@@ -1,0 +1,77 @@
+# GoReleaser configuration for loomcli
+# See https://goreleaser.com for documentation
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: loom
+    binary: loom
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.Build={{.ShortCommit}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  github:
+    owner: tysonthomas9
+    name: loomcli
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+  header: |
+    ## loom v{{.Version}}
+
+    Pre-compiled binaries for Linux, macOS (Intel & Apple Silicon), and Windows.
+
+    ### Installation
+
+    **Quick Install (macOS/Linux):**
+    ```bash
+    go install github.com/tysonthomas9/loomcli@latest
+    ```
+
+    **Manual Install:**
+    Download the appropriate binary for your platform below, extract it, and place it in your PATH.
