@@ -33,9 +33,9 @@ Flags:
   -i, --interval    Refresh interval in seconds (default: 5)
 
 Examples:
-  loom monitor              # One-shot display
-  loom monitor --watch      # Auto-refresh
-  loom monitor -w -i 10     # Refresh every 10 seconds`,
+  vibecli monitor              # One-shot display
+  vibecli monitor --watch      # Auto-refresh
+  vibecli monitor -w -i 10     # Refresh every 10 seconds`,
 	Args: cobra.NoArgs,
 	Run:  runMonitor,
 }
@@ -230,11 +230,9 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 		} else if task, ok := agentTasks[wt.Name]; ok && task.Status == "in_progress" {
 			// Task still in_progress but no lock - agent died
 			agent.Status = fmt.Sprintf("error: %s", task.ID)
-		} else if task, ok := agentTasks[wt.Name]; ok && task.Status == "closed" {
-			// Task completed - show done state
-			agent.Status = fmt.Sprintf("done: %s", task.ID)
 		} else {
-			// No active task - check git status
+			// No lock and no in_progress task - check git status
+			// (closed tasks don't trigger "done" fallback - "done" only shows while agent is running)
 			clean, _ := IsCleanWorkingTree(wt.Path)
 			if clean {
 				agent.Status = "ready"
@@ -390,28 +388,6 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 		}
 	}
 
-	// Also add closed tasks to agentTasks for "done" state display
-	// This helps when agents complete tasks but lock file has no TaskID (old prompts)
-	closedOutput, err := runBdCommand("list", "--status=closed", "--json")
-	if err == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(closedOutput), &issues) == nil {
-			for _, issue := range issues {
-				if issue.Assignee != "" {
-					// Only add if not already in agentTasks (in_progress takes precedence)
-					if _, exists := agentTasks[issue.Assignee]; !exists {
-						agentTasks[issue.Assignee] = TaskInfo{
-							ID:       issue.ID,
-							Title:    issue.Title,
-							Priority: issue.Priority,
-							Status:   "closed",
-						}
-					}
-				}
-			}
-		}
-	}
-
 	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, agentTasks
 }
 
@@ -481,7 +457,7 @@ func renderDashboard(data *MonitorData) string {
 
 	// Header
 	sb.WriteString(renderBoxTop(width))
-	sb.WriteString(renderBoxLine(width, centerText("LOOM MONITOR", width-4)))
+	sb.WriteString(renderBoxLine(width, centerText("VIBECLI MONITOR", width-4)))
 	sb.WriteString(renderBoxLine(width, centerText(fmt.Sprintf("Last updated: %s", data.Timestamp.Format("15:04:05")), width-4)))
 
 	// Agents section
