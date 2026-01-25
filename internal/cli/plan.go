@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"fmt"
@@ -7,37 +7,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var taskCmd = &cobra.Command{
-	Use:               "task [worktree]",
-	Short:             "Run a Claude implementation agent",
+var planCmd = &cobra.Command{
+	Use:               "plan [worktree]",
+	Short:             "Run a Claude planning agent",
 	GroupID:           "agents",
 	ValidArgsFunction: worktreeCompletion,
-	Long: `Run a Claude implementation agent in the specified worktree.
+	Long: `Run a Claude planning agent in the specified worktree.
 
-The implementation agent will:
-  1. Pick the highest priority ready task (skipping [Need Review] tasks)
-  2. Follow the --design plan if present, otherwise create a local plan
-  3. Implement, test, and review the code
-  4. Commit and push changes
-  5. Close the task and exit after completing ONE task
+The planning agent will:
+  1. Pick the highest priority task (skipping [Need Review] tasks)
+  2. Research the codebase and create a detailed plan
+  3. Save the plan to the task's --design field
+  4. Mark the task as [Need Review] for human approval
+  5. Exit after completing ONE task
 
 Arguments:
   worktree    Worktree name (e.g., falcon) or path
               If omitted, runs in current directory
 
 Examples:
-  loom task falcon              # Run in falcon worktree
-  loom task                     # Run in current directory
-  loom task /path/to/worktree   # Run in specific path`,
+  loom plan falcon              # Run in falcon worktree
+  loom plan                     # Run in current directory
+  loom plan /path/to/worktree   # Run in specific path`,
 	Args: cobra.MaximumNArgs(1),
-	Run:  runTask,
+	Run:  runPlan,
 }
 
 func init() {
-	rootCmd.AddCommand(taskCmd)
+	rootCmd.AddCommand(planCmd)
 }
 
-func runTask(cmd *cobra.Command, args []string) {
+func runPlan(cmd *cobra.Command, args []string) {
 	// Resolve worktree path
 	var worktreeName string
 	if len(args) > 0 {
@@ -53,20 +53,20 @@ func runTask(cmd *cobra.Command, args []string) {
 	agentName := GetWorktreeName(worktreePath)
 
 	// Acquire lock to prevent concurrent agents
-	if err := AcquireLock(worktreePath, "task", agentName); err != nil {
+	if err := AcquireLock(worktreePath, "plan", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 	defer ReleaseLock(worktreePath)
 
 	fmt.Println("=========================================")
-	fmt.Printf("Running IMPLEMENTATION agent in: %s\n", worktreePath)
+	fmt.Printf("Running PLANNING agent in: %s\n", worktreePath)
 	fmt.Printf("Agent name: %s\n", agentName)
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	// Generate and run the task prompt
-	prompt := GenerateTaskPrompt(agentName)
+	// Generate and run the planning prompt
+	prompt := GeneratePlanningPrompt(agentName)
 	if err := InvokeClaude(worktreePath, prompt); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
 		os.Exit(1)

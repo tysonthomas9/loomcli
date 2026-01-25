@@ -9,6 +9,7 @@ before:
 
 builds:
   - id: loom
+    main: ./cmd/loom
     binary: loom
     env:
       - CGO_ENABLED=0
@@ -24,8 +25,27 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X main.Version={{.Version}}
-      - -X main.Build={{.ShortCommit}}
+      - -X github.com/tysonthomas9/loomcli/internal/cli.Version={{.Version}}
+      - -X github.com/tysonthomas9/loomcli/internal/cli.Build={{.ShortCommit}}
+  - id: loomcli
+    main: .
+    binary: loomcli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/tysonthomas9/loomcli/internal/cli.Version={{.Version}}
+      - -X github.com/tysonthomas9/loomcli/internal/cli.Build={{.ShortCommit}}
 
 archives:
   - format: tar.gz

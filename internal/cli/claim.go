@@ -1,10 +1,9 @@
-package main
+package cli
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/spf13/cobra"
 )
@@ -62,15 +61,14 @@ func runClaim(cmd *cobra.Command, args []string) {
 }
 
 func getTaskTitle(taskID string) string {
-	cmd := exec.Command("bd", "show", taskID, "--json")
-	output, err := cmd.Output()
-	if err != nil {
+	result := execCommand(".", "bd", "show", taskID, "--json")
+	if result.Err != nil {
 		return ""
 	}
 
 	// bd show --json returns an array
 	var results []bdShowOutput
-	if err := json.Unmarshal(output, &results); err != nil {
+	if err := json.Unmarshal([]byte(result.Stdout), &results); err != nil {
 		return ""
 	}
 	if len(results) == 0 {

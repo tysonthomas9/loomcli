@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"fmt"
@@ -27,7 +27,7 @@ func GetDefaultBranch() string {
 	if branch := os.Getenv("LOOM_DEFAULT_BRANCH"); branch != "" {
 		return branch
 	}
-	return "feature/web-ui"
+	return "main"
 }
 
 // GetScriptDir returns the directory where loom is run from

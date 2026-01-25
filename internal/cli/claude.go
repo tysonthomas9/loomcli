@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"fmt"
@@ -6,8 +6,11 @@ import (
 	"os/exec"
 )
 
-// InvokeClaude runs Claude with the given prompt using --dangerously-skip-permissions
-func InvokeClaude(workDir, prompt string) error {
+// claudeInvoker is the function used to invoke Claude (mockable for tests)
+var claudeInvoker = defaultClaudeInvoker
+
+// defaultClaudeInvoker is the real Claude invocation
+func defaultClaudeInvoker(workDir, prompt string) error {
 	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt)
 	cmd.Dir = workDir
 	cmd.Stdin = os.Stdin
@@ -18,6 +21,11 @@ func InvokeClaude(workDir, prompt string) error {
 	fmt.Println("")
 
 	return cmd.Run()
+}
+
+// InvokeClaude runs Claude with the given prompt using --dangerously-skip-permissions
+func InvokeClaude(workDir, prompt string) error {
+	return claudeInvoker(workDir, prompt)
 }
 
 // InvokeClaudeForConflicts runs Claude to resolve merge conflicts

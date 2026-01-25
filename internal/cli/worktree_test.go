@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"os"
@@ -28,8 +28,8 @@ func TestGetDefaultBranch(t *testing.T) {
 	// Test default value
 	os.Unsetenv("LOOM_DEFAULT_BRANCH")
 	branch := GetDefaultBranch()
-	if branch != "feature/web-ui" {
-		t.Errorf("GetDefaultBranch() = %q, want 'feature/web-ui'", branch)
+	if branch != "main" {
+		t.Errorf("GetDefaultBranch() = %q, want 'main'", branch)
 	}
 
 	// Test environment variable override

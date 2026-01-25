@@ -1,9 +1,8 @@
-package main
+package cli
 
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +11,7 @@ import (
 )
 
 var (
-	monitorWatch    bool
+	monitorNoWatch  bool
 	monitorInterval int
 )
 
@@ -29,19 +28,19 @@ Sections:
   STATS      - Overall issue counts and completion rate
 
 Flags:
-  -w, --watch       Auto-refresh mode (default: 5s interval)
+  -n, --no-watch    One-shot mode (disable auto-refresh)
   -i, --interval    Refresh interval in seconds (default: 5)
 
 Examples:
-  vibecli monitor              # One-shot display
-  vibecli monitor --watch      # Auto-refresh
-  vibecli monitor -w -i 10     # Refresh every 10 seconds`,
+  loom monitor              # Auto-refresh (default)
+  loom monitor -n           # One-shot display
+  loom monitor -i 10        # Refresh every 10 seconds`,
 	Args: cobra.NoArgs,
 	Run:  runMonitor,
 }
 
 func init() {
-	monitorCmd.Flags().BoolVarP(&monitorWatch, "watch", "w", false, "Auto-refresh mode")
+	monitorCmd.Flags().BoolVarP(&monitorNoWatch, "no-watch", "n", false, "Disable auto-refresh (one-shot mode)")
 	monitorCmd.Flags().IntVarP(&monitorInterval, "interval", "i", 5, "Refresh interval in seconds")
 	rootCmd.AddCommand(monitorCmd)
 }
@@ -126,13 +125,21 @@ type BdStats struct {
 }
 
 func runMonitor(cmd *cobra.Command, args []string) {
-	if monitorWatch {
-		// Watch mode - clear screen and refresh
+	if !monitorNoWatch {
+		// Watch mode - refresh in place without flickering
 		for {
-			clearScreen()
 			data := collectMonitorData()
-			fmt.Print(renderDashboard(data))
-			fmt.Printf("\nPress Ctrl+C to exit (refreshing every %ds)\n", monitorInterval)
+			output := renderDashboard(data)
+
+			// Build complete output including status line (no trailing newline)
+			fullOutput := output + fmt.Sprintf("\nPress Ctrl+C to exit (refreshing every %ds)", monitorInterval)
+
+			fmt.Print("\033[?25l")  // Hide cursor
+			fmt.Print("\033[H")     // Move to home position
+			fmt.Print(fullOutput)
+			fmt.Print("\033[J")     // Clear from cursor to end of screen
+			fmt.Print("\033[?25h")  // Show cursor
+
 			time.Sleep(time.Duration(monitorInterval) * time.Second)
 		}
 	} else {
@@ -140,10 +147,6 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		data := collectMonitorData()
 		fmt.Print(renderDashboard(data))
 	}
-}
-
-func clearScreen() {
-	fmt.Print("\033[H\033[2J")
 }
 
 func collectMonitorData() *MonitorData {
@@ -437,9 +440,11 @@ func collectStatistics() MonitorStats {
 }
 
 func runBdCommand(args ...string) (string, error) {
-	cmd := exec.Command("bd", args...)
-	output, err := cmd.Output()
-	return string(output), err
+	result := execCommand(".", "bd", args...)
+	if result.Err != nil {
+		return "", result.Err
+	}
+	return result.Stdout, nil
 }
 
 func truncateString(s string, maxLen int) string {
@@ -457,7 +462,7 @@ func renderDashboard(data *MonitorData) string {
 
 	// Header
 	sb.WriteString(renderBoxTop(width))
-	sb.WriteString(renderBoxLine(width, centerText("VIBECLI MONITOR", width-4)))
+	sb.WriteString(renderBoxLine(width, centerText("LOOM", width-4)))
 	sb.WriteString(renderBoxLine(width, centerText(fmt.Sprintf("Last updated: %s", data.Timestamp.Format("15:04:05")), width-4)))
 
 	// Agents section
@@ -505,36 +510,6 @@ func renderDashboard(data *MonitorData) string {
 	}
 	if len(data.Agents) == 0 {
 		sb.WriteString(renderBoxLine(width, "  No agents found"))
-	}
-
-	// Check for agent/work mismatch warnings
-	planningAgents := 0
-	implementAgents := 0
-	for _, agent := range data.Agents {
-		// Count by explicit state prefix
-		if strings.HasPrefix(agent.Status, "planning:") {
-			planningAgents++
-		} else if strings.HasPrefix(agent.Status, "working:") {
-			implementAgents++
-		}
-	}
-
-	// Show warnings if agents don't match available work
-	if planningAgents > 0 && data.Tasks.NeedsPlanning == 0 {
-		sb.WriteString(renderBoxLine(width, ""))
-		sb.WriteString(renderBoxLine(width, "  ⚠️  Planning agents running but no tasks need planning"))
-	}
-	if implementAgents > 0 && data.Tasks.ReadyToImplement == 0 {
-		sb.WriteString(renderBoxLine(width, ""))
-		sb.WriteString(renderBoxLine(width, "  ⚠️  Implementation agents running but no tasks ready"))
-	}
-	if len(data.TaskConflicts) > 0 {
-		sb.WriteString(renderBoxLine(width, ""))
-		sb.WriteString(renderBoxLine(width, "  ⚠️  TASK CONFLICTS - Multiple agents claiming same task:"))
-		for taskID, agents := range data.TaskConflicts {
-			agentList := strings.Join(agents, ", ")
-			sb.WriteString(renderBoxLine(width, fmt.Sprintf("    • %s: %s", taskID, agentList)))
-		}
 	}
 
 	// Tasks section

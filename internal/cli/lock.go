@@ -1,10 +1,9 @@
-package main
+package cli
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -26,22 +25,16 @@ type LockInfo struct {
 
 // AcquireLock attempts to acquire an agent lock for the worktree
 // Returns an error if an agent is already running
+// Uses atomic file creation (O_EXCL) to prevent race conditions
 func AcquireLock(worktreePath, command, agentName string) error {
 	lockPath := filepath.Join(worktreePath, LockFileName)
 
-	// Check for existing lock
-	if info, running, err := CheckLock(worktreePath); err == nil && running {
-		duration := time.Since(info.StartedAt).Round(time.Second)
-		return fmt.Errorf("agent already running: %s (PID %d, started %s ago)",
-			info.Command, info.PID, duration)
-	}
-
-	// Create new lock
+	// Prepare lock info
 	info := LockInfo{
 		PID:       os.Getpid(),
 		Command:   command,
-		StartedAt: time.Now(),
 		AgentName: agentName,
+		StartedAt: time.Now(),
 	}
 
 	data, err := json.MarshalIndent(info, "", "  ")
@@ -49,8 +42,35 @@ func AcquireLock(worktreePath, command, agentName string) error {
 		return fmt.Errorf("failed to marshal lock info: %w", err)
 	}
 
-	if err := os.WriteFile(lockPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write lock file: %w", err)
+	// Atomic lock creation - O_EXCL fails if file exists
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		if os.IsExist(err) {
+			// Lock file exists - check if it's stale (process dead)
+			if existingInfo, running, checkErr := CheckLock(worktreePath); checkErr == nil {
+				if running {
+					duration := time.Since(existingInfo.StartedAt).Round(time.Second)
+					return fmt.Errorf("agent already running: %s (PID %d, started %s ago)",
+						existingInfo.Command, existingInfo.PID, duration)
+				}
+				// Stale lock - remove and retry once
+				os.Remove(lockPath)
+				file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+				if err != nil {
+					return fmt.Errorf("failed to acquire lock after removing stale lock: %w", err)
+				}
+			} else {
+				return fmt.Errorf("failed to check existing lock: %w", checkErr)
+			}
+		} else {
+			return fmt.Errorf("failed to create lock file: %w", err)
+		}
+	}
+	defer file.Close()
+
+	if _, err := file.Write(data); err != nil {
+		os.Remove(lockPath) // Clean up on write failure
+		return fmt.Errorf("failed to write lock info: %w", err)
 	}
 
 	return nil
@@ -188,15 +208,15 @@ func GetLockStatus(worktreePath string) string {
 // getTaskStatus returns the status of a beads task
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(taskID string) string {
-	output, err := exec.Command("bd", "show", taskID, "--json").Output()
-	if err != nil {
+	result := execCommand(".", "bd", "show", taskID, "--json")
+	if result.Err != nil {
 		return ""
 	}
 	var issues []struct {
 		Title  string `json:"title"`
 		Status string `json:"status"`
 	}
-	if json.Unmarshal(output, &issues) != nil || len(issues) == 0 {
+	if json.Unmarshal([]byte(result.Stdout), &issues) != nil || len(issues) == 0 {
 		return ""
 	}
 	if strings.Contains(issues[0].Title, "[Need Review]") {

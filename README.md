@@ -4,11 +4,19 @@ Agent management CLI for parallel Claude Code workflows with [beads](https://git
 
 ## Installation
 
+### Go (recommended)
 ```bash
-go install github.com/tysonthomas9/loomcli@latest
+go install github.com/tysonthomas9/loomcli/...@latest
+```
+This installs both `loom` and `loomcli` commands.
+
+### npm
+```bash
+npm install -g loomcli
 ```
 
-Or download a pre-built binary from [Releases](https://github.com/tysonthomas9/loomcli/releases).
+### Pre-built binaries
+Download from [Releases](https://github.com/tysonthomas9/loomcli/releases).
 
 ## Usage
 
@@ -35,7 +43,7 @@ Examples:
 
 ## Environment Variables
 
-- `LOOM_DEFAULT_BRANCH` - Default integration branch (default: feature/web-ui)
+- `LOOM_DEFAULT_BRANCH` - Default integration branch (default: main)
 - `LOOM_WORKTREES_DIR` - Worktrees directory (default: ./worktrees)
 
 ## License
