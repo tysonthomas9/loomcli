@@ -15,8 +15,8 @@ Follow this workflow EXACTLY for ONE task.
 **Your agent name is: %s** - Use this as assignee when claiming tasks.
 
 ### Step 1: Select ONE Task for Planning
-- Run 'bd ready --limit 10' to see available tasks
-- SKIP any task with '[Need Review]' in the title (awaiting human approval)
+- Run this command to see available tasks (excludes [Need Review] awaiting human approval):
+  bd ready --limit 10 --json | jq -r '.[] | select(.title | contains("[Need Review]") | not) | "\(.id): [\(.priority)] \(.title)"'
 - SKIP any task already 'in_progress' by checking 'bd list --status=in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is NOT an epic

@@ -13,6 +13,7 @@ import (
 var (
 	monitorNoWatch  bool
 	monitorInterval int
+	monitorBranch   string
 )
 
 var monitorCmd = &cobra.Command{
@@ -28,6 +29,7 @@ Sections:
   STATS      - Overall issue counts and completion rate
 
 Flags:
+  -b, --branch      Integration branch to compare against
   -n, --no-watch    One-shot mode (disable auto-refresh)
   -i, --interval    Refresh interval in seconds (default: 5)
 
@@ -40,6 +42,7 @@ Examples:
 }
 
 func init() {
+	monitorCmd.Flags().StringVarP(&monitorBranch, "branch", "b", "", "Integration branch to compare against (default: LOOM_DEFAULT_BRANCH or main)")
 	monitorCmd.Flags().BoolVarP(&monitorNoWatch, "no-watch", "n", false, "Disable auto-refresh (one-shot mode)")
 	monitorCmd.Flags().IntVarP(&monitorInterval, "interval", "i", 5, "Refresh interval in seconds")
 	rootCmd.AddCommand(monitorCmd)
@@ -259,12 +262,15 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 }
 
 func getWorktreeGitSyncStatus(path string) (ahead, behind int) {
-	defaultBranch := GetDefaultBranch()
+	branch := monitorBranch
+	if branch == "" {
+		branch = GetDefaultBranch()
+	}
 
 	// Count commits ahead/behind integration branch
 	// Format: "behind\tahead" (from HEAD's perspective)
 	output, err := RunGitCommand(path, "rev-list", "--left-right", "--count",
-		fmt.Sprintf("origin/%s...HEAD", defaultBranch))
+		fmt.Sprintf("origin/%s...HEAD", branch))
 	if err != nil {
 		return 0, 0
 	}

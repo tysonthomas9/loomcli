@@ -41,6 +41,78 @@ Examples:
   loom monitor                  # Show real-time agent dashboard
 ```
 
+## Auto Mode
+
+Both `plan` and `task` commands support continuous auto mode with the `--auto` flag:
+
+```bash
+loom plan falcon --auto              # Continuous planning mode
+loom task falcon --auto              # Continuous implementation mode
+loom plan falcon -a -m 5             # Process up to 5 tasks
+loom plan falcon -a -t 30            # Exit after 30 min idle
+```
+
+### Implementation Flow
+
+```
+loom plan <worktree> --auto   OR   loom task <worktree> --auto
+        │
+        ▼
+   Acquire Lock (prevent concurrent agents)
+        │
+        ▼
+   Setup Signal Handler (Ctrl+C)
+        │
+        ▼
+┌─────────────────────────────────────────┐
+│    Auto Mode Loop                       │
+│  ┌───────────────────────────────────┐  │
+│  │ 1. Check shutdown signal          │  │
+│  │    (non-blocking Ctrl+C check)    │  │
+│  └───────────────────────────────────┘  │
+│              │                          │
+│              ▼                          │
+│  ┌───────────────────────────────────┐  │
+│  │ 2. Check max tasks limit          │  │
+│  │    (exit if --max-tasks reached)  │  │
+│  └───────────────────────────────────┘  │
+│              │                          │
+│              ▼                          │
+│  ┌───────────────────────────────────┐  │
+│  │ 3. Check available tasks          │  │
+│  │  Plan: tasks WITHOUT design       │  │
+│  │  Task: tasks WITH approved design │  │
+│  │  (skips [Need Review], in_progress│  │
+│  │   and epic tasks)                 │  │
+│  └───────────────────────────────────┘  │
+│        │              │                 │
+│     No tasks      Has tasks             │
+│        │              │                 │
+│        ▼              │                 │
+│  Check idle timeout   │                 │
+│  Sleep(--interval)    │                 │
+│        │              │                 │
+│        │              ▼                 │
+│        │     Generate prompt            │
+│        │     InvokeClaude()             │
+│        │     Increment task count       │
+│        │     Brief pause (2s)           │
+│        │              │                 │
+│        └──────────────┘                 │
+│              │                          │
+│        (loop continues)                 │
+└─────────────────────────────────────────┘
+        │
+        ▼ (on exit condition)
+   Release Lock
+   Print Summary (exit reason, tasks completed)
+```
+
+### Exit Conditions
+- Ctrl+C signal received
+- Max tasks limit reached (`--max-tasks`)
+- Idle timeout exceeded (`--idle-timeout`)
+
 ## Environment Variables
 
 - `LOOM_DEFAULT_BRANCH` - Default integration branch (default: main)

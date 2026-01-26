@@ -7,6 +7,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	planAutoMode    bool
+	planInterval    int
+	planMaxTasks    int
+	planIdleTimeout int
+)
+
 var planCmd = &cobra.Command{
 	Use:               "plan [worktree]",
 	Short:             "Run a Claude planning agent",
@@ -19,21 +26,33 @@ The planning agent will:
   2. Research the codebase and create a detailed plan
   3. Save the plan to the task's --design field
   4. Mark the task as [Need Review] for human approval
-  5. Exit after completing ONE task
+  5. Exit after completing ONE task (unless --auto is enabled)
 
 Arguments:
   worktree    Worktree name (e.g., falcon) or path
               If omitted, runs in current directory
 
+Flags:
+  -a, --auto          Enable continuous mode (process multiple tasks)
+  -i, --interval      Polling interval in seconds when no tasks (default: 30)
+  -m, --max-tasks     Maximum tasks to process before exiting (0 = unlimited)
+  -t, --idle-timeout  Exit after N minutes with no available tasks (0 = none)
+
 Examples:
-  loom plan falcon              # Run in falcon worktree
+  loom plan falcon              # Run in falcon worktree (single task)
   loom plan                     # Run in current directory
-  loom plan /path/to/worktree   # Run in specific path`,
+  loom plan falcon --auto       # Continuous mode until Ctrl+C
+  loom plan falcon -a -m 5      # Process up to 5 tasks
+  loom plan falcon -a -t 30     # Exit after 30 min idle`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runPlan,
 }
 
 func init() {
+	planCmd.Flags().BoolVarP(&planAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
+	planCmd.Flags().IntVarP(&planInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
+	planCmd.Flags().IntVarP(&planMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
+	planCmd.Flags().IntVarP(&planIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
 	rootCmd.AddCommand(planCmd)
 }
 
@@ -59,16 +78,30 @@ func runPlan(cmd *cobra.Command, args []string) {
 	}
 	defer ReleaseLock(worktreePath)
 
-	fmt.Println("=========================================")
-	fmt.Printf("Running PLANNING agent in: %s\n", worktreePath)
-	fmt.Printf("Agent name: %s\n", agentName)
-	fmt.Println("=========================================")
-	fmt.Println("")
+	if planAutoMode {
+		// Auto mode - run the loop
+		shutdown := SetupSignalHandler()
+		RunAutoModeLoop(AutoModeOptions{
+			Interval:     planInterval,
+			MaxTasks:     planMaxTasks,
+			IdleTimeout:  planIdleTimeout,
+			AgentType:    "plan",
+			AgentName:    agentName,
+			WorktreePath: worktreePath,
+		}, shutdown)
+	} else {
+		// Single task mode (original behavior)
+		fmt.Println("=========================================")
+		fmt.Printf("Running PLANNING agent in: %s\n", worktreePath)
+		fmt.Printf("Agent name: %s\n", agentName)
+		fmt.Println("=========================================")
+		fmt.Println("")
 
-	// Generate and run the planning prompt
-	prompt := GeneratePlanningPrompt(agentName)
-	if err := InvokeClaude(worktreePath, prompt); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
-		os.Exit(1)
+		// Generate and run the planning prompt
+		prompt := GeneratePlanningPrompt(agentName)
+		if err := InvokeClaude(worktreePath, prompt); err != nil {
+			fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
