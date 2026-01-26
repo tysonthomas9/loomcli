@@ -282,3 +282,112 @@ func TestGetLockStatus_DurationFormat(t *testing.T) {
 		t.Errorf("Expected status to include duration in parentheses, got '%s'", status)
 	}
 }
+
+func TestUpdateLockState(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Update to idle state
+	err = UpdateLockState(tmpDir, StateIdle)
+	if err != nil {
+		t.Fatalf("UpdateLockState failed: %v", err)
+	}
+
+	info, _, _ := CheckLock(tmpDir)
+	if info.State != StateIdle {
+		t.Errorf("Expected State '%s', got '%s'", StateIdle, info.State)
+	}
+
+	// Update to active state
+	err = UpdateLockState(tmpDir, StateActive)
+	if err != nil {
+		t.Fatalf("UpdateLockState failed: %v", err)
+	}
+
+	info, _, _ = CheckLock(tmpDir)
+	if info.State != StateActive {
+		t.Errorf("Expected State '%s', got '%s'", StateActive, info.State)
+	}
+}
+
+func TestUpdateLockStateNoLock(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Should fail when no lock exists
+	err := UpdateLockState(tmpDir, StateIdle)
+	if err == nil {
+		t.Error("Expected error when updating non-existent lock")
+	}
+}
+
+func TestGetLockStatus_IdleState(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Set idle state
+	err = UpdateLockState(tmpDir, StateIdle)
+	if err != nil {
+		t.Fatalf("UpdateLockState failed: %v", err)
+	}
+
+	status := GetLockStatus(tmpDir)
+	// Should show "idle" instead of "planning: ..."
+	if !strings.HasPrefix(status, "idle") {
+		t.Errorf("Expected 'idle' prefix, got '%s'", status)
+	}
+}
+
+func TestGetLockStatus_ActiveStateShowsCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Set active state
+	err = UpdateLockState(tmpDir, StateActive)
+	if err != nil {
+		t.Fatalf("UpdateLockState failed: %v", err)
+	}
+
+	status := GetLockStatus(tmpDir)
+	// Active state without TaskID should show "planning: ..." (normal behavior)
+	if !strings.HasPrefix(status, "planning: ...") {
+		t.Errorf("Expected 'planning: ...' prefix for active state, got '%s'", status)
+	}
+}
+
+func TestGetLockStatus_IdleOverridesTaskID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Set task then idle state
+	UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	err = UpdateLockState(tmpDir, StateIdle)
+	if err != nil {
+		t.Fatalf("UpdateLockState failed: %v", err)
+	}
+
+	status := GetLockStatus(tmpDir)
+	// Idle state should take precedence
+	if !strings.HasPrefix(status, "idle") {
+		t.Errorf("Expected 'idle' prefix (should override task), got '%s'", status)
+	}
+}

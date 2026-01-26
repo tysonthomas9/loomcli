@@ -13,6 +13,12 @@ import (
 // LockFileName is the name of the lock file in each worktree
 const LockFileName = ".agent.lock"
 
+// Lock states for auto mode tracking
+const (
+	StateActive = "active" // Claude is executing (planning/working)
+	StateIdle   = "idle"   // Polling for tasks, no work available
+)
+
 // LockInfo holds information about a running agent
 type LockInfo struct {
 	PID       int       `json:"pid"`
@@ -21,6 +27,7 @@ type LockInfo struct {
 	AgentName string    `json:"agent_name"`
 	TaskID    string    `json:"task_id,omitempty"`
 	TaskTitle string    `json:"task_title,omitempty"`
+	State     string    `json:"state,omitempty"` // Execution state (active/idle) for auto mode
 }
 
 // AcquireLock attempts to acquire an agent lock for the worktree
@@ -154,6 +161,36 @@ func UpdateLockTask(worktreePath, taskID, taskTitle string) error {
 	return os.WriteFile(lockPath, data, 0644)
 }
 
+// UpdateLockState updates the lock file with current execution state
+// Used by auto mode to distinguish idle (polling) from active (executing Claude)
+func UpdateLockState(worktreePath, state string) error {
+	lockPath := filepath.Join(worktreePath, LockFileName)
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return fmt.Errorf("no active lock to update: %w", err)
+	}
+
+	var info LockInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return fmt.Errorf("invalid lock file: %w", err)
+	}
+
+	// Validate PID matches (prevent updating another agent's lock)
+	if info.PID != os.Getpid() {
+		return fmt.Errorf("lock belongs to different process (PID %d)", info.PID)
+	}
+
+	info.State = state
+
+	data, err = json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal lock info: %w", err)
+	}
+
+	return os.WriteFile(lockPath, data, 0644)
+}
+
 // IsProcessRunning checks if a process with the given PID is still running
 func IsProcessRunning(pid int) bool {
 	process, err := os.FindProcess(pid)
@@ -168,7 +205,7 @@ func IsProcessRunning(pid int) bool {
 }
 
 // GetLockStatus returns a human-readable status for a worktree's lock
-// Uses explicit state words: planning, working, done, review
+// Uses explicit state words: planning, working, done, review, idle
 func GetLockStatus(worktreePath string) string {
 	info, running, err := CheckLock(worktreePath)
 	if err != nil || !running {
@@ -176,6 +213,11 @@ func GetLockStatus(worktreePath string) string {
 	}
 
 	duration := time.Since(info.StartedAt).Round(time.Second)
+
+	// Check for idle state (auto mode waiting for tasks)
+	if info.State == StateIdle {
+		return fmt.Sprintf("idle (%s)", duration)
+	}
 
 	if info.TaskID != "" {
 		// Check actual task status

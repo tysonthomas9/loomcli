@@ -146,6 +146,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan bool) {
 	fmt.Println("")
 
 	for {
+		// Set idle state at loop start
+		if err := UpdateLockState(opts.WorktreePath, StateIdle); err != nil {
+			fmt.Printf("[auto] Warning: failed to update state: %v\n", err)
+		}
+
 		// Check for shutdown signal (non-blocking)
 		select {
 		case <-shutdown:
@@ -193,6 +198,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan bool) {
 		// Reset idle timer when we find tasks
 		state.IdleStartTime = time.Now()
 
+		// Set active state before invoking Claude
+		if err := UpdateLockState(opts.WorktreePath, StateActive); err != nil {
+			fmt.Printf("[auto] Warning: failed to update state: %v\n", err)
+		}
+
 		// Invoke Claude to work on one task
 		fmt.Println("")
 		fmt.Printf("[auto] === Starting task %d ===\n", state.TasksCompleted+1)
@@ -200,6 +210,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan bool) {
 
 		prompt := generatePrompt(opts.AgentName)
 		err = InvokeClaudeNonInteractive(opts.WorktreePath, prompt, shutdown)
+
+		// Return to idle state after Claude finishes
+		if updateErr := UpdateLockState(opts.WorktreePath, StateIdle); updateErr != nil {
+			fmt.Printf("[auto] Warning: failed to update state: %v\n", updateErr)
+		}
 
 		if err != nil {
 			fmt.Printf("[auto] Claude exited with error: %v\n", err)
