@@ -32,10 +32,10 @@ func InvokeClaude(workDir, prompt string) error {
 }
 
 // claudeNonInteractiveInvoker is the function used for non-interactive Claude invocation (mockable for tests)
-var claudeNonInteractiveInvoker func(workDir, prompt string, shutdown <-chan bool) error = defaultClaudeNonInteractiveInvoker
+var claudeNonInteractiveInvoker func(workDir, prompt string, shutdown <-chan struct{}) error = defaultClaudeNonInteractiveInvoker
 
 // defaultClaudeNonInteractiveInvoker is the real non-interactive Claude invocation
-func defaultClaudeNonInteractiveInvoker(workDir, prompt string, shutdown <-chan bool) error {
+func defaultClaudeNonInteractiveInvoker(workDir, prompt string, shutdown <-chan struct{}) error {
 	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
 		"--dangerously-skip-permissions", prompt)
 	cmd.Dir = workDir
@@ -146,7 +146,7 @@ func displayStreamEvent(line string) {
 // InvokeClaudeNonInteractive runs Claude in non-interactive mode (for auto mode)
 // Claude will process the prompt and exit, rather than waiting for more input
 // The shutdown channel allows the caller to signal that the process should be terminated
-func InvokeClaudeNonInteractive(workDir, prompt string, shutdown <-chan bool) error {
+func InvokeClaudeNonInteractive(workDir, prompt string, shutdown <-chan struct{}) error {
 	return claudeNonInteractiveInvoker(workDir, prompt, shutdown)
 }
 

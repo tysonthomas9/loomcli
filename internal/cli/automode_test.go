@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestHasAvailablePlanningTasks(t *testing.T) {
@@ -236,6 +237,91 @@ func TestSetupSignalHandler(t *testing.T) {
 	shutdown := SetupSignalHandler()
 	if shutdown == nil {
 		t.Error("SetupSignalHandler() returned nil channel")
+	}
+}
+
+func TestInterruptibleSleep_CompletesNormally(t *testing.T) {
+	shutdown := make(chan struct{})
+
+	start := time.Now()
+	interrupted := interruptibleSleep(50*time.Millisecond, shutdown)
+	elapsed := time.Since(start)
+
+	if interrupted {
+		t.Error("interruptibleSleep() returned true, expected false (not interrupted)")
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("interruptibleSleep() returned too early: %v", elapsed)
+	}
+}
+
+func TestInterruptibleSleep_InterruptedByShutdown(t *testing.T) {
+	shutdown := make(chan struct{})
+
+	// Close shutdown after a short delay
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		close(shutdown)
+	}()
+
+	start := time.Now()
+	interrupted := interruptibleSleep(1*time.Second, shutdown)
+	elapsed := time.Since(start)
+
+	if !interrupted {
+		t.Error("interruptibleSleep() returned false, expected true (should be interrupted)")
+	}
+	if elapsed >= 500*time.Millisecond {
+		t.Errorf("interruptibleSleep() took too long to respond to shutdown: %v", elapsed)
+	}
+}
+
+func TestInterruptibleSleep_AlreadyClosedChannel(t *testing.T) {
+	shutdown := make(chan struct{})
+	close(shutdown) // Already closed
+
+	start := time.Now()
+	interrupted := interruptibleSleep(1*time.Second, shutdown)
+	elapsed := time.Since(start)
+
+	if !interrupted {
+		t.Error("interruptibleSleep() returned false, expected true (channel already closed)")
+	}
+	if elapsed >= 100*time.Millisecond {
+		t.Errorf("interruptibleSleep() should return immediately for closed channel: %v", elapsed)
+	}
+}
+
+func TestClosedChannelPattern_MultipleReceivers(t *testing.T) {
+	// Verify that closing a channel unblocks multiple receivers (the core pattern we're using)
+	shutdown := make(chan struct{})
+
+	received := make(chan int, 3)
+
+	// Start 3 goroutines waiting on shutdown
+	for i := 0; i < 3; i++ {
+		go func(id int) {
+			<-shutdown
+			received <- id
+		}(i)
+	}
+
+	// Give goroutines time to start waiting
+	time.Sleep(10 * time.Millisecond)
+
+	// Close the channel - should unblock all 3
+	close(shutdown)
+
+	// All 3 should receive within a short time
+	timeout := time.After(100 * time.Millisecond)
+	count := 0
+	for count < 3 {
+		select {
+		case <-received:
+			count++
+		case <-timeout:
+			t.Fatalf("Only %d/3 receivers were unblocked by close", count)
+		}
 	}
 }
 

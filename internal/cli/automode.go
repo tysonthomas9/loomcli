@@ -31,18 +31,31 @@ type AutoModeState struct {
 }
 
 // SetupSignalHandler sets up graceful shutdown on SIGINT/SIGTERM
-// Returns a channel that receives true when shutdown is requested
-func SetupSignalHandler() chan bool {
-	shutdown := make(chan bool, 1)
+// Returns a channel that will be CLOSED when shutdown is requested
+// (closed channel pattern allows multiple goroutines to detect shutdown)
+func SetupSignalHandler() chan struct{} {
+	shutdown := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-sigChan
-		shutdown <- true
+		fmt.Println("\n[auto] Shutdown signal received, stopping gracefully...")
+		close(shutdown) // Closing unblocks ALL receivers
 	}()
 
 	return shutdown
+}
+
+// interruptibleSleep waits for the specified duration or until shutdown is signaled
+// Returns true if interrupted by shutdown, false if duration elapsed
+func interruptibleSleep(d time.Duration, shutdown <-chan struct{}) bool {
+	select {
+	case <-time.After(d):
+		return false
+	case <-shutdown:
+		return true
+	}
 }
 
 // HasAvailablePlanningTasks checks if there are tasks that need planning
@@ -116,7 +129,7 @@ func HasAvailableImplementationTasks() (bool, error) {
 }
 
 // RunAutoModeLoop runs the auto mode loop for either plan or task agents
-func RunAutoModeLoop(opts AutoModeOptions, shutdown chan bool) {
+func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	state := &AutoModeState{
 		LastTaskTime:  time.Now(),
 		IdleStartTime: time.Now(),
@@ -175,7 +188,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan bool) {
 		if err != nil {
 			fmt.Printf("[auto] Error checking tasks: %v\n", err)
 			// Continue and retry after interval
-			time.Sleep(time.Duration(opts.Interval) * time.Second)
+			if interruptibleSleep(time.Duration(opts.Interval)*time.Second, shutdown) {
+				state.ShouldExit = true
+				state.ExitReason = "shutdown signal received"
+				break
+			}
 			continue
 		}
 
@@ -191,7 +208,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan bool) {
 			}
 
 			fmt.Printf("[auto] No tasks available, waiting %ds...\n", opts.Interval)
-			time.Sleep(time.Duration(opts.Interval) * time.Second)
+			if interruptibleSleep(time.Duration(opts.Interval)*time.Second, shutdown) {
+				state.ShouldExit = true
+				state.ExitReason = "shutdown signal received"
+				break
+			}
 			continue
 		}
 
@@ -229,7 +250,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan bool) {
 
 			// Backoff before retry
 			fmt.Printf("[auto] Waiting %ds before retry...\n", opts.Interval)
-			time.Sleep(time.Duration(opts.Interval) * time.Second)
+			if interruptibleSleep(time.Duration(opts.Interval)*time.Second, shutdown) {
+				state.ShouldExit = true
+				state.ExitReason = "shutdown signal received"
+				break
+			}
 			continue // Don't increment TasksCompleted
 		}
 
@@ -243,7 +268,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan bool) {
 		fmt.Println("")
 
 		// Brief pause before checking for next task
-		time.Sleep(2 * time.Second)
+		if interruptibleSleep(2*time.Second, shutdown) {
+			state.ShouldExit = true
+			state.ExitReason = "shutdown signal received"
+			break
+		}
 	}
 
 	// Print summary
