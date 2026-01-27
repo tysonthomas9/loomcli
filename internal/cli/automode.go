@@ -449,8 +449,8 @@ func streamUntilExit(sessionName string, attachChan, shutdown chan struct{}) {
 				return
 			}
 
-			// Stream new output
-			out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
+			// Stream new output (use -S - to capture full scrollback history, not just visible pane)
+			out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-").Output()
 			if err != nil {
 				continue
 			}
