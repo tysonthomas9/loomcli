@@ -86,7 +86,7 @@ func runTask(cmd *cobra.Command, args []string) {
 		UpdateLockState(worktreePath, StateActive)
 		prompt := GenerateTaskPrompt(agentName)
 		InvokeClaude(worktreePath, prompt) // Interactive mode, nice output
-		UpdateLockState(worktreePath, StateIdle)
+		// Note: No StateIdle here - daemon exits immediately, lock released by defer
 		return
 	}
 
