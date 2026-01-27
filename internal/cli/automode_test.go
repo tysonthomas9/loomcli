@@ -333,3 +333,120 @@ func mustJSON(v interface{}) string {
 	}
 	return string(data)
 }
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"simple", "'simple'"},
+		{"with space", "'with space'"},
+		{"with'quote", "'with'\\''quote'"},
+		{"multiple'quotes'here", "'multiple'\\''quotes'\\''here'"},
+		{"", "''"},
+		{"/path/to/file.log", "'/path/to/file.log'"},
+		{"path with spaces/and'quotes", "'path with spaces/and'\\''quotes'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := shellQuote(tt.input)
+			if got != tt.want {
+				t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsTmuxAvailable(t *testing.T) {
+	// This test checks the actual system - tmux may or may not be installed
+	// We just verify the function doesn't panic and returns a bool
+	result := IsTmuxAvailable()
+	// Result is either true or false depending on system
+	t.Logf("IsTmuxAvailable() = %v", result)
+}
+
+func TestTmuxSessionExists_NonExistentSession(t *testing.T) {
+	// Test with a session name that definitely doesn't exist
+	exists := tmuxSessionExists("nonexistent-test-session-12345-xyz")
+	if exists {
+		t.Error("tmuxSessionExists() returned true for non-existent session")
+	}
+}
+
+func TestTmuxPaneDead_NonExistentSession(t *testing.T) {
+	// For non-existent session, should return true (assume dead)
+	dead := tmuxPaneDead("nonexistent-test-session-12345-xyz")
+	if !dead {
+		t.Error("tmuxPaneDead() returned false for non-existent session, expected true")
+	}
+}
+
+func TestListenForAttachKey_ShutdownSignal(t *testing.T) {
+	attachChan := make(chan struct{}, 1)
+	shutdown := make(chan struct{})
+
+	// Start the listener
+	done := make(chan struct{})
+	go func() {
+		listenForAttachKey(attachChan, shutdown)
+		close(done)
+	}()
+
+	// Give it time to start
+	time.Sleep(10 * time.Millisecond)
+
+	// Signal shutdown
+	close(shutdown)
+
+	// Should exit promptly
+	select {
+	case <-done:
+		// Good - listener exited
+	case <-time.After(500 * time.Millisecond):
+		t.Error("listenForAttachKey did not exit after shutdown signal")
+	}
+}
+
+func TestPrintTmuxSummary(t *testing.T) {
+	// This is a simple output function - just verify it doesn't panic
+	// In a real scenario we'd capture stdout, but for now just ensure no panic
+	printTmuxSummary(0)
+	printTmuxSummary(1)
+	printTmuxSummary(10)
+}
+
+func TestCleanupTmuxSession(t *testing.T) {
+	// Test that cleanup doesn't panic even for non-existent sessions
+	cleanupTmuxSession("nonexistent-test-session-cleanup-12345")
+}
+
+func TestRunAutoModeTmux_MaxTasksZero(t *testing.T) {
+	// Test early exit when shutdown is signaled immediately
+	shutdown := make(chan struct{})
+	close(shutdown) // Signal shutdown immediately
+
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0, // unlimited
+		IdleTimeout:  0,
+		AgentType:    "plan",
+		AgentName:    "test",
+		WorktreePath: t.TempDir(),
+	}
+
+	// Should return immediately due to shutdown
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeTmux(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - exited promptly
+	case <-time.After(2 * time.Second):
+		t.Error("RunAutoModeTmux did not exit after shutdown signal")
+	}
+}
+

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -302,4 +304,235 @@ func formatTimeout(timeout int) string {
 		return "none"
 	}
 	return fmt.Sprintf("%dm", timeout)
+}
+
+// IsTmuxAvailable checks if tmux is installed and available
+func IsTmuxAvailable() bool {
+	return exec.Command("tmux", "-V").Run() == nil
+}
+
+// RunAutoModeTmux runs auto mode with tmux session management and live streaming
+func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
+	// Include PID to prevent session name collisions
+	sessionName := fmt.Sprintf("loom-%s-%s-%d", opts.AgentType, opts.AgentName, os.Getpid())
+
+	// Setup log file
+	logDir := filepath.Join(opts.WorktreePath, ".loom", "logs")
+	os.MkdirAll(logDir, 0755)
+	logFile := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", opts.AgentType, opts.AgentName))
+
+	// Print header
+	fmt.Println("═══════════════════════════════════════════════════════════════")
+	fmt.Printf("Running %s agent in AUTO MODE (tmux)\n", strings.ToUpper(opts.AgentType))
+	fmt.Printf("Worktree: %s\n", opts.WorktreePath)
+	fmt.Printf("Session: %s\n", sessionName)
+	fmt.Println("")
+	fmt.Println("Press ENTER to attach (Ctrl+B D to detach)")
+	fmt.Println("Press Ctrl+C to stop")
+	fmt.Println("═══════════════════════════════════════════════════════════════")
+	fmt.Println("")
+
+	// Start non-blocking input listener
+	attachChan := make(chan struct{}, 1)
+	go listenForAttachKey(attachChan, shutdown)
+
+	taskCount := 0
+	for {
+		select {
+		case <-shutdown:
+			cleanupTmuxSession(sessionName)
+			printTmuxSummary(taskCount)
+			return
+		default:
+		}
+
+		// Check max tasks
+		if opts.MaxTasks > 0 && taskCount >= opts.MaxTasks {
+			fmt.Printf("[auto] Reached max tasks (%d)\n", opts.MaxTasks)
+			cleanupTmuxSession(sessionName)
+			printTmuxSummary(taskCount)
+			return
+		}
+
+		taskCount++
+		fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+		fmt.Printf("[Session #%d] Starting...\n", taskCount)
+		fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+
+		if err := startTmuxSession(sessionName, opts, logFile); err != nil {
+			fmt.Printf("[auto] Failed to start session: %v\n", err)
+			taskCount--
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		// Stream output and wait for session to exit
+		streamUntilExit(sessionName, attachChan, shutdown)
+
+		select {
+		case <-shutdown:
+			cleanupTmuxSession(sessionName)
+			printTmuxSummary(taskCount)
+			return
+		default:
+		}
+
+		fmt.Printf("[Session #%d] Completed, cycling...\n", taskCount)
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// startTmuxSession creates a detached tmux session running loom --daemon-mode
+func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) error {
+	// Kill any existing session with this name
+	exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+
+	// Build the loom command to run inside tmux
+	loomCmd := fmt.Sprintf("loom %s %s --daemon-mode", opts.AgentType, opts.WorktreePath)
+
+	// Create detached session
+	if err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, loomCmd).Run(); err != nil {
+		return fmt.Errorf("tmux new-session failed: %w", err)
+	}
+
+	// Setup logging (shell-quoted path for safety)
+	quotedPath := shellQuote(logFile)
+	exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", "cat >> "+quotedPath).Run()
+
+	return nil
+}
+
+// streamUntilExit streams tmux output until the session exits naturally
+func streamUntilExit(sessionName string, attachChan, shutdown chan struct{}) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	lastLineCount := 0
+
+	for {
+		select {
+		case <-shutdown:
+			return
+
+		case <-attachChan:
+			fmt.Println("")
+			fmt.Println("─── ATTACHED (Ctrl+B D to detach) ───")
+			fmt.Println("")
+
+			cmd := exec.Command("tmux", "attach", "-t", sessionName)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				// Check if session is done (either gone or command exited)
+				if !tmuxSessionExists(sessionName) || tmuxPaneDead(sessionName) {
+					cleanupTmuxSession(sessionName)
+					return
+				}
+				fmt.Printf("[auto] Attach error: %v\n", err)
+			}
+
+			fmt.Println("")
+			fmt.Println("─── DETACHED, resuming stream ───")
+			fmt.Println("")
+
+		case <-ticker.C:
+			// PRIMARY completion check: session exited
+			if !tmuxSessionExists(sessionName) {
+				return
+			}
+
+			// SECONDARY completion check: command inside session exited (zombie state)
+			// This happens when tmux keeps the session alive after the command exits
+			if tmuxPaneDead(sessionName) {
+				cleanupTmuxSession(sessionName)
+				return
+			}
+
+			// Stream new output
+			out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
+			if err != nil {
+				continue
+			}
+
+			lines := strings.Split(string(out), "\n")
+			for i := lastLineCount; i < len(lines); i++ {
+				line := strings.TrimRight(lines[i], " \t")
+				if line != "" {
+					fmt.Println(line)
+				}
+			}
+			lastLineCount = len(lines)
+		}
+	}
+}
+
+// listenForAttachKey listens for Enter key in a separate goroutine
+// Uses blocking reads but the goroutine exits when process terminates
+func listenForAttachKey(attachChan chan struct{}, shutdown chan struct{}) {
+	// Use a channel to signal when a key is read
+	keyChan := make(chan byte, 1)
+
+	// Start a goroutine for blocking reads
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if err != nil || n == 0 {
+				return
+			}
+			select {
+			case keyChan <- buf[0]:
+			default:
+			}
+		}
+	}()
+
+	// Main loop: check for keys or shutdown
+	for {
+		select {
+		case <-shutdown:
+			return
+		case key := <-keyChan:
+			if key == '\n' || key == '\r' {
+				select {
+				case attachChan <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}
+}
+
+// tmuxSessionExists checks if a tmux session with the given name exists
+func tmuxSessionExists(name string) bool {
+	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
+}
+
+// tmuxPaneDead checks if the pane's command has exited (but session may still exist)
+// This happens when tmux keeps the session alive after the command exits (remain-on-exit)
+func tmuxPaneDead(sessionName string) bool {
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_dead}").Output()
+	if err != nil {
+		return true // Assume dead if we can't check
+	}
+	return strings.TrimSpace(string(out)) == "1"
+}
+
+// cleanupTmuxSession kills a tmux session if it exists
+func cleanupTmuxSession(name string) {
+	exec.Command("tmux", "kill-session", "-t", name).Run()
+}
+
+// shellQuote safely quotes a string for use in shell commands
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// printTmuxSummary prints the auto mode completion summary
+func printTmuxSummary(taskCount int) {
+	fmt.Println("")
+	fmt.Println("═══════════════════════════════════════════════════════════════")
+	fmt.Printf("AUTO MODE COMPLETE - %d task(s) processed\n", taskCount)
+	fmt.Println("═══════════════════════════════════════════════════════════════")
 }
