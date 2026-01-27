@@ -9,6 +9,7 @@ import (
 
 var (
 	planAutoMode    bool
+	planDaemonMode  bool // Hidden: for internal tmux session use
 	planInterval    int
 	planMaxTasks    int
 	planIdleTimeout int
@@ -50,6 +51,8 @@ Examples:
 
 func init() {
 	planCmd.Flags().BoolVarP(&planAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
+	planCmd.Flags().BoolVar(&planDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
+	planCmd.Flags().MarkHidden("daemon-mode")
 	planCmd.Flags().IntVarP(&planInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	planCmd.Flags().IntVarP(&planMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	planCmd.Flags().IntVarP(&planIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
@@ -71,7 +74,37 @@ func runPlan(cmd *cobra.Command, args []string) {
 
 	agentName := GetWorktreeName(worktreePath)
 
-	// Acquire lock to prevent concurrent agents
+	// DAEMON MODE: Called by tmux session, run single task
+	// Daemon manages its own lock (parent doesn't hold lock in tmux mode)
+	if planDaemonMode {
+		if err := AcquireLock(worktreePath, "plan", agentName); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		defer ReleaseLock(worktreePath)
+
+		UpdateLockState(worktreePath, StateActive)
+		prompt := GeneratePlanningPrompt(agentName)
+		InvokeClaude(worktreePath, prompt) // Interactive mode, nice output
+		UpdateLockState(worktreePath, StateIdle)
+		return
+	}
+
+	// AUTO MODE with tmux - daemon manages lock, not parent
+	if planAutoMode && IsTmuxAvailable() {
+		shutdown := SetupSignalHandler()
+		RunAutoModeTmux(AutoModeOptions{
+			Interval:     planInterval,
+			MaxTasks:     planMaxTasks,
+			IdleTimeout:  planIdleTimeout,
+			AgentType:    "plan",
+			AgentName:    agentName,
+			WorktreePath: worktreePath,
+		}, shutdown)
+		return
+	}
+
+	// AUTO MODE without tmux OR single task mode - parent manages lock
 	if err := AcquireLock(worktreePath, "plan", agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -79,7 +112,8 @@ func runPlan(cmd *cobra.Command, args []string) {
 	defer ReleaseLock(worktreePath)
 
 	if planAutoMode {
-		// Auto mode - run the loop
+		// Fallback to JSON streaming mode (no tmux)
+		fmt.Println("[auto] tmux not found, using JSON streaming mode")
 		shutdown := SetupSignalHandler()
 		RunAutoModeLoop(AutoModeOptions{
 			Interval:     planInterval,
@@ -89,19 +123,20 @@ func runPlan(cmd *cobra.Command, args []string) {
 			AgentName:    agentName,
 			WorktreePath: worktreePath,
 		}, shutdown)
-	} else {
-		// Single task mode (original behavior)
-		fmt.Println("=========================================")
-		fmt.Printf("Running PLANNING agent in: %s\n", worktreePath)
-		fmt.Printf("Agent name: %s\n", agentName)
-		fmt.Println("=========================================")
-		fmt.Println("")
+		return
+	}
 
-		// Generate and run the planning prompt
-		prompt := GeneratePlanningPrompt(agentName)
-		if err := InvokeClaude(worktreePath, prompt); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
-			os.Exit(1)
-		}
+	// SINGLE TASK MODE (original behavior)
+	fmt.Println("=========================================")
+	fmt.Printf("Running PLANNING agent in: %s\n", worktreePath)
+	fmt.Printf("Agent name: %s\n", agentName)
+	fmt.Println("=========================================")
+	fmt.Println("")
+
+	// Generate and run the planning prompt
+	prompt := GeneratePlanningPrompt(agentName)
+	if err := InvokeClaude(worktreePath, prompt); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
+		os.Exit(1)
 	}
 }
