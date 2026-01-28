@@ -66,7 +66,7 @@ func runComplete(cmd *cobra.Command, args []string) {
 	}
 
 	// Write the worktree path to the signal file (for debugging/verification)
-	if err := os.WriteFile(signalFile, []byte(worktreePath), 0644); err != nil {
+	if err := os.WriteFile(signalFile, []byte(worktreePath), 0600); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing signal file: %v\n", err)
 		os.Exit(1)
 	}

@@ -84,7 +84,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		select {
 		case <-shutdown:
 			// Kill the child process
-			cmd.Process.Signal(syscall.SIGTERM)
+			_ = cmd.Process.Signal(syscall.SIGTERM)
 		case <-done:
 			// Normal completion
 		}

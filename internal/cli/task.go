@@ -52,7 +52,7 @@ Examples:
 func init() {
 	taskCmd.Flags().BoolVarP(&taskAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
 	taskCmd.Flags().BoolVar(&taskDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
-	taskCmd.Flags().MarkHidden("daemon-mode")
+	_ = taskCmd.Flags().MarkHidden("daemon-mode")
 	taskCmd.Flags().IntVarP(&taskInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	taskCmd.Flags().IntVarP(&taskMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	taskCmd.Flags().IntVarP(&taskIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
@@ -81,11 +81,16 @@ func runTask(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		defer ReleaseLock(worktreePath)
+		defer func() { _ = ReleaseLock(worktreePath) }()
 
-		UpdateLockState(worktreePath, StateActive)
+		if err := UpdateLockState(worktreePath, StateActive); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
+		}
 		prompt := GenerateTaskPrompt(agentName)
-		InvokeClaude(worktreePath, prompt, agentName) // Interactive mode, nice output
+		if err := InvokeClaude(worktreePath, prompt, agentName); err != nil { // Interactive mode, nice output
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		// Note: No StateIdle here - daemon exits immediately, lock released by defer
 		return
 	}
@@ -109,7 +114,7 @@ func runTask(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	defer ReleaseLock(worktreePath)
+	defer func() { _ = ReleaseLock(worktreePath) }()
 
 	if taskAutoMode {
 		// Fallback to JSON streaming mode (no tmux)

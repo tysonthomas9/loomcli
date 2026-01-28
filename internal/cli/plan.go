@@ -52,7 +52,7 @@ Examples:
 func init() {
 	planCmd.Flags().BoolVarP(&planAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
 	planCmd.Flags().BoolVar(&planDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
-	planCmd.Flags().MarkHidden("daemon-mode")
+	_ = planCmd.Flags().MarkHidden("daemon-mode")
 	planCmd.Flags().IntVarP(&planInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	planCmd.Flags().IntVarP(&planMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	planCmd.Flags().IntVarP(&planIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
@@ -81,11 +81,16 @@ func runPlan(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		defer ReleaseLock(worktreePath)
+		defer func() { _ = ReleaseLock(worktreePath) }()
 
-		UpdateLockState(worktreePath, StateActive)
+		if err := UpdateLockState(worktreePath, StateActive); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
+		}
 		prompt := GeneratePlanningPrompt(agentName)
-		InvokeClaude(worktreePath, prompt, agentName) // Interactive mode, nice output
+		if err := InvokeClaude(worktreePath, prompt, agentName); err != nil { // Interactive mode, nice output
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		// Note: No StateIdle here - daemon exits immediately, lock released by defer
 		return
 	}
@@ -109,7 +114,7 @@ func runPlan(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	defer ReleaseLock(worktreePath)
+	defer func() { _ = ReleaseLock(worktreePath) }()
 
 	if planAutoMode {
 		// Fallback to JSON streaming mode (no tmux)

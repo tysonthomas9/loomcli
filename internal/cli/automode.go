@@ -370,7 +370,9 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 
 	// Setup log file
 	logDir := filepath.Join(opts.WorktreePath, ".loom", "logs")
-	os.MkdirAll(logDir, 0755)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		fmt.Printf("[auto] Warning: could not create log directory: %v\n", err)
+	}
 	logFile := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", opts.AgentType, opts.AgentName))
 
 	// Choose task checker based on agent type
@@ -497,11 +499,12 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	}
 
 	// Disable tmux focus-events to prevent ^[[I and ^[[O in output
-	exec.Command("tmux", "set", "-t", sessionName, "focus-events", "off").Run()
+	_ = exec.Command("tmux", "set", "-t", sessionName, "focus-events", "off").Run()
 
 	// Setup logging (shell-quoted path for safety)
+	// G204: logFile is from internal code path, not user input; shellQuote escapes it for shell safety
 	quotedPath := shellQuote(logFile)
-	if err := exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", "cat >> "+quotedPath).Run(); err != nil {
+	if err := exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", "cat >> "+quotedPath).Run(); err != nil { //nolint:gosec // path is shell-quoted
 		fmt.Printf("[auto] Warning: logging setup failed: %v\n", err)
 	}
 
@@ -763,7 +766,7 @@ func listenForAttachKey(attachChan chan struct{}, shutdown chan struct{}) {
 			// Filter escape sequences (e.g., focus events ^[[I ^[[O)
 			if buf[0] == '\x1b' {
 				// Drain the rest of the escape sequence
-				os.Stdin.Read(make([]byte, 2))
+				_, _ = os.Stdin.Read(make([]byte, 2))
 				continue
 			}
 			select {

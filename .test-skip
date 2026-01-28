@@ -1,0 +1,3 @@
+# Tests to skip (one regex pattern per line)
+# Example: TestFlakyIntegration
+# Example: TestWindows.*

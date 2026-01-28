@@ -176,7 +176,7 @@ func UpdateLockTask(worktreePath, taskID, taskTitle string) error {
 		return fmt.Errorf("failed to marshal lock info: %w", err)
 	}
 
-	return os.WriteFile(lockPath, data, 0644)
+	return os.WriteFile(lockPath, data, 0600)
 }
 
 // UpdateLockState updates the lock file with current execution state
@@ -206,7 +206,7 @@ func UpdateLockState(worktreePath, state string) error {
 		return fmt.Errorf("failed to marshal lock info: %w", err)
 	}
 
-	return os.WriteFile(lockPath, data, 0644)
+	return os.WriteFile(lockPath, data, 0600)
 }
 
 // IsProcessRunning checks if a process with the given PID is still running

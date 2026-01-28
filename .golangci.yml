@@ -1,0 +1,19 @@
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosec
+    - misspell
+    - unconvert
+    - unparam
+
+linters-settings:
+  misspell:
+    locale: US
+
+issues:
+  uniq-by-line: true

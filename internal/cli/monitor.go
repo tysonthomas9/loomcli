@@ -10,6 +10,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	dashboardWidth   = 70 // Width of the monitor dashboard box
+	taskTitleMaxLen  = 45 // Maximum length for task titles in dashboard
+)
+
 var (
 	monitorNoWatch  bool
 	monitorInterval int
@@ -480,28 +485,27 @@ func runBdCommand(args ...string) (string, error) {
 	return result.Stdout, nil
 }
 
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+func truncateString(s string) string {
+	if len(s) <= taskTitleMaxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	return s[:taskTitleMaxLen-3] + "..."
 }
 
 // Rendering functions
 
 func renderDashboard(data *MonitorData) string {
 	var sb strings.Builder
-	width := 70
 
 	// Header
-	sb.WriteString(renderBoxTop(width))
-	sb.WriteString(renderBoxLine(width, centerText("LOOM", width-4)))
-	sb.WriteString(renderBoxLine(width, centerText(fmt.Sprintf("Last updated: %s", data.Timestamp.Format("15:04:05")), width-4)))
+	sb.WriteString(renderBoxTop())
+	sb.WriteString(renderBoxLine(centerText("LOOM", dashboardWidth-4)))
+	sb.WriteString(renderBoxLine(centerText(fmt.Sprintf("Last updated: %s", data.Timestamp.Format("15:04:05")), dashboardWidth-4)))
 
 	// Agents section
-	sb.WriteString(renderBoxSeparator(width))
-	sb.WriteString(renderBoxLine(width, " AGENTS"))
-	sb.WriteString(renderBoxSeparator(width))
+	sb.WriteString(renderBoxSeparator())
+	sb.WriteString(renderBoxLine(" AGENTS"))
+	sb.WriteString(renderBoxSeparator())
 	for _, agent := range data.Agents {
 		statusIcon := "✓"
 		// Running agents show explicit state prefixes
@@ -539,80 +543,80 @@ func renderDashboard(data *MonitorData) string {
 			padding = 0
 		}
 		line := leftPart + strings.Repeat(" ", padding) + syncIndicator
-		sb.WriteString(renderBoxLine(width, line))
+		sb.WriteString(renderBoxLine(line))
 	}
 	if len(data.Agents) == 0 {
-		sb.WriteString(renderBoxLine(width, "  No agents found"))
+		sb.WriteString(renderBoxLine("  No agents found"))
 	}
 
 	// Tasks section
-	sb.WriteString(renderBoxSeparator(width))
-	sb.WriteString(renderBoxLine(width, " WORK QUEUE"))
-	sb.WriteString(renderBoxSeparator(width))
+	sb.WriteString(renderBoxSeparator())
+	sb.WriteString(renderBoxLine(" WORK QUEUE"))
+	sb.WriteString(renderBoxSeparator())
 	taskSummary := fmt.Sprintf("  Plan: %-3d  Impl: %-3d  Review: %-3d  Active: %-3d  Blocked: %-3d",
 		data.Tasks.NeedsPlanning, data.Tasks.ReadyToImplement, data.Tasks.NeedReview, data.Tasks.InProgress, data.Tasks.Blocked)
-	sb.WriteString(renderBoxLine(width, taskSummary))
+	sb.WriteString(renderBoxLine(taskSummary))
 
 	// Needs Planning tasks (top 5)
-	sb.WriteString(renderBoxLine(width, ""))
-	sb.WriteString(renderBoxLine(width, fmt.Sprintf("  NEEDS PLANNING (%d):", data.Tasks.NeedsPlanning)))
+	sb.WriteString(renderBoxLine(""))
+	sb.WriteString(renderBoxLine(fmt.Sprintf("  NEEDS PLANNING (%d):", data.Tasks.NeedsPlanning)))
 	if len(data.NeedsPlanningTasks) > 0 {
 		for _, task := range data.NeedsPlanningTasks {
-			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(task.Title, 45))
-			sb.WriteString(renderBoxLine(width, line))
+			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(task.Title))
+			sb.WriteString(renderBoxLine(line))
 		}
 	} else {
-		sb.WriteString(renderBoxLine(width, "    (none)"))
+		sb.WriteString(renderBoxLine("    (none)"))
 	}
 
 	// Need review tasks (top 5)
-	sb.WriteString(renderBoxLine(width, ""))
-	sb.WriteString(renderBoxLine(width, fmt.Sprintf("  NEEDS REVIEW (%d):", data.Tasks.NeedReview)))
+	sb.WriteString(renderBoxLine(""))
+	sb.WriteString(renderBoxLine(fmt.Sprintf("  NEEDS REVIEW (%d):", data.Tasks.NeedReview)))
 	if len(data.ReviewTasks) > 0 {
 		for _, task := range data.ReviewTasks {
 			// Strip [Need Review] prefix from title for cleaner display
 			title := strings.TrimPrefix(task.Title, "[Need Review] ")
-			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(title, 45))
-			sb.WriteString(renderBoxLine(width, line))
+			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(title))
+			sb.WriteString(renderBoxLine(line))
 		}
 	} else {
-		sb.WriteString(renderBoxLine(width, "    (none)"))
+		sb.WriteString(renderBoxLine("    (none)"))
 	}
 
 	// Ready to Implement tasks (top 5)
-	sb.WriteString(renderBoxLine(width, ""))
-	sb.WriteString(renderBoxLine(width, fmt.Sprintf("  READY TO IMPLEMENT (%d):", data.Tasks.ReadyToImplement)))
+	sb.WriteString(renderBoxLine(""))
+	sb.WriteString(renderBoxLine(fmt.Sprintf("  READY TO IMPLEMENT (%d):", data.Tasks.ReadyToImplement)))
 	if len(data.ReadyToImplement) > 0 {
 		for _, task := range data.ReadyToImplement {
-			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(task.Title, 45))
-			sb.WriteString(renderBoxLine(width, line))
+			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(task.Title))
+			sb.WriteString(renderBoxLine(line))
 		}
 	} else {
-		sb.WriteString(renderBoxLine(width, "    (none)"))
+		sb.WriteString(renderBoxLine("    (none)"))
 	}
 
 	// In progress tasks (all)
-	sb.WriteString(renderBoxLine(width, ""))
-	sb.WriteString(renderBoxLine(width, fmt.Sprintf("  IN PROGRESS (%d):", data.Tasks.InProgress)))
+	sb.WriteString(renderBoxLine(""))
+	sb.WriteString(renderBoxLine(fmt.Sprintf("  IN PROGRESS (%d):", data.Tasks.InProgress)))
 	if len(data.InProgressTasks) > 0 {
 		for _, task := range data.InProgressTasks {
-			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(task.Title, 45))
-			sb.WriteString(renderBoxLine(width, line))
+			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(task.Title))
+			sb.WriteString(renderBoxLine(line))
 		}
 	} else {
-		sb.WriteString(renderBoxLine(width, "    (none)"))
+		sb.WriteString(renderBoxLine("    (none)"))
 	}
 
 	// Sync section
-	sb.WriteString(renderBoxSeparator(width))
-	sb.WriteString(renderBoxLine(width, " SYNC STATUS"))
-	sb.WriteString(renderBoxSeparator(width))
+	sb.WriteString(renderBoxSeparator())
+	sb.WriteString(renderBoxLine(" SYNC STATUS"))
+	sb.WriteString(renderBoxSeparator())
 
 	dbStatus := "✓ synced"
 	if !data.SyncStatus.DBSynced {
 		dbStatus = "⚠ " + data.SyncStatus.DBError
 	}
-	sb.WriteString(renderBoxLine(width, fmt.Sprintf("  Database:  %s", dbStatus)))
+	sb.WriteString(renderBoxLine(fmt.Sprintf("  Database:  %s", dbStatus)))
 
 	gitStatus := "✓ all synced"
 	if data.SyncStatus.GitNeedsPush > 0 || data.SyncStatus.GitNeedsPull > 0 {
@@ -625,32 +629,32 @@ func renderDashboard(data *MonitorData) string {
 		}
 		gitStatus = "⚠ " + strings.Join(parts, ", ")
 	}
-	sb.WriteString(renderBoxLine(width, fmt.Sprintf("  Git:       %s", gitStatus)))
+	sb.WriteString(renderBoxLine(fmt.Sprintf("  Git:       %s", gitStatus)))
 
 	// Stats section
-	sb.WriteString(renderBoxSeparator(width))
-	sb.WriteString(renderBoxLine(width, " STATS"))
-	sb.WriteString(renderBoxSeparator(width))
+	sb.WriteString(renderBoxSeparator())
+	sb.WriteString(renderBoxLine(" STATS"))
+	sb.WriteString(renderBoxSeparator())
 	statsLine := fmt.Sprintf("  Open: %-4d  Closed: %-4d  Total: %-4d  Completion: %.0f%%",
 		data.Stats.Open, data.Stats.Closed, data.Stats.Total, data.Stats.Completion)
-	sb.WriteString(renderBoxLine(width, statsLine))
+	sb.WriteString(renderBoxLine(statsLine))
 
 	// Footer
-	sb.WriteString(renderBoxBottom(width))
+	sb.WriteString(renderBoxBottom())
 
 	return sb.String()
 }
 
-func renderBoxTop(width int) string {
-	return "╔" + strings.Repeat("═", width-2) + "╗\n"
+func renderBoxTop() string {
+	return "╔" + strings.Repeat("═", dashboardWidth-2) + "╗\n"
 }
 
-func renderBoxBottom(width int) string {
-	return "╚" + strings.Repeat("═", width-2) + "╝\n"
+func renderBoxBottom() string {
+	return "╚" + strings.Repeat("═", dashboardWidth-2) + "╝\n"
 }
 
-func renderBoxSeparator(width int) string {
-	return "╠" + strings.Repeat("═", width-2) + "╣\n"
+func renderBoxSeparator() string {
+	return "╠" + strings.Repeat("═", dashboardWidth-2) + "╣\n"
 }
 
 // displayWidth returns the terminal display width of a string
@@ -665,10 +669,10 @@ func displayWidth(s string) int {
 	return width
 }
 
-func renderBoxLine(width int, content string) string {
+func renderBoxLine(content string) string {
 	// Use display width instead of byte length for padding calculation
 	contentWidth := displayWidth(content)
-	padding := width - 4 - contentWidth
+	padding := dashboardWidth - 4 - contentWidth
 	if padding < 0 {
 		padding = 0
 	}
