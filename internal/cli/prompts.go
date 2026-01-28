@@ -15,11 +15,12 @@ Follow this workflow EXACTLY for ONE task.
 **Your agent name is: %s** (BD_ACTOR is set automatically)
 
 ### Step 1: Select ONE Task for Planning
-- Run this command to see available tasks (excludes [Need Review] awaiting human approval):
-  bd ready --limit 10 --json | jq -r '.[] | select(.title | contains("[Need Review]") | not) | "\(.id): [\(.priority)] \(.title)"'
+- Run this command to find tasks needing planning (no design yet, not awaiting review):
+  bd ready --json | jq -r '.[] | select(.title | contains("[Need Review]") | not) | select(.issue_type != "epic") | select(.design == null or .design == "") | "\(.id): [\(.priority)] \(.title)"'
+- If jq fails, fallback: Run 'bd ready --limit 10' and manually SKIP tasks with '[Need Review]' in title, epics, or tasks that already have a --design field
 - SKIP any task already 'in_progress' by checking 'bd list --status=in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
-- Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is NOT an epic
+- Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
 - Run 'bd show <id>' to understand the task requirements
 - Run 'bd update <id> --claim' to claim it (atomic - prevents race conditions)
 - If claim fails with 'already claimed by X', pick the next highest priority task
@@ -123,13 +124,13 @@ You are a disciplined software engineer. Follow this workflow EXACTLY for ONE ta
 **Your agent name is: %s** (BD_ACTOR is set automatically)
 
 ### Step 1: Select ONE Task
-- Run 'bd ready --limit 10' to see available tasks (sorted by priority, only unblocked tasks shown)
-- SKIP any task with '[Need Review]' in the title (awaiting human approval)
+- Run this command to find tasks ready to implement (has design, not awaiting review):
+  bd ready --json | jq -r '.[] | select(.title | contains("[Need Review]") | not) | select(.issue_type != "epic") | select(.design != null and .design != "") | "\(.id): [\(.priority)] \(.title)"'
+- If jq fails, fallback: Run 'bd ready --limit 10' and manually SKIP tasks with '[Need Review]' in title, epics, or tasks without a --design field
 - Run 'bd list --status=in_progress --json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'bd update <id> --status in_progress --assignee %s')
 - IGNORE existing assignees - if status is 'open', the task is available to claim
-- Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is NOT an epic and not already in_progress
+- Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is not already in_progress
 - Run 'bd show <id>' to understand the task requirements
-- SKIP any task that does NOT have a --design field - it must go through 'loom plan' first
 - If NO tasks have a --design field:
   1. Print: "No planned tasks available. Run 'loom plan' first."
   2. Run: loom complete
