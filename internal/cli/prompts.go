@@ -16,7 +16,7 @@ Follow this workflow EXACTLY for ONE task.
 
 ### Step 1: Select ONE Task for Planning
 - Run this command to find tasks needing planning (no design yet, not awaiting review):
-  bd ready --json | jq -r '.[] | select(.title | contains("[Need Review]") | not) | select(.issue_type == "epic" | not) | select(.design == null or .design == "") | "\(.id): [\(.priority)] \(.title)"'
+  bd ready --json | jq -r '.[] | select(.status == "open") | select(.title | contains("[Need Review]") | not) | select(.issue_type == "epic" | not) | select(.design == null or .design == "") | "\(.id): [\(.priority)] \(.title)"'
 - If jq fails, fallback: Run 'bd ready --limit 10' and manually SKIP tasks with '[Need Review]' in title, epics, or tasks that already have a --design field
 - SKIP any task already 'in_progress' by checking 'bd list --status=in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
@@ -125,7 +125,7 @@ You are a disciplined software engineer. Follow this workflow EXACTLY for ONE ta
 
 ### Step 1: Select ONE Task
 - Run this command to find tasks ready to implement (has design, not awaiting review):
-  bd ready --json | jq -r '.[] | select(.title | contains("[Need Review]") | not) | select(.issue_type == "epic" | not) | select((.design == null or .design == "") | not) | "\(.id): [\(.priority)] \(.title)"'
+  bd ready --json | jq -r '.[] | select(.status == "open") | select(.title | contains("[Need Review]") | not) | select(.issue_type == "epic" | not) | select((.design == null or .design == "") | not) | "\(.id): [\(.priority)] \(.title)"'
 - If jq fails, fallback: Run 'bd ready --limit 10' and manually SKIP tasks with '[Need Review]' in title, epics, or tasks without a --design field
 - Run 'bd list --status=in_progress --json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'bd update <id> --status in_progress --assignee %s')
 - IGNORE existing assignees - if status is 'open', the task is available to claim
