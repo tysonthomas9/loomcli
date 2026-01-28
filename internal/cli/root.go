@@ -17,27 +17,63 @@ var rootCmd = &cobra.Command{
 	Short: "Agent management CLI for parallel Claude Code workflows",
 	Long: `loom - Agent Management CLI
 
-A unified command-line tool for managing Claude Code agents in parallel
-worktree workflows. Provides commands for planning, implementation,
-merging, syncing, and resetting worktrees.
+Manage Claude Code agents working in parallel across git worktrees.
 
-Commands:
-  plan     Run a planning agent (creates designs, marks for review)
-  task     Run an implementation agent (implements approved tasks)
-  merge    Merge worktree branches with AI conflict resolution
-  sync     Sync worktrees with integration branch
-  reset    Hard reset worktrees to a specific branch
+GETTING STARTED
+  1. Install beads CLI (issue tracker):
+     go install github.com/bounteous/beads/cmd/bd@latest
 
-Environment Variables:
+  2. Initialize beads in your project:
+     bd init
+
+  3. Create worktrees for parallel agent work:
+     mkdir -p worktrees
+     git worktree add ./worktrees/falcon -b falcon
+     git worktree add ./worktrees/nova -b nova
+
+  4. Create tasks for agents to work on:
+     bd create --title="Add login feature" --type=feature --priority=2
+
+  5. Run agents:
+     loom plan falcon    # Creates design, marks [Need Review]
+     loom lead           # Review and approve plans
+     loom task falcon    # Implements approved design
+
+KEY CONCEPTS
+  Worktrees    Isolated git directories (./worktrees/<name>) where agents
+               work independently. Each has its own branch.
+
+  Agents       Claude processes that work on tasks:
+               - 'plan' agent: researches and creates designs
+               - 'task' agent: implements approved designs
+
+  Beads        Issue tracker (bd CLI). Tasks flow through states:
+               open → in_progress → [Need Review] → open → closed
+
+  Auto Mode    --auto flag runs agents continuously, processing multiple
+               tasks until stopped (Ctrl+C) or idle timeout.
+
+COMMANDS
+  plan         Run a planning agent (creates designs, marks for review)
+  task         Run an implementation agent (implements approved tasks)
+  lead         Interactive mode for reviewing plans and managing backlog
+  monitor      Dashboard showing agent status and task progress
+  merge        Merge worktree branches with AI conflict resolution
+  sync         Sync worktrees with integration branch
+  reset        Hard reset worktrees to a specific branch
+  list         List all worktrees and their status
+
+ENVIRONMENT VARIABLES
   LOOM_DEFAULT_BRANCH    Default integration branch (default: main)
   LOOM_WORKTREES_DIR     Worktrees directory (default: ./worktrees)
 
-Examples:
+EXAMPLES
   loom plan falcon              # Run planning agent in falcon worktree
-  loom task falcon              # Run implementation agent in falcon
-  loom merge --all              # Merge all worktrees to integration branch
-  loom sync --all               # Sync all worktrees from integration branch
-  loom reset falcon --force     # Reset falcon worktree`,
+  loom task falcon --auto       # Continuous implementation mode
+  loom lead                     # Interactive backlog management
+  loom monitor                  # Watch agent progress
+  loom merge --all              # Merge all worktrees to main
+  loom sync --all               # Sync all worktrees from main`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if v, _ := cmd.Flags().GetBool("version"); v {
 			fmt.Printf("loom version %s (%s)\n", Version, Build)

@@ -127,6 +127,18 @@ func runPlan(cmd *cobra.Command, args []string) {
 	}
 
 	// SINGLE TASK MODE (original behavior)
+	// Check if there are tasks available for planning
+	available, err := HasAvailablePlanningTasks()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
+		os.Exit(1)
+	}
+	if !available {
+		fmt.Println("No tasks available for planning.")
+		fmt.Println("Tasks must be: open status, no design, not [Need Review], not epics")
+		return
+	}
+
 	fmt.Println("=========================================")
 	fmt.Printf("Running PLANNING agent in: %s\n", worktreePath)
 	fmt.Printf("Agent name: %s\n", agentName)

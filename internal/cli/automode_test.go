@@ -370,6 +370,25 @@ func TestIsTmuxAvailable(t *testing.T) {
 	t.Logf("IsTmuxAvailable() = %v", result)
 }
 
+func TestGetTerminalSize(t *testing.T) {
+	// This test checks the actual system - may fail in CI without a TTY
+	// We just verify the function doesn't panic
+	width, height, err := getTerminalSize()
+	if err != nil {
+		t.Logf("getTerminalSize() error (expected in CI): %v", err)
+		return
+	}
+	t.Logf("getTerminalSize() = %dx%d", width, height)
+
+	// If we got values, they should be reasonable
+	if width > 0 && width < 10 {
+		t.Errorf("width %d seems too small", width)
+	}
+	if height > 0 && height < 5 {
+		t.Errorf("height %d seems too small", height)
+	}
+}
+
 func TestTmuxSessionExists_NonExistentSession(t *testing.T) {
 	// Test with a session name that definitely doesn't exist
 	exists := tmuxSessionExists("nonexistent-test-session-12345-xyz")
@@ -716,6 +735,152 @@ func TestStreamRemainingLogContent_ReadsIncrementalContent(t *testing.T) {
 	expectedOffset := int64(len(chunk1) + len(chunk2))
 	if offset != expectedOffset {
 		t.Errorf("after chunk2: offset = %d, want %d", offset, expectedOffset)
+	}
+}
+
+func TestFilterFocusEscapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []byte
+		want  []byte
+	}{
+		{
+			name:  "no escape sequences",
+			input: []byte("hello world"),
+			want:  []byte("hello world"),
+		},
+		{
+			name:  "focus gained escape",
+			input: []byte("before\x1b[Iafter"),
+			want:  []byte("beforeafter"),
+		},
+		{
+			name:  "focus lost escape",
+			input: []byte("before\x1b[Oafter"),
+			want:  []byte("beforeafter"),
+		},
+		{
+			name:  "both focus escapes",
+			input: []byte("start\x1b[Imiddle\x1b[Oend"),
+			want:  []byte("startmiddleend"),
+		},
+		{
+			name:  "multiple of same escape",
+			input: []byte("\x1b[I\x1b[I\x1b[Itext\x1b[O\x1b[O"),
+			want:  []byte("text"),
+		},
+		{
+			name:  "escape at start",
+			input: []byte("\x1b[Itext"),
+			want:  []byte("text"),
+		},
+		{
+			name:  "escape at end",
+			input: []byte("text\x1b[O"),
+			want:  []byte("text"),
+		},
+		{
+			name:  "empty input",
+			input: []byte(""),
+			want:  []byte(""),
+		},
+		{
+			name:  "only escape sequences",
+			input: []byte("\x1b[I\x1b[O"),
+			want:  []byte(""),
+		},
+		{
+			name:  "preserves other escape sequences",
+			input: []byte("\x1b[32mgreen\x1b[0m\x1b[Itext"),
+			want:  []byte("\x1b[32mgreen\x1b[0mtext"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterFocusEscapes(tt.input)
+			if string(got) != string(tt.want) {
+				t.Errorf("filterFocusEscapes(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStreamUntilExit_StartsFromCurrentFileSize(t *testing.T) {
+	// This tests the principle that we should start from current file size
+	// to avoid replaying old content from previous sessions.
+	// The actual streamUntilExit function is tested via e2e tests.
+
+	// Create temp log file with existing content (simulating previous session)
+	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	fileName := tmpFile.Name()
+	defer os.Remove(fileName)
+
+	// Write "old" content from a previous session
+	oldContent := "old session output line 1\nold session output line 2\n"
+	if _, err := tmpFile.WriteString(oldContent); err != nil {
+		t.Fatalf("failed to write old content: %v", err)
+	}
+	tmpFile.Close()
+
+	// Verify file size matches old content
+	info, err := os.Stat(fileName)
+	if err != nil {
+		t.Fatalf("failed to stat file: %v", err)
+	}
+
+	expectedOffset := int64(len(oldContent))
+	if info.Size() != expectedOffset {
+		t.Errorf("file size = %d, want %d", info.Size(), expectedOffset)
+	}
+
+	// Simulate the offset initialization logic from streamUntilExit
+	var lastOffset int64 = 0
+	if info, err := os.Stat(fileName); err == nil {
+		lastOffset = info.Size()
+	}
+
+	// Offset should start at end of existing content
+	if lastOffset != expectedOffset {
+		t.Errorf("lastOffset = %d, want %d (should skip old content)", lastOffset, expectedOffset)
+	}
+
+	// Now simulate new content being appended
+	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("failed to open file for append: %v", err)
+	}
+	newContent := "new session output\n"
+	if _, err := f.WriteString(newContent); err != nil {
+		t.Fatalf("failed to write new content: %v", err)
+	}
+	f.Close()
+
+	// Reading from lastOffset should only get new content
+	streamRemainingLogContent(fileName, &lastOffset)
+
+	// Offset should now be at end of all content
+	expectedFinalOffset := int64(len(oldContent) + len(newContent))
+	if lastOffset != expectedFinalOffset {
+		t.Errorf("final offset = %d, want %d", lastOffset, expectedFinalOffset)
+	}
+}
+
+func TestStreamUntilExit_HandlesNonExistentFile(t *testing.T) {
+	// When log file doesn't exist yet, offset should start at 0
+	nonExistentFile := "/tmp/loom-nonexistent-test-file-12345.log"
+
+	var lastOffset int64 = 0
+	if info, err := os.Stat(nonExistentFile); err == nil {
+		lastOffset = info.Size()
+	}
+
+	// Offset should remain 0 for non-existent file
+	if lastOffset != 0 {
+		t.Errorf("lastOffset = %d, want 0 for non-existent file", lastOffset)
 	}
 }
 

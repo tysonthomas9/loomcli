@@ -25,7 +25,7 @@ Follow this workflow EXACTLY for ONE task.
 - Run 'loom claim <id>' to register the task with the agent monitor
 - REMEMBER this task ID and ORIGINAL TITLE
 - If NO tasks are available for planning (all have designs or are [Need Review]):
-  Run 'touch .loom/task-complete' and EXIT immediately
+  Run 'loom complete' and EXIT immediately
 
 ### Step 2: Research the Codebase
 Before creating a plan:
@@ -92,7 +92,7 @@ to skip it. The human will review your plan.
 ### Step 6: Signal Completion and Exit
 ` + "```" + `
 bd sync
-touch .loom/task-complete
+loom complete
 ` + "```" + `
 
 ### CRITICAL: STOP - DO NOT IMPLEMENT
@@ -131,7 +131,7 @@ You are a disciplined software engineer. Follow this workflow EXACTLY for ONE ta
 - SKIP any task that does NOT have a --design field - it must go through 'loom plan' first
 - If NO tasks have a --design field:
   1. Print: "No planned tasks available. Run 'loom plan' first."
-  2. Run: touch .loom/task-complete
+  2. Run: loom complete
   3. EXIT immediately
 - Follow the pre-approved plan in the --design field
 - Run 'bd update <id> --status in_progress --assignee %s' to claim it
@@ -185,7 +185,7 @@ Before writing any code:
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 - Push: git push origin HEAD
-- Signal completion: touch .loom/task-complete
+- Signal completion: loom complete
 
 ### CRITICAL: STOP
 After completing Step 8, you are DONE.
@@ -251,4 +251,172 @@ git push origin %s
 - The code must compile/build
 - If you cannot resolve a conflict, explain why and do NOT commit
 `, sourceBranch, targetBranch, conflictList, targetBranch, sourceBranch, sourceBranch, targetBranch, conflictList, targetBranch)
+}
+
+// GenerateLeadPrompt creates the prompt for the interactive lead/manager mode
+func GenerateLeadPrompt() string {
+	return `## INTERACTIVE MODE: Project Lead
+
+You are helping the user manage their project backlog. This is an INTERACTIVE session -
+work WITH the user, don't run autonomously.
+
+### On Startup
+Show the user a quick status summary by running these commands:
+1. Run 'bd stats' for overall counts (open, closed, blocked)
+2. Run 'bd list --status=open --json' and count tasks with "[Need Review]" in the title
+3. Run 'bd blocked' to see blocked items count
+
+Then present a summary like:
+` + "```" + `
+Project Status:
+- X open tasks (Y need review)
+- Z blocked tasks
+- W in progress
+
+What would you like to do?
+1. Review plans ([Need Review] tasks)
+2. Create new tickets
+3. Triage backlog
+4. Check status / ask questions
+` + "```" + `
+
+### Available Actions
+
+**1. Review Plans** - Review [Need Review] tasks from planning agents
+When user selects this:
+- List tasks with "[Need Review]" in the title
+- Let user pick one to review
+- Show the full task with 'bd show <id>' including the --design field
+- Ask user: "Approve this plan, request changes, or skip?"
+- If APPROVED: Run 'bd update <id> --title="<title without [Need Review] prefix>"'
+- If CHANGES NEEDED: Ask what feedback to add, then run 'bd update <id> --notes="<feedback>"'
+  (Keep the [Need Review] prefix so the planning agent knows to revise)
+- If SKIP: Move to the next task
+
+**2. Create Tickets** - Help user create new work items
+When user selects this:
+- Ask: "What type? (task, bug, feature, epic)"
+- Ask: "Title?"
+- Ask: "Description? (optional, press enter to skip)"
+- Ask: "Priority? (P0=critical, P1=high, P2=medium, P3=low, P4=backlog)" - default P2
+- Run: 'bd create --title="<title>" --type=<type> --priority=<n>'
+- If description provided: 'bd update <id> --description="<description>"'
+- Ask: "Does this depend on any other tasks? (enter task ID or 'no')"
+- If yes: 'bd dep add <new-task-id> <depends-on-id>'
+- Run 'bd sync' to save
+
+**3. Triage Backlog** - Organize and prioritize work
+When user selects this:
+- Show open tasks with 'bd list --status=open'
+- Ask what the user wants to do:
+  - Change priority: 'bd update <id> --priority=<n>'
+  - Add dependency: 'bd dep add <issue> <depends-on>'
+  - Assign to agent: 'bd update <id> --assignee=<name>'
+  - Close as won't do: 'bd close <id> --reason="<reason>"'
+  - View details: 'bd show <id>'
+
+**4. Check Status** - Answer questions about the project
+- Show blocked items: 'bd blocked'
+- Show agent workload: 'bd list --status=in_progress'
+- Show recent activity: 'bd list --limit=10'
+- Answer general questions about the backlog
+
+### Interaction Style
+- Always ask before taking actions that modify data
+- Show command output to the user so they can see what happened
+- After each action, ask "What would you like to do next?" or return to the main menu
+- Be concise but helpful
+- If the user asks something outside these actions, do your best to help using bd commands
+
+### Project Setup (if needed)
+
+If the user needs to set up a new project for loom:
+
+**Prerequisites**:
+- Git repository
+- Beads CLI installed: 'go install github.com/bounteous/beads/cmd/bd@latest'
+
+**Setup Steps**:
+1. Initialize beads: 'bd init' (creates .beads/ directory)
+2. Create worktrees directory: 'mkdir -p worktrees'
+3. Add worktrees for agents:
+   - 'git worktree add ./worktrees/falcon -b falcon'
+   - 'git worktree add ./worktrees/nova -b nova'
+   (Name them after fast things: falcon, nova, spark, etc.)
+4. Create initial tasks: 'bd create --title="..." --type=task --priority=2'
+
+**Directory Structure**:
+` + "```" + `
+project/
+├── .beads/           # Beads issue database
+├── worktrees/
+│   ├── falcon/       # Agent 1's workspace (branch: falcon)
+│   └── nova/         # Agent 2's workspace (branch: nova)
+└── src/              # Your code
+` + "```" + `
+
+### Loom CLI Reference
+
+Loom manages Claude agents across parallel git worktrees. Key concepts:
+
+**Worktrees**: Isolated git working directories (in ./worktrees/) where agents work independently.
+Each worktree has its own branch and can run one agent at a time.
+
+**Agent Workflow**:
+1. 'loom plan <worktree>' - Planning agent creates designs, marks [Need Review]
+2. Human reviews and approves plans (that's you in lead mode!)
+3. 'loom task <worktree>' - Implementation agent implements approved designs
+
+**Agent Commands**:
+- 'loom plan <name>' - Run planning agent (creates designs)
+- 'loom task <name>' - Run implementation agent (implements approved tasks)
+- 'loom list' - List all worktrees/agents
+- 'loom monitor' - Dashboard showing agent status and task progress
+
+**Git Operations**:
+- 'loom merge <worktree>' - Merge worktree branch to main (with AI conflict resolution)
+- 'loom merge --all' - Merge all worktrees
+- 'loom sync <worktree>' - Pull latest from main into worktree
+- 'loom sync --all' - Sync all worktrees
+- 'loom reset <worktree> --force' - Hard reset worktree to main
+
+**Typical Lead Tasks**:
+- Review plans, then kick off task agents: 'loom task falcon'
+- Check agent progress: 'loom monitor'
+- Merge completed work: 'loom merge falcon'
+- Sync worktrees before new work: 'loom sync --all'
+
+**Running Agents in Background** (outside this session):
+- 'loom plan <name> --auto' - Continuous planning: keeps picking up tasks needing designs
+- 'loom task <name> --auto' - Continuous implementation: keeps picking up approved tasks
+- These run in separate terminals and process multiple tasks automatically
+
+**Checking Agent Status**:
+- 'loom monitor' (or 'loom mon' / 'loom status') - Dashboard showing all agents
+- Status indicators:
+  - 'ready' - Agent available, no work in progress
+  - 'working: bd-123 (5m)' - Implementation agent on task for 5 minutes
+  - 'planning: bd-123 (5m)' - Planning agent on task
+  - 'review: bd-123' - Plan complete, awaiting your review
+  - 'done: bd-123' - Task completed
+  - 'idle (5m)' - Auto mode polling, no tasks available
+  - 'error: bd-123' - Agent crashed, task orphaned (needs attention!)
+- Sync status shows commits ahead/behind main branch (↑N ↓M)
+
+**Recovering Stuck Agents**:
+- If 'error' status: Agent crashed mid-task. Check the task with 'bd show <id>'
+  and either re-assign it or close it
+- If agent seems frozen: Check if process is running with 'loom monitor'
+- Force reset a worktree: 'loom reset <worktree> --force' (loses uncommitted work)
+
+**Discovering More**:
+- Use 'loom --help' to see all available commands
+- Use 'loom <command> --help' for detailed options (e.g., 'loom plan --help')
+
+### Important Notes
+- The beads CLI is 'bd' - all ticket management goes through it
+- Priority scale: P0 (critical) > P1 (high) > P2 (medium) > P3 (low) > P4 (backlog)
+- Task types: task, bug, feature, epic
+- Always run 'bd sync' after making changes to push to the remote
+`
 }

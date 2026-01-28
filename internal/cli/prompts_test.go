@@ -134,6 +134,83 @@ func TestGenerateConflictResolutionPrompt(t *testing.T) {
 	}
 }
 
+func TestGenerateLeadPrompt(t *testing.T) {
+	prompt := GenerateLeadPrompt()
+
+	// Check for key sections
+	wantParts := []string{
+		"INTERACTIVE MODE: Project Lead",
+		"On Startup",
+		"Available Actions",
+		"Review Plans",
+		"Create Tickets",
+		"Triage Backlog",
+		"Check Status",
+		"Interaction Style",
+		"Loom CLI Reference",
+		"Important Notes",
+	}
+
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("prompt missing expected part: %q", part)
+		}
+	}
+
+	// Check for loom commands documentation
+	loomCommands := []string{
+		"loom plan",
+		"loom task",
+		"loom monitor",
+		"loom merge",
+		"loom sync",
+		"loom reset",
+		"loom list",
+		"--auto",
+		"--help",
+	}
+
+	for _, cmd := range loomCommands {
+		if !strings.Contains(prompt, cmd) {
+			t.Errorf("prompt missing loom command: %q", cmd)
+		}
+	}
+
+	// Check for agent status indicators
+	statusIndicators := []string{
+		"ready",
+		"working:",
+		"planning:",
+		"review:",
+		"idle",
+		"error:",
+	}
+
+	for _, status := range statusIndicators {
+		if !strings.Contains(prompt, status) {
+			t.Errorf("prompt missing status indicator: %q", status)
+		}
+	}
+
+	// Check for beads commands
+	beadsCommands := []string{
+		"bd stats",
+		"bd list",
+		"bd show",
+		"bd create",
+		"bd update",
+		"bd close",
+		"bd sync",
+		"bd blocked",
+	}
+
+	for _, cmd := range beadsCommands {
+		if !strings.Contains(prompt, cmd) {
+			t.Errorf("prompt missing beads command: %q", cmd)
+		}
+	}
+}
+
 func TestPromptStructure(t *testing.T) {
 	t.Run("planning prompt has required sections", func(t *testing.T) {
 		prompt := GeneratePlanningPrompt("test")

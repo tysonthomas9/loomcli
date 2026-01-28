@@ -127,6 +127,18 @@ func runTask(cmd *cobra.Command, args []string) {
 	}
 
 	// SINGLE TASK MODE (original behavior)
+	// Check if there are tasks available for implementation
+	available, err := HasAvailableImplementationTasks()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
+		os.Exit(1)
+	}
+	if !available {
+		fmt.Println("No tasks available for implementation.")
+		fmt.Println("Tasks must be: open status, has design, not [Need Review], not epics")
+		return
+	}
+
 	fmt.Println("=========================================")
 	fmt.Printf("Running IMPLEMENTATION agent in: %s\n", worktreePath)
 	fmt.Printf("Agent name: %s\n", agentName)

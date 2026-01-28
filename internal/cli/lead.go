@@ -1,0 +1,54 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+var leadCmd = &cobra.Command{
+	Use:   "lead",
+	Short: "Interactive project management with Claude",
+	GroupID: "agents",
+	Long: `Launch an interactive Claude session for project management.
+
+Unlike 'plan' and 'task' (which are autonomous agents), 'lead' is a
+human-collaborative mode where Claude helps you:
+  - Review and approve/reject plans from planning agents
+  - Create new tickets (tasks, bugs, features, epics)
+  - Triage and prioritize the backlog
+  - Manage dependencies between tickets
+
+This command does not require a worktree - it can run from the main
+repository or any worktree.`,
+	Args: cobra.NoArgs,
+	Run:  runLead,
+}
+
+func init() {
+	rootCmd.AddCommand(leadCmd)
+}
+
+func runLead(cmd *cobra.Command, args []string) {
+	// Get current working directory
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("=========================================")
+	fmt.Println("Starting LEAD mode (Interactive)")
+	fmt.Println("=========================================")
+	fmt.Println()
+
+	// Generate the lead prompt
+	prompt := GenerateLeadPrompt()
+
+	// Invoke Claude interactively
+	if err := InvokeClaude(workDir, prompt); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
+		os.Exit(1)
+	}
+}

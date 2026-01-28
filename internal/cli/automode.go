@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -354,6 +355,16 @@ func IsTmuxAvailable() bool {
 
 // RunAutoModeTmux runs auto mode with tmux session management and live streaming
 func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
+	// Canonicalize worktree path to handle symlinks and relative paths
+	// This ensures consistent paths between parent and daemon processes
+	if absPath, err := filepath.Abs(opts.WorktreePath); err == nil {
+		if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+			opts.WorktreePath = resolved
+		} else {
+			opts.WorktreePath = absPath
+		}
+	}
+
 	// Include PID to prevent session name collisions
 	sessionName := fmt.Sprintf("loom-%s-%s-%d", opts.AgentType, opts.AgentName, os.Getpid())
 
@@ -380,6 +391,10 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	fmt.Println("Press Ctrl+C to stop")
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 	fmt.Println("")
+
+	// Disable terminal focus reporting to prevent ^[[I and ^[[O in output
+	fmt.Print("\x1b[?1004l")
+	defer fmt.Print("\x1b[?1004h") // Re-enable on exit
 
 	// Start non-blocking input listener
 	attachChan := make(chan struct{}, 1)
@@ -468,10 +483,21 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	// TERM=dumb disables alternate screen buffer, enabling output streaming via capture-pane
 	loomCmd := fmt.Sprintf("TERM=dumb loom %s %s --daemon-mode", opts.AgentType, opts.WorktreePath)
 
-	// Create detached session
-	if err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, loomCmd).Run(); err != nil {
+	// Create detached session with current terminal dimensions
+	args := []string{"new-session", "-d", "-s", sessionName}
+
+	// Get terminal size and pass to tmux so output uses full width
+	if width, height, err := getTerminalSize(); err == nil && width > 0 && height > 0 {
+		args = append(args, "-x", fmt.Sprintf("%d", width), "-y", fmt.Sprintf("%d", height))
+	}
+
+	args = append(args, loomCmd)
+	if err := exec.Command("tmux", args...).Run(); err != nil {
 		return fmt.Errorf("tmux new-session failed: %w", err)
 	}
+
+	// Disable tmux focus-events to prevent ^[[I and ^[[O in output
+	exec.Command("tmux", "set", "-t", sessionName, "focus-events", "off").Run()
 
 	// Setup logging (shell-quoted path for safety)
 	quotedPath := shellQuote(logFile)
@@ -486,8 +512,22 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 // Reads from the pipe-pane log file instead of capture-pane to avoid
 // visual artifacts from cursor positioning and UI redraws
 func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shutdown chan struct{}) {
+	// Canonicalize worktree path to handle symlinks and relative paths
+	// This ensures the signal file path matches where Claude creates it
+	if absPath, err := filepath.Abs(worktreePath); err == nil {
+		if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+			worktreePath = resolved
+		} else {
+			worktreePath = absPath
+		}
+	}
+
+	// Start from current file size to avoid replaying old content from previous sessions
 	var lastOffset int64 = 0
-	signalFile := filepath.Join(worktreePath, ".loom", "task-complete")
+	if info, err := os.Stat(logFile); err == nil {
+		lastOffset = info.Size()
+	}
+	signalFile := GetSignalFilePath(worktreePath)
 
 	// Use adaptive polling unless LOOM_FIXED_POLLING is set
 	var poller *adaptivePoller
@@ -542,9 +582,34 @@ func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shut
 		case <-getTickChan():
 			// HIGHEST PRIORITY: Check for explicit completion signal
 			if _, err := os.Stat(signalFile); err == nil {
-				fmt.Println("[auto] Task completion signal received")
+				fmt.Println("[auto] Task completion signal received, waiting for output to settle...")
 				os.Remove(signalFile) // Claim the signal
-				streamRemainingLogContent(logFile, &lastOffset)
+
+				// Wait for output silence (no new content for 10s) or max 30s
+				const silenceTimeout = 10 * time.Second
+				const maxWait = 30 * time.Second
+				lastActivity := time.Now()
+				deadline := time.Now().Add(maxWait)
+
+				for time.Now().Before(deadline) {
+					select {
+					case <-shutdown:
+						streamRemainingLogContent(logFile, &lastOffset)
+						cleanupTmuxSession(sessionName)
+						return
+					default:
+					}
+
+					prevOffset := lastOffset
+					streamRemainingLogContent(logFile, &lastOffset)
+					if lastOffset > prevOffset {
+						lastActivity = time.Now() // New output, reset silence timer
+					} else if time.Since(lastActivity) >= silenceTimeout {
+						break // No output for 3s, we're done
+					}
+					time.Sleep(200 * time.Millisecond)
+				}
+
 				cleanupTmuxSession(sessionName)
 				return
 			}
@@ -597,7 +662,8 @@ func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shut
 					newContent := make([]byte, stat.Size()-lastOffset)
 					n, _ := file.Read(newContent)
 					if n > 0 {
-						os.Stdout.Write(newContent[:n])
+						filtered := filterFocusEscapes(newContent[:n])
+						os.Stdout.Write(filtered)
 						lastOffset += int64(n)
 						if poller != nil {
 							poller.hadActivity()
@@ -611,7 +677,8 @@ func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shut
 					newContent := make([]byte, stat.Size())
 					n, _ := file.Read(newContent)
 					if n > 0 {
-						os.Stdout.Write(newContent[:n])
+						filtered := filterFocusEscapes(newContent[:n])
+						os.Stdout.Write(filtered)
 						lastOffset = int64(n)
 						if poller != nil {
 							poller.hadActivity()
@@ -655,7 +722,8 @@ func streamRemainingLogContent(logFile string, lastOffset *int64) {
 			fmt.Fprintf(os.Stderr, "[auto] Warning: failed to read final output: %v\n", err)
 		}
 		if n > 0 {
-			os.Stdout.Write(newContent[:n])
+			filtered := filterFocusEscapes(newContent[:n])
+			os.Stdout.Write(filtered)
 			*lastOffset += int64(n)
 		}
 	} else if stat.Size() < *lastOffset {
@@ -671,7 +739,8 @@ func streamRemainingLogContent(logFile string, lastOffset *int64) {
 			fmt.Fprintf(os.Stderr, "[auto] Warning: failed to read final output: %v\n", err)
 		}
 		if n > 0 {
-			os.Stdout.Write(newContent[:n])
+			filtered := filterFocusEscapes(newContent[:n])
+			os.Stdout.Write(filtered)
 			*lastOffset = int64(n)
 		}
 	}
@@ -784,6 +853,28 @@ func cleanupTmuxSession(name string) {
 // shellQuote safely quotes a string for use in shell commands
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// getTerminalSize returns the current terminal width and height
+func getTerminalSize() (width, height int, err error) {
+	cmd := exec.Command("stty", "size")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0, err
+	}
+	_, err = fmt.Sscanf(strings.TrimSpace(string(out)), "%d %d", &height, &width)
+	return width, height, err
+}
+
+// filterFocusEscapes removes terminal focus event escape sequences
+// These are sent by some terminals when focus is gained/lost:
+// - ESC [ I = focus gained
+// - ESC [ O = focus lost
+func filterFocusEscapes(data []byte) []byte {
+	result := bytes.ReplaceAll(data, []byte("\x1b[I"), nil)
+	result = bytes.ReplaceAll(result, []byte("\x1b[O"), nil)
+	return result
 }
 
 // printTmuxSummary prints the auto mode completion summary

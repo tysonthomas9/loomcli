@@ -180,3 +180,158 @@ func TestE2E_StartTmuxSession(t *testing.T) {
 		t.Error("Session should have exited")
 	}
 }
+
+func TestE2E_LogFileSkipsOldContent(t *testing.T) {
+	skipIfNoTmux(t)
+
+	tmpDir := t.TempDir()
+	logDir := filepath.Join(tmpDir, ".loom", "logs")
+	logFile := filepath.Join(logDir, "test-skip-old.log")
+
+	// Create log directory and pre-populate with "old" content
+	os.MkdirAll(logDir, 0755)
+	oldContent := "OLD_SESSION_LINE_1\nOLD_SESSION_LINE_2\nOLD_SESSION_LINE_3\n"
+	if err := os.WriteFile(logFile, []byte(oldContent), 0644); err != nil {
+		t.Fatalf("Failed to write old content: %v", err)
+	}
+
+	// Get the size of old content (this is where new streaming should start)
+	oldSize := int64(len(oldContent))
+
+	sessionName := uniqueSessionName(t)
+
+	// Create session that outputs new content
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName,
+		"sleep 0.5 && echo 'NEW_SESSION_MARKER' && sleep 1")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	defer cleanupTmuxSession(sessionName)
+
+	// Setup logging (appends to existing file)
+	quotedPath := shellQuote(logFile)
+	exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", "cat >> "+quotedPath).Run()
+
+	// Simulate the offset initialization from streamUntilExit
+	var lastOffset int64 = 0
+	if info, err := os.Stat(logFile); err == nil {
+		lastOffset = info.Size()
+	}
+
+	// Offset should start at end of old content
+	if lastOffset != oldSize {
+		t.Errorf("Initial offset = %d, want %d (should skip old content)", lastOffset, oldSize)
+	}
+
+	// Wait for new output
+	time.Sleep(2 * time.Second)
+
+	// Read only new content (from lastOffset)
+	content, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	newContent := string(content[lastOffset:])
+
+	// New content should contain the marker
+	if !strings.Contains(newContent, "NEW_SESSION_MARKER") {
+		t.Errorf("New content should contain 'NEW_SESSION_MARKER', got: %s", newContent)
+	}
+
+	// New content should NOT contain old session lines
+	if strings.Contains(newContent, "OLD_SESSION_LINE") {
+		t.Errorf("New content should NOT contain old session content, got: %s", newContent)
+	}
+}
+
+func TestE2E_SilenceDetectionAfterSignal(t *testing.T) {
+	skipIfNoTmux(t)
+
+	tmpDir := t.TempDir()
+	logDir := filepath.Join(tmpDir, ".loom", "logs")
+	logFile := filepath.Join(logDir, "test-silence.log")
+	signalFile := filepath.Join(tmpDir, ".loom", "task-complete")
+
+	// Create directories
+	os.MkdirAll(logDir, 0755)
+
+	sessionName := uniqueSessionName(t)
+
+	// Create session that outputs content, then signals completion, then outputs more
+	// The silence detection should capture all output after the signal
+	script := fmt.Sprintf(`
+		echo 'BEFORE_SIGNAL'
+		sleep 0.5
+		touch %s
+		echo 'AFTER_SIGNAL_1'
+		sleep 0.3
+		echo 'AFTER_SIGNAL_2'
+		sleep 5
+	`, signalFile)
+
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sh", "-c", script)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	defer cleanupTmuxSession(sessionName)
+
+	// Setup logging
+	quotedPath := shellQuote(logFile)
+	exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", "cat >> "+quotedPath).Run()
+
+	// Wait for signal file to be created
+	deadline := time.Now().Add(5 * time.Second)
+	signalReceived := false
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(signalFile); err == nil {
+			signalReceived = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !signalReceived {
+		t.Fatal("Signal file was never created")
+	}
+
+	// Remove signal file (as streamUntilExit would)
+	os.Remove(signalFile)
+
+	// Simulate silence detection loop (wait for 3s of silence or 10s max)
+	const silenceTimeout = 3 * time.Second
+	const maxWait = 10 * time.Second
+	lastActivity := time.Now()
+	loopDeadline := time.Now().Add(maxWait)
+	var lastOffset int64 = 0
+
+	for time.Now().Before(loopDeadline) {
+		prevOffset := lastOffset
+		streamRemainingLogContent(logFile, &lastOffset)
+		if lastOffset > prevOffset {
+			lastActivity = time.Now()
+		} else if time.Since(lastActivity) >= silenceTimeout {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// Read final content
+	content, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Should have captured content before AND after signal
+	if !strings.Contains(contentStr, "BEFORE_SIGNAL") {
+		t.Error("Should contain content before signal")
+	}
+	if !strings.Contains(contentStr, "AFTER_SIGNAL_1") {
+		t.Error("Should contain first output after signal")
+	}
+	if !strings.Contains(contentStr, "AFTER_SIGNAL_2") {
+		t.Error("Should contain second output after signal (silence detection should wait)")
+	}
+}

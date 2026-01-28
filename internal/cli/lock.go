@@ -21,13 +21,14 @@ const (
 
 // LockInfo holds information about a running agent
 type LockInfo struct {
-	PID       int       `json:"pid"`
-	Command   string    `json:"command"`
-	StartedAt time.Time `json:"started_at"`
-	AgentName string    `json:"agent_name"`
-	TaskID    string    `json:"task_id,omitempty"`
-	TaskTitle string    `json:"task_title,omitempty"`
-	State     string    `json:"state,omitempty"` // Execution state (active/idle) for auto mode
+	PID           int       `json:"pid"`
+	Command       string    `json:"command"`
+	StartedAt     time.Time `json:"started_at"`
+	AgentName     string    `json:"agent_name"`
+	TaskID        string    `json:"task_id,omitempty"`
+	TaskTitle     string    `json:"task_title,omitempty"`
+	TaskStartedAt time.Time `json:"task_started_at,omitempty"` // Per-task timing (reset when new task claimed)
+	State         string    `json:"state,omitempty"`           // Execution state (active/idle) for auto mode
 }
 
 // AcquireLock attempts to acquire an agent lock for the worktree
@@ -167,6 +168,7 @@ func UpdateLockTask(worktreePath, taskID, taskTitle string) error {
 	// Update task info
 	info.TaskID = taskID
 	info.TaskTitle = taskTitle
+	info.TaskStartedAt = time.Now() // Reset timer for this task
 
 	// Write back
 	data, err = json.MarshalIndent(info, "", "  ")
@@ -228,7 +230,13 @@ func GetLockStatus(worktreePath string) string {
 		return ""
 	}
 
-	duration := time.Since(info.StartedAt).Round(time.Second)
+	// Use per-task timing if available, otherwise session timing
+	var duration time.Duration
+	if !info.TaskStartedAt.IsZero() {
+		duration = time.Since(info.TaskStartedAt).Round(time.Second)
+	} else {
+		duration = time.Since(info.StartedAt).Round(time.Second)
+	}
 
 	// Check for idle state (auto mode waiting for tasks)
 	if info.State == StateIdle {
