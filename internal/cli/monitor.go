@@ -57,6 +57,7 @@ type MonitorData struct {
 	ReadyToImplement   []TaskInfo          // Ready tasks with design (top 5)
 	ReviewTasks        []TaskInfo          // top 5 need review tasks
 	InProgressTasks    []TaskInfo          // all in_progress tasks
+	BlockedTasks       []TaskInfo          // blocked tasks (top 20)
 	AgentTasks         map[string]TaskInfo // agent name -> current task (from assignee)
 	TaskConflicts      map[string][]string // TaskID -> agent names (if multiple agents claim same task)
 	SyncStatus         SyncInfo
@@ -65,46 +66,46 @@ type MonitorData struct {
 
 // AgentStatus represents a single agent/worktree status
 type AgentStatus struct {
-	Name   string
-	Branch string
-	Status string // "ready", "3 changes", "running (plan, 5m ago)"
-	Ahead  int    // commits ahead of integration branch
-	Behind int    // commits behind integration branch
+	Name   string `json:"name"`
+	Branch string `json:"branch"`
+	Status string `json:"status"` // "ready", "3 changes", "running (plan, 5m ago)"
+	Ahead  int    `json:"ahead"`  // commits ahead of integration branch
+	Behind int    `json:"behind"` // commits behind integration branch
 }
 
 // TaskInfo represents a task with basic info
 type TaskInfo struct {
-	ID       string
-	Title    string
-	Priority int
-	Status   string // "in_progress", "closed", "open"
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Priority int    `json:"priority"`
+	Status   string `json:"status"` // "in_progress", "closed", "open"
 }
 
 // TaskSummary holds task counts by category
 type TaskSummary struct {
-	NeedsPlanning    int // Ready tasks without design
-	ReadyToImplement int // Ready tasks with approved design
-	InProgress       int
-	NeedReview       int
-	Blocked          int
+	NeedsPlanning    int `json:"needs_planning"`     // Ready tasks without design
+	ReadyToImplement int `json:"ready_to_implement"` // Ready tasks with approved design
+	InProgress       int `json:"in_progress"`
+	NeedReview       int `json:"need_review"`
+	Blocked          int `json:"blocked"`
 }
 
 
 // SyncInfo holds sync status information
 type SyncInfo struct {
-	DBSynced     bool
-	DBLastSync   string
-	DBError      string
-	GitNeedsPush int
-	GitNeedsPull int
+	DBSynced     bool   `json:"db_synced"`
+	DBLastSync   string `json:"db_last_sync"`
+	DBError      string `json:"db_error,omitempty"`
+	GitNeedsPush int    `json:"git_needs_push"`
+	GitNeedsPull int    `json:"git_needs_pull"`
 }
 
 // MonitorStats holds overall statistics
 type MonitorStats struct {
-	Open       int
-	Closed     int
-	Total      int
-	Completion float64
+	Open       int     `json:"open"`
+	Closed     int     `json:"closed"`
+	Total      int     `json:"total"`
+	Completion float64 `json:"completion"`
 }
 
 // BdIssue represents an issue from bd list --json
@@ -152,11 +153,17 @@ func runMonitor(cmd *cobra.Command, args []string) {
 	}
 }
 
+// CollectMonitorData gathers all dashboard data.
+// Exported for use by the HTTP server.
+func CollectMonitorData() *MonitorData {
+	return collectMonitorData()
+}
+
 func collectMonitorData() *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
 	// Collect tasks FIRST to get agent-task mapping
-	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.AgentTasks = collectTaskStatus()
+	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BlockedTasks, data.AgentTasks = collectTaskStatus()
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
@@ -177,6 +184,13 @@ func collectMonitorData() *MonitorData {
 	data.Stats = collectStatistics()
 
 	return data
+}
+
+// CollectAgentStatusOnly returns just agent status without task context.
+// Exported for use by the HTTP server.
+func CollectAgentStatusOnly() []AgentStatus {
+	agents, _ := collectAgentStatus(nil)
+	return agents
 }
 
 func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[string][]string) {
@@ -284,7 +298,7 @@ func getWorktreeGitSyncStatus(path string) (ahead, behind int) {
 	return ahead, behind
 }
 
-func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
+func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
 	var summary TaskSummary
 	var needsPlanningTasks []TaskInfo
 	var readyToImplementTasks []TaskInfo
@@ -388,16 +402,29 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 		}
 	}
 
-	// Get blocked tasks count
+	// Get blocked tasks
+	var blockedTasks []TaskInfo
 	blockedOutput, err := runBdCommand("blocked", "--json")
 	if err == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(blockedOutput), &issues) == nil {
 			summary.Blocked = len(issues)
+			// Store up to 20 blocked tasks for display
+			for i, issue := range issues {
+				if i >= 20 {
+					break
+				}
+				blockedTasks = append(blockedTasks, TaskInfo{
+					ID:       issue.ID,
+					Title:    issue.Title,
+					Priority: issue.Priority,
+					Status:   issue.Status,
+				})
+			}
 		}
 	}
 
-	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, agentTasks
+	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, blockedTasks, agentTasks
 }
 
 func collectSyncStatus(agents []AgentStatus) SyncInfo {
