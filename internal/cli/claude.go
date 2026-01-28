@@ -19,6 +19,7 @@ var claudeInvoker = defaultClaudeInvoker
 func defaultClaudeInvoker(workDir, prompt string) error {
 	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt)
 	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -42,6 +43,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt string, shutdown <-chan 
 	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
 		"--dangerously-skip-permissions", prompt)
 	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
 
 	// Create a pipe and close write end to send EOF
 	r, w, err := os.Pipe()

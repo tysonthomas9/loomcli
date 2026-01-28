@@ -29,11 +29,22 @@ func init() {
 }
 
 func runComplete(cmd *cobra.Command, args []string) {
-	// Get worktree path (current directory)
-	worktreePath, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
-		os.Exit(1)
+	// Primary: Check env var (set by loom when invoking Claude)
+	worktreePath := os.Getenv("LOOM_WORKTREE_PATH")
+
+	if worktreePath == "" {
+		// Fallback: Find .loom.lock by traversing up
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting current directory: %v\n", err)
+			os.Exit(1)
+		}
+
+		worktreePath, err = findWorktreeRoot(cwd)
+		if err != nil {
+			// Final fallback: use cwd (legacy behavior)
+			worktreePath = cwd
+		}
 	}
 
 	// Canonicalize the path to match what automode uses
@@ -70,4 +81,23 @@ func GetSignalFilePath(worktreePath string) string {
 	signalDir := filepath.Join(os.TempDir(), "loom-signals")
 	hash := sha256.Sum256([]byte(worktreePath))
 	return filepath.Join(signalDir, hex.EncodeToString(hash[:8]))
+}
+
+// findWorktreeRoot traverses up from startPath looking for .loom.lock
+// Returns the directory containing .loom.lock, or an error if not found
+func findWorktreeRoot(startPath string) (string, error) {
+	dir := startPath
+	for {
+		lockPath := filepath.Join(dir, ".loom.lock")
+		if _, err := os.Stat(lockPath); err == nil {
+			return dir, nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached filesystem root without finding .loom.lock
+			return "", fmt.Errorf("no .loom.lock found")
+		}
+		dir = parent
+	}
 }

@@ -149,3 +149,80 @@ func TestSignalFileSurvivesGitClean(t *testing.T) {
 		t.Errorf("Signal file should be in temp dir: %s", signalFile)
 	}
 }
+
+func TestFindWorktreeRoot_WithLockFile(t *testing.T) {
+	// Create a directory structure: root/subdir1/subdir2
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "worktree-root")
+	subdir1 := filepath.Join(root, "subdir1")
+	subdir2 := filepath.Join(subdir1, "subdir2")
+	os.MkdirAll(subdir2, 0755)
+
+	// Create .loom.lock in the root
+	lockFile := filepath.Join(root, ".loom.lock")
+	if err := os.WriteFile(lockFile, []byte("{}"), 0644); err != nil {
+		t.Fatalf("Failed to create lock file: %v", err)
+	}
+
+	// findWorktreeRoot from subdir2 should find root
+	found, err := findWorktreeRoot(subdir2)
+	if err != nil {
+		t.Errorf("Expected to find worktree root, got error: %v", err)
+	}
+	if found != root {
+		t.Errorf("Expected %s, got %s", root, found)
+	}
+
+	// findWorktreeRoot from subdir1 should also find root
+	found, err = findWorktreeRoot(subdir1)
+	if err != nil {
+		t.Errorf("Expected to find worktree root, got error: %v", err)
+	}
+	if found != root {
+		t.Errorf("Expected %s, got %s", root, found)
+	}
+
+	// findWorktreeRoot from root should find root
+	found, err = findWorktreeRoot(root)
+	if err != nil {
+		t.Errorf("Expected to find worktree root, got error: %v", err)
+	}
+	if found != root {
+		t.Errorf("Expected %s, got %s", root, found)
+	}
+}
+
+func TestFindWorktreeRoot_NoLockFile(t *testing.T) {
+	// Create a directory structure without .loom.lock
+	tmpDir := t.TempDir()
+	subdir := filepath.Join(tmpDir, "no-lock", "subdir")
+	os.MkdirAll(subdir, 0755)
+
+	// findWorktreeRoot should return error
+	_, err := findWorktreeRoot(subdir)
+	if err == nil {
+		t.Error("Expected error when no .loom.lock found")
+	}
+}
+
+func TestFindWorktreeRoot_MultipleRoots(t *testing.T) {
+	// Create nested worktrees (inner .loom.lock should win)
+	tmpDir := t.TempDir()
+	outerRoot := filepath.Join(tmpDir, "outer")
+	innerRoot := filepath.Join(outerRoot, "nested", "inner")
+	subdir := filepath.Join(innerRoot, "src", "pkg")
+	os.MkdirAll(subdir, 0755)
+
+	// Create .loom.lock in both outer and inner
+	os.WriteFile(filepath.Join(outerRoot, ".loom.lock"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(innerRoot, ".loom.lock"), []byte("{}"), 0644)
+
+	// findWorktreeRoot from subdir should find inner (closest)
+	found, err := findWorktreeRoot(subdir)
+	if err != nil {
+		t.Errorf("Expected to find worktree root, got error: %v", err)
+	}
+	if found != innerRoot {
+		t.Errorf("Expected innerRoot %s, got %s", innerRoot, found)
+	}
+}
