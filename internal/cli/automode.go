@@ -760,6 +760,12 @@ func listenForAttachKey(attachChan chan struct{}, shutdown chan struct{}) {
 			if err != nil || n == 0 {
 				return
 			}
+			// Filter escape sequences (e.g., focus events ^[[I ^[[O)
+			if buf[0] == '\x1b' {
+				// Drain the rest of the escape sequence
+				os.Stdin.Read(make([]byte, 2))
+				continue
+			}
 			select {
 			case keyChan <- buf[0]:
 			default:
