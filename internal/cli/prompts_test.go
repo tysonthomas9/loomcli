@@ -16,7 +16,7 @@ func TestGeneratePlanningPrompt(t *testing.T) {
 			agentName: "falcon",
 			wantParts: []string{
 				"Your agent name is: falcon",
-				"--assignee falcon",
+				"--claim",
 				"Planning Task",
 				"Do NOT write any implementation code",
 				"[Need Review]",
@@ -27,7 +27,7 @@ func TestGeneratePlanningPrompt(t *testing.T) {
 			agentName: "nova",
 			wantParts: []string{
 				"Your agent name is: nova",
-				"--assignee nova",
+				"--claim",
 			},
 		},
 	}
@@ -56,7 +56,8 @@ func TestGenerateTaskPrompt(t *testing.T) {
 			agentName: "ember",
 			wantParts: []string{
 				"Your agent name is: ember",
-				"--assignee ember",
+				"--claim",                 // Main task claiming uses atomic --claim
+				"--assignee ember",        // Reclaiming stale tasks still uses --assignee
 				"Implementation Task",
 				"--design",
 				"git push origin HEAD",
@@ -68,6 +69,7 @@ func TestGenerateTaskPrompt(t *testing.T) {
 			agentName: "zephyr",
 			wantParts: []string{
 				"Your agent name is: zephyr",
+				"--claim",
 				"--assignee zephyr",
 			},
 		},

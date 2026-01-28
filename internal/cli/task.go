@@ -85,7 +85,7 @@ func runTask(cmd *cobra.Command, args []string) {
 
 		UpdateLockState(worktreePath, StateActive)
 		prompt := GenerateTaskPrompt(agentName)
-		InvokeClaude(worktreePath, prompt) // Interactive mode, nice output
+		InvokeClaude(worktreePath, prompt, agentName) // Interactive mode, nice output
 		// Note: No StateIdle here - daemon exits immediately, lock released by defer
 		return
 	}
@@ -147,7 +147,7 @@ func runTask(cmd *cobra.Command, args []string) {
 
 	// Generate and run the task prompt
 	prompt := GenerateTaskPrompt(agentName)
-	if err := InvokeClaude(worktreePath, prompt); err != nil {
+	if err := InvokeClaude(worktreePath, prompt, agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
 		os.Exit(1)
 	}

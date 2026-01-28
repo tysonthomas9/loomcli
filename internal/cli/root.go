@@ -58,6 +58,7 @@ COMMANDS
   task         Run an implementation agent (implements approved tasks)
   lead         Interactive mode for reviewing plans and managing backlog
   monitor      Dashboard showing agent status and task progress
+  recover      Recover agent from error state (clear stale locks, reset tasks)
   merge        Merge worktree branches with AI conflict resolution
   sync         Sync worktrees with integration branch
   reset        Hard reset worktrees to a specific branch

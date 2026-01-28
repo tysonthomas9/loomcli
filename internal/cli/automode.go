@@ -274,7 +274,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		fmt.Println("")
 
 		prompt := generatePrompt(opts.AgentName)
-		err = InvokeClaudeNonInteractive(opts.WorktreePath, prompt, shutdown)
+		err = InvokeClaudeNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown)
 
 		// Return to idle state after Claude finishes
 		if updateErr := UpdateLockState(opts.WorktreePath, StateIdle); updateErr != nil {

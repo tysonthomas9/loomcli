@@ -203,17 +203,19 @@ func TestClaudeInvokerMocking(t *testing.T) {
 	// Track if Claude was invoked
 	invoked := false
 	capturedPrompt := ""
+	capturedAgentName := ""
 
 	origInvoker := claudeInvoker
-	claudeInvoker = func(workDir, prompt string) error {
+	claudeInvoker = func(workDir, prompt, agentName string) error {
 		invoked = true
 		capturedPrompt = prompt
+		capturedAgentName = agentName
 		return nil
 	}
 	t.Cleanup(func() { claudeInvoker = origInvoker })
 
 	// Call InvokeClaude
-	err := InvokeClaude("/tmp/test", "test prompt")
+	err := InvokeClaude("/tmp/test", "test prompt", "test-agent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -223,6 +225,9 @@ func TestClaudeInvokerMocking(t *testing.T) {
 	}
 	if capturedPrompt != "test prompt" {
 		t.Errorf("expected prompt 'test prompt', got %q", capturedPrompt)
+	}
+	if capturedAgentName != "test-agent" {
+		t.Errorf("expected agentName 'test-agent', got %q", capturedAgentName)
 	}
 }
 

@@ -12,7 +12,7 @@ func GeneratePlanningPrompt(agentName string) string {
 You are a disciplined software architect. Your job is to CREATE PLANS, not implement them.
 Follow this workflow EXACTLY for ONE task.
 
-**Your agent name is: %s** - Use this as assignee when claiming tasks.
+**Your agent name is: %s** (BD_ACTOR is set automatically)
 
 ### Step 1: Select ONE Task for Planning
 - Run this command to see available tasks (excludes [Need Review] awaiting human approval):
@@ -21,7 +21,8 @@ Follow this workflow EXACTLY for ONE task.
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is NOT an epic
 - Run 'bd show <id>' to understand the task requirements
-- Run 'bd update <id> --status in_progress --assignee %s' to claim it
+- Run 'bd update <id> --claim' to claim it (atomic - prevents race conditions)
+- If claim fails with 'already claimed by X', pick the next highest priority task
 - Run 'loom claim <id>' to register the task with the agent monitor
 - REMEMBER this task ID and ORIGINAL TITLE
 - If NO tasks are available for planning (all have designs or are [Need Review]):
@@ -110,7 +111,7 @@ You have completed ONE planning task. The human will:
 3. Run an implementation agent separately
 
 Your job was ONLY to create the plan. Implementation happens later.
-`, agentName, agentName)
+`, agentName)
 }
 
 // GenerateTaskPrompt creates the prompt for the implementation agent
@@ -119,7 +120,7 @@ func GenerateTaskPrompt(agentName string) string {
 
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
 
-**Your agent name is: %s** - Use this as assignee when claiming tasks.
+**Your agent name is: %s** (BD_ACTOR is set automatically)
 
 ### Step 1: Select ONE Task
 - Run 'bd ready --limit 10' to see available tasks (sorted by priority, only unblocked tasks shown)
@@ -134,7 +135,8 @@ You are a disciplined software engineer. Follow this workflow EXACTLY for ONE ta
   2. Run: loom complete
   3. EXIT immediately
 - Follow the pre-approved plan in the --design field
-- Run 'bd update <id> --status in_progress --assignee %s' to claim it
+- Run 'bd update <id> --claim' to claim it (atomic - prevents race conditions)
+- If claim fails with 'already claimed by X', pick the next highest priority task
 - Run 'loom claim <id>' to register the task with the agent monitor
 - REMEMBER this task ID - you will work ONLY on this task
 
@@ -221,7 +223,7 @@ After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
 - Simply EXIT
 
 You have completed ONE task through the full workflow. The human will run you again for the next task.
-`, agentName, agentName, agentName)
+`, agentName, agentName)
 }
 
 // GenerateConflictResolutionPrompt creates the prompt for merge conflict resolution
@@ -430,8 +432,9 @@ Each worktree has its own branch and can run one agent at a time.
 - Sync status shows commits ahead/behind main branch (↑N ↓M)
 
 **Recovering Stuck Agents**:
-- If 'error' status: Agent crashed mid-task. Check the task with 'bd show <id>'
-  and either re-assign it or close it
+- If 'error' status: Run 'loom recover <worktree>' to clear the error state
+  - This clears the stale lock and resets any orphaned tasks to open
+  - Example: 'loom recover ember' when monitor shows 'error: bd-123'
 - If agent seems frozen: Check if process is running with 'loom monitor'
 - Force reset a worktree: 'loom reset <worktree> --force' (loses uncommitted work)
 

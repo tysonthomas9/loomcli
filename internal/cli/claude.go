@@ -16,10 +16,14 @@ var debugStreamParsing = os.Getenv("LOOM_DEBUG_STREAM") != ""
 var claudeInvoker = defaultClaudeInvoker
 
 // defaultClaudeInvoker is the real Claude invocation
-func defaultClaudeInvoker(workDir, prompt string) error {
+func defaultClaudeInvoker(workDir, prompt, agentName string) error {
 	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt)
 	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	if agentName != "" {
+		env = append(env, "BD_ACTOR="+agentName)
+	}
+	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -31,19 +35,24 @@ func defaultClaudeInvoker(workDir, prompt string) error {
 }
 
 // InvokeClaude runs Claude with the given prompt using --dangerously-skip-permissions
-func InvokeClaude(workDir, prompt string) error {
-	return claudeInvoker(workDir, prompt)
+// agentName is used to set BD_ACTOR for atomic task claiming (pass "" if not claiming tasks)
+func InvokeClaude(workDir, prompt, agentName string) error {
+	return claudeInvoker(workDir, prompt, agentName)
 }
 
 // claudeNonInteractiveInvoker is the function used for non-interactive Claude invocation (mockable for tests)
-var claudeNonInteractiveInvoker func(workDir, prompt string, shutdown <-chan struct{}) error = defaultClaudeNonInteractiveInvoker
+var claudeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}) error = defaultClaudeNonInteractiveInvoker
 
 // defaultClaudeNonInteractiveInvoker is the real non-interactive Claude invocation
-func defaultClaudeNonInteractiveInvoker(workDir, prompt string, shutdown <-chan struct{}) error {
+func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
 		"--dangerously-skip-permissions", prompt)
 	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	if agentName != "" {
+		env = append(env, "BD_ACTOR="+agentName)
+	}
+	cmd.Env = env
 
 	// Create a pipe and close write end to send EOF
 	r, w, err := os.Pipe()
@@ -159,12 +168,13 @@ func displayStreamEvent(line string) {
 // InvokeClaudeNonInteractive runs Claude in non-interactive mode (for auto mode)
 // Claude will process the prompt and exit, rather than waiting for more input
 // The shutdown channel allows the caller to signal that the process should be terminated
-func InvokeClaudeNonInteractive(workDir, prompt string, shutdown <-chan struct{}) error {
-	return claudeNonInteractiveInvoker(workDir, prompt, shutdown)
+// agentName is used to set BD_ACTOR for atomic task claiming
+func InvokeClaudeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
 }
 
 // InvokeClaudeForConflicts runs Claude to resolve merge conflicts
 func InvokeClaudeForConflicts(workDir, sourceBranch, targetBranch string, conflicts []string) error {
 	prompt := GenerateConflictResolutionPrompt(sourceBranch, targetBranch, conflicts)
-	return InvokeClaude(workDir, prompt)
+	return InvokeClaude(workDir, prompt, "") // No agent name for conflict resolution
 }

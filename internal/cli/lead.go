@@ -46,8 +46,8 @@ func runLead(cmd *cobra.Command, args []string) {
 	// Generate the lead prompt
 	prompt := GenerateLeadPrompt()
 
-	// Invoke Claude interactively
-	if err := InvokeClaude(workDir, prompt); err != nil {
+	// Invoke Claude interactively (no agent name needed - lead mode doesn't claim tasks)
+	if err := InvokeClaude(workDir, prompt, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
 		os.Exit(1)
 	}
