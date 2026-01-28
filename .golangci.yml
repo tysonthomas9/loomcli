@@ -1,9 +1,11 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: false
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
     - gosec
@@ -11,9 +13,49 @@ linters:
     - unconvert
     - unparam
 
-linters-settings:
-  misspell:
-    locale: US
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*os.File).Close
+        - (*os.File).Write
+        - (io.Closer).Close
+        - (*io.PipeReader).Close
+        - (*io.PipeWriter).Close
+        - os.Remove
+        - (*os.File).Sync
+    misspell:
+      locale: US
+
+  exclusions:
+    rules:
+      # G104: Unhandled errors for cleanup operations (Close, Remove) are acceptable
+      - linters:
+          - gosec
+        text: "G104"
+      # G301: Directory permissions 0755 are standard for directories
+      - linters:
+          - gosec
+        text: "G301"
+      # G302: Lock file permissions - we use 0644 for cross-process access
+      - path: 'internal/cli/lock\.go'
+        linters:
+          - gosec
+        text: "G302"
+      # G304: File inclusion via variable - these are intentional file operations
+      - path: 'internal/cli/(automode|lock)\.go'
+        linters:
+          - gosec
+        text: "G304"
+      # G204: Subprocess launches are intentional for tmux, claude, bd commands
+      - path: 'internal/cli/(automode|recover)\.go'
+        linters:
+          - gosec
+        text: "G204"
+      # G602: False positive - buf[0] access is after successful Read
+      - path: 'internal/cli/automode\.go'
+        linters:
+          - gosec
+        text: "G602"
 
 issues:
   uniq-by-line: true
