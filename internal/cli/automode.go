@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,46 @@ type AutoModeState struct {
 	IdleStartTime     time.Time
 	ShouldExit        bool
 	ExitReason        string
+}
+
+// useFixedPolling allows reverting to fixed 200ms polling via environment variable
+var useFixedPolling = os.Getenv("LOOM_FIXED_POLLING") != ""
+
+// adaptivePoller implements exponential backoff for polling intervals
+type adaptivePoller struct {
+	minInterval     time.Duration
+	maxInterval     time.Duration
+	currentInterval time.Duration
+	backoffFactor   float64
+}
+
+// newAdaptivePoller creates a poller with sensible defaults
+func newAdaptivePoller() *adaptivePoller {
+	return &adaptivePoller{
+		minInterval:     100 * time.Millisecond,  // Fast when active
+		maxInterval:     1000 * time.Millisecond, // Slow when idle
+		currentInterval: 200 * time.Millisecond,  // Start at legacy value
+		backoffFactor:   1.5,
+	}
+}
+
+// tick returns a channel that fires after the current interval
+func (p *adaptivePoller) tick() <-chan time.Time {
+	return time.After(p.currentInterval)
+}
+
+// hadActivity resets to fast polling
+func (p *adaptivePoller) hadActivity() {
+	p.currentInterval = p.minInterval
+}
+
+// hadNoActivity increases the polling interval (exponential backoff)
+func (p *adaptivePoller) hadNoActivity() {
+	newInterval := time.Duration(float64(p.currentInterval) * p.backoffFactor)
+	if newInterval > p.maxInterval {
+		newInterval = p.maxInterval
+	}
+	p.currentInterval = newInterval
 }
 
 // SetupSignalHandler sets up graceful shutdown on SIGINT/SIGTERM
@@ -321,6 +362,14 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	os.MkdirAll(logDir, 0755)
 	logFile := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", opts.AgentType, opts.AgentName))
 
+	// Choose task checker based on agent type
+	var hasAvailableTasks func() (bool, error)
+	if opts.AgentType == "plan" {
+		hasAvailableTasks = HasAvailablePlanningTasks
+	} else {
+		hasAvailableTasks = HasAvailableImplementationTasks
+	}
+
 	// Print header
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 	fmt.Printf("Running %s agent in AUTO MODE (tmux)\n", strings.ToUpper(opts.AgentType))
@@ -337,6 +386,7 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	go listenForAttachKey(attachChan, shutdown)
 
 	taskCount := 0
+	idleStart := time.Now()
 	for {
 		select {
 		case <-shutdown:
@@ -354,6 +404,33 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 			return
 		}
 
+		// Check for available tasks before spawning session
+		available, err := hasAvailableTasks()
+		if err != nil {
+			fmt.Printf("[auto] Error checking tasks: %v\n", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		if !available {
+			// Check idle timeout
+			if opts.IdleTimeout > 0 && time.Since(idleStart) >= time.Duration(opts.IdleTimeout)*time.Minute {
+				fmt.Printf("[auto] Idle timeout exceeded (%d minutes)\n", opts.IdleTimeout)
+				cleanupTmuxSession(sessionName)
+				printTmuxSummary(taskCount)
+				return
+			}
+			fmt.Printf("[auto] No tasks available, waiting %ds...\n", opts.Interval)
+			if interruptibleSleep(time.Duration(opts.Interval)*time.Second, shutdown) {
+				cleanupTmuxSession(sessionName)
+				printTmuxSummary(taskCount)
+				return
+			}
+			continue
+		}
+
+		// Reset idle timer when tasks are available
+		idleStart = time.Now()
+
 		taskCount++
 		fmt.Printf("═══════════════════════════════════════════════════════════════\n")
 		fmt.Printf("[Session #%d] Starting...\n", taskCount)
@@ -367,7 +444,7 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		}
 
 		// Stream output and wait for session to exit
-		streamUntilExit(sessionName, attachChan, shutdown)
+		streamUntilExit(sessionName, logFile, opts.WorktreePath, attachChan, shutdown)
 
 		select {
 		case <-shutdown:
@@ -384,11 +461,12 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 
 // startTmuxSession creates a detached tmux session running loom --daemon-mode
 func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) error {
-	// Kill any existing session with this name
-	exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	// Kill any existing session with this name (error expected if session doesn't exist)
+	_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run()
 
 	// Build the loom command to run inside tmux
-	loomCmd := fmt.Sprintf("loom %s %s --daemon-mode", opts.AgentType, opts.WorktreePath)
+	// TERM=dumb disables alternate screen buffer, enabling output streaming via capture-pane
+	loomCmd := fmt.Sprintf("TERM=dumb loom %s %s --daemon-mode", opts.AgentType, opts.WorktreePath)
 
 	// Create detached session
 	if err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, loomCmd).Run(); err != nil {
@@ -397,17 +475,37 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 
 	// Setup logging (shell-quoted path for safety)
 	quotedPath := shellQuote(logFile)
-	exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", "cat >> "+quotedPath).Run()
+	if err := exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", "cat >> "+quotedPath).Run(); err != nil {
+		fmt.Printf("[auto] Warning: logging setup failed: %v\n", err)
+	}
 
 	return nil
 }
 
 // streamUntilExit streams tmux output until the session exits naturally
-func streamUntilExit(sessionName string, attachChan, shutdown chan struct{}) {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
+// Reads from the pipe-pane log file instead of capture-pane to avoid
+// visual artifacts from cursor positioning and UI redraws
+func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shutdown chan struct{}) {
+	var lastOffset int64 = 0
+	signalFile := filepath.Join(worktreePath, ".loom", "task-complete")
 
-	lastLineCount := 0
+	// Use adaptive polling unless LOOM_FIXED_POLLING is set
+	var poller *adaptivePoller
+	var ticker *time.Ticker
+	if useFixedPolling {
+		ticker = time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+	} else {
+		poller = newAdaptivePoller()
+	}
+
+	// getTickChan returns the appropriate tick channel based on polling mode
+	getTickChan := func() <-chan time.Time {
+		if useFixedPolling {
+			return ticker.C
+		}
+		return poller.tick()
+	}
 
 	for {
 		select {
@@ -436,33 +534,145 @@ func streamUntilExit(sessionName string, attachChan, shutdown chan struct{}) {
 			fmt.Println("─── DETACHED, resuming stream ───")
 			fmt.Println("")
 
-		case <-ticker.C:
+			// Reset to fast polling after detach
+			if poller != nil {
+				poller.hadActivity()
+			}
+
+		case <-getTickChan():
+			// HIGHEST PRIORITY: Check for explicit completion signal
+			if _, err := os.Stat(signalFile); err == nil {
+				fmt.Println("[auto] Task completion signal received")
+				os.Remove(signalFile) // Claim the signal
+				streamRemainingLogContent(logFile, &lastOffset)
+				cleanupTmuxSession(sessionName)
+				return
+			}
+
 			// PRIMARY completion check: session exited
 			if !tmuxSessionExists(sessionName) {
+				// Read any remaining output from log file before returning
+				streamRemainingLogContent(logFile, &lastOffset)
 				return
 			}
 
 			// SECONDARY completion check: command inside session exited (zombie state)
 			// This happens when tmux keeps the session alive after the command exits
-			if tmuxPaneDead(sessionName) {
+			if state, err := getPaneState(sessionName); err == nil && state.Dead {
+				if state.ExitStatus != 0 {
+					fmt.Printf("[auto] Session exited with status %d", state.ExitStatus)
+					if state.ExitSignal != "" {
+						fmt.Printf(" (signal: %s)", state.ExitSignal)
+					}
+					fmt.Println()
+				}
+				// Read any remaining output before cleanup
+				streamRemainingLogContent(logFile, &lastOffset)
 				cleanupTmuxSession(sessionName)
 				return
 			}
 
-			// Stream new output (use -S - to capture full scrollback history, not just visible pane)
-			out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-").Output()
+			// Stream new output from log file (not capture-pane)
+			// pipe-pane captures raw byte stream without cursor positioning artifacts
+			file, err := os.Open(logFile)
 			if err != nil {
+				if poller != nil {
+					poller.hadNoActivity()
+				}
 				continue
 			}
 
-			lines := strings.Split(string(out), "\n")
-			for i := lastLineCount; i < len(lines); i++ {
-				line := strings.TrimRight(lines[i], " \t")
-				if line != "" {
-					fmt.Println(line)
+			stat, err := file.Stat()
+			if err != nil {
+				file.Close()
+				if poller != nil {
+					poller.hadNoActivity()
+				}
+				continue
+			}
+
+			if stat.Size() > lastOffset {
+				// New content available
+				if _, err := file.Seek(lastOffset, 0); err == nil {
+					newContent := make([]byte, stat.Size()-lastOffset)
+					n, _ := file.Read(newContent)
+					if n > 0 {
+						os.Stdout.Write(newContent[:n])
+						lastOffset += int64(n)
+						if poller != nil {
+							poller.hadActivity()
+						}
+					}
+				}
+			} else if stat.Size() < lastOffset {
+				// Log file was truncated/rotated - reset and read from beginning
+				lastOffset = 0
+				if _, err := file.Seek(0, 0); err == nil {
+					newContent := make([]byte, stat.Size())
+					n, _ := file.Read(newContent)
+					if n > 0 {
+						os.Stdout.Write(newContent[:n])
+						lastOffset = int64(n)
+						if poller != nil {
+							poller.hadActivity()
+						}
+					}
+				}
+			} else {
+				// No new output - back off
+				if poller != nil {
+					poller.hadNoActivity()
 				}
 			}
-			lastLineCount = len(lines)
+			file.Close()
+		}
+	}
+}
+
+// streamRemainingLogContent reads and outputs any remaining content from the log file
+func streamRemainingLogContent(logFile string, lastOffset *int64) {
+	file, err := os.Open(logFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[auto] Warning: failed to read final output: %v\n", err)
+		return
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[auto] Warning: failed to stat log file: %v\n", err)
+		return
+	}
+
+	if stat.Size() > *lastOffset {
+		if _, err := file.Seek(*lastOffset, 0); err != nil {
+			fmt.Fprintf(os.Stderr, "[auto] Warning: failed to seek log file: %v\n", err)
+			return
+		}
+		newContent := make([]byte, stat.Size()-*lastOffset)
+		n, err := file.Read(newContent)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[auto] Warning: failed to read final output: %v\n", err)
+		}
+		if n > 0 {
+			os.Stdout.Write(newContent[:n])
+			*lastOffset += int64(n)
+		}
+	} else if stat.Size() < *lastOffset {
+		// Log was truncated - read from beginning
+		*lastOffset = 0
+		if _, err := file.Seek(0, 0); err != nil {
+			fmt.Fprintf(os.Stderr, "[auto] Warning: failed to seek log file: %v\n", err)
+			return
+		}
+		newContent := make([]byte, stat.Size())
+		n, err := file.Read(newContent)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[auto] Warning: failed to read final output: %v\n", err)
+		}
+		if n > 0 {
+			os.Stdout.Write(newContent[:n])
+			*lastOffset = int64(n)
 		}
 	}
 }
@@ -509,19 +719,66 @@ func tmuxSessionExists(name string) bool {
 	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
 }
 
+// PaneState holds detailed information about a tmux pane
+type PaneState struct {
+	Dead       bool
+	ExitStatus int
+	ExitSignal string
+	PID        int
+}
+
+// getPaneState returns detailed state information about the session's pane
+func getPaneState(sessionName string) (*PaneState, error) {
+	format := "#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_pid}"
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", format).Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pane state: %w", err)
+	}
+
+	parts := strings.Split(strings.TrimSpace(string(out)), "|")
+	if len(parts) != 4 {
+		return nil, fmt.Errorf("unexpected format: %s", string(out))
+	}
+
+	state := &PaneState{
+		Dead: parts[0] == "1",
+	}
+
+	if state.Dead {
+		state.ExitStatus, _ = strconv.Atoi(parts[1])
+		state.ExitSignal = parts[2]
+	}
+
+	state.PID, _ = strconv.Atoi(parts[3])
+	return state, nil
+}
+
 // tmuxPaneDead checks if the pane's command has exited (but session may still exist)
 // This happens when tmux keeps the session alive after the command exits (remain-on-exit)
 func tmuxPaneDead(sessionName string) bool {
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_dead}").Output()
+	state, err := getPaneState(sessionName)
 	if err != nil {
 		return true // Assume dead if we can't check
 	}
-	return strings.TrimSpace(string(out)) == "1"
+	return state.Dead
 }
 
-// cleanupTmuxSession kills a tmux session if it exists
+// cleanupTmuxSession gracefully stops and kills a tmux session
+// Sends Ctrl+C first to allow Claude to handle interrupt gracefully,
+// then kills the session after a brief grace period.
+// Errors are ignored since session may already be dead.
 func cleanupTmuxSession(name string) {
-	exec.Command("tmux", "kill-session", "-t", name).Run()
+	// Skip if session already gone (saves 100ms)
+	if !tmuxSessionExists(name) {
+		return
+	}
+
+	// Send Ctrl+C for graceful shutdown (allows Claude to save state)
+	_ = exec.Command("tmux", "send-keys", "-t", name, "C-c").Run()
+	time.Sleep(100 * time.Millisecond)
+
+	// Kill session
+	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
 }
 
 // shellQuote safely quotes a string for use in shell commands

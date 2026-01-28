@@ -2,6 +2,10 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -421,6 +425,56 @@ func TestCleanupTmuxSession(t *testing.T) {
 	cleanupTmuxSession("nonexistent-test-session-cleanup-12345")
 }
 
+// waitForFile waits for a file to exist within timeout
+func waitForFile(path string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
+func TestCleanupTmuxSession_SendsCtrlC(t *testing.T) {
+	// Skip if tmux is not available
+	if exec.Command("tmux", "-V").Run() != nil {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := fmt.Sprintf("loom-test-ctrlc-%d", os.Getpid())
+	signalFile := filepath.Join(t.TempDir(), "received-sigint")
+
+	// Create a script that writes to a file when it receives SIGINT
+	// The script traps SIGINT and writes before exiting
+	trapScript := fmt.Sprintf(`trap 'echo received > %s; exit 0' INT; sleep 30`, signalFile)
+
+	// Create tmux session running the trap script
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sh", "-c", trapScript).Run()
+	if err != nil {
+		t.Fatalf("Failed to create tmux session: %v", err)
+	}
+
+	// Give the script time to set up the trap
+	time.Sleep(100 * time.Millisecond)
+
+	// Call cleanupTmuxSession - should send Ctrl+C then kill
+	cleanupTmuxSession(sessionName)
+
+	// Wait for signal file with timeout (more robust than fixed sleep)
+	if !waitForFile(signalFile, 1*time.Second) {
+		t.Fatal("Timeout waiting for SIGINT signal file - Ctrl+C was not sent before kill")
+	}
+
+	// Verify session is actually gone
+	if exec.Command("tmux", "has-session", "-t", sessionName).Run() == nil {
+		t.Error("Session still exists after cleanup")
+		// Clean up manually
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	}
+}
+
 func TestRunAutoModeTmux_MaxTasksZero(t *testing.T) {
 	// Test early exit when shutdown is signaled immediately
 	shutdown := make(chan struct{})
@@ -447,6 +501,265 @@ func TestRunAutoModeTmux_MaxTasksZero(t *testing.T) {
 		// Good - exited promptly
 	case <-time.After(2 * time.Second):
 		t.Error("RunAutoModeTmux did not exit after shutdown signal")
+	}
+}
+
+func TestAdaptivePoller_Creation(t *testing.T) {
+	p := newAdaptivePoller()
+
+	if p.minInterval != 100*time.Millisecond {
+		t.Errorf("minInterval = %v, want 100ms", p.minInterval)
+	}
+	if p.maxInterval != 1000*time.Millisecond {
+		t.Errorf("maxInterval = %v, want 1000ms", p.maxInterval)
+	}
+	if p.currentInterval != 200*time.Millisecond {
+		t.Errorf("currentInterval = %v, want 200ms", p.currentInterval)
+	}
+	if p.backoffFactor != 1.5 {
+		t.Errorf("backoffFactor = %v, want 1.5", p.backoffFactor)
+	}
+}
+
+func TestAdaptivePoller_BackoffBehavior(t *testing.T) {
+	p := newAdaptivePoller()
+
+	// Start at 200ms
+	if p.currentInterval != 200*time.Millisecond {
+		t.Fatalf("initial interval = %v, want 200ms", p.currentInterval)
+	}
+
+	// First backoff: 200ms * 1.5 = 300ms
+	p.hadNoActivity()
+	if p.currentInterval != 300*time.Millisecond {
+		t.Errorf("after 1st backoff = %v, want 300ms", p.currentInterval)
+	}
+
+	// Second backoff: 300ms * 1.5 = 450ms
+	p.hadNoActivity()
+	if p.currentInterval != 450*time.Millisecond {
+		t.Errorf("after 2nd backoff = %v, want 450ms", p.currentInterval)
+	}
+
+	// Third backoff: 450ms * 1.5 = 675ms
+	p.hadNoActivity()
+	if p.currentInterval != 675*time.Millisecond {
+		t.Errorf("after 3rd backoff = %v, want 675ms", p.currentInterval)
+	}
+
+	// Fourth backoff: 675ms * 1.5 = 1012.5ms -> capped at 1000ms
+	p.hadNoActivity()
+	if p.currentInterval != 1000*time.Millisecond {
+		t.Errorf("after 4th backoff = %v, want 1000ms (capped)", p.currentInterval)
+	}
+
+	// Further backoffs should stay at max
+	p.hadNoActivity()
+	if p.currentInterval != 1000*time.Millisecond {
+		t.Errorf("after 5th backoff = %v, want 1000ms (capped)", p.currentInterval)
+	}
+}
+
+func TestAdaptivePoller_ResetOnActivity(t *testing.T) {
+	p := newAdaptivePoller()
+
+	// Back off a few times
+	p.hadNoActivity()
+	p.hadNoActivity()
+	p.hadNoActivity()
+
+	if p.currentInterval == p.minInterval {
+		t.Fatal("interval should have increased after backoff")
+	}
+
+	// Activity should reset to min
+	p.hadActivity()
+	if p.currentInterval != 100*time.Millisecond {
+		t.Errorf("after activity = %v, want 100ms (min)", p.currentInterval)
+	}
+}
+
+func TestAdaptivePoller_Tick(t *testing.T) {
+	p := newAdaptivePoller()
+	p.currentInterval = 10 * time.Millisecond // Short for test
+
+	start := time.Now()
+	<-p.tick()
+	elapsed := time.Since(start)
+
+	if elapsed < 10*time.Millisecond || elapsed > 50*time.Millisecond {
+		t.Errorf("tick elapsed = %v, want ~10ms", elapsed)
+	}
+}
+
+func TestGetPaneState_NonExistentSession(t *testing.T) {
+	_, err := getPaneState("nonexistent-test-session-12345")
+	if err == nil {
+		t.Error("expected error for non-existent session")
+	}
+}
+
+func TestPaneState_Fields(t *testing.T) {
+	// Test that PaneState struct has expected fields
+	state := &PaneState{
+		Dead:       true,
+		ExitStatus: 1,
+		ExitSignal: "SIGTERM",
+		PID:        12345,
+	}
+
+	if !state.Dead {
+		t.Error("Dead should be true")
+	}
+	if state.ExitStatus != 1 {
+		t.Errorf("ExitStatus = %d, want 1", state.ExitStatus)
+	}
+	if state.ExitSignal != "SIGTERM" {
+		t.Errorf("ExitSignal = %s, want SIGTERM", state.ExitSignal)
+	}
+	if state.PID != 12345 {
+		t.Errorf("PID = %d, want 12345", state.PID)
+	}
+}
+
+func TestStreamRemainingLogContent_ReadsNewContent(t *testing.T) {
+	// Create temp log file with content
+	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Write initial content
+	content := "line 1\nline 2\nline 3\n"
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("failed to write content: %v", err)
+	}
+	tmpFile.Close()
+
+	// Test reading from offset 0
+	var offset int64 = 0
+	streamRemainingLogContent(tmpFile.Name(), &offset)
+
+	if offset != int64(len(content)) {
+		t.Errorf("offset = %d, want %d", offset, len(content))
+	}
+}
+
+func TestStreamRemainingLogContent_SkipsAlreadyReadContent(t *testing.T) {
+	// Create temp log file with content
+	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := "line 1\nline 2\n"
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("failed to write content: %v", err)
+	}
+	tmpFile.Close()
+
+	// Start with offset at end of file - should not read anything new
+	var offset int64 = int64(len(content))
+	streamRemainingLogContent(tmpFile.Name(), &offset)
+
+	// Offset should remain unchanged
+	if offset != int64(len(content)) {
+		t.Errorf("offset changed unexpectedly: got %d, want %d", offset, len(content))
+	}
+}
+
+func TestStreamRemainingLogContent_HandlesNonExistentFile(t *testing.T) {
+	// Should not panic for non-existent file
+	var offset int64 = 0
+	streamRemainingLogContent("/nonexistent/path/to/file.log", &offset)
+
+	// Offset should remain 0
+	if offset != 0 {
+		t.Errorf("offset = %d, want 0 for non-existent file", offset)
+	}
+}
+
+func TestStreamRemainingLogContent_ReadsIncrementalContent(t *testing.T) {
+	// Create temp log file
+	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Write first chunk
+	chunk1 := "first chunk\n"
+	if _, err := tmpFile.WriteString(chunk1); err != nil {
+		t.Fatalf("failed to write chunk1: %v", err)
+	}
+
+	// Read first chunk
+	var offset int64 = 0
+	streamRemainingLogContent(tmpFile.Name(), &offset)
+
+	if offset != int64(len(chunk1)) {
+		t.Errorf("after chunk1: offset = %d, want %d", offset, len(chunk1))
+	}
+
+	// Write second chunk
+	chunk2 := "second chunk\n"
+	if _, err := tmpFile.WriteString(chunk2); err != nil {
+		t.Fatalf("failed to write chunk2: %v", err)
+	}
+	tmpFile.Close()
+
+	// Read second chunk (should only read new content)
+	streamRemainingLogContent(tmpFile.Name(), &offset)
+
+	expectedOffset := int64(len(chunk1) + len(chunk2))
+	if offset != expectedOffset {
+		t.Errorf("after chunk2: offset = %d, want %d", offset, expectedOffset)
+	}
+}
+
+func TestStreamRemainingLogContent_HandlesLogTruncation(t *testing.T) {
+	// Create temp log file with initial content
+	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	fileName := tmpFile.Name()
+	defer os.Remove(fileName)
+
+	// Write initial content
+	initialContent := "initial content that is long\n"
+	if _, err := tmpFile.WriteString(initialContent); err != nil {
+		t.Fatalf("failed to write initial content: %v", err)
+	}
+	tmpFile.Close()
+
+	// Set offset to end of initial content
+	var offset int64 = int64(len(initialContent))
+
+	// Truncate the file (simulate log rotation)
+	if err := os.Truncate(fileName, 0); err != nil {
+		t.Fatalf("failed to truncate file: %v", err)
+	}
+
+	// Write new content (shorter than original)
+	newContent := "new\n"
+	f, err := os.OpenFile(fileName, os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("failed to open file for writing: %v", err)
+	}
+	if _, err := f.WriteString(newContent); err != nil {
+		t.Fatalf("failed to write new content: %v", err)
+	}
+	f.Close()
+
+	// Read should detect truncation and reset offset
+	streamRemainingLogContent(fileName, &offset)
+
+	// Offset should now be at end of new content (reset from stale value)
+	if offset != int64(len(newContent)) {
+		t.Errorf("after truncation: offset = %d, want %d", offset, len(newContent))
 	}
 }
 

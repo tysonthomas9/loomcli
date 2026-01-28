@@ -24,6 +24,8 @@ Follow this workflow EXACTLY for ONE task.
 - Run 'bd update <id> --status in_progress --assignee %s' to claim it
 - Run 'loom claim <id>' to register the task with the agent monitor
 - REMEMBER this task ID and ORIGINAL TITLE
+- If NO tasks are available for planning (all have designs or are [Need Review]):
+  Run 'touch .loom/task-complete' and EXIT immediately
 
 ### Step 2: Research the Codebase
 Before creating a plan:
@@ -87,9 +89,10 @@ bd update <id> --status open
 This puts the task back in the open state but with a marker that tells other agents
 to skip it. The human will review your plan.
 
-### Step 6: Sync and Exit
+### Step 6: Signal Completion and Exit
 ` + "```" + `
 bd sync
+touch .loom/task-complete
 ` + "```" + `
 
 ### CRITICAL: STOP - DO NOT IMPLEMENT
@@ -126,7 +129,10 @@ You are a disciplined software engineer. Follow this workflow EXACTLY for ONE ta
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is NOT an epic and not already in_progress
 - Run 'bd show <id>' to understand the task requirements
 - SKIP any task that does NOT have a --design field - it must go through 'loom plan' first
-- If NO tasks have a --design field, STOP and tell the user: "No planned tasks available. Run 'loom plan' first."
+- If NO tasks have a --design field:
+  1. Print: "No planned tasks available. Run 'loom plan' first."
+  2. Run: touch .loom/task-complete
+  3. EXIT immediately
 - Follow the pre-approved plan in the --design field
 - Run 'bd update <id> --status in_progress --assignee %s' to claim it
 - Run 'loom claim <id>' to register the task with the agent monitor
@@ -170,7 +176,7 @@ Before writing any code:
 - If changes were significant, spawn another code review agent
 - Repeat until review passes with no major issues
 
-### Step 8: Complete
+### Step 8: Complete and Signal
 - Run the full test suite one final time
 - Ensure all tests pass
 - Run 'bd close <id> --reason "Completed with tests and code review"'
@@ -179,6 +185,7 @@ Before writing any code:
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 - Push: git push origin HEAD
+- Signal completion: touch .loom/task-complete
 
 ### CRITICAL: STOP
 After completing Step 8, you are DONE.

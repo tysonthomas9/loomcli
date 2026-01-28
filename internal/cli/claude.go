@@ -9,6 +9,9 @@ import (
 	"syscall"
 )
 
+// debugStreamParsing enables verbose output for JSON parsing errors
+var debugStreamParsing = os.Getenv("LOOM_DEBUG_STREAM") != ""
+
 // claudeInvoker is the function used to invoke Claude (mockable for tests)
 var claudeInvoker = defaultClaudeInvoker
 
@@ -111,6 +114,14 @@ type ContentBlock struct {
 func displayStreamEvent(line string) {
 	var event StreamEvent
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		if debugStreamParsing {
+			// Truncate long lines in debug output
+			truncated := line
+			if len(truncated) > 100 {
+				truncated = truncated[:100] + "..."
+			}
+			fmt.Fprintf(os.Stderr, "[debug] JSON parse failed: %v (line: %s)\n", err, truncated)
+		}
 		return
 	}
 

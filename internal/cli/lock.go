@@ -132,6 +132,22 @@ func CheckLock(worktreePath string) (*LockInfo, bool, error) {
 	return &info, running, nil
 }
 
+// ReadLockFile reads and parses the lock file without modifying it
+func ReadLockFile(worktreePath string) (*LockInfo, error) {
+	lockPath := filepath.Join(worktreePath, LockFileName)
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var info LockInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return nil, err
+	}
+
+	return &info, nil
+}
+
 // UpdateLockTask updates the lock file with task information
 // This is called by Claude after picking a task to work on
 func UpdateLockTask(worktreePath, taskID, taskTitle string) error {
