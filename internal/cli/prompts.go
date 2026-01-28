@@ -143,7 +143,9 @@ Before writing any code:
 - Read and understand the --design field thoroughly
 - Identify the files to create/modify as specified in the design
 - Note any edge cases or dependencies mentioned
-- ONLY proceed to Step 3 after you fully understand the plan
+- Check if any dependencies are missing or incomplete
+- If a required dependency is not ready, go to Step 8 (Handle Blockers)
+- ONLY proceed to Step 3 after you fully understand the plan AND all dependencies are met
 
 ### Step 3: Implement
 - Follow the design plan exactly
@@ -176,7 +178,31 @@ Before writing any code:
 - If changes were significant, spawn another code review agent
 - Repeat until review passes with no major issues
 
-### Step 8: Complete and Signal
+### Step 8: Handle Blockers
+If at ANY point you discover the task cannot be completed:
+- Missing dependency (code/feature not yet implemented)
+- External blocker (waiting on API, approval, merge, etc.)
+- Discovered bug that blocks this work
+
+Do NOT leave the task in_progress. Instead:
+1. Document what's blocking in the notes:
+   bd update <id> --notes "BLOCKED: <detailed reason>"
+2. If the blocker is another task, add the dependency:
+   bd dep add <this-task-id> <blocking-task-id>
+3. Change status to blocked:
+   bd update <id> --status blocked
+4. Commit any partial work (if meaningful):
+   git add -A && git commit -m "WIP: <task-id> - blocked on <reason>
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+   git push origin HEAD
+5. Run 'bd sync'
+6. Signal completion: loom complete
+7. EXIT immediately
+
+This ensures the task is properly tracked as blocked, not orphaned in error state.
+
+### Step 9: Complete and Signal
 - Run the full test suite one final time
 - Ensure all tests pass
 - Run 'bd close <id> --reason "Completed with tests and code review"'
@@ -188,7 +214,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 - Signal completion: loom complete
 
 ### CRITICAL: STOP
-After completing Step 8, you are DONE.
+After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
 - Do NOT run 'bd ready' again
 - Do NOT pick up another task
 - Do NOT continue working
