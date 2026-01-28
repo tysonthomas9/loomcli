@@ -83,7 +83,7 @@ IMPORTANT: Make sure the plan is complete and detailed enough that another agent
 ### Step 5: Mark for Review
 Update the task title to indicate it needs human review:
 ` + "```" + `
-bd update <id> --title="[Need Review] <original title>"
+bd update <id> --title="[Need Review] <original title>" --assignee=""
 bd update <id> --status open
 ` + "```" + `
 
