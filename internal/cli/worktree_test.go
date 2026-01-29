@@ -7,6 +7,11 @@ import (
 )
 
 func TestGetWorktreesDir(t *testing.T) {
+	// Save original flag value and reset after test
+	origFlag := worktreesFlag
+	defer func() { worktreesFlag = origFlag }()
+	worktreesFlag = ""
+
 	// Test default value
 	os.Unsetenv("LOOM_WORKTREES_DIR")
 	dir := GetWorktreesDir()
@@ -21,6 +26,51 @@ func TestGetWorktreesDir(t *testing.T) {
 	dir = GetWorktreesDir()
 	if dir != "custom-dir" {
 		t.Errorf("GetWorktreesDir() = %q, want 'custom-dir'", dir)
+	}
+}
+
+func TestGetWorktreesDirFlagPrecedence(t *testing.T) {
+	// Save original flag value
+	origFlag := worktreesFlag
+	defer func() { worktreesFlag = origFlag }()
+
+	// Test 1: Flag takes precedence over env var
+	os.Setenv("LOOM_WORKTREES_DIR", "env-dir")
+	defer os.Unsetenv("LOOM_WORKTREES_DIR")
+	worktreesFlag = "flag-dir"
+
+	dir := GetWorktreesDir()
+	if dir != "flag-dir" {
+		t.Errorf("GetWorktreesDir() = %q, want 'flag-dir' (flag should override env)", dir)
+	}
+
+	// Test 2: Env var used when flag is empty
+	worktreesFlag = ""
+	dir = GetWorktreesDir()
+	if dir != "env-dir" {
+		t.Errorf("GetWorktreesDir() = %q, want 'env-dir'", dir)
+	}
+
+	// Test 3: Default used when both are empty
+	os.Unsetenv("LOOM_WORKTREES_DIR")
+	dir = GetWorktreesDir()
+	if dir != "worktrees" {
+		t.Errorf("GetWorktreesDir() = %q, want 'worktrees'", dir)
+	}
+
+	// Test 4: Paths are cleaned (trailing slashes removed)
+	worktreesFlag = "my-agents/"
+	dir = GetWorktreesDir()
+	if dir != "my-agents" {
+		t.Errorf("GetWorktreesDir() = %q, want 'my-agents' (trailing slash should be removed)", dir)
+	}
+
+	// Test 5: Env var paths are also cleaned
+	worktreesFlag = ""
+	os.Setenv("LOOM_WORKTREES_DIR", "env-agents/")
+	dir = GetWorktreesDir()
+	if dir != "env-agents" {
+		t.Errorf("GetWorktreesDir() = %q, want 'env-agents' (trailing slash should be removed)", dir)
 	}
 }
 

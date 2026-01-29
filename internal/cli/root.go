@@ -12,6 +12,9 @@ var (
 	Build   = "unknown"
 )
 
+// worktreesFlag stores the --worktrees flag value for override
+var worktreesFlag string
+
 var rootCmd = &cobra.Command{
 	Use:   "loom",
 	Short: "Agent management CLI for parallel Claude Code workflows",
@@ -64,6 +67,9 @@ COMMANDS
   reset        Hard reset worktrees to a specific branch
   list         List all worktrees and their status
 
+GLOBAL FLAGS
+  -w, --worktrees        Override worktrees directory (takes precedence over env)
+
 ENVIRONMENT VARIABLES
   LOOM_DEFAULT_BRANCH    Default integration branch (default: main)
   LOOM_WORKTREES_DIR     Worktrees directory (default: ./worktrees)
@@ -86,6 +92,7 @@ EXAMPLES
 
 func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "Print version information")
+	rootCmd.PersistentFlags().StringVarP(&worktreesFlag, "worktrees", "w", "", "Override worktrees directory (takes precedence over LOOM_WORKTREES_DIR)")
 
 	// Add command groups for organized help
 	rootCmd.AddGroup(&cobra.Group{ID: "agents", Title: "Agent Commands:"})
