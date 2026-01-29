@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -112,6 +113,30 @@ func SetupTestWorktree(t *testing.T, name string) string {
 	}
 
 	return tmpDir
+}
+
+// MockStdin replaces os.Stdin with a pipe containing the given input.
+// Restores original stdin via t.Cleanup().
+func MockStdin(t *testing.T, input string) {
+	t.Helper()
+	origStdin := os.Stdin
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	defer w.Close()
+
+	_, err = io.WriteString(w, input)
+	if err != nil {
+		t.Fatalf("failed to write to pipe: %v", err)
+	}
+
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		r.Close()
+	})
 }
 
 // SetupTestEnv sets environment variables and registers cleanup with t.Cleanup()
