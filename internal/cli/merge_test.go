@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -90,6 +92,262 @@ func TestMergeCmd_ArgsValidation(t *testing.T) {
 					t.Errorf("expected no error, got %v", err)
 				}
 			}
+		})
+	}
+}
+
+func TestMergeBranch(t *testing.T) {
+	tests := []struct {
+		name           string
+		sourceBranch   string
+		targetBranch   string
+		outputStubs    []OutputCommandStub // for GitFetch, GitCheckout, GitPull, GitMergeOrigin, GitPush
+		commandStubs   []CommandStub       // for HasCommitsBetween, GetConflictedFiles
+		claudeCalled   bool                // whether claude should be invoked
+		claudeErr      error               // error from claude invocation
+	}{
+		{
+			name:         "successful merge no conflicts",
+			sourceBranch: "feature/test",
+			targetBranch: "main",
+			outputStubs: []OutputCommandStub{
+				{Args: []string{"fetch", "origin"}, Err: nil},                                                                            // GitFetch
+				{Args: []string{"checkout", "main"}, Err: nil},                                                                           // GitCheckout
+				{Args: []string{"pull", "origin", "main"}, Err: nil},                                                                     // GitPull
+				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil}, // GitMergeOrigin
+				{Args: []string{"push", "origin", "main"}, Err: nil},                                                                     // GitPush
+			},
+			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 some commit\n"}, // HasCommitsBetween
+			},
+		},
+		{
+			name:         "already up to date",
+			sourceBranch: "feature/test",
+			targetBranch: "main",
+			outputStubs: []OutputCommandStub{
+				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"checkout", "main"}, Err: nil},
+				{Args: []string{"pull", "origin", "main"}, Err: nil},
+				// No merge or push since already up to date
+			},
+			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: ""}, // no commits
+			},
+		},
+		{
+			name:         "fetch fails",
+			sourceBranch: "feature/test",
+			targetBranch: "main",
+			outputStubs: []OutputCommandStub{
+				{Args: []string{"fetch", "origin"}, Err: errors.New("network error")},
+			},
+			commandStubs: []CommandStub{},
+		},
+		{
+			name:         "checkout fails",
+			sourceBranch: "feature/test",
+			targetBranch: "main",
+			outputStubs: []OutputCommandStub{
+				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"checkout", "main"}, Err: errors.New("checkout failed")},
+			},
+			commandStubs: []CommandStub{},
+		},
+		{
+			name:         "pull fails",
+			sourceBranch: "feature/test",
+			targetBranch: "main",
+			outputStubs: []OutputCommandStub{
+				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"checkout", "main"}, Err: nil},
+				{Args: []string{"pull", "origin", "main"}, Err: errors.New("pull failed")},
+			},
+			commandStubs: []CommandStub{},
+		},
+		{
+			name:         "merge with conflicts invokes claude",
+			sourceBranch: "feature/test",
+			targetBranch: "main",
+			outputStubs: []OutputCommandStub{
+				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"checkout", "main"}, Err: nil},
+				{Args: []string{"pull", "origin", "main"}, Err: nil},
+				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
+				// No push after conflicts
+			},
+			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
+			},
+			claudeCalled: true,
+		},
+		{
+			name:         "merge fails no conflicts returns error",
+			sourceBranch: "feature/test",
+			targetBranch: "main",
+			outputStubs: []OutputCommandStub{
+				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"checkout", "main"}, Err: nil},
+				{Args: []string{"pull", "origin", "main"}, Err: nil},
+				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("merge failed")},
+			},
+			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""}, // no conflict files
+			},
+		},
+		{
+			name:         "push fails after successful merge",
+			sourceBranch: "feature/test",
+			targetBranch: "main",
+			outputStubs: []OutputCommandStub{
+				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"checkout", "main"}, Err: nil},
+				{Args: []string{"pull", "origin", "main"}, Err: nil},
+				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+				{Args: []string{"push", "origin", "main"}, Err: errors.New("push rejected")},
+			},
+			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+			},
+		},
+		{
+			name:         "merge conflicts with claude error",
+			sourceBranch: "feature/test",
+			targetBranch: "main",
+			outputStubs: []OutputCommandStub{
+				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"checkout", "main"}, Err: nil},
+				{Args: []string{"pull", "origin", "main"}, Err: nil},
+				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
+			},
+			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
+			},
+			claudeCalled: true,
+			claudeErr:    errors.New("claude failed"),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Install output command mock (streaming git commands)
+			outputMock := NewOutputCommandMock(t, tc.outputStubs)
+			outputMock.Install()
+
+			// Install command mock (captured git commands)
+			if len(tc.commandStubs) > 0 {
+				cmdMock := NewCommandMock(t, tc.commandStubs)
+				cmdMock.Install()
+			}
+
+			// Mock claude invoker
+			claudeCalled := false
+			origClaude := claudeInvoker
+			claudeInvoker = func(workDir, prompt, agentName string) error {
+				claudeCalled = true
+				return tc.claudeErr
+			}
+			t.Cleanup(func() { claudeInvoker = origClaude })
+
+			// Call the function under test
+			mergeBranch(tc.sourceBranch, tc.targetBranch)
+
+			if tc.claudeCalled && !claudeCalled {
+				t.Error("expected claude to be invoked, but it was not")
+			}
+			if !tc.claudeCalled && claudeCalled {
+				t.Error("expected claude NOT to be invoked, but it was")
+			}
+		})
+	}
+}
+
+func TestMergeAllWorktrees(t *testing.T) {
+	tests := []struct {
+		name         string
+		targetBranch string
+		worktrees    []WorktreeInfo
+		outputStubs  []OutputCommandStub
+		commandStubs []CommandStub
+	}{
+		{
+			name:         "multiple worktrees",
+			targetBranch: "main",
+			worktrees: []WorktreeInfo{
+				{Name: "alpha", Path: "/worktrees/alpha", Branch: "alpha-branch"},
+				{Name: "beta", Path: "/worktrees/beta", Branch: "beta-branch"},
+			},
+			outputStubs: []OutputCommandStub{
+				// First worktree merge: alpha-branch -> main
+				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"checkout", "main"}, Err: nil},
+				{Args: []string{"pull", "origin", "main"}, Err: nil},
+				{Args: []string{"merge", "origin/alpha-branch", "-m", "Merge alpha-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+				{Args: []string{"push", "origin", "main"}, Err: nil},
+				// Second worktree merge: beta-branch -> main
+				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"checkout", "main"}, Err: nil},
+				{Args: []string{"pull", "origin", "main"}, Err: nil},
+				{Args: []string{"merge", "origin/beta-branch", "-m", "Merge beta-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+				{Args: []string{"push", "origin", "main"}, Err: nil},
+			},
+			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"log", "main..origin/alpha-branch", "--oneline"}, Stdout: "abc commit\n"},
+				{Name: "git", Args: []string{"log", "main..origin/beta-branch", "--oneline"}, Stdout: "def commit\n"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Set up a temp dir with worktree directories
+			tmpDir := t.TempDir()
+
+			// Create worktrees/<name>/.git for each test worktree
+			for _, wt := range tc.worktrees {
+				wtPath := tmpDir + "/worktrees/" + wt.Name + "/.git"
+				if err := os.MkdirAll(wtPath, 0755); err != nil {
+					t.Fatalf("failed to create worktree dir: %v", err)
+				}
+			}
+
+			// Set LOOM_WORKTREES_DIR to point to our temp worktrees
+			SetupTestEnv(t, map[string]string{
+				"LOOM_WORKTREES_DIR": tmpDir + "/worktrees",
+			})
+
+			// Install output command mock
+			outputMock := NewOutputCommandMock(t, tc.outputStubs)
+			outputMock.Install()
+
+			// Install command mock - DiscoverWorktrees calls GetCurrentBranch for all,
+			// then mergeBranch calls HasCommitsBetween for each
+			var allCmdStubs []CommandStub
+			// First: GetCurrentBranch for each worktree (during DiscoverWorktrees)
+			for _, wt := range tc.worktrees {
+				allCmdStubs = append(allCmdStubs, CommandStub{
+					Name:   "git",
+					Args:   []string{"branch", "--show-current"},
+					Stdout: wt.Branch + "\n",
+				})
+			}
+			// Then: HasCommitsBetween for each mergeBranch call
+			allCmdStubs = append(allCmdStubs, tc.commandStubs...)
+			cmdMock := NewCommandMock(t, allCmdStubs)
+			cmdMock.Install()
+
+			// Mock claude (shouldn't be called in this test)
+			origClaude := claudeInvoker
+			claudeInvoker = func(workDir, prompt, agentName string) error {
+				t.Error("unexpected claude invocation")
+				return nil
+			}
+			t.Cleanup(func() { claudeInvoker = origClaude })
+
+			mergeAllWorktrees(tc.targetBranch)
 		})
 	}
 }
