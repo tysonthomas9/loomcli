@@ -15,9 +15,13 @@ type WorktreeInfo struct {
 }
 
 // GetWorktreesDir returns the worktrees directory path
+// Priority: --worktrees flag > LOOM_WORKTREES_DIR env var > default "worktrees"
 func GetWorktreesDir() string {
+	if worktreesFlag != "" {
+		return filepath.Clean(worktreesFlag)
+	}
 	if dir := os.Getenv("LOOM_WORKTREES_DIR"); dir != "" {
-		return dir
+		return filepath.Clean(dir)
 	}
 	return "worktrees"
 }

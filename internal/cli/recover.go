@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -124,16 +123,14 @@ func handleOrphanedTask(worktreePath, taskID string, analyze bool) {
 // analyzeTaskCompletion uses Claude to determine if a task was completed
 func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason string) {
 	// Get task details
-	taskCmd := exec.Command("bd", "show", taskID)
-	taskOutput, err := taskCmd.Output()
-	if err != nil {
+	taskResult := execCommand(".", "bd", "show", taskID)
+	if taskResult.Err != nil {
 		return false, "Could not fetch task details"
 	}
 
 	// Get git commits mentioning this task
-	gitCmd := exec.Command("git", "-C", worktreePath, "log",
-		"--oneline", "-20", "--all", "--grep", taskID)
-	gitOutput, _ := gitCmd.Output()
+	gitResult := execCommand(worktreePath, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
+	// gitResult.Err is ignored - empty commits is fine
 
 	// Build prompt for Claude
 	prompt := fmt.Sprintf(`You are analyzing whether a software task was completed before the agent crashed.
@@ -152,37 +149,32 @@ Respond with EXACTLY one line in this format:
 COMPLETED: <brief reason>
 or
 INCOMPLETE: <brief reason>
-`, string(taskOutput), taskID, string(gitOutput))
+`, taskResult.Stdout, taskID, gitResult.Stdout)
 
 	// Run claude -p with the prompt
-	claudeCmd := exec.Command("claude", "-p", "--output-format", "text", prompt)
-	claudeCmd.Dir = worktreePath
-	output, err := claudeCmd.Output()
-	if err != nil {
-		return false, fmt.Sprintf("Claude analysis failed: %v", err)
+	claudeResult := execCommand(worktreePath, "claude", "-p", "--output-format", "text", prompt)
+	if claudeResult.Err != nil {
+		return false, fmt.Sprintf("Claude analysis failed: %v", claudeResult.Err)
 	}
 
 	// Parse response
-	response := strings.TrimSpace(string(output))
+	response := strings.TrimSpace(claudeResult.Stdout)
 	lines := strings.Split(response, "\n")
 
 	// Find the line with COMPLETED or INCOMPLETE
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(strings.ToUpper(line), "COMPLETED:") {
-			reason := strings.TrimPrefix(line, "COMPLETED:")
-			reason = strings.TrimPrefix(strings.ToUpper(line), "COMPLETED:")
 			if idx := strings.Index(line, ":"); idx != -1 {
-				reason = strings.TrimSpace(line[idx+1:])
+				return true, strings.TrimSpace(line[idx+1:])
 			}
-			return true, reason
+			return true, ""
 		}
 		if strings.HasPrefix(strings.ToUpper(line), "INCOMPLETE:") {
-			reason := strings.TrimSpace(line[11:])
 			if idx := strings.Index(line, ":"); idx != -1 {
-				reason = strings.TrimSpace(line[idx+1:])
+				return false, strings.TrimSpace(line[idx+1:])
 			}
-			return false, reason
+			return false, ""
 		}
 	}
 
@@ -193,11 +185,10 @@ INCOMPLETE: <brief reason>
 // closeTask closes a completed task
 func closeTask(worktreePath, taskID, reason string) {
 	closeReason := fmt.Sprintf("Completed (verified by recovery analysis): %s", reason)
-	bdCmd := exec.Command("bd", "close", taskID, "--reason", closeReason)
-	bdCmd.Dir = worktreePath
-	output, err := bdCmd.CombinedOutput()
-	if err != nil {
-		fmt.Printf("Warning: failed to close task: %v\n", err)
+	result := execCommand(worktreePath, "bd", "close", taskID, "--reason", closeReason)
+	if result.Err != nil {
+		fmt.Printf("Warning: failed to close task: %v\n", result.Err)
+		output := result.Stdout + result.Stderr
 		if len(output) > 0 {
 			fmt.Printf("Output: %s\n", output)
 		}
@@ -208,11 +199,10 @@ func closeTask(worktreePath, taskID, reason string) {
 
 // resetTask resets a task to open status
 func resetTask(worktreePath, taskID string) {
-	bdCmd := exec.Command("bd", "update", taskID, "--status", "open", "--assignee", "")
-	bdCmd.Dir = worktreePath
-	output, err := bdCmd.CombinedOutput()
-	if err != nil {
-		fmt.Printf("Warning: failed to reset task: %v\n", err)
+	result := execCommand(worktreePath, "bd", "update", taskID, "--status", "open", "--assignee", "")
+	if result.Err != nil {
+		fmt.Printf("Warning: failed to reset task: %v\n", result.Err)
+		output := result.Stdout + result.Stderr
 		if len(output) > 0 {
 			fmt.Printf("Output: %s\n", output)
 		}

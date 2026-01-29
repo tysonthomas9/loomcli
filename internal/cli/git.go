@@ -16,13 +16,23 @@ func RunGitCommand(dir string, args ...string) (string, error) {
 	return result.Stdout, nil
 }
 
-// RunGitCommandWithOutput executes a git command and streams output to stdout/stderr
-func RunGitCommandWithOutput(dir string, args ...string) error {
+// outputCommandExecutor is the function type for executing commands with streaming output
+type outputCommandExecutor func(dir string, args ...string) error
+
+// runGitWithOutputFunc is the package-level executor (swappable for tests)
+var runGitWithOutputFunc outputCommandExecutor = defaultRunGitWithOutput
+
+func defaultRunGitWithOutput(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// RunGitCommandWithOutput executes a git command and streams output to stdout/stderr
+func RunGitCommandWithOutput(dir string, args ...string) error {
+	return runGitWithOutputFunc(dir, args...)
 }
 
 // GitFetch fetches from origin

@@ -18,6 +18,10 @@ import (
 var (
 	servePort       int
 	serveCorsOrigin string
+
+	// collectDataFunc is the function used to collect monitor data.
+	// This is a package-level variable to allow tests to inject mock data.
+	collectDataFunc = collectMonitorData
 )
 
 var serveCmd = &cobra.Command{
@@ -190,7 +194,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
-	data := collectMonitorData()
+	data := collectDataFunc()
 	writeJSON(w, StatusResponse{
 		Agents:         data.Agents,
 		Tasks:          data.Tasks,
@@ -203,7 +207,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAgents(w http.ResponseWriter, r *http.Request) {
-	data := collectMonitorData()
+	data := collectDataFunc()
 	writeJSON(w, AgentsResponse{
 		Agents:    data.Agents,
 		Timestamp: data.Timestamp,
@@ -211,7 +215,7 @@ func handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTasks(w http.ResponseWriter, r *http.Request) {
-	data := collectMonitorData()
+	data := collectDataFunc()
 	writeJSON(w, TasksResponse{
 		Summary:          data.Tasks,
 		NeedsPlanning:    data.NeedsPlanningTasks,
@@ -224,7 +228,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleStats(w http.ResponseWriter, r *http.Request) {
-	data := collectMonitorData()
+	data := collectDataFunc()
 	writeJSON(w, StatsResponse{
 		Stats:     data.Stats,
 		Timestamp: data.Timestamp,
@@ -232,7 +236,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSync(w http.ResponseWriter, r *http.Request) {
-	data := collectMonitorData()
+	data := collectDataFunc()
 	writeJSON(w, SyncResponse{
 		Sync:      data.SyncStatus,
 		Timestamp: data.Timestamp,
