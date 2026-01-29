@@ -10,7 +10,7 @@ import (
 var mergeAll bool
 
 var mergeCmd = &cobra.Command{
-	Use:               "merge <source> [target]",
+	Use:               "merge <source> <target>",
 	Short:             "Merge branches with AI conflict resolution",
 	GroupID:           "git",
 	ValidArgsFunction: branchCompletion,
@@ -20,25 +20,24 @@ When conflicts occur, Claude is launched to resolve them automatically.
 
 Arguments:
   source    Source branch to merge from (e.g., webui/falcon)
-  target    Target branch to merge into (default: feature/web-ui)
+  target    Target branch to merge into (required)
 
 Flags:
   -a, --all    Merge all worktree branches into target
 
 Examples:
-  loom merge webui/falcon                  # Merge to feature/web-ui
   loom merge webui/falcon main             # Merge to main
-  loom merge --all                         # Merge all worktrees to feature/web-ui
+  loom merge webui/falcon feature/web-ui   # Merge to feature/web-ui
   loom merge --all main                    # Merge all worktrees to main`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if mergeAll {
-			if len(args) > 1 {
-				return fmt.Errorf("--all flag accepts at most 1 argument (target branch)")
+			if len(args) != 1 {
+				return fmt.Errorf("--all flag requires exactly 1 argument (target branch)")
 			}
 			return nil
 		}
-		if len(args) < 1 {
-			return fmt.Errorf("requires source branch argument (or use --all)")
+		if len(args) != 2 {
+			return fmt.Errorf("requires exactly 2 arguments: <source> <target>")
 		}
 		return nil
 	},
@@ -51,23 +50,12 @@ func init() {
 }
 
 func runMerge(cmd *cobra.Command, args []string) {
-	defaultBranch := GetDefaultBranch()
-
 	if mergeAll {
-		// Merge all worktrees
-		targetBranch := defaultBranch
-		if len(args) > 0 {
-			targetBranch = args[0]
-		}
-		mergeAllWorktrees(targetBranch)
+		// Merge all worktrees to the specified target branch
+		mergeAllWorktrees(args[0])
 	} else {
 		// Single branch merge
-		sourceBranch := args[0]
-		targetBranch := defaultBranch
-		if len(args) > 1 {
-			targetBranch = args[1]
-		}
-		mergeBranch(sourceBranch, targetBranch)
+		mergeBranch(args[0], args[1])
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 var syncAll bool
 
 var syncCmd = &cobra.Command{
-	Use:               "sync <worktree> [branch]",
+	Use:               "sync <worktree> <branch>",
 	Short:             "Sync worktree with integration branch",
 	GroupID:           "git",
 	ValidArgsFunction: worktreeThenBranchCompletion,
@@ -22,25 +22,24 @@ is launched to resolve them.
 
 Arguments:
   worktree    Worktree name (e.g., falcon)
-  branch      Source branch to sync from (default: feature/web-ui)
+  branch      Source branch to sync from (required)
 
 Flags:
   -a, --all    Sync all worktrees
 
 Examples:
-  loom sync falcon                         # Sync falcon with feature/web-ui
   loom sync falcon main                    # Sync falcon with main
-  loom sync --all                          # Sync all worktrees
+  loom sync falcon feature/web-ui          # Sync falcon with feature/web-ui
   loom sync --all main                     # Sync all worktrees with main`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if syncAll {
-			if len(args) > 1 {
-				return fmt.Errorf("--all flag accepts at most 1 argument (source branch)")
+			if len(args) != 1 {
+				return fmt.Errorf("--all flag requires exactly 1 argument (source branch)")
 			}
 			return nil
 		}
-		if len(args) < 1 {
-			return fmt.Errorf("requires worktree argument (or use --all)")
+		if len(args) != 2 {
+			return fmt.Errorf("requires exactly 2 arguments: <worktree> <branch>")
 		}
 		return nil
 	},
@@ -53,23 +52,12 @@ func init() {
 }
 
 func runSync(cmd *cobra.Command, args []string) {
-	defaultBranch := GetDefaultBranch()
-
 	if syncAll {
-		// Sync all worktrees
-		sourceBranch := defaultBranch
-		if len(args) > 0 {
-			sourceBranch = args[0]
-		}
-		syncAllWorktrees(sourceBranch)
+		// Sync all worktrees with the specified branch
+		syncAllWorktrees(args[0])
 	} else {
 		// Single worktree sync
-		worktreeName := args[0]
-		sourceBranch := defaultBranch
-		if len(args) > 1 {
-			sourceBranch = args[1]
-		}
-		syncWorktree(worktreeName, sourceBranch)
+		syncWorktree(args[0], args[1])
 	}
 }
 
