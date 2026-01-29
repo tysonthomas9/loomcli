@@ -34,6 +34,20 @@ func GetDefaultBranch() string {
 	return "main"
 }
 
+// ResolveWorktreesDir returns the absolute path to the worktrees directory
+// If the configured path is absolute, use it directly; otherwise join with scriptDir
+func ResolveWorktreesDir() (string, error) {
+	dir := GetWorktreesDir()
+	if filepath.IsAbs(dir) {
+		return dir, nil
+	}
+	scriptDir, err := GetScriptDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(scriptDir, dir), nil
+}
+
 // GetScriptDir returns the directory where loom is run from
 func GetScriptDir() (string, error) {
 	cwd, err := os.Getwd()
@@ -62,12 +76,12 @@ func ResolveWorktreePath(name string) (string, error) {
 	}
 
 	// Relative name - resolve to worktrees directory
-	scriptDir, err := GetScriptDir()
+	worktreesDir, err := ResolveWorktreesDir()
 	if err != nil {
 		return "", err
 	}
 
-	worktreePath := filepath.Join(scriptDir, GetWorktreesDir(), name)
+	worktreePath := filepath.Join(worktreesDir, name)
 	if _, err := os.Stat(worktreePath); err != nil {
 		return "", fmt.Errorf("worktree '%s' not found at %s", name, worktreePath)
 	}
@@ -82,12 +96,10 @@ func GetWorktreeName(path string) string {
 
 // DiscoverWorktrees finds all worktrees in the worktrees directory
 func DiscoverWorktrees() ([]WorktreeInfo, error) {
-	scriptDir, err := GetScriptDir()
+	worktreesDir, err := ResolveWorktreesDir()
 	if err != nil {
 		return nil, err
 	}
-
-	worktreesDir := filepath.Join(scriptDir, GetWorktreesDir())
 	if _, err := os.Stat(worktreesDir); err != nil {
 		return nil, fmt.Errorf("worktrees directory not found: %s", worktreesDir)
 	}
