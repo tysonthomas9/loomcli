@@ -29,7 +29,7 @@ var monitorCmd = &cobra.Command{
 
 Sections:
   AGENTS     - Worktree status (running/idle, branch, dirty/clean)
-  TASKS      - Ready, in_progress, need review, blocked counts
+  TASKS      - Ready, in_progress, need review, backlog counts
   SYNC       - Database and git sync status
   STATS      - Overall issue counts and completion rate
 
@@ -62,7 +62,7 @@ type MonitorData struct {
 	ReadyToImplement   []TaskInfo          // Ready tasks with design (top 5)
 	ReviewTasks        []TaskInfo          // top 5 need review tasks
 	InProgressTasks    []TaskInfo          // all in_progress tasks
-	BlockedTasks       []TaskInfo          // blocked tasks (top 20)
+	BlockedTasks       []TaskInfo          // backlog tasks (top 20)
 	AgentTasks         map[string]TaskInfo // agent name -> current task (from assignee)
 	TaskConflicts      map[string][]string // TaskID -> agent names (if multiple agents claim same task)
 	SyncStatus         SyncInfo
@@ -92,7 +92,7 @@ type TaskSummary struct {
 	ReadyToImplement int `json:"ready_to_implement"` // Ready tasks with approved design
 	InProgress       int `json:"in_progress"`
 	NeedReview       int `json:"need_review"`
-	Blocked          int `json:"blocked"`
+	Blocked          int `json:"backlog"`
 }
 
 
@@ -553,7 +553,7 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxSeparator())
 	sb.WriteString(renderBoxLine(" WORK QUEUE"))
 	sb.WriteString(renderBoxSeparator())
-	taskSummary := fmt.Sprintf("  Plan: %-3d  Impl: %-3d  Review: %-3d  Active: %-3d  Blocked: %-3d",
+	taskSummary := fmt.Sprintf("  Plan: %-3d  Impl: %-3d  Review: %-3d  Active: %-3d  Backlog: %-3d",
 		data.Tasks.NeedsPlanning, data.Tasks.ReadyToImplement, data.Tasks.NeedReview, data.Tasks.InProgress, data.Tasks.Blocked)
 	sb.WriteString(renderBoxLine(taskSummary))
 
