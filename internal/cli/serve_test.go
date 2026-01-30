@@ -21,7 +21,7 @@ func mockMonitorData() *MonitorData {
 			ReadyToImplement: 5,
 			InProgress:       2,
 			NeedReview:       1,
-			Blocked:          0,
+			Backlog:          0,
 		},
 		NeedsPlanningTasks: []TaskInfo{
 			{ID: "bd-001", Title: "Add feature X", Priority: 1},
@@ -353,12 +353,12 @@ func TestHandleTasks(t *testing.T) {
 		wantReadyToImplLen    int
 		wantNeedsReviewLen    int
 		wantInProgressLen     int
-		wantBlockedLen        int
+		wantBacklogLen        int
 		wantSummaryNeedsPlan  int
 		wantSummaryReadyImpl  int
 		wantSummaryInProgress int
 		wantSummaryNeedReview int
-		wantSummaryBlocked    int
+		wantSummaryBacklog    int
 	}{
 		{
 			name:                  "tasks with all categories populated",
@@ -367,12 +367,12 @@ func TestHandleTasks(t *testing.T) {
 			wantReadyToImplLen:    1,
 			wantNeedsReviewLen:    1,
 			wantInProgressLen:     1,
-			wantBlockedLen:        0,
+			wantBacklogLen:        0,
 			wantSummaryNeedsPlan:  3,
 			wantSummaryReadyImpl:  5,
 			wantSummaryInProgress: 2,
 			wantSummaryNeedReview: 1,
-			wantSummaryBlocked:    0,
+			wantSummaryBacklog:    0,
 		},
 		{
 			name: "empty task lists",
@@ -389,12 +389,12 @@ func TestHandleTasks(t *testing.T) {
 			wantReadyToImplLen:    0,
 			wantNeedsReviewLen:    0,
 			wantInProgressLen:     0,
-			wantBlockedLen:        0,
+			wantBacklogLen:        0,
 			wantSummaryNeedsPlan:  0,
 			wantSummaryReadyImpl:  0,
 			wantSummaryInProgress: 0,
 			wantSummaryNeedReview: 0,
-			wantSummaryBlocked:    0,
+			wantSummaryBacklog:    0,
 		},
 	}
 
@@ -428,8 +428,8 @@ func TestHandleTasks(t *testing.T) {
 				if len(resp.InProgress) != tt.wantInProgressLen {
 					t.Errorf("InProgress len = %d, want %d", len(resp.InProgress), tt.wantInProgressLen)
 				}
-				if len(resp.Blocked) != tt.wantBlockedLen {
-					t.Errorf("Blocked len = %d, want %d", len(resp.Blocked), tt.wantBlockedLen)
+				if len(resp.Backlog) != tt.wantBacklogLen {
+					t.Errorf("Backlog len = %d, want %d", len(resp.Backlog), tt.wantBacklogLen)
 				}
 
 				// Check summary counts
@@ -445,8 +445,8 @@ func TestHandleTasks(t *testing.T) {
 				if resp.Summary.NeedReview != tt.wantSummaryNeedReview {
 					t.Errorf("Summary.NeedReview = %d, want %d", resp.Summary.NeedReview, tt.wantSummaryNeedReview)
 				}
-				if resp.Summary.Blocked != tt.wantSummaryBlocked {
-					t.Errorf("Summary.Blocked = %d, want %d", resp.Summary.Blocked, tt.wantSummaryBlocked)
+				if resp.Summary.Backlog != tt.wantSummaryBacklog {
+					t.Errorf("Summary.Backlog = %d, want %d", resp.Summary.Backlog, tt.wantSummaryBacklog)
 				}
 
 				if resp.Timestamp.IsZero() {
@@ -643,7 +643,7 @@ func TestResponseTypes(t *testing.T) {
 				ReadyToImplement: []TaskInfo{},
 				NeedsReview:      []TaskInfo{},
 				InProgress:       []TaskInfo{},
-				Blocked:          []TaskInfo{},
+				Backlog:          []TaskInfo{},
 				Timestamp:        time.Now(),
 			},
 		},
