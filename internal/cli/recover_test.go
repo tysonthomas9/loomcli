@@ -453,3 +453,97 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 
 	handleOrphanedTask("/test/worktree", "task-orphan3", false)
 }
+
+func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"list", "--assignee", "falcon", "--status", "in_progress", "--json"},
+			Stdout: `[{"id":"task-1","title":"First task"},{"id":"task-2","title":"Second task"}]`,
+			Err:    nil,
+		},
+		// resetTask for task-1
+		{
+			Dir:    "/test/worktree",
+			Name:   "bd",
+			Args:   []string{"update", "task-1", "--status", "open", "--assignee", ""},
+			Stdout: "Updated\n",
+			Err:    nil,
+		},
+		// resetTask for task-2
+		{
+			Dir:    "/test/worktree",
+			Name:   "bd",
+			Args:   []string{"update", "task-2", "--status", "open", "--assignee", ""},
+			Stdout: "Updated\n",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	resetOrphanedAgentTasks("/test/worktree", "falcon", "", false)
+}
+
+func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"list", "--assignee", "ember", "--status", "in_progress", "--json"},
+			Stdout: `[{"id":"task-1","title":"Already handled"},{"id":"task-2","title":"Orphaned task"}]`,
+			Err:    nil,
+		},
+		// resetTask for task-2 only (task-1 is already handled)
+		{
+			Dir:    "/test/worktree",
+			Name:   "bd",
+			Args:   []string{"update", "task-2", "--status", "open", "--assignee", ""},
+			Stdout: "Updated\n",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	resetOrphanedAgentTasks("/test/worktree", "ember", "task-1", false)
+}
+
+func TestResetOrphanedAgentTasks_NoOrphanedTasks(t *testing.T) {
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"list", "--assignee", "falcon", "--status", "in_progress", "--json"},
+			Stdout: `[]`,
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	resetOrphanedAgentTasks("/test/worktree", "falcon", "", false)
+}
+
+func TestResetOrphanedAgentTasks_BdListFails(t *testing.T) {
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"list", "--assignee", "falcon", "--status", "in_progress", "--json"},
+			Stdout: "",
+			Stderr: "Error: connection failed\n",
+			Err:    errors.New("exit status 1"),
+		},
+	})
+	mock.Install()
+
+	// Should not panic
+	resetOrphanedAgentTasks("/test/worktree", "falcon", "", false)
+}
+
+func TestResetOrphanedAgentTasks_EmptyAgentName(t *testing.T) {
+	mock := NewCommandMock(t, []CommandStub{})
+	mock.Install()
+
+	// Should return immediately with no commands
+	resetOrphanedAgentTasks("/test/worktree", "", "", false)
+}

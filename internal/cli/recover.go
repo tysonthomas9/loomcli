@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,7 +66,8 @@ func runRecover(cmd *cobra.Command, args []string) {
 	}
 
 	if lockInfo == nil {
-		fmt.Println("No lock file found - agent is not in error state.")
+		fmt.Println("No lock file found - checking for orphaned tasks...")
+		resetOrphanedAgentTasks(worktreePath, worktreeName, "", !recoverNoAnalyze)
 		fmt.Println("Agent is ready for new work.")
 		return
 	}
@@ -92,6 +94,9 @@ func runRecover(cmd *cobra.Command, args []string) {
 	if lockInfo.TaskID != "" {
 		handleOrphanedTask(worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
 	}
+
+	// 5. Find and reset any additional orphaned tasks assigned to this agent
+	resetOrphanedAgentTasks(worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
 
 	fmt.Println("")
 	fmt.Println("=========================================")
@@ -211,6 +216,49 @@ func resetTask(worktreePath, taskID string) {
 		fmt.Printf("  bd update %s --status open --assignee \"\"\n", taskID)
 	} else {
 		fmt.Printf("✓ Task %s reset to open\n", taskID)
+	}
+}
+
+// resetOrphanedAgentTasks finds all in_progress tasks assigned to the given agent
+// and handles them (analyze or reset). Tasks matching alreadyHandledTaskID are skipped.
+func resetOrphanedAgentTasks(worktreePath, agentName, alreadyHandledTaskID string, analyze bool) {
+	if agentName == "" {
+		return
+	}
+
+	result := execCommand(".", "bd", "list", "--assignee", agentName, "--status", "in_progress", "--json")
+	if result.Err != nil {
+		fmt.Printf("Warning: could not check for orphaned tasks: %v\n", result.Err)
+		return
+	}
+
+	var tasks []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal([]byte(result.Stdout), &tasks); err != nil {
+		fmt.Printf("Warning: could not parse task list: %v\n", err)
+		return
+	}
+
+	// Filter out the task already handled from lock file
+	var orphaned []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	for _, t := range tasks {
+		if t.ID != alreadyHandledTaskID {
+			orphaned = append(orphaned, t)
+		}
+	}
+
+	if len(orphaned) == 0 {
+		return
+	}
+
+	fmt.Printf("\nFound %d additional orphaned task(s) for agent %s:\n", len(orphaned), agentName)
+	for _, t := range orphaned {
+		handleOrphanedTask(worktreePath, t.ID, analyze)
 	}
 }
 
