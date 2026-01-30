@@ -1114,6 +1114,79 @@ func TestTmuxCycle_DaemonCrashesBeforeAcquiringLock(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// workspaceHash Tests
+// ============================================================================
+
+func TestWorkspaceHash_Deterministic(t *testing.T) {
+	// Same input should always produce the same hash
+	hash1 := workspaceHash("/some/path")
+	hash2 := workspaceHash("/some/path")
+
+	if hash1 != hash2 {
+		t.Errorf("workspaceHash not deterministic: got %q and %q", hash1, hash2)
+	}
+}
+
+func TestWorkspaceHash_Length(t *testing.T) {
+	// Should return a 16-character hex string (8 bytes = 16 hex chars)
+	hash := workspaceHash("/some/path")
+
+	if len(hash) != 16 {
+		t.Errorf("workspaceHash(%q) length = %d, want 16", "/some/path", len(hash))
+	}
+
+	// Verify all characters are valid hex
+	for _, c := range hash {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Errorf("workspaceHash(%q) contains non-hex char %q in %q", "/some/path", string(c), hash)
+			break
+		}
+	}
+}
+
+func TestWorkspaceHash_DifferentPaths(t *testing.T) {
+	// Different paths should produce different hashes
+	tests := []struct {
+		path1 string
+		path2 string
+	}{
+		{"/path/to/worktree1", "/path/to/worktree2"},
+		{"/a", "/b"},
+		{"/home/user/project", "/home/user/other"},
+		{"", "/nonempty"},
+	}
+
+	for _, tt := range tests {
+		hash1 := workspaceHash(tt.path1)
+		hash2 := workspaceHash(tt.path2)
+		if hash1 == hash2 {
+			t.Errorf("workspaceHash(%q) == workspaceHash(%q) = %q, want different hashes",
+				tt.path1, tt.path2, hash1)
+		}
+	}
+}
+
+func TestWorkspaceHash_KnownValue(t *testing.T) {
+	// Verify against a pre-computed sha256 value to ensure the implementation
+	// matches: sha256("/some/path")[:8] hex-encoded
+	hash := workspaceHash("/some/path")
+	expected := "eda6cf0b63f1a1d2"
+
+	if hash != expected {
+		t.Errorf("workspaceHash(%q) = %q, want %q", "/some/path", hash, expected)
+	}
+}
+
+func TestWorkspaceHash_EmptyString(t *testing.T) {
+	// Empty string should still produce a valid 16-char hex hash
+	hash := workspaceHash("")
+
+	if len(hash) != 16 {
+		t.Errorf("workspaceHash(%q) length = %d, want 16", "", len(hash))
+	}
+}
+
 func TestStreamRemainingLogContent_HandlesLogTruncation(t *testing.T) {
 	// Create temp log file with initial content
 	tmpFile, err := os.CreateTemp("", "loom-test-*.log")
