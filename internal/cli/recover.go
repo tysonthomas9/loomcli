@@ -5,12 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
 var (
 	recoverNoAnalyze bool
+	recoverForce     bool
 )
 
 var recoverCmd = &cobra.Command{
@@ -31,7 +34,8 @@ Use this when 'loom monitor' shows an agent in error state.
 
 Examples:
   loom recover falcon              # Recover with task analysis (default)
-  loom recover ember --no-analyze  # Skip analysis, always reset to open`,
+  loom recover ember --no-analyze  # Skip analysis, always reset to open
+  loom recover falcon --force      # Kill running agent and recover immediately`,
 	Args: cobra.ExactArgs(1),
 	Run:  runRecover,
 }
@@ -39,6 +43,8 @@ Examples:
 func init() {
 	recoverCmd.Flags().BoolVar(&recoverNoAnalyze, "no-analyze", false,
 		"Skip Claude analysis, always reset task to open status")
+	recoverCmd.Flags().BoolVar(&recoverForce, "force", false,
+		"Kill running agent process without prompting")
 	rootCmd.AddCommand(recoverCmd)
 }
 
@@ -72,12 +78,22 @@ func runRecover(cmd *cobra.Command, args []string) {
 
 	if isRunning {
 		fmt.Printf("Agent process (PID %d) is still running.\n", lockInfo.PID)
-		fmt.Println("")
-		fmt.Println("Options:")
-		fmt.Println("  - Wait for the agent to finish")
-		fmt.Println("  - Send Ctrl+C to the agent terminal")
-		fmt.Printf("  - Force kill: kill -9 %d\n", lockInfo.PID)
-		return
+
+		shouldKill := recoverForce
+		if !shouldKill {
+			shouldKill = confirmKill(lockInfo.PID)
+		}
+
+		if !shouldKill {
+			fmt.Println("Aborted. Agent process left running.")
+			return
+		}
+
+		if err := killProcess(lockInfo.PID); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to kill process: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✓ Killed agent process (PID %d)\n", lockInfo.PID)
 	}
 
 	// 3. Clear stale lock
@@ -212,6 +228,38 @@ func resetTask(worktreePath, taskID string) {
 	} else {
 		fmt.Printf("✓ Task %s reset to open\n", taskID)
 	}
+}
+
+// killProcess sends SIGTERM then SIGKILL to the given PID
+func killProcess(pid int) error {
+	// Try graceful shutdown first
+	err := syscall.Kill(pid, syscall.SIGTERM)
+	if err == syscall.ESRCH {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	// Wait up to 5 seconds for graceful exit
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if !IsProcessRunning(pid) {
+			return nil
+		}
+	}
+
+	// Force kill if still running
+	err = syscall.Kill(pid, syscall.SIGKILL)
+	if err == syscall.ESRCH {
+		return nil
+	}
+	return err
+}
+
+// confirmKill prompts the user to confirm killing the agent process
+func confirmKill(pid int) bool {
+	return confirmAction(fmt.Sprintf("Kill agent process (PID %d)?", pid))
 }
 
 // forceReleaseLock removes the lock file regardless of which process owns it
