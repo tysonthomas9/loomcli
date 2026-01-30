@@ -926,9 +926,9 @@ func TestAgentClaimedTask_WithoutTaskID(t *testing.T) {
 func TestAgentClaimedTask_NoLockFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// No lock file — should return true (conservative: assume work done)
-	if !agentClaimedTask(tmpDir) {
-		t.Error("agentClaimedTask() = false, want true when lock file doesn't exist (conservative)")
+	// No lock file — daemon never ran or failed before writing lock. No progress.
+	if agentClaimedTask(tmpDir) {
+		t.Error("agentClaimedTask() = true, want false when lock file doesn't exist (no progress)")
 	}
 }
 
@@ -977,6 +977,140 @@ func TestAgentClaimedTask_ClearThenReclaim(t *testing.T) {
 	info, _ := ReadLockFile(tmpDir)
 	if info.TaskID != "bd-new" {
 		t.Errorf("Expected TaskID 'bd-new', got '%s'", info.TaskID)
+	}
+}
+
+// ============================================================================
+// Tmux Auto Mode Lock Lifecycle Tests
+// ============================================================================
+
+// Simulates the tmux auto mode cycle where the daemon exits without claiming
+// a task (e.g. no plannable tasks found). The lock file should remain on disk
+// with an empty TaskID so the parent correctly detects no progress.
+func TestTmuxCycle_DaemonExitsWithoutClaimingTask(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Parent removes any old lock (start of cycle)
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	_ = os.Remove(lockPath)
+
+	// Daemon acquires lock (simulating daemon start)
+	if err := AcquireLock(tmpDir, "plan", "falcon"); err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+
+	// Daemon exits WITHOUT calling loom claim — TaskID stays empty.
+	// In the fix, daemon does NOT call ReleaseLock (no defer).
+	// Lock file remains on disk.
+
+	// Parent checks if task was claimed
+	if agentClaimedTask(tmpDir) {
+		t.Error("agentClaimedTask() = true, want false when daemon didn't claim a task")
+	}
+
+	// Verify lock file still exists on disk
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		t.Error("lock file should still exist after daemon exit (no defer ReleaseLock)")
+	}
+
+	// Cleanup
+	os.Remove(lockPath)
+}
+
+// Simulates the tmux auto mode cycle where the daemon claims a task.
+// The lock file should remain with a TaskID so the parent detects progress.
+func TestTmuxCycle_DaemonClaimsTask(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Parent removes any old lock (start of cycle)
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	_ = os.Remove(lockPath)
+
+	// Daemon acquires lock
+	if err := AcquireLock(tmpDir, "plan", "falcon"); err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+
+	// Daemon (Claude) claims a task via loom claim
+	if err := UpdateLockTask(tmpDir, "bd-abc", "Implement feature"); err != nil {
+		t.Fatalf("UpdateLockTask failed: %v", err)
+	}
+
+	// Daemon exits — lock stays (no defer ReleaseLock)
+
+	// Parent checks if task was claimed
+	if !agentClaimedTask(tmpDir) {
+		t.Error("agentClaimedTask() = false, want true when daemon claimed a task")
+	}
+
+	// Parent removes lock before next cycle
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatalf("Failed to remove lock before next cycle: %v", err)
+	}
+
+	// Next daemon can acquire a fresh lock
+	if err := AcquireLock(tmpDir, "plan", "falcon"); err != nil {
+		t.Fatalf("AcquireLock failed on next cycle: %v", err)
+	}
+
+	// Fresh lock has empty TaskID
+	if agentClaimedTask(tmpDir) {
+		t.Error("Fresh lock should have empty TaskID")
+	}
+
+	// Cleanup
+	os.Remove(lockPath)
+}
+
+// Simulates consecutive no-progress cycles in tmux auto mode.
+// After 3 cycles where the daemon doesn't claim a task, auto mode should exit.
+func TestTmuxCycle_ConsecutiveNoProgress(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	consecutiveNoProgress := 0
+
+	for cycle := 0; cycle < 3; cycle++ {
+		// Parent removes old lock
+		_ = os.Remove(lockPath)
+
+		// Daemon acquires lock
+		if err := AcquireLock(tmpDir, "plan", "falcon"); err != nil {
+			t.Fatalf("Cycle %d: AcquireLock failed: %v", cycle, err)
+		}
+
+		// Daemon exits without claiming (no loom claim called)
+		// Lock stays on disk (no defer ReleaseLock)
+
+		// Parent checks progress
+		if agentClaimedTask(tmpDir) {
+			t.Errorf("Cycle %d: agentClaimedTask() = true, want false", cycle)
+		} else {
+			consecutiveNoProgress++
+		}
+	}
+
+	if consecutiveNoProgress != 3 {
+		t.Errorf("Expected 3 consecutive no-progress, got %d", consecutiveNoProgress)
+	}
+
+	// Cleanup
+	os.Remove(lockPath)
+}
+
+// Verifies that if the daemon crashes before even creating the lock file,
+// the parent correctly detects no progress (returns false, not true).
+func TestTmuxCycle_DaemonCrashesBeforeAcquiringLock(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Parent removes old lock
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	_ = os.Remove(lockPath)
+
+	// Daemon crashes before AcquireLock — no lock file created
+
+	// Parent checks progress — lock file doesn't exist
+	if agentClaimedTask(tmpDir) {
+		t.Error("agentClaimedTask() = true, want false when daemon crashed before acquiring lock")
 	}
 }
 

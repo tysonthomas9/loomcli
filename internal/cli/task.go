@@ -81,7 +81,9 @@ func runTask(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		defer func() { _ = ReleaseLock(worktreePath) }()
+		// Lock intentionally NOT released here. Parent (RunAutoModeTmux)
+		// reads the lock after daemon exit to detect task claims, then
+		// removes it before the next cycle.
 
 		if err := UpdateLockState(worktreePath, StateActive); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
@@ -91,7 +93,7 @@ func runTask(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		// Note: No StateIdle here - daemon exits immediately, lock released by defer
+		// Note: No StateIdle here - daemon exits immediately, lock left for parent to read
 		return
 	}
 

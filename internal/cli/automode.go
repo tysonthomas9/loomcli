@@ -178,8 +178,9 @@ func HasAvailableImplementationTasks() (bool, error) {
 func agentClaimedTask(worktreePath string) bool {
 	info, err := ReadLockFile(worktreePath)
 	if err != nil {
-		// Can't read lock file — assume work was done to avoid false exits
-		return true
+		// Can't read lock file — daemon never ran or failed before writing lock.
+		// No task was claimed (no progress).
+		return false
 	}
 	return info.TaskID != ""
 }
@@ -497,10 +498,11 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		// Reset idle timer when tasks are available
 		idleStart = time.Now()
 
-		// Clear TaskID before new session so we can detect if the agent claims one
-		if clearErr := ClearLockTaskID(opts.WorktreePath); clearErr != nil {
-			fmt.Printf("[auto] Warning: failed to clear task ID: %v\n", clearErr)
-		}
+		// Remove leftover lock from previous cycle. The daemon intentionally
+		// does not delete its lock on exit so agentClaimedTask() can read it.
+		// We clean up here before the next daemon acquires a fresh lock.
+		lockPath := filepath.Join(opts.WorktreePath, LockFileName)
+		_ = os.Remove(lockPath)
 
 		fmt.Printf("═══════════════════════════════════════════════════════════════\n")
 		fmt.Printf("[Session] Starting...\n")
