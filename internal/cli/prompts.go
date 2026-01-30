@@ -294,6 +294,15 @@ Show the user a quick status summary by running these commands:
 1. Run 'bd stats' for overall counts (open, closed, blocked)
 2. Run 'bd list --status=open --json' and count tasks with "[Need Review]" in the title
 3. Run 'bd blocked' to see blocked items count
+4. Check epic status:
+   - Run 'bd list --status=open --type=epic' to find open epics
+   - For each epic, run 'bd show <id> --children' to get child task status
+   - Categorize each epic:
+     - COMPLETE (✓): All children are closed — ready to close
+     - IN PROGRESS (◐): Some children open, some closed
+     - NOT STARTED (○): No children, or all children still open
+     - STUCK (!): All remaining open children are blocked
+   - Count how many children are done vs total for each epic
 
 Then present a summary like:
 ` + "```" + `
@@ -302,11 +311,27 @@ Project Status:
 - Z blocked tasks
 - W in progress
 
+Epics:
+  ✓ bd-93gz: Web UI API hardening (8/8 done) — ready to close
+  ◐ bd-spq5: Kanban Board UI Redesign (0/7 done, 5 ready)
+  ○ bd-ng4: Phase 8: Shared & Polish (0 children)
+  ! bd-zyl8: Column Redesign (3 remaining, all blocked)
+
+N epics ready to close. Close them? [Y/n/select]
+` + "```" + `
+
+If the user approves closing completed epics:
+- Run 'bd close <id1> <id2> ...' to batch close them
+- Run 'bd sync' to save
+If the user declines, skip and continue to the main menu.
+
+` + "```" + `
 What would you like to do?
 1. Review plans ([Need Review] tasks)
 2. Create new tickets
 3. Triage backlog
 4. Check status / ask questions
+5. Epic status
 ` + "```" + `
 
 ### Available Actions
@@ -349,6 +374,24 @@ When user selects this:
 - Show agent workload: 'bd list --status=in_progress'
 - Show recent activity: 'bd list --limit=10'
 - Answer general questions about the backlog
+
+**5. Epic Status** - View and manage epics
+When user selects this:
+- Run 'bd list --status=open --type=epic' to find all open epics
+- For each epic, run 'bd show <id> --children' to get child task breakdown
+- Show detailed status for each epic:
+` + "```" + `
+  bd-spq5: Kanban Board UI Redesign (2/7 done)
+    Ready:    bd-ago2 (Move sidebar), bd-e4ex (Remove Show Blocked)
+    Blocked:  bd-vvhr (AgentCard redesign) — blocked by bd-ago2
+    In Progress: bd-u8c4 (IssueCard design) @falcon
+    Done:     bd-4enb (Column headers), bd-k6lj (Talk to Lead)
+` + "```" + `
+- Offer actions:
+  - Close completed epics (all children closed): 'bd close <id1> <id2> ...'
+  - Drill into a specific epic: 'bd show <id> --children'
+  - Close an epic manually (won't do / superseded): 'bd close <id> --reason="<reason>"'
+- Run 'bd sync' after any changes
 
 ### Interaction Style
 - Always ask before taking actions that modify data
