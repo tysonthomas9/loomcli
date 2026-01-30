@@ -884,6 +884,102 @@ func TestStreamUntilExit_HandlesNonExistentFile(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// agentClaimedTask Tests
+// ============================================================================
+
+func TestAgentClaimedTask_WithTaskID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Set a task
+	err = UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	if err != nil {
+		t.Fatalf("UpdateLockTask failed: %v", err)
+	}
+
+	if !agentClaimedTask(tmpDir) {
+		t.Error("agentClaimedTask() = false, want true when TaskID is set")
+	}
+}
+
+func TestAgentClaimedTask_WithoutTaskID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// No task set — TaskID is empty
+	if agentClaimedTask(tmpDir) {
+		t.Error("agentClaimedTask() = true, want false when TaskID is empty")
+	}
+}
+
+func TestAgentClaimedTask_NoLockFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// No lock file — should return true (conservative: assume work done)
+	if !agentClaimedTask(tmpDir) {
+		t.Error("agentClaimedTask() = false, want true when lock file doesn't exist (conservative)")
+	}
+}
+
+func TestAgentClaimedTask_AfterClear(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Set task, then clear it
+	UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	ClearLockTaskID(tmpDir)
+
+	if agentClaimedTask(tmpDir) {
+		t.Error("agentClaimedTask() = true, want false after ClearLockTaskID")
+	}
+}
+
+func TestAgentClaimedTask_ClearThenReclaim(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Simulate auto-mode cycle: clear → agent claims new task
+	UpdateLockTask(tmpDir, "bd-old", "Old Task")
+	ClearLockTaskID(tmpDir)
+
+	if agentClaimedTask(tmpDir) {
+		t.Error("after clear: agentClaimedTask() should be false")
+	}
+
+	UpdateLockTask(tmpDir, "bd-new", "New Task")
+
+	if !agentClaimedTask(tmpDir) {
+		t.Error("after reclaim: agentClaimedTask() should be true")
+	}
+
+	// Verify it's the new task
+	info, _ := ReadLockFile(tmpDir)
+	if info.TaskID != "bd-new" {
+		t.Errorf("Expected TaskID 'bd-new', got '%s'", info.TaskID)
+	}
+}
+
 func TestStreamRemainingLogContent_HandlesLogTruncation(t *testing.T) {
 	// Create temp log file with initial content
 	tmpFile, err := os.CreateTemp("", "loom-test-*.log")

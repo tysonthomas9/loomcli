@@ -393,6 +393,133 @@ func TestGetLockStatus_IdleOverridesTaskID(t *testing.T) {
 }
 
 // ============================================================================
+// ClearLockTaskID Tests
+// ============================================================================
+
+func TestClearLockTaskID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Set a task first
+	err = UpdateLockTask(tmpDir, "bd-123", "Test Task")
+	if err != nil {
+		t.Fatalf("UpdateLockTask failed: %v", err)
+	}
+
+	// Verify task is set
+	info, _ := ReadLockFile(tmpDir)
+	if info.TaskID != "bd-123" {
+		t.Fatalf("Expected TaskID 'bd-123', got '%s'", info.TaskID)
+	}
+
+	// Clear task ID
+	err = ClearLockTaskID(tmpDir)
+	if err != nil {
+		t.Fatalf("ClearLockTaskID failed: %v", err)
+	}
+
+	// Verify cleared
+	info, _ = ReadLockFile(tmpDir)
+	if info.TaskID != "" {
+		t.Errorf("Expected empty TaskID after clear, got '%s'", info.TaskID)
+	}
+	if info.TaskTitle != "" {
+		t.Errorf("Expected empty TaskTitle after clear, got '%s'", info.TaskTitle)
+	}
+	if !info.TaskStartedAt.IsZero() {
+		t.Errorf("Expected zero TaskStartedAt after clear, got '%v'", info.TaskStartedAt)
+	}
+
+	// Other fields should be preserved
+	if info.PID != os.Getpid() {
+		t.Errorf("PID should be preserved, got %d", info.PID)
+	}
+	if info.Command != "plan" {
+		t.Errorf("Command should be preserved, got '%s'", info.Command)
+	}
+	if info.AgentName != "falcon" {
+		t.Errorf("AgentName should be preserved, got '%s'", info.AgentName)
+	}
+}
+
+func TestClearLockTaskIDNoLock(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := ClearLockTaskID(tmpDir)
+	if err == nil {
+		t.Error("Expected error when clearing non-existent lock")
+	}
+}
+
+func TestClearLockTaskIDDifferentPID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create lock file owned by a different process
+	otherLock := `{"pid":999999999,"command":"plan","agent_name":"falcon","started_at":"2024-01-01T00:00:00Z","task_id":"bd-123","task_title":"Test"}`
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	if err := os.WriteFile(lockPath, []byte(otherLock), 0644); err != nil {
+		t.Fatalf("failed to write lock: %v", err)
+	}
+
+	err := ClearLockTaskID(tmpDir)
+	if err == nil {
+		t.Error("Expected error when clearing lock owned by different PID")
+	}
+	if !strings.Contains(err.Error(), "different process") {
+		t.Errorf("Expected 'different process' in error, got: %v", err)
+	}
+
+	// Verify task ID was NOT cleared
+	info, _ := ReadLockFile(tmpDir)
+	if info.TaskID != "bd-123" {
+		t.Errorf("TaskID should not be cleared when PID doesn't match, got '%s'", info.TaskID)
+	}
+}
+
+func TestClearLockTaskIDInvalidJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	if err := os.WriteFile(lockPath, []byte(`{invalid json}`), 0644); err != nil {
+		t.Fatalf("failed to write lock: %v", err)
+	}
+
+	err := ClearLockTaskID(tmpDir)
+	if err == nil {
+		t.Error("Expected error for invalid JSON lock file")
+	}
+	if !strings.Contains(err.Error(), "invalid lock file") {
+		t.Errorf("Expected 'invalid lock file' in error, got: %v", err)
+	}
+}
+
+func TestClearLockTaskIDAlreadyEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Clear when already empty — should succeed without error
+	err = ClearLockTaskID(tmpDir)
+	if err != nil {
+		t.Fatalf("ClearLockTaskID should succeed when TaskID is already empty: %v", err)
+	}
+
+	info, _ := ReadLockFile(tmpDir)
+	if info.TaskID != "" {
+		t.Errorf("Expected empty TaskID, got '%s'", info.TaskID)
+	}
+}
+
+// ============================================================================
 // ReadLockFile Tests (NEW - no coverage existed before)
 // ============================================================================
 

@@ -26,12 +26,13 @@ type AutoModeOptions struct {
 
 // AutoModeState tracks the current state of auto mode execution
 type AutoModeState struct {
-	TasksCompleted    int
-	ConsecutiveErrors int
-	LastTaskTime      time.Time
-	IdleStartTime     time.Time
-	ShouldExit        bool
-	ExitReason        string
+	TasksCompleted        int
+	ConsecutiveErrors     int
+	ConsecutiveNoProgress int // sessions that completed without claiming a task
+	LastTaskTime          time.Time
+	IdleStartTime         time.Time
+	ShouldExit            bool
+	ExitReason            string
 }
 
 // useFixedPolling allows reverting to fixed 200ms polling via environment variable
@@ -172,6 +173,17 @@ func HasAvailableImplementationTasks() (bool, error) {
 	return false, nil
 }
 
+// agentClaimedTask checks the lock file to determine if the agent claimed a task
+// during its session. Returns true if TaskID is non-empty.
+func agentClaimedTask(worktreePath string) bool {
+	info, err := ReadLockFile(worktreePath)
+	if err != nil {
+		// Can't read lock file — assume work was done to avoid false exits
+		return true
+	}
+	return info.TaskID != ""
+}
+
 // RunAutoModeLoop runs the auto mode loop for either plan or task agents
 func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	state := &AutoModeState{
@@ -268,6 +280,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			fmt.Printf("[auto] Warning: failed to update state: %v\n", err)
 		}
 
+		// Clear TaskID before new session so we can detect if the agent claims one
+		if clearErr := ClearLockTaskID(opts.WorktreePath); clearErr != nil {
+			fmt.Printf("[auto] Warning: failed to clear task ID: %v\n", clearErr)
+		}
+
 		// Invoke Claude to work on one task
 		fmt.Println("")
 		fmt.Printf("[auto] === Starting task %d ===\n", state.TasksCompleted+1)
@@ -302,20 +319,48 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			continue // Don't increment TasksCompleted
 		}
 
-		// Success - reset error counter and count the task
+		// Success - reset error counter, check if real work happened
 		state.ConsecutiveErrors = 0
-		state.TasksCompleted++
-		state.LastTaskTime = time.Now()
 
-		fmt.Println("")
-		fmt.Printf("[auto] Task completed. Total: %d\n", state.TasksCompleted)
-		fmt.Println("")
+		if agentClaimedTask(opts.WorktreePath) {
+			state.TasksCompleted++
+			state.ConsecutiveNoProgress = 0
+			state.LastTaskTime = time.Now()
 
-		// Brief pause before checking for next task
-		if interruptibleSleep(2*time.Second, shutdown) {
-			state.ShouldExit = true
-			state.ExitReason = "shutdown signal received"
-			break
+			fmt.Println("")
+			fmt.Printf("[auto] Task completed. Total: %d\n", state.TasksCompleted)
+			fmt.Println("")
+
+			// Brief pause before checking for next task
+			if interruptibleSleep(2*time.Second, shutdown) {
+				state.ShouldExit = true
+				state.ExitReason = "shutdown signal received"
+				break
+			}
+		} else {
+			state.ConsecutiveNoProgress++
+			fmt.Println("")
+			fmt.Printf("[auto] Agent exited without claiming a task (%d consecutive)\n", state.ConsecutiveNoProgress)
+
+			if state.ConsecutiveNoProgress >= 3 {
+				state.ShouldExit = true
+				state.ExitReason = fmt.Sprintf("no tasks claimed in %d consecutive sessions", state.ConsecutiveNoProgress)
+				break
+			}
+
+			// Exponential backoff: 30s, 60s, 120s (capped)
+			backoff := time.Duration(30<<(state.ConsecutiveNoProgress-1)) * time.Second
+			if backoff > 120*time.Second {
+				backoff = 120 * time.Second
+			}
+			fmt.Printf("[auto] Backing off for %s before retry...\n", backoff)
+			fmt.Println("")
+			if interruptibleSleep(backoff, shutdown) {
+				state.ShouldExit = true
+				state.ExitReason = "shutdown signal received"
+				break
+			}
+			continue
 		}
 	}
 
@@ -328,6 +373,9 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	fmt.Printf("Tasks completed: %d\n", state.TasksCompleted)
 	if state.ConsecutiveErrors > 0 {
 		fmt.Printf("Errors at exit: %d consecutive\n", state.ConsecutiveErrors)
+	}
+	if state.ConsecutiveNoProgress > 0 {
+		fmt.Printf("No-progress sessions at exit: %d consecutive\n", state.ConsecutiveNoProgress)
 	}
 	fmt.Println("=========================================")
 }
@@ -403,6 +451,7 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	go listenForAttachKey(attachChan, shutdown)
 
 	taskCount := 0
+	consecutiveNoProgress := 0
 	idleStart := time.Now()
 	for {
 		select {
@@ -448,14 +497,17 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		// Reset idle timer when tasks are available
 		idleStart = time.Now()
 
-		taskCount++
+		// Clear TaskID before new session so we can detect if the agent claims one
+		if clearErr := ClearLockTaskID(opts.WorktreePath); clearErr != nil {
+			fmt.Printf("[auto] Warning: failed to clear task ID: %v\n", clearErr)
+		}
+
 		fmt.Printf("═══════════════════════════════════════════════════════════════\n")
-		fmt.Printf("[Session #%d] Starting...\n", taskCount)
+		fmt.Printf("[Session] Starting...\n")
 		fmt.Printf("═══════════════════════════════════════════════════════════════\n")
 
 		if err := startTmuxSession(sessionName, opts, logFile); err != nil {
 			fmt.Printf("[auto] Failed to start session: %v\n", err)
-			taskCount--
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -471,7 +523,32 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		default:
 		}
 
-		fmt.Printf("[Session #%d] Completed, cycling...\n", taskCount)
+		// Check if agent actually claimed a task
+		if agentClaimedTask(opts.WorktreePath) {
+			taskCount++
+			consecutiveNoProgress = 0
+			fmt.Printf("[Session #%d] Completed, cycling...\n", taskCount)
+		} else {
+			consecutiveNoProgress++
+			fmt.Printf("[auto] Agent exited without claiming a task (%d consecutive)\n", consecutiveNoProgress)
+			if consecutiveNoProgress >= 3 {
+				fmt.Printf("[auto] No tasks claimed in %d consecutive sessions, exiting\n", consecutiveNoProgress)
+				cleanupTmuxSession(sessionName)
+				printTmuxSummary(taskCount)
+				return
+			}
+			// Exponential backoff: 30s, 60s, 120s (capped)
+			backoff := time.Duration(30<<(consecutiveNoProgress-1)) * time.Second
+			if backoff > 120*time.Second {
+				backoff = 120 * time.Second
+			}
+			fmt.Printf("[auto] Backing off for %s before retry...\n", backoff)
+			if interruptibleSleep(backoff, shutdown) {
+				cleanupTmuxSession(sessionName)
+				printTmuxSummary(taskCount)
+				return
+			}
+		}
 		time.Sleep(2 * time.Second)
 	}
 }

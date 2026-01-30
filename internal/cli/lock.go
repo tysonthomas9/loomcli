@@ -209,6 +209,39 @@ func UpdateLockState(worktreePath, state string) error {
 	return os.WriteFile(lockPath, data, 0600)
 }
 
+// ClearLockTaskID resets the TaskID, TaskTitle, and TaskStartedAt in the lock file.
+// Called before each agent session in auto mode so we can detect whether the
+// new session claims a task (used for no-progress detection).
+func ClearLockTaskID(worktreePath string) error {
+	lockPath := filepath.Join(worktreePath, LockFileName)
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return fmt.Errorf("no active lock to update: %w", err)
+	}
+
+	var info LockInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return fmt.Errorf("invalid lock file: %w", err)
+	}
+
+	// Validate PID matches (prevent clearing another agent's lock)
+	if info.PID != os.Getpid() {
+		return fmt.Errorf("lock belongs to different process (PID %d)", info.PID)
+	}
+
+	info.TaskID = ""
+	info.TaskTitle = ""
+	info.TaskStartedAt = time.Time{}
+
+	data, err = json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal lock info: %w", err)
+	}
+
+	return os.WriteFile(lockPath, data, 0600)
+}
+
 // IsProcessRunning checks if a process with the given PID is still running
 func IsProcessRunning(pid int) bool {
 	process, err := os.FindProcess(pid)
