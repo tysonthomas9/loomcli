@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -173,6 +174,213 @@ func TestResolveWorktreePathRelative(t *testing.T) {
 	_, err = ResolveWorktreePath("nonexistent")
 	if err == nil {
 		t.Error("Expected error for non-existent worktree")
+	}
+}
+
+// setupTestRepo creates a bare origin repo and a clone with the given branch topology.
+// It returns the clone path. The caller can use this path for WorktreeInfo entries.
+// branchTopology maps branch names to their parent branch. All branches are pushed to origin.
+// Commits are created in order so that the topology is correct.
+func setupTestRepo(t *testing.T, branches []struct{ name, parent string }) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	originPath := filepath.Join(tmpDir, "origin.git")
+	clonePath := filepath.Join(tmpDir, "clone")
+
+	// Create bare origin repo with main as default branch
+	_, err := RunGitCommand(tmpDir, "init", "--bare", "--initial-branch=main", originPath)
+	if err != nil {
+		t.Fatalf("failed to init bare repo: %v", err)
+	}
+
+	// Clone it
+	_, err = RunGitCommand(tmpDir, "clone", originPath, clonePath)
+	if err != nil {
+		t.Fatalf("failed to clone: %v", err)
+	}
+
+	// Configure git user for commits
+	RunGitCommand(clonePath, "config", "user.email", "test@test.com")
+	RunGitCommand(clonePath, "config", "user.name", "Test")
+
+	// Ensure we are on main branch
+	RunGitCommand(clonePath, "checkout", "-b", "main")
+
+	// Create initial commit on main
+	initialFile := filepath.Join(clonePath, "init.txt")
+	os.WriteFile(initialFile, []byte("init"), 0644)
+	RunGitCommand(clonePath, "add", "init.txt")
+	RunGitCommand(clonePath, "commit", "-m", "initial commit")
+	RunGitCommand(clonePath, "push", "-u", "origin", "main")
+
+	// Create each branch off its parent with a unique commit
+	for i, b := range branches {
+		// Checkout parent
+		_, err := RunGitCommand(clonePath, "checkout", b.parent)
+		if err != nil {
+			t.Fatalf("failed to checkout parent %s: %v", b.parent, err)
+		}
+
+		// Create new branch
+		_, err = RunGitCommand(clonePath, "checkout", "-b", b.name)
+		if err != nil {
+			t.Fatalf("failed to create branch %s: %v", b.name, err)
+		}
+
+		// Create a unique commit
+		fname := filepath.Join(clonePath, fmt.Sprintf("file-%d.txt", i))
+		os.WriteFile(fname, []byte(b.name), 0644)
+		RunGitCommand(clonePath, "add", ".")
+		RunGitCommand(clonePath, "commit", "-m", fmt.Sprintf("commit on %s", b.name))
+
+		// Push to origin
+		RunGitCommand(clonePath, "push", "origin", b.name)
+	}
+
+	return clonePath
+}
+
+func TestDetectIntegrationBranch_TooFewWorktrees(t *testing.T) {
+	// Zero worktrees
+	result := DetectIntegrationBranch(nil)
+	if result != "" {
+		t.Errorf("expected empty string for nil worktrees, got %q", result)
+	}
+
+	result = DetectIntegrationBranch([]WorktreeInfo{})
+	if result != "" {
+		t.Errorf("expected empty string for empty worktrees, got %q", result)
+	}
+
+	// One worktree
+	result = DetectIntegrationBranch([]WorktreeInfo{
+		{Name: "falcon", Path: "/tmp/fake", Branch: "falcon"},
+	})
+	if result != "" {
+		t.Errorf("expected empty string for single worktree, got %q", result)
+	}
+}
+
+func TestDetectIntegrationBranch_CommonParent(t *testing.T) {
+	// Topology:
+	//   main -> feature/web-ui -> falcon
+	//                          -> nova
+	// Expected: DetectIntegrationBranch should return "feature/web-ui"
+	clonePath := setupTestRepo(t, []struct{ name, parent string }{
+		{"feature/web-ui", "main"},
+		{"falcon", "feature/web-ui"},
+		{"nova", "feature/web-ui"},
+	})
+
+	worktrees := []WorktreeInfo{
+		{Name: "falcon", Path: clonePath, Branch: "falcon"},
+		{Name: "nova", Path: clonePath, Branch: "nova"},
+	}
+
+	result := DetectIntegrationBranch(worktrees)
+	if result != "feature/web-ui" {
+		t.Errorf("expected 'feature/web-ui', got %q", result)
+	}
+}
+
+func TestDetectIntegrationBranch_OnlyMain(t *testing.T) {
+	// Topology:
+	//   main -> falcon
+	//        -> nova
+	// No intermediate branch exists, so result should be ""
+	clonePath := setupTestRepo(t, []struct{ name, parent string }{
+		{"falcon", "main"},
+		{"nova", "main"},
+	})
+
+	worktrees := []WorktreeInfo{
+		{Name: "falcon", Path: clonePath, Branch: "falcon"},
+		{Name: "nova", Path: clonePath, Branch: "nova"},
+	}
+
+	result := DetectIntegrationBranch(worktrees)
+	if result != "" {
+		t.Errorf("expected empty string when branches are directly off main, got %q", result)
+	}
+}
+
+func TestDetectIntegrationBranch_DetectedFartherThanMain(t *testing.T) {
+	// Topology:
+	//   main -> feature/old (with extra commits after branching falcon/nova)
+	//        -> falcon (directly off main)
+	//        -> nova (directly off main)
+	// feature/old is an ancestor of falcon and nova only if we set it up that way.
+	// Actually, we need feature/old to be an ancestor of both falcon and nova,
+	// but farther away than main. The trick: branch feature/old from a point
+	// BEFORE main's tip, then branch falcon and nova from main (after main has
+	// additional commits). That way feature/old is NOT an ancestor of falcon/nova.
+	//
+	// Simpler approach: create a topology where an intermediate branch exists
+	// but is at the same distance as main (not closer).
+	//
+	// Topology:
+	//   initial commit (A)
+	//     -> feature/base (B) [branch from A, with 1 commit]
+	//       -> main gets commit (C) [merge or advance main past A]
+	//
+	// Actually the simplest: create feature/base off root, then main gets more
+	// commits, then falcon and nova branch off feature/base. But feature/base
+	// must be ancestor of falcon/nova AND main must also be ancestor.
+	// For main to be ancestor too, we need main to be at or before feature/base.
+	// But then main would be farther, not closer.
+	//
+	// Let's think differently: we want bestMaxDist >= mainMaxDist.
+	// That means feature/base is at least as far from the worktrees as main is.
+	// Topology:
+	//   A (main, feature/base) -> B (falcon, nova each have 1 commit)
+	// Both main and feature/base point to the same commit A, so distances are equal.
+	// bestMaxDist == mainMaxDist, so the condition bestMaxDist >= mainMaxDist is true -> return "".
+
+	tmpDir := t.TempDir()
+	originPath := filepath.Join(tmpDir, "origin.git")
+	clonePath := filepath.Join(tmpDir, "clone")
+
+	RunGitCommand(tmpDir, "init", "--bare", "--initial-branch=main", originPath)
+	RunGitCommand(tmpDir, "clone", originPath, clonePath)
+	RunGitCommand(clonePath, "config", "user.email", "test@test.com")
+	RunGitCommand(clonePath, "config", "user.name", "Test")
+
+	// Initial commit on main
+	RunGitCommand(clonePath, "checkout", "-b", "main")
+	os.WriteFile(filepath.Join(clonePath, "init.txt"), []byte("init"), 0644)
+	RunGitCommand(clonePath, "add", "init.txt")
+	RunGitCommand(clonePath, "commit", "-m", "initial")
+	RunGitCommand(clonePath, "push", "-u", "origin", "main")
+
+	// Create feature/base at same point as main (same commit)
+	RunGitCommand(clonePath, "checkout", "-b", "feature/base")
+	RunGitCommand(clonePath, "push", "origin", "feature/base")
+
+	// Create falcon off main with 1 commit
+	RunGitCommand(clonePath, "checkout", "main")
+	RunGitCommand(clonePath, "checkout", "-b", "falcon")
+	os.WriteFile(filepath.Join(clonePath, "falcon.txt"), []byte("falcon"), 0644)
+	RunGitCommand(clonePath, "add", ".")
+	RunGitCommand(clonePath, "commit", "-m", "falcon commit")
+	RunGitCommand(clonePath, "push", "origin", "falcon")
+
+	// Create nova off main with 1 commit
+	RunGitCommand(clonePath, "checkout", "main")
+	RunGitCommand(clonePath, "checkout", "-b", "nova")
+	os.WriteFile(filepath.Join(clonePath, "nova.txt"), []byte("nova"), 0644)
+	RunGitCommand(clonePath, "add", ".")
+	RunGitCommand(clonePath, "commit", "-m", "nova commit")
+	RunGitCommand(clonePath, "push", "origin", "nova")
+
+	worktrees := []WorktreeInfo{
+		{Name: "falcon", Path: clonePath, Branch: "falcon"},
+		{Name: "nova", Path: clonePath, Branch: "nova"},
+	}
+
+	result := DetectIntegrationBranch(worktrees)
+	if result != "" {
+		t.Errorf("expected empty string when candidate is not closer than main, got %q", result)
 	}
 }
 

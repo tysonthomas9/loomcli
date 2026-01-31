@@ -207,6 +207,9 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 	var agents []AgentStatus
 	taskIDToAgents := make(map[string][]string) // Track which agents claim which tasks
 
+	// Compute default branch once per tick using already-discovered worktrees
+	defaultBranch := GetDefaultBranchForWorktrees(worktrees)
+
 	for _, wt := range worktrees {
 		agent := AgentStatus{
 			Name:   wt.Name,
@@ -272,7 +275,7 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 		}
 
 		// Check ahead/behind integration branch
-		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path)
+		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, defaultBranch)
 
 		agents = append(agents, agent)
 	}
@@ -280,10 +283,10 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 	return agents, taskIDToAgents
 }
 
-func getWorktreeGitSyncStatus(path string) (ahead, behind int) {
+func getWorktreeGitSyncStatus(path, defaultBranch string) (ahead, behind int) {
 	branch := monitorBranch
 	if branch == "" {
-		branch = GetDefaultBranch()
+		branch = defaultBranch
 	}
 
 	// Count commits ahead/behind integration branch

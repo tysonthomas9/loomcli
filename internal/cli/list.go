@@ -73,7 +73,7 @@ func runList(cmd *cobra.Command, args []string) {
 
 	fmt.Println("")
 	fmt.Printf("Total: %d agents\n", len(worktrees))
-	fmt.Printf("Default branch: %s\n", GetDefaultBranch())
+	fmt.Printf("Default branch: %s\n", GetDefaultBranchForWorktrees(worktrees))
 }
 
 func getUncommittedChangesCount(path string) int {
