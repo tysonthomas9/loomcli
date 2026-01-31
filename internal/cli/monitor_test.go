@@ -1063,9 +1063,7 @@ func TestCollectTaskStatus(t *testing.T) {
 			oldExec := execCommand
 			defer func() { execCommand = oldExec }()
 
-			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
 				if len(args) > 0 && args[0] == "ready" {
 					return CommandResult{Stdout: tt.readyOutput}
 				}

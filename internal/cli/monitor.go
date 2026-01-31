@@ -3,8 +3,10 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -135,10 +137,28 @@ type BdStats struct {
 
 func runMonitor(cmd *cobra.Command, args []string) {
 	if !monitorNoWatch {
+		// Watch mode - show loading message while first data collection runs
+		fmt.Print("\033[?25l")  // Hide cursor
+		fmt.Print("\033[H")     // Move to home position
+		fmt.Print("\033[J")     // Clear screen
+		fmt.Print("Loading...")
+		fmt.Print("\033[?25h")  // Show cursor
+
+		// Collect first batch before entering loop (loading message visible during this)
+		data := collectMonitorData()
+		output := renderDashboard(data)
+		fullOutput := output + fmt.Sprintf("\nPress Ctrl+C to exit (refreshing every %ds)", monitorInterval)
+		fmt.Print("\033[?25l")
+		fmt.Print("\033[H")
+		fmt.Print(fullOutput)
+		fmt.Print("\033[J")
+		fmt.Print("\033[?25h")
+
 		// Watch mode - refresh in place without flickering
 		for {
-			data := collectMonitorData()
-			output := renderDashboard(data)
+			time.Sleep(time.Duration(monitorInterval) * time.Second)
+			data = collectMonitorData()
+			output = renderDashboard(data)
 
 			// Build complete output including status line (no trailing newline)
 			fullOutput := output + fmt.Sprintf("\nPress Ctrl+C to exit (refreshing every %ds)", monitorInterval)
@@ -152,8 +172,10 @@ func runMonitor(cmd *cobra.Command, args []string) {
 			time.Sleep(time.Duration(monitorInterval) * time.Second)
 		}
 	} else {
-		// One-shot mode
+		// One-shot mode - show loading message on stderr
+		fmt.Fprint(os.Stderr, "Loading...")
 		data := collectMonitorData()
+		fmt.Fprint(os.Stderr, "\r          \r") // Clear loading message
 		fmt.Print(renderDashboard(data))
 	}
 }
@@ -167,7 +189,26 @@ func CollectMonitorData() *MonitorData {
 func collectMonitorData() *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
-	// Collect tasks FIRST to get agent-task mapping
+	// Start stats and sync bd call in parallel with task collection
+	var (
+		stats      MonitorStats
+		syncBdInfo SyncInfo
+		wg         sync.WaitGroup
+	)
+
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		stats = collectStatistics()
+	}()
+
+	go func() {
+		defer wg.Done()
+		syncBdInfo = collectSyncBdStatus()
+	}()
+
+	// Collect tasks (internally parallel) to get agent-task mapping
 	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BlockedTasks, data.AgentTasks = collectTaskStatus()
 
 	// Collect agents, passing the task map for fallback lookup
@@ -182,11 +223,12 @@ func collectMonitorData() *MonitorData {
 		}
 	}
 
-	// Collect sync status
-	data.SyncStatus = collectSyncStatus(data.Agents)
+	// Wait for stats and sync bd call to finish
+	wg.Wait()
 
-	// Collect stats
-	data.Stats = collectStatistics()
+	// Combine sync bd result with agent data for git push/pull counts
+	data.SyncStatus = completeSyncStatus(syncBdInfo, data.Agents)
+	data.Stats = stats
 
 	return data
 }
@@ -312,11 +354,42 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 	var readyToImplementTasks []TaskInfo
 	var reviewTasks []TaskInfo
 	var inProgressTasks []TaskInfo
+	var blockedTasks []TaskInfo
 	agentTasks := make(map[string]TaskInfo)
 
-	// Get ready tasks, split by workflow stage
-	readyOutput, err := runBdCommand("ready", "--json", "--limit", "50")
-	if err == nil {
+	// Run all 4 bd commands in parallel
+	var (
+		readyOutput, inProgressOutput, needReviewOutput, blockedOutput string
+		readyErr, inProgressErr, needReviewErr, blockedErr             error
+		wg                                                              sync.WaitGroup
+	)
+
+	wg.Add(4)
+
+	go func() {
+		defer wg.Done()
+		readyOutput, readyErr = runBdCommand("ready", "--json", "--limit", "50")
+	}()
+
+	go func() {
+		defer wg.Done()
+		inProgressOutput, inProgressErr = runBdCommand("list", "--status=in_progress", "--json")
+	}()
+
+	go func() {
+		defer wg.Done()
+		needReviewOutput, needReviewErr = runBdCommand("list", "--status=open", "--json")
+	}()
+
+	go func() {
+		defer wg.Done()
+		blockedOutput, blockedErr = runBdCommand("blocked", "--json")
+	}()
+
+	wg.Wait()
+
+	// Process ready tasks, split by workflow stage
+	if readyErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(readyOutput), &issues) == nil {
 			needsPlanningCount := 0
@@ -363,9 +436,8 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 		}
 	}
 
-	// Get in_progress tasks (all) and build agent-task map
-	inProgressOutput, err := runBdCommand("list", "--status=in_progress", "--json")
-	if err == nil {
+	// Process in_progress tasks and build agent-task map
+	if inProgressErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(inProgressOutput), &issues) == nil {
 			summary.InProgress = len(issues)
@@ -385,12 +457,11 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 		}
 	}
 
-	// Get need review tasks (top 5)
+	// Process need review tasks (top 5)
 	// Note: Don't add to agentTasks - these tasks have status=open meaning
 	// the planning agent finished and released its lock. The assignee field
 	// still points to the planning agent but it's no longer running.
-	needReviewOutput, err := runBdCommand("list", "--status=open", "--json")
-	if err == nil {
+	if needReviewErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(needReviewOutput), &issues) == nil {
 			count := 0
@@ -410,10 +481,8 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 		}
 	}
 
-	// Get blocked tasks
-	var blockedTasks []TaskInfo
-	blockedOutput, err := runBdCommand("blocked", "--json")
-	if err == nil {
+	// Process blocked tasks
+	if blockedErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(blockedOutput), &issues) == nil {
 			summary.Backlog = len(issues)
@@ -435,10 +504,9 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, blockedTasks, agentTasks
 }
 
-func collectSyncStatus(agents []AgentStatus) SyncInfo {
+// collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).
+func collectSyncBdStatus() SyncInfo {
 	var info SyncInfo
-
-	// Check bd sync status
 	syncOutput, err := runBdCommand("sync", "--status")
 	if err == nil {
 		info.DBSynced = !strings.Contains(syncOutput, "error") && !strings.Contains(syncOutput, "failed")
@@ -446,8 +514,11 @@ func collectSyncStatus(agents []AgentStatus) SyncInfo {
 	} else {
 		info.DBError = "unable to check"
 	}
+	return info
+}
 
-	// Count git push/pull needs from agents
+// completeSyncStatus combines the bd sync result with agent data for git push/pull counts.
+func completeSyncStatus(info SyncInfo, agents []AgentStatus) SyncInfo {
 	for _, agent := range agents {
 		if agent.Ahead > 0 {
 			info.GitNeedsPush++
@@ -456,8 +527,13 @@ func collectSyncStatus(agents []AgentStatus) SyncInfo {
 			info.GitNeedsPull++
 		}
 	}
-
 	return info
+}
+
+// collectSyncStatus is the original sequential version, kept for external callers.
+func collectSyncStatus(agents []AgentStatus) SyncInfo {
+	info := collectSyncBdStatus()
+	return completeSyncStatus(info, agents)
 }
 
 func collectStatistics() MonitorStats {
