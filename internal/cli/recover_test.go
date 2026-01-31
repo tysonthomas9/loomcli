@@ -456,6 +456,78 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 	handleOrphanedTask("/test/worktree", "task-orphan3", false)
 }
 
+func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
+	// Dry run returns empty — no clean should be called
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:    "/test/worktree",
+		Name:   "git",
+		Args:   []string{"clean", "-fdn"},
+		Stdout: "",
+		Err:    nil,
+	}})
+	mock.Install()
+
+	// No output command mock needed — GitClean should not be called
+	cleanUntrackedFiles("/test/worktree", false)
+}
+
+func TestCleanUntrackedFiles_WithForce(t *testing.T) {
+	// Dry run returns files, force=true → clean is called without prompt
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:    "/test/worktree",
+		Name:   "git",
+		Args:   []string{"clean", "-fdn"},
+		Stdout: "Would remove test.txt\nWould remove screenshots/\n",
+		Err:    nil,
+	}})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
+		Dir:  "/test/worktree",
+		Args: []string{"clean", "-fd"},
+		Err:  nil,
+	}})
+	outputMock.Install()
+
+	cleanUntrackedFiles("/test/worktree", true)
+}
+
+func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
+	// Dry run fails — prints warning, no clean called
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:    "/test/worktree",
+		Name:   "git",
+		Args:   []string{"clean", "-fdn"},
+		Stdout: "",
+		Stderr: "error: not a git repo\n",
+		Err:    errors.New("exit status 128"),
+	}})
+	mock.Install()
+
+	cleanUntrackedFiles("/test/worktree", true)
+}
+
+func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
+	// Dry run succeeds but actual clean fails — prints warning
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:    "/test/worktree",
+		Name:   "git",
+		Args:   []string{"clean", "-fdn"},
+		Stdout: "Would remove test.txt\n",
+		Err:    nil,
+	}})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
+		Dir:  "/test/worktree",
+		Args: []string{"clean", "-fd"},
+		Err:  errors.New("Permission denied"),
+	}})
+	outputMock.Install()
+
+	cleanUntrackedFiles("/test/worktree", true)
+}
+
 func TestKillProcess_Success(t *testing.T) {
 	// Start a sleep process that we can kill
 	cmd := exec.Command("sleep", "60")

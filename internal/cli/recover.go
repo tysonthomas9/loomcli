@@ -29,13 +29,18 @@ This command will:
   2. If not running, clear the stale lock file
   3. Analyze the orphaned task using Claude to determine if it was completed
   4. Close completed tasks, or reset incomplete tasks to open status
+  5. Clean up untracked files left by the crashed agent (with confirmation)
 
 Use this when 'loom monitor' shows an agent in error state.
+
+Flags:
+  --force        Kill running agent and clean untracked files without prompting
+  --no-analyze   Skip Claude analysis, always reset task to open status
 
 Examples:
   loom recover falcon              # Recover with task analysis (default)
   loom recover ember --no-analyze  # Skip analysis, always reset to open
-  loom recover falcon --force      # Kill running agent and recover immediately`,
+  loom recover falcon --force      # Kill running agent and clean files without prompting`,
 	Args: cobra.ExactArgs(1),
 	Run:  runRecover,
 }
@@ -44,7 +49,7 @@ func init() {
 	recoverCmd.Flags().BoolVar(&recoverNoAnalyze, "no-analyze", false,
 		"Skip Claude analysis, always reset task to open status")
 	recoverCmd.Flags().BoolVar(&recoverForce, "force", false,
-		"Kill running agent process without prompting")
+		"Skip all confirmation prompts (kill process, clean files)")
 	rootCmd.AddCommand(recoverCmd)
 }
 
@@ -108,6 +113,9 @@ func runRecover(cmd *cobra.Command, args []string) {
 	if lockInfo.TaskID != "" {
 		handleOrphanedTask(worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
 	}
+
+	// 5. Clean up untracked files left by the crashed agent
+	cleanUntrackedFiles(worktreePath, recoverForce)
 
 	fmt.Println("")
 	fmt.Println("=========================================")
@@ -260,6 +268,37 @@ func killProcess(pid int) error {
 // confirmKill prompts the user to confirm killing the agent process
 func confirmKill(pid int) bool {
 	return confirmAction(fmt.Sprintf("Kill agent process (PID %d)?", pid))
+}
+
+// cleanUntrackedFiles checks for and optionally removes untracked files in the worktree
+func cleanUntrackedFiles(worktreePath string, force bool) {
+	output, err := GitCleanDryRun(worktreePath)
+	if err != nil {
+		fmt.Printf("Warning: could not check for untracked files: %v\n", err)
+		return
+	}
+
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return
+	}
+
+	fmt.Println("\nUntracked files found in worktree:")
+	fmt.Println(output)
+	fmt.Println("")
+
+	if !force {
+		if !confirmAction("Remove these untracked files?") {
+			fmt.Println("Untracked files left in place.")
+			return
+		}
+	}
+
+	if err := GitClean(worktreePath); err != nil {
+		fmt.Printf("Warning: failed to clean untracked files: %v\n", err)
+		return
+	}
+	fmt.Println("✓ Untracked files removed")
 }
 
 // forceReleaseLock removes the lock file regardless of which process owns it
