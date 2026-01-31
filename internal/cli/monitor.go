@@ -315,7 +315,7 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 	agentTasks := make(map[string]TaskInfo)
 
 	// Get ready tasks, split by workflow stage
-	readyOutput, err := runBdCommand("ready", "--json")
+	readyOutput, err := runBdCommand("ready", "--json", "--limit", "50")
 	if err == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(readyOutput), &issues) == nil {

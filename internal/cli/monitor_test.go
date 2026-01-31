@@ -1120,6 +1120,36 @@ func TestCollectTaskStatus(t *testing.T) {
 	}
 }
 
+func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
+	// This test specifically verifies that the "ready" command is called with --limit 50
+	oldExec := execCommand
+	defer func() { execCommand = oldExec }()
+
+	var capturedArgs []string
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		if len(args) > 0 && args[0] == "ready" {
+			capturedArgs = args
+			// Return minimal valid JSON
+			return CommandResult{Stdout: "[]"}
+		}
+		// Return empty for other commands (list, blocked, etc.)
+		return CommandResult{Stdout: "[]"}
+	}
+
+	collectTaskStatus()
+
+	// Verify the ready command was called with correct args
+	expectedArgs := []string{"ready", "--json", "--limit", "50"}
+	if len(capturedArgs) != len(expectedArgs) {
+		t.Errorf("ready command called with %d args, want %d. Got: %v", len(capturedArgs), len(expectedArgs), capturedArgs)
+	}
+	for i, expected := range expectedArgs {
+		if i >= len(capturedArgs) || capturedArgs[i] != expected {
+			t.Errorf("ready command arg[%d] = %q, want %q. Full args: %v", i, capturedArgs[i], expected, capturedArgs)
+		}
+	}
+}
+
 func TestCollectAgentStatus(t *testing.T) {
 	t.Run("no lock clean worktree shows ready", func(t *testing.T) {
 		// Save and restore working directory
