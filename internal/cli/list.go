@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -44,36 +45,91 @@ func runList(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Detect workspace mode: if any worktree has a non-empty Workspace, use grouped display
+	isWorkspaceMode := false
+	for _, wt := range worktrees {
+		if wt.Workspace != "" {
+			isWorkspaceMode = true
+			break
+		}
+	}
+
+	if isWorkspaceMode {
+		renderListWorkspace(worktrees)
+	} else {
+		renderListLegacy(worktrees)
+	}
+}
+
+func renderListLegacy(worktrees []WorktreeInfo) {
 	fmt.Println("Agents (Worktrees):")
 	fmt.Println("-------------------")
 
 	for _, wt := range worktrees {
-		// Check for running agent first (highest priority)
-		lockStatus := GetLockStatus(wt.Path)
-		if lockStatus != "" {
-			fmt.Printf("  %-12s  %-20s  ● %s\n", wt.Name, wt.Branch, lockStatus)
-			continue
-		}
-
-		// Check if working tree is clean
-		clean, _ := IsCleanWorkingTree(wt.Path)
-		status := "✓ ready"
-		if !clean {
-			status = "● dirty"
-		}
-
-		// Check for uncommitted changes count
-		changes := getUncommittedChangesCount(wt.Path)
-		if changes > 0 {
-			status = fmt.Sprintf("● %d changes", changes)
-		}
-
+		status := getWorktreeListStatus(wt)
 		fmt.Printf("  %-12s  %-20s  %s\n", wt.Name, wt.Branch, status)
 	}
 
 	fmt.Println("")
 	fmt.Printf("Total: %d agents\n", len(worktrees))
 	fmt.Printf("Default branch: %s\n", GetDefaultBranchForWorktrees(worktrees))
+}
+
+func renderListWorkspace(worktrees []WorktreeInfo) {
+	// Group worktrees by workspace
+	groups := make(map[string][]WorktreeInfo)
+	for _, wt := range worktrees {
+		ws := wt.Workspace
+		if ws == "" {
+			ws = "(legacy)"
+		}
+		groups[ws] = append(groups[ws], wt)
+	}
+
+	// Sort workspace names
+	var wsNames []string
+	for name := range groups {
+		wsNames = append(wsNames, name)
+	}
+	sort.Strings(wsNames)
+
+	fmt.Println("Agents by Workspace:")
+	fmt.Println("====================")
+
+	for _, ws := range wsNames {
+		fmt.Printf("\n[%s]\n", ws)
+		for _, wt := range groups[ws] {
+			status := getWorktreeListStatus(wt)
+			fmt.Printf("  %-12s  %-20s  %s\n", wt.Name, wt.Branch, status)
+		}
+	}
+
+	fmt.Println("")
+	fmt.Printf("Total: %d agents across %d workspaces\n", len(worktrees), len(wsNames))
+	fmt.Printf("Default branch: %s\n", GetDefaultBranchForWorktrees(worktrees))
+}
+
+func getWorktreeListStatus(wt WorktreeInfo) string {
+	// Check for running agent first (highest priority)
+	lockStatus := GetLockStatus(wt.Path)
+	if lockStatus != "" {
+		return fmt.Sprintf("● %s", lockStatus)
+	}
+
+	// Check if working tree is clean
+	clean, _ := IsCleanWorkingTree(wt.Path)
+	status := "✓ ready"
+	if !clean {
+		status = "● dirty"
+	}
+
+	// Check for uncommitted changes count
+	changes := getUncommittedChangesCount(wt.Path)
+	if changes > 0 {
+		status = fmt.Sprintf("● %d changes", changes)
+	}
+
+	return status
 }
 
 func getUncommittedChangesCount(path string) int {

@@ -2036,3 +2036,307 @@ func fixedTime() time.Time {
 }
 
 // Note: mustJSON helper is defined in automode_test.go and available here
+
+func TestRenderDashboardWorkspaceMode(t *testing.T) {
+	data := &MonitorData{
+		Timestamp: fixedTime(),
+		Agents: []AgentStatus{
+			{Name: "falcon", Branch: "falcon", Status: "working: T-1 (2m)", Ahead: 1, Behind: 0, Workspace: "my-workspace"},
+			{Name: "nova", Branch: "nova", Status: "ready", Ahead: 0, Behind: 0, Workspace: "my-workspace"},
+			{Name: "spark", Branch: "spark", Status: "3 changes", Ahead: 0, Behind: 1, Workspace: "other-ws"},
+		},
+		Tasks:          TaskSummary{},
+		AgentTasks:     make(map[string]TaskInfo),
+		TaskConflicts:  make(map[string][]string),
+		SyncStatus:     SyncInfo{DBSynced: true},
+		Stats:          MonitorStats{},
+	}
+
+	output := renderDashboard(data)
+
+	// Verify workspace sub-headers appear in AGENTS section
+	if !strings.Contains(output, "[my-workspace]") {
+		t.Errorf("expected '[my-workspace]' workspace header in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "[other-ws]") {
+		t.Errorf("expected '[other-ws]' workspace header in output, got:\n%s", output)
+	}
+
+	// Verify agent names appear
+	if !strings.Contains(output, "falcon") {
+		t.Error("expected agent 'falcon' in output")
+	}
+	if !strings.Contains(output, "nova") {
+		t.Error("expected agent 'nova' in output")
+	}
+	if !strings.Contains(output, "spark") {
+		t.Error("expected agent 'spark' in output")
+	}
+
+	// Verify it does NOT show "No agents found" since we have agents
+	if strings.Contains(output, "No agents found") {
+		t.Error("should not show 'No agents found' when agents exist")
+	}
+
+	// Verify standard sections still present
+	if !strings.Contains(output, "AGENTS") {
+		t.Error("expected AGENTS section header")
+	}
+	if !strings.Contains(output, "WORK QUEUE") {
+		t.Error("expected WORK QUEUE section header")
+	}
+}
+
+func TestRenderDashboardMixedWorkspace(t *testing.T) {
+	// Agents with empty Workspace get grouped under "(legacy)"
+	data := &MonitorData{
+		Timestamp: fixedTime(),
+		Agents: []AgentStatus{
+			{Name: "falcon", Branch: "falcon", Status: "ready", Workspace: "my-workspace"},
+			{Name: "nova", Branch: "nova", Status: "ready", Workspace: ""},
+			{Name: "spark", Branch: "spark", Status: "dirty", Workspace: ""},
+		},
+		Tasks:          TaskSummary{},
+		AgentTasks:     make(map[string]TaskInfo),
+		TaskConflicts:  make(map[string][]string),
+		SyncStatus:     SyncInfo{DBSynced: true},
+		Stats:          MonitorStats{},
+	}
+
+	output := renderDashboard(data)
+
+	// Workspace mode should be triggered because falcon has a workspace
+	if !strings.Contains(output, "[my-workspace]") {
+		t.Errorf("expected '[my-workspace]' workspace header, got:\n%s", output)
+	}
+
+	// Agents without workspace should be in "(legacy)" group
+	if !strings.Contains(output, "[(legacy)]") {
+		t.Errorf("expected '[(legacy)]' group for agents without workspace, got:\n%s", output)
+	}
+
+	// All agents should still be present
+	if !strings.Contains(output, "falcon") {
+		t.Error("expected 'falcon' in output")
+	}
+	if !strings.Contains(output, "nova") {
+		t.Error("expected 'nova' in output")
+	}
+	if !strings.Contains(output, "spark") {
+		t.Error("expected 'spark' in output")
+	}
+}
+
+func TestRenderDashboardLegacyModeNoWorkspace(t *testing.T) {
+	// When no agents have Workspace set, should NOT show workspace headers
+	data := &MonitorData{
+		Timestamp: fixedTime(),
+		Agents: []AgentStatus{
+			{Name: "falcon", Branch: "falcon", Status: "ready", Workspace: ""},
+			{Name: "nova", Branch: "nova", Status: "3 changes", Workspace: ""},
+		},
+		Tasks:          TaskSummary{},
+		AgentTasks:     make(map[string]TaskInfo),
+		TaskConflicts:  make(map[string][]string),
+		SyncStatus:     SyncInfo{DBSynced: true},
+		Stats:          MonitorStats{},
+	}
+
+	output := renderDashboard(data)
+
+	// Should NOT have workspace group headers
+	if strings.Contains(output, "[(legacy)]") {
+		t.Errorf("legacy mode should not show workspace group headers, got:\n%s", output)
+	}
+
+	// Agents should still render
+	if !strings.Contains(output, "falcon") {
+		t.Error("expected 'falcon' in output")
+	}
+	if !strings.Contains(output, "nova") {
+		t.Error("expected 'nova' in output")
+	}
+}
+
+func TestAgentStatusWorkspaceField(t *testing.T) {
+	// Verify Workspace field in AgentStatus JSON serialization
+	agent := AgentStatus{
+		Name:      "falcon",
+		Branch:    "falcon",
+		Status:    "ready",
+		Ahead:     1,
+		Behind:    2,
+		Workspace: "my-workspace",
+	}
+
+	data, err := json.Marshal(agent)
+	if err != nil {
+		t.Fatalf("failed to marshal AgentStatus: %v", err)
+	}
+
+	jsonStr := string(data)
+
+	// Verify workspace field is present
+	if !strings.Contains(jsonStr, `"workspace":"my-workspace"`) {
+		t.Errorf("expected workspace field in JSON, got: %s", jsonStr)
+	}
+
+	// Verify all other fields
+	if !strings.Contains(jsonStr, `"name":"falcon"`) {
+		t.Errorf("expected name field in JSON, got: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"branch":"falcon"`) {
+		t.Errorf("expected branch field in JSON, got: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"status":"ready"`) {
+		t.Errorf("expected status field in JSON, got: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"ahead":1`) {
+		t.Errorf("expected ahead field in JSON, got: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"behind":2`) {
+		t.Errorf("expected behind field in JSON, got: %s", jsonStr)
+	}
+
+	// Verify empty workspace serializes correctly
+	agentNoWs := AgentStatus{
+		Name:      "nova",
+		Branch:    "nova",
+		Status:    "ready",
+		Workspace: "",
+	}
+
+	data, err = json.Marshal(agentNoWs)
+	if err != nil {
+		t.Fatalf("failed to marshal AgentStatus: %v", err)
+	}
+
+	jsonStr = string(data)
+	if !strings.Contains(jsonStr, `"workspace":""`) {
+		t.Errorf("expected empty workspace field in JSON, got: %s", jsonStr)
+	}
+
+	// Verify round-trip deserialization
+	var decoded AgentStatus
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("failed to unmarshal AgentStatus: %v", err)
+	}
+	if decoded.Workspace != "" {
+		t.Errorf("expected empty workspace after round-trip, got %q", decoded.Workspace)
+	}
+}
+
+func TestRenderAgentsWorkspace(t *testing.T) {
+	agents := []AgentStatus{
+		{Name: "alpha", Branch: "alpha", Status: "ready", Workspace: "ws-a"},
+		{Name: "beta", Branch: "beta", Status: "working: T-1 (3m)", Workspace: "ws-a"},
+		{Name: "gamma", Branch: "gamma", Status: "ready", Workspace: "ws-b"},
+		{Name: "delta", Branch: "delta", Status: "dirty", Workspace: ""},
+	}
+
+	var sb strings.Builder
+	renderAgentsWorkspace(&sb, agents)
+	output := sb.String()
+
+	// Verify workspace groups appear in sorted order
+	wsAIdx := strings.Index(output, "[ws-a]")
+	wsBIdx := strings.Index(output, "[ws-b]")
+	legacyIdx := strings.Index(output, "[(legacy)]")
+
+	if wsAIdx == -1 {
+		t.Error("expected [ws-a] in output")
+	}
+	if wsBIdx == -1 {
+		t.Error("expected [ws-b] in output")
+	}
+	if legacyIdx == -1 {
+		t.Error("expected [(legacy)] in output")
+	}
+
+	// (legacy) sorts before ws-a alphabetically
+	if legacyIdx > wsAIdx {
+		t.Errorf("expected (legacy) before ws-a, legacyIdx=%d, wsAIdx=%d", legacyIdx, wsAIdx)
+	}
+	if wsAIdx > wsBIdx {
+		t.Errorf("expected ws-a before ws-b, wsAIdx=%d, wsBIdx=%d", wsAIdx, wsBIdx)
+	}
+
+	// All agents should be listed
+	if !strings.Contains(output, "alpha") {
+		t.Error("expected 'alpha' in output")
+	}
+	if !strings.Contains(output, "beta") {
+		t.Error("expected 'beta' in output")
+	}
+	if !strings.Contains(output, "gamma") {
+		t.Error("expected 'gamma' in output")
+	}
+	if !strings.Contains(output, "delta") {
+		t.Error("expected 'delta' in output")
+	}
+}
+
+func TestRenderAgentsLegacy(t *testing.T) {
+	agents := []AgentStatus{
+		{Name: "alpha", Branch: "alpha", Status: "ready"},
+		{Name: "beta", Branch: "beta", Status: "3 changes"},
+	}
+
+	var sb strings.Builder
+	renderAgentsLegacy(&sb, agents)
+	output := sb.String()
+
+	// Should not contain workspace headers
+	if strings.Contains(output, "[") {
+		t.Errorf("legacy mode should not contain bracket headers, got:\n%s", output)
+	}
+
+	if !strings.Contains(output, "alpha") {
+		t.Error("expected 'alpha' in output")
+	}
+	if !strings.Contains(output, "beta") {
+		t.Error("expected 'beta' in output")
+	}
+}
+
+func TestRenderAgentLine(t *testing.T) {
+	tests := []struct {
+		name           string
+		agent          AgentStatus
+		indent         string
+		expectContains []string
+	}{
+		{
+			name:   "ready_agent_with_sync",
+			agent:  AgentStatus{Name: "falcon", Branch: "falcon", Status: "ready", Ahead: 2, Behind: 1},
+			indent: "  ",
+			expectContains: []string{"falcon", "✓", "ready", "↑2", "↓1"},
+		},
+		{
+			name:   "working_agent_no_sync",
+			agent:  AgentStatus{Name: "nova", Branch: "nova", Status: "working: T-1 (5m)"},
+			indent: "   ",
+			expectContains: []string{"nova", "●", "working:"},
+		},
+		{
+			name:   "dirty_agent",
+			agent:  AgentStatus{Name: "spark", Branch: "spark", Status: "dirty"},
+			indent: "  ",
+			expectContains: []string{"spark", "●", "dirty"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var sb strings.Builder
+			renderAgentLine(&sb, tc.agent, tc.indent)
+			output := sb.String()
+
+			for _, expected := range tc.expectContains {
+				if !strings.Contains(output, expected) {
+					t.Errorf("expected %q in output, got:\n%s", expected, output)
+				}
+			}
+		})
+	}
+}

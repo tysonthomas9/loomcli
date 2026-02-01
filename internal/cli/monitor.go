@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -73,11 +74,12 @@ type MonitorData struct {
 
 // AgentStatus represents a single agent/worktree status
 type AgentStatus struct {
-	Name   string `json:"name"`
-	Branch string `json:"branch"`
-	Status string `json:"status"` // "ready", "3 changes", "running (plan, 5m ago)"
-	Ahead  int    `json:"ahead"`  // commits ahead of integration branch
-	Behind int    `json:"behind"` // commits behind integration branch
+	Name      string `json:"name"`
+	Branch    string `json:"branch"`
+	Status    string `json:"status"`    // "ready", "3 changes", "running (plan, 5m ago)"
+	Ahead     int    `json:"ahead"`     // commits ahead of integration branch
+	Behind    int    `json:"behind"`    // commits behind integration branch
+	Workspace string `json:"workspace"` // workspace name (empty in legacy mode)
 }
 
 // TaskInfo represents a task with basic info
@@ -254,8 +256,9 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 
 	for _, wt := range worktrees {
 		agent := AgentStatus{
-			Name:   wt.Name,
-			Branch: wt.Branch,
+			Name:      wt.Name,
+			Branch:    wt.Branch,
+			Workspace: wt.Workspace,
 		}
 
 		// Check for running agent (lock status)
@@ -585,44 +588,20 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxSeparator())
 	sb.WriteString(renderBoxLine(" AGENTS"))
 	sb.WriteString(renderBoxSeparator())
+
+	// Detect workspace mode from agent data
+	hasWorkspace := false
 	for _, agent := range data.Agents {
-		statusIcon := "✓"
-		// Running agents show explicit state prefixes
-		if strings.HasPrefix(agent.Status, "planning:") ||
-			strings.HasPrefix(agent.Status, "working:") ||
-			strings.HasPrefix(agent.Status, "done:") ||
-			strings.HasPrefix(agent.Status, "review:") ||
-			strings.HasPrefix(agent.Status, "error:") {
-			statusIcon = "●"
-		} else if strings.Contains(agent.Status, "changes") || agent.Status == "dirty" {
-			statusIcon = "●"
+		if agent.Workspace != "" {
+			hasWorkspace = true
+			break
 		}
+	}
 
-		// Build sync indicator (↑ahead ↓behind)
-		syncIndicator := ""
-		if agent.Ahead > 0 {
-			syncIndicator += fmt.Sprintf("↑%d", agent.Ahead)
-		}
-		if agent.Behind > 0 {
-			if syncIndicator != "" {
-				syncIndicator += " "
-			}
-			syncIndicator += fmt.Sprintf("↓%d", agent.Behind)
-		}
-
-		// Format left part with fixed widths
-		leftPart := fmt.Sprintf("  %-10s %-18s %s %-24s", agent.Name, agent.Branch, statusIcon, agent.Status)
-
-		// Right-align sync indicator (box content width is 66)
-		contentWidth := 66
-		leftWidth := displayWidth(leftPart)
-		syncWidth := displayWidth(syncIndicator)
-		padding := contentWidth - leftWidth - syncWidth
-		if padding < 0 {
-			padding = 0
-		}
-		line := leftPart + strings.Repeat(" ", padding) + syncIndicator
-		sb.WriteString(renderBoxLine(line))
+	if hasWorkspace {
+		renderAgentsWorkspace(&sb, data.Agents)
+	} else {
+		renderAgentsLegacy(&sb, data.Agents)
 	}
 	if len(data.Agents) == 0 {
 		sb.WriteString(renderBoxLine("  No agents found"))
@@ -722,6 +701,77 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxBottom())
 
 	return sb.String()
+}
+
+func renderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
+	statusIcon := "✓"
+	if strings.HasPrefix(agent.Status, "planning:") ||
+		strings.HasPrefix(agent.Status, "working:") ||
+		strings.HasPrefix(agent.Status, "done:") ||
+		strings.HasPrefix(agent.Status, "review:") ||
+		strings.HasPrefix(agent.Status, "error:") {
+		statusIcon = "●"
+	} else if strings.Contains(agent.Status, "changes") || agent.Status == "dirty" {
+		statusIcon = "●"
+	}
+
+	// Build sync indicator (↑ahead ↓behind)
+	syncIndicator := ""
+	if agent.Ahead > 0 {
+		syncIndicator += fmt.Sprintf("↑%d", agent.Ahead)
+	}
+	if agent.Behind > 0 {
+		if syncIndicator != "" {
+			syncIndicator += " "
+		}
+		syncIndicator += fmt.Sprintf("↓%d", agent.Behind)
+	}
+
+	// Format left part with fixed widths
+	leftPart := fmt.Sprintf("%s%-10s %-18s %s %-24s", indent, agent.Name, agent.Branch, statusIcon, agent.Status)
+
+	// Right-align sync indicator (box content width is 66)
+	contentWidth := 66
+	leftWidth := displayWidth(leftPart)
+	syncWidth := displayWidth(syncIndicator)
+	padding := contentWidth - leftWidth - syncWidth
+	if padding < 0 {
+		padding = 0
+	}
+	line := leftPart + strings.Repeat(" ", padding) + syncIndicator
+	sb.WriteString(renderBoxLine(line))
+}
+
+func renderAgentsLegacy(sb *strings.Builder, agents []AgentStatus) {
+	for _, agent := range agents {
+		renderAgentLine(sb, agent, "  ")
+	}
+}
+
+func renderAgentsWorkspace(sb *strings.Builder, agents []AgentStatus) {
+	// Group agents by workspace
+	groups := make(map[string][]AgentStatus)
+	for _, agent := range agents {
+		ws := agent.Workspace
+		if ws == "" {
+			ws = "(legacy)"
+		}
+		groups[ws] = append(groups[ws], agent)
+	}
+
+	// Sort workspace names
+	var wsNames []string
+	for name := range groups {
+		wsNames = append(wsNames, name)
+	}
+	sort.Strings(wsNames)
+
+	for _, ws := range wsNames {
+		sb.WriteString(renderBoxLine(fmt.Sprintf("  [%s]", ws)))
+		for _, agent := range groups[ws] {
+			renderAgentLine(sb, agent, "   ")
+		}
+	}
 }
 
 func renderBoxTop() string {

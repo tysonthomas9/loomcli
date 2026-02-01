@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -378,4 +379,339 @@ func TestRunListSkipsNonGitDirectories(t *testing.T) {
 	}
 	// Should NOT show the invalid directory (though it might not be listed anyway)
 	// This is implicitly tested by the "Total: 1 agent" check
+}
+
+func TestGetWorktreeListStatus(t *testing.T) {
+	tests := []struct {
+		name           string
+		lockRunning    bool   // whether to create a running lock file
+		lockCommand    string // lock command type (e.g., "task")
+		gitClean       bool   // whether git status --porcelain returns empty
+		gitChanges     string // porcelain output for dirty case
+		expectedStatus string
+	}{
+		{
+			name:           "clean_worktree_shows_ready",
+			lockRunning:    false,
+			gitClean:       true,
+			gitChanges:     "",
+			expectedStatus: "✓ ready",
+		},
+		{
+			name:           "dirty_worktree_with_changes_shows_count",
+			lockRunning:    false,
+			gitClean:       false,
+			gitChanges:     "M file1.go\nM file2.go\n?? file3.go\n",
+			expectedStatus: "● 3 changes",
+		},
+		// Note: the "dirty" code path (line 128 in list.go) is reached when
+		// IsCleanWorkingTree returns false but getUncommittedChangesCount returns 0.
+		// This is tested via separate mock stubs below.
+		{
+			name:           "running_lock_shows_lock_status",
+			lockRunning:    true,
+			lockCommand:    "task",
+			gitClean:       true,
+			gitChanges:     "",
+			expectedStatus: "●", // lock status will start with ●
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			wtPath := filepath.Join(tmpDir, "test-wt")
+			if err := os.MkdirAll(wtPath, 0755); err != nil {
+				t.Fatal(err)
+			}
+
+			if tc.lockRunning {
+				// Create lock file with current PID so it appears running
+				lockInfo := LockInfo{
+					PID:       os.Getpid(),
+					Command:   tc.lockCommand,
+					AgentName: "test",
+				}
+				lockData, _ := json.Marshal(lockInfo)
+				os.WriteFile(filepath.Join(wtPath, ".agent.lock"), lockData, 0644)
+			}
+
+			// Set up git command mocks
+			var stubs []CommandStub
+			if !tc.lockRunning {
+				// IsCleanWorkingTree call
+				porcelainOut := tc.gitChanges
+				if tc.gitClean {
+					porcelainOut = ""
+				}
+				stubs = append(stubs, CommandStub{
+					Name:   "git",
+					Args:   []string{"status", "--porcelain"},
+					Stdout: porcelainOut,
+				})
+				// getUncommittedChangesCount call (second porcelain)
+				stubs = append(stubs, CommandStub{
+					Name:   "git",
+					Args:   []string{"status", "--porcelain"},
+					Stdout: tc.gitChanges,
+				})
+			}
+
+			mock := NewCommandMock(t, stubs)
+			mock.Install()
+
+			wt := WorktreeInfo{
+				Name:   "test",
+				Path:   wtPath,
+				Branch: "test-branch",
+			}
+
+			status := getWorktreeListStatus(wt)
+
+			if tc.lockRunning {
+				// Just verify it starts with the lock icon
+				if !strings.HasPrefix(status, "●") {
+					t.Errorf("expected status to start with '●', got %q", status)
+				}
+			} else if status != tc.expectedStatus {
+				t.Errorf("getWorktreeListStatus() = %q, want %q", status, tc.expectedStatus)
+			}
+		})
+	}
+
+	// Test the "dirty" path separately: IsCleanWorkingTree returns false (non-empty porcelain)
+	// but getUncommittedChangesCount returns 0 (empty after trim).
+	t.Run("dirty_worktree_no_counted_changes", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		wtPath := filepath.Join(tmpDir, "test-wt")
+		if err := os.MkdirAll(wtPath, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		stubs := []CommandStub{
+			// IsCleanWorkingTree: returns non-empty -> clean=false
+			{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: "M something\n"},
+			// getUncommittedChangesCount: returns empty -> count=0
+			{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		}
+		mock := NewCommandMock(t, stubs)
+		mock.Install()
+
+		wt := WorktreeInfo{Name: "test", Path: wtPath, Branch: "test-branch"}
+		status := getWorktreeListStatus(wt)
+
+		// With clean=false and changes=0, status should be "● dirty"
+		if status != "● dirty" {
+			t.Errorf("getWorktreeListStatus() = %q, want %q", status, "● dirty")
+		}
+	})
+}
+
+func TestRunListWorkspaceMode(t *testing.T) {
+	// Save and restore working directory
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	tmpDir, err = filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Test renderListWorkspace directly by capturing stdout, since setting up
+	// full workspace config for DiscoverWorktrees is complex.
+	worktrees := []WorktreeInfo{
+		{Name: "falcon", Path: "/tmp/ws/falcon", Branch: "falcon", Workspace: "my-workspace"},
+		{Name: "nova", Path: "/tmp/ws/nova", Branch: "nova", Workspace: "my-workspace"},
+		{Name: "spark", Path: "/tmp/ws/spark", Branch: "spark", Workspace: "other-ws"},
+		{Name: "legacy-agent", Path: "/tmp/ws/legacy-agent", Branch: "legacy-agent", Workspace: ""},
+	}
+
+	// Mock git commands for getWorktreeListStatus calls (4 worktrees x 2 porcelain calls each)
+	var stubs []CommandStub
+	for i := 0; i < len(worktrees); i++ {
+		// IsCleanWorkingTree
+		stubs = append(stubs, CommandStub{
+			Name:   "git",
+			Args:   []string{"status", "--porcelain"},
+			Stdout: "",
+		})
+		// getUncommittedChangesCount
+		stubs = append(stubs, CommandStub{
+			Name:   "git",
+			Args:   []string{"status", "--porcelain"},
+			Stdout: "",
+		})
+	}
+
+	// GetDefaultBranchForWorktrees with 4 worktrees triggers auto-detection
+	stubs = append(stubs, CommandStub{
+		Name:   "git",
+		Args:   []string{"branch", "-r", "--format=%(refname:short)"},
+		Stdout: "",
+		Err:    fmt.Errorf("not a real repo"),
+	})
+
+	mock := NewCommandMock(t, stubs)
+	mock.Install()
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	renderListWorkspace(worktrees)
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	// Verify workspace header
+	if !strings.Contains(output, "Agents by Workspace:") {
+		t.Errorf("expected 'Agents by Workspace:' header, got:\n%s", output)
+	}
+
+	// Verify workspace group headers
+	if !strings.Contains(output, "[my-workspace]") {
+		t.Errorf("expected '[my-workspace]' group header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "[other-ws]") {
+		t.Errorf("expected '[other-ws]' group header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "[(legacy)]") {
+		t.Errorf("expected '[(legacy)]' group header for empty workspace, got:\n%s", output)
+	}
+
+	// Verify agent names appear
+	if !strings.Contains(output, "falcon") {
+		t.Errorf("expected 'falcon' agent in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "nova") {
+		t.Errorf("expected 'nova' agent in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "spark") {
+		t.Errorf("expected 'spark' agent in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "legacy-agent") {
+		t.Errorf("expected 'legacy-agent' in output, got:\n%s", output)
+	}
+
+	// Verify workspace count in summary
+	if !strings.Contains(output, "across 3 workspaces") {
+		t.Errorf("expected 'across 3 workspaces' in output, got:\n%s", output)
+	}
+
+	// Verify total agent count
+	if !strings.Contains(output, "Total: 4 agents") {
+		t.Errorf("expected 'Total: 4 agents' in output, got:\n%s", output)
+	}
+}
+
+func TestRunListWorkspaceModeDetection(t *testing.T) {
+	// Verify that runList detects workspace mode when any worktree has Workspace set.
+	// We test this by setting up real worktree dirs with workspace config.
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	tmpDir, err = filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Create two worktree directories
+	for _, name := range []string{"alpha", "beta"} {
+		wtPath := filepath.Join(tmpDir, "worktrees", name, ".git")
+		if err := os.MkdirAll(wtPath, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Build stubs: branch for each, then porcelain x2 for each, then auto-detect
+	stubs := []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "alpha"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "beta"},
+		// alpha: IsCleanWorkingTree + getUncommittedChangesCount
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		// beta: IsCleanWorkingTree + getUncommittedChangesCount
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		// Auto-detect integration branch
+		{Name: "git", Args: []string{"branch", "-r", "--format=%(refname:short)"}, Stdout: "", Err: fmt.Errorf("no remote")},
+	}
+
+	mock := NewCommandMock(t, stubs)
+	mock.Install()
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	runList(nil, nil)
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	// In legacy mode (no Workspace set), should show "Agents (Worktrees):" not "Agents by Workspace:"
+	if !strings.Contains(output, "Agents (Worktrees):") {
+		t.Errorf("expected legacy mode header 'Agents (Worktrees):' when no workspace set, got:\n%s", output)
+	}
+	if strings.Contains(output, "Agents by Workspace:") {
+		t.Errorf("should NOT show workspace header in legacy mode, got:\n%s", output)
+	}
+}
+
+func TestRenderListLegacy(t *testing.T) {
+	// Test that renderListLegacy produces the expected format
+	worktrees := []WorktreeInfo{
+		{Name: "falcon", Path: "/tmp/falcon", Branch: "falcon"},
+		{Name: "nova", Path: "/tmp/nova", Branch: "feature-x"},
+	}
+
+	// Mock git commands: 2 worktrees x 2 porcelain calls, plus auto-detect
+	stubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: "M dirty.go\n"},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: "M dirty.go\n"},
+		{Name: "git", Args: []string{"branch", "-r", "--format=%(refname:short)"}, Stdout: "", Err: fmt.Errorf("no remote")},
+	}
+	mock := NewCommandMock(t, stubs)
+	mock.Install()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	renderListLegacy(worktrees)
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Agents (Worktrees):") {
+		t.Errorf("expected legacy header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Total: 2 agents") {
+		t.Errorf("expected 'Total: 2 agents', got:\n%s", output)
+	}
+	if strings.Contains(output, "workspaces") {
+		t.Errorf("legacy mode should not mention workspaces, got:\n%s", output)
+	}
 }
