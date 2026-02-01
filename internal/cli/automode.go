@@ -196,7 +196,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 
 	// Choose the appropriate task checker based on agent type
 	var hasAvailableTasks func() (bool, error)
-	var generatePrompt func(string) string
+	var generatePrompt func(string, *WorkspaceConfig) string
 	if opts.AgentType == "plan" {
 		hasAvailableTasks = HasAvailablePlanningTasks
 		generatePrompt = GeneratePlanningPrompt
@@ -293,7 +293,8 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		fmt.Printf("[auto] === Starting task %d ===\n", state.TasksCompleted+1)
 		fmt.Println("")
 
-		prompt := generatePrompt(opts.AgentName)
+		workspace, _ := ResolveActiveWorkspace()
+		prompt := generatePrompt(opts.AgentName, workspace)
 		err = InvokeClaudeNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown)
 
 		// Return to idle state after Claude finishes

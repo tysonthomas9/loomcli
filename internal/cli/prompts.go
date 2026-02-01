@@ -5,15 +5,52 @@ import (
 	"strings"
 )
 
-// GeneratePlanningPrompt creates the prompt for the planning agent
-func GeneratePlanningPrompt(agentName string) string {
+// buildWorkspaceContextBlock generates the workspace context section for prompts.
+// Returns empty string if workspace is nil.
+func buildWorkspaceContextBlock(workspace *WorkspaceConfig) string {
+	if workspace == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n### Workspace Mode: Multi-Repo Environment\n")
+	sb.WriteString("You are working in a multi-repo workspace. The workspace root is your current working directory.\n")
+	sb.WriteString("Repositories are subdirectories within this workspace:\n\n")
+
+	if len(workspace.Repos) == 0 {
+		sb.WriteString("_No repositories configured in this workspace._\n")
+	} else {
+		sb.WriteString("| Repo | Path | Default Branch |\n")
+		sb.WriteString("|------|------|----------------|\n")
+		for _, repo := range workspace.Repos {
+			branch := repo.DefaultBranch
+			if branch == "" {
+				branch = "main"
+			}
+			sb.WriteString(fmt.Sprintf("| %s | ./%s | %s |\n", repo.Name, repo.Path, branch))
+		}
+	}
+
+	sb.WriteString("\n**Important workspace rules:**\n")
+	sb.WriteString("- Run `bd` commands from the workspace root (current directory)\n")
+	sb.WriteString("- Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory\n")
+	sb.WriteString("- Run build/test commands from the specific repo subdirectory\n")
+	sb.WriteString("- Changes may span multiple repos — coordinate commits across them\n\n")
+
+	return sb.String()
+}
+
+// GeneratePlanningPrompt creates the prompt for the planning agent.
+// If workspace is non-nil, workspace context is injected into the prompt.
+func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig) string {
+	wsBlock := buildWorkspaceContextBlock(workspace)
 	return fmt.Sprintf(`## WORKFLOW: Planning Task (Design Only - No Implementation)
 
 You are a disciplined software architect. Your job is to CREATE PLANS, not implement them.
 Follow this workflow EXACTLY for ONE task.
 
 **Your agent name is: %s** (BD_ACTOR is set automatically)
-
+%s
 ### Step 1: Select ONE Task for Planning
 - Run this command to find tasks needing planning (no design yet, not awaiting review):
   bd ready --json | jq -r '.[] | select(.status == "open") | select(.title | contains("[Need Review]") | not) | select(.issue_type == "epic" | not) | select(.design == null or .design == "") | "\(.id): [\(.priority)] \(.title)"'
@@ -112,17 +149,19 @@ You have completed ONE planning task. The human will:
 3. Run an implementation agent separately
 
 Your job was ONLY to create the plan. Implementation happens later.
-`, agentName)
+`, agentName, wsBlock)
 }
 
-// GenerateTaskPrompt creates the prompt for the implementation agent
-func GenerateTaskPrompt(agentName string) string {
+// GenerateTaskPrompt creates the prompt for the implementation agent.
+// If workspace is non-nil, workspace context is injected into the prompt.
+func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig) string {
+	wsBlock := buildWorkspaceContextBlock(workspace)
 	return fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)
 
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
 
 **Your agent name is: %s** (BD_ACTOR is set automatically)
-
+%s
 ### Step 1: Select ONE Task
 - Run this command to find tasks ready to implement (has design, not awaiting review):
   bd ready --json | jq -r '.[] | select(.status == "open") | select(.title | contains("[Need Review]") | not) | select(.issue_type == "epic" | not) | select((.design == null or .design == "") | not) | "\(.id): [\(.priority)] \(.title)"'
@@ -224,7 +263,7 @@ After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
 - Simply EXIT
 
 You have completed ONE task through the full workflow. The human will run you again for the next task.
-`, agentName, agentName)
+`, agentName, wsBlock, agentName)
 }
 
 // GenerateConflictResolutionPrompt creates the prompt for merge conflict resolution

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -34,7 +36,7 @@ func TestGeneratePlanningPrompt(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt := GeneratePlanningPrompt(tc.agentName)
+			prompt := GeneratePlanningPrompt(tc.agentName, nil)
 
 			for _, part := range tc.wantParts {
 				if !strings.Contains(prompt, part) {
@@ -77,7 +79,7 @@ func TestGenerateTaskPrompt(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt := GenerateTaskPrompt(tc.agentName)
+			prompt := GenerateTaskPrompt(tc.agentName, nil)
 
 			for _, part := range tc.wantParts {
 				if !strings.Contains(prompt, part) {
@@ -215,7 +217,7 @@ func TestGenerateLeadPrompt(t *testing.T) {
 
 func TestPromptStructure(t *testing.T) {
 	t.Run("planning prompt has required sections", func(t *testing.T) {
-		prompt := GeneratePlanningPrompt("test")
+		prompt := GeneratePlanningPrompt("test", nil)
 		sections := []string{
 			"Step 1:",
 			"Step 2:",
@@ -233,7 +235,7 @@ func TestPromptStructure(t *testing.T) {
 	})
 
 	t.Run("task prompt has required sections", func(t *testing.T) {
-		prompt := GenerateTaskPrompt("test")
+		prompt := GenerateTaskPrompt("test", nil)
 		sections := []string{
 			"Step 1:",
 			"Step 2:",
@@ -251,4 +253,153 @@ func TestPromptStructure(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestGeneratePlanningPrompt_Workspace(t *testing.T) {
+	ws := &WorkspaceConfig{
+		Path: "/home/user/myworkspace",
+		Repos: []RepoConfig{
+			{Name: "frontend", Path: "frontend", DefaultBranch: "develop", Remote: "origin"},
+			{Name: "backend", Path: "services/backend", DefaultBranch: "main", Remote: "origin"},
+		},
+	}
+
+	prompt := GeneratePlanningPrompt("falcon", ws)
+
+	// Verify workspace context is present
+	wantParts := []string{
+		"Workspace Mode: Multi-Repo Environment",
+		"frontend",
+		"./frontend",
+		"develop",
+		"backend",
+		"./services/backend",
+		"Run `bd` commands from the workspace root",
+		"Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory",
+		// Standard planning steps must still be present
+		"Step 1:",
+		"Step 2:",
+		"Step 3:",
+		"Step 4:",
+		"Step 5:",
+		"Step 6:",
+	}
+
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("planning prompt with workspace missing expected part: %q", part)
+		}
+	}
+}
+
+func TestGenerateTaskPrompt_Workspace(t *testing.T) {
+	ws := &WorkspaceConfig{
+		Path: "/home/user/myworkspace",
+		Repos: []RepoConfig{
+			{Name: "api", Path: "api", DefaultBranch: "main", Remote: "origin"},
+			{Name: "web", Path: "web", DefaultBranch: "main", Remote: "origin"},
+		},
+	}
+
+	prompt := GenerateTaskPrompt("nova", ws)
+
+	// Verify workspace context block
+	wantParts := []string{
+		"Workspace Mode: Multi-Repo Environment",
+		"api",
+		"./api",
+		"web",
+		"./web",
+		"Run `bd` commands from the workspace root",
+		"Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory",
+		"Run build/test commands from the specific repo subdirectory",
+		"Changes may span multiple repos",
+		// Standard task steps must still be present
+		"Step 1:",
+		"Step 2:",
+		"Step 3:",
+		"Step 4:",
+		"Step 5:",
+		"Step 6:",
+		"Step 7:",
+		"Step 8:",
+	}
+
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("task prompt with workspace missing expected part: %q", part)
+		}
+	}
+}
+
+func TestBuildWorkspaceContextBlock_NilWorkspace(t *testing.T) {
+	result := buildWorkspaceContextBlock(nil)
+	if result != "" {
+		t.Errorf("expected empty string for nil workspace, got: %q", result)
+	}
+}
+
+func TestBuildWorkspaceContextBlock_EmptyRepos(t *testing.T) {
+	ws := &WorkspaceConfig{
+		Path:  "/home/user/emptyws",
+		Repos: []RepoConfig{},
+	}
+
+	result := buildWorkspaceContextBlock(ws)
+
+	if !strings.Contains(result, "Workspace Mode: Multi-Repo Environment") {
+		t.Error("expected workspace header even with no repos")
+	}
+	if !strings.Contains(result, "No repositories configured") {
+		t.Error("expected 'No repositories configured' note for empty repos")
+	}
+}
+
+func TestBuildWorkspaceContextBlock_DefaultBranch(t *testing.T) {
+	ws := &WorkspaceConfig{
+		Path: "/home/user/ws",
+		Repos: []RepoConfig{
+			{Name: "myrepo", Path: "myrepo", DefaultBranch: "", Remote: "origin"},
+		},
+	}
+
+	result := buildWorkspaceContextBlock(ws)
+
+	// Empty DefaultBranch should default to "main" in the output
+	if !strings.Contains(result, "main") {
+		t.Error("expected default branch 'main' when DefaultBranch is empty")
+	}
+	// Verify the repo row contains "main"
+	if !strings.Contains(result, "| myrepo | ./myrepo | main |") {
+		t.Errorf("expected table row with default branch 'main', got:\n%s", result)
+	}
+}
+
+func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
+	// Create a temp empty directory and point LOOM_CONFIG_DIR to it
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "loomcfg")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create temp config dir: %v", err)
+	}
+
+	// Save and restore original env var
+	origVal, origSet := os.LookupEnv("LOOM_CONFIG_DIR")
+	t.Cleanup(func() {
+		if origSet {
+			os.Setenv("LOOM_CONFIG_DIR", origVal)
+		} else {
+			os.Unsetenv("LOOM_CONFIG_DIR")
+		}
+	})
+
+	os.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	ws, err := ResolveActiveWorkspace()
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if ws != nil {
+		t.Errorf("expected nil workspace when config dir is empty, got: %+v", ws)
+	}
 }

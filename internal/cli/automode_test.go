@@ -1665,7 +1665,7 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 	}
 
 	// Verify that plan prompt was generated
-	expectedPrompt := GeneratePlanningPrompt("planner")
+	expectedPrompt := GeneratePlanningPrompt("planner", nil)
 	if receivedPrompt != expectedPrompt {
 		t.Errorf("Plan agent did not receive planning prompt")
 	}
@@ -1721,7 +1721,7 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 	}
 
 	// Verify that task prompt was generated
-	expectedPrompt := GenerateTaskPrompt("worker")
+	expectedPrompt := GenerateTaskPrompt("worker", nil)
 	if receivedPrompt != expectedPrompt {
 		t.Errorf("Task agent did not receive task prompt")
 	}

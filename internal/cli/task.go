@@ -88,7 +88,8 @@ func runTask(cmd *cobra.Command, args []string) {
 		if err := UpdateLockState(worktreePath, StateActive); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 		}
-		prompt := GenerateTaskPrompt(agentName)
+		workspace, _ := ResolveActiveWorkspace()
+		prompt := GenerateTaskPrompt(agentName, workspace)
 		if err := InvokeClaude(worktreePath, prompt, agentName); err != nil { // Interactive mode, nice output
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -153,7 +154,8 @@ func runTask(cmd *cobra.Command, args []string) {
 	fmt.Println("")
 
 	// Generate and run the task prompt
-	prompt := GenerateTaskPrompt(agentName)
+	workspace, _ := ResolveActiveWorkspace()
+	prompt := GenerateTaskPrompt(agentName, workspace)
 	if err := InvokeClaude(worktreePath, prompt, agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
 		os.Exit(1)

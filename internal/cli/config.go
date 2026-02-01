@@ -100,3 +100,31 @@ func IsWorkspaceMode() bool {
 	}
 	return len(cfg.Workspaces) > 0
 }
+
+// ResolveActiveWorkspace loads the config and returns the active workspace config.
+// Returns (nil, nil) if not in workspace mode (no config or no workspaces defined).
+// Uses DefaultWorkspace if set, otherwise uses the first workspace in the map.
+func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil || len(cfg.Workspaces) == 0 {
+		return nil, nil
+	}
+
+	// Use default workspace if set
+	if cfg.DefaultWorkspace != "" {
+		if ws, ok := cfg.Workspaces[cfg.DefaultWorkspace]; ok {
+			return &ws, nil
+		}
+		return nil, fmt.Errorf("default workspace %q not found in config", cfg.DefaultWorkspace)
+	}
+
+	// Use first workspace in map
+	for _, ws := range cfg.Workspaces {
+		wsCopy := ws
+		return &wsCopy, nil
+	}
+	return nil, nil
+}
