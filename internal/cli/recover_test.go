@@ -711,3 +711,129 @@ func TestResetOrphanedAgentTasks_EmptyAgentName(t *testing.T) {
 	// Should return immediately with no commands
 	resetOrphanedAgentTasks("/test/worktree", "", "", false)
 }
+
+func TestRecoverWorktree_NoLock(t *testing.T) {
+	ResetBeadsDirCache()
+	tmpDir := t.TempDir()
+
+	// No lock file in tmpDir, so CheckLock returns (nil, false, nil).
+	// RecoverWorktree should call resetOrphanedAgentTasks (bd list) and cleanUntrackedFiles (git clean -fdn).
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"list", "--assignee", "test-agent", "--status", "in_progress", "--json"},
+			Stdout: `[]`,
+			Err:    nil,
+		},
+		{
+			Dir:    tmpDir,
+			Name:   "git",
+			Args:   []string{"clean", "-fdn"},
+			Stdout: "",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	err := RecoverWorktree(tmpDir, "test-agent")
+	if err != nil {
+		t.Errorf("expected nil error, got: %v", err)
+	}
+}
+
+func TestRecoverWorktree_StaleLock(t *testing.T) {
+	ResetBeadsDirCache()
+	tmpDir := t.TempDir()
+
+	// Create a lock file with a non-existent PID so CheckLock returns (info, false, nil)
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	lockData := `{"pid":999999999,"command":"test","started_at":"2024-01-01T00:00:00Z","agent_name":"test-agent","task_id":"task-123"}`
+	if err := os.WriteFile(lockPath, []byte(lockData), 0644); err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+
+	// RecoverWorktree should:
+	// 1. CheckLock -> lock exists, not running
+	// 2. forceReleaseLock -> removes lock file
+	// 3. resetTask (bd update task-123)
+	// 4. resetOrphanedAgentTasks (bd list for test-agent, skipping task-123)
+	// 5. cleanUntrackedFiles (git clean -fdn)
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"update", "task-123", "--status", "open", "--assignee", ""},
+			Stdout: "Updated\n",
+			Err:    nil,
+		},
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"list", "--assignee", "test-agent", "--status", "in_progress", "--json"},
+			Stdout: `[]`,
+			Err:    nil,
+		},
+		{
+			Dir:    tmpDir,
+			Name:   "git",
+			Args:   []string{"clean", "-fdn"},
+			Stdout: "",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	err := RecoverWorktree(tmpDir, "test-agent")
+	if err != nil {
+		t.Errorf("expected nil error, got: %v", err)
+	}
+
+	// Verify lock file was removed
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("lock file should have been removed by forceReleaseLock")
+	}
+}
+
+func TestRecoverWorktree_LockCheckError(t *testing.T) {
+	ResetBeadsDirCache()
+	tmpDir := t.TempDir()
+
+	// Create a directory named .agent.lock instead of a file, causing ReadFile to fail
+	lockDirPath := filepath.Join(tmpDir, LockFileName)
+	if err := os.Mkdir(lockDirPath, 0755); err != nil {
+		t.Fatalf("failed to create lock dir: %v", err)
+	}
+
+	// No mocks needed — RecoverWorktree should return an error before calling any commands
+	mock := NewCommandMock(t, []CommandStub{})
+	mock.Install()
+
+	err := RecoverWorktree(tmpDir, "test-agent")
+	if err == nil {
+		t.Error("expected error when CheckLock fails, got nil")
+	}
+}
+
+func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
+	ResetBeadsDirCache()
+	tmpDir := t.TempDir()
+
+	// No lock file. Empty agent name means resetOrphanedAgentTasks returns immediately.
+	// Only cleanUntrackedFiles runs (git clean -fdn returning empty).
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    tmpDir,
+			Name:   "git",
+			Args:   []string{"clean", "-fdn"},
+			Stdout: "",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	err := RecoverWorktree(tmpDir, "")
+	if err != nil {
+		t.Errorf("expected nil error, got: %v", err)
+	}
+}

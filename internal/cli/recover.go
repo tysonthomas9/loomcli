@@ -128,6 +128,49 @@ func runRecover(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 }
 
+// RecoverWorktree provides a programmatic, non-interactive recovery path for daemon use.
+// It wraps the existing recovery helpers with force=true and analyze=false semantics:
+// force-release any stale lock, kill running processes, reset orphaned tasks to open,
+// and clean untracked files without prompting.
+func RecoverWorktree(worktreePath, agentName string) error {
+	// 1. Check lock status
+	lockInfo, isRunning, err := CheckLock(worktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to check lock: %w", err)
+	}
+
+	if lockInfo != nil {
+		// 2. If lock exists and process is running, kill it
+		if isRunning {
+			if err := killProcess(lockInfo.PID); err != nil {
+				return fmt.Errorf("failed to kill agent process (PID %d): %w", lockInfo.PID, err)
+			}
+		}
+
+		// 3. Clear stale lock (fatal if removal fails, unlike interactive runRecover which warns)
+		if err := forceReleaseLock(worktreePath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to clear lock: %w", err)
+		}
+
+		// 4. Handle orphaned task from lock (no analysis)
+		if lockInfo.TaskID != "" {
+			resetTask(worktreePath, lockInfo.TaskID)
+		}
+	}
+
+	// 5. Reset any additional orphaned tasks for this agent (no analysis)
+	lockTaskID := ""
+	if lockInfo != nil {
+		lockTaskID = lockInfo.TaskID
+	}
+	resetOrphanedAgentTasks(worktreePath, agentName, lockTaskID, false)
+
+	// 6. Clean untracked files (force=true, no prompting)
+	cleanUntrackedFiles(worktreePath, true)
+
+	return nil
+}
+
 // handleOrphanedTask decides whether to close or reopen an orphaned task
 func handleOrphanedTask(worktreePath, taskID string, analyze bool) {
 	fmt.Printf("\nHandling orphaned task: %s\n", taskID)
