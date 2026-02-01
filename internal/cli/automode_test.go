@@ -2037,3 +2037,341 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// HasAnyAvailableTasks Tests
+// ============================================================================
+
+func TestHasAnyAvailableTasks(t *testing.T) {
+	tests := []struct {
+		name     string
+		bdOutput string
+		bdErr    error
+		want     bool
+		wantErr  bool
+	}{
+		{
+			name: "task with no design - available",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
+			}),
+			want: true,
+		},
+		{
+			name: "task with design - available",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
+			}),
+			want: true,
+		},
+		{
+			name: "skip Need Review tasks",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "[Need Review] Add feature", Status: "open", Design: ""},
+			}),
+			want: false,
+		},
+		{
+			name: "skip in_progress tasks",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
+			}),
+			want: false,
+		},
+		{
+			name: "skip epics",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
+			}),
+			want: false,
+		},
+		{
+			name:     "empty list",
+			bdOutput: "[]",
+			want:     false,
+		},
+		{
+			name: "mixed - review + epic + valid task",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "[Need Review] Skip me", Status: "open", Design: ""},
+				{ID: "T-2", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
+				{ID: "T-3", Title: "Valid task", Status: "open", Design: ""},
+			}),
+			want: true,
+		},
+		{
+			name:    "bd command error",
+			bdErr:   fmt.Errorf("bd error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore execCommand
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			}
+
+			got, err := HasAnyAvailableTasks()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("HasAnyAvailableTasks() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("HasAnyAvailableTasks() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// AutoModeOptions Custom Fields Tests
+// ============================================================================
+
+func TestAutoModeOptions_CustomFields(t *testing.T) {
+	promptCalled := false
+	checkCalled := false
+
+	opts := AutoModeOptions{
+		Interval:     60,
+		MaxTasks:     10,
+		IdleTimeout:  30,
+		AgentType:    "task",
+		AgentName:    "falcon",
+		WorktreePath: "/path/to/worktree",
+		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
+			promptCalled = true
+			return "custom prompt for " + agentName
+		},
+		CustomTaskCheck: func() (bool, error) {
+			checkCalled = true
+			return true, nil
+		},
+	}
+
+	// Verify custom prompt gen works
+	result := opts.CustomPromptGen("falcon", nil)
+	if !promptCalled {
+		t.Error("CustomPromptGen was not called")
+	}
+	if result != "custom prompt for falcon" {
+		t.Errorf("CustomPromptGen returned %q, want %q", result, "custom prompt for falcon")
+	}
+
+	// Verify custom task check works
+	available, err := opts.CustomTaskCheck()
+	if !checkCalled {
+		t.Error("CustomTaskCheck was not called")
+	}
+	if err != nil {
+		t.Errorf("CustomTaskCheck returned error: %v", err)
+	}
+	if !available {
+		t.Error("CustomTaskCheck returned false, want true")
+	}
+}
+
+// ============================================================================
+// RunAutoModeLoop Custom Prompt/Task Check Tests
+// ============================================================================
+
+func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// execCommand should NOT be called for task checks when CustomTaskCheck is set
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{Stdout: "[]"}
+	}
+
+	var receivedPrompt string
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		receivedPrompt = prompt
+		// Simulate task claiming
+		UpdateLockTask(workDir, "mock-custom-1", "Mock Custom Task")
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     1,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "custom-agent",
+		WorktreePath: tmpDir,
+		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
+			return "custom prompt for " + agentName
+		},
+		CustomTaskCheck: func() (bool, error) {
+			return true, nil
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Verify custom prompt was used (not default task prompt)
+	expectedPrompt := "custom prompt for custom-agent"
+	if receivedPrompt != expectedPrompt {
+		t.Errorf("Received prompt %q, want %q", receivedPrompt, expectedPrompt)
+	}
+
+	// Verify it's NOT the default task prompt
+	defaultTaskPrompt := GenerateTaskPrompt("custom-agent", nil)
+	if receivedPrompt == defaultTaskPrompt {
+		t.Error("Received default task prompt instead of custom prompt")
+	}
+}
+
+func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Return a task WITH design (ready for implementation via default task check)
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Ready to implement", Status: "open", Design: "Design here"},
+			}),
+		}
+	}
+
+	var receivedPrompt string
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		receivedPrompt = prompt
+		// Simulate task claiming
+		UpdateLockTask(workDir, "mock-fallback-1", "Mock Fallback Task")
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     1,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "fallback-agent",
+		WorktreePath: tmpDir,
+		// Only set CustomPromptGen, NOT CustomTaskCheck — should fall back to AgentType
+		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
+			return "custom prompt for " + agentName
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Should receive the default task prompt (NOT the custom prompt)
+	// because CustomTaskCheck is nil, so both custom fields are ignored
+	expectedPrompt := GenerateTaskPrompt("fallback-agent", nil)
+	if receivedPrompt != expectedPrompt {
+		t.Errorf("Received prompt %q, want default task prompt %q", receivedPrompt, expectedPrompt)
+	}
+
+	// Verify custom prompt was NOT used
+	customPrompt := "custom prompt for fallback-agent"
+	if receivedPrompt == customPrompt {
+		t.Error("Received custom prompt instead of default task prompt — fallback did not work")
+	}
+}
+
+func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
+	// When only CustomTaskCheck is set (not CustomPromptGen), should fall back to AgentType
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Return tasks (needed for default HasAvailableImplementationTasks fallback)
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	var receivedPrompt string
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		receivedPrompt = prompt
+		UpdateLockTask(workDir, "mock-taskcheck-1", "Mock Task")
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     1,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "taskcheck-agent",
+		WorktreePath: tmpDir,
+		// Only set CustomTaskCheck, NOT CustomPromptGen — should fall back to AgentType
+		CustomTaskCheck: func() (bool, error) {
+			return true, nil
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Should receive default task prompt since CustomPromptGen is nil
+	expectedPrompt := GenerateTaskPrompt("taskcheck-agent", nil)
+	if receivedPrompt != expectedPrompt {
+		t.Errorf("Received prompt %q, want default task prompt", receivedPrompt)
+	}
+}
+

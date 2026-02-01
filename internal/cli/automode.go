@@ -24,6 +24,8 @@ type AutoModeOptions struct {
 	AgentType   string // "plan" or "task"
 	AgentName   string
 	WorktreePath string
+	CustomPromptGen func(string, *WorkspaceConfig) string // Custom prompt generator (overrides AgentType selection)
+	CustomTaskCheck func() (bool, error)                   // Custom task availability check (overrides AgentType selection)
 }
 
 // AutoModeState tracks the current state of auto mode execution
@@ -175,6 +177,35 @@ func HasAvailableImplementationTasks() (bool, error) {
 	return false, nil
 }
 
+// HasAnyAvailableTasks checks if there are any ready tasks regardless of design status.
+// Used by custom roles with task_filter=any.
+func HasAnyAvailableTasks() (bool, error) {
+	result := execCommand(GetBeadsDir(), "bd", "ready", "--json")
+	if result.Err != nil {
+		return false, fmt.Errorf("failed to check ready tasks: %w", result.Err)
+	}
+
+	var issues []BdIssue
+	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
+		return false, fmt.Errorf("failed to parse task list: %w", err)
+	}
+
+	for _, issue := range issues {
+		if strings.Contains(issue.Title, "[Need Review]") {
+			continue
+		}
+		if issue.Status == "in_progress" {
+			continue
+		}
+		if issue.IssueType == "epic" {
+			continue
+		}
+		return true, nil
+	}
+
+	return false, nil
+}
+
 // agentClaimedTask checks the lock file to determine if the agent claimed a task
 // during its session. Returns true if TaskID is non-empty.
 func agentClaimedTask(worktreePath string) bool {
@@ -197,7 +228,10 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	// Choose the appropriate task checker based on agent type
 	var hasAvailableTasks func() (bool, error)
 	var generatePrompt func(string, *WorkspaceConfig) string
-	if opts.AgentType == "plan" {
+	if opts.CustomPromptGen != nil && opts.CustomTaskCheck != nil {
+		hasAvailableTasks = opts.CustomTaskCheck
+		generatePrompt = opts.CustomPromptGen
+	} else if opts.AgentType == "plan" {
 		hasAvailableTasks = HasAvailablePlanningTasks
 		generatePrompt = GeneratePlanningPrompt
 	} else {
@@ -432,9 +466,13 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	}
 	logFile := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", opts.AgentType, opts.AgentName))
 
-	// Choose task checker based on agent type
+	// Choose task checker based on agent type.
+	// Note: CustomPromptGen is not used here because tmux mode delegates prompt
+	// generation to the daemon subprocess via the loom command.
 	var hasAvailableTasks func() (bool, error)
-	if opts.AgentType == "plan" {
+	if opts.CustomTaskCheck != nil {
+		hasAvailableTasks = opts.CustomTaskCheck
+	} else if opts.AgentType == "plan" {
 		hasAvailableTasks = HasAvailablePlanningTasks
 	} else {
 		hasAvailableTasks = HasAvailableImplementationTasks
