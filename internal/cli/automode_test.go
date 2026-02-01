@@ -1231,3 +1231,801 @@ func TestStreamRemainingLogContent_HandlesLogTruncation(t *testing.T) {
 	}
 }
 
+// setupLockFile creates a lock file for the current process in the given directory
+// This is needed because UpdateLockState requires a valid lock file with matching PID
+func setupLockFile(t *testing.T, dir string) {
+	t.Helper()
+	lockInfo := LockInfo{
+		PID:       os.Getpid(),
+		Command:   "test",
+		AgentName: "test-agent",
+		StartedAt: time.Now(),
+	}
+	data, err := json.Marshal(lockInfo)
+	if err != nil {
+		t.Fatalf("failed to marshal lock info: %v", err)
+	}
+	lockPath := filepath.Join(dir, LockFileName)
+	if err := os.WriteFile(lockPath, data, 0644); err != nil {
+		t.Fatalf("failed to write lock file: %v", err)
+	}
+	// Ensure lock file is cleaned up after test
+	t.Cleanup(func() {
+		os.Remove(lockPath)
+	})
+}
+
+func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
+	// Save and restore mocks
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	// Setup temp directory with lock file
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Mock bd ready to return tasks (so loop would continue without shutdown)
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Available task", Status: "open", Design: "Has design"},
+			}),
+		}
+	}
+
+	// Track if Claude was invoked
+	claudeInvoked := false
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeInvoked = true
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	close(shutdown) // Close immediately
+
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	// Run loop - should exit immediately due to shutdown
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - exited promptly
+	case <-time.After(2 * time.Second):
+		t.Error("RunAutoModeLoop did not exit after shutdown signal")
+	}
+
+	// Claude should NOT have been invoked
+	if claudeInvoked {
+		t.Error("Claude was invoked despite immediate shutdown")
+	}
+}
+
+func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Mock bd ready to always return tasks
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	// Track Claude invocations
+	claudeInvocations := 0
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeInvocations++
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     3, // Limit to 3 tasks
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good
+	case <-time.After(10 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit after max tasks")
+	}
+
+	if claudeInvocations != 3 {
+		t.Errorf("Claude was invoked %d times, want 3", claudeInvocations)
+	}
+}
+
+func TestRunAutoModeLoop_GracefulShutdownNoTasks(t *testing.T) {
+	// This test verifies graceful shutdown when no tasks are available.
+	// Note: Testing actual IdleTimeout would require waiting 1+ minutes,
+	// so we test the shutdown-during-idle path instead.
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Mock bd ready to return NO tasks
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{Stdout: "[]"}
+	}
+
+	claudeInvoked := false
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeInvoked = true
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  1, // Set but won't be reached - we'll shutdown first
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		close(shutdown)
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	if claudeInvoked {
+		t.Error("Claude should not be invoked when no tasks available")
+	}
+}
+
+func TestRunAutoModeLoop_NoTasks(t *testing.T) {
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	checkCount := 0
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		checkCount++
+		return CommandResult{Stdout: "[]"} // No tasks
+	}
+
+	claudeInvoked := false
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeInvoked = true
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+
+	// Close shutdown after multiple poll cycles
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		close(shutdown)
+	}()
+
+	opts := AutoModeOptions{
+		Interval:     1, // Will be interrupted by shutdown
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Should have checked for tasks at least once
+	if checkCount == 0 {
+		t.Error("Should have checked for available tasks")
+	}
+
+	// Claude should not be invoked with no tasks
+	if claudeInvoked {
+		t.Error("Claude should not be invoked when no tasks")
+	}
+}
+
+func TestRunAutoModeLoop_TaskExecution(t *testing.T) {
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Return tasks initially, then no tasks to stop
+	callCount := 0
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		callCount++
+		if callCount <= 2 { // First two calls return task
+			return CommandResult{
+				Stdout: mustJSON([]BdIssue{
+					{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+				}),
+			}
+		}
+		return CommandResult{Stdout: "[]"} // No more tasks
+	}
+
+	promptsReceived := []string{}
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		promptsReceived = append(promptsReceived, prompt)
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		close(shutdown)
+	}()
+
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     1, // Only run 1 task
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test-agent",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	if len(promptsReceived) != 1 {
+		t.Errorf("Expected 1 prompt, got %d", len(promptsReceived))
+	}
+}
+
+func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Always return tasks
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	// Always return error
+	errorCount := 0
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		errorCount++
+		return fmt.Errorf("simulated error %d", errorCount)
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1, // Short interval for test
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - should exit after 3 consecutive errors
+	case <-time.After(30 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit after consecutive errors")
+	}
+
+	// Should have tried exactly 3 times before exiting
+	if errorCount != 3 {
+		t.Errorf("Expected 3 consecutive errors, got %d", errorCount)
+	}
+}
+
+func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Return a task WITHOUT design (needs planning)
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Needs planning", Status: "open", Design: ""},
+			}),
+		}
+	}
+
+	var receivedPrompt string
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		receivedPrompt = prompt
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     1,
+		IdleTimeout:  0,
+		AgentType:    "plan", // Plan agent
+		AgentName:    "planner",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Verify that plan prompt was generated
+	expectedPrompt := GeneratePlanningPrompt("planner")
+	if receivedPrompt != expectedPrompt {
+		t.Errorf("Plan agent did not receive planning prompt")
+	}
+}
+
+func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Return a task WITH design (ready for implementation)
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Ready to implement", Status: "open", Design: "Design here"},
+			}),
+		}
+	}
+
+	var receivedPrompt string
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		receivedPrompt = prompt
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     1,
+		IdleTimeout:  0,
+		AgentType:    "task", // Task agent
+		AgentName:    "worker",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Verify that task prompt was generated
+	expectedPrompt := GenerateTaskPrompt("worker")
+	if receivedPrompt != expectedPrompt {
+		t.Errorf("Task agent did not receive task prompt")
+	}
+}
+
+func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
+	// Test that a successful task resets the error counter
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	// Pattern: error, error, success, error, error, error (should exit on 6th)
+	callNum := 0
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		callNum++
+		// Errors on calls 1, 2, 4, 5, 6
+		// Success on call 3
+		if callNum == 3 {
+			return nil // Success resets error counter
+		}
+		return fmt.Errorf("error %d", callNum)
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Should exit after 6 calls (2 errors, 1 success, 3 consecutive errors)
+	if callNum != 6 {
+		t.Errorf("Expected 6 Claude invocations, got %d", callNum)
+	}
+}
+
+func TestRunAutoModeLoop_BdCommandError(t *testing.T) {
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// bd ready returns an error
+	bdErrorCount := 0
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		bdErrorCount++
+		return CommandResult{Err: fmt.Errorf("bd error")}
+	}
+
+	claudeInvoked := false
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeInvoked = true
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		close(shutdown)
+	}()
+
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Should have tried bd command
+	if bdErrorCount == 0 {
+		t.Error("Should have attempted bd command")
+	}
+
+	// Claude should not be invoked when bd fails
+	if claudeInvoked {
+		t.Error("Claude should not be invoked when bd command fails")
+	}
+}
+
+func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
+	// Test that shutdown is respected during the error backoff sleep
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	claudeInvocations := 0
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeInvocations++
+		return fmt.Errorf("error")
+	}
+
+	shutdown := make(chan struct{})
+
+	// Close shutdown shortly after first error (during backoff period)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		close(shutdown)
+	}()
+
+	opts := AutoModeOptions{
+		Interval:     5, // Long backoff to ensure shutdown happens during wait
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		elapsed := time.Since(start)
+		// Should exit quickly, not wait full 5-second backoff
+		if elapsed >= 3*time.Second {
+			t.Errorf("Loop did not respect shutdown during backoff (took %v)", elapsed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Should have invoked Claude exactly once before shutdown during backoff
+	if claudeInvocations != 1 {
+		t.Errorf("Expected 1 Claude invocation before shutdown, got %d", claudeInvocations)
+	}
+}
+
+func TestGetPaneState_ParsesCorrectly(t *testing.T) {
+	// Skip if tmux is not available
+	if exec.Command("tmux", "-V").Run() != nil {
+		t.Skip("tmux not available")
+	}
+
+	// Create a simple tmux session that runs long enough to query
+	sessionName := fmt.Sprintf("loom-test-panestate-%d", os.Getpid())
+
+	// Create session with a command that sleeps briefly (enough time to query)
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "5").Run()
+	if err != nil {
+		t.Fatalf("Failed to create test session: %v", err)
+	}
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	// Give session time to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Get pane state while session is running
+	state, err := getPaneState(sessionName)
+	if err != nil {
+		t.Fatalf("getPaneState failed: %v", err)
+	}
+
+	// Command is still running, so pane should NOT be dead
+	if state.Dead {
+		t.Error("Expected pane to be alive while command is running")
+	}
+	if state.PID <= 0 {
+		t.Errorf("Expected valid PID, got %d", state.PID)
+	}
+	t.Logf("PaneState: Dead=%v, ExitStatus=%d, ExitSignal=%q, PID=%d",
+		state.Dead, state.ExitStatus, state.ExitSignal, state.PID)
+}
+
+func TestStartTmuxSession_Success(t *testing.T) {
+	// Skip if tmux is not available
+	if exec.Command("tmux", "-V").Run() != nil {
+		t.Skip("tmux not available")
+	}
+
+	tmpDir := t.TempDir()
+	sessionName := fmt.Sprintf("loom-test-start-%d", os.Getpid())
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	opts := AutoModeOptions{
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	err := startTmuxSession(sessionName, opts, logFile)
+	if err != nil {
+		t.Fatalf("startTmuxSession failed: %v", err)
+	}
+
+	// Verify session was created
+	if !tmuxSessionExists(sessionName) {
+		t.Error("Session was not created")
+	}
+}
+
+func TestStartTmuxSession_KillsExisting(t *testing.T) {
+	// Skip if tmux is not available
+	if exec.Command("tmux", "-V").Run() != nil {
+		t.Skip("tmux not available")
+	}
+
+	tmpDir := t.TempDir()
+	sessionName := fmt.Sprintf("loom-test-kill-%d", os.Getpid())
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	// Create an existing session with the same name
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60").Run()
+	if err != nil {
+		t.Fatalf("Failed to create initial session: %v", err)
+	}
+
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	// Verify initial session exists
+	if !tmuxSessionExists(sessionName) {
+		t.Fatal("Initial session should exist")
+	}
+
+	opts := AutoModeOptions{
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	// Start new session - should kill and replace the existing one
+	err = startTmuxSession(sessionName, opts, logFile)
+	if err != nil {
+		t.Fatalf("startTmuxSession failed: %v", err)
+	}
+
+	// Verify session still exists (the new one)
+	if !tmuxSessionExists(sessionName) {
+		t.Error("New session should exist after replacing old one")
+	}
+}
+

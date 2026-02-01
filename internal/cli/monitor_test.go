@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDisplayWidth(t *testing.T) {
@@ -1093,8 +1094,8 @@ func TestCollectTaskStatus(t *testing.T) {
 			if summary.NeedReview != tt.wantNeedReview {
 				t.Errorf("NeedReview = %d, want %d", summary.NeedReview, tt.wantNeedReview)
 			}
-			if summary.Backlog != tt.wantBacklog{
-				t.Errorf("Backlog = %d, want %d", summary.Backlog, tt.wantBacklog)
+			if summary.Blocked != tt.wantBacklog{
+				t.Errorf("Blocked = %d, want %d", summary.Blocked, tt.wantBacklog)
 			}
 			if len(needsPlanningTasks) != tt.wantNeedsPlanningLen {
 				t.Errorf("needsPlanningTasks len = %d, want %d", len(needsPlanningTasks), tt.wantNeedsPlanningLen)
@@ -1459,6 +1460,579 @@ func TestCollectMonitorData(t *testing.T) {
 	if data.AgentTasks == nil {
 		t.Error("AgentTasks should be initialized")
 	}
+}
+
+// ===========================================================================
+// Coverage improvement tests
+// ===========================================================================
+
+func TestCollectMonitorDataExported(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	wtDir := filepath.Join(tmpDir, "worktrees", "test-agent")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		if name == "git" && len(args) > 0 && args[0] == "branch" {
+			return CommandResult{Stdout: "test-agent"}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "status" {
+			return CommandResult{Stdout: ""}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
+			return CommandResult{Stdout: "0\t0"}
+		}
+		if name == "bd" {
+			if len(args) > 0 && args[0] == "ready" {
+				return CommandResult{Stdout: "[]"}
+			}
+			if len(args) > 0 && args[0] == "stats" {
+				return CommandResult{Stdout: `{"summary":{"total_issues":5,"open_issues":2,"closed_issues":3}}`}
+			}
+			if len(args) > 0 && args[0] == "sync" {
+				return CommandResult{Stdout: "synced"}
+			}
+			if len(args) > 0 && args[0] == "blocked" {
+				return CommandResult{Stdout: "[]"}
+			}
+			if len(args) > 1 && args[0] == "list" {
+				return CommandResult{Stdout: "[]"}
+			}
+		}
+		return CommandResult{}
+	}
+
+	data := CollectMonitorData()
+	if data == nil {
+		t.Fatal("CollectMonitorData returned nil")
+	}
+	if data.Timestamp.IsZero() {
+		t.Error("Timestamp should be set")
+	}
+	if data.Stats.Total != 5 {
+		t.Errorf("expected Stats.Total=5, got %d", data.Stats.Total)
+	}
+}
+
+func TestCollectAgentStatusOnlyExported(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	wtDir := filepath.Join(tmpDir, "worktrees", "solo")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		if name == "git" && len(args) > 0 && args[0] == "branch" {
+			return CommandResult{Stdout: "solo"}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "status" {
+			return CommandResult{Stdout: ""}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
+			return CommandResult{Stdout: "0\t0"}
+		}
+		return CommandResult{}
+	}
+
+	agents := CollectAgentStatusOnly()
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].Name != "solo" {
+		t.Errorf("expected agent name 'solo', got %q", agents[0].Name)
+	}
+	if agents[0].Status != "ready" {
+		t.Errorf("expected status 'ready', got %q", agents[0].Status)
+	}
+}
+
+func TestRunMonitorOneShot(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	wtDir := filepath.Join(tmpDir, "worktrees", "oneshot")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		if name == "git" && len(args) > 0 && args[0] == "branch" {
+			return CommandResult{Stdout: "oneshot"}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "status" {
+			return CommandResult{Stdout: ""}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
+			return CommandResult{Stdout: "0\t0"}
+		}
+		if name == "bd" {
+			return CommandResult{Stdout: "[]"}
+		}
+		return CommandResult{}
+	}
+
+	// Save and set monitorNoWatch
+	oldNoWatch := monitorNoWatch
+	monitorNoWatch = true
+	t.Cleanup(func() { monitorNoWatch = oldNoWatch })
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	runMonitor(nil, nil)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 8192)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "LOOM") {
+		t.Error("expected dashboard header 'LOOM' in output")
+	}
+	if !strings.Contains(output, "AGENTS") {
+		t.Error("expected AGENTS section in output")
+	}
+}
+
+func TestRenderDashboardEmptyData(t *testing.T) {
+	data := &MonitorData{
+		Timestamp:      fixedTime(),
+		Agents:         nil,
+		Tasks:          TaskSummary{},
+		AgentTasks:     make(map[string]TaskInfo),
+		TaskConflicts:  make(map[string][]string),
+		SyncStatus:     SyncInfo{DBSynced: true},
+		Stats:          MonitorStats{},
+	}
+
+	output := renderDashboard(data)
+
+	// Check empty agent section
+	if !strings.Contains(output, "No agents found") {
+		t.Error("expected 'No agents found' for empty agents")
+	}
+
+	// Check empty task sections show "(none)"
+	noneCount := strings.Count(output, "(none)")
+	if noneCount < 4 {
+		t.Errorf("expected at least 4 '(none)' entries for empty task lists, got %d", noneCount)
+	}
+
+	// Check sync shows synced
+	if !strings.Contains(output, "synced") {
+		t.Error("expected 'synced' in sync section")
+	}
+}
+
+func TestRenderDashboardWithData(t *testing.T) {
+	data := &MonitorData{
+		Timestamp: fixedTime(),
+		Agents: []AgentStatus{
+			{Name: "falcon", Branch: "falcon", Status: "working: T-1 (2m)", Ahead: 3, Behind: 1},
+			{Name: "nova", Branch: "nova", Status: "ready", Ahead: 0, Behind: 0},
+		},
+		Tasks: TaskSummary{
+			NeedsPlanning:    2,
+			ReadyToImplement: 1,
+			InProgress:       1,
+			NeedReview:       1,
+			Blocked:          1,
+		},
+		NeedsPlanningTasks: []TaskInfo{
+			{ID: "T-1", Title: "Plan this", Priority: 2},
+		},
+		ReadyToImplement: []TaskInfo{
+			{ID: "T-2", Title: "Implement this", Priority: 1},
+		},
+		ReviewTasks: []TaskInfo{
+			{ID: "T-3", Title: "[Need Review] Review this", Priority: 2},
+		},
+		InProgressTasks: []TaskInfo{
+			{ID: "T-4", Title: "In progress task", Priority: 1},
+		},
+		BlockedTasks: []TaskInfo{
+			{ID: "T-5", Title: "Blocked task", Priority: 3},
+		},
+		AgentTasks:    make(map[string]TaskInfo),
+		TaskConflicts: make(map[string][]string),
+		SyncStatus: SyncInfo{
+			DBSynced:     false,
+			DBError:      "connection failed",
+			GitNeedsPush: 1,
+			GitNeedsPull: 1,
+		},
+		Stats: MonitorStats{
+			Open:       5,
+			Closed:     10,
+			Total:      15,
+			Completion: 66.7,
+		},
+	}
+
+	output := renderDashboard(data)
+
+	// Check agents rendered
+	if !strings.Contains(output, "falcon") {
+		t.Error("expected agent 'falcon' in output")
+	}
+	if !strings.Contains(output, "working:") {
+		t.Error("expected 'working:' status")
+	}
+	if !strings.Contains(output, "↑3") {
+		t.Error("expected '↑3' sync indicator")
+	}
+	if !strings.Contains(output, "↓1") {
+		t.Error("expected '↓1' sync indicator")
+	}
+
+	// Check task sections
+	if !strings.Contains(output, "NEEDS PLANNING") {
+		t.Error("expected NEEDS PLANNING section")
+	}
+	if !strings.Contains(output, "NEEDS REVIEW") {
+		t.Error("expected NEEDS REVIEW section")
+	}
+	if !strings.Contains(output, "READY TO IMPLEMENT") {
+		t.Error("expected READY TO IMPLEMENT section")
+	}
+	if !strings.Contains(output, "IN PROGRESS") {
+		t.Error("expected IN PROGRESS section")
+	}
+
+	// Check [Need Review] prefix stripped
+	if strings.Contains(output, "[Need Review] Review this") {
+		t.Error("[Need Review] prefix should be stripped from review task titles")
+	}
+	if !strings.Contains(output, "Review this") {
+		t.Error("expected stripped review task title")
+	}
+
+	// Check sync section shows errors
+	if !strings.Contains(output, "connection failed") {
+		t.Error("expected DB error message")
+	}
+	if !strings.Contains(output, "need push") {
+		t.Error("expected 'need push' in git sync")
+	}
+	if !strings.Contains(output, "need pull") {
+		t.Error("expected 'need pull' in git sync")
+	}
+
+	// Check stats
+	if !strings.Contains(output, "67%") {
+		t.Error("expected completion percentage")
+	}
+}
+
+func TestRenderBoxLineLongContent(t *testing.T) {
+	// Content longer than dashboardWidth - 4 should not cause negative padding
+	longContent := strings.Repeat("x", dashboardWidth+10)
+	result := renderBoxLine(longContent)
+
+	if !strings.HasPrefix(result, "║ ") {
+		t.Error("expected box line to start with '║ '")
+	}
+	if !strings.HasSuffix(result, " ║\n") {
+		t.Error("expected box line to end with ' ║\\n'")
+	}
+	// Padding should be 0, so content is directly followed by " ║\n"
+	if !strings.Contains(result, longContent+" ║\n") {
+		t.Error("expected long content with no padding")
+	}
+}
+
+func TestRenderBoxLineEmptyContent(t *testing.T) {
+	result := renderBoxLine("")
+
+	if !strings.HasPrefix(result, "║ ") {
+		t.Error("expected box line to start with '║ '")
+	}
+	if !strings.HasSuffix(result, " ║\n") {
+		t.Error("expected box line to end with ' ║\\n'")
+	}
+	// Empty content should get full padding
+	expectedLen := dashboardWidth + len("║") + len("║") + len("\n") - 2 // account for unicode chars
+	_ = expectedLen // just verify it doesn't panic
+}
+
+func TestGetWorktreeGitSyncStatusError(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{Err: fmt.Errorf("git failed")}
+	}
+
+	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main")
+	if ahead != 0 || behind != 0 {
+		t.Errorf("expected (0, 0) on error, got (%d, %d)", ahead, behind)
+	}
+}
+
+func TestGetWorktreeGitSyncStatusMalformed(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{Stdout: "not-a-number"}
+	}
+
+	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main")
+	if ahead != 0 || behind != 0 {
+		t.Errorf("expected (0, 0) on malformed output, got (%d, %d)", ahead, behind)
+	}
+}
+
+func TestGetWorktreeGitSyncStatusCustomBranch(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	oldBranch := monitorBranch
+	monitorBranch = "develop"
+	t.Cleanup(func() { monitorBranch = oldBranch })
+
+	var capturedArgs []string
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		capturedArgs = args
+		return CommandResult{Stdout: "2\t4"}
+	}
+
+	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main")
+	if ahead != 4 || behind != 2 {
+		t.Errorf("expected (4, 2), got (%d, %d)", ahead, behind)
+	}
+
+	// Verify the custom branch was used
+	found := false
+	for _, arg := range capturedArgs {
+		if strings.Contains(arg, "origin/develop") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'origin/develop' in git args, got %v", capturedArgs)
+	}
+}
+
+func TestCollectAgentStatusLockFallback(t *testing.T) {
+	tests := []struct {
+		name           string
+		lockCommand    string // "plan" or "task"
+		taskStatus     string // return from getTaskStatus mock
+		expectPrefix   string
+	}{
+		{
+			name:         "planning_agent_task_needs_review_becomes_review",
+			lockCommand:  "plan",
+			taskStatus:   "needs_review",
+			expectPrefix: "review:",
+		},
+		{
+			name:         "working_agent_task_needs_review_stays_working",
+			lockCommand:  "task",
+			taskStatus:   "needs_review",
+			expectPrefix: "working:",
+		},
+		{
+			name:         "planning_agent_task_closed_becomes_done",
+			lockCommand:  "plan",
+			taskStatus:   "closed",
+			expectPrefix: "done:",
+		},
+		{
+			name:         "working_agent_task_closed_becomes_done",
+			lockCommand:  "task",
+			taskStatus:   "closed",
+			expectPrefix: "done:",
+		},
+		{
+			name:         "planning_agent_task_in_progress_keeps_planning",
+			lockCommand:  "plan",
+			taskStatus:   "in_progress",
+			expectPrefix: "planning:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origDir, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tmpDir := t.TempDir()
+			os.Chdir(tmpDir)
+			t.Cleanup(func() { os.Chdir(origDir) })
+
+			wtDir := filepath.Join(tmpDir, "worktrees", "alpha")
+			if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
+				t.Fatal(err)
+			}
+
+			// Create lock file with empty TaskID - triggers "..." in status
+			lockInfo := LockInfo{
+				PID:       os.Getpid(),
+				Command:   tt.lockCommand,
+				AgentName: "alpha",
+				TaskID:    "", // empty - triggers "..." in GetLockStatus
+				StartedAt: time.Now(),
+			}
+			lockData, _ := json.Marshal(lockInfo)
+			os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644)
+
+			oldExec := execCommand
+			t.Cleanup(func() { execCommand = oldExec })
+
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				if name == "git" && len(args) > 0 && args[0] == "branch" {
+					return CommandResult{Stdout: "alpha"}
+				}
+				if name == "git" && len(args) > 0 && args[0] == "status" {
+					return CommandResult{Stdout: ""}
+				}
+				if name == "git" && len(args) > 0 && args[0] == "rev-list" {
+					return CommandResult{Stdout: "0\t0"}
+				}
+				// Mock bd show for getTaskStatus
+				if name == "bd" && len(args) > 0 && args[0] == "show" {
+					return CommandResult{Stdout: mustJSON([]struct {
+						Title  string `json:"title"`
+						Status string `json:"status"`
+					}{{Title: "Test Task", Status: tt.taskStatus}})}
+				}
+				return CommandResult{}
+			}
+
+			agentTasks := map[string]TaskInfo{
+				"alpha": {ID: "T-999", Title: "Test Task", Priority: 2, Status: "in_progress"},
+			}
+
+			agents, _ := collectAgentStatus(agentTasks)
+			if len(agents) != 1 {
+				t.Fatalf("expected 1 agent, got %d", len(agents))
+			}
+
+			if !strings.HasPrefix(agents[0].Status, tt.expectPrefix) {
+				t.Errorf("expected status prefix %q, got %q", tt.expectPrefix, agents[0].Status)
+			}
+		})
+	}
+}
+
+func TestRenderDashboardSyncGitPushOnly(t *testing.T) {
+	data := &MonitorData{
+		Timestamp:     fixedTime(),
+		AgentTasks:    make(map[string]TaskInfo),
+		TaskConflicts: make(map[string][]string),
+		SyncStatus: SyncInfo{
+			DBSynced:     true,
+			GitNeedsPush: 2,
+			GitNeedsPull: 0,
+		},
+	}
+
+	output := renderDashboard(data)
+	if !strings.Contains(output, "2 need push") {
+		t.Error("expected '2 need push' in git sync status")
+	}
+	if strings.Contains(output, "need pull") {
+		t.Error("should not show 'need pull' when GitNeedsPull is 0")
+	}
+}
+
+func TestRenderDashboardSyncGitPullOnly(t *testing.T) {
+	data := &MonitorData{
+		Timestamp:     fixedTime(),
+		AgentTasks:    make(map[string]TaskInfo),
+		TaskConflicts: make(map[string][]string),
+		SyncStatus: SyncInfo{
+			DBSynced:     true,
+			GitNeedsPush: 0,
+			GitNeedsPull: 3,
+		},
+	}
+
+	output := renderDashboard(data)
+	if !strings.Contains(output, "3 need pull") {
+		t.Error("expected '3 need pull' in git sync status")
+	}
+	if strings.Contains(output, "need push") {
+		t.Error("should not show 'need push' when GitNeedsPush is 0")
+	}
+}
+
+func TestRenderDashboardAgentStatusIcons(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     string
+		wantIcon   string
+	}{
+		{"ready_shows_checkmark", "ready", "✓"},
+		{"changes_shows_bullet", "3 changes", "●"},
+		{"dirty_shows_bullet", "dirty", "●"},
+		{"working_shows_bullet", "working: T-1 (2m)", "●"},
+		{"planning_shows_bullet", "planning: T-2 (3m)", "●"},
+		{"done_shows_bullet", "done: T-3 (1m)", "●"},
+		{"review_shows_bullet", "review: T-4 (5m)", "●"},
+		{"error_shows_bullet", "error: T-5", "●"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := &MonitorData{
+				Timestamp: fixedTime(),
+				Agents: []AgentStatus{
+					{Name: "test", Branch: "test", Status: tt.status},
+				},
+				AgentTasks:    make(map[string]TaskInfo),
+				TaskConflicts: make(map[string][]string),
+				SyncStatus:    SyncInfo{DBSynced: true},
+			}
+
+			output := renderDashboard(data)
+			if !strings.Contains(output, tt.wantIcon) {
+				t.Errorf("expected icon %q for status %q in output", tt.wantIcon, tt.status)
+			}
+		})
+	}
+}
+
+// fixedTime returns a consistent time for test assertions
+func fixedTime() time.Time {
+	return time.Date(2026, 1, 29, 12, 0, 0, 0, time.UTC)
 }
 
 // Note: mustJSON helper is defined in automode_test.go and available here
