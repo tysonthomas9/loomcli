@@ -1138,7 +1138,7 @@ func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
 	collectTaskStatus()
 
 	// Verify the ready command was called with correct args
-	expectedArgs := []string{"ready", "--json", "--limit", "50"}
+	expectedArgs := []string{"ready", "--json", "--limit", "100"}
 	if len(capturedArgs) != len(expectedArgs) {
 		t.Errorf("ready command called with %d args, want %d. Got: %v", len(capturedArgs), len(expectedArgs), capturedArgs)
 	}

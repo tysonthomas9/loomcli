@@ -1340,6 +1340,8 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 	claudeInvocations := 0
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 		claudeInvocations++
+		// Simulate task claiming by writing a TaskID to the lock file
+		UpdateLockTask(workDir, fmt.Sprintf("mock-%d", claudeInvocations), "Mock Task")
 		return nil
 	}
 
@@ -1638,6 +1640,8 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 	var receivedPrompt string
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 		receivedPrompt = prompt
+		// Simulate task claiming by writing a TaskID to the lock file
+		UpdateLockTask(workDir, "mock-plan-1", "Mock Plan Task")
 		return nil
 	}
 
@@ -1694,6 +1698,8 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 	var receivedPrompt string
 	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 		receivedPrompt = prompt
+		// Simulate task claiming by writing a TaskID to the lock file
+		UpdateLockTask(workDir, "mock-task-1", "Mock Task")
 		return nil
 	}
 
@@ -1754,6 +1760,8 @@ func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
 		// Errors on calls 1, 2, 4, 5, 6
 		// Success on call 3
 		if callNum == 3 {
+			// Simulate task claiming so the loop counts this as progress
+			UpdateLockTask(workDir, "mock-recovery", "Mock Recovery Task")
 			return nil // Success resets error counter
 		}
 		return fmt.Errorf("error %d", callNum)
