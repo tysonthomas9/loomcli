@@ -1,0 +1,5 @@
+[
+  {"id":"TASK-1","title":"Implement user authentication","status":"open","priority":1,"issue_type":"task","design":""},
+  {"id":"TASK-2","title":"Add caching layer","status":"open","priority":2,"issue_type":"task","design":""},
+  {"id":"TASK-3","title":"Refactor error handling","status":"open","priority":3,"issue_type":"task","design":""}
+]
