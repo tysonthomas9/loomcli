@@ -126,3 +126,50 @@ func IsCleanWorkingTree(dir string) (bool, error) {
 	}
 	return strings.TrimSpace(output) == "", nil
 }
+
+// resolveRemote returns "origin" if remote is empty, otherwise returns remote as-is.
+func resolveRemote(remote string) string {
+	if remote == "" {
+		return "origin"
+	}
+	return remote
+}
+
+// GitFetchRemote fetches from the specified remote
+func GitFetchRemote(dir, remote string) error {
+	r := resolveRemote(remote)
+	fmt.Printf("Fetching from %s...\n", r)
+	return RunGitCommandWithOutput(dir, "fetch", r)
+}
+
+// GitMergeRemote attempts to merge remote/branch
+func GitMergeRemote(dir, remote, branch, message string) error {
+	r := resolveRemote(remote)
+	ref := r + "/" + branch
+	fmt.Printf("Merging %s...\n", ref)
+	return RunGitCommandWithOutput(dir, "merge", ref, "-m", message)
+}
+
+// GitPushRemote pushes to the specified remote
+func GitPushRemote(dir, remote, branch string) error {
+	r := resolveRemote(remote)
+	fmt.Printf("Pushing to %s/%s...\n", r, branch)
+	return RunGitCommandWithOutput(dir, "push", r, branch)
+}
+
+// GitPullRemote pulls from the specified remote for the given branch
+func GitPullRemote(dir, remote, branch string) error {
+	r := resolveRemote(remote)
+	fmt.Printf("Pulling from %s/%s...\n", r, branch)
+	return RunGitCommandWithOutput(dir, "pull", r, branch)
+}
+
+// HasCommitsBetweenRemote checks if source has commits not in target using a specific remote
+func HasCommitsBetweenRemote(dir, remote, target, source string) (bool, error) {
+	r := resolveRemote(remote)
+	output, err := RunGitCommand(dir, "log", fmt.Sprintf("%s..%s/%s", target, r, source), "--oneline")
+	if err != nil {
+		return true, nil
+	}
+	return strings.TrimSpace(output) != "", nil
+}

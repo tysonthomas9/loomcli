@@ -351,3 +351,281 @@ func TestMergeAllWorktrees(t *testing.T) {
 		})
 	}
 }
+
+func TestTargetBranchDisplay(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"empty returns per-repo default", "", "(per-repo default)"},
+		{"non-empty returns as-is", "main", "main"},
+		{"feature branch", "feature/web-ui", "feature/web-ui"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := targetBranchDisplay(tc.input)
+			if got != tc.expect {
+				t.Errorf("targetBranchDisplay(%q) = %q, want %q", tc.input, got, tc.expect)
+			}
+		})
+	}
+}
+
+func TestMergeWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "main", Remote: ""},
+		},
+		{
+			Name:   "repo-b",
+			Path:   "/ws/repo-b",
+			Branch: "feat-b",
+			Repo:   &RepoConfig{Name: "repo-b", DefaultBranch: "main", Remote: ""},
+		},
+	}
+
+	outputStubs := []OutputCommandStub{
+		// repo-a: fetch, checkout, pull, merge, push
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "origin", "main"}, Err: nil},
+		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "main"}, Err: nil},
+		// repo-b: fetch, checkout, pull, merge, push
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "origin", "main"}, Err: nil},
+		{Args: []string{"merge", "origin/feat-b", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "main"}, Err: nil},
+	}
+
+	commandStubs := []CommandStub{
+		// HasCommitsBetweenRemote for repo-a
+		{Name: "git", Args: []string{"log", "main..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+		// HasCommitsBetweenRemote for repo-b
+		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	// sourceBranch="" means use wt.Branch for each; targetBranch="main" is explicit
+	mergeWorkspaceWorktrees(worktrees, "", "main")
+}
+
+func TestMergeWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "develop", Remote: ""},
+		},
+		{
+			Name:   "repo-b",
+			Path:   "/ws/repo-b",
+			Branch: "feat-b",
+			Repo:   &RepoConfig{Name: "repo-b", DefaultBranch: "staging", Remote: ""},
+		},
+	}
+
+	outputStubs := []OutputCommandStub{
+		// repo-a merges into "develop"
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"checkout", "develop"}, Err: nil},
+		{Args: []string{"pull", "origin", "develop"}, Err: nil},
+		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "develop"}, Err: nil},
+		// repo-b merges into "staging"
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"checkout", "staging"}, Err: nil},
+		{Args: []string{"pull", "origin", "staging"}, Err: nil},
+		{Args: []string{"merge", "origin/feat-b", "-m", "Merge feat-b into staging\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "staging"}, Err: nil},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "develop..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"log", "staging..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	// targetBranch="" means use per-repo DefaultBranch
+	mergeWorkspaceWorktrees(worktrees, "", "")
+}
+
+func TestMergeWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "develop", Remote: ""},
+		},
+	}
+
+	// CLI target "release" overrides per-repo "develop"
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"checkout", "release"}, Err: nil},
+		{Args: []string{"pull", "origin", "release"}, Err: nil},
+		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into release\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "release"}, Err: nil},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "release..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	mergeWorkspaceWorktrees(worktrees, "", "release")
+}
+
+func TestMergeWorkspaceWorktrees_CustomRemote(t *testing.T) {
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "main", Remote: "upstream"},
+		},
+	}
+
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "upstream"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "upstream", "main"}, Err: nil},
+		{Args: []string{"merge", "upstream/feat-a", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "upstream", "main"}, Err: nil},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..upstream/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	mergeWorkspaceWorktrees(worktrees, "", "main")
+}
+
+func TestRunMerge_LegacyMode(t *testing.T) {
+	// When no workspace config exists, runMerge falls through to legacy mergeBranch.
+	// We test the legacy path by calling mergeBranch directly, same as existing TestMergeBranch.
+	// This test verifies the same git command sequence with hardcoded "origin".
+
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "origin", "main"}, Err: nil},
+		{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "main"}, Err: nil},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	mergeBranch("feature/test", "main")
+}
+
+func TestMergeWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   nil, // should be skipped
+		},
+		{
+			Name:   "repo-b",
+			Path:   "/ws/repo-b",
+			Branch: "feat-b",
+			Repo:   &RepoConfig{Name: "repo-b", DefaultBranch: "main", Remote: ""},
+		},
+	}
+
+	// Only repo-b should be processed
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "origin", "main"}, Err: nil},
+		{Args: []string{"merge", "origin/feat-b", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "main"}, Err: nil},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	mergeWorkspaceWorktrees(worktrees, "", "main")
+}

@@ -334,3 +334,254 @@ func TestSyncAllWorktrees_NoWorktrees(t *testing.T) {
 
 	syncAllWorktrees("main")
 }
+
+func TestSourceBranchDisplay(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"empty returns per-repo default", "", "(per-repo default)"},
+		{"non-empty returns as-is", "main", "main"},
+		{"feature branch", "feature/web-ui", "feature/web-ui"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sourceBranchDisplay(tc.input)
+			if got != tc.expect {
+				t.Errorf("sourceBranchDisplay(%q) = %q, want %q", tc.input, got, tc.expect)
+			}
+		})
+	}
+}
+
+func TestSyncWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "main", Remote: ""},
+		},
+		{
+			Name:   "repo-b",
+			Path:   "/ws/repo-b",
+			Branch: "feat-b",
+			Repo:   &RepoConfig{Name: "repo-b", DefaultBranch: "main", Remote: ""},
+		},
+	}
+
+	outputStubs := []OutputCommandStub{
+		// repo-a: fetch, merge, push
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Sync with main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
+		// repo-b: fetch, merge, push
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Sync with main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	syncWorkspaceWorktrees(worktrees, "main")
+}
+
+func TestSyncWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "develop", Remote: ""},
+		},
+		{
+			Name:   "repo-b",
+			Path:   "/ws/repo-b",
+			Branch: "feat-b",
+			Repo:   &RepoConfig{Name: "repo-b", DefaultBranch: "staging", Remote: ""},
+		},
+	}
+
+	outputStubs := []OutputCommandStub{
+		// repo-a syncs from "develop"
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/develop", "-m", "Sync with develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
+		// repo-b syncs from "staging"
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/staging", "-m", "Sync with staging\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	// sourceBranch="" means use per-repo DefaultBranch
+	syncWorkspaceWorktrees(worktrees, "")
+}
+
+func TestSyncRepoWorktree_CustomRemote(t *testing.T) {
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "upstream"}, Err: nil},
+		{Args: []string{"merge", "upstream/main", "-m", "Sync with main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "upstream", "feat-a"}, Err: nil},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := syncRepoWorktree("/ws/repo-a", "feat-a", "main", "upstream")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestSyncRepoWorktree_EmptyRemoteDefaultsToOrigin(t *testing.T) {
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Sync with main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := syncRepoWorktree("/ws/repo-a", "feat-a", "main", "")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunSync_LegacyMode(t *testing.T) {
+	// Test legacy syncWorktree path - same as existing TestSyncWorktree "successful sync" case
+	tmpDir := t.TempDir()
+	wtPath := tmpDir + "/falcon"
+	if err := os.MkdirAll(wtPath+"/.git", 0755); err != nil {
+		t.Fatalf("failed to create worktree: %v", err)
+	}
+
+	SetupTestEnv(t, map[string]string{
+		"LOOM_WORKTREES_DIR": tmpDir,
+	})
+
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Sync with main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "falcon-branch"}, Err: nil},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon-branch\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	syncWorktree("falcon", "main")
+}
+
+func TestSyncWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   nil, // should be skipped
+		},
+		{
+			Name:   "repo-b",
+			Path:   "/ws/repo-b",
+			Branch: "feat-b",
+			Repo:   &RepoConfig{Name: "repo-b", DefaultBranch: "main", Remote: ""},
+		},
+	}
+
+	// Only repo-b should be processed
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/main", "-m", "Sync with main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "feat-b"}, Err: nil},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	syncWorkspaceWorktrees(worktrees, "main")
+}
+
+func TestSyncWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "develop", Remote: ""},
+		},
+	}
+
+	// CLI source "release" overrides per-repo "develop"
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"merge", "origin/release", "-m", "Sync with release\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "feat-a"}, Err: nil},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	syncWorkspaceWorktrees(worktrees, "release")
+}

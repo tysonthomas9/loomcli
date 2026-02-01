@@ -717,3 +717,236 @@ func TestGitClean(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveRemote(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{"empty defaults to origin", "", "origin"},
+		{"non-empty returns as-is", "upstream", "upstream"},
+		{"origin stays origin", "origin", "origin"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveRemote(tc.input)
+			if got != tc.expect {
+				t.Errorf("resolveRemote(%q) = %q, want %q", tc.input, got, tc.expect)
+			}
+		})
+	}
+}
+
+func TestGitFetchRemote(t *testing.T) {
+	tests := []struct {
+		name       string
+		dir        string
+		remote     string
+		wantRemote string
+		mockErr    error
+		wantErr    bool
+	}{
+		{"empty remote defaults to origin", "/repo", "", "origin", nil, false},
+		{"custom remote", "/repo", "upstream", "upstream", nil, false},
+		{"network error", "/repo", "upstream", "upstream", errors.New("Could not resolve host"), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: []string{"fetch", tc.wantRemote},
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitFetchRemote(tc.dir, tc.remote)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestGitMergeRemote(t *testing.T) {
+	tests := []struct {
+		name       string
+		dir        string
+		remote     string
+		branch     string
+		message    string
+		wantRemote string
+		mockErr    error
+		wantErr    bool
+	}{
+		{"empty remote defaults to origin", "/repo", "", "main", "Merge msg", "origin", nil, false},
+		{"custom remote", "/repo", "upstream", "main", "Merge msg", "upstream", nil, false},
+		{"merge conflict", "/repo", "upstream", "feat", "Merge", "upstream", errors.New("CONFLICT"), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: []string{"merge", tc.wantRemote + "/" + tc.branch, "-m", tc.message},
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitMergeRemote(tc.dir, tc.remote, tc.branch, tc.message)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestGitPushRemote(t *testing.T) {
+	tests := []struct {
+		name       string
+		dir        string
+		remote     string
+		branch     string
+		wantRemote string
+		mockErr    error
+		wantErr    bool
+	}{
+		{"empty remote defaults to origin", "/repo", "", "main", "origin", nil, false},
+		{"custom remote", "/repo", "upstream", "main", "upstream", nil, false},
+		{"push rejected", "/repo", "upstream", "main", "upstream", errors.New("rejected"), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: []string{"push", tc.wantRemote, tc.branch},
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitPushRemote(tc.dir, tc.remote, tc.branch)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestGitPullRemote(t *testing.T) {
+	tests := []struct {
+		name       string
+		dir        string
+		remote     string
+		branch     string
+		wantRemote string
+		mockErr    error
+		wantErr    bool
+	}{
+		{"empty remote defaults to origin", "/repo", "", "main", "origin", nil, false},
+		{"custom remote", "/repo", "upstream", "main", "upstream", nil, false},
+		{"pull fails", "/repo", "upstream", "main", "upstream", errors.New("non-fast-forward"), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: []string{"pull", tc.wantRemote, tc.branch},
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitPullRemote(tc.dir, tc.remote, tc.branch)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestHasCommitsBetweenRemote(t *testing.T) {
+	tests := []struct {
+		name       string
+		remote     string
+		target     string
+		source     string
+		wantRemote string
+		mockOutput string
+		mockErr    error
+		wantHas    bool
+	}{
+		{
+			name:       "empty remote defaults to origin",
+			remote:     "",
+			target:     "main",
+			source:     "feature",
+			wantRemote: "origin",
+			mockOutput: "abc123 commit message\n",
+			wantHas:    true,
+		},
+		{
+			name:       "custom remote with commits",
+			remote:     "upstream",
+			target:     "main",
+			source:     "feature",
+			wantRemote: "upstream",
+			mockOutput: "abc123 commit message\n",
+			wantHas:    true,
+		},
+		{
+			name:       "no commits",
+			remote:     "upstream",
+			target:     "main",
+			source:     "feature",
+			wantRemote: "upstream",
+			mockOutput: "",
+			wantHas:    false,
+		},
+		{
+			name:       "git error assumes has commits",
+			remote:     "upstream",
+			target:     "main",
+			source:     "feature",
+			wantRemote: "upstream",
+			mockErr:    errors.New("ambiguous ref"),
+			wantHas:    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewCommandMock(t, []CommandStub{{
+				Name:   "git",
+				Args:   []string{"log", tc.target + ".." + tc.wantRemote + "/" + tc.source, "--oneline"},
+				Stdout: tc.mockOutput,
+				Err:    tc.mockErr,
+			}})
+			mock.Install()
+
+			hasCommits, _ := HasCommitsBetweenRemote("/repo", tc.remote, tc.target, tc.source)
+
+			if hasCommits != tc.wantHas {
+				t.Errorf("hasCommits = %v, want %v", hasCommits, tc.wantHas)
+			}
+		})
+	}
+}
