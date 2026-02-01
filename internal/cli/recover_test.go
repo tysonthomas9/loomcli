@@ -3,7 +3,9 @@ package cli
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -452,4 +454,139 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 	mock.Install()
 
 	handleOrphanedTask("/test/worktree", "task-orphan3", false)
+}
+
+func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
+	// Dry run returns empty — no clean should be called
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:    "/test/worktree",
+		Name:   "git",
+		Args:   []string{"clean", "-fdn"},
+		Stdout: "",
+		Err:    nil,
+	}})
+	mock.Install()
+
+	// No output command mock needed — GitClean should not be called
+	cleanUntrackedFiles("/test/worktree", false)
+}
+
+func TestCleanUntrackedFiles_WithForce(t *testing.T) {
+	// Dry run returns files, force=true → clean is called without prompt
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:    "/test/worktree",
+		Name:   "git",
+		Args:   []string{"clean", "-fdn"},
+		Stdout: "Would remove test.txt\nWould remove screenshots/\n",
+		Err:    nil,
+	}})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
+		Dir:  "/test/worktree",
+		Args: []string{"clean", "-fd"},
+		Err:  nil,
+	}})
+	outputMock.Install()
+
+	cleanUntrackedFiles("/test/worktree", true)
+}
+
+func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
+	// Dry run fails — prints warning, no clean called
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:    "/test/worktree",
+		Name:   "git",
+		Args:   []string{"clean", "-fdn"},
+		Stdout: "",
+		Stderr: "error: not a git repo\n",
+		Err:    errors.New("exit status 128"),
+	}})
+	mock.Install()
+
+	cleanUntrackedFiles("/test/worktree", true)
+}
+
+func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
+	// Dry run succeeds but actual clean fails — prints warning
+	mock := NewCommandMock(t, []CommandStub{{
+		Dir:    "/test/worktree",
+		Name:   "git",
+		Args:   []string{"clean", "-fdn"},
+		Stdout: "Would remove test.txt\n",
+		Err:    nil,
+	}})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{{
+		Dir:  "/test/worktree",
+		Args: []string{"clean", "-fd"},
+		Err:  errors.New("Permission denied"),
+	}})
+	outputMock.Install()
+
+	cleanUntrackedFiles("/test/worktree", true)
+}
+
+func TestKillProcess_Success(t *testing.T) {
+	// Start a sleep process that we can kill
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep process: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	// Verify it's running
+	if !IsProcessRunning(pid) {
+		t.Fatal("process should be running before kill")
+	}
+
+	// Reap the child in a goroutine so it doesn't become a zombie
+	// (in production, killed processes aren't children of the recover command)
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+
+	// Kill it (sends SIGTERM first, then SIGKILL if needed)
+	err := killProcess(pid)
+	if err != nil {
+		t.Errorf("killProcess returned error: %v", err)
+	}
+
+	<-done
+
+	// Verify it's dead
+	if IsProcessRunning(pid) {
+		t.Error("process should not be running after kill")
+	}
+}
+
+func TestKillProcess_NonExistentPid(t *testing.T) {
+	// Use a PID that almost certainly doesn't exist
+	// killProcess treats ESRCH (no such process) as success
+	err := killProcess(999999999)
+	if err != nil {
+		t.Errorf("killProcess should treat non-existent PID as success, got: %v", err)
+	}
+}
+
+func TestKillProcess_AlreadyDead(t *testing.T) {
+	// Start and immediately kill a process to get a dead PID
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep process: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	// Kill it directly
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	_ = cmd.Wait()
+
+	// Now killProcess should handle the already-dead case gracefully
+	err := killProcess(pid)
+	if err != nil {
+		t.Errorf("killProcess should succeed for already-dead process, got: %v", err)
+	}
 }

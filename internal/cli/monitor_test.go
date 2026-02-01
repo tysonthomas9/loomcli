@@ -898,7 +898,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		wantReadyToImplement    int
 		wantInProgress          int
 		wantNeedReview          int
-		wantBlocked             int
+		wantBacklog            int
 		wantNeedsPlanningLen    int
 		wantReadyToImplementLen int
 		wantReviewTasksLen      int
@@ -960,7 +960,7 @@ func TestCollectTaskStatus(t *testing.T) {
 			}),
 			inProgressOutput:    "[]",
 			needReviewOutput:    "[]",
-			wantBlocked:         2,
+			wantBacklog:         2,
 			wantBlockedTasksLen: 2,
 		},
 		{
@@ -1095,8 +1095,8 @@ func TestCollectTaskStatus(t *testing.T) {
 			if summary.NeedReview != tt.wantNeedReview {
 				t.Errorf("NeedReview = %d, want %d", summary.NeedReview, tt.wantNeedReview)
 			}
-			if summary.Blocked != tt.wantBlocked {
-				t.Errorf("Blocked = %d, want %d", summary.Blocked, tt.wantBlocked)
+			if summary.Backlog != tt.wantBacklog{
+				t.Errorf("Backlog = %d, want %d", summary.Backlog, tt.wantBacklog)
 			}
 			if len(needsPlanningTasks) != tt.wantNeedsPlanningLen {
 				t.Errorf("needsPlanningTasks len = %d, want %d", len(needsPlanningTasks), tt.wantNeedsPlanningLen)

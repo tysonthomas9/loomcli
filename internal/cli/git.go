@@ -89,6 +89,11 @@ func GitClean(dir string) error {
 	return RunGitCommandWithOutput(dir, "clean", "-fd")
 }
 
+// GitCleanDryRun returns the list of untracked files that would be removed by git clean
+func GitCleanDryRun(dir string) (string, error) {
+	return RunGitCommand(dir, "clean", "-fdn")
+}
+
 // GetConflictedFiles returns a list of files with merge conflicts
 func GetConflictedFiles(dir string) ([]string, error) {
 	output, err := RunGitCommand(dir, "diff", "--name-only", "--diff-filter=U")

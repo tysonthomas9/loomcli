@@ -629,6 +629,62 @@ func TestGitReset(t *testing.T) {
 	}
 }
 
+func TestGitCleanDryRun(t *testing.T) {
+	tests := []struct {
+		name       string
+		dir        string
+		mockStdout string
+		mockErr    error
+		wantOutput string
+		wantErr    bool
+	}{
+		{
+			name:       "files to clean",
+			dir:        "/repo",
+			mockStdout: "Would remove test.txt\nWould remove screenshots/\n",
+			wantOutput: "Would remove test.txt\nWould remove screenshots/\n",
+		},
+		{
+			name:       "nothing to clean",
+			dir:        "/repo",
+			mockStdout: "",
+			wantOutput: "",
+		},
+		{
+			name:    "git error",
+			dir:     "/repo",
+			mockErr: errors.New("not a git repository"),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewCommandMock(t, []CommandStub{{
+				Dir:    tc.dir,
+				Name:   "git",
+				Args:   []string{"clean", "-fdn"},
+				Stdout: tc.mockStdout,
+				Stderr: "",
+				Err:    tc.mockErr,
+			}})
+			mock.Install()
+
+			output, err := GitCleanDryRun(tc.dir)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if output != tc.wantOutput {
+				t.Errorf("output = %q, want %q", output, tc.wantOutput)
+			}
+		})
+	}
+}
+
 func TestGitClean(t *testing.T) {
 	tests := []struct {
 		name    string

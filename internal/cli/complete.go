@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -79,8 +77,7 @@ func runComplete(cmd *cobra.Command, args []string) {
 // by git clean operations.
 func GetSignalFilePath(worktreePath string) string {
 	signalDir := filepath.Join(os.TempDir(), "loom-signals")
-	hash := sha256.Sum256([]byte(worktreePath))
-	return filepath.Join(signalDir, hex.EncodeToString(hash[:8]))
+	return filepath.Join(signalDir, workspaceHash(worktreePath))
 }
 
 // findWorktreeRoot traverses up from startPath looking for .loom.lock

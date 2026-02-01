@@ -92,7 +92,7 @@ type TaskSummary struct {
 	ReadyToImplement int `json:"ready_to_implement"` // Ready tasks with approved design
 	InProgress       int `json:"in_progress"`
 	NeedReview       int `json:"need_review"`
-	Blocked          int `json:"blocked"`
+	Backlog          int `json:"backlog"`
 }
 
 
@@ -207,6 +207,9 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 	var agents []AgentStatus
 	taskIDToAgents := make(map[string][]string) // Track which agents claim which tasks
 
+	// Compute default branch once per tick using already-discovered worktrees
+	defaultBranch := GetDefaultBranchForWorktrees(worktrees)
+
 	for _, wt := range worktrees {
 		agent := AgentStatus{
 			Name:   wt.Name,
@@ -272,7 +275,7 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 		}
 
 		// Check ahead/behind integration branch
-		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path)
+		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, defaultBranch)
 
 		agents = append(agents, agent)
 	}
@@ -280,10 +283,10 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 	return agents, taskIDToAgents
 }
 
-func getWorktreeGitSyncStatus(path string) (ahead, behind int) {
+func getWorktreeGitSyncStatus(path, defaultBranch string) (ahead, behind int) {
 	branch := monitorBranch
 	if branch == "" {
-		branch = GetDefaultBranch()
+		branch = defaultBranch
 	}
 
 	// Count commits ahead/behind integration branch
@@ -413,7 +416,7 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 	if err == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(blockedOutput), &issues) == nil {
-			summary.Blocked = len(issues)
+			summary.Backlog = len(issues)
 			// Store up to 20 blocked tasks for display
 			for i, issue := range issues {
 				if i >= 20 {
@@ -554,7 +557,7 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxLine(" WORK QUEUE"))
 	sb.WriteString(renderBoxSeparator())
 	taskSummary := fmt.Sprintf("  Plan: %-3d  Impl: %-3d  Review: %-3d  Active: %-3d  Blocked: %-3d",
-		data.Tasks.NeedsPlanning, data.Tasks.ReadyToImplement, data.Tasks.NeedReview, data.Tasks.InProgress, data.Tasks.Blocked)
+		data.Tasks.NeedsPlanning, data.Tasks.ReadyToImplement, data.Tasks.NeedReview, data.Tasks.InProgress, data.Tasks.Backlog)
 	sb.WriteString(renderBoxLine(taskSummary))
 
 	// Needs Planning tasks (top 5)

@@ -352,7 +352,7 @@ func TestDashboardRenderingDoesNotPanic(t *testing.T) {
 					ReadyToImplement: 3,
 					InProgress:       2,
 					NeedReview:       1,
-					Blocked:          0,
+					Backlog:          0,
 				},
 				NeedsPlanningTasks: []TaskInfo{
 					{ID: "TASK-1", Title: "First task", Priority: 1},

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -417,8 +419,13 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	// Include PID to prevent session name collisions
 	sessionName := fmt.Sprintf("loom-%s-%s-%d", opts.AgentType, opts.AgentName, os.Getpid())
 
-	// Setup log file
-	logDir := filepath.Join(opts.WorktreePath, ".loom", "logs")
+	// Setup log file — store outside worktree to avoid polluting git status
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("[auto] Warning: could not get home directory: %v\n", err)
+		homeDir = os.TempDir()
+	}
+	logDir := filepath.Join(homeDir, ".loom", "logs", workspaceHash(opts.WorktreePath))
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		fmt.Printf("[auto] Warning: could not create log directory: %v\n", err)
 	}
@@ -971,4 +978,11 @@ func printTmuxSummary(taskCount int) {
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 	fmt.Printf("AUTO MODE COMPLETE - %d task(s) processed\n", taskCount)
 	fmt.Println("═══════════════════════════════════════════════════════════════")
+}
+
+// workspaceHash returns a deterministic short hash for a workspace path.
+// Used to create per-workspace subdirectories outside the git worktree.
+func workspaceHash(path string) string {
+	hash := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(hash[:8])
 }

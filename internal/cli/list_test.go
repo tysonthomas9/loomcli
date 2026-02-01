@@ -127,11 +127,12 @@ func TestRunListNoWorktrees(t *testing.T) {
 
 func TestRunListWithWorktrees(t *testing.T) {
 	tests := []struct {
-		name           string
-		worktreeNames  []string
-		gitOutputs     map[string]string // worktree name -> git status output
-		branches       map[string]string // worktree name -> branch name
-		expectedOutput []string          // strings that should appear in output
+		name                 string
+		worktreeNames        []string
+		gitOutputs           map[string]string // worktree name -> git status output
+		branches             map[string]string // worktree name -> branch name
+		expectedOutput       []string          // strings that should appear in output
+		needsAutoDetectStubs bool              // add stubs for integration branch auto-detection
 	}{
 		{
 			name:          "single_worktree_ready",
@@ -174,6 +175,8 @@ func TestRunListWithWorktrees(t *testing.T) {
 				"1 changes",
 				"Total: 2 agents",
 			},
+			// With 2+ worktrees, auto-detection queries remote branches
+			needsAutoDetectStubs: true,
 		},
 	}
 
@@ -222,6 +225,16 @@ func TestRunListWithWorktrees(t *testing.T) {
 					Name:   "git",
 					Args:   []string{"status", "--porcelain"},
 					Stdout: tc.gitOutputs[name],
+				})
+			}
+
+			// With 2+ worktrees, GetDefaultBranchForWorktrees triggers auto-detection
+			if tc.needsAutoDetectStubs {
+				stubs = append(stubs, CommandStub{
+					Name:   "git",
+					Args:   []string{"branch", "-r", "--format=%(refname:short)"},
+					Stdout: "",
+					Err:    fmt.Errorf("not a real repo"),
 				})
 			}
 

@@ -150,6 +150,32 @@ func TestSignalFileSurvivesGitClean(t *testing.T) {
 	}
 }
 
+func TestGetSignalFilePath_UsesWorkspaceHash(t *testing.T) {
+	// Verify that GetSignalFilePath produces a path whose basename matches
+	// the workspaceHash of the input path. This confirms the refactoring
+	// from inline sha256 to the shared workspaceHash helper is correct.
+	worktreePath := "/home/user/project"
+	signalPath := GetSignalFilePath(worktreePath)
+	expectedHash := workspaceHash(worktreePath)
+	actualBasename := filepath.Base(signalPath)
+
+	if actualBasename != expectedHash {
+		t.Errorf("GetSignalFilePath basename = %q, want workspaceHash = %q", actualBasename, expectedHash)
+	}
+}
+
+func TestGetSignalFilePath_MatchesExpectedFormat(t *testing.T) {
+	// Verify the full path structure: <tmpdir>/loom-signals/<hash>
+	worktreePath := "/some/worktree"
+	signalPath := GetSignalFilePath(worktreePath)
+	expectedDir := filepath.Join(os.TempDir(), "loom-signals")
+	expectedPath := filepath.Join(expectedDir, workspaceHash(worktreePath))
+
+	if signalPath != expectedPath {
+		t.Errorf("GetSignalFilePath(%q) = %q, want %q", worktreePath, signalPath, expectedPath)
+	}
+}
+
 func TestFindWorktreeRoot_WithLockFile(t *testing.T) {
 	// Create a directory structure: root/subdir1/subdir2
 	tmpDir := t.TempDir()
