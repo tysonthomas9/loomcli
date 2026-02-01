@@ -27,13 +27,14 @@ import (
 // Progressive strategy optimizes for common case: 97% stay at 6 chars.
 func GenerateHashID(prefix, title, description string, created time.Time, workspaceID string) string {
 	h := sha256.New()
-	
-	// Write all components to hash
-	h.Write([]byte(title))
-	h.Write([]byte(description))
-	h.Write([]byte(created.Format(time.RFC3339Nano)))
-	h.Write([]byte(workspaceID))
-	
+	w := hashFieldWriter{h}
+
+	// Write all components with null byte separators to prevent field boundary collisions
+	w.str(title)
+	w.str(description)
+	w.str(created.Format(time.RFC3339Nano))
+	w.str(workspaceID)
+
 	// Return full hash for progressive length selection
 	hash := hex.EncodeToString(h.Sum(nil))
 	return hash
