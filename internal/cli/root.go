@@ -97,6 +97,7 @@ func init() {
 	// Add command groups for organized help
 	rootCmd.AddGroup(&cobra.Group{ID: "agents", Title: "Agent Commands:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "git", Title: "Git Operations:"})
+	rootCmd.AddGroup(&cobra.Group{ID: "config", Title: "Configuration:"})
 }
 
 // Execute runs the root command
