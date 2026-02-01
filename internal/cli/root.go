@@ -98,6 +98,7 @@ func init() {
 	rootCmd.AddGroup(&cobra.Group{ID: "agents", Title: "Agent Commands:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "git", Title: "Git Operations:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "config", Title: "Configuration:"})
+	rootCmd.AddGroup(&cobra.Group{ID: "workspace", Title: "Workspace Commands:"})
 }
 
 // Execute runs the root command

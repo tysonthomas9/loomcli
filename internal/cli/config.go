@@ -16,16 +16,16 @@ type LoomConfig struct {
 
 // WorkspaceConfig defines a named workspace containing multiple repos
 type WorkspaceConfig struct {
-	Path  string       `yaml:"path"`  // Directory path for this workspace
-	Repos []RepoConfig `yaml:"repos"` // Repositories in this workspace
+	Path  string       `yaml:"path" json:"path"`   // Directory path for this workspace
+	Repos []RepoConfig `yaml:"repos" json:"repos"` // Repositories in this workspace
 }
 
 // RepoConfig defines a single repository within a workspace
 type RepoConfig struct {
-	Name          string `yaml:"name"`                     // Display name / identifier
-	Path          string `yaml:"path"`                     // Path to the repo (absolute or relative to workspace)
-	DefaultBranch string `yaml:"default_branch,omitempty"` // Override default branch (defaults to "main")
-	Remote        string `yaml:"remote,omitempty"`         // Git remote name (defaults to "origin")
+	Name          string `yaml:"name" json:"name"`                                // Display name / identifier
+	Path          string `yaml:"path" json:"path"`                                // Path to the repo (absolute or relative to workspace)
+	DefaultBranch string `yaml:"default_branch,omitempty" json:"default_branch,omitempty"` // Override default branch (defaults to "main")
+	Remote        string `yaml:"remote,omitempty" json:"remote,omitempty"`        // Git remote name (defaults to "origin")
 }
 
 // GetConfigDir returns the loom config directory path.
