@@ -28,18 +28,22 @@ This command will:
   2. Reset to the target branch (origin/branch)
   3. Force push the worktree branch to match
 
+In workspace mode, --all resets all repos in the workspace. Each repo
+resets to its own configured integration branch (DefaultBranch) unless
+a target branch is explicitly provided.
+
 Arguments:
   worktree    Worktree name (e.g., falcon)
-  branch      Target branch to reset to (default: feature/web-ui)
+  branch      Target branch to reset to (default: integration branch)
 
 Flags:
   -a, --all      Reset all worktrees
   -f, --force    Skip confirmation prompt
 
 Examples:
-  loom reset falcon                        # Reset falcon to feature/web-ui
+  loom reset falcon                        # Reset falcon to integration branch
   loom reset falcon main                   # Reset falcon to main
-  loom reset --all                         # Reset all worktrees (with confirmation)
+  loom reset --all                         # Reset all worktrees to their integration branches
   loom reset --all --force                 # Reset all worktrees (no confirmation)`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if resetAll {
@@ -68,10 +72,11 @@ func runReset(cmd *cobra.Command, args []string) {
 	if resetAll {
 		// Reset all worktrees
 		targetBranch := defaultBranch
-		if len(args) > 0 {
+		explicitBranch := len(args) > 0
+		if explicitBranch {
 			targetBranch = args[0]
 		}
-		resetAllWorktrees(targetBranch)
+		resetAllWorktrees(targetBranch, explicitBranch)
 	} else {
 		// Single worktree reset
 		worktreeName := args[0]
@@ -83,14 +88,7 @@ func runReset(cmd *cobra.Command, args []string) {
 	}
 }
 
-func resetAllWorktrees(targetBranch string) {
-	fmt.Println("=========================================")
-	fmt.Printf("Resetting ALL worktrees -> %s\n", targetBranch)
-	fmt.Println("=========================================")
-	fmt.Println("")
-	fmt.Println("⚠ WARNING: This will discard ALL local changes in ALL worktrees!")
-	fmt.Println("")
-
+func resetAllWorktrees(targetBranch string, explicitTarget bool) {
 	worktrees, err := DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
@@ -102,9 +100,40 @@ func resetAllWorktrees(targetBranch string) {
 		return
 	}
 
-	// List what will be reset
+	// Determine per-worktree target branches.
+	// In workspace mode, each repo may have its own DefaultBranch.
+	// An explicit targetBranch argument overrides per-repo defaults.
+	type resetTarget struct {
+		wt     WorktreeInfo
+		branch string
+	}
+	var targets []resetTarget
+	perRepoBranches := false
 	for _, wt := range worktrees {
-		fmt.Printf("  - %s (%s)\n", wt.Name, wt.Branch)
+		branch := targetBranch
+		if !explicitTarget && wt.Repo != nil && wt.Repo.DefaultBranch != "" {
+			branch = wt.Repo.DefaultBranch
+			if branch != targetBranch {
+				perRepoBranches = true
+			}
+		}
+		targets = append(targets, resetTarget{wt: wt, branch: branch})
+	}
+
+	fmt.Println("=========================================")
+	if perRepoBranches {
+		fmt.Println("Resetting ALL worktrees -> per-repo integration branches")
+	} else {
+		fmt.Printf("Resetting ALL worktrees -> %s\n", targetBranch)
+	}
+	fmt.Println("=========================================")
+	fmt.Println("")
+	fmt.Println("⚠ WARNING: This will discard ALL local changes in ALL worktrees!")
+	fmt.Println("")
+
+	// List what will be reset
+	for _, t := range targets {
+		fmt.Printf("  - %s (%s) -> %s\n", t.wt.Name, t.wt.Branch, t.branch)
 	}
 	fmt.Println("")
 
@@ -118,13 +147,17 @@ func resetAllWorktrees(targetBranch string) {
 	}
 
 	// Reset each worktree
-	for _, wt := range worktrees {
-		resetWorktree(wt.Name, targetBranch, false) // Don't ask for each one
+	for _, t := range targets {
+		resetWorktree(t.wt.Name, t.branch, false) // Don't ask for each one
 		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
-	fmt.Printf("All worktrees reset to %s!\n", targetBranch)
+	if perRepoBranches {
+		fmt.Println("All worktrees reset to their integration branches!")
+	} else {
+		fmt.Printf("All worktrees reset to %s!\n", targetBranch)
+	}
 	fmt.Println("=========================================")
 }
 

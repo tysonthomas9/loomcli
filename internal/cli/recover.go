@@ -32,6 +32,10 @@ This command will:
   4. Close completed tasks, or reset incomplete tasks to open status
   5. Clean up untracked files left by the crashed agent (with confirmation)
 
+In workspace mode, recovery clears the shared workspace-level lock,
+searches git logs across all repos for task completion evidence, and
+cleans untracked files in all workspace repos.
+
 Use this when 'loom monitor' shows an agent in error state.
 
 Flags:
@@ -41,7 +45,8 @@ Flags:
 Examples:
   loom recover falcon              # Recover with task analysis (default)
   loom recover ember --no-analyze  # Skip analysis, always reset to open
-  loom recover falcon --force      # Kill running agent and clean files without prompting`,
+  loom recover falcon --force      # Kill running agent and clean files without prompting
+  loom recover myworkspace         # Recover workspace-level agent`,
 	Args: cobra.ExactArgs(1),
 	Run:  runRecover,
 }
@@ -192,7 +197,9 @@ func handleOrphanedTask(worktreePath, taskID string, analyze bool) {
 	}
 }
 
-// analyzeTaskCompletion uses Claude to determine if a task was completed
+// analyzeTaskCompletion uses Claude to determine if a task was completed.
+// In workspace mode, it searches git logs across ALL repos in the workspace
+// to give Claude the most complete picture of relevant commits.
 func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason string) {
 	// Get task details
 	taskResult := execCommand(GetBeadsDir(), "bd", "show", taskID)
@@ -200,9 +207,31 @@ func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason 
 		return false, "Could not fetch task details"
 	}
 
-	// Get git commits mentioning this task
-	gitResult := execCommand(worktreePath, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
-	// gitResult.Err is ignored - empty commits is fine
+	// Get git commits mentioning this task.
+	// In workspace mode, search across all repos for a complete picture.
+	var gitOutput string
+	searchedWorkspace := false
+	resolver := getDefaultResolver()
+	if resolver.Mode() == ModeWorkspace {
+		worktrees, err := resolver.DiscoverWorktrees()
+		if err == nil && len(worktrees) > 0 {
+			searchedWorkspace = true
+			var parts []string
+			for _, wt := range worktrees {
+				result := execCommand(wt.Path, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
+				output := strings.TrimSpace(result.Stdout)
+				if output != "" {
+					parts = append(parts, fmt.Sprintf("[%s]\n%s", wt.Name, output))
+				}
+			}
+			gitOutput = strings.Join(parts, "\n\n")
+		}
+	}
+	if !searchedWorkspace {
+		// Legacy mode or workspace discovery failed: search single repo
+		gitResult := execCommand(worktreePath, "git", "log", "--oneline", "-20", "--all", "--grep", taskID)
+		gitOutput = gitResult.Stdout
+	}
 
 	// Build prompt for Claude
 	prompt := fmt.Sprintf(`You are analyzing whether a software task was completed before the agent crashed.
@@ -221,7 +250,7 @@ Respond with EXACTLY one line in this format:
 COMPLETED: <brief reason>
 or
 INCOMPLETE: <brief reason>
-`, taskResult.Stdout, taskID, gitResult.Stdout)
+`, taskResult.Stdout, taskID, gitOutput)
 
 	// Run claude -p with the prompt
 	claudeResult := execCommand(worktreePath, "claude", "-p", "--output-format", "text", prompt)
@@ -318,21 +347,55 @@ func confirmKill(pid int) bool {
 	return confirmAction(fmt.Sprintf("Kill agent process (PID %d)?", pid))
 }
 
-// cleanUntrackedFiles checks for and optionally removes untracked files in the worktree
+// cleanUntrackedFiles checks for and optionally removes untracked files.
+// In workspace mode, it iterates over all repos in the workspace.
 func cleanUntrackedFiles(worktreePath string, force bool) {
-	output, err := GitCleanDryRun(worktreePath)
-	if err != nil {
-		fmt.Printf("Warning: could not check for untracked files: %v\n", err)
-		return
+	// Collect paths to clean. In workspace mode, clean all repos.
+	type cleanTarget struct {
+		name string
+		path string
+	}
+	var targets []cleanTarget
+
+	resolver := getDefaultResolver()
+	if resolver.Mode() == ModeWorkspace {
+		worktrees, err := resolver.DiscoverWorktrees()
+		if err == nil && len(worktrees) > 0 {
+			for _, wt := range worktrees {
+				targets = append(targets, cleanTarget{name: wt.Name, path: wt.Path})
+			}
+		}
+	}
+	if len(targets) == 0 {
+		// Legacy mode or workspace discovery failed
+		targets = []cleanTarget{{name: "", path: worktreePath}}
 	}
 
-	output = strings.TrimSpace(output)
-	if output == "" {
-		return
+	// Check for untracked files across all targets, track which ones need cleaning
+	var dirtyTargets []cleanTarget
+	for _, t := range targets {
+		output, err := GitCleanDryRun(t.path)
+		if err != nil {
+			fmt.Printf("Warning: could not check for untracked files in %s: %v\n", t.path, err)
+			continue
+		}
+		output = strings.TrimSpace(output)
+		if output == "" {
+			continue
+		}
+		if len(dirtyTargets) == 0 {
+			fmt.Println("\nUntracked files found:")
+		}
+		if t.name != "" {
+			fmt.Printf("  [%s]\n", t.name)
+		}
+		fmt.Println(output)
+		dirtyTargets = append(dirtyTargets, t)
 	}
 
-	fmt.Println("\nUntracked files found in worktree:")
-	fmt.Println(output)
+	if len(dirtyTargets) == 0 {
+		return
+	}
 	fmt.Println("")
 
 	if !force {
@@ -342,11 +405,21 @@ func cleanUntrackedFiles(worktreePath string, force bool) {
 		}
 	}
 
-	if err := GitClean(worktreePath); err != nil {
-		fmt.Printf("Warning: failed to clean untracked files: %v\n", err)
-		return
+	cleaned := 0
+	for _, t := range dirtyTargets {
+		if err := GitClean(t.path); err != nil {
+			label := t.path
+			if t.name != "" {
+				label = t.name
+			}
+			fmt.Printf("Warning: failed to clean untracked files in %s: %v\n", label, err)
+			continue
+		}
+		cleaned++
 	}
-	fmt.Println("✓ Untracked files removed")
+	if cleaned > 0 {
+		fmt.Println("✓ Untracked files removed")
+	}
 }
 
 // resetOrphanedAgentTasks finds all in_progress tasks assigned to the given agent
@@ -392,9 +465,12 @@ func resetOrphanedAgentTasks(worktreePath, agentName, alreadyHandledTaskID strin
 	}
 }
 
-// forceReleaseLock removes the lock file regardless of which process owns it
-// This is used for recovery from error states where the owning process is dead
+// forceReleaseLock removes the lock file regardless of which process owns it.
+// This is used for recovery from error states where the owning process is dead.
+// In workspace mode, ResolveLockDir returns the workspace root so the shared
+// lock is cleared correctly.
 func forceReleaseLock(worktreePath string) error {
-	lockPath := filepath.Join(worktreePath, LockFileName)
+	lockDir := ResolveLockDir(worktreePath)
+	lockPath := filepath.Join(lockDir, LockFileName)
 	return os.Remove(lockPath)
 }

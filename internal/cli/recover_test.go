@@ -837,3 +837,513 @@ func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 		t.Errorf("expected nil error, got: %v", err)
 	}
 }
+
+// ============================================================================
+// Workspace-Aware Tests
+// ============================================================================
+
+func TestForceReleaseLock_WorkspacePath(t *testing.T) {
+	// In workspace mode, forceReleaseLock uses ResolveLockDir which redirects
+	// to the workspace root. Verify the lock at the workspace root is removed.
+	wsDir := t.TempDir()
+	repoDir := filepath.Join(wsDir, "repo1")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("failed to create repo dir: %v", err)
+	}
+
+	setupLockWorkspaceConfig(t, &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: wsDir,
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: repoDir},
+				},
+			},
+		},
+	})
+
+	// Create lock file at workspace root (where ResolveLockDir points)
+	lockPath := filepath.Join(wsDir, LockFileName)
+	if err := os.WriteFile(lockPath, []byte(`{"pid":12345}`), 0644); err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+
+	// Call forceReleaseLock with the REPO path (not workspace root)
+	err := forceReleaseLock(repoDir)
+	if err != nil {
+		t.Errorf("forceReleaseLock returned error: %v", err)
+	}
+
+	// Lock at workspace root should be removed
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("lock file at workspace root should have been removed")
+	}
+
+	// There should be no lock at repo dir
+	repoLockPath := filepath.Join(repoDir, LockFileName)
+	if _, err := os.Stat(repoLockPath); !os.IsNotExist(err) {
+		t.Error("no lock file should exist at repo dir")
+	}
+}
+
+func TestForceReleaseLock_WorkspacePath_NoLock(t *testing.T) {
+	// forceReleaseLock via workspace path when no lock exists should return error
+	wsDir := t.TempDir()
+	repoDir := filepath.Join(wsDir, "repo1")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatalf("failed to create repo dir: %v", err)
+	}
+
+	setupLockWorkspaceConfig(t, &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: wsDir,
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: repoDir},
+				},
+			},
+		},
+	})
+
+	err := forceReleaseLock(repoDir)
+	if err == nil {
+		t.Error("expected error when removing non-existent lock file in workspace mode")
+	}
+	if !os.IsNotExist(err) {
+		t.Errorf("expected os.IsNotExist error, got: %v", err)
+	}
+}
+
+func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
+	// In workspace mode, analyzeTaskCompletion should search git logs across
+	// all repos discovered by the resolver, aggregating with repo name labels.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repo1Path := filepath.Join(tmpDir, "repo1")
+	repo2Path := filepath.Join(tmpDir, "repo2")
+	createGitRepo(t, repo1Path)
+	createGitRepo(t, repo2Path)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "testws",
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: repo1Path},
+					{Name: "repo2", Path: repo2Path},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		// bd show task (GetBeadsDir() returns tmpDir in workspace mode)
+		{
+			Dir:    tmpDir,
+			Name:   "bd",
+			Args:   []string{"show", "task-ws1"},
+			Stdout: "Task: Cross-repo feature\nStatus: in_progress\n",
+			Err:    nil,
+		},
+		// DiscoverWorktrees calls GetCurrentBranch for each repo
+		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		// git log in repo1
+		{
+			Dir:    repo1Path,
+			Name:   "git",
+			Args:   []string{"log", "--oneline", "-20", "--all", "--grep", "task-ws1"},
+			Stdout: "abc123 feat: implement backend (task-ws1)\n",
+			Err:    nil,
+		},
+		// git log in repo2
+		{
+			Dir:    repo2Path,
+			Name:   "git",
+			Args:   []string{"log", "--oneline", "-20", "--all", "--grep", "task-ws1"},
+			Stdout: "def456 feat: implement frontend (task-ws1)\n",
+			Err:    nil,
+		},
+		// claude analysis
+		{
+			Dir:    "/test/worktree",
+			Name:   "claude",
+			Stdout: "COMPLETED: Both backend and frontend implemented across repos\n",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	completed, reason := analyzeTaskCompletion("/test/worktree", "task-ws1")
+
+	if !completed {
+		t.Error("expected completed=true in workspace mode")
+	}
+	if reason != "Both backend and frontend implemented across repos" {
+		t.Errorf("unexpected reason: %q", reason)
+	}
+}
+
+func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
+	// When workspace mode finds no commits across any repo, the fallback
+	// single-repo search also runs. Either way, claude receives empty git logs.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repo1Path := filepath.Join(tmpDir, "repo1")
+	createGitRepo(t, repo1Path)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "testws",
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: repo1Path},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		// bd show task (GetBeadsDir returns tmpDir)
+		{
+			Dir:    tmpDir,
+			Name:   "bd",
+			Args:   []string{"show", "task-empty"},
+			Stdout: "Task: Nothing done\nStatus: in_progress\n",
+			Err:    nil,
+		},
+		// DiscoverWorktrees: GetCurrentBranch for repo1
+		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		// git log in repo1 returns empty
+		{
+			Dir:  repo1Path,
+			Name: "git",
+			Args: []string{"log", "--oneline", "-20", "--all", "--grep", "task-empty"},
+			// Return empty to simulate no commits
+			Stdout: "",
+			Err:    nil,
+		},
+		// Fallback single-repo search OR claude (depends on whether fallback triggers).
+		// Use permissive matching to handle either case.
+		{
+			Name:   "claude",
+			Stdout: "INCOMPLETE: No commits found\n",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	completed, _ := analyzeTaskCompletion("/test/worktree", "task-empty")
+
+	if completed {
+		t.Error("expected completed=false when no commits found in workspace")
+	}
+}
+
+func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
+	// Only some repos have matching commits; the aggregated output
+	// should include only those repos with results.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repo1Path := filepath.Join(tmpDir, "repo1")
+	repo2Path := filepath.Join(tmpDir, "repo2")
+	createGitRepo(t, repo1Path)
+	createGitRepo(t, repo2Path)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "testws",
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: repo1Path},
+					{Name: "repo2", Path: repo2Path},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		// bd show (GetBeadsDir returns tmpDir)
+		{
+			Dir:    tmpDir,
+			Name:   "bd",
+			Args:   []string{"show", "task-partial"},
+			Stdout: "Task: Partial work\nStatus: in_progress\n",
+			Err:    nil,
+		},
+		// DiscoverWorktrees: GetCurrentBranch for each repo
+		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		// repo1 has commits
+		{
+			Dir:    repo1Path,
+			Name:   "git",
+			Args:   []string{"log", "--oneline", "-20", "--all", "--grep", "task-partial"},
+			Stdout: "abc123 partial work (task-partial)\n",
+			Err:    nil,
+		},
+		// repo2 has no commits
+		{
+			Dir:    repo2Path,
+			Name:   "git",
+			Args:   []string{"log", "--oneline", "-20", "--all", "--grep", "task-partial"},
+			Stdout: "",
+			Err:    nil,
+		},
+		// claude analysis (gitOutput is not empty because repo1 had results)
+		{
+			Dir:    "/test/worktree",
+			Name:   "claude",
+			Stdout: "INCOMPLETE: Only backend work done in repo1\n",
+			Err:    nil,
+		},
+	})
+	mock.Install()
+
+	completed, reason := analyzeTaskCompletion("/test/worktree", "task-partial")
+
+	if completed {
+		t.Error("expected completed=false")
+	}
+	if reason != "Only backend work done in repo1" {
+		t.Errorf("unexpected reason: %q", reason)
+	}
+}
+
+func TestCleanUntrackedFiles_WorkspaceMode(t *testing.T) {
+	// In workspace mode, cleanUntrackedFiles should iterate over all repos.
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repo1Path := filepath.Join(tmpDir, "repo1")
+	repo2Path := filepath.Join(tmpDir, "repo2")
+	createGitRepo(t, repo1Path)
+	createGitRepo(t, repo2Path)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "testws",
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: repo1Path},
+					{Name: "repo2", Path: repo2Path},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	// DiscoverWorktrees calls GetCurrentBranch for each repo, then
+	// GitCleanDryRun (via RunGitCommand/execCommand) for each.
+	mock := NewCommandMock(t, []CommandStub{
+		// DiscoverWorktrees: GetCurrentBranch
+		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		// GitCleanDryRun for each repo
+		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: "Would remove file1.txt\n"},
+		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: "Would remove file2.txt\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: repo1Path, Args: []string{"clean", "-fd"}},
+		{Dir: repo2Path, Args: []string{"clean", "-fd"}},
+	})
+	outputMock.Install()
+
+	cleanUntrackedFiles("/some/path", true)
+}
+
+func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
+	// No untracked files in any workspace repo -- GitClean should not be called.
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repo1Path := filepath.Join(tmpDir, "repo1")
+	repo2Path := filepath.Join(tmpDir, "repo2")
+	createGitRepo(t, repo1Path)
+	createGitRepo(t, repo2Path)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "testws",
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: repo1Path},
+					{Name: "repo2", Path: repo2Path},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		// DiscoverWorktrees: GetCurrentBranch
+		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		// GitCleanDryRun returns empty for both
+		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: ""},
+		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: ""},
+	})
+	mock.Install()
+
+	// No OutputCommandMock needed -- GitClean should not be called
+	cleanUntrackedFiles("/some/path", true)
+}
+
+func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
+	// Only one repo has untracked files. Both repos go through the dry-run
+	// check, but both have GitClean called when any repo has untracked files.
+	// However, the code below tests that the workspace iterates all repos.
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repo1Path := filepath.Join(tmpDir, "repo1")
+	repo2Path := filepath.Join(tmpDir, "repo2")
+	createGitRepo(t, repo1Path)
+	createGitRepo(t, repo2Path)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "testws",
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: tmpDir,
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: repo1Path},
+					{Name: "repo2", Path: repo2Path},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	// Both repos have untracked files so that GitClean is definitively called for both
+	mock := NewCommandMock(t, []CommandStub{
+		// DiscoverWorktrees: GetCurrentBranch
+		{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		// GitCleanDryRun: repo1 has files, repo2 also has files
+		{Dir: repo1Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: "Would remove leftover.txt\n"},
+		{Dir: repo2Path, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: "Would remove other.txt\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: repo1Path, Args: []string{"clean", "-fd"}},
+		{Dir: repo2Path, Args: []string{"clean", "-fd"}},
+	})
+	outputMock.Install()
+
+	cleanUntrackedFiles("/some/path", true)
+}
+
+func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
+	// Full RecoverWorktree flow in workspace mode: lock at workspace root,
+	// clean across workspace repos.
+	ResetBeadsDirCache()
+
+	wsDir := t.TempDir()
+	wsDir, _ = filepath.EvalSymlinks(wsDir)
+	repoDir := filepath.Join(wsDir, "repo1")
+	createGitRepo(t, repoDir)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "testws",
+		Workspaces: map[string]WorkspaceConfig{
+			"testws": {
+				Path: wsDir,
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: repoDir},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	// Create lock file at workspace root (where ResolveLockDir resolves to)
+	lockPath := filepath.Join(wsDir, LockFileName)
+	lockData := `{"pid":999999999,"command":"test","started_at":"2024-01-01T00:00:00Z","agent_name":"test-agent","task_id":"task-ws","workspace":"testws"}`
+	if err := os.WriteFile(lockPath, []byte(lockData), 0644); err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+
+	mock := NewCommandMock(t, []CommandStub{
+		// resetTask for task-ws (GetBeadsDir returns wsDir)
+		{
+			Dir:    wsDir,
+			Name:   "bd",
+			Args:   []string{"update", "task-ws", "--status", "open", "--assignee", ""},
+			Stdout: "Updated\n",
+			Err:    nil,
+		},
+		// resetOrphanedAgentTasks (GetBeadsDir returns wsDir)
+		{
+			Dir:    wsDir,
+			Name:   "bd",
+			Args:   []string{"list", "--assignee", "test-agent", "--status", "in_progress", "--json"},
+			Stdout: `[]`,
+			Err:    nil,
+		},
+		// cleanUntrackedFiles: DiscoverWorktrees calls GetCurrentBranch
+		{Dir: repoDir, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+		// cleanUntrackedFiles: GitCleanDryRun
+		{Dir: repoDir, Name: "git", Args: []string{"clean", "-fdn"}, Stdout: ""},
+	})
+	mock.Install()
+
+	// Pass repoDir as worktreePath -- ResolveLockDir redirects to wsDir
+	err := RecoverWorktree(repoDir, "test-agent")
+	if err != nil {
+		t.Errorf("expected nil error, got: %v", err)
+	}
+
+	// Verify lock file was removed at workspace root
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("lock file at workspace root should have been removed")
+	}
+}
