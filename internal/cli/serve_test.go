@@ -722,3 +722,62 @@ func TestCorsMiddlewareAllHeaders(t *testing.T) {
 		}
 	}
 }
+
+func TestServeFlags_Defaults(t *testing.T) {
+	// Verify the three new flags exist with correct defaults
+	f := serveCmd.Flags()
+
+	webuiPort, err := f.GetInt("webui-port")
+	if err != nil {
+		t.Fatalf("failed to get webui-port flag: %v", err)
+	}
+	if webuiPort != 8080 {
+		t.Errorf("webui-port default = %d, want %d", webuiPort, 8080)
+	}
+
+	webuiSocket, err := f.GetString("webui-socket")
+	if err != nil {
+		t.Fatalf("failed to get webui-socket flag: %v", err)
+	}
+	if webuiSocket != "" {
+		t.Errorf("webui-socket default = %q, want %q", webuiSocket, "")
+	}
+
+	noWebUI, err := f.GetBool("no-webui")
+	if err != nil {
+		t.Fatalf("failed to get no-webui flag: %v", err)
+	}
+	if noWebUI != false {
+		t.Errorf("no-webui default = %v, want %v", noWebUI, false)
+	}
+}
+
+func TestServeFlags_WebUIPort(t *testing.T) {
+	f := serveCmd.Flags().Lookup("webui-port")
+	if f == nil {
+		t.Fatal("webui-port flag not registered on serveCmd")
+	}
+
+	if f.DefValue != "8080" {
+		t.Errorf("webui-port DefValue = %q, want %q", f.DefValue, "8080")
+	}
+
+	if f.Value.Type() != "int" {
+		t.Errorf("webui-port type = %q, want %q", f.Value.Type(), "int")
+	}
+}
+
+func TestServeFlags_NoWebUI(t *testing.T) {
+	f := serveCmd.Flags().Lookup("no-webui")
+	if f == nil {
+		t.Fatal("no-webui flag not registered on serveCmd")
+	}
+
+	if f.DefValue != "false" {
+		t.Errorf("no-webui DefValue = %q, want %q", f.DefValue, "false")
+	}
+
+	if f.Value.Type() != "bool" {
+		t.Errorf("no-webui type = %q, want %q", f.Value.Type(), "bool")
+	}
+}

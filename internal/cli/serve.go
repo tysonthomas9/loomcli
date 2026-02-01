@@ -13,11 +13,15 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
 var (
-	servePort       int
-	serveCorsOrigin string
+	servePort        int
+	serveCorsOrigin  string
+	serveWebUIPort   int
+	serveWebUISocket string
+	serveNoWebUI     bool
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
@@ -65,11 +69,39 @@ func init() {
 
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", defaultPort, "Server port")
 	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin (empty for all)")
+	serveCmd.Flags().IntVar(&serveWebUIPort, "webui-port", 8080, "Port for the web UI server")
+	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
+	serveCmd.Flags().BoolVar(&serveNoWebUI, "no-webui", false, "Disable the web UI server, run only the API")
 
 	rootCmd.AddCommand(serveCmd)
 }
 
 func runServe(cmd *cobra.Command, args []string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Signal handling
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	// Start webui server in goroutine (unless --no-webui)
+	webuiErr := make(chan error, 1)
+	if !serveNoWebUI {
+		go func() {
+			cfg := webui.ServerConfig{
+				Port:       serveWebUIPort,
+				SocketPath: serveWebUISocket,
+			}
+			if serveCorsOrigin != "" {
+				cfg.CORSEnabled = true
+				cfg.CORSOrigins = []string{serveCorsOrigin}
+			}
+			webuiErr <- webui.StartServer(ctx, cfg)
+		}()
+		log.Printf("Web UI server starting on port %d", serveWebUIPort)
+	}
+
+	// Set up the loom API server
 	mux := http.NewServeMux()
 
 	// Register routes
@@ -90,28 +122,64 @@ func runServe(cmd *cobra.Command, args []string) {
 		WriteTimeout: 10 * time.Second,
 	}
 
-	// Handle graceful shutdown
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-
+	// Start API server
+	apiErr := make(chan error, 1)
 	go func() {
-		<-stop
-		log.Println("Shutting down server...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("Server shutdown error: %v", err)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			apiErr <- err
 		}
+		close(apiErr)
 	}()
 
-	log.Printf("Starting loom server on port %d", servePort)
+	log.Printf("Starting loom API server on port %d", servePort)
 	if serveCorsOrigin != "" {
 		log.Printf("CORS enabled for origin: %s", serveCorsOrigin)
 	}
 
-	if err := server.ListenAndServe(); err != http.ErrServerClosed {
-		cmd.PrintErrf("Server error: %v\n", err)
-		os.Exit(1)
+	// Wait for signal, API error, or webui error
+	select {
+	case <-stop:
+		log.Println("Shutting down servers...")
+	case err := <-apiErr:
+		if err != nil {
+			cmd.PrintErrf("API server error: %v\n", err)
+			cancel()
+			os.Exit(1)
+		}
+	case err := <-webuiErr:
+		if err != nil {
+			log.Printf("Warning: webui server error: %v", err)
+		}
+		// Webui failure should not bring down the API server; wait for signal or API error
+		select {
+		case <-stop:
+			log.Println("Shutting down servers...")
+		case err := <-apiErr:
+			if err != nil {
+				cmd.PrintErrf("API server error: %v\n", err)
+				cancel()
+				os.Exit(1)
+			}
+		}
+	}
+
+	// Cancel context to stop webui server
+	cancel()
+
+	// Gracefully shut down API server
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("API server shutdown error: %v", err)
+	}
+
+	// Wait for webui goroutine to finish its shutdown
+	if !serveNoWebUI {
+		select {
+		case <-webuiErr:
+		case <-time.After(10 * time.Second):
+			log.Printf("Warning: webui server did not shut down within timeout")
+		}
 	}
 }
 
