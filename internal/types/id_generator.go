@@ -12,13 +12,14 @@ import (
 // Examples: bd-a3f2dd (6), bd-a3f2dda (7), bd-a3f2dda8 (8)
 //
 // The hash is computed from:
+// - Prefix (prevents cross-project collisions)
 // - Title (primary identifier)
 // - Description (additional context)
 // - Created timestamp (RFC3339Nano for precision)
 // - Workspace ID (prevents cross-workspace collisions)
 //
-// Returns the full 64-char hash for progressive collision handling.
-// Caller extracts hash[:6] initially, then hash[:7], hash[:8] on collisions.
+// Returns prefix-{64-char-hex} for progressive collision handling.
+// Caller extracts prefix-hash[:6] initially, then hash[:7], hash[:8] on collisions.
 //
 // Collision probability with 6 chars (24 bits):
 // - 1,000 issues: ~2.94% chance (most extend to 7 chars)
@@ -30,14 +31,15 @@ func GenerateHashID(prefix, title, description string, created time.Time, worksp
 	w := hashFieldWriter{h}
 
 	// Write all components with null byte separators to prevent field boundary collisions
+	w.str(prefix)
 	w.str(title)
 	w.str(description)
 	w.str(created.Format(time.RFC3339Nano))
 	w.str(workspaceID)
 
-	// Return full hash for progressive length selection
+	// Return prefix-hash for progressive length selection
 	hash := hex.EncodeToString(h.Sum(nil))
-	return hash
+	return fmt.Sprintf("%s-%s", prefix, hash)
 }
 
 // GenerateChildID creates a hierarchical child ID.
