@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // WorktreeInfo holds information about a discovered worktree
@@ -275,6 +276,48 @@ func (r *Resolver) GetDefaultBranch() string {
 	worktrees, _ := r.DiscoverWorktrees()
 	return GetDefaultBranchForWorktrees(worktrees)
 }
+
+// GetBeadsDir returns the directory where .beads/ lives.
+// In workspace mode, this is the workspace root path (shared across repos).
+// In legacy mode, this returns "." (current directory).
+// The result is cached for the lifetime of the process.
+func GetBeadsDir() string {
+	beadsDirOnce.Do(func() {
+		cfg, err := LoadConfig()
+		if err != nil || cfg == nil || len(cfg.Workspaces) == 0 {
+			beadsDirCache = "."
+			return
+		}
+
+		ws := cfg.DefaultWorkspace
+		if ws == "" {
+			names := make([]string, 0, len(cfg.Workspaces))
+			for name := range cfg.Workspaces {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			ws = names[0]
+		}
+
+		if wsConfig, ok := cfg.Workspaces[ws]; ok && wsConfig.Path != "" {
+			beadsDirCache = wsConfig.Path
+		} else {
+			beadsDirCache = "."
+		}
+	})
+	return beadsDirCache
+}
+
+// ResetBeadsDirCache clears the cached beads directory value. For testing only.
+func ResetBeadsDirCache() {
+	beadsDirOnce = sync.Once{}
+	beadsDirCache = ""
+}
+
+var (
+	beadsDirCache string
+	beadsDirOnce  sync.Once
+)
 
 // Package-level default resolver (lazily initialized)
 var defaultResolver *Resolver

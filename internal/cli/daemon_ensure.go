@@ -20,7 +20,7 @@ func EnsureBdDaemonRunning(timeout time.Duration) (bool, error) {
 		return false, nil
 	}
 
-	result := execCommand(".", "bd", "daemon", "start")
+	result := execCommand(GetBeadsDir(), "bd", "daemon", "start")
 	if result.Err != nil {
 		return false, fmt.Errorf("failed to start bd daemon: %w", result.Err)
 	}
@@ -43,7 +43,7 @@ func EnsureBdDaemonRunning(timeout time.Duration) (bool, error) {
 
 // isDaemonRunning checks if the bd daemon is currently running.
 func isDaemonRunning() bool {
-	result := execCommand(".", "bd", "daemon", "status", "--json")
+	result := execCommand(GetBeadsDir(), "bd", "daemon", "status", "--json")
 	if result.Err != nil {
 		return false
 	}

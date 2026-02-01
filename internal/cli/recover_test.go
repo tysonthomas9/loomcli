@@ -49,8 +49,9 @@ func TestForceReleaseLock_NoLockFile(t *testing.T) {
 }
 
 func TestCloseTask_Success(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    "/test/worktree",
+		Dir:    ".",
 		Name:   "bd",
 		Args:   []string{"close", "task-123", "--reason", "Completed (verified by recovery analysis): Tests pass"},
 		Stdout: "Task closed\n",
@@ -63,8 +64,9 @@ func TestCloseTask_Success(t *testing.T) {
 }
 
 func TestCloseTask_Failure(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    "/test/worktree",
+		Dir:    ".",
 		Name:   "bd",
 		Args:   []string{"close", "task-456", "--reason", "Completed (verified by recovery analysis): Done"},
 		Stdout: "",
@@ -78,8 +80,9 @@ func TestCloseTask_Failure(t *testing.T) {
 }
 
 func TestResetTask_Success(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    "/test/worktree",
+		Dir:    ".",
 		Name:   "bd",
 		Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
 		Stdout: "Task updated\n",
@@ -91,8 +94,9 @@ func TestResetTask_Success(t *testing.T) {
 }
 
 func TestResetTask_Failure(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    "/test/worktree",
+		Dir:    ".",
 		Name:   "bd",
 		Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
 		Stdout: "",
@@ -106,8 +110,10 @@ func TestResetTask_Failure(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-abc"},
 			Stdout: "Task: Implement feature X\nStatus: in_progress\n",
@@ -141,8 +147,10 @@ func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-def"},
 			Stdout: "Task: Add unit tests\nStatus: in_progress\n",
@@ -175,8 +183,10 @@ func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_BdShowFails(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-notfound"},
 			Stdout: "",
@@ -197,8 +207,10 @@ func TestAnalyzeTaskCompletion_BdShowFails(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-xyz"},
 			Stdout: "Task: Some task\n",
@@ -232,8 +244,10 @@ func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-multi"},
 			Stdout: "Task: Multiline test\n",
@@ -266,8 +280,10 @@ func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-case"},
 			Stdout: "Task: Case test\n",
@@ -300,8 +316,10 @@ func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-colon"},
 			Stdout: "Task: Colon test\n",
@@ -335,8 +353,10 @@ func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-unparse"},
 			Stdout: "Task: Unparse test\n",
@@ -369,9 +389,11 @@ func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
 }
 
 func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		// analyzeTaskCompletion calls
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-orphan1"},
 			Stdout: "Task: Orphan complete\n",
@@ -392,7 +414,7 @@ func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
 		},
 		// closeTask call
 		{
-			Dir:    "/test/worktree",
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"close", "task-orphan1", "--reason", "Completed (verified by recovery analysis): Task was finished"},
 			Stdout: "Closed\n",
@@ -405,9 +427,11 @@ func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
 }
 
 func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		// analyzeTaskCompletion calls
 		{
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"show", "task-orphan2"},
 			Stdout: "Task: Orphan incomplete\n",
@@ -428,7 +452,7 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 		},
 		// resetTask call
 		{
-			Dir:    "/test/worktree",
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"update", "task-orphan2", "--status", "open", "--assignee", ""},
 			Stdout: "Reset\n",
@@ -441,10 +465,11 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 }
 
 func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		// resetTask call only (no analyze)
 		{
-			Dir:    "/test/worktree",
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"update", "task-orphan3", "--status", "open", "--assignee", ""},
 			Stdout: "Reset\n",
@@ -592,6 +617,7 @@ func TestKillProcess_AlreadyDead(t *testing.T) {
 }
 
 func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -602,7 +628,7 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 		},
 		// resetTask for task-1
 		{
-			Dir:    "/test/worktree",
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"update", "task-1", "--status", "open", "--assignee", ""},
 			Stdout: "Updated\n",
@@ -610,7 +636,7 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 		},
 		// resetTask for task-2
 		{
-			Dir:    "/test/worktree",
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"update", "task-2", "--status", "open", "--assignee", ""},
 			Stdout: "Updated\n",
@@ -623,6 +649,7 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 }
 
 func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
+	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -633,7 +660,7 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 		},
 		// resetTask for task-2 only (task-1 is already handled)
 		{
-			Dir:    "/test/worktree",
+			Dir:    ".",
 			Name:   "bd",
 			Args:   []string{"update", "task-2", "--status", "open", "--assignee", ""},
 			Stdout: "Updated\n",

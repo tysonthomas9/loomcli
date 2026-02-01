@@ -557,7 +557,7 @@ func collectStatistics() MonitorStats {
 }
 
 func runBdCommand(args ...string) (string, error) {
-	result := execCommand(".", "bd", args...)
+	result := execCommand(GetBeadsDir(), "bd", args...)
 	if result.Err != nil {
 		return "", result.Err
 	}

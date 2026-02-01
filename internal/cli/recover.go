@@ -152,7 +152,7 @@ func handleOrphanedTask(worktreePath, taskID string, analyze bool) {
 // analyzeTaskCompletion uses Claude to determine if a task was completed
 func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason string) {
 	// Get task details
-	taskResult := execCommand(".", "bd", "show", taskID)
+	taskResult := execCommand(GetBeadsDir(), "bd", "show", taskID)
 	if taskResult.Err != nil {
 		return false, "Could not fetch task details"
 	}
@@ -214,7 +214,7 @@ INCOMPLETE: <brief reason>
 // closeTask closes a completed task
 func closeTask(worktreePath, taskID, reason string) {
 	closeReason := fmt.Sprintf("Completed (verified by recovery analysis): %s", reason)
-	result := execCommand(worktreePath, "bd", "close", taskID, "--reason", closeReason)
+	result := execCommand(GetBeadsDir(), "bd", "close", taskID, "--reason", closeReason)
 	if result.Err != nil {
 		fmt.Printf("Warning: failed to close task: %v\n", result.Err)
 		output := result.Stdout + result.Stderr
@@ -228,7 +228,7 @@ func closeTask(worktreePath, taskID, reason string) {
 
 // resetTask resets a task to open status
 func resetTask(worktreePath, taskID string) {
-	result := execCommand(worktreePath, "bd", "update", taskID, "--status", "open", "--assignee", "")
+	result := execCommand(GetBeadsDir(), "bd", "update", taskID, "--status", "open", "--assignee", "")
 	if result.Err != nil {
 		fmt.Printf("Warning: failed to reset task: %v\n", result.Err)
 		output := result.Stdout + result.Stderr
@@ -313,7 +313,7 @@ func resetOrphanedAgentTasks(worktreePath, agentName, alreadyHandledTaskID strin
 		return
 	}
 
-	result := execCommand(".", "bd", "list", "--assignee", agentName, "--status", "in_progress", "--json")
+	result := execCommand(GetBeadsDir(), "bd", "list", "--assignee", agentName, "--status", "in_progress", "--json")
 	if result.Err != nil {
 		fmt.Printf("Warning: could not check for orphaned tasks: %v\n", result.Err)
 		return

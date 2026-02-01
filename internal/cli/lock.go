@@ -390,7 +390,7 @@ func GetLockStatus(worktreePath string) string {
 // getTaskStatus returns the status of a beads task
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(taskID string) string {
-	result := execCommand(".", "bd", "show", taskID, "--json")
+	result := execCommand(GetBeadsDir(), "bd", "show", taskID, "--json")
 	if result.Err != nil {
 		return ""
 	}

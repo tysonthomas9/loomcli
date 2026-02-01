@@ -61,7 +61,7 @@ func runClaim(cmd *cobra.Command, args []string) {
 }
 
 func getTaskTitle(taskID string) string {
-	result := execCommand(".", "bd", "show", taskID, "--json")
+	result := execCommand(GetBeadsDir(), "bd", "show", taskID, "--json")
 	if result.Err != nil {
 		return ""
 	}

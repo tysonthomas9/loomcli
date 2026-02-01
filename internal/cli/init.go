@@ -117,7 +117,7 @@ func checkPrerequisites() bool {
 		}
 	}
 
-	// Check if bd (beads) CLI is available
+	// Check if bd (beads) CLI is available (run from cwd — just checking PATH)
 	result = execCommand(".", "bd", "--version")
 	if result.Err != nil {
 		fmt.Println("✗ bd (beads CLI) not found")
@@ -134,7 +134,7 @@ func checkPrerequisites() bool {
 // initBeads initializes beads if not already done
 func initBeads() bool {
 	// Check if .beads/ already exists
-	if _, err := os.Stat(".beads"); err == nil {
+	if _, err := os.Stat(filepath.Join(GetBeadsDir(), ".beads")); err == nil {
 		fmt.Println("✓ beads already initialized, skipping...")
 		return true
 	}
@@ -147,7 +147,7 @@ func initBeads() bool {
 	}
 
 	fmt.Println("→ Creating .beads/ directory...")
-	result := execCommand(".", "bd", "init")
+	result := execCommand(GetBeadsDir(), "bd", "init")
 	if result.Err != nil {
 		fmt.Fprintf(os.Stderr, "✗ Failed to initialize beads: %s\n", result.Stderr)
 		return false
