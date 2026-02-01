@@ -184,6 +184,32 @@ func (r *Resolver) ResolveWorktreePath(name string) (string, error) {
 	return resolveLegacyPath(name)
 }
 
+// ResolveWorkspaceByName checks if name matches a workspace name and returns
+// the workspace root path. Returns (path, true) if found, ("", false) if not.
+func (r *Resolver) ResolveWorkspaceByName(name string) (string, bool) {
+	if r.mode != ModeWorkspace || r.config == nil || name == "" {
+		return "", false
+	}
+	if ws, ok := r.config.Workspaces[name]; ok && ws.Path != "" {
+		return ws.Path, true
+	}
+	return "", false
+}
+
+// WorkspaceNames returns the names of all configured workspaces.
+// Returns nil in legacy mode.
+func (r *Resolver) WorkspaceNames() []string {
+	if r.mode != ModeWorkspace || r.config == nil {
+		return nil
+	}
+	names := make([]string, 0, len(r.config.Workspaces))
+	for name := range r.config.Workspaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // resolveWorkspacePath looks up a repo by name in the active workspace config.
 func (r *Resolver) resolveWorkspacePath(name string) (string, error) {
 	if name == "" {
@@ -507,6 +533,64 @@ func GetScriptDir() (string, error) {
 //   - Empty string -> current directory
 func ResolveWorktreePath(name string) (string, error) {
 	return getDefaultResolver().ResolveWorktreePath(name)
+}
+
+// ResolvedTarget holds the result of workspace-aware argument resolution.
+type ResolvedTarget struct {
+	WorkDir   string // directory where Claude should run
+	AgentName string // agent name for locks and prompts
+}
+
+// ResolveAgentTarget resolves a CLI argument (workspace name, repo name, or
+// worktree name) into the working directory and agent name. In workspace mode,
+// Claude always runs from the workspace root so bd commands use the shared
+// .beads/ directory.
+func ResolveAgentTarget(name string) (ResolvedTarget, error) {
+	resolver, _ := NewResolver()
+	if resolver.Mode() == ModeWorkspace {
+		// Absolute paths are used as-is even in workspace mode
+		if name != "" && filepath.IsAbs(name) {
+			if _, err := os.Stat(name); err != nil {
+				return ResolvedTarget{}, fmt.Errorf("path does not exist: %s", name)
+			}
+			return ResolvedTarget{
+				WorkDir:   name,
+				AgentName: filepath.Base(name),
+			}, nil
+		}
+		// Try workspace name first
+		if wsPath, ok := resolver.ResolveWorkspaceByName(name); ok {
+			return ResolvedTarget{
+				WorkDir:   wsPath,
+				AgentName: name,
+			}, nil
+		}
+		// Validate repo name exists (but still use workspace root for Claude)
+		if name != "" {
+			if _, err := resolver.ResolveWorktreePath(name); err != nil {
+				return ResolvedTarget{}, fmt.Errorf("'%s' is not a workspace or repo name: %w", name, err)
+			}
+		}
+		// In workspace mode, always use workspace root for Claude
+		wsConfig, ok := resolver.config.Workspaces[resolver.workspace]
+		if !ok || wsConfig.Path == "" {
+			return ResolvedTarget{}, fmt.Errorf("workspace %q has no path configured", resolver.workspace)
+		}
+		return ResolvedTarget{
+			WorkDir:   wsConfig.Path,
+			AgentName: resolver.WorkspaceName(),
+		}, nil
+	}
+
+	// Legacy mode - unchanged behavior
+	worktreePath, err := ResolveWorktreePath(name)
+	if err != nil {
+		return ResolvedTarget{}, err
+	}
+	return ResolvedTarget{
+		WorkDir:   worktreePath,
+		AgentName: GetWorktreeName(worktreePath),
+	}, nil
 }
 
 // GetWorktreeName extracts the worktree name from a path

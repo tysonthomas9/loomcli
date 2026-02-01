@@ -16,11 +16,11 @@ var (
 )
 
 var taskCmd = &cobra.Command{
-	Use:               "task [worktree]",
+	Use:               "task [worktree|workspace]",
 	Short:             "Run a Claude implementation agent",
 	GroupID:           "agents",
 	ValidArgsFunction: worktreeCompletion,
-	Long: `Run a Claude implementation agent in the specified worktree.
+	Long: `Run a Claude implementation agent in the specified worktree or workspace.
 
 The implementation agent will:
   1. Pick the highest priority ready task (skipping [Need Review] tasks)
@@ -30,8 +30,9 @@ The implementation agent will:
   5. Close the task and exit after completing ONE task (unless --auto is enabled)
 
 Arguments:
-  worktree    Worktree name (e.g., falcon) or path
-              If omitted, runs in current directory
+  worktree    Worktree/workspace name (e.g., falcon) or path
+              In workspace mode, workspace names take priority over repo names.
+              If omitted, runs in current directory (or workspace root in workspace mode).
 
 Flags:
   -a, --auto          Enable continuous mode (process multiple tasks)
@@ -40,7 +41,7 @@ Flags:
   -t, --idle-timeout  Exit after N minutes with no available tasks (0 = none)
 
 Examples:
-  loom task falcon              # Run in falcon worktree (single task)
+  loom task falcon              # Run in falcon worktree/workspace (single task)
   loom task                     # Run in current directory
   loom task falcon --auto       # Continuous mode until Ctrl+C
   loom task falcon -a -m 5      # Process up to 5 tasks
@@ -60,19 +61,20 @@ func init() {
 }
 
 func runTask(cmd *cobra.Command, args []string) {
-	// Resolve worktree path
-	var worktreeName string
+	// Resolve worktree/workspace path
+	var argName string
 	if len(args) > 0 {
-		worktreeName = args[0]
+		argName = args[0]
 	}
 
-	worktreePath, err := ResolveWorktreePath(worktreeName)
+	target, err := ResolveAgentTarget(argName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	agentName := GetWorktreeName(worktreePath)
+	worktreePath := target.WorkDir
+	agentName := target.AgentName
 
 	// DAEMON MODE: Called by tmux session, run single task
 	// Daemon manages its own lock (parent doesn't hold lock in tmux mode)

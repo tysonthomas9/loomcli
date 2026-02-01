@@ -6,20 +6,35 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// worktreeCompletion provides completion for worktree names
+// worktreeCompletion provides completion for worktree and workspace names
 func worktreeCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	// Only complete the first argument (worktree name)
+	// Only complete the first argument (worktree/workspace name)
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	worktrees, err := DiscoverWorktrees()
+	seen := make(map[string]bool)
+	var completions []string
+
+	// In workspace mode, include workspace names first
+	resolver, _ := NewResolver()
+	for _, name := range resolver.WorkspaceNames() {
+		completions = append(completions, name+"\tworkspace")
+		seen[name] = true
+	}
+
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
+		if len(completions) > 0 {
+			return completions, cobra.ShellCompDirectiveNoFileComp
+		}
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	var completions []string
 	for _, wt := range worktrees {
+		if seen[wt.Name] {
+			continue // Skip if already added as workspace name
+		}
 		// Format: "name\tdescription" for shell completion
 		completions = append(completions, wt.Name+"\t"+wt.Branch)
 	}
