@@ -1,0 +1,81 @@
+/**
+ * EmptyState component styles.
+ * Uses CSS Modules for component-scoped styling.
+ */
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-8);
+  text-align: center;
+  min-height: 200px;
+}
+
+.iconWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background-color: var(--color-bg-secondary);
+}
+
+.icon {
+  color: var(--color-text-muted);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  line-height: var(--line-height-tight);
+}
+
+.description {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  line-height: var(--line-height-normal);
+  max-width: 320px;
+}
+
+.action {
+  margin-top: var(--space-2);
+}
+
+/* Action button styling hint (consumer can override) */
+.action button {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-primary);
+  background-color: transparent;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.action button:hover {
+  background-color: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+.action button:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.action button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.action button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}

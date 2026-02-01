@@ -1,0 +1,178 @@
+/**
+ * PriorityDropdown component styles.
+ * Custom dropdown with colored priority indicators.
+ */
+
+.priorityDropdown {
+  position: relative;
+  display: inline-block;
+}
+
+/* Trigger button - styled as colored badge */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: var(--font-xs);
+  font-weight: 500;
+  background-color: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: var(--color-border);
+  background-color: var(--color-bg-secondary);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Saving state - pulsing animation */
+.trigger[data-saving="true"] {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.triggerText {
+  white-space: nowrap;
+}
+
+.dropdownArrow {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-left: 2px;
+}
+
+/* Dropdown menu */
+.menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--z-dropdown, 100);
+  min-width: 160px;
+  margin-top: var(--space-1, 4px);
+  padding: var(--space-1, 4px);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+/* Menu options */
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast);
+}
+
+.option:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.option[data-selected="true"] {
+  background-color: var(--color-bg-tertiary);
+  font-weight: 500;
+}
+
+.option[data-focused="true"] {
+  background-color: var(--color-bg-secondary);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.optionText {
+  flex: 1;
+}
+
+.checkmark {
+  color: var(--color-success);
+  font-size: var(--font-sm);
+  margin-left: auto;
+}
+
+/* Color dot indicators */
+.colorDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.colorDot[data-priority="0"] {
+  background-color: var(--color-priority-0);
+}
+
+.colorDot[data-priority="1"] {
+  background-color: var(--color-priority-1);
+}
+
+.colorDot[data-priority="2"] {
+  background-color: var(--color-priority-2);
+}
+
+.colorDot[data-priority="3"] {
+  background-color: var(--color-priority-3);
+}
+
+.colorDot[data-priority="4"] {
+  background-color: var(--color-priority-4);
+}
+
+/* Saving indicator */
+.savingIndicator {
+  position: absolute;
+  top: 50%;
+  right: -20px;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: translateY(-50%) rotate(360deg);
+  }
+}
+
+/* Error state */
+.error {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: var(--space-1, 4px);
+  font-size: var(--font-xs);
+  color: var(--color-danger);
+  white-space: nowrap;
+}

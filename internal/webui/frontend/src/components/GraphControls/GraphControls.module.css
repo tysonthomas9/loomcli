@@ -1,0 +1,227 @@
+/**
+ * GraphControls component styles.
+ * Uses CSS Modules for component-scoped styling.
+ */
+
+.graphControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Status filter group */
+.filterGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.filterLabel {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+/* Status filter select - matches FilterBar pattern */
+.statusSelect {
+  height: 28px;
+  padding: var(--space-1) var(--space-2);
+  padding-right: var(--space-6);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right var(--space-1) center;
+  background-repeat: no-repeat;
+  background-size: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  appearance: none;
+  transition: border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.statusSelect:hover {
+  border-color: var(--color-text-muted);
+}
+
+.statusSelect:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+}
+
+.statusSelect:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Dependency type filter group */
+.depTypeGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.depTypeCheckboxGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.depTypeLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.depTypeLabel:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.depTypeLabel:has(input:checked) span {
+  color: var(--color-text);
+  font-weight: var(--font-weight-medium);
+}
+
+.depTypeCheckbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.depTypeCheckbox:disabled {
+  cursor: not-allowed;
+}
+
+.depTypeCheckbox:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.toggleLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggleLabel:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-ready);
+  cursor: pointer;
+}
+
+.checkbox:disabled {
+  cursor: not-allowed;
+}
+
+.checkbox:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.toggleText {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast);
+}
+
+/* Highlight text when toggle is active */
+.toggleLabel:has(input:checked) .toggleText {
+  color: var(--color-ready);
+}
+
+/* Blocked checkbox uses red accent color */
+.blockedCheckbox {
+  accent-color: var(--color-blocked);
+}
+
+/* Highlight text red when blocked toggle is active */
+.toggleLabel:has(.blockedCheckbox:checked) .toggleText {
+  color: var(--color-blocked);
+}
+
+/* Closed checkbox uses muted accent color */
+.closedCheckbox {
+  accent-color: var(--color-status-closed);
+}
+
+/* Highlight text muted when closed toggle is active */
+.toggleLabel:has(.closedCheckbox:checked) .toggleText {
+  color: var(--color-status-closed);
+}
+
+/* Divider between highlight toggle and zoom controls */
+.divider {
+  width: 1px;
+  height: 20px;
+  background-color: var(--color-border);
+}
+
+/* Zoom controls button group */
+.zoomControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* Zoom button styles */
+.zoomButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.zoomButton:hover {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
+  color: var(--color-text);
+}
+
+.zoomButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.zoomButton:active {
+  background-color: var(--color-bg-active);
+}

@@ -1,0 +1,52 @@
+/**
+ * SwimLaneBoard component styles.
+ * Vertical stack of swim lanes with proper spacing.
+ */
+
+.swimLaneBoard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1; /* Fill available space from parent flex container */
+  min-height: 0;
+}
+
+/* Ensure lanes don't shrink below their content */
+.swimLaneBoard > * {
+  flex-shrink: 0;
+}
+
+/**
+ * Toolbar for Expand All / Collapse All controls.
+ */
+.toolbar {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.toolbarButton {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.toolbarButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.toolbarButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}

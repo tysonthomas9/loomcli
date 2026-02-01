@@ -1,0 +1,69 @@
+/**
+ * Styles for DraggableIssueCard component.
+ */
+
+.draggable {
+  position: relative;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  display: block;
+  width: 100%;
+  position: relative;
+}
+
+.dragHandle {
+  position: absolute;
+  left: var(--space-1);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.draggable:hover .dragHandle {
+  opacity: 0.6;
+}
+
+.draggable:active .dragHandle,
+.draggable[data-dragging='true'] .dragHandle {
+  opacity: 1;
+}
+
+.dragHandle {
+  position: absolute;
+  left: var(--space-1);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.draggable:hover .dragHandle {
+  opacity: 0.6;
+}
+
+.draggable:active .dragHandle,
+.draggable[data-dragging='true'] .dragHandle {
+  opacity: 1;
+}
+
+.draggable:active {
+  cursor: grabbing;
+}
+
+.draggable[data-dragging='true'] {
+  cursor: grabbing;
+}
+
+.overlay {
+  cursor: grabbing;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+}

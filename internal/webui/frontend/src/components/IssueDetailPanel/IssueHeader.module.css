@@ -1,0 +1,206 @@
+/**
+ * IssueHeader component styles.
+ * Header area with ID, status badge, priority, and close button.
+ */
+
+.issueHeader {
+  padding: 16px 20px 12px;
+}
+
+/* Sticky mode - no bottom border, handled by wrapper */
+.issueHeader.sticky {
+  border-bottom: none;
+}
+
+.topRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* Priority badge in header */
+.priorityBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border: none;
+  transition: background-color var(--transition-fast);
+}
+
+.priorityBadge:hover {
+  background-color: var(--color-bg-active);
+}
+
+.priorityBadge[data-priority="0"],
+.priorityBadge[data-priority="1"] {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.priorityBadge[data-priority="0"]:hover,
+.priorityBadge[data-priority="1"]:hover {
+  background-color: #fecaca;
+}
+
+.priorityBadge[data-priority="2"] {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.priorityBadge[data-priority="2"]:hover {
+  background-color: #fde68a;
+}
+
+.issueId {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.statusBadge[data-status="open"] {
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.statusBadge[data-status="in_progress"] {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.statusBadge[data-status="closed"] {
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.statusBadge[data-status="blocked"] {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.statusBadge[data-status="deferred"] {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+}
+
+/* Review action buttons (approve/reject) */
+.reviewActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.approveButton,
+.rejectButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.approveButton {
+  color: var(--color-success);
+}
+
+.approveButton:hover:not(:disabled) {
+  background-color: var(--color-success-bg);
+  border-color: var(--color-success);
+}
+
+.approveButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rejectButton {
+  color: var(--color-danger);
+}
+
+.rejectButton:hover:not(:disabled) {
+  background-color: var(--color-danger-bg);
+  border-color: var(--color-danger);
+}
+
+/* Fullscreen toggle button */
+.fullscreenButton {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.fullscreenButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.fullscreenButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.closeButton {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.closeButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.closeButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  margin: 0;
+  line-height: var(--line-height-tight);
+  word-break: break-word;
+}

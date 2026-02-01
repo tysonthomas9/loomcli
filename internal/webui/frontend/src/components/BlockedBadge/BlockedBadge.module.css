@@ -1,0 +1,101 @@
+/**
+ * BlockedBadge component styles.
+ * Uses CSS Modules for component-scoped styling.
+ */
+
+.blockedBadge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-blocked);
+  color: var(--color-text-inverse);
+  cursor: default;
+  user-select: none;
+  box-shadow: var(--shadow-xs);
+  transition: transform var(--transition-fast);
+}
+
+/* Interactive state when clickable */
+.blockedBadge[role="button"] {
+  cursor: pointer;
+}
+
+.blockedBadge[role="button"]:hover {
+  transform: scale(1.05);
+}
+
+.blockedBadge[role="button"]:focus-visible {
+  outline: 2px solid var(--color-text-inverse);
+  outline-offset: 1px;
+}
+
+.icon {
+  font-size: 0.65rem;
+  line-height: 1;
+}
+
+.count {
+  line-height: 1;
+}
+
+/* Tooltip container */
+.tooltip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-text);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-dropdown);
+  min-width: 160px;
+  max-width: 240px;
+  white-space: normal;
+  font-weight: var(--font-weight-normal);
+}
+
+/* Tooltip arrow */
+.tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: var(--color-text);
+}
+
+.tooltipHeader {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--space-1);
+  color: var(--color-text-muted);
+}
+
+.tooltipList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tooltipItem {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  padding: var(--space-1) 0;
+  color: var(--color-text-inverse);
+}
+
+.tooltipItem::before {
+  content: '\2022';
+  margin-right: var(--space-2);
+  color: var(--color-text-muted);
+}

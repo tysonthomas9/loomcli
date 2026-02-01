@@ -1,0 +1,72 @@
+/**
+ * CommentsSection component styles.
+ */
+
+/* Section container - matches IssueDetailPanel section style */
+.section {
+  margin-bottom: 20px;
+}
+
+.sectionTitle {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Comment list (no bullets) */
+.commentList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Individual comment item */
+.commentItem {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.commentItem:last-child {
+  border-bottom: none;
+}
+
+/* Top row: author + timestamp */
+.commentHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.commentAuthor {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.commentTime {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+/* Comment body text */
+.commentText {
+  font-size: var(--font-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Empty state */
+.emptyState {
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  margin: 0;
+  text-align: center;
+  padding: 12px 0;
+}

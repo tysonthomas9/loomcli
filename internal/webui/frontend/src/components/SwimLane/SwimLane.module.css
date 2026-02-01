@@ -1,0 +1,122 @@
+/**
+ * SwimLane component styles.
+ * Horizontal lane with header and status columns.
+ */
+
+.swimLane {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-bg);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--color-border-light);
+  flex: 1 0 auto; /* Grow to fill space, don't shrink, auto content basis */
+  min-height: 250px; /* Ensure reasonable minimum height for cards */
+}
+
+.swimLane + .swimLane {
+  margin-top: var(--space-3);
+}
+
+.laneHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.collapseToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.collapseToggle:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.collapseToggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.chevronIcon {
+  transition: transform var(--transition-fast);
+}
+
+.swimLane:not([data-collapsed='true']) .chevronIcon {
+  transform: rotate(90deg);
+}
+
+.laneTitle {
+  flex: 1;
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  line-height: var(--line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.laneCount {
+  flex-shrink: 0;
+  min-width: 1.5rem;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  text-align: center;
+}
+
+.laneContent {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1; /* Fill available space from swimLane */
+  min-height: 0; /* Allow flex calculations to work */
+  opacity: 1;
+  transition: opacity 0.15s ease-out, padding 0.2s ease-out;
+}
+
+.laneContent > * {
+  flex-shrink: 0;
+}
+
+.laneContent[data-collapsed='true'] {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+/* Muted column style (Pending - blocked by dependencies) */
+.mutedColumn {
+  opacity: 0.7;
+  background-color: var(--color-surface-subtle);
+}
+
+/* Highlighted column style (Review - needs human attention) */
+.highlightedColumn {
+  border-left: 3px solid var(--color-status-review);
+}

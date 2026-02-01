@@ -1,0 +1,420 @@
+/**
+ * IssueTable component styles.
+ * Uses CSS variables from styles/variables.css.
+ */
+
+/* Wrapper for horizontal scrolling on narrow viewports */
+.issue-table__wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+/* Main table */
+.issue-table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  background-color: var(--color-bg);
+}
+
+/* Table header */
+.issue-table__head {
+  background-color: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.issue-table__header-cell {
+  padding: var(--space-3) var(--space-4);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+/* Sortable header styles */
+.issue-table__header-cell--sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.issue-table__header-cell--sortable:hover {
+  color: var(--color-text);
+  background-color: var(--color-bg-tertiary);
+}
+
+.issue-table__header-cell--sortable:focus {
+  outline: none;
+}
+
+.issue-table__header-cell--sortable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.issue-table__header-cell--sorted {
+  color: var(--color-text);
+}
+
+/* Header content wrapper for alignment */
+.issue-table__header-content {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Sort indicator */
+.issue-table__sort-indicator {
+  font-size: 0.65em;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  color: var(--color-text-muted);
+}
+
+.issue-table__header-cell--sortable:hover .issue-table__sort-indicator {
+  opacity: 0.5;
+}
+
+.issue-table__sort-indicator--asc,
+.issue-table__sort-indicator--desc {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+/* Table body */
+.issue-table__body {
+  /* Body-level styles if needed */
+}
+
+/* Table rows */
+.issue-table__row {
+  border-bottom: 1px solid var(--color-border-light);
+  transition: background-color var(--transition-fast);
+}
+
+.issue-table__row:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.issue-table__row--clickable {
+  cursor: pointer;
+}
+
+.issue-table__row--clickable:focus {
+  outline: none;
+  background-color: var(--color-bg-tertiary);
+}
+
+.issue-table__row--clickable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.issue-table__row--selected {
+  background-color: var(--color-bg-tertiary);
+}
+
+.issue-table__row--selected:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* Table cells */
+.issue-table__cell {
+  padding: var(--space-3) var(--space-4);
+  vertical-align: middle;
+}
+
+/* Empty state */
+.issue-table__empty-row {
+  /* No hover effect for empty row */
+}
+
+.issue-table__empty-row:hover {
+  background-color: transparent;
+}
+
+.issue-table__empty-cell {
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Cell type-specific styles */
+
+/* ID column - monospace font */
+.issue-table__id {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* Priority badges */
+.issue-table__priority {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  color: var(--color-text-inverse);
+}
+
+.issue-table__priority.priority-0 {
+  background-color: var(--color-priority-0);
+}
+
+.issue-table__priority.priority-1 {
+  background-color: var(--color-priority-1);
+}
+
+.issue-table__priority.priority-2 {
+  background-color: var(--color-priority-2);
+  color: var(--color-text); /* Dark text for WCAG AA contrast */
+}
+
+.issue-table__priority.priority-3 {
+  background-color: var(--color-priority-3);
+}
+
+.issue-table__priority.priority-4 {
+  background-color: var(--color-priority-4);
+}
+
+/* Title - truncate with ellipsis */
+.issue-table__title {
+  display: block;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+/* Status badges */
+.issue-table__status {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.issue-table__status.status-open {
+  background-color: color-mix(in srgb, var(--color-status-open) 15%, transparent);
+  color: var(--color-status-open);
+}
+
+.issue-table__status.status-in-progress {
+  background-color: color-mix(in srgb, var(--color-status-in-progress) 15%, transparent);
+  color: var(--color-status-in-progress);
+}
+
+.issue-table__status.status-closed {
+  background-color: color-mix(in srgb, var(--color-status-closed) 15%, transparent);
+  color: var(--color-status-closed);
+}
+
+.issue-table__status.status-blocked {
+  background-color: color-mix(in srgb, var(--color-blocked) 15%, transparent);
+  color: var(--color-blocked);
+}
+
+.issue-table__status.status-deferred {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+}
+
+/* Issue type */
+.issue-table__type {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: capitalize;
+}
+
+/* Assignee */
+.issue-table__assignee {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* Date */
+.issue-table__date {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+/* Checkbox column - narrow fixed width */
+.issue-table__header-cell--checkbox,
+.issue-table__cell--checkbox {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  padding: var(--space-2) var(--space-3);
+  text-align: center;
+}
+
+/* Checkbox input styling */
+.issue-table__checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+  /* Remove default margin */
+  margin: 0;
+}
+
+/* Hover state for checkbox cell */
+.issue-table__cell--checkbox:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* Screen reader only text for header */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Blocked row styling */
+.issue-table__row--blocked {
+  border-left: 3px solid var(--color-blocked);
+}
+
+/* Blocked cell styling */
+.issue-table__blocked {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.issue-table__blocked--none {
+  color: var(--color-text-muted);
+}
+
+.issue-table__blocked--active {
+  background: none;
+  border: none;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  background-color: color-mix(in srgb, var(--color-blocked) 15%, transparent);
+  color: var(--color-blocked);
+  transition: background-color var(--transition-fast);
+}
+
+.issue-table__blocked--active:hover {
+  background-color: color-mix(in srgb, var(--color-blocked) 25%, transparent);
+}
+
+.issue-table__blocked--active:focus {
+  outline: none;
+}
+
+.issue-table__blocked--active:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.issue-table__blocked-icon {
+  font-size: 0.85em;
+}
+
+.issue-table__blocked-count {
+  font-weight: var(--font-weight-medium);
+}
+
+/* ===========================
+ * Sticky Columns - ID column stays fixed during horizontal scroll
+ * =========================== */
+
+/* ID column sticky positioning */
+.issue-table__header-cell[data-column="id"],
+.issue-table__cell[data-column="id"] {
+  position: sticky;
+  left: 0;
+  z-index: var(--z-sticky);
+}
+
+/* Header sticky cells need explicit background */
+.issue-table__header-cell[data-column="id"] {
+  background-color: var(--color-bg-secondary);
+}
+
+/* Body sticky cells need opaque background */
+.issue-table__cell[data-column="id"] {
+  background-color: var(--color-bg);
+}
+
+/* Match hover state background for sticky cells */
+.issue-table__row:hover .issue-table__cell[data-column="id"] {
+  background-color: var(--color-bg-secondary);
+}
+
+/* Match selected state background for sticky cells */
+.issue-table__row--selected .issue-table__cell[data-column="id"],
+.issue-table__row--selected:hover .issue-table__cell[data-column="id"] {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* Visual separator shadow on sticky column's right edge */
+.issue-table__header-cell[data-column="id"]::after,
+.issue-table__cell[data-column="id"]::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 4px;
+  background: linear-gradient(to right, rgba(0,0,0,0.05), transparent);
+  pointer-events: none;
+}
+
+/* Checkbox column sticky (when present) */
+.issue-table__header-cell--checkbox,
+.issue-table__cell--checkbox {
+  position: sticky;
+  left: 0;
+  z-index: calc(var(--z-sticky) + 1);
+}
+
+.issue-table__header-cell--checkbox {
+  background-color: var(--color-bg-secondary);
+}
+
+.issue-table__cell--checkbox {
+  background-color: var(--color-bg);
+}
+
+/* Match hover state for checkbox cells */
+.issue-table__row:hover .issue-table__cell--checkbox {
+  background-color: var(--color-bg-secondary);
+}
+
+/* Match selected state for checkbox cells */
+.issue-table__row--selected .issue-table__cell--checkbox,
+.issue-table__row--selected:hover .issue-table__cell--checkbox {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* When checkbox is present, ID column shifts right */
+.issue-table__header-cell--checkbox ~ .issue-table__header-cell[data-column="id"],
+.issue-table__cell--checkbox ~ .issue-table__cell[data-column="id"] {
+  left: 40px; /* width of checkbox column */
+}

@@ -1,0 +1,132 @@
+/**
+ * Toast notification styles.
+ * Supports multiple toast types (success, error, warning, info) and positions.
+ */
+
+/* Container positioning */
+.container {
+  position: fixed;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 400px;
+  pointer-events: none;
+}
+
+.container > * {
+  pointer-events: auto;
+}
+
+/* Position variants */
+.bottomright {
+  bottom: var(--space-4);
+  right: var(--space-4);
+}
+
+.bottomleft {
+  bottom: var(--space-4);
+  left: var(--space-4);
+}
+
+.topright {
+  top: var(--space-4);
+  right: var(--space-4);
+}
+
+.topleft {
+  top: var(--space-4);
+  left: var(--space-4);
+}
+
+/* Individual toast */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: slideIn var(--transition-normal) ease-out;
+}
+
+/* Slide-in animation */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Type variants */
+.success {
+  background-color: var(--color-success);
+  color: var(--color-text-inverse);
+}
+
+.error {
+  background-color: var(--color-danger);
+  color: var(--color-text-inverse);
+}
+
+.warning {
+  background-color: var(--color-warning);
+  color: var(--color-text);
+}
+
+.info {
+  background-color: var(--color-info);
+  color: var(--color-text-inverse);
+}
+
+/* Icon styling */
+.icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  opacity: 0.9;
+}
+
+/* Message text */
+.message {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-normal);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dismiss button */
+.dismissButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background-color: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: currentColor;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast);
+}
+
+.dismissButton:hover {
+  opacity: 1;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.dismissButton:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+  opacity: 1;
+}

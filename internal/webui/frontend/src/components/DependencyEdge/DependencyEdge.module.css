@@ -1,0 +1,138 @@
+/**
+ * DependencyEdge component styles.
+ * Uses CSS Modules for component-scoped styling.
+ *
+ * Edge types are styled based on their semantic meaning:
+ * - Blocking types (blocks, conditional-blocks): Red, prominent
+ * - Structural types (parent-child): Blue, solid
+ * - Temporal types (waits-for): Orange, dotted
+ * - Informational types (related): Gray, subtle
+ */
+
+/* ===========================
+ * Type: blocks
+ * Critical blocking dependency
+ * =========================== */
+.typeBlocks {
+  stroke: var(--color-danger, #ef4444);
+  stroke-width: 2px;
+}
+
+/* ===========================
+ * Type: parent-child
+ * Structural hierarchy
+ * =========================== */
+.typeParentChild {
+  stroke: var(--color-primary, #3b82f6);
+  stroke-width: 2px;
+}
+
+/* ===========================
+ * Type: conditional-blocks
+ * Conditional blocking (may resolve)
+ * =========================== */
+.typeConditionalBlocks {
+  stroke: var(--color-danger, #ef4444);
+  stroke-width: 2px;
+  stroke-dasharray: 6 4;
+}
+
+/* ===========================
+ * Type: waits-for
+ * Temporal dependency
+ * =========================== */
+.typeWaitsFor {
+  stroke: var(--color-warning, #f59e0b);
+  stroke-width: 1.5px;
+  stroke-dasharray: 2 3;
+}
+
+/* ===========================
+ * Type: related
+ * Informational, non-blocking
+ * =========================== */
+.typeRelated {
+  stroke: var(--color-text-muted, #9ca3af);
+  stroke-width: 1px;
+  stroke-dasharray: 4 4;
+  opacity: 0.7;
+}
+
+/* ===========================
+ * Type: default (unknown types)
+ * Fallback styling
+ * =========================== */
+.typeDefault {
+  stroke: var(--color-border, #e5e7eb);
+  stroke-width: 1.5px;
+}
+
+/* ===========================
+ * Animated blocking indicator
+ * Applied to blocking types on hover
+ * =========================== */
+@keyframes dashFlow {
+  from {
+    stroke-dashoffset: 10;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Add animation to blocks type for emphasis on hover */
+.typeBlocks:hover {
+  animation: dashFlow 0.5s linear infinite;
+  stroke-dasharray: 5 5;
+}
+
+/* Conditional-blocks already has dash pattern, just animate it */
+.typeConditionalBlocks:hover {
+  animation: dashFlow 0.5s linear infinite;
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .typeBlocks:hover,
+  .typeConditionalBlocks:hover {
+    animation: none;
+  }
+}
+
+/* ===========================
+ * Edge label styling
+ * =========================== */
+.edgeLabel {
+  font-size: var(--font-size-xs, 0.75rem);
+  font-family: var(--font-family-mono, monospace);
+  color: var(--color-text-muted, #9ca3af);
+  background-color: var(--color-bg, #ffffff);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border, #e5e7eb);
+  white-space: nowrap;
+}
+
+/* Selected state - highlight the label */
+.edgeLabel.selected {
+  border-color: var(--color-primary, #3b82f6);
+  color: var(--color-primary, #3b82f6);
+}
+
+/* ===========================
+ * Highlighted Edge (part of chain)
+ * ================================= */
+
+/* Edge is part of highlighted blocking chain */
+.highlighted {
+  stroke: var(--color-blocked, #ef4444);
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 4px var(--color-blocked, #ef4444));
+}
+
+/* Highlighted edge label */
+.edgeLabel.highlighted {
+  border-color: var(--color-blocked, #ef4444);
+  color: var(--color-blocked, #ef4444);
+  background-color: color-mix(in srgb, var(--color-blocked) 10%, var(--color-bg));
+}

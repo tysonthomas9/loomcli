@@ -1,0 +1,132 @@
+/**
+ * SearchInput component styles.
+ * Uses CSS Modules for component-scoped styling.
+ */
+
+.searchInput {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  max-width: 200px;
+}
+
+.icon {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--color-text-muted);
+  pointer-events: none;
+  transition: color var(--transition-fast);
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  padding-left: calc(var(--space-3) + 16px + var(--space-2)); /* icon offset */
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* Placeholder text */
+.input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Remove native search input styling */
+.input::-webkit-search-cancel-button,
+.input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Hover state */
+.input:hover:not(:disabled) {
+  border-color: var(--color-text-muted);
+}
+
+/* Focus state */
+.input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background-color: var(--color-bg-secondary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+}
+
+.searchInput:focus-within .icon {
+  color: var(--color-primary);
+}
+
+/* Disabled state */
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--color-bg-tertiary);
+}
+
+/* Clear button */
+.clear {
+  position: absolute;
+  right: var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.clear:hover {
+  color: var(--color-text);
+  background-color: var(--color-bg-tertiary);
+}
+
+.clear:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* Adjust input padding when clear button visible */
+.hasValue .input {
+  padding-right: calc(var(--space-2) + 24px + var(--space-2)); /* clear button offset */
+}
+
+/* Size variants - Small */
+.sm .input {
+  height: 32px;
+  font-size: var(--font-size-xs);
+  padding-left: calc(var(--space-2) + 14px + var(--space-2));
+}
+
+.sm .icon {
+  left: var(--space-2);
+}
+
+/* Size variants - Medium */
+.md .input {
+  height: 40px;
+}
+
+/* Size variants - Large */
+.lg .input {
+  height: 48px;
+  font-size: var(--font-size-base);
+  padding-left: calc(var(--space-4) + 18px + var(--space-2));
+}
+
+.lg .icon {
+  left: var(--space-4);
+}

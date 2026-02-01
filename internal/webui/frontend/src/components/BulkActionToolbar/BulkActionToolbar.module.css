@@ -1,0 +1,126 @@
+/**
+ * BulkActionToolbar component styles.
+ * Uses CSS Modules for component-scoped styling.
+ * Follows FilterBar pattern for consistency.
+ */
+
+.toolbar {
+  position: fixed;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-sticky);
+}
+
+.selectionCount {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 36px;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.actionButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.actionButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* Secondary variant (default) */
+.secondary {
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+}
+
+.secondary:hover:not(:disabled) {
+  color: var(--color-text);
+  background-color: var(--color-bg-tertiary);
+  border-color: var(--color-text-muted);
+}
+
+/* Primary variant */
+.primary {
+  color: var(--color-text-inverse);
+  background-color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.primary:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-primary) 85%, black);
+  border-color: color-mix(in srgb, var(--color-primary) 85%, black);
+}
+
+/* Danger variant */
+.danger {
+  color: var(--color-text-inverse);
+  background-color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+}
+
+.danger:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-danger) 85%, black);
+  border-color: color-mix(in srgb, var(--color-danger) 85%, black);
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Responsive: full width on mobile */
+@media (max-width: 480px) {
+  .toolbar {
+    left: var(--space-4);
+    right: var(--space-4);
+    transform: none;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .actionButton {
+    flex: 1;
+    justify-content: center;
+    min-width: 0;
+  }
+}

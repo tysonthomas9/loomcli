@@ -1,0 +1,169 @@
+/**
+ * GraphLegend component styles.
+ * Floating collapsible panel explaining graph visual elements.
+ */
+
+.graphLegend {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  min-width: 160px;
+  max-width: 200px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--transition-fast);
+}
+
+.header:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.header:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+
+.chevron {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  transition: transform var(--transition-fast);
+}
+
+.chevron[data-collapsed="true"] {
+  transform: rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}
+
+.content {
+  padding: 0 var(--space-3) var(--space-3);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.section {
+  padding-top: var(--space-2);
+}
+
+.section:not(:last-child) {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.legendItem dt {
+  flex-shrink: 0;
+}
+
+.legendItem dd {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.edgeSwatch {
+  width: 20px;
+  height: 2px;
+  background-color: var(--color-border);
+}
+
+.edgeSwatch[data-style="dashed"] {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-blocked) 0,
+    var(--color-blocked) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+.edgeSwatch[data-style="solid"] {
+  background-color: var(--color-border);
+}
+
+/* =================================
+ * Indicator Swatches
+ * ================================= */
+
+.indicatorSwatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Root blocker indicator - red circle */
+.indicatorSwatch[data-type="rootBlocker"] {
+  background-color: var(--color-blocked);
+  opacity: 0.8;
+  box-shadow: 0 0 3px var(--color-blocked);
+}
+
+/* Blocked count badge indicator - red pill */
+.indicatorSwatch[data-type="blockedBadge"] {
+  width: 18px;
+  height: 14px;
+  border-radius: 7px;
+  background-color: var(--color-blocked);
+  position: relative;
+}
+
+/* Add "3" text to the badge indicator */
+.indicatorSwatch[data-type="blockedBadge"]::after {
+  content: "3";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-inverse);
+}

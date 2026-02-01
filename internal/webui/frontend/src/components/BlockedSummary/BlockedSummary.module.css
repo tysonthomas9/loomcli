@@ -1,0 +1,245 @@
+/**
+ * BlockedSummary component styles.
+ * Header badge with expandable dropdown for blocked issues.
+ */
+
+.blockedSummary {
+  position: relative;
+  display: inline-flex;
+}
+
+/* ===========================
+ * Badge (collapsed state)
+ * =========================== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.badge:hover {
+  background: var(--color-bg-hover);
+}
+
+.badge:focus {
+  outline: none;
+}
+
+.badge:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Badge with blocked issues - use red color */
+.badge[data-has-blocked='true'] {
+  color: var(--color-blocked);
+}
+
+.badge[data-has-blocked='true']:hover {
+  background: color-mix(in srgb, var(--color-blocked) 10%, transparent);
+}
+
+.icon {
+  flex-shrink: 0;
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===========================
+ * Dropdown (expanded state)
+ * =========================== */
+.dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  width: 320px;
+  max-width: 90vw;
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-dropdown);
+  overflow: hidden;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+}
+
+/* ===========================
+ * Issue item in dropdown
+ * =========================== */
+.issueItem {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-bottom: 1px solid var(--color-border-light);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  font-family: var(--font-family-base);
+}
+
+.issueItem:last-child {
+  border-bottom: none;
+}
+
+.issueItem:hover {
+  background: var(--color-bg-hover);
+}
+
+.issueItem:focus {
+  outline: none;
+}
+
+.issueItem:focus-visible {
+  background: var(--color-bg-hover);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.issueHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.issueId {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.issueTitle {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blockedByText {
+  margin-top: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+/* ===========================
+ * Priority badge
+ * =========================== */
+.priorityBadge {
+  flex-shrink: 0;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-inverse);
+}
+
+.priorityBadge[data-priority='0'] {
+  background: var(--color-priority-0);
+}
+
+.priorityBadge[data-priority='1'] {
+  background: var(--color-priority-1);
+}
+
+.priorityBadge[data-priority='2'] {
+  background: var(--color-priority-2);
+  color: var(--color-text); /* Dark text for yellow background */
+}
+
+.priorityBadge[data-priority='3'] {
+  background: var(--color-priority-3);
+}
+
+.priorityBadge[data-priority='4'] {
+  background: var(--color-priority-4);
+}
+
+/* ===========================
+ * States: Loading, Error, Empty
+ * =========================== */
+.loading,
+.error,
+.empty {
+  padding: var(--space-4) var(--space-3);
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.error {
+  color: var(--color-danger);
+}
+
+.moreText {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ===========================
+ * Footer link
+ * =========================== */
+.footer {
+  display: block;
+  width: 100%;
+  padding: var(--space-3);
+  border: none;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  color: var(--color-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.footer:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.footer:focus {
+  outline: none;
+}
+
+.footer:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}

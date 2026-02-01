@@ -1,0 +1,120 @@
+/**
+ * MiniDependencyGraph styles.
+ * Compact graph view for Monitor Dashboard panel.
+ */
+
+.miniGraph {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Expand button - absolute positioned top-right */
+.expandButton {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.expandButton:hover {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.expandButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.expandIcon {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast);
+}
+
+.expandButton:hover .expandIcon {
+  color: var(--color-text);
+}
+
+/* Empty state */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  gap: var(--space-2);
+}
+
+.emptyIcon {
+  font-size: var(--font-size-2xl);
+  color: var(--color-status-closed);
+}
+
+.emptyText {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* React Flow overrides for mini view */
+.miniGraph :global(.react-flow) {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.miniGraph :global(.react-flow__renderer) {
+  cursor: default;
+}
+
+.miniGraph :global(.react-flow__node) {
+  border: none;
+  background: none;
+  padding: 0;
+  visibility: visible !important;
+}
+
+.miniGraph :global(.react-flow__edge-path) {
+  stroke-width: 1.5;
+}
+
+/* Hide React Flow controls (we don't use them but ensure none show) */
+.miniGraph :global(.react-flow__controls),
+.miniGraph :global(.react-flow__minimap),
+.miniGraph :global(.react-flow__background) {
+  display: none;
+}
+
+/* Accessibility: Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .expandButton {
+    transition: none;
+  }
+
+  .expandIcon {
+    transition: none;
+  }
+}

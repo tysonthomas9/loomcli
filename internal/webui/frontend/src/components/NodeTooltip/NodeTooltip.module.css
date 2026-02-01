@@ -1,0 +1,162 @@
+/**
+ * NodeTooltip component styles.
+ * Floating tooltip for issue preview on graph node hover.
+ */
+
+.nodeTooltip {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  max-width: 280px;
+  padding: var(--space-3);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  animation: fadeIn var(--transition-fast) ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .nodeTooltip {
+    animation: none;
+  }
+}
+
+/* Issue ID - monospace, muted */
+.issueId {
+  display: block;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+}
+
+/* Title - bold, max 2 lines */
+.title {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  line-height: var(--line-height-tight);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Status and Priority badges container */
+.badges {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+/* Status badge */
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--radius-sm);
+  text-transform: capitalize;
+  color: var(--color-text-inverse);
+  background-color: var(--color-status-open);
+}
+
+.statusBadge[data-status="open"] {
+  background-color: var(--color-status-open);
+}
+
+.statusBadge[data-status="in_progress"] {
+  background-color: var(--color-status-in-progress);
+}
+
+.statusBadge[data-status="closed"] {
+  background-color: var(--color-status-closed);
+}
+
+.statusBadge[data-status="blocked"] {
+  background-color: var(--color-blocked);
+}
+
+/* Priority badge */
+.priorityBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-inverse);
+  background-color: var(--color-priority-4);
+}
+
+.priorityBadge[data-priority="0"] {
+  background-color: var(--color-priority-0);
+}
+
+.priorityBadge[data-priority="1"] {
+  background-color: var(--color-priority-1);
+}
+
+.priorityBadge[data-priority="2"] {
+  background-color: var(--color-priority-2);
+  color: var(--color-text); /* Dark text for WCAG AA contrast */
+}
+
+.priorityBadge[data-priority="3"] {
+  background-color: var(--color-priority-3);
+}
+
+.priorityBadge[data-priority="4"] {
+  background-color: var(--color-priority-4);
+}
+
+/* Description preview - max 3 lines */
+.description {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-normal);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.noDescription {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+/* Assignee section */
+.assignee {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.assigneeLabel {
+  color: var(--color-text-muted);
+}
+
+.assigneeValue {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}

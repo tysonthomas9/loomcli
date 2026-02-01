@@ -1,0 +1,70 @@
+/**
+ * GraphView container styles.
+ */
+
+.graphView {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Controls styling (positioned by React Flow Panel) */
+.controls {
+  background-color: var(--color-bg);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+/* React Flow overrides */
+.graphView :global(.react-flow) {
+  /* Ensure React Flow fills the graphView container using absolute positioning */
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.graphView :global(.react-flow__renderer) {
+  /* Ensure proper cursor for non-draggable nodes */
+  cursor: default;
+}
+
+.graphView :global(.react-flow__node) {
+  /* Remove default React Flow node styles */
+  border: none;
+  background: none;
+  padding: 0;
+  /* Override React Flow's hidden visibility during initialization */
+  visibility: visible !important;
+}
+
+.graphView :global(.react-flow__edge-path) {
+  stroke-width: 1.5;
+}
+
+/* MiniMap node coloring */
+.miniMapNode {
+  fill: var(--color-border);
+  stroke: none;
+}
+
+/* Arrow marker definition for edges */
+.graphView :global(#arrow) path {
+  fill: var(--color-border);
+}
+
+/* Legend positioned at bottom-left */
+.legend {
+  position: absolute;
+  bottom: var(--space-3);
+  left: var(--space-3);
+  z-index: 10;
+}

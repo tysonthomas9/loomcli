@@ -1,0 +1,170 @@
+/**
+ * AgentActivityPanel styles.
+ * Displays agent cards in a scrollable grid with summary statistics.
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+  min-height: 0;
+}
+
+/* Summary bar */
+.summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+}
+
+.summaryItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.summaryCount {
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.summaryLabel {
+  color: var(--color-text-secondary);
+}
+
+.summarySeparator {
+  color: var(--color-text-tertiary);
+}
+
+/* Summary type colors */
+.summaryItem[data-type='active'] .summaryCount {
+  color: var(--color-status-working);
+}
+
+.summaryItem[data-type='idle'] .summaryCount {
+  color: var(--color-text-tertiary);
+}
+
+.summaryItem[data-type='error'] .summaryCount {
+  color: var(--color-status-error);
+}
+
+.summaryItem[data-type='sync'] .summaryCount {
+  color: var(--color-warning);
+}
+
+/* Agent grid */
+.agentGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-2);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Empty, loading, and reconnecting states */
+.empty,
+.loading,
+.reconnecting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 100%;
+  min-height: 120px;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.emptyIcon {
+  font-size: 1.5rem;
+}
+
+.emptyText {
+  text-align: center;
+}
+
+.emptyHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-1);
+}
+
+.code {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  background-color: var(--color-bg-secondary);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+
+.retryButton {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.retryButton:hover {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
+}
+
+.retryButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.countdown {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .agentGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .summary {
+    justify-content: center;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .agentGrid {
+    scroll-behavior: auto;
+  }
+}

@@ -2,3 +2,6 @@
 # Build artifacts
 loom
 loomcli
+
+# Frontend dependencies
+internal/webui/frontend/node_modules/

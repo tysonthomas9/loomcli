@@ -1,0 +1,267 @@
+/**
+ * WorkPipelinePanel and PipelineStage styles.
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  height: 100%;
+}
+
+/* Pipeline flow container */
+.pipeline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+}
+
+.stageWrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Arrow connector */
+.arrow {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-lg);
+  flex-shrink: 0;
+}
+
+/* Stage card */
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-width: 120px;
+  transition: background-color var(--transition-fast),
+              border-color var(--transition-fast),
+              box-shadow var(--transition-fast);
+}
+
+.stageClickable {
+  cursor: pointer;
+}
+
+.stageClickable:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
+}
+
+.stageClickable:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.stageEmpty {
+  opacity: 0.6;
+}
+
+.stageBlocked {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger);
+}
+
+.stageBlocked.stageClickable:hover {
+  background: color-mix(in srgb, var(--color-danger) 20%, var(--color-bg));
+}
+
+/* Stage header */
+.stageHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.stageIcon {
+  font-size: var(--font-size-sm);
+}
+
+.stageLabel {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.stageCount {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+}
+
+.stageCount[data-highlight="true"] {
+  color: var(--color-text-inverse);
+  background: var(--color-primary);
+}
+
+.stageBlocked .stageCount[data-highlight="true"] {
+  background: var(--color-danger);
+}
+
+/* Stage preview (oldest item) */
+.stagePreview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+}
+
+.previewId {
+  font-family: var(--font-family-mono);
+  color: var(--color-text-muted);
+}
+
+.previewTitle {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+/* Done stage (terminal state) */
+.doneStage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success);
+  border-radius: var(--radius-md);
+}
+
+.doneIcon {
+  color: var(--color-success);
+  font-weight: var(--font-weight-bold);
+}
+
+.doneLabel {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-success);
+}
+
+/* Blocked branch */
+.blockedBranch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-left: var(--space-8);
+  margin-top: var(--space-2);
+}
+
+.branchLine {
+  color: var(--color-danger);
+  font-size: var(--font-size-lg);
+}
+
+/* Oldest items table */
+.oldestItems {
+  margin-top: auto;
+  border-top: 1px solid var(--color-border-light);
+  padding-top: var(--space-3);
+}
+
+.oldestTitle {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 var(--space-2) 0;
+}
+
+.oldestTable {
+  width: 100%;
+  font-size: var(--font-size-xs);
+  border-collapse: collapse;
+}
+
+.oldestTable th {
+  text-align: left;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.oldestTable td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.oldestTable tr:last-child td {
+  border-bottom: none;
+}
+
+.stageCell {
+  width: 80px;
+  color: var(--color-text-secondary);
+}
+
+.taskCell {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.taskId {
+  font-family: var(--font-family-mono);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.taskTitle {
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.priorityCell {
+  width: 40px;
+  text-align: center;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+/* Responsive: Stack stages vertically on small panels */
+@media (max-width: 600px) {
+  .pipeline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .stageWrapper {
+    flex-direction: column;
+  }
+
+  .arrow {
+    transform: rotate(90deg);
+  }
+
+  .stage {
+    width: 100%;
+  }
+
+  .blockedBranch {
+    padding-left: 0;
+    flex-direction: column;
+  }
+
+  .branchLine {
+    transform: rotate(90deg);
+  }
+}

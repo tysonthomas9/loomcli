@@ -1,0 +1,24 @@
+.fab {
+  position: fixed;
+  bottom: var(--space-8, 2rem);
+  right: var(--space-8, 2rem);
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 1.25rem;
+  background-color: #f05d46;
+  color: white;
+  border: none;
+  border-radius: 9999px;
+  box-shadow: 0 4px 12px rgba(240, 93, 70, 0.3);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  z-index: var(--z-sticky);
+  transition: all 0.15s ease;
+}
+
+.fab:hover {
+  transform: scale(1.05);
+  background-color: #e04e38;
+}

@@ -1,0 +1,172 @@
+/**
+ * ConnectionStatus component styles.
+ * Uses CSS Modules for component-scoped styling.
+ */
+
+/* ===========================
+ * Pulse Animation
+ * Used for transient states (connecting/reconnecting)
+ * =========================== */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.connectionStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-family-base);
+}
+
+/* Status indicator dot */
+.indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  transition:
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* Status text */
+.text {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===========================
+ * Variant: inline (default)
+ * =========================== */
+.inline {
+  /* Minimal visual footprint */
+}
+
+/* ===========================
+ * Variant: badge
+ * =========================== */
+.badge {
+  padding: var(--space-1) var(--space-2);
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ===========================
+ * State-based indicator colors
+ * Colors prepared for T077 styling task
+ * =========================== */
+
+/* Connected - success green */
+.connectionStatus[data-state='connected'] .indicator {
+  background-color: var(--color-success);
+}
+
+/* Connecting - warning amber with pulse */
+.connectionStatus[data-state='connecting'] .indicator {
+  background-color: var(--color-warning);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Reconnecting - warning amber with pulse */
+.connectionStatus[data-state='reconnecting'] .indicator {
+  background-color: var(--color-warning);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Disconnected - danger red with glow for visibility */
+.connectionStatus[data-state='disconnected'] .indicator {
+  background-color: var(--color-danger);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-danger) 25%, transparent),
+    0 0 6px 1px color-mix(in srgb, var(--color-danger) 40%, transparent);
+}
+
+/* Fallback for unknown state */
+.indicator {
+  background-color: var(--color-text-muted);
+}
+
+/* ===========================
+ * Retry button
+ * =========================== */
+.retryButton {
+  margin-left: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.retryButton:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-text-muted);
+}
+
+.retryButton:focus {
+  outline: none;
+}
+
+.retryButton:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.retryButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.retryButton:active {
+  background: var(--color-bg-tertiary);
+}
+
+/* ===========================
+ * Disconnected state text emphasis
+ * Red text provides urgency/warning
+ * =========================== */
+.connectionStatus[data-state='disconnected'] .text {
+  color: var(--color-danger);
+}
+
+/* ===========================
+ * Badge variant border colors by state
+ * Subtle tint to reinforce state
+ * =========================== */
+.badge[data-state='connected'] {
+  border-color: var(--color-success);
+}
+
+.badge[data-state='connecting'],
+.badge[data-state='reconnecting'] {
+  border-color: var(--color-warning);
+}
+
+.badge[data-state='disconnected'] {
+  border-color: var(--color-danger);
+}
+
+/* ===========================
+ * Accessibility: Reduced Motion
+ * Disables pulse animation for users who prefer reduced motion
+ * =========================== */
+@media (prefers-reduced-motion: reduce) {
+  .indicator {
+    animation: none !important;
+  }
+}

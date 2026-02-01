@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test lint clean install help
+.PHONY: all build test lint clean install help frontend build-all
 
 # Default target
 all: build
@@ -33,6 +33,18 @@ clean:
 	rm -f loom
 	rm -f /tmp/loom.coverage.out
 
+# Frontend directory
+FRONTEND_DIR := internal/webui/frontend
+
+# Build frontend (requires Node.js >= 20)
+# Run this after modifying frontend source; pre-built dist/ is committed for go build without Node.js
+frontend:
+	@echo "Building frontend..."
+	cd $(FRONTEND_DIR) && npm install && npm run build
+
+# Build everything (frontend + Go binary)
+build-all: frontend build
+
 # Show help
 help:
 	@echo "Loomcli Makefile targets:"
@@ -40,5 +52,7 @@ help:
 	@echo "  make test    - Run all tests with coverage"
 	@echo "  make lint    - Run golangci-lint"
 	@echo "  make install - Install loom to GOPATH/bin"
-	@echo "  make clean   - Remove build artifacts"
-	@echo "  make help    - Show this help message"
+	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
+	@echo "  make build-all - Build frontend + Go binary"
+	@echo "  make clean     - Remove build artifacts"
+	@echo "  make help      - Show this help message"

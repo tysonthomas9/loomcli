@@ -1,0 +1,143 @@
+/**
+ * StatsHeader component styles.
+ * Compact stat badges with variant coloring and responsive behavior.
+ */
+
+/* ===========================
+ * Container
+ * =========================== */
+.statsHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ===========================
+ * Stat Badge
+ * =========================== */
+.statBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  min-width: 40px; /* Prevent collapse with large numbers */
+  border: 1px solid transparent; /* Prevents layout shift when variant borders applied */
+}
+
+.value {
+  font-weight: var(--font-weight-semibold);
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-normal);
+}
+
+/* ===========================
+ * Variant Colors
+ * =========================== */
+.open {
+  background-color: color-mix(in srgb, var(--color-status-open) 20%, transparent);
+  color: var(--color-status-open);
+  border-color: color-mix(in srgb, var(--color-status-open) 30%, transparent);
+}
+
+.open .label {
+  color: var(--color-status-open);
+  opacity: 0.9;
+}
+
+.progress {
+  background-color: color-mix(in srgb, var(--color-warning) 20%, transparent);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+}
+
+.progress .label {
+  color: var(--color-warning);
+  opacity: 0.9;
+}
+
+.ready {
+  background-color: color-mix(in srgb, var(--color-success) 20%, transparent);
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+.ready .label {
+  color: var(--color-success);
+  opacity: 0.9;
+}
+
+.closed {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  border-color: var(--color-border);
+}
+
+.closed .label {
+  color: var(--color-text-muted);
+}
+
+/* ===========================
+ * Loading Skeleton
+ * =========================== */
+.skeleton {
+  width: 60px;
+  height: 24px;
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ===========================
+ * Error State
+ * =========================== */
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast);
+}
+
+.error:hover {
+  background-color: var(--color-danger-bg);
+}
+
+.error:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* ===========================
+ * Responsive - Hide Labels on Mobile
+ * =========================== */
+@media (max-width: 768px) {
+  .label {
+    display: none;
+  }
+
+  .statBadge {
+    padding: 4px 6px;
+  }
+}
