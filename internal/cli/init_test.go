@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -337,5 +339,347 @@ func TestSuggestedAgentNames(t *testing.T) {
 	}
 	if suggestedAgentNames[1] != "nova" {
 		t.Errorf("suggestedAgentNames[1] = %q, want 'nova'", suggestedAgentNames[1])
+	}
+}
+
+// --- promptYesNo tests ---
+
+func TestPromptYesNo_DefaultYes(t *testing.T) {
+	MockStdin(t, "\n")
+	result := promptYesNo("Continue?", true)
+	if !result {
+		t.Error("promptYesNo with empty input and defaultYes=true should return true")
+	}
+}
+
+func TestPromptYesNo_DefaultNo(t *testing.T) {
+	MockStdin(t, "\n")
+	result := promptYesNo("Continue?", false)
+	if result {
+		t.Error("promptYesNo with empty input and defaultYes=false should return false")
+	}
+}
+
+func TestPromptYesNo_ExplicitYes(t *testing.T) {
+	for _, input := range []string{"y\n", "yes\n", "Y\n", "YES\n", "Yes\n"} {
+		t.Run(input, func(t *testing.T) {
+			MockStdin(t, input)
+			result := promptYesNo("Continue?", false)
+			if !result {
+				t.Errorf("promptYesNo(%q) should return true", strings.TrimSpace(input))
+			}
+		})
+	}
+}
+
+func TestPromptYesNo_ExplicitNo(t *testing.T) {
+	for _, input := range []string{"n\n", "no\n", "N\n", "NO\n"} {
+		t.Run(input, func(t *testing.T) {
+			MockStdin(t, input)
+			result := promptYesNo("Continue?", true)
+			if result {
+				t.Errorf("promptYesNo(%q) should return false", strings.TrimSpace(input))
+			}
+		})
+	}
+}
+
+func TestPromptYesNo_EOF(t *testing.T) {
+	// Pipe with no data simulates EOF
+	MockStdin(t, "")
+	result := promptYesNo("Continue?", true)
+	if !result {
+		t.Error("promptYesNo on EOF should return default (true)")
+	}
+}
+
+// --- promptString tests ---
+
+func TestPromptString_Default(t *testing.T) {
+	MockStdin(t, "\n")
+	result := promptString("Name", "falcon")
+	if result != "falcon" {
+		t.Errorf("promptString with empty input = %q, want 'falcon'", result)
+	}
+}
+
+func TestPromptString_Custom(t *testing.T) {
+	MockStdin(t, "nova\n")
+	result := promptString("Name", "falcon")
+	if result != "nova" {
+		t.Errorf("promptString = %q, want 'nova'", result)
+	}
+}
+
+func TestPromptString_Whitespace(t *testing.T) {
+	MockStdin(t, "  spark  \n")
+	result := promptString("Name", "falcon")
+	if result != "spark" {
+		t.Errorf("promptString = %q, want 'spark'", result)
+	}
+}
+
+func TestPromptString_EOF(t *testing.T) {
+	MockStdin(t, "")
+	result := promptString("Name", "default")
+	if result != "default" {
+		t.Errorf("promptString on EOF = %q, want 'default'", result)
+	}
+}
+
+// --- promptInt tests ---
+
+func TestPromptInt_Default(t *testing.T) {
+	MockStdin(t, "\n")
+	result := promptInt("Count", 5)
+	if result != 5 {
+		t.Errorf("promptInt with empty input = %d, want 5", result)
+	}
+}
+
+func TestPromptInt_ValidInt(t *testing.T) {
+	MockStdin(t, "3\n")
+	result := promptInt("Count", 5)
+	if result != 3 {
+		t.Errorf("promptInt = %d, want 3", result)
+	}
+}
+
+func TestPromptInt_InvalidInt(t *testing.T) {
+	MockStdin(t, "abc\n")
+	result := promptInt("Count", 5)
+	if result != 5 {
+		t.Errorf("promptInt with invalid input = %d, want 5 (default)", result)
+	}
+}
+
+// --- createWorktrees tests ---
+
+func TestCreateWorktrees_NonInteractive_NoExisting(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	os.MkdirAll(worktreesDir, 0755)
+
+	origYes := initYes
+	origNames := initNames
+	initYes = true
+	initNames = ""
+	defer func() { initYes = origYes; initNames = origNames }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "falcon"), "-b", "falcon"}, Stdout: "Created"},
+		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "nova"), "-b", "nova"}, Stdout: "Created"},
+	})
+	mock.Install()
+
+	names := createWorktrees(worktreesDir)
+	if len(names) != 2 {
+		t.Fatalf("createWorktrees returned %d names, want 2", len(names))
+	}
+	if names[0] != "falcon" || names[1] != "nova" {
+		t.Errorf("createWorktrees = %v, want [falcon nova]", names)
+	}
+}
+
+func TestCreateWorktrees_NonInteractive_WithExisting(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	// Create an existing worktree "falcon"
+	falconDir := filepath.Join(worktreesDir, "falcon")
+	os.MkdirAll(falconDir, 0755)
+	os.WriteFile(filepath.Join(falconDir, ".git"), []byte{}, 0644)
+
+	origYes := initYes
+	origNames := initNames
+	initYes = true
+	initNames = ""
+	defer func() { initYes = origYes; initNames = origNames }()
+
+	// Only "nova" should be created (falcon already exists and is filtered)
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "nova"), "-b", "nova"}, Stdout: "Created"},
+	})
+	mock.Install()
+
+	names := createWorktrees(worktreesDir)
+	if len(names) != 2 {
+		t.Fatalf("createWorktrees returned %d names, want 2 (1 existing + 1 created)", len(names))
+	}
+	if names[0] != "falcon" || names[1] != "nova" {
+		t.Errorf("createWorktrees = %v, want [falcon nova]", names)
+	}
+}
+
+func TestCreateWorktrees_NonInteractive_CustomNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	os.MkdirAll(worktreesDir, 0755)
+
+	origYes := initYes
+	origNames := initNames
+	initYes = true
+	initNames = "alpha,beta"
+	defer func() { initYes = origYes; initNames = origNames }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "alpha"), "-b", "alpha"}, Stdout: "Created"},
+		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "beta"), "-b", "beta"}, Stdout: "Created"},
+	})
+	mock.Install()
+
+	names := createWorktrees(worktreesDir)
+	if len(names) != 2 {
+		t.Fatalf("createWorktrees returned %d names, want 2", len(names))
+	}
+	if names[0] != "alpha" || names[1] != "beta" {
+		t.Errorf("createWorktrees = %v, want [alpha beta]", names)
+	}
+}
+
+func TestCreateWorktrees_NonInteractive_NoneToCreate(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	// Create both default worktrees
+	for _, name := range []string{"falcon", "nova"} {
+		d := filepath.Join(worktreesDir, name)
+		os.MkdirAll(d, 0755)
+		os.WriteFile(filepath.Join(d, ".git"), []byte{}, 0644)
+	}
+
+	origYes := initYes
+	origNames := initNames
+	initYes = true
+	initNames = ""
+	defer func() { initYes = origYes; initNames = origNames }()
+
+	// No commands should be called since all names already exist
+	mock := NewCommandMock(t, []CommandStub{})
+	mock.Install()
+
+	names := createWorktrees(worktreesDir)
+	if len(names) != 2 {
+		t.Fatalf("createWorktrees returned %d names, want 2 existing", len(names))
+	}
+}
+
+// --- showSummary tests ---
+
+func TestShowSummary_MultipleNames(t *testing.T) {
+	// Capture stdout
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	showSummary("worktrees", []string{"falcon", "nova"})
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if !strings.Contains(output, "Setup complete!") {
+		t.Error("showSummary should print 'Setup complete!'")
+	}
+	if !strings.Contains(output, "falcon") {
+		t.Error("showSummary should include 'falcon'")
+	}
+	if !strings.Contains(output, "nova") {
+		t.Error("showSummary should include 'nova'")
+	}
+	if !strings.Contains(output, "loom plan falcon") {
+		t.Error("showSummary should show 'loom plan falcon' in next steps")
+	}
+}
+
+func TestShowSummary_EmptyNames(t *testing.T) {
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	showSummary("worktrees", nil)
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	// With no names, getFirstName returns "falcon"
+	if !strings.Contains(output, "loom plan falcon") {
+		t.Error("showSummary with nil names should fallback to 'falcon' in next steps")
+	}
+}
+
+// --- Additional coverage tests ---
+
+func TestInitBeads_Failure(t *testing.T) {
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+
+	origYes := initYes
+	initYes = true
+	defer func() { initYes = origYes }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "bd", Args: []string{"init"}, Stderr: "failed to init", Err: errors.New("exit 1")},
+	})
+	mock.Install()
+
+	result := initBeads()
+	if result {
+		t.Error("initBeads() should return false when bd init fails")
+	}
+}
+
+func TestCreateSingleWorktree_RetryFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	wtPath := filepath.Join(tmpDir, "falcon")
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"worktree", "add", wtPath, "-b", "falcon"}, Stderr: "branch already exists", Err: errors.New("exit 1")},
+		{Name: "git", Args: []string{"worktree", "add", wtPath, "falcon"}, Stderr: "worktree locked", Err: errors.New("exit 1")},
+	})
+	mock.Install()
+
+	result := createSingleWorktree(tmpDir, "falcon")
+	if result {
+		t.Error("createSingleWorktree() should return false when retry also fails")
+	}
+}
+
+func TestCheckPrerequisites_InsideWorktree(t *testing.T) {
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
+		{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: "/repo/.git"},
+		{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: "/repo/.git/worktrees/falcon"},
+		{Name: "bd", Args: []string{"--version"}, Stdout: "beads v1.0.0"},
+	})
+	mock.Install()
+
+	// Capture stderr to verify warning is printed
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := checkPrerequisites()
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if !result {
+		t.Error("checkPrerequisites() should still return true when inside worktree")
+	}
+	if !strings.Contains(output, "Warning") {
+		t.Error("checkPrerequisites() should warn when inside a worktree")
 	}
 }

@@ -21,7 +21,7 @@ func mockMonitorData() *MonitorData {
 			ReadyToImplement: 5,
 			InProgress:       2,
 			NeedReview:       1,
-			Backlog:          0,
+			Blocked:          0,
 		},
 		NeedsPlanningTasks: []TaskInfo{
 			{ID: "bd-001", Title: "Add feature X", Priority: 1},
@@ -445,8 +445,8 @@ func TestHandleTasks(t *testing.T) {
 				if resp.Summary.NeedReview != tt.wantSummaryNeedReview {
 					t.Errorf("Summary.NeedReview = %d, want %d", resp.Summary.NeedReview, tt.wantSummaryNeedReview)
 				}
-				if resp.Summary.Backlog != tt.wantSummaryBacklog {
-					t.Errorf("Summary.Backlog = %d, want %d", resp.Summary.Backlog, tt.wantSummaryBacklog)
+				if resp.Summary.Blocked != tt.wantSummaryBacklog {
+					t.Errorf("Summary.Blocked = %d, want %d", resp.Summary.Blocked, tt.wantSummaryBacklog)
 				}
 
 				if resp.Timestamp.IsZero() {
