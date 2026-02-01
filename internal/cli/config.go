@@ -12,6 +12,7 @@ import (
 type LoomConfig struct {
 	DefaultWorkspace string                     `yaml:"default_workspace,omitempty"`
 	Workspaces       map[string]WorkspaceConfig `yaml:"workspaces"`
+	Daemon           *DaemonSettings            `yaml:"daemon,omitempty"`
 }
 
 // WorkspaceConfig defines a named workspace containing multiple repos
