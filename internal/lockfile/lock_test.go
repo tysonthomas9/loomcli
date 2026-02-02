@@ -631,9 +631,9 @@ func TestFlockFunctions(t *testing.T) {
 		}
 		defer f2.Close()
 
-		err = flockExclusive(f2)
-		if err != errDaemonLocked {
-			t.Errorf("expected errDaemonLocked, got: %v", err)
+		err = FlockExclusiveNonBlocking(f2)
+		if err != ErrLockHeld {
+			t.Errorf("expected ErrLockHeld, got: %v", err)
 		}
 	})
 }

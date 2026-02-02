@@ -39,8 +39,8 @@ func TryDaemonLock(beadsDir string) (running bool, pid int) {
 	defer func() { _ = f.Close() }()
 
 	// Try to acquire lock non-blocking
-	if err := flockExclusive(f); err != nil {
-		if err == errDaemonLocked {
+	if err := FlockExclusiveNonBlocking(f); err != nil {
+		if err == ErrLockHeld {
 			// Lock is held - daemon is running
 			// Try to read PID from JSON format (best effort)
 			_, _ = f.Seek(0, 0)

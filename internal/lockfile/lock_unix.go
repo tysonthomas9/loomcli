@@ -9,13 +9,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var errDaemonLocked = errors.New("daemon lock already held by another process")
+// ErrLockHeld is returned when a non-blocking lock attempt fails because
+// another process already holds the lock.
+var ErrLockHeld = errors.New("lock already held by another process")
 
-// flockExclusive acquires an exclusive non-blocking lock on the file
-func flockExclusive(f *os.File) error {
+// FlockExclusiveNonBlocking attempts to acquire an exclusive non-blocking lock on the file.
+// Returns ErrLockHeld if the lock is already held by another process.
+func FlockExclusiveNonBlocking(f *os.File) error {
 	err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 	if err == unix.EWOULDBLOCK {
-		return errDaemonLocked
+		return ErrLockHeld
 	}
 	return err
 }
