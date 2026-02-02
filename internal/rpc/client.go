@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/debug"
@@ -31,8 +32,12 @@ func rpcDebugLog(format string, args ...interface{}) {
 // It's set dynamically by main.go from cmd/bd/version.go before making RPC calls
 var ClientVersion = "0.0.0" // Placeholder; overridden at startup
 
-// Client represents an RPC client that connects to the daemon
+// Client represents an RPC client that connects to the daemon.
+// The client is safe for concurrent use of SetTimeout, SetDatabasePath, and SetActor.
+// However, the underlying connection (conn) is not safe for concurrent RPC calls -
+// use connection pooling for concurrent operations.
 type Client struct {
+	mu         sync.RWMutex // protects timeout, dbPath, actor; conn and socketPath are immutable after construction
 	conn       net.Conn
 	socketPath string
 	timeout    time.Duration
@@ -150,16 +155,22 @@ func (c *Client) Close() error {
 
 // SetTimeout sets the request timeout duration
 func (c *Client) SetTimeout(timeout time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.timeout = timeout
 }
 
 // SetDatabasePath sets the expected database path for validation
 func (c *Client) SetDatabasePath(dbPath string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.dbPath = dbPath
 }
 
 // SetActor sets the actor for audit trail (who is performing operations)
 func (c *Client) SetActor(actor string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.actor = actor
 }
 
@@ -170,6 +181,12 @@ func (c *Client) Execute(operation string, args interface{}) (*Response, error) 
 
 // ExecuteWithCwd sends an RPC request with an explicit cwd (or current dir if empty string)
 func (c *Client) ExecuteWithCwd(operation string, args interface{}, cwd string) (*Response, error) {
+	return c.executeWithTimeout(operation, args, cwd, 0)
+}
+
+// executeWithTimeout sends an RPC request with an explicit timeout override.
+// If timeoutOverride is 0, the client's configured timeout is used.
+func (c *Client) executeWithTimeout(operation string, args interface{}, cwd string, timeoutOverride time.Duration) (*Response, error) {
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal args: %w", err)
@@ -180,13 +197,25 @@ func (c *Client) ExecuteWithCwd(operation string, args interface{}, cwd string) 
 		cwd, _ = os.Getwd()
 	}
 
+	// Get mutable fields under read lock
+	c.mu.RLock()
+	actor := c.actor
+	dbPath := c.dbPath
+	timeout := c.timeout
+	c.mu.RUnlock()
+
+	// Use override if provided
+	if timeoutOverride > 0 {
+		timeout = timeoutOverride
+	}
+
 	req := Request{
 		Operation:     operation,
 		Args:          argsJSON,
-		Actor:         c.actor, // Who is performing this operation
+		Actor:         actor, // Who is performing this operation
 		ClientVersion: ClientVersion,
 		Cwd:           cwd,
-		ExpectedDB:    c.dbPath, // Send expected database path for validation
+		ExpectedDB:    dbPath, // Send expected database path for validation
 	}
 
 	reqJSON, err := json.Marshal(req)
@@ -194,8 +223,8 @@ func (c *Client) ExecuteWithCwd(operation string, args interface{}, cwd string) 
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	if c.timeout > 0 {
-		deadline := time.Now().Add(c.timeout)
+	if timeout > 0 {
+		deadline := time.Now().Add(timeout)
 		if err := c.conn.SetDeadline(deadline); err != nil {
 			return nil, fmt.Errorf("failed to set deadline: %w", err)
 		}
@@ -363,17 +392,15 @@ func (c *Client) GetMutations(args *GetMutationsArgs) (*Response, error) {
 // WaitForMutations waits for mutations to occur, returning immediately if any
 // exist since the given timestamp, or blocking until new mutations arrive or timeout.
 func (c *Client) WaitForMutations(args *WaitForMutationsArgs) (*Response, error) {
-	// Temporarily increase timeout for this blocking call
-	oldTimeout := c.timeout
-	// Use request timeout plus buffer, or at least the requested timeout
+	// Calculate appropriate timeout for this blocking call
 	requestTimeout := time.Duration(args.Timeout) * time.Millisecond
 	if args.Timeout == 0 {
 		requestTimeout = 30 * time.Second
 	}
-	c.timeout = requestTimeout + 5*time.Second
-	defer func() { c.timeout = oldTimeout }()
+	blockingTimeout := requestTimeout + 5*time.Second
 
-	return c.Execute(OpWaitForMutations, args)
+	// Use executeWithTimeout to avoid modifying struct state
+	return c.executeWithTimeout(OpWaitForMutations, args, "", blockingTimeout)
 }
 
 // AddDependency adds a dependency via the daemon
