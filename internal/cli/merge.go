@@ -250,6 +250,26 @@ func mergeBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) erro
 		return fmt.Errorf("fetching: %v", err)
 	}
 
+	// Stash local changes if working tree is dirty
+	stashed, stashErr := GitStash(repoPath)
+	if stashErr != nil {
+		return fmt.Errorf("stashing changes: %v", stashErr)
+	}
+	// Ensure we pop stash at end (even on error)
+	if stashed {
+		defer func() {
+			if err := GitStashPop(repoPath); err != nil {
+				// Check if stash pop caused conflicts
+				hasConflicts, _ := HasUnmergedFiles(repoPath)
+				if hasConflicts {
+					fmt.Println("⚠ Warning: Stash pop caused conflicts. Resolve manually with 'git stash show -p | git apply'")
+				} else {
+					fmt.Fprintf(os.Stderr, "Warning: failed to restore stashed changes: %v\n", err)
+				}
+			}
+		}()
+	}
+
 	// Checkout target branch
 	if err := GitCheckout(repoPath, targetBranch); err != nil {
 		return fmt.Errorf("checking out %s: %v", targetBranch, err)
@@ -361,6 +381,25 @@ func mergeBranch(sourceBranch, targetBranch string) {
 	if err := GitFetch(scriptDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching: %v\n", err)
 		return
+	}
+
+	// Stash local changes if working tree is dirty
+	stashed, stashErr := GitStash(scriptDir)
+	if stashErr != nil {
+		fmt.Fprintf(os.Stderr, "Error stashing: %v\n", stashErr)
+		return
+	}
+	if stashed {
+		defer func() {
+			if err := GitStashPop(scriptDir); err != nil {
+				hasConflicts, _ := HasUnmergedFiles(scriptDir)
+				if hasConflicts {
+					fmt.Println("⚠ Warning: Stash pop caused conflicts. Resolve manually with 'git stash show -p | git apply'")
+				} else {
+					fmt.Fprintf(os.Stderr, "Warning: failed to restore stashed changes: %v\n", err)
+				}
+			}
+		}()
 	}
 
 	// Checkout target branch

@@ -173,3 +173,37 @@ func HasCommitsBetweenRemote(dir, remote, target, source string) (bool, error) {
 	}
 	return strings.TrimSpace(output) != "", nil
 }
+
+// GitStash stashes local changes. Returns true if changes were actually stashed,
+// false if working tree was clean (nothing to stash).
+func GitStash(dir string) (bool, error) {
+	// Check if there's anything to stash
+	clean, err := IsCleanWorkingTree(dir)
+	if err != nil {
+		return false, err
+	}
+	if clean {
+		return false, nil
+	}
+
+	fmt.Println("Stashing local changes...")
+	if err := RunGitCommandWithOutput(dir, "stash"); err != nil {
+		return false, fmt.Errorf("failed to stash changes: %w", err)
+	}
+	return true, nil
+}
+
+// GitStashPop pops the most recent stash entry
+func GitStashPop(dir string) error {
+	fmt.Println("Restoring stashed changes...")
+	return RunGitCommandWithOutput(dir, "stash", "pop")
+}
+
+// HasUnmergedFiles checks if there are unmerged files in the working tree
+func HasUnmergedFiles(dir string) (bool, error) {
+	files, err := GetConflictedFiles(dir)
+	if err != nil {
+		return false, err
+	}
+	return len(files) > 0, nil
+}

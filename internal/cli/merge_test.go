@@ -102,7 +102,7 @@ func TestMergeBranch(t *testing.T) {
 		sourceBranch   string
 		targetBranch   string
 		outputStubs    []OutputCommandStub // for GitFetch, GitCheckout, GitPull, GitMergeOrigin, GitPush
-		commandStubs   []CommandStub       // for HasCommitsBetween, GetConflictedFiles
+		commandStubs   []CommandStub       // for IsCleanWorkingTree, HasCommitsBetween, GetConflictedFiles
 		claudeCalled   bool                // whether claude should be invoked
 		claudeErr      error               // error from claude invocation
 	}{
@@ -118,6 +118,7 @@ func TestMergeBranch(t *testing.T) {
 				{Args: []string{"push", "origin", "main"}, Err: nil},                                                                     // GitPush
 			},
 			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                             // IsCleanWorkingTree (clean, no stash)
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 some commit\n"}, // HasCommitsBetween
 			},
 		},
@@ -132,6 +133,7 @@ func TestMergeBranch(t *testing.T) {
 				// No merge or push since already up to date
 			},
 			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                 // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: ""}, // no commits
 			},
 		},
@@ -152,7 +154,9 @@ func TestMergeBranch(t *testing.T) {
 				{Args: []string{"fetch", "origin"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: errors.New("checkout failed")},
 			},
-			commandStubs: []CommandStub{},
+			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""}, // IsCleanWorkingTree
+			},
 		},
 		{
 			name:         "pull fails",
@@ -163,7 +167,9 @@ func TestMergeBranch(t *testing.T) {
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: errors.New("pull failed")},
 			},
-			commandStubs: []CommandStub{},
+			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""}, // IsCleanWorkingTree
+			},
 		},
 		{
 			name:         "merge with conflicts invokes claude",
@@ -177,6 +183,7 @@ func TestMergeBranch(t *testing.T) {
 				// No push after conflicts
 			},
 			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
 			},
@@ -193,6 +200,7 @@ func TestMergeBranch(t *testing.T) {
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("merge failed")},
 			},
 			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""}, // no conflict files
 			},
@@ -209,6 +217,7 @@ func TestMergeBranch(t *testing.T) {
 				{Args: []string{"push", "origin", "main"}, Err: errors.New("push rejected")},
 			},
 			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 			},
 		},
@@ -223,6 +232,7 @@ func TestMergeBranch(t *testing.T) {
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
 			},
 			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
 			},
@@ -295,7 +305,9 @@ func TestMergeAllWorktrees(t *testing.T) {
 				{Args: []string{"push", "origin", "main"}, Err: nil},
 			},
 			commandStubs: []CommandStub{
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree (alpha)
 				{Name: "git", Args: []string{"log", "main..origin/alpha-branch", "--oneline"}, Stdout: "abc commit\n"},
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree (beta)
 				{Name: "git", Args: []string{"log", "main..origin/beta-branch", "--oneline"}, Stdout: "def commit\n"},
 			},
 		},
@@ -405,9 +417,11 @@ func TestMergeWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		// HasCommitsBetweenRemote for repo-a
+		// IsCleanWorkingTree + HasCommitsBetweenRemote for repo-a
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
-		// HasCommitsBetweenRemote for repo-b
+		// IsCleanWorkingTree + HasCommitsBetweenRemote for repo-b
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
@@ -459,7 +473,9 @@ func TestMergeWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "develop..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "staging..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
@@ -499,6 +515,7 @@ func TestMergeWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "release..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -536,6 +553,7 @@ func TestMergeWorkspaceWorktrees_CustomRemote(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..upstream/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -568,6 +586,7 @@ func TestRunMerge_LegacyMode(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
@@ -612,6 +631,7 @@ func TestMergeWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
@@ -628,4 +648,239 @@ func TestMergeWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
 	mergeWorkspaceWorktrees(worktrees, "", "main")
+}
+
+func TestMergeBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
+	// Test that when working tree is dirty, mergeBranch stashes before checkout
+	// and pops stash after merge completes successfully
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},                      // GitStash
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "origin", "main"}, Err: nil},
+		{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"stash", "pop"}, Err: nil},               // GitStashPop (via defer)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M dirty.go\n"}, // IsCleanWorkingTree returns false (dirty)
+		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	mergeBranch("feature/test", "main")
+}
+
+func TestMergeBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
+	// Test that when stash pop fails due to conflicts, a warning is printed
+	// but the merge itself succeeds (no error returned to caller)
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "origin", "main"}, Err: nil},
+		{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"stash", "pop"}, Err: errors.New("conflict during stash pop")}, // stash pop fails
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M dirty.go\n"},
+		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "dirty.go\n"}, // HasUnmergedFiles returns true
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	// mergeBranch doesn't return an error, it just prints to stderr
+	// The test verifies the correct sequence of commands is called
+	mergeBranch("feature/test", "main")
+}
+
+func TestMergeBranch_StashFails_ReturnsEarly(t *testing.T) {
+	// Test that when GitStash fails, mergeBranch returns early without proceeding to checkout
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: errors.New("stash failed: no local changes")}, // GitStash fails
+		// No checkout, pull, merge, push - should return early
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M dirty.go\n"}, // dirty working tree
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	// mergeBranch prints error and returns early - no panic
+	mergeBranch("feature/test", "main")
+}
+
+func TestMergeBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
+	// Test that mergeBranchInRepo stashes dirty changes and pops after merge
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "origin", "main"}, Err: nil},
+		{Args: []string{"merge", "origin/feature", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"stash", "pop"}, Err: nil},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := mergeBranchInRepo("/repo", "feature", "main", "")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMergeBranchInRepo_StashFails_ReturnsError(t *testing.T) {
+	// Test that when GitStash fails, mergeBranchInRepo returns the error
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: errors.New("stash failed")},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := mergeBranchInRepo("/repo", "feature", "main", "")
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "stashing") {
+		t.Errorf("expected error to mention stashing, got: %v", err)
+	}
+}
+
+func TestMergeBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
+	// Test that stash pop conflicts produce warning but don't fail the merge
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "origin", "main"}, Err: nil},
+		{Args: []string{"merge", "origin/feature", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"stash", "pop"}, Err: errors.New("conflict")},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file.go\n"}, // HasUnmergedFiles
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	// Should succeed despite stash pop conflict
+	err := mergeBranchInRepo("/repo", "feature", "main", "")
+	if err != nil {
+		t.Errorf("expected success despite stash pop conflict, got: %v", err)
+	}
+}
+
+func TestMergeBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
+	// Test that clean working tree skips stash entirely
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},
+		// No stash or stash pop - clean working tree
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: []string{"pull", "origin", "main"}, Err: nil},
+		{Args: []string{"merge", "origin/feature", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"push", "origin", "main"}, Err: nil},
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""}, // clean
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := mergeBranchInRepo("/repo", "feature", "main", "")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 }

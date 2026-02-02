@@ -950,3 +950,157 @@ func TestHasCommitsBetweenRemote(t *testing.T) {
 		})
 	}
 }
+
+func TestGitStash_DirtyWorkingTree(t *testing.T) {
+	// When working tree is dirty, GitStash should call "git stash" and return true
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"}, // IsCleanWorkingTree returns false
+	})
+	cmdMock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"stash"}, Err: nil}, // GitStash calls RunGitCommandWithOutput
+	})
+	outputMock.Install()
+
+	stashed, err := GitStash("/repo")
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !stashed {
+		t.Error("expected stashed to be true for dirty working tree")
+	}
+}
+
+func TestGitStash_CleanWorkingTree(t *testing.T) {
+	// When working tree is clean, GitStash should not call "git stash" and return false
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""}, // IsCleanWorkingTree returns true
+	})
+	cmdMock.Install()
+
+	// No output command mock needed - stash should not be called
+
+	stashed, err := GitStash("/repo")
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if stashed {
+		t.Error("expected stashed to be false for clean working tree")
+	}
+}
+
+func TestGitStash_StatusCheckFails(t *testing.T) {
+	// When IsCleanWorkingTree fails, GitStash should return the error
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Err: errors.New("not a git repository")},
+	})
+	cmdMock.Install()
+
+	stashed, err := GitStash("/repo")
+
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if stashed {
+		t.Error("expected stashed to be false when error occurs")
+	}
+}
+
+func TestGitStash_StashCommandFails(t *testing.T) {
+	// When git stash command fails, GitStash should return wrapped error
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+	})
+	cmdMock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"stash"}, Err: errors.New("stash failed")},
+	})
+	outputMock.Install()
+
+	stashed, err := GitStash("/repo")
+
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if stashed {
+		t.Error("expected stashed to be false when stash command fails")
+	}
+}
+
+func TestGitStashPop_Success(t *testing.T) {
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"stash", "pop"}, Err: nil},
+	})
+	outputMock.Install()
+
+	err := GitStashPop("/repo")
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGitStashPop_Fails(t *testing.T) {
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"stash", "pop"}, Err: errors.New("conflict during stash pop")},
+	})
+	outputMock.Install()
+
+	err := GitStashPop("/repo")
+
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+}
+
+func TestHasUnmergedFiles_WithConflicts(t *testing.T) {
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
+	})
+	cmdMock.Install()
+
+	hasUnmerged, err := HasUnmergedFiles("/repo")
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !hasUnmerged {
+		t.Error("expected hasUnmerged to be true when conflicts exist")
+	}
+}
+
+func TestHasUnmergedFiles_Clean(t *testing.T) {
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""},
+	})
+	cmdMock.Install()
+
+	hasUnmerged, err := HasUnmergedFiles("/repo")
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if hasUnmerged {
+		t.Error("expected hasUnmerged to be false when no conflicts")
+	}
+}
+
+func TestHasUnmergedFiles_GitError(t *testing.T) {
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Err: errors.New("not a git repository")},
+	})
+	cmdMock.Install()
+
+	hasUnmerged, err := HasUnmergedFiles("/repo")
+
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if hasUnmerged {
+		t.Error("expected hasUnmerged to be false when error occurs")
+	}
+}
