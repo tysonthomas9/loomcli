@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"hash"
+	"sort"
 	"strings"
 	"time"
 )
@@ -142,13 +143,33 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(string(i.IssueType))
 	w.str(i.Assignee)
 	w.str(i.Owner)
+	w.intPtr(i.EstimatedMinutes)
 	w.str(i.CreatedBy)
+	w.str(i.CloseReason)
+	w.str(i.ClosedBySession)
+
+	// Time-based scheduling
+	w.timePtr(i.DueAt)
+	w.timePtr(i.DeferUntil)
 
 	// Optional fields
 	w.strPtr(i.ExternalRef)
 	w.str(i.SourceSystem)
 	w.flag(i.Pinned, "pinned")
 	w.flag(i.IsTemplate, "template")
+	w.flag(i.Ephemeral, "ephemeral")
+
+	// Source tracing fields
+	w.str(i.SourceFormula)
+	w.str(i.SourceLocation)
+
+	// Tombstone fields (excluding DeletedAt timestamp)
+	w.str(i.DeletedBy)
+	w.str(i.DeleteReason)
+	w.str(i.OriginalType)
+
+	// Messaging fields
+	w.str(i.Sender)
 
 	// Bonded molecules
 	for _, br := range i.BondedFrom {
@@ -176,9 +197,7 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(i.AwaitType)
 	w.str(i.AwaitID)
 	w.duration(i.Timeout)
-	for _, waiter := range i.Waiters {
-		w.str(waiter)
-	}
+	w.strings(i.Waiters)
 
 	// Slot fields for exclusive access
 	w.str(i.Holder)
@@ -201,6 +220,40 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(i.Actor)
 	w.str(i.Target)
 	w.str(i.Payload)
+
+	// Relational data (sorted for deterministic hashing)
+	w.strings(i.Labels)
+
+	// Dependencies (sorted by IssueID + DependsOnID)
+	sortedDeps := make([]*Dependency, len(i.Dependencies))
+	copy(sortedDeps, i.Dependencies)
+	sort.Slice(sortedDeps, func(a, b int) bool {
+		if sortedDeps[a].IssueID != sortedDeps[b].IssueID {
+			return sortedDeps[a].IssueID < sortedDeps[b].IssueID
+		}
+		return sortedDeps[a].DependsOnID < sortedDeps[b].DependsOnID
+	})
+	for _, dep := range sortedDeps {
+		w.str(dep.IssueID)
+		w.str(dep.DependsOnID)
+		w.str(string(dep.Type))
+		w.str(dep.CreatedBy)
+		w.str(dep.Metadata)
+		w.str(dep.ThreadID)
+	}
+
+	// Comments (sorted by ID for determinism)
+	sortedComments := make([]*Comment, len(i.Comments))
+	copy(sortedComments, i.Comments)
+	sort.Slice(sortedComments, func(a, b int) bool {
+		return sortedComments[a].ID < sortedComments[b].ID
+	})
+	for _, c := range sortedComments {
+		w.int(int(c.ID))
+		w.str(c.IssueID)
+		w.str(c.Author)
+		w.str(c.Text)
+	}
 
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
@@ -253,6 +306,29 @@ func (w hashFieldWriter) entityRef(e *EntityRef) {
 		w.str(e.Platform)
 		w.str(e.Org)
 		w.str(e.ID)
+	}
+}
+
+func (w hashFieldWriter) intPtr(p *int) {
+	if p != nil {
+		w.h.Write([]byte(fmt.Sprintf("%d", *p)))
+	}
+	w.h.Write([]byte{0})
+}
+
+func (w hashFieldWriter) timePtr(t *time.Time) {
+	if t != nil {
+		w.h.Write([]byte(t.Format(time.RFC3339Nano)))
+	}
+	w.h.Write([]byte{0})
+}
+
+func (w hashFieldWriter) strings(ss []string) {
+	sorted := make([]string, len(ss))
+	copy(sorted, ss)
+	sort.Strings(sorted)
+	for _, s := range sorted {
+		w.str(s)
 	}
 }
 
