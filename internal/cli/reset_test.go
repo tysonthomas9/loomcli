@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // ============================================================================
@@ -261,4 +264,291 @@ func TestResetAllWorktrees_LegacyMode_NoPerRepoBranch(t *testing.T) {
 	defer func() { resetForce = false }()
 
 	resetAllWorktrees("main", false)
+}
+
+// ============================================================================
+// Reset Command Argument Validation Tests
+// ============================================================================
+
+func TestResetCmd_ArgsValidation_MissingWorktree(t *testing.T) {
+	// The reset command's Args function requires either --all flag or a worktree argument
+	// Test that it returns an error when neither is provided
+	resetAll = false
+	defer func() { resetAll = false }()
+
+	// Create a minimal cobra command to test Args validation
+	cmd := &cobra.Command{}
+	err := resetCmd.Args(cmd, []string{})
+	if err == nil {
+		t.Error("expected error when worktree argument is missing and --all not set")
+	}
+	if err.Error() != "requires worktree argument (or use --all)" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestResetCmd_ArgsValidation_AllWithTooManyArgs(t *testing.T) {
+	// When --all is set, at most 1 argument (target branch) is allowed
+	resetAll = true
+	defer func() { resetAll = false }()
+
+	cmd := &cobra.Command{}
+	// Two args with --all should fail
+	err := resetCmd.Args(cmd, []string{"branch1", "branch2"})
+	if err == nil {
+		t.Error("expected error when --all is set with more than 1 argument")
+	}
+	if err.Error() != "--all flag accepts at most 1 argument (target branch)" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestResetCmd_ArgsValidation_AllWithOneArg(t *testing.T) {
+	// --all with one arg (target branch) should be valid
+	resetAll = true
+	defer func() { resetAll = false }()
+
+	cmd := &cobra.Command{}
+	err := resetCmd.Args(cmd, []string{"main"})
+	if err != nil {
+		t.Errorf("--all with one arg should be valid, got error: %v", err)
+	}
+}
+
+func TestResetCmd_ArgsValidation_AllWithNoArgs(t *testing.T) {
+	// --all with no args should be valid (uses default branch)
+	resetAll = true
+	defer func() { resetAll = false }()
+
+	cmd := &cobra.Command{}
+	err := resetCmd.Args(cmd, []string{})
+	if err != nil {
+		t.Errorf("--all with no args should be valid, got error: %v", err)
+	}
+}
+
+func TestResetCmd_ArgsValidation_WorktreeProvided(t *testing.T) {
+	// When worktree is provided and --all is not set, should be valid
+	resetAll = false
+	defer func() { resetAll = false }()
+
+	cmd := &cobra.Command{}
+	err := resetCmd.Args(cmd, []string{"falcon"})
+	if err != nil {
+		t.Errorf("worktree arg without --all should be valid, got error: %v", err)
+	}
+}
+
+func TestResetCmd_ArgsValidation_WorktreeAndBranch(t *testing.T) {
+	// When worktree and branch are provided (no --all), should be valid
+	resetAll = false
+	defer func() { resetAll = false }()
+
+	cmd := &cobra.Command{}
+	err := resetCmd.Args(cmd, []string{"falcon", "main"})
+	if err != nil {
+		t.Errorf("worktree and branch args should be valid, got error: %v", err)
+	}
+}
+
+// ============================================================================
+// confirmAction Tests
+// ============================================================================
+
+func TestConfirmAction_Yes(t *testing.T) {
+	MockStdin(t, "y\n")
+
+	result := confirmAction("Are you sure?")
+	if !result {
+		t.Error("expected confirmAction to return true for 'y' input")
+	}
+}
+
+func TestConfirmAction_YesLong(t *testing.T) {
+	MockStdin(t, "yes\n")
+
+	result := confirmAction("Are you sure?")
+	if !result {
+		t.Error("expected confirmAction to return true for 'yes' input")
+	}
+}
+
+func TestConfirmAction_YesUppercase(t *testing.T) {
+	MockStdin(t, "Y\n")
+
+	result := confirmAction("Are you sure?")
+	if !result {
+		t.Error("expected confirmAction to return true for 'Y' input")
+	}
+}
+
+func TestConfirmAction_No(t *testing.T) {
+	MockStdin(t, "n\n")
+
+	result := confirmAction("Are you sure?")
+	if result {
+		t.Error("expected confirmAction to return false for 'n' input")
+	}
+}
+
+func TestConfirmAction_NoLong(t *testing.T) {
+	MockStdin(t, "no\n")
+
+	result := confirmAction("Are you sure?")
+	if result {
+		t.Error("expected confirmAction to return false for 'no' input")
+	}
+}
+
+func TestConfirmAction_Default(t *testing.T) {
+	// Empty input (just newline) should default to false
+	MockStdin(t, "\n")
+
+	result := confirmAction("Are you sure?")
+	if result {
+		t.Error("expected confirmAction to return false for empty input (default)")
+	}
+}
+
+func TestConfirmAction_Whitespace(t *testing.T) {
+	// Whitespace only should default to false
+	MockStdin(t, "   \n")
+
+	result := confirmAction("Are you sure?")
+	if result {
+		t.Error("expected confirmAction to return false for whitespace input")
+	}
+}
+
+func TestConfirmAction_Invalid(t *testing.T) {
+	// Invalid input should default to false
+	MockStdin(t, "maybe\n")
+
+	result := confirmAction("Are you sure?")
+	if result {
+		t.Error("expected confirmAction to return false for invalid input")
+	}
+}
+
+func TestConfirmAction_YesWithSpaces(t *testing.T) {
+	// Input with surrounding spaces should be trimmed
+	MockStdin(t, "  y  \n")
+
+	result := confirmAction("Are you sure?")
+	if !result {
+		t.Error("expected confirmAction to return true for '  y  ' input (should be trimmed)")
+	}
+}
+
+func TestConfirmAction_Output(t *testing.T) {
+	// Test that the prompt is displayed correctly
+	// This is a basic test - confirmAction writes to stdout
+	MockStdin(t, "n\n")
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	confirmAction("Test prompt?")
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	// Read output
+	buf := make([]byte, 256)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if output != "Test prompt? (y/N) " {
+		t.Errorf("expected 'Test prompt? (y/N) ', got %q", output)
+	}
+}
+
+// ============================================================================
+// resetWorktree Tests
+// ============================================================================
+
+func TestResetWorktree_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
+		{Dir: wtPath, Args: []string{"clean", "-fd"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
+		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
+	})
+	outputMock.Install()
+
+	// Capture stdout to suppress output
+	oldStdout := os.Stdout
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+
+	resetWorktree("test-wt", "main", false)
+
+	w.Close()
+	os.Stdout = oldStdout
+	// No errors expected - success path completes normally
+}
+
+func TestResetWorktree_FetchError(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}, Err: fmt.Errorf("network error")},
+	})
+	outputMock.Install()
+
+	// Capture stderr to check error message
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Capture stdout too
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	resetWorktree("test-wt", "main", false)
+
+	w.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 1024)
+	n, _ := r.Read(buf)
+	stderr := string(buf[:n])
+
+	if stderr == "" || !containsSubstring([]string{stderr}, "Error fetching") {
+		t.Errorf("expected 'Error fetching' in stderr, got %q", stderr)
+	}
 }
