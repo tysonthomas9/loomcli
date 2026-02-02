@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-func TestMergeCmd_ArgsValidation(t *testing.T) {
+func TestPushCmd_ArgsValidation(t *testing.T) {
 	// Save and restore the global flag
-	origMergeAll := mergeAll
-	defer func() { mergeAll = origMergeAll }()
+	origPushAll := pushAll
+	defer func() { pushAll = origPushAll }()
 
 	tests := []struct {
 		name      string
@@ -74,10 +74,10 @@ func TestMergeCmd_ArgsValidation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Set the flag state
-			mergeAll = tc.allFlag
+			pushAll = tc.allFlag
 
 			// Call the Args validation function directly
-			err := mergeCmd.Args(mergeCmd, tc.args)
+			err := pushCmd.Args(pushCmd, tc.args)
 
 			if tc.wantError {
 				if err == nil {
@@ -96,26 +96,26 @@ func TestMergeCmd_ArgsValidation(t *testing.T) {
 	}
 }
 
-func TestMergeBranch(t *testing.T) {
+func TestPushBranch(t *testing.T) {
 	tests := []struct {
-		name           string
-		sourceBranch   string
-		targetBranch   string
-		outputStubs    []OutputCommandStub // for GitFetch, GitCheckout, GitPull, GitMergeOrigin, GitPush
-		commandStubs   []CommandStub       // for IsCleanWorkingTree, HasCommitsBetween, GetConflictedFiles
-		claudeCalled   bool                // whether claude should be invoked
-		claudeErr      error               // error from claude invocation
+		name         string
+		sourceBranch string
+		targetBranch string
+		outputStubs  []OutputCommandStub // for GitFetch, GitCheckout, GitPull, GitMergeOrigin, GitPush
+		commandStubs []CommandStub       // for IsCleanWorkingTree, HasCommitsBetween, GetConflictedFiles
+		claudeCalled bool                // whether claude should be invoked
+		claudeErr    error               // error from claude invocation
 	}{
 		{
-			name:         "successful merge no conflicts",
+			name:         "successful push no conflicts",
 			sourceBranch: "feature/test",
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},                                                                            // GitFetch
-				{Args: []string{"checkout", "main"}, Err: nil},                                                                           // GitCheckout
-				{Args: []string{"pull", "origin", "main"}, Err: nil},                                                                     // GitPull
+				{Args: []string{"fetch", "origin"}, Err: nil},                                                                                                             // GitFetch
+				{Args: []string{"checkout", "main"}, Err: nil},                                                                                                            // GitCheckout
+				{Args: []string{"pull", "origin", "main"}, Err: nil},                                                                                                      // GitPull
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil}, // GitMergeOrigin
-				{Args: []string{"push", "origin", "main"}, Err: nil},                                                                     // GitPush
+				{Args: []string{"push", "origin", "main"}, Err: nil},                                                                                                      // GitPush
 			},
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                             // IsCleanWorkingTree (clean, no stash)
@@ -133,7 +133,7 @@ func TestMergeBranch(t *testing.T) {
 				// No merge or push since already up to date
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                 // IsCleanWorkingTree
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                          // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: ""}, // no commits
 			},
 		},
@@ -183,7 +183,7 @@ func TestMergeBranch(t *testing.T) {
 				// No push after conflicts
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
 			},
@@ -200,7 +200,7 @@ func TestMergeBranch(t *testing.T) {
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("merge failed")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""}, // no conflict files
 			},
@@ -217,7 +217,7 @@ func TestMergeBranch(t *testing.T) {
 				{Args: []string{"push", "origin", "main"}, Err: errors.New("push rejected")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 			},
 		},
@@ -232,7 +232,7 @@ func TestMergeBranch(t *testing.T) {
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
 			},
@@ -263,7 +263,7 @@ func TestMergeBranch(t *testing.T) {
 			t.Cleanup(func() { claudeInvoker = origClaude })
 
 			// Call the function under test
-			mergeBranch(tc.sourceBranch, tc.targetBranch)
+			pushBranch(tc.sourceBranch, tc.targetBranch)
 
 			if tc.claudeCalled && !claudeCalled {
 				t.Error("expected claude to be invoked, but it was not")
@@ -275,7 +275,7 @@ func TestMergeBranch(t *testing.T) {
 	}
 }
 
-func TestMergeAllWorktrees(t *testing.T) {
+func TestPushAllWorktrees(t *testing.T) {
 	tests := []struct {
 		name         string
 		targetBranch string
@@ -291,13 +291,13 @@ func TestMergeAllWorktrees(t *testing.T) {
 				{Name: "beta", Path: "/worktrees/beta", Branch: "beta-branch"},
 			},
 			outputStubs: []OutputCommandStub{
-				// First worktree merge: alpha-branch -> main
+				// First worktree push: alpha-branch -> main
 				{Args: []string{"fetch", "origin"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
 				{Args: []string{"merge", "origin/alpha-branch", "-m", "Merge alpha-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 				{Args: []string{"push", "origin", "main"}, Err: nil},
-				// Second worktree merge: beta-branch -> main
+				// Second worktree push: beta-branch -> main
 				{Args: []string{"fetch", "origin"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
@@ -305,9 +305,9 @@ func TestMergeAllWorktrees(t *testing.T) {
 				{Args: []string{"push", "origin", "main"}, Err: nil},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree (alpha)
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree (alpha)
 				{Name: "git", Args: []string{"log", "main..origin/alpha-branch", "--oneline"}, Stdout: "abc commit\n"},
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                    // IsCleanWorkingTree (beta)
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree (beta)
 				{Name: "git", Args: []string{"log", "main..origin/beta-branch", "--oneline"}, Stdout: "def commit\n"},
 			},
 		},
@@ -336,7 +336,7 @@ func TestMergeAllWorktrees(t *testing.T) {
 			outputMock.Install()
 
 			// Install command mock - DiscoverWorktrees calls GetCurrentBranch for all,
-			// then mergeBranch calls HasCommitsBetween for each
+			// then pushBranch calls HasCommitsBetween for each
 			var allCmdStubs []CommandStub
 			// First: GetCurrentBranch for each worktree (during DiscoverWorktrees)
 			for _, wt := range tc.worktrees {
@@ -346,7 +346,7 @@ func TestMergeAllWorktrees(t *testing.T) {
 					Stdout: wt.Branch + "\n",
 				})
 			}
-			// Then: HasCommitsBetween for each mergeBranch call
+			// Then: HasCommitsBetween for each pushBranch call
 			allCmdStubs = append(allCmdStubs, tc.commandStubs...)
 			cmdMock := NewCommandMock(t, allCmdStubs)
 			cmdMock.Install()
@@ -359,7 +359,7 @@ func TestMergeAllWorktrees(t *testing.T) {
 			}
 			t.Cleanup(func() { claudeInvoker = origClaude })
 
-			mergeAllWorktrees(tc.targetBranch)
+			pushAllWorktrees(tc.targetBranch)
 		})
 	}
 }
@@ -385,7 +385,7 @@ func TestTargetBranchDisplay(t *testing.T) {
 	}
 }
 
-func TestMergeWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
+func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -438,10 +438,10 @@ func TestMergeWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
 	// sourceBranch="" means use wt.Branch for each; targetBranch="main" is explicit
-	mergeWorkspaceWorktrees(worktrees, "", "main")
+	pushWorkspaceWorktrees(worktrees, "", "main")
 }
 
-func TestMergeWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
+func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -458,13 +458,13 @@ func TestMergeWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	}
 
 	outputStubs := []OutputCommandStub{
-		// repo-a merges into "develop"
+		// repo-a pushes into "develop"
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"checkout", "develop"}, Err: nil},
 		{Args: []string{"pull", "origin", "develop"}, Err: nil},
 		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 		{Args: []string{"push", "origin", "develop"}, Err: nil},
-		// repo-b merges into "staging"
+		// repo-b pushes into "staging"
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"checkout", "staging"}, Err: nil},
 		{Args: []string{"pull", "origin", "staging"}, Err: nil},
@@ -492,10 +492,10 @@ func TestMergeWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
 	// targetBranch="" means use per-repo DefaultBranch
-	mergeWorkspaceWorktrees(worktrees, "", "")
+	pushWorkspaceWorktrees(worktrees, "", "")
 }
 
-func TestMergeWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
+func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -531,10 +531,10 @@ func TestMergeWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	mergeWorkspaceWorktrees(worktrees, "", "release")
+	pushWorkspaceWorktrees(worktrees, "", "release")
 }
 
-func TestMergeWorkspaceWorktrees_CustomRemote(t *testing.T) {
+func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -569,12 +569,12 @@ func TestMergeWorkspaceWorktrees_CustomRemote(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	mergeWorkspaceWorktrees(worktrees, "", "main")
+	pushWorkspaceWorktrees(worktrees, "", "main")
 }
 
-func TestRunMerge_LegacyMode(t *testing.T) {
-	// When no workspace config exists, runMerge falls through to legacy mergeBranch.
-	// We test the legacy path by calling mergeBranch directly, same as existing TestMergeBranch.
+func TestRunPush_LegacyMode(t *testing.T) {
+	// When no workspace config exists, runPush falls through to legacy pushBranch.
+	// We test the legacy path by calling pushBranch directly.
 	// This test verifies the same git command sequence with hardcoded "origin".
 
 	outputStubs := []OutputCommandStub{
@@ -602,10 +602,10 @@ func TestRunMerge_LegacyMode(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	mergeBranch("feature/test", "main")
+	pushBranch("feature/test", "main")
 }
 
-func TestMergeWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
+func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	worktrees := []WorktreeInfo{
 		{
 			Name:   "repo-a",
@@ -647,20 +647,20 @@ func TestMergeWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	mergeWorkspaceWorktrees(worktrees, "", "main")
+	pushWorkspaceWorktrees(worktrees, "", "main")
 }
 
-func TestMergeBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
-	// Test that when working tree is dirty, mergeBranch stashes before checkout
+func TestPushBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
+	// Test that when working tree is dirty, pushBranch stashes before checkout
 	// and pops stash after merge completes successfully
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"stash"}, Err: nil},                      // GitStash
+		{Args: []string{"stash"}, Err: nil}, // GitStash
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
 		{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"stash", "pop"}, Err: nil},               // GitStashPop (via defer)
+		{Args: []string{"stash", "pop"}, Err: nil}, // GitStashPop (via defer)
 	}
 
 	commandStubs := []CommandStub{
@@ -680,10 +680,10 @@ func TestMergeBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	mergeBranch("feature/test", "main")
+	pushBranch("feature/test", "main")
 }
 
-func TestMergeBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
+func TestPushBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	// Test that when stash pop fails due to conflicts, a warning is printed
 	// but the merge itself succeeds (no error returned to caller)
 	outputStubs := []OutputCommandStub{
@@ -714,13 +714,13 @@ func TestMergeBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	// mergeBranch doesn't return an error, it just prints to stderr
+	// pushBranch doesn't return an error, it just prints to stderr
 	// The test verifies the correct sequence of commands is called
-	mergeBranch("feature/test", "main")
+	pushBranch("feature/test", "main")
 }
 
-func TestMergeBranch_StashFails_ReturnsEarly(t *testing.T) {
-	// Test that when GitStash fails, mergeBranch returns early without proceeding to checkout
+func TestPushBranch_StashFails_ReturnsEarly(t *testing.T) {
+	// Test that when GitStash fails, pushBranch returns early without proceeding to checkout
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"stash"}, Err: errors.New("stash failed: no local changes")}, // GitStash fails
@@ -743,12 +743,12 @@ func TestMergeBranch_StashFails_ReturnsEarly(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	// mergeBranch prints error and returns early - no panic
-	mergeBranch("feature/test", "main")
+	// pushBranch prints error and returns early - no panic
+	pushBranch("feature/test", "main")
 }
 
-func TestMergeBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
-	// Test that mergeBranchInRepo stashes dirty changes and pops after merge
+func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
+	// Test that pushBranchInRepo stashes dirty changes and pops after merge
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"stash"}, Err: nil},
@@ -776,14 +776,14 @@ func TestMergeBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	err := mergeBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo("/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
-func TestMergeBranchInRepo_StashFails_ReturnsError(t *testing.T) {
-	// Test that when GitStash fails, mergeBranchInRepo returns the error
+func TestPushBranchInRepo_StashFails_ReturnsError(t *testing.T) {
+	// Test that when GitStash fails, pushBranchInRepo returns the error
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"stash"}, Err: errors.New("stash failed")},
@@ -805,7 +805,7 @@ func TestMergeBranchInRepo_StashFails_ReturnsError(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	err := mergeBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo("/repo", "feature", "main", "")
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
@@ -814,7 +814,7 @@ func TestMergeBranchInRepo_StashFails_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestMergeBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
+func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	// Test that stash pop conflicts produce warning but don't fail the merge
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
@@ -845,13 +845,13 @@ func TestMergeBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
 	// Should succeed despite stash pop conflict
-	err := mergeBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo("/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("expected success despite stash pop conflict, got: %v", err)
 	}
 }
 
-func TestMergeBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
+func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 	// Test that clean working tree skips stash entirely
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
@@ -879,8 +879,215 @@ func TestMergeBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 	}
 	t.Cleanup(func() { claudeInvoker = origClaude })
 
-	err := mergeBranchInRepo("/repo", "feature", "main", "")
+	err := pushBranchInRepo("/repo", "feature", "main", "")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPushCmd_MergeAlias(t *testing.T) {
+	// Test that "merge" is listed as an alias for the push command
+	aliases := pushCmd.Aliases
+	found := false
+	for _, a := range aliases {
+		if a == "merge" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'merge' to be an alias for push command, got aliases: %v", aliases)
+	}
+}
+
+func TestPushCmd_MergeAliasIsFirst(t *testing.T) {
+	// Test that "merge" alias is the first (primary) alias
+	aliases := pushCmd.Aliases
+	if len(aliases) == 0 {
+		t.Fatal("push command has no aliases")
+	}
+	if aliases[0] != "merge" {
+		t.Errorf("expected first alias to be 'merge', got %q", aliases[0])
+	}
+}
+
+func TestPushCmd_GroupID(t *testing.T) {
+	// Verify command is in the "git" group
+	if pushCmd.GroupID != "git" {
+		t.Errorf("expected push command to be in 'git' group, got %q", pushCmd.GroupID)
+	}
+}
+
+func TestPushCmd_Flags(t *testing.T) {
+	// Verify flags are registered
+	if allFlag := pushCmd.Flags().Lookup("all"); allFlag == nil {
+		t.Error("expected --all flag to be registered")
+	}
+	if wsFlag := pushCmd.Flags().Lookup("workspace"); wsFlag == nil {
+		t.Error("expected --workspace flag to be registered")
+	}
+
+	// Verify shorthand flags
+	if allFlag := pushCmd.Flags().ShorthandLookup("a"); allFlag == nil {
+		t.Error("expected -a shorthand flag to be registered")
+	}
+	if wsFlag := pushCmd.Flags().ShorthandLookup("W"); wsFlag == nil {
+		t.Error("expected -W shorthand flag to be registered")
+	}
+}
+
+func TestPushAllWorktrees_EmptyList(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create empty worktrees directory
+	if err := os.MkdirAll(tmpDir+"/worktrees", 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+
+	SetupTestEnv(t, map[string]string{
+		"LOOM_WORKTREES_DIR": tmpDir + "/worktrees",
+	})
+
+	// No mocks needed - should return early when no worktrees found
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
+	outputMock.Install()
+
+	// Should not panic when no worktrees
+	pushAllWorktrees("main")
+}
+
+func TestPushWorkspaceWorktrees_EmptyList(t *testing.T) {
+	// Empty worktree list should produce no errors and no git commands
+	worktrees := []WorktreeInfo{}
+
+	// No output stubs - no commands should be called
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
+	outputMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	// Should not panic or call any commands
+	pushWorkspaceWorktrees(worktrees, "", "main")
+}
+
+func TestPushCmd_WorkspaceModeArgsValidation(t *testing.T) {
+	// Save and restore the global flags
+	origPushAll := pushAll
+	origPushWorkspace := pushWorkspace
+	defer func() {
+		pushAll = origPushAll
+		pushWorkspace = origPushWorkspace
+	}()
+
+	// Create a temp config directory with config.yaml to enable workspace mode
+	tmpDir := t.TempDir()
+	configDir := tmpDir + "/.loom"
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+
+	configContent := `workspaces:
+  test:
+    path: /tmp/test
+    repos:
+      - name: repo1
+        path: repo1
+`
+	configPath := configDir + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	SetupTestEnv(t, map[string]string{
+		"LOOM_CONFIG_DIR": configDir,
+	})
+
+	// Verify workspace mode is enabled
+	if !IsWorkspaceMode() {
+		t.Skip("workspace mode not enabled - config not loaded properly")
+	}
+
+	tests := []struct {
+		name        string
+		args        []string
+		allFlag     bool
+		wantError   bool
+		errorSubstr string
+	}{
+		// Workspace mode with --all flag
+		{
+			name:      "workspace mode with --all, no args (success)",
+			args:      []string{},
+			allFlag:   true,
+			wantError: false,
+		},
+		{
+			name:      "workspace mode with --all, one arg (target branch, success)",
+			args:      []string{"main"},
+			allFlag:   true,
+			wantError: false,
+		},
+		{
+			name:        "workspace mode with --all, two args (error)",
+			args:        []string{"main", "extra"},
+			allFlag:     true,
+			wantError:   true,
+			errorSubstr: "--all flag accepts at most 1 argument",
+		},
+		// Workspace mode without --all flag
+		{
+			name:        "workspace mode without --all, no args",
+			args:        []string{},
+			allFlag:     false,
+			wantError:   true,
+			errorSubstr: "requires 1-2 arguments",
+		},
+		{
+			name:      "workspace mode without --all, one arg (worktree only, success)",
+			args:      []string{"falcon"},
+			allFlag:   false,
+			wantError: false,
+		},
+		{
+			name:      "workspace mode without --all, two args (success)",
+			args:      []string{"falcon", "main"},
+			allFlag:   false,
+			wantError: false,
+		},
+		{
+			name:        "workspace mode without --all, three args",
+			args:        []string{"falcon", "main", "extra"},
+			allFlag:     false,
+			wantError:   true,
+			errorSubstr: "requires 1-2 arguments",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pushAll = tc.allFlag
+			pushWorkspace = ""
+
+			err := pushCmd.Args(pushCmd, tc.args)
+
+			if tc.wantError {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tc.errorSubstr)
+					return
+				}
+				if tc.errorSubstr != "" && !strings.Contains(err.Error(), tc.errorSubstr) {
+					t.Errorf("expected error containing %q, got %q", tc.errorSubstr, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+			}
+		})
 	}
 }

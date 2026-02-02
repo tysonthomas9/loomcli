@@ -7,50 +7,49 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var mergeAll bool
-var mergeWorkspace string
+var pushAll bool
+var pushWorkspace string
 
-var mergeCmd = &cobra.Command{
-	Use:               "merge <source> <target>",
-	Short:             "Merge branches with AI conflict resolution",
+var pushCmd = &cobra.Command{
+	Use:               "push [worktree] [target]",
+	Short:             "Push worktree branch to target branch",
+	Aliases:           []string{"merge"},
 	GroupID:           "git",
 	ValidArgsFunction: branchCompletion,
-	Long: `Merge branches with AI-assisted conflict resolution.
+	Long: `Push completed work from worktree branches to target branch.
 
-When conflicts occur, Claude is launched to resolve them automatically.
+Merges worktree branch INTO the target branch (e.g., main), pushing
+completed work. If conflicts occur, Claude is launched to resolve them.
 
 Arguments:
-  source    Source branch to merge from (e.g., webui/falcon)
-  target    Target branch to merge into (required in legacy mode, optional in workspace mode)
+  worktree    Source worktree to push from (e.g., falcon)
+  target      Target branch to push into (default: main or per-repo default)
 
 Flags:
-  -a, --all          Merge all worktree branches into target (legacy) or all workspaces (workspace mode)
+  -a, --all          Push all worktree branches to target
   -W, --workspace    Workspace to operate on (workspace mode only)
 
 Examples:
-  loom merge webui/falcon main             # Merge to main (legacy)
-  loom merge webui/falcon feature/web-ui   # Merge to feature/web-ui (legacy)
-  loom merge --all main                    # Merge all worktrees to main (legacy)
-  loom merge falcon                        # Merge source in workspace (uses per-repo default_branch)
-  loom merge falcon main                   # Merge source in workspace to explicit target
-  loom merge --all                         # Merge all workspaces (uses per-repo default_branch)
-  loom merge --all main                    # Merge all workspaces to explicit target
-  loom merge -W myworkspace falcon         # Merge in specific workspace`,
+  loom push falcon                        # Push falcon to main (or per-repo default)
+  loom push falcon main                   # Push falcon to main explicitly
+  loom push --all                         # Push all worktrees to their default targets
+  loom push --all main                    # Push all worktrees to main
+  loom push -W myworkspace falcon         # Push in specific workspace`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if IsWorkspaceMode() {
-			if mergeAll {
+			if pushAll {
 				if len(args) > 1 {
 					return fmt.Errorf("--all flag accepts at most 1 argument (target branch)")
 				}
 				return nil
 			}
 			if len(args) < 1 || len(args) > 2 {
-				return fmt.Errorf("requires 1-2 arguments: <source> [target]")
+				return fmt.Errorf("requires 1-2 arguments: <worktree> [target]")
 			}
 			return nil
 		}
 		// Legacy mode
-		if mergeAll {
+		if pushAll {
 			if len(args) != 1 {
 				return fmt.Errorf("--all flag requires exactly 1 argument (target branch)")
 			}
@@ -61,18 +60,18 @@ Examples:
 		}
 		return nil
 	},
-	Run: runMerge,
+	Run: runPush,
 }
 
 func init() {
-	mergeCmd.Flags().BoolVarP(&mergeAll, "all", "a", false, "Merge all worktree branches into target")
-	mergeCmd.Flags().StringVarP(&mergeWorkspace, "workspace", "W", "", "Workspace to operate on")
-	rootCmd.AddCommand(mergeCmd)
+	pushCmd.Flags().BoolVarP(&pushAll, "all", "a", false, "Push all worktree branches to target")
+	pushCmd.Flags().StringVarP(&pushWorkspace, "workspace", "W", "", "Workspace to operate on")
+	rootCmd.AddCommand(pushCmd)
 }
 
-func runMerge(cmd *cobra.Command, args []string) {
+func runPush(cmd *cobra.Command, args []string) {
 	if IsWorkspaceMode() {
-		if mergeAll && mergeWorkspace != "" {
+		if pushAll && pushWorkspace != "" {
 			fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
 			os.Exit(1)
 		}
@@ -80,11 +79,11 @@ func runMerge(cmd *cobra.Command, args []string) {
 		targetBranch := ""
 		sourceBranch := ""
 
-		if mergeAll {
+		if pushAll {
 			if len(args) == 1 {
 				targetBranch = args[0]
 			}
-			mergeAllWorkspaces(targetBranch)
+			pushAllWorkspaces(targetBranch)
 		} else {
 			sourceBranch = args[0]
 			if len(args) == 2 {
@@ -97,7 +96,7 @@ func runMerge(cmd *cobra.Command, args []string) {
 				os.Exit(1)
 			}
 
-			wsName := mergeWorkspace
+			wsName := pushWorkspace
 			if wsName == "" {
 				wsName = resolver.WorkspaceName()
 			} else {
@@ -108,20 +107,20 @@ func runMerge(cmd *cobra.Command, args []string) {
 				}
 			}
 
-			mergeWorkspaceRepos(resolver, sourceBranch, targetBranch)
+			pushWorkspaceRepos(resolver, sourceBranch, targetBranch)
 		}
 		return
 	}
 
 	// Legacy mode
-	if mergeAll {
-		mergeAllWorktrees(args[0])
+	if pushAll {
+		pushAllWorktrees(args[0])
 	} else {
-		mergeBranch(args[0], args[1])
+		pushBranch(args[0], args[1])
 	}
 }
 
-func mergeAllWorkspaces(targetBranch string) {
+func pushAllWorkspaces(targetBranch string) {
 	resolver, err := NewResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
@@ -135,7 +134,7 @@ func mergeAllWorkspaces(targetBranch string) {
 	}
 
 	fmt.Println("=========================================")
-	fmt.Printf("Merging all workspaces -> %s\n", targetBranchDisplay(targetBranch))
+	fmt.Printf("Pushing all workspaces -> %s\n", targetBranchDisplay(targetBranch))
 	fmt.Println("=========================================")
 	fmt.Println("")
 
@@ -157,16 +156,16 @@ func mergeAllWorkspaces(targetBranch string) {
 			continue
 		}
 
-		mergeWorkspaceWorktrees(worktrees, "", targetBranch)
+		pushWorkspaceWorktrees(worktrees, "", targetBranch)
 		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
-	fmt.Printf("All workspaces merged!\n")
+	fmt.Printf("All workspaces pushed!\n")
 	fmt.Println("=========================================")
 }
 
-func mergeWorkspaceRepos(resolver *Resolver, sourceBranch, targetBranch string) {
+func pushWorkspaceRepos(resolver *Resolver, sourceBranch, targetBranch string) {
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering repos: %v\n", err)
@@ -179,18 +178,18 @@ func mergeWorkspaceRepos(resolver *Resolver, sourceBranch, targetBranch string) 
 	}
 
 	fmt.Println("=========================================")
-	fmt.Printf("Merging workspace %q: %s -> %s\n", resolver.WorkspaceName(), sourceBranch, targetBranchDisplay(targetBranch))
+	fmt.Printf("Pushing workspace %q: %s -> %s\n", resolver.WorkspaceName(), sourceBranch, targetBranchDisplay(targetBranch))
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	mergeWorkspaceWorktrees(worktrees, sourceBranch, targetBranch)
+	pushWorkspaceWorktrees(worktrees, sourceBranch, targetBranch)
 
 	fmt.Println("=========================================")
-	fmt.Printf("Workspace %q merge complete!\n", resolver.WorkspaceName())
+	fmt.Printf("Workspace %q push complete!\n", resolver.WorkspaceName())
 	fmt.Println("=========================================")
 }
 
-func mergeWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch, targetBranch string) {
+func pushWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch, targetBranch string) {
 	type result struct {
 		repo    string
 		success bool
@@ -218,7 +217,7 @@ func mergeWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch, targetBranc
 
 		remote := wt.Repo.Remote
 
-		err := mergeBranchInRepo(wt.Path, source, target, remote)
+		err := pushBranchInRepo(wt.Path, source, target, remote)
 		if err != nil {
 			results = append(results, result{repo: wt.Name, success: false, err: err.Error()})
 		} else {
@@ -238,11 +237,11 @@ func mergeWorkspaceWorktrees(worktrees []WorktreeInfo, sourceBranch, targetBranc
 	}
 }
 
-func mergeBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error {
+func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error {
 	r := resolveRemote(remote)
 
 	fmt.Println("=========================================")
-	fmt.Printf("Merge: %s -> %s (repo: %s, remote: %s)\n", sourceBranch, targetBranch, repoPath, r)
+	fmt.Printf("Push: %s -> %s (repo: %s, remote: %s)\n", sourceBranch, targetBranch, repoPath, r)
 	fmt.Println("=========================================")
 
 	// Fetch latest
@@ -312,7 +311,7 @@ func mergeBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) erro
 		return nil
 	}
 
-	fmt.Println("✓ Merge completed successfully (no conflicts)")
+	fmt.Println("✓ Push completed successfully (no conflicts)")
 
 	// Push
 	if err := GitPushRemote(repoPath, remote, targetBranch); err != nil {
@@ -330,9 +329,9 @@ func targetBranchDisplay(target string) string {
 	return target
 }
 
-func mergeAllWorktrees(targetBranch string) {
+func pushAllWorktrees(targetBranch string) {
 	fmt.Println("=========================================")
-	fmt.Printf("Merging all worktrees -> %s\n", targetBranch)
+	fmt.Printf("Pushing all worktrees -> %s\n", targetBranch)
 	fmt.Println("=========================================")
 	fmt.Println("")
 
@@ -347,26 +346,26 @@ func mergeAllWorktrees(targetBranch string) {
 		return
 	}
 
-	// List what will be merged
+	// List what will be pushed
 	for _, wt := range worktrees {
 		fmt.Printf("Found: %s -> %s\n", wt.Name, wt.Branch)
 	}
 	fmt.Println("")
-	fmt.Printf("Will merge %d branches into %s\n", len(worktrees), targetBranch)
+	fmt.Printf("Will push %d branches into %s\n", len(worktrees), targetBranch)
 	fmt.Println("")
 
-	// Merge each branch
+	// Push each branch
 	for _, wt := range worktrees {
-		mergeBranch(wt.Branch, targetBranch)
+		pushBranch(wt.Branch, targetBranch)
 		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
-	fmt.Printf("All worktrees merged into %s!\n", targetBranch)
+	fmt.Printf("All worktrees pushed into %s!\n", targetBranch)
 	fmt.Println("=========================================")
 }
 
-func mergeBranch(sourceBranch, targetBranch string) {
+func pushBranch(sourceBranch, targetBranch string) {
 	scriptDir, err := GetScriptDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -374,7 +373,7 @@ func mergeBranch(sourceBranch, targetBranch string) {
 	}
 
 	fmt.Println("=========================================")
-	fmt.Printf("Merge: %s -> %s\n", sourceBranch, targetBranch)
+	fmt.Printf("Push: %s -> %s\n", sourceBranch, targetBranch)
 	fmt.Println("=========================================")
 
 	// Fetch latest
@@ -427,7 +426,7 @@ func mergeBranch(sourceBranch, targetBranch string) {
 		// Check for conflicts
 		conflicts, conflictErr := GetConflictedFiles(scriptDir)
 		if conflictErr != nil || len(conflicts) == 0 {
-			fmt.Fprintf(os.Stderr, "Merge failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Push failed: %v\n", err)
 			return
 		}
 
@@ -448,7 +447,7 @@ func mergeBranch(sourceBranch, targetBranch string) {
 		return
 	}
 
-	fmt.Println("✓ Merge completed successfully (no conflicts)")
+	fmt.Println("✓ Push completed successfully (no conflicts)")
 
 	// Push
 	if err := GitPush(scriptDir, targetBranch); err != nil {
