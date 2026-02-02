@@ -781,3 +781,387 @@ func TestServeFlags_NoWebUI(t *testing.T) {
 		t.Errorf("no-webui type = %q, want %q", f.Value.Type(), "bool")
 	}
 }
+
+func TestGetWorkspaceInfo_LegacyMode(t *testing.T) {
+	// No config file -> legacy mode
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	info := getWorkspaceInfo()
+
+	if info.Mode != "legacy" {
+		t.Errorf("Mode = %q, want %q", info.Mode, "legacy")
+	}
+	if info.Name != "" {
+		t.Errorf("Name = %q, want empty", info.Name)
+	}
+	if info.Workspaces != nil {
+		t.Errorf("Workspaces = %v, want nil", info.Workspaces)
+	}
+}
+
+func TestGetWorkspaceInfo_WorkspaceMode(t *testing.T) {
+	cfg := &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  "/tmp/ws",
+				Repos: []RepoConfig{{Name: "repo1", Path: "/tmp/ws/repo1"}},
+			},
+			"otherws": {
+				Path:  "/tmp/other",
+				Repos: []RepoConfig{{Name: "repo2", Path: "/tmp/other/repo2"}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	info := getWorkspaceInfo()
+
+	if info.Mode != "workspace" {
+		t.Errorf("Mode = %q, want %q", info.Mode, "workspace")
+	}
+	if info.Name != "myws" {
+		t.Errorf("Name = %q, want %q", info.Name, "myws")
+	}
+	if len(info.Workspaces) != 2 {
+		t.Errorf("len(Workspaces) = %d, want 2", len(info.Workspaces))
+	}
+	// Workspaces should be sorted alphabetically
+	hasMyws := false
+	hasOtherws := false
+	for _, ws := range info.Workspaces {
+		if ws == "myws" {
+			hasMyws = true
+		}
+		if ws == "otherws" {
+			hasOtherws = true
+		}
+	}
+	if !hasMyws || !hasOtherws {
+		t.Errorf("Workspaces = %v, expected to contain myws and otherws", info.Workspaces)
+	}
+}
+
+func TestGroupAgentsByWorkspace(t *testing.T) {
+	tests := []struct {
+		name     string
+		agents   []AgentStatus
+		expected map[string]int // workspace name -> expected count
+	}{
+		{
+			name:     "empty agents",
+			agents:   []AgentStatus{},
+			expected: map[string]int{},
+		},
+		{
+			name: "all legacy agents",
+			agents: []AgentStatus{
+				{Name: "falcon", Workspace: ""},
+				{Name: "nova", Workspace: ""},
+			},
+			expected: map[string]int{"(legacy)": 2},
+		},
+		{
+			name: "all workspace agents",
+			agents: []AgentStatus{
+				{Name: "repo1", Workspace: "myws"},
+				{Name: "repo2", Workspace: "myws"},
+			},
+			expected: map[string]int{"myws": 2},
+		},
+		{
+			name: "mixed workspace and legacy agents",
+			agents: []AgentStatus{
+				{Name: "falcon", Workspace: ""},
+				{Name: "repo1", Workspace: "myws"},
+				{Name: "repo2", Workspace: "otherws"},
+				{Name: "nova", Workspace: ""},
+			},
+			expected: map[string]int{"(legacy)": 2, "myws": 1, "otherws": 1},
+		},
+		{
+			name: "multiple workspaces",
+			agents: []AgentStatus{
+				{Name: "repo1", Workspace: "ws1"},
+				{Name: "repo2", Workspace: "ws2"},
+				{Name: "repo3", Workspace: "ws1"},
+				{Name: "repo4", Workspace: "ws3"},
+			},
+			expected: map[string]int{"ws1": 2, "ws2": 1, "ws3": 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := groupAgentsByWorkspace(tt.agents)
+
+			// Check that we have the expected number of groups
+			if len(result) != len(tt.expected) {
+				t.Errorf("got %d groups, want %d", len(result), len(tt.expected))
+			}
+
+			// Check counts for each workspace
+			for ws, expectedCount := range tt.expected {
+				if len(result[ws]) != expectedCount {
+					t.Errorf("workspace %q: got %d agents, want %d", ws, len(result[ws]), expectedCount)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleWorkspaces_LegacyMode(t *testing.T) {
+	// No config file -> legacy mode
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	req := httptest.NewRequest("GET", "/api/workspaces", nil)
+	rr := httptest.NewRecorder()
+
+	handleWorkspaces(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp WorkspacesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if resp.Mode != "legacy" {
+		t.Errorf("Mode = %q, want %q", resp.Mode, "legacy")
+	}
+	if resp.Default != "" {
+		t.Errorf("Default = %q, want empty", resp.Default)
+	}
+	if len(resp.Workspaces) != 0 {
+		t.Errorf("len(Workspaces) = %d, want 0", len(resp.Workspaces))
+	}
+	if resp.Timestamp.IsZero() {
+		t.Error("Timestamp should not be zero")
+	}
+}
+
+func TestHandleWorkspaces_WorkspaceMode(t *testing.T) {
+	cfg := &LoomConfig{
+		DefaultWorkspace: "primary",
+		Workspaces: map[string]WorkspaceConfig{
+			"primary": {
+				Path: "/home/user/primary",
+				Repos: []RepoConfig{
+					{Name: "backend", Path: "/home/user/primary/backend"},
+					{Name: "frontend", Path: "/home/user/primary/frontend"},
+				},
+			},
+			"secondary": {
+				Path: "/home/user/secondary",
+				Repos: []RepoConfig{
+					{Name: "lib", Path: "/home/user/secondary/lib"},
+				},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	req := httptest.NewRequest("GET", "/api/workspaces", nil)
+	rr := httptest.NewRecorder()
+
+	handleWorkspaces(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp WorkspacesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if resp.Mode != "workspace" {
+		t.Errorf("Mode = %q, want %q", resp.Mode, "workspace")
+	}
+	if resp.Default != "primary" {
+		t.Errorf("Default = %q, want %q", resp.Default, "primary")
+	}
+	if len(resp.Workspaces) != 2 {
+		t.Errorf("len(Workspaces) = %d, want 2", len(resp.Workspaces))
+	}
+
+	// Verify primary workspace details
+	primary, ok := resp.Workspaces["primary"]
+	if !ok {
+		t.Fatal("missing 'primary' workspace in response")
+	}
+	if primary.Path != "/home/user/primary" {
+		t.Errorf("primary.Path = %q, want %q", primary.Path, "/home/user/primary")
+	}
+	if len(primary.Repos) != 2 {
+		t.Errorf("len(primary.Repos) = %d, want 2", len(primary.Repos))
+	}
+
+	// Verify secondary workspace details
+	secondary, ok := resp.Workspaces["secondary"]
+	if !ok {
+		t.Fatal("missing 'secondary' workspace in response")
+	}
+	if secondary.Path != "/home/user/secondary" {
+		t.Errorf("secondary.Path = %q, want %q", secondary.Path, "/home/user/secondary")
+	}
+	if len(secondary.Repos) != 1 {
+		t.Errorf("len(secondary.Repos) = %d, want 1", len(secondary.Repos))
+	}
+
+	if resp.Timestamp.IsZero() {
+		t.Error("Timestamp should not be zero")
+	}
+}
+
+func TestHandleAgents_WorkspaceMode(t *testing.T) {
+	cfg := &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  "/tmp/ws",
+				Repos: []RepoConfig{{Name: "repo1", Path: "/tmp/ws/repo1"}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	// Create mock data with agents that have workspace set
+	mockData := &MonitorData{
+		Timestamp: time.Now(),
+		Agents: []AgentStatus{
+			{Name: "repo1", Branch: "main", Status: "ready", Workspace: "myws"},
+			{Name: "repo2", Branch: "feature", Status: "working", Workspace: "myws"},
+			{Name: "legacy-agent", Branch: "dev", Status: "ready", Workspace: ""},
+		},
+	}
+
+	withMockData(t, mockData, func() {
+		req := httptest.NewRequest("GET", "/api/agents", nil)
+		rr := httptest.NewRecorder()
+
+		handleAgents(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
+		}
+
+		var resp AgentsResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		// Verify workspace info
+		if resp.Workspace.Mode != "workspace" {
+			t.Errorf("Workspace.Mode = %q, want %q", resp.Workspace.Mode, "workspace")
+		}
+		if resp.Workspace.Name != "myws" {
+			t.Errorf("Workspace.Name = %q, want %q", resp.Workspace.Name, "myws")
+		}
+
+		// Verify flat agents list
+		if len(resp.Agents) != 3 {
+			t.Errorf("len(Agents) = %d, want 3", len(resp.Agents))
+		}
+
+		// Verify ByWorkspace grouping is present
+		if resp.ByWorkspace == nil {
+			t.Fatal("ByWorkspace should not be nil in workspace mode")
+		}
+		if len(resp.ByWorkspace) != 2 {
+			t.Errorf("len(ByWorkspace) = %d, want 2 (myws and (legacy))", len(resp.ByWorkspace))
+		}
+
+		// Verify myws group
+		mywsAgents, ok := resp.ByWorkspace["myws"]
+		if !ok {
+			t.Fatal("missing 'myws' in ByWorkspace")
+		}
+		if len(mywsAgents) != 2 {
+			t.Errorf("len(ByWorkspace[myws]) = %d, want 2", len(mywsAgents))
+		}
+
+		// Verify legacy group
+		legacyAgents, ok := resp.ByWorkspace["(legacy)"]
+		if !ok {
+			t.Fatal("missing '(legacy)' in ByWorkspace")
+		}
+		if len(legacyAgents) != 1 {
+			t.Errorf("len(ByWorkspace[(legacy)]) = %d, want 1", len(legacyAgents))
+		}
+
+		if resp.Timestamp.IsZero() {
+			t.Error("Timestamp should not be zero")
+		}
+	})
+}
+
+func TestHandleAgents_LegacyMode_NoByWorkspace(t *testing.T) {
+	// No config file -> legacy mode
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	mockData := &MonitorData{
+		Timestamp: time.Now(),
+		Agents: []AgentStatus{
+			{Name: "falcon", Branch: "main", Status: "ready"},
+			{Name: "nova", Branch: "feature", Status: "working"},
+		},
+	}
+
+	withMockData(t, mockData, func() {
+		req := httptest.NewRequest("GET", "/api/agents", nil)
+		rr := httptest.NewRecorder()
+
+		handleAgents(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
+		}
+
+		var resp AgentsResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		// Verify legacy mode
+		if resp.Workspace.Mode != "legacy" {
+			t.Errorf("Workspace.Mode = %q, want %q", resp.Workspace.Mode, "legacy")
+		}
+
+		// Verify flat agents list is present
+		if len(resp.Agents) != 2 {
+			t.Errorf("len(Agents) = %d, want 2", len(resp.Agents))
+		}
+
+		// ByWorkspace should be nil in legacy mode
+		if resp.ByWorkspace != nil {
+			t.Errorf("ByWorkspace = %v, want nil in legacy mode", resp.ByWorkspace)
+		}
+	})
+}

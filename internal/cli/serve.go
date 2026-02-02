@@ -37,12 +37,13 @@ This server is designed to be consumed by web UIs (like beads-web-ui)
 that want to display agent status and task information.
 
 ENDPOINTS
-  GET /health       Health check
-  GET /api/status   Full dashboard data (agents, tasks, stats, sync)
-  GET /api/agents   Just agent status
-  GET /api/tasks    Task queue and lists
-  GET /api/stats    Statistics (open/closed/completion)
-  GET /api/sync     Sync status
+  GET /health          Health check
+  GET /api/status      Full dashboard data (agents, tasks, stats, sync)
+  GET /api/agents      Just agent status
+  GET /api/tasks       Task queue and lists
+  GET /api/stats       Statistics (open/closed/completion)
+  GET /api/sync        Sync status
+  GET /api/workspaces  Workspace configuration (workspace mode only)
 
 ENVIRONMENT VARIABLES
   LOOM_SERVER_PORT    Server port (default: 8081)
@@ -111,6 +112,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	mux.HandleFunc("GET /api/tasks", handleTasks)
 	mux.HandleFunc("GET /api/stats", handleStats)
 	mux.HandleFunc("GET /api/sync", handleSync)
+	mux.HandleFunc("GET /api/workspaces", handleWorkspaces)
 
 	// Wrap with CORS middleware
 	handler := corsMiddleware(serveCorsOrigin, mux)
@@ -206,16 +208,39 @@ func corsMiddleware(corsOrigin string, next http.Handler) http.Handler {
 
 // Response types for JSON API
 
+// WorkspaceInfo represents workspace metadata for API responses.
+type WorkspaceInfo struct {
+	Mode       string   `json:"mode"`                 // "workspace" or "legacy"
+	Name       string   `json:"name,omitempty"`       // workspace name (workspace mode only)
+	Workspaces []string `json:"workspaces,omitempty"` // all workspace names (workspace mode only)
+}
+
+// WorkspacesResponse lists all configured workspaces.
+type WorkspacesResponse struct {
+	Mode       string                     `json:"mode"`       // "workspace" or "legacy"
+	Default    string                     `json:"default"`    // default workspace name
+	Workspaces map[string]WorkspaceDetail `json:"workspaces"` // workspace details
+	Timestamp  time.Time                  `json:"timestamp"`
+}
+
+// WorkspaceDetail contains details about a single workspace.
+type WorkspaceDetail struct {
+	Path  string   `json:"path"`  // workspace root path
+	Repos []string `json:"repos"` // repo names in this workspace
+}
+
 // HealthResponse is the health check response.
 type HealthResponse struct {
 	Status    string    `json:"status"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// AgentsResponse wraps the agents list.
+// AgentsResponse wraps the agents list with optional workspace grouping.
 type AgentsResponse struct {
-	Agents    []AgentStatus `json:"agents"`
-	Timestamp time.Time     `json:"timestamp"`
+	Workspace   WorkspaceInfo              `json:"workspace"`               // workspace mode info
+	Agents      []AgentStatus              `json:"agents"`                  // flat list (existing)
+	ByWorkspace map[string][]AgentStatus   `json:"by_workspace,omitempty"` // grouped by workspace
+	Timestamp   time.Time                  `json:"timestamp"`
 }
 
 // TasksResponse wraps task information.
@@ -243,6 +268,7 @@ type SyncResponse struct {
 
 // StatusResponse is the full status (like monitor dashboard).
 type StatusResponse struct {
+	Workspace      WorkspaceInfo       `json:"workspace"`
 	Agents         []AgentStatus       `json:"agents"`
 	Tasks          TaskSummary         `json:"tasks"`
 	InProgressList []TaskInfo          `json:"in_progress_list"`
@@ -264,6 +290,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
 	writeJSON(w, StatusResponse{
+		Workspace:      getWorkspaceInfo(),
 		Agents:         data.Agents,
 		Tasks:          data.Tasks,
 		InProgressList: data.InProgressTasks,
@@ -276,10 +303,20 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 
 func handleAgents(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
-	writeJSON(w, AgentsResponse{
+	wsInfo := getWorkspaceInfo()
+
+	response := AgentsResponse{
+		Workspace: wsInfo,
 		Agents:    data.Agents,
 		Timestamp: data.Timestamp,
-	})
+	}
+
+	// Group agents by workspace if in workspace mode
+	if wsInfo.Mode == "workspace" {
+		response.ByWorkspace = groupAgentsByWorkspace(data.Agents)
+	}
+
+	writeJSON(w, response)
 }
 
 func handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -317,4 +354,65 @@ func writeJSON(w http.ResponseWriter, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Printf("Failed to encode JSON response: %v", err)
 	}
+}
+
+// getWorkspaceInfo returns workspace metadata for API responses.
+func getWorkspaceInfo() WorkspaceInfo {
+	resolver, err := NewResolver()
+	if err != nil || resolver.Mode() != ModeWorkspace {
+		return WorkspaceInfo{Mode: "legacy"}
+	}
+	return WorkspaceInfo{
+		Mode:       "workspace",
+		Name:       resolver.WorkspaceName(),
+		Workspaces: resolver.WorkspaceNames(),
+	}
+}
+
+// groupAgentsByWorkspace groups agents by their workspace field.
+func groupAgentsByWorkspace(agents []AgentStatus) map[string][]AgentStatus {
+	groups := make(map[string][]AgentStatus)
+	for _, agent := range agents {
+		ws := agent.Workspace
+		if ws == "" {
+			ws = "(legacy)"
+		}
+		groups[ws] = append(groups[ws], agent)
+	}
+	return groups
+}
+
+func handleWorkspaces(w http.ResponseWriter, r *http.Request) {
+	response := WorkspacesResponse{
+		Workspaces: make(map[string]WorkspaceDetail),
+		Timestamp:  time.Now(),
+	}
+
+	resolver, err := NewResolver()
+	if err != nil || resolver.Mode() != ModeWorkspace {
+		response.Mode = "legacy"
+		writeJSON(w, response)
+		return
+	}
+
+	response.Mode = "workspace"
+	cfg, err := LoadConfig()
+	if err != nil || cfg == nil {
+		writeJSON(w, response)
+		return
+	}
+
+	response.Default = cfg.DefaultWorkspace
+	for name, ws := range cfg.Workspaces {
+		repos := make([]string, len(ws.Repos))
+		for i, repo := range ws.Repos {
+			repos[i] = repo.Name
+		}
+		response.Workspaces[name] = WorkspaceDetail{
+			Path:  ws.Path,
+			Repos: repos,
+		}
+	}
+
+	writeJSON(w, response)
 }

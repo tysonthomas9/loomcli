@@ -683,3 +683,198 @@ func TestCheckPrerequisites_InsideWorktree(t *testing.T) {
 		t.Error("checkPrerequisites() should warn when inside a worktree")
 	}
 }
+
+// --- runInitWorkspace tests ---
+
+func TestRunInitWorkspace_NoConfig(t *testing.T) {
+	// Set up empty config directory (no config.yaml)
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	origYes := initYes
+	origWorkspace := initWorkspace
+	initYes = true
+	initWorkspace = "myws"
+	defer func() {
+		initYes = origYes
+		initWorkspace = origWorkspace
+	}()
+
+	// Verify LoadConfig returns nil for empty config dir
+	// This is the condition that would cause runInitWorkspace to print an error and exit
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error from LoadConfig: %v", err)
+	}
+	if cfg != nil {
+		t.Error("expected nil config when config.yaml doesn't exist")
+	}
+
+	// The test verifies the pre-condition that would cause the error:
+	// When config is nil, runInitWorkspace should print:
+	//   "No loom config found. Create a workspace first with: loom workspace create <name> --repos /path/to/repo"
+	// We can't easily test os.Exit without subprocess, but we verify the logic path
+}
+
+func TestRunInitWorkspace_WorkspaceNotFound(t *testing.T) {
+	// Set up config with workspaces, but not the one we're looking for
+	cfg := &LoomConfig{
+		DefaultWorkspace: "existing",
+		Workspaces: map[string]WorkspaceConfig{
+			"existing": {
+				Path:  "/tmp/existing",
+				Repos: []RepoConfig{{Name: "repo1", Path: "/tmp/existing/repo1"}},
+			},
+			"another": {
+				Path:  "/tmp/another",
+				Repos: []RepoConfig{{Name: "repo2", Path: "/tmp/another/repo2"}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	origYes := initYes
+	origWorkspace := initWorkspace
+	initYes = true
+	initWorkspace = "nonexistent"
+	defer func() {
+		initYes = origYes
+		initWorkspace = origWorkspace
+	}()
+
+	// Verify the workspace doesn't exist in config
+	loadedCfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	if loadedCfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+
+	_, exists := loadedCfg.Workspaces[initWorkspace]
+	if exists {
+		t.Error("expected workspace 'nonexistent' to not exist in config")
+	}
+
+	// Verify available workspaces would be shown in error message
+	available := make([]string, 0, len(loadedCfg.Workspaces))
+	for name := range loadedCfg.Workspaces {
+		available = append(available, name)
+	}
+	if len(available) != 2 {
+		t.Errorf("expected 2 available workspaces, got %d", len(available))
+	}
+}
+
+func TestRunInitWorkspace_WorkspaceExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "repo1")
+	createGitRepo(t, repoPath)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  tmpDir,
+				Repos: []RepoConfig{{Name: "repo1", Path: repoPath}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	// Verify workspace exists and can be loaded
+	loadedCfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+	if loadedCfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+
+	ws, exists := loadedCfg.Workspaces["myws"]
+	if !exists {
+		t.Fatal("expected workspace 'myws' to exist in config")
+	}
+	if ws.Path != tmpDir {
+		t.Errorf("workspace path = %q, want %q", ws.Path, tmpDir)
+	}
+	if len(ws.Repos) != 1 {
+		t.Errorf("len(ws.Repos) = %d, want 1", len(ws.Repos))
+	}
+	if ws.Repos[0].Name != "repo1" {
+		t.Errorf("ws.Repos[0].Name = %q, want %q", ws.Repos[0].Name, "repo1")
+	}
+}
+
+func TestShowWorkspaceSummary(t *testing.T) {
+	ws := WorkspaceConfig{
+		Path: "/home/user/myworkspace",
+		Repos: []RepoConfig{
+			{Name: "backend", Path: "/home/user/myworkspace/backend"},
+			{Name: "frontend", Path: "/home/user/myworkspace/frontend"},
+		},
+	}
+
+	// Capture stdout
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	showWorkspaceSummary("myws", ws)
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	// Verify key elements are printed
+	if !strings.Contains(output, "Workspace ready!") {
+		t.Error("showWorkspaceSummary should print 'Workspace ready!'")
+	}
+	if !strings.Contains(output, "/home/user/myworkspace") {
+		t.Error("showWorkspaceSummary should include workspace path")
+	}
+	if !strings.Contains(output, ".beads/") {
+		t.Error("showWorkspaceSummary should mention .beads/ directory")
+	}
+	if !strings.Contains(output, "loom agent backend") {
+		t.Error("showWorkspaceSummary should suggest 'loom agent' with first repo name")
+	}
+	if !strings.Contains(output, "loom monitor") {
+		t.Error("showWorkspaceSummary should suggest 'loom monitor'")
+	}
+}
+
+func TestShowWorkspaceSummary_NoRepos(t *testing.T) {
+	ws := WorkspaceConfig{
+		Path:  "/home/user/emptyws",
+		Repos: []RepoConfig{},
+	}
+
+	// Capture stdout
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	showWorkspaceSummary("emptyws", ws)
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	// Verify basic elements are printed even with no repos
+	if !strings.Contains(output, "Workspace ready!") {
+		t.Error("showWorkspaceSummary should print 'Workspace ready!'")
+	}
+	if !strings.Contains(output, "/home/user/emptyws") {
+		t.Error("showWorkspaceSummary should include workspace path")
+	}
+	// With no repos, the "loom agent" suggestion line should not include a repo name
+	// (the function only prints that line if len(ws.Repos) > 0)
+}
