@@ -23,10 +23,10 @@ var planCmd = &cobra.Command{
 	Long: `Run a Claude planning agent in the specified worktree or workspace.
 
 The planning agent will:
-  1. Pick the highest priority task (skipping [Need Review] tasks)
+  1. Pick the highest priority task (or one with needs-revision label)
   2. Research the codebase and create a detailed plan
   3. Save the plan to the task's --design field
-  4. Mark the task as [Need Review] for human approval
+  4. Set status to 'review' for human approval
   5. Exit after completing ONE task (unless --auto is enabled)
 
 Arguments:
@@ -145,7 +145,7 @@ func runPlan(cmd *cobra.Command, args []string) {
 	}
 	if !available {
 		fmt.Println("No tasks available for planning.")
-		fmt.Println("Tasks must be: open status, no design, not [Need Review], not epics")
+		fmt.Println("Tasks must be: open status, no design (or has needs-revision label), not epics")
 		return
 	}
 

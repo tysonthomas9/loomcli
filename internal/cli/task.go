@@ -23,7 +23,7 @@ var taskCmd = &cobra.Command{
 	Long: `Run a Claude implementation agent in the specified worktree or workspace.
 
 The implementation agent will:
-  1. Pick the highest priority ready task (skipping [Need Review] tasks)
+  1. Pick the highest priority ready task (skipping tasks needing revision)
   2. Follow the --design plan if present, otherwise create a local plan
   3. Implement, test, and review the code
   4. Commit and push changes
@@ -145,7 +145,7 @@ func runTask(cmd *cobra.Command, args []string) {
 	}
 	if !available {
 		fmt.Println("No tasks available for implementation.")
-		fmt.Println("Tasks must be: open status, has design, not [Need Review], not epics")
+		fmt.Println("Tasks must be: open status, has design, no needs-revision label, not epics")
 		return
 	}
 

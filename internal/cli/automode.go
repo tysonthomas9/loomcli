@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -108,7 +109,7 @@ func interruptibleSleep(d time.Duration, shutdown <-chan struct{}) bool {
 }
 
 // HasAvailablePlanningTasks checks if there are tasks that need planning
-// (ready tasks without a design, excluding [Need Review] and epics)
+// (ready tasks without a design OR with needs-revision label, excluding epics)
 func HasAvailablePlanningTasks() (bool, error) {
 	result := execCommand(GetBeadsDir(), "bd", "ready", "--json")
 	if result.Err != nil {
@@ -121,10 +122,6 @@ func HasAvailablePlanningTasks() (bool, error) {
 	}
 
 	for _, issue := range issues {
-		// Skip [Need Review] tasks - they're waiting for human review
-		if strings.Contains(issue.Title, "[Need Review]") {
-			continue
-		}
 		// Skip in_progress tasks - another agent is working on them
 		if issue.Status == "in_progress" {
 			continue
@@ -133,8 +130,11 @@ func HasAvailablePlanningTasks() (bool, error) {
 		if issue.IssueType == "epic" {
 			continue
 		}
-		// Task needs planning if it has no design
-		if issue.Design == "" {
+		// Task needs planning if:
+		// 1. No design (new task), OR
+		// 2. Has 'needs-revision' label (revision task)
+		hasRevisionLabel := slices.Contains(issue.Labels, "needs-revision")
+		if issue.Design == "" || hasRevisionLabel {
 			return true, nil
 		}
 	}
@@ -143,7 +143,7 @@ func HasAvailablePlanningTasks() (bool, error) {
 }
 
 // HasAvailableImplementationTasks checks if there are tasks ready for implementation
-// (ready tasks WITH an approved design, excluding [Need Review] and epics)
+// (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
 func HasAvailableImplementationTasks() (bool, error) {
 	result := execCommand(GetBeadsDir(), "bd", "ready", "--json")
 	if result.Err != nil {
@@ -156,10 +156,6 @@ func HasAvailableImplementationTasks() (bool, error) {
 	}
 
 	for _, issue := range issues {
-		// Skip [Need Review] tasks - they're waiting for human review
-		if strings.Contains(issue.Title, "[Need Review]") {
-			continue
-		}
 		// Skip in_progress tasks - another agent is working on them
 		if issue.Status == "in_progress" {
 			continue
@@ -168,8 +164,9 @@ func HasAvailableImplementationTasks() (bool, error) {
 		if issue.IssueType == "epic" {
 			continue
 		}
-		// Task is ready for implementation if it HAS a design
-		if issue.Design != "" {
+		// Task ready for implementation if it HAS a design AND no revision label
+		hasRevisionLabel := slices.Contains(issue.Labels, "needs-revision")
+		if issue.Design != "" && !hasRevisionLabel {
 			return true, nil
 		}
 	}
@@ -191,9 +188,6 @@ func HasAnyAvailableTasks() (bool, error) {
 	}
 
 	for _, issue := range issues {
-		if strings.Contains(issue.Title, "[Need Review]") {
-			continue
-		}
 		if issue.Status == "in_progress" {
 			continue
 		}

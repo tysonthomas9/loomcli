@@ -38,7 +38,7 @@ GETTING STARTED
      bd create --title="Add login feature" --type=feature --priority=2
 
   5. Run agents:
-     loom plan falcon    # Creates design, marks [Need Review]
+     loom plan falcon    # Creates design, sets status=review
      loom lead           # Review and approve plans
      loom task falcon    # Implements approved design
 
@@ -51,7 +51,7 @@ KEY CONCEPTS
                - 'task' agent: implements approved designs
 
   Beads        Issue tracker (bd CLI). Tasks flow through states:
-               open → in_progress → [Need Review] → open → closed
+               open → in_progress → review → open → closed
 
   Auto Mode    --auto flag runs agents continuously, processing multiple
                tasks until stopped (Ctrl+C) or idle timeout.

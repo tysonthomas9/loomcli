@@ -33,11 +33,11 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "skip Need Review tasks",
+			name: "include tasks with needs-revision label (revision task)",
 			bdOutput: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "[Need Review] Add feature", Status: "open", Design: ""},
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "existing design", Labels: []string{"needs-revision"}},
 			}),
-			want: false,
+			want: true,
 		},
 		{
 			name: "skip in_progress tasks",
@@ -61,7 +61,7 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 		{
 			name: "mixed - one valid task",
 			bdOutput: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "[Need Review] Skip me", Status: "open", Design: ""},
+				{ID: "T-1", Title: "Has design and needs-revision", Status: "open", Design: "plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Work on me", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Has design", Status: "open", Design: "Already planned"},
 			}),
@@ -114,9 +114,9 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "skip Need Review tasks even with design",
+			name: "skip tasks with needs-revision label even with design",
 			bdOutput: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "[Need Review] Add feature", Status: "open", Design: "Has design"},
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
 			}),
 			want: false,
 		},
@@ -142,7 +142,7 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 		{
 			name: "mixed - one valid task with design",
 			bdOutput: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "[Need Review] Skip me", Status: "open", Design: "Has design"},
+				{ID: "T-1", Title: "Has needs-revision label", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "No design yet", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Ready to implement", Status: "open", Design: "Detailed plan"},
 			}),
@@ -2064,11 +2064,11 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "skip Need Review tasks",
+			name: "task with needs-revision label - available (for HasAny)",
 			bdOutput: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "[Need Review] Add feature", Status: "open", Design: ""},
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "", Labels: []string{"needs-revision"}},
 			}),
-			want: false,
+			want: true,
 		},
 		{
 			name: "skip in_progress tasks",
@@ -2090,9 +2090,9 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 			want:     false,
 		},
 		{
-			name: "mixed - review + epic + valid task",
+			name: "mixed - epic + valid task",
 			bdOutput: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "[Need Review] Skip me", Status: "open", Design: ""},
+				{ID: "T-1", Title: "Valid task with revision", Status: "open", Design: "plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
 				{ID: "T-3", Title: "Valid task", Status: "open", Design: ""},
 			}),
