@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,12 +75,13 @@ type MonitorData struct {
 
 // AgentStatus represents a single agent/worktree status
 type AgentStatus struct {
-	Name      string `json:"name"`
-	Branch    string `json:"branch"`
-	Status    string `json:"status"`    // "ready", "3 changes", "running (plan, 5m ago)"
-	Ahead     int    `json:"ahead"`     // commits ahead of integration branch
-	Behind    int    `json:"behind"`    // commits behind integration branch
-	Workspace string `json:"workspace"` // workspace name (empty in legacy mode)
+	Name          string `json:"name"`
+	Branch        string `json:"branch"`
+	Status        string `json:"status"`                    // "ready", "3 changes", "running (plan, 5m ago)"
+	Ahead         int    `json:"ahead"`                     // commits ahead of integration branch
+	Behind        int    `json:"behind"`                    // commits behind integration branch
+	Workspace     string `json:"workspace"`                 // workspace name (empty in legacy mode)
+	DaemonManaged bool   `json:"daemon_managed,omitempty"`  // true if under daemon supervision
 }
 
 // TaskInfo represents a task with basic info
@@ -136,6 +138,49 @@ type BdStats struct {
 		OpenIssues   int `json:"open_issues"`
 		ClosedIssues int `json:"closed_issues"`
 	} `json:"summary"`
+}
+
+// DaemonAgentState represents the daemon-agents.json file format.
+// This matches the DaemonState written by daemon_cmd.go.
+type DaemonAgentState struct {
+	PID    int                     `json:"pid"`
+	Agents []DaemonAgentStateEntry `json:"agents"`
+}
+
+// DaemonAgentStateEntry represents a single agent in daemon-agents.json
+type DaemonAgentStateEntry struct {
+	Worktree string `json:"worktree"`
+	Status   string `json:"status"`
+}
+
+// loadDaemonManagedAgents reads the daemon state file and returns a set of
+// worktree names that are under daemon supervision.
+// Returns nil if the file doesn't exist, can't be parsed, or daemon isn't running.
+// The state file is expected at ~/.loom/daemon-agents.json (global location).
+func loadDaemonManagedAgents() map[string]bool {
+	daemonStatePath := filepath.Join(GetConfigDir(), "daemon-agents.json")
+	data, err := os.ReadFile(daemonStatePath)
+	if err != nil {
+		return nil // File doesn't exist or can't be read
+	}
+
+	var state DaemonAgentState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil // Invalid JSON
+	}
+
+	// Check if daemon process is still running (PID must be valid and process alive)
+	if state.PID <= 0 || !IsProcessRunning(state.PID) {
+		return nil // Invalid PID or daemon died, don't show stale [D] markers
+	}
+
+	result := make(map[string]bool)
+	for _, agent := range state.Agents {
+		if agent.Worktree != "" {
+			result[agent.Worktree] = true
+		}
+	}
+	return result
 }
 
 func runMonitor(cmd *cobra.Command, args []string) {
@@ -249,6 +294,9 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 		return nil, nil
 	}
 
+	// Load daemon-managed agents (if any)
+	daemonManaged := loadDaemonManagedAgents()
+
 	var agents []AgentStatus
 	taskIDToAgents := make(map[string][]string) // Track which agents claim which tasks
 
@@ -257,9 +305,10 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 
 	for _, wt := range worktrees {
 		agent := AgentStatus{
-			Name:      wt.Name,
-			Branch:    wt.Branch,
-			Workspace: wt.Workspace,
+			Name:          wt.Name,
+			Branch:        wt.Branch,
+			Workspace:     wt.Workspace,
+			DaemonManaged: daemonManaged[wt.Name],
 		}
 
 		// Check for running agent (lock status)
@@ -720,6 +769,12 @@ func renderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 		statusIcon = "●"
 	}
 
+	// Build agent name with [D] prefix if daemon-managed
+	displayName := agent.Name
+	if agent.DaemonManaged {
+		displayName = "[D] " + agent.Name
+	}
+
 	// Build sync indicator (↑ahead ↓behind)
 	syncIndicator := ""
 	if agent.Ahead > 0 {
@@ -732,8 +787,8 @@ func renderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 		syncIndicator += fmt.Sprintf("↓%d", agent.Behind)
 	}
 
-	// Format left part with fixed widths
-	leftPart := fmt.Sprintf("%s%-10s %-18s %s %-24s", indent, agent.Name, agent.Branch, statusIcon, agent.Status)
+	// Format left part with fixed widths (14 chars for name to accommodate [D] prefix)
+	leftPart := fmt.Sprintf("%s%-14s %-18s %s %-24s", indent, displayName, agent.Branch, statusIcon, agent.Status)
 
 	// Right-align sync indicator (box content width is 66)
 	contentWidth := 66

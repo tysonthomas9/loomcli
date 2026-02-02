@@ -2342,3 +2342,366 @@ func TestRenderAgentLine(t *testing.T) {
 		})
 	}
 }
+
+// ===========================================================================
+// Daemon-Managed Agents Tests
+// ===========================================================================
+
+func TestLoadDaemonManagedAgents_NoFile(t *testing.T) {
+	// Set LOOM_CONFIG_DIR to a temp directory that doesn't contain daemon-agents.json
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	result := loadDaemonManagedAgents()
+
+	// When file doesn't exist, should return nil
+	if result != nil {
+		t.Errorf("loadDaemonManagedAgents() = %v, want nil when file doesn't exist", result)
+	}
+}
+
+func TestLoadDaemonManagedAgents_ValidFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	// Create valid daemon-agents.json with current PID (so it passes the "is running" check)
+	state := DaemonAgentState{
+		PID: os.Getpid(), // Use current process PID so IsProcessRunning returns true
+		Agents: []DaemonAgentStateEntry{
+			{Worktree: "falcon", Status: "running"},
+			{Worktree: "nova", Status: "idle"},
+			{Worktree: "spark", Status: "running"},
+		},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("failed to marshal state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+		t.Fatalf("failed to write daemon-agents.json: %v", err)
+	}
+
+	result := loadDaemonManagedAgents()
+
+	// Should return map with all three worktrees
+	if result == nil {
+		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
+	}
+	if len(result) != 3 {
+		t.Errorf("len(result) = %d, want 3", len(result))
+	}
+	if !result["falcon"] {
+		t.Error("result[falcon] = false, want true")
+	}
+	if !result["nova"] {
+		t.Error("result[nova] = false, want true")
+	}
+	if !result["spark"] {
+		t.Error("result[spark] = false, want true")
+	}
+}
+
+func TestLoadDaemonManagedAgents_InvalidJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	// Create file with invalid JSON
+	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), []byte("not valid json"), 0644); err != nil {
+		t.Fatalf("failed to write daemon-agents.json: %v", err)
+	}
+
+	result := loadDaemonManagedAgents()
+
+	// Should return nil on invalid JSON
+	if result != nil {
+		t.Errorf("loadDaemonManagedAgents() = %v, want nil for invalid JSON", result)
+	}
+}
+
+func TestLoadDaemonManagedAgents_StaleDaemon(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	// Create daemon-agents.json with a PID that doesn't exist (very high PID unlikely to exist)
+	// Use a PID that's almost certainly not running
+	state := DaemonAgentState{
+		PID: 2147483647, // Max int32, extremely unlikely to be a real process
+		Agents: []DaemonAgentStateEntry{
+			{Worktree: "falcon", Status: "running"},
+		},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("failed to marshal state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+		t.Fatalf("failed to write daemon-agents.json: %v", err)
+	}
+
+	result := loadDaemonManagedAgents()
+
+	// Should return nil when daemon process is not running (stale state file)
+	if result != nil {
+		t.Errorf("loadDaemonManagedAgents() = %v, want nil for stale daemon (non-existent PID)", result)
+	}
+}
+
+func TestLoadDaemonManagedAgents_EmptyAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	// Create valid daemon-agents.json with current PID but empty agents array
+	state := DaemonAgentState{
+		PID:    os.Getpid(),
+		Agents: []DaemonAgentStateEntry{}, // empty
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("failed to marshal state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+		t.Fatalf("failed to write daemon-agents.json: %v", err)
+	}
+
+	result := loadDaemonManagedAgents()
+
+	// Should return empty map (not nil) when agents array is empty but file is valid
+	if result == nil {
+		t.Fatal("loadDaemonManagedAgents() returned nil, want empty map for empty agents")
+	}
+	if len(result) != 0 {
+		t.Errorf("len(result) = %d, want 0", len(result))
+	}
+}
+
+func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	// Create daemon-agents.json with some empty worktree names
+	state := DaemonAgentState{
+		PID: os.Getpid(),
+		Agents: []DaemonAgentStateEntry{
+			{Worktree: "falcon", Status: "running"},
+			{Worktree: "", Status: "running"},      // empty worktree name
+			{Worktree: "nova", Status: "idle"},
+		},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("failed to marshal state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+		t.Fatalf("failed to write daemon-agents.json: %v", err)
+	}
+
+	result := loadDaemonManagedAgents()
+
+	// Should only include non-empty worktree names
+	if result == nil {
+		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
+	}
+	if len(result) != 2 {
+		t.Errorf("len(result) = %d, want 2 (should skip empty worktree name)", len(result))
+	}
+	if !result["falcon"] {
+		t.Error("result[falcon] = false, want true")
+	}
+	if !result["nova"] {
+		t.Error("result[nova] = false, want true")
+	}
+	if result[""] {
+		t.Error("result[\"\"] = true, want false (empty worktree name should be skipped)")
+	}
+}
+
+func TestRenderAgentLine_WithDaemonMarker(t *testing.T) {
+	agent := AgentStatus{
+		Name:          "falcon",
+		Branch:        "falcon",
+		Status:        "ready",
+		Ahead:         0,
+		Behind:        0,
+		DaemonManaged: true,
+	}
+
+	var sb strings.Builder
+	renderAgentLine(&sb, agent, "  ")
+	output := sb.String()
+
+	// Verify [D] prefix is present
+	if !strings.Contains(output, "[D]") {
+		t.Errorf("output should contain '[D]' marker for daemon-managed agent, got:\n%s", output)
+	}
+	if !strings.Contains(output, "[D] falcon") {
+		t.Errorf("output should contain '[D] falcon', got:\n%s", output)
+	}
+}
+
+func TestRenderAgentLine_WithoutDaemonMarker(t *testing.T) {
+	agent := AgentStatus{
+		Name:          "falcon",
+		Branch:        "falcon",
+		Status:        "ready",
+		Ahead:         0,
+		Behind:        0,
+		DaemonManaged: false,
+	}
+
+	var sb strings.Builder
+	renderAgentLine(&sb, agent, "  ")
+	output := sb.String()
+
+	// Verify [D] prefix is NOT present
+	if strings.Contains(output, "[D]") {
+		t.Errorf("output should NOT contain '[D]' marker for non-daemon agent, got:\n%s", output)
+	}
+	// Agent name should still be present
+	if !strings.Contains(output, "falcon") {
+		t.Errorf("output should contain agent name 'falcon', got:\n%s", output)
+	}
+}
+
+func TestRenderAgentLine_DaemonManagedWithSyncIndicators(t *testing.T) {
+	agent := AgentStatus{
+		Name:          "nova",
+		Branch:        "nova",
+		Status:        "working: T-1 (5m)",
+		Ahead:         3,
+		Behind:        2,
+		DaemonManaged: true,
+	}
+
+	var sb strings.Builder
+	renderAgentLine(&sb, agent, "  ")
+	output := sb.String()
+
+	// Verify all elements are present
+	if !strings.Contains(output, "[D]") {
+		t.Error("missing [D] marker")
+	}
+	if !strings.Contains(output, "nova") {
+		t.Error("missing agent name")
+	}
+	if !strings.Contains(output, "working:") {
+		t.Error("missing status")
+	}
+	if !strings.Contains(output, "↑3") {
+		t.Error("missing ahead indicator")
+	}
+	if !strings.Contains(output, "↓2") {
+		t.Error("missing behind indicator")
+	}
+}
+
+func TestAgentStatusDaemonManagedField(t *testing.T) {
+	// Test JSON serialization with DaemonManaged field
+	agent := AgentStatus{
+		Name:          "falcon",
+		Branch:        "falcon",
+		Status:        "ready",
+		DaemonManaged: true,
+	}
+
+	data, err := json.Marshal(agent)
+	if err != nil {
+		t.Fatalf("failed to marshal AgentStatus: %v", err)
+	}
+
+	jsonStr := string(data)
+
+	// Verify daemon_managed field is present when true
+	if !strings.Contains(jsonStr, `"daemon_managed":true`) {
+		t.Errorf("expected daemon_managed:true in JSON, got: %s", jsonStr)
+	}
+
+	// Test that false value is omitted (omitempty)
+	agentNotManaged := AgentStatus{
+		Name:          "nova",
+		Branch:        "nova",
+		Status:        "ready",
+		DaemonManaged: false,
+	}
+
+	data, err = json.Marshal(agentNotManaged)
+	if err != nil {
+		t.Fatalf("failed to marshal AgentStatus: %v", err)
+	}
+
+	jsonStr = string(data)
+
+	// With omitempty, daemon_managed:false should be omitted
+	if strings.Contains(jsonStr, "daemon_managed") {
+		t.Errorf("daemon_managed should be omitted when false (omitempty), got: %s", jsonStr)
+	}
+}
+
+func TestDaemonAgentStateStructs(t *testing.T) {
+	// Test that the structs correctly parse daemon-agents.json format
+	jsonData := `{
+		"pid": 12345,
+		"agents": [
+			{"worktree": "falcon", "status": "running"},
+			{"worktree": "nova", "status": "idle"}
+		]
+	}`
+
+	var state DaemonAgentState
+	if err := json.Unmarshal([]byte(jsonData), &state); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if state.PID != 12345 {
+		t.Errorf("PID = %d, want 12345", state.PID)
+	}
+	if len(state.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(state.Agents))
+	}
+	if state.Agents[0].Worktree != "falcon" {
+		t.Errorf("Agents[0].Worktree = %q, want %q", state.Agents[0].Worktree, "falcon")
+	}
+	if state.Agents[0].Status != "running" {
+		t.Errorf("Agents[0].Status = %q, want %q", state.Agents[0].Status, "running")
+	}
+	if state.Agents[1].Worktree != "nova" {
+		t.Errorf("Agents[1].Worktree = %q, want %q", state.Agents[1].Worktree, "nova")
+	}
+	if state.Agents[1].Status != "idle" {
+		t.Errorf("Agents[1].Status = %q, want %q", state.Agents[1].Status, "idle")
+	}
+}
+
+func TestRenderDashboardWithDaemonManagedAgents(t *testing.T) {
+	data := &MonitorData{
+		Timestamp: fixedTime(),
+		Agents: []AgentStatus{
+			{Name: "falcon", Branch: "falcon", Status: "working: T-1 (2m)", DaemonManaged: true},
+			{Name: "nova", Branch: "nova", Status: "ready", DaemonManaged: false},
+			{Name: "spark", Branch: "spark", Status: "3 changes", DaemonManaged: true},
+		},
+		Tasks:          TaskSummary{},
+		AgentTasks:     make(map[string]TaskInfo),
+		TaskConflicts:  make(map[string][]string),
+		SyncStatus:     SyncInfo{DBSynced: true},
+		Stats:          MonitorStats{},
+	}
+
+	output := renderDashboard(data)
+
+	// Verify [D] markers appear for daemon-managed agents
+	// falcon and spark should have [D], nova should not
+	if !strings.Contains(output, "[D] falcon") {
+		t.Error("expected '[D] falcon' in output for daemon-managed agent")
+	}
+	if !strings.Contains(output, "[D] spark") {
+		t.Error("expected '[D] spark' in output for daemon-managed agent")
+	}
+	// nova should NOT have [D] prefix
+	if strings.Contains(output, "[D] nova") {
+		t.Error("nova should NOT have [D] prefix (not daemon-managed)")
+	}
+	// But nova should still appear
+	if !strings.Contains(output, "nova") {
+		t.Error("expected 'nova' in output")
+	}
+}
