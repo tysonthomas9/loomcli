@@ -370,7 +370,7 @@ func GetLockStatus(worktreePath string) string {
 			if info.Command == "plan" {
 				return fmt.Sprintf("review: %s (%s)", info.TaskID, duration)
 			}
-			// Implementation agents show "working" even on [Need Review] tasks
+			// Implementation agents show "working" even on review status tasks
 			return fmt.Sprintf("working: %s (%s)", info.TaskID, duration)
 		default:
 			// Use "planning" or "working" based on command
@@ -395,13 +395,12 @@ func getTaskStatus(taskID string) string {
 		return ""
 	}
 	var issues []struct {
-		Title  string `json:"title"`
 		Status string `json:"status"`
 	}
 	if json.Unmarshal([]byte(result.Stdout), &issues) != nil || len(issues) == 0 {
 		return ""
 	}
-	if strings.Contains(issues[0].Title, "[Need Review]") {
+	if issues[0].Status == "review" {
 		return "needs_review"
 	}
 	return issues[0].Status

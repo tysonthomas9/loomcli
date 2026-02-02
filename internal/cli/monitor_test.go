@@ -930,10 +930,10 @@ func TestCollectTaskStatus(t *testing.T) {
 			wantNeedsPlanningLen: 1,
 		},
 		{
-			name: "tasks with [Need Review] go to NeedReview",
+			name: "tasks with review status go to NeedReview",
 			readyOutput: "[]",
 			needReviewOutput: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "[Need Review] Review this task", Status: "open"},
+				{ID: "T-1", Title: "Review this task", Status: "review"},
 			}),
 			inProgressOutput:   "[]",
 			blockedOutput:      "[]",
@@ -977,16 +977,18 @@ func TestCollectTaskStatus(t *testing.T) {
 			wantNeedsPlanningLen: 1,
 		},
 		{
-			name: "[Need Review] tasks skipped in ready output",
+			name: "needs-revision label tasks go to NeedsPlanning",
 			readyOutput: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "[Need Review] Skip me", Status: "open", Design: ""},
-				{ID: "T-2", Title: "Regular task", Status: "open", Design: ""},
+				{ID: "T-1", Title: "Task needing revision", Status: "open", Design: "existing plan", Labels: []string{"needs-revision"}},
+				{ID: "T-2", Title: "Regular task with design", Status: "open", Design: "plan"},
 			}),
-			inProgressOutput:     "[]",
-			needReviewOutput:     "[]",
-			blockedOutput:        "[]",
-			wantNeedsPlanning:    1, // Only the regular task
-			wantNeedsPlanningLen: 1,
+			inProgressOutput:        "[]",
+			needReviewOutput:        "[]",
+			blockedOutput:           "[]",
+			wantNeedsPlanning:       1, // Task with needs-revision label
+			wantNeedsPlanningLen:    1,
+			wantReadyToImplement:    1, // Regular task with design
+			wantReadyToImplementLen: 1,
 		},
 		{
 			name: "in_progress tasks skipped in ready output",
@@ -1071,7 +1073,7 @@ func TestCollectTaskStatus(t *testing.T) {
 				if len(args) > 1 && args[0] == "list" && args[1] == "--status=in_progress" {
 					return CommandResult{Stdout: tt.inProgressOutput}
 				}
-				if len(args) > 1 && args[0] == "list" && args[1] == "--status=open" {
+				if len(args) > 1 && args[0] == "list" && args[1] == "--status=review" {
 					return CommandResult{Stdout: tt.needReviewOutput}
 				}
 				if len(args) > 0 && args[0] == "blocked" {

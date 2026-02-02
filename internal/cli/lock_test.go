@@ -845,7 +845,7 @@ func TestGetTaskStatus(t *testing.T) {
 		{
 			name:       "need review task",
 			taskID:     "bd-456",
-			bdResponse: `[{"title":"[Need Review] Design Feature","status":"open"}]`,
+			bdResponse: `[{"title":"Design Feature","status":"review"}]`,
 			wantStatus: "needs_review",
 		},
 		{
@@ -901,33 +901,33 @@ func TestGetTaskStatus(t *testing.T) {
 	}
 }
 
-func TestGetTaskStatus_NeedReviewInTitle(t *testing.T) {
-	// Test that [Need Review] detection works in various positions in the title
+func TestGetTaskStatus_ReviewStatus(t *testing.T) {
+	// Test that review status is properly detected
 	tests := []struct {
 		name       string
-		title      string
+		status     string
 		wantStatus string
 	}{
 		{
-			name:       "at start of title",
-			title:      "[Need Review] Feature implementation",
+			name:       "review status",
+			status:     "review",
 			wantStatus: "needs_review",
 		},
 		{
-			name:       "in middle of title",
-			title:      "Feature [Need Review] implementation",
-			wantStatus: "needs_review",
+			name:       "open status",
+			status:     "open",
+			wantStatus: "open",
 		},
 		{
-			name:       "at end of title",
-			title:      "Feature implementation [Need Review]",
-			wantStatus: "needs_review",
+			name:       "in_progress status",
+			status:     "in_progress",
+			wantStatus: "in_progress",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bdResponse := `[{"title":"` + tt.title + `","status":"open"}]`
+			bdResponse := `[{"title":"Test Feature","status":"` + tt.status + `"}]`
 			mock := NewCommandMock(t, []CommandStub{
 				{
 					Name:   "bd",

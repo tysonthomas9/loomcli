@@ -113,7 +113,7 @@ func TestMonitorDataCollection(t *testing.T) {
 	// bd commands (called in parallel, order varies)
 	mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: bdReadyResponse}).WithMinCalls(1)
 	mock.AddStub("bd", []string{"list", "--status=in_progress"}, CommandResult{Stdout: bdInProgressResponse}).WithMinCalls(1)
-	mock.AddStub("bd", []string{"list", "--status=open"}, CommandResult{Stdout: bdEmptyResponse}).WithMinCalls(1)
+	mock.AddStub("bd", []string{"list", "--status=review"}, CommandResult{Stdout: bdEmptyResponse}).WithMinCalls(1)
 	mock.AddStub("bd", []string{"blocked"}, CommandResult{Stdout: bdEmptyResponse}).WithMinCalls(1)
 	mock.AddStub("bd", []string{"sync"}, CommandResult{Stdout: "synced"}).WithMinCalls(1)
 	mock.AddStub("bd", []string{"stats"}, CommandResult{Stdout: bdStatsResponse}).WithMinCalls(1)
@@ -420,7 +420,7 @@ func TestMultiAgentConflictDetection(t *testing.T) {
 	mock := NewFlexibleCommandMock(t)
 	mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: "[]"})
 	mock.AddStub("bd", []string{"list", "--status=in_progress"}, CommandResult{Stdout: "[]"})
-	mock.AddStub("bd", []string{"list", "--status=open"}, CommandResult{Stdout: "[]"})
+	mock.AddStub("bd", []string{"list", "--status=review"}, CommandResult{Stdout: "[]"})
 	mock.AddStub("bd", []string{"blocked"}, CommandResult{Stdout: "[]"})
 	mock.AddStub("bd", []string{"sync"}, CommandResult{Stdout: "synced"})
 	mock.AddStub("bd", []string{"stats"}, CommandResult{Stdout: `{"summary":{"total_issues":0,"open_issues":0,"closed_issues":0}}`})
@@ -483,7 +483,7 @@ func TestNoConflictForDifferentTasks(t *testing.T) {
 	mock := NewFlexibleCommandMock(t)
 	mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: "[]"})
 	mock.AddStub("bd", []string{"list", "--status=in_progress"}, CommandResult{Stdout: "[]"})
-	mock.AddStub("bd", []string{"list", "--status=open"}, CommandResult{Stdout: "[]"})
+	mock.AddStub("bd", []string{"list", "--status=review"}, CommandResult{Stdout: "[]"})
 	mock.AddStub("bd", []string{"blocked"}, CommandResult{Stdout: "[]"})
 	mock.AddStub("bd", []string{"sync"}, CommandResult{Stdout: "synced"})
 	mock.AddStub("bd", []string{"stats"}, CommandResult{Stdout: `{"summary":{"total_issues":0,"open_issues":0,"closed_issues":0}}`})
@@ -813,21 +813,21 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		}
 	})
 
-	// Test that [Need Review] tasks are skipped
-	t.Run("need review tasks are skipped for planning", func(t *testing.T) {
-		needReviewJSON := `[
-			{"id":"TASK-1","title":"[Need Review] Some task","status":"open","priority":1,"design":""}
+	// Test that needs-revision label tasks ARE available for planning
+	t.Run("needs-revision tasks are available for planning", func(t *testing.T) {
+		needsRevisionJSON := `[
+			{"id":"TASK-1","title":"Some task","status":"open","priority":1,"design":"existing plan","labels":["needs-revision"]}
 		]`
 		mock := NewFlexibleCommandMock(t)
-		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: needReviewJSON})
+		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: needsRevisionJSON})
 		mock.Install()
 
 		hasTasks, err := HasAvailablePlanningTasks()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if hasTasks {
-			t.Error("expected [Need Review] tasks to be skipped")
+		if !hasTasks {
+			t.Error("expected needs-revision tasks to be available for planning")
 		}
 	})
 

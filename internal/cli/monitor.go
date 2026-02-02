@@ -119,13 +119,14 @@ type MonitorStats struct {
 
 // BdIssue represents an issue from bd list --json
 type BdIssue struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"`
-	Priority  int    `json:"priority"`
-	IssueType string `json:"issue_type"`
-	Design    string `json:"design"`
-	Assignee  string `json:"assignee"`
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Status    string   `json:"status"`
+	Priority  int      `json:"priority"`
+	IssueType string   `json:"issue_type"`
+	Design    string   `json:"design"`
+	Assignee  string   `json:"assignee"`
+	Labels    []string `json:"labels"`
 }
 
 // BdStats represents output from bd stats --json
@@ -381,7 +382,7 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 
 	go func() {
 		defer wg.Done()
-		needReviewOutput, needReviewErr = runBdCommand("list", "--status=open", "--json")
+		needReviewOutput, needReviewErr = runBdCommand("list", "--status=review", "--json")
 	}()
 
 	go func() {
@@ -392,16 +393,13 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 	wg.Wait()
 
 	// Process ready tasks, split by workflow stage
+	// Note: bd ready only returns open/in_progress tasks, not review status
 	if readyErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(readyOutput), &issues) == nil {
 			needsPlanningCount := 0
 			readyToImplementCount := 0
 			for _, issue := range issues {
-				// Skip [Need Review] tasks - they appear in Need Review section
-				if strings.Contains(issue.Title, "[Need Review]") {
-					continue
-				}
 				// Skip in_progress tasks - they appear in In Progress section
 				if issue.Status == "in_progress" {
 					continue
@@ -411,9 +409,18 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 					continue
 				}
 
-				// Split by whether task has a design
-				if issue.Design != "" {
-					// Has design - ready to implement
+				// Check for needs-revision label
+				hasRevisionLabel := false
+				for _, label := range issue.Labels {
+					if label == "needs-revision" {
+						hasRevisionLabel = true
+						break
+					}
+				}
+
+				// Split by whether task has a design (and no revision label)
+				if issue.Design != "" && !hasRevisionLabel {
+					// Has design and no revision needed - ready to implement
 					summary.ReadyToImplement++
 					if readyToImplementCount < 5 {
 						readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
@@ -424,7 +431,7 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 						readyToImplementCount++
 					}
 				} else {
-					// No design - needs planning
+					// No design OR needs revision - needs planning
 					summary.NeedsPlanning++
 					if needsPlanningCount < 5 {
 						needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
@@ -461,25 +468,23 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 	}
 
 	// Process need review tasks (top 5)
-	// Note: Don't add to agentTasks - these tasks have status=open meaning
+	// Note: Don't add to agentTasks - these tasks have status=review meaning
 	// the planning agent finished and released its lock. The assignee field
 	// still points to the planning agent but it's no longer running.
 	if needReviewErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(needReviewOutput), &issues) == nil {
-			count := 0
-			for _, issue := range issues {
-				if strings.Contains(issue.Title, "[Need Review]") {
-					summary.NeedReview++
-					if count < 5 {
-						reviewTasks = append(reviewTasks, TaskInfo{
-							ID:       issue.ID,
-							Title:    issue.Title,
-							Priority: issue.Priority,
-						})
-						count++
-					}
+			// All tasks with status=review are review tasks
+			summary.NeedReview = len(issues)
+			for i, issue := range issues {
+				if i >= 5 {
+					break
 				}
+				reviewTasks = append(reviewTasks, TaskInfo{
+					ID:       issue.ID,
+					Title:    issue.Title,
+					Priority: issue.Priority,
+				})
 			}
 		}
 	}

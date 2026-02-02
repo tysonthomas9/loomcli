@@ -21,7 +21,8 @@ func TestGeneratePlanningPrompt(t *testing.T) {
 				"--claim",
 				"Planning Task",
 				"Do NOT write any implementation code",
-				"[Need Review]",
+				"--status review",
+				"needs-revision",
 			},
 		},
 		{
