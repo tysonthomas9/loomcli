@@ -47,11 +47,12 @@ type Daemon struct {
 	config     *DaemonConfig
 	projectDir string // directory containing loom.yaml
 
-	agents   []*AgentProcess
-	shutdown chan struct{}  // closed to signal shutdown
-	wg       sync.WaitGroup // tracks superviseAgent goroutines
-
-	mu sync.Mutex // protects agents slice
+	// agents is populated during NewDaemon and is immutable afterward.
+	// Safe to read without holding mu after Start() is called.
+	agents       []*AgentProcess
+	shutdown     chan struct{}  // closed to signal shutdown
+	shutdownOnce sync.Once      // protects shutdown channel from double-close
+	wg           sync.WaitGroup // tracks superviseAgent goroutines
 }
 
 // builtInRoles defines the built-in role names that use loom <role> command.
@@ -153,10 +154,12 @@ func (d *Daemon) Start() error {
 	return nil
 }
 
-// Stop gracefully shuts down all agents.
+// Stop gracefully shuts down all agents. Safe to call multiple times.
 func (d *Daemon) Stop() {
-	// Signal all goroutines to stop
-	close(d.shutdown)
+	// Signal all goroutines to stop (protected from double-close)
+	d.shutdownOnce.Do(func() {
+		close(d.shutdown)
+	})
 
 	// Stop all agent processes
 	for _, ap := range d.agents {
