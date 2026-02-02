@@ -107,6 +107,9 @@ func TestMutationEvent_OmitEmpty(t *testing.T) {
 
 	// These fields have omitempty and should not appear when empty
 	omitEmptyFields := []string{
+		`"title"`,
+		`"assignee"`,
+		`"actor"`,
 		`"old_status"`,
 		`"new_status"`,
 		`"parent_id"`,
@@ -118,16 +121,31 @@ func TestMutationEvent_OmitEmpty(t *testing.T) {
 			t.Errorf("Empty field %s should be omitted, got: %s", field, jsonStr)
 		}
 	}
+
+	// Verify required fields ARE present
+	requiredFields := []string{
+		`"type"`,
+		`"issue_id"`,
+		`"timestamp"`,
+	}
+
+	for _, field := range requiredFields {
+		if !strings.Contains(jsonStr, field) {
+			t.Errorf("Required field %s should be present, got: %s", field, jsonStr)
+		}
+	}
 }
 
 func TestMutationEvent_JSONTagConsistency(t *testing.T) {
 	t.Parallel()
 
-	// Document the mixed JSON tag format
-	// The struct uses snake_case for optional metadata fields
+	// Verify all fields use consistent snake_case JSON tags
 	event := MutationEvent{
 		Type:      MutationStatus,
 		IssueID:   "bd-123",
+		Title:     "Test Issue",
+		Assignee:  "alice",
+		Actor:     "bob",
 		Timestamp: time.Now(),
 		OldStatus: "open",
 		NewStatus: "closed",
@@ -142,8 +160,14 @@ func TestMutationEvent_JSONTagConsistency(t *testing.T) {
 
 	jsonStr := string(data)
 
-	// Verify snake_case JSON tags are used for optional fields
+	// Verify snake_case JSON tags are used for all fields
 	expectedTags := []string{
+		`"type"`,
+		`"issue_id"`,
+		`"title"`,
+		`"assignee"`,
+		`"actor"`,
+		`"timestamp"`,
 		`"old_status"`,
 		`"new_status"`,
 		`"parent_id"`,
@@ -152,7 +176,23 @@ func TestMutationEvent_JSONTagConsistency(t *testing.T) {
 
 	for _, tag := range expectedTags {
 		if !strings.Contains(jsonStr, tag) {
-			t.Errorf("Expected JSON tag %s not found in: %s", tag, jsonStr)
+			t.Errorf("Expected snake_case JSON tag %s not found in: %s", tag, jsonStr)
+		}
+	}
+
+	// Verify PascalCase keys are NOT present (regression test)
+	unexpectedTags := []string{
+		`"Type"`,
+		`"IssueID"`,
+		`"Title"`,
+		`"Assignee"`,
+		`"Actor"`,
+		`"Timestamp"`,
+	}
+
+	for _, tag := range unexpectedTags {
+		if strings.Contains(jsonStr, tag) {
+			t.Errorf("Unexpected PascalCase JSON tag %s found in: %s", tag, jsonStr)
 		}
 	}
 }
