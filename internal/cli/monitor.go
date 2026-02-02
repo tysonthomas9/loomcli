@@ -792,13 +792,17 @@ func renderBoxSeparator() string {
 }
 
 // displayWidth returns the terminal display width of a string
-// accounting for Unicode characters that display as single width
+// accounting for Unicode characters that may display as double width
 func displayWidth(s string) int {
 	width := 0
-	for range s {
-		// All runes count as 1 display width in a typical terminal
-		// This correctly handles Unicode arrows, symbols, etc.
-		width++
+	for _, r := range s {
+		// Common symbols that render as double width in most terminals
+		switch r {
+		case '●', '✓', '✗', '◐', '○', '↑', '↓', '⚠', '★', '▶', '◀':
+			width += 2
+		default:
+			width++
+		}
 	}
 	return width
 }
