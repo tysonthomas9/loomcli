@@ -454,11 +454,12 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		fmt.Printf("[auto] Warning: could not get home directory: %v\n", err)
 		homeDir = os.TempDir()
 	}
-	logDir := filepath.Join(homeDir, ".loom", "logs", workspaceHash(opts.WorktreePath))
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	logDir := filepath.Join(homeDir, ".loom", "logs")
+	agentLogDir := filepath.Join(logDir, "agents")
+	if err := os.MkdirAll(agentLogDir, 0755); err != nil {
 		fmt.Printf("[auto] Warning: could not create log directory: %v\n", err)
 	}
-	logFile := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", opts.AgentType, opts.AgentName))
+	logFile := filepath.Join(agentLogDir, fmt.Sprintf("%s.log", opts.AgentName))
 
 	// Choose task checker based on agent type.
 	// Note: CustomPromptGen is not used here because tmux mode delegates prompt
@@ -620,10 +621,16 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	// Disable tmux focus-events to prevent ^[[I and ^[[O in output
 	_ = exec.Command("tmux", "set", "-t", sessionName, "focus-events", "off").Run()
 
-	// Setup logging (shell-quoted path for safety)
-	// G204: logFile is from internal code path, not user input; shellQuote escapes it for shell safety
-	quotedPath := shellQuote(logFile)
-	if err := exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", "cat >> "+quotedPath).Run(); err != nil { //nolint:gosec // path is shell-quoted
+	// Setup logging via loom-router for intelligent log routing
+	// loom-router writes to agent log always, and task log when a task is claimed
+	// logFile is ~/.loom/logs/agents/{agentName}.log, so logDir is two levels up
+	logDir := filepath.Dir(filepath.Dir(logFile))
+	lockPath := filepath.Join(ResolveLockDir(opts.WorktreePath), LockFileName)
+	routerCmd := fmt.Sprintf("loom-router --agent %s --base-dir %s --lock-path %s",
+		shellQuote(opts.AgentName),
+		shellQuote(logDir),
+		shellQuote(lockPath))
+	if err := exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", routerCmd).Run(); err != nil { //nolint:gosec // args are shell-quoted
 		fmt.Printf("[auto] Warning: logging setup failed: %v\n", err)
 	}
 
