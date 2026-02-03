@@ -2,6 +2,7 @@
 # Build artifacts
 loom
 loomcli
+logrouter
 
 # Frontend dependencies
 internal/webui/frontend/node_modules/
