@@ -548,6 +548,34 @@ Each worktree has its own branch and can run one agent at a time.
 - Use 'loom --help' to see all available commands
 - Use 'loom <command> --help' for detailed options (e.g., 'loom plan --help')
 
+### Epic-Task Organization
+
+**Parent-Child vs Dependencies** - Two ways to relate issues:
+
+**Parent-Child (--parent)**: Use for ownership/hierarchy
+- Task belongs to epic: 'bd create --title="..." --parent=bd-abc'
+- Creates dotted IDs: bd-abc.1, bd-abc.2 (shows lineage)
+- Query: 'bd show <epic> --children' or 'bd children <epic>'
+- Semantic: "This task is part of this epic"
+
+**Dependencies (bd dep add)**: Use for sequencing/blocking
+- Task blocked by another: 'bd dep add <blocked> <blocker>'
+- Syntax: 'bd dep add A B' means "A depends on B" (B blocks A)
+- Semantic: "Can't start A until B is done"
+
+**Best Practice**:
+` + "```" + `
+Epic (parent)
+  └── Task 1 (--parent=epic)
+  └── Task 2 (--parent=epic)
+        └── depends on Task 1 (bd dep add task2 task1)
+  └── Task 3 (--parent=epic)
+` + "```" + `
+Use parent-child for ownership, dependencies for sequencing.
+
+**Common Mistake**: Using 'bd dep add task epic' makes task depend on epic (task blocked forever).
+Correct for children: Use --parent flag, not dependencies.
+
 ### Important Notes
 - The beads CLI is 'bd' - all ticket management goes through it
 - Priority scale: P0 (critical) > P1 (high) > P2 (medium) > P3 (low) > P4 (backlog)
