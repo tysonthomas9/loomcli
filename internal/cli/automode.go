@@ -111,7 +111,7 @@ func interruptibleSleep(d time.Duration, shutdown <-chan struct{}) bool {
 // HasAvailablePlanningTasks checks if there are tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
 func HasAvailablePlanningTasks() (bool, error) {
-	result := execCommand(GetBeadsDir(), "bd", "ready", "--json")
+	result := execCommand(GetBeadsDir(), "bd", "ready", "--json", "--limit", "100")
 	if result.Err != nil {
 		return false, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
@@ -145,7 +145,7 @@ func HasAvailablePlanningTasks() (bool, error) {
 // HasAvailableImplementationTasks checks if there are tasks ready for implementation
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
 func HasAvailableImplementationTasks() (bool, error) {
-	result := execCommand(GetBeadsDir(), "bd", "ready", "--json")
+	result := execCommand(GetBeadsDir(), "bd", "ready", "--json", "--limit", "100")
 	if result.Err != nil {
 		return false, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
@@ -177,7 +177,7 @@ func HasAvailableImplementationTasks() (bool, error) {
 // HasAnyAvailableTasks checks if there are any ready tasks regardless of design status.
 // Used by custom roles with task_filter=any.
 func HasAnyAvailableTasks() (bool, error) {
-	result := execCommand(GetBeadsDir(), "bd", "ready", "--json")
+	result := execCommand(GetBeadsDir(), "bd", "ready", "--json", "--limit", "100")
 	if result.Err != nil {
 		return false, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
