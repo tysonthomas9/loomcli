@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
+	"github.com/tysonthomas9/loomcli/internal/kv"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
@@ -22,10 +24,14 @@ var (
 	serveWebUIPort   int
 	serveWebUISocket string
 	serveNoWebUI     bool
+	serveRedisAddr   string
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
 	collectDataFunc = collectMonitorData
+
+	// staleDetectorInstance holds the running stale detector for status queries.
+	staleDetectorInstance *kv.StaleDetector
 )
 
 var serveCmd = &cobra.Command{
@@ -74,6 +80,9 @@ func init() {
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
 	serveCmd.Flags().BoolVar(&serveNoWebUI, "no-webui", false, "Disable the web UI server, run only the API")
 
+	defaultRedisAddr := os.Getenv("LOOM_REDIS_ADDR")
+	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", defaultRedisAddr, "Redis address for fleet coordination (enables stale detector)")
+
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -102,6 +111,38 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Printf("Web UI server starting on port %d", serveWebUIPort)
 	}
 
+	// Start stale detector if Redis is configured
+	var kvClient *kv.Client
+	if serveRedisAddr != "" {
+		kvClient = kv.NewClient(serveRedisAddr, "", 0)
+		defer func() {
+			if err := kvClient.Close(); err != nil {
+				log.Printf("Error closing Redis client: %v", err)
+			}
+		}()
+
+		breaker := circuitbreaker.NewBreaker("redis-stale-detector", circuitbreaker.Config{
+			FailureThreshold: 5,
+			OpenTimeout:      30 * time.Second,
+			ShouldTrip:       kv.RedisShouldTrip,
+		})
+		kvClient.SetCircuitBreaker(breaker)
+
+		cfg := kv.DefaultStaleDetectorConfig()
+		serverID := kv.GenerateServerID()
+		reconciler := kv.NewReconciler("")
+
+		detector := kv.NewStaleDetector(kvClient, cfg, serverID, reconciler)
+		staleDetectorInstance = detector
+
+		go func() {
+			if err := detector.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("Stale detector error: %v", err)
+			}
+		}()
+		log.Printf("Stale detector enabled (redis=%s, server=%s)", serveRedisAddr, serverID)
+	}
+
 	// Set up the loom API server
 	mux := http.NewServeMux()
 
@@ -113,6 +154,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	mux.HandleFunc("GET /api/stats", handleStats)
 	mux.HandleFunc("GET /api/sync", handleSync)
 	mux.HandleFunc("GET /api/workspaces", handleWorkspaces)
+	mux.HandleFunc("GET /api/stale-detector", handleStaleDetector)
 
 	// Wrap with CORS middleware
 	handler := corsMiddleware(serveCorsOrigin, mux)
@@ -346,6 +388,14 @@ func handleSync(w http.ResponseWriter, r *http.Request) {
 		Sync:      data.SyncStatus,
 		Timestamp: data.Timestamp,
 	})
+}
+
+func handleStaleDetector(w http.ResponseWriter, r *http.Request) {
+	if staleDetectorInstance == nil {
+		writeJSON(w, kv.StaleDetectorStatus{Enabled: false})
+		return
+	}
+	writeJSON(w, staleDetectorInstance.Status())
 }
 
 // writeJSON writes a JSON response.

@@ -290,6 +290,134 @@ func toString(v interface{}) (string, error) {
 	}
 }
 
+// StaleWorkerEntry represents a worker with an expired heartbeat found in the ZSET.
+type StaleWorkerEntry struct {
+	WorkerID string
+	Score    float64 // last heartbeat timestamp in milliseconds
+}
+
+// GetStaleWorkers returns workers whose heartbeats are older than the given threshold.
+// It queries the active workers ZSET for entries with scores below (now - threshold).
+func (c *Client) GetStaleWorkers(ctx context.Context, threshold time.Duration) ([]StaleWorkerEntry, error) {
+	if c.breaker != nil {
+		return circuitbreaker.ExecuteWithResult(c.breaker, func() ([]StaleWorkerEntry, error) {
+			return c.getStaleWorkers(ctx, threshold)
+		})
+	}
+	return c.getStaleWorkers(ctx, threshold)
+}
+
+func (c *Client) getStaleWorkers(ctx context.Context, threshold time.Duration) ([]StaleWorkerEntry, error) {
+	cutoff := float64(time.Now().Add(-threshold).UnixMilli())
+	results, err := c.rdb.ZRangeByScoreWithScores(ctx, activeWorkersKey(), &redis.ZRangeBy{
+		Min: "-inf",
+		Max: strconv.FormatFloat(cutoff, 'f', 0, 64),
+	}).Result()
+	if err != nil {
+		return nil, fmt.Errorf("ZRANGEBYSCORE failed: %w", err)
+	}
+
+	entries := make([]StaleWorkerEntry, len(results))
+	for i, z := range results {
+		entries[i] = StaleWorkerEntry{
+			WorkerID: z.Member.(string),
+			Score:    z.Score,
+		}
+	}
+	return entries, nil
+}
+
+// GetWorkerState returns the hash fields for a worker's state key.
+func (c *Client) GetWorkerState(ctx context.Context, workerID string) (map[string]string, error) {
+	if c.breaker != nil {
+		return circuitbreaker.ExecuteWithResult(c.breaker, func() (map[string]string, error) {
+			return c.rdb.HGetAll(ctx, workerStateKey(workerID)).Result()
+		})
+	}
+	return c.rdb.HGetAll(ctx, workerStateKey(workerID)).Result()
+}
+
+// GetTaskOwner returns the worker ID that owns the given task, or empty string if unowned.
+func (c *Client) GetTaskOwner(ctx context.Context, taskID string) (string, error) {
+	get := func() (string, error) {
+		val, err := c.rdb.Get(ctx, taskOwnerKey(taskID)).Result()
+		if err == redis.Nil {
+			return "", nil
+		}
+		return val, err
+	}
+	if c.breaker != nil {
+		return circuitbreaker.ExecuteWithResult(c.breaker, get)
+	}
+	return get()
+}
+
+// DeleteTaskOwner removes the ownership key for a task.
+func (c *Client) DeleteTaskOwner(ctx context.Context, taskID string) error {
+	fn := func() error {
+		return c.rdb.Del(ctx, taskOwnerKey(taskID)).Err()
+	}
+	if c.breaker != nil {
+		return c.breaker.Execute(fn)
+	}
+	return fn()
+}
+
+// DeleteWorkerState removes the state hash for a worker.
+func (c *Client) DeleteWorkerState(ctx context.Context, workerID string) error {
+	fn := func() error {
+		return c.rdb.Del(ctx, workerStateKey(workerID)).Err()
+	}
+	if c.breaker != nil {
+		return c.breaker.Execute(fn)
+	}
+	return fn()
+}
+
+// RemoveActiveWorker removes a worker from the active workers ZSET.
+func (c *Client) RemoveActiveWorker(ctx context.Context, workerID string) error {
+	fn := func() error {
+		return c.rdb.ZRem(ctx, activeWorkersKey(), workerID).Err()
+	}
+	if c.breaker != nil {
+		return c.breaker.Execute(fn)
+	}
+	return fn()
+}
+
+// SetLeaderKey atomically sets a leader key if it does not exist (SETNX with TTL).
+// Returns true if the key was set (leadership acquired), false if already held.
+func (c *Client) SetLeaderKey(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
+	if c.breaker != nil {
+		return circuitbreaker.ExecuteWithResult(c.breaker, func() (bool, error) {
+			return c.rdb.SetNX(ctx, key, value, ttl).Result()
+		})
+	}
+	return c.rdb.SetNX(ctx, key, value, ttl).Result()
+}
+
+// RenewLeaderKey extends the TTL on a leader key.
+func (c *Client) RenewLeaderKey(ctx context.Context, key string, ttl time.Duration) error {
+	fn := func() error {
+		return c.rdb.Expire(ctx, key, ttl).Err()
+	}
+	if c.breaker != nil {
+		return c.breaker.Execute(fn)
+	}
+	return fn()
+}
+
+// DeleteLeaderKey removes a leader key (best-effort on shutdown).
+func (c *Client) DeleteLeaderKey(ctx context.Context, key string) error {
+	fn := func() error {
+		return c.rdb.Del(ctx, key).Err()
+	}
+	if c.breaker != nil {
+		return c.breaker.Execute(fn)
+	}
+	return fn()
+}
+
 // validateID checks that an ID is non-empty and does not contain characters
 // that could cause Redis key collisions or parsing issues.
 func validateID(id, name string) error {
