@@ -122,8 +122,8 @@ func HasAvailablePlanningTasks() (bool, error) {
 	}
 
 	for _, issue := range issues {
-		// Skip in_progress tasks - another agent is working on them
-		if issue.Status == "in_progress" {
+		// Only consider open tasks - skip in_progress, review, blocked, etc.
+		if issue.Status != "open" {
 			continue
 		}
 		// Skip epics - agents shouldn't work on epics directly
@@ -156,8 +156,8 @@ func HasAvailableImplementationTasks() (bool, error) {
 	}
 
 	for _, issue := range issues {
-		// Skip in_progress tasks - another agent is working on them
-		if issue.Status == "in_progress" {
+		// Only consider open tasks - skip in_progress, review, blocked, etc.
+		if issue.Status != "open" {
 			continue
 		}
 		// Skip epics - agents shouldn't work on epics directly
@@ -188,7 +188,8 @@ func HasAnyAvailableTasks() (bool, error) {
 	}
 
 	for _, issue := range issues {
-		if issue.Status == "in_progress" {
+		// Only consider open tasks - skip in_progress, review, blocked, etc.
+		if issue.Status != "open" {
 			continue
 		}
 		if issue.IssueType == "epic" {

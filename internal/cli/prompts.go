@@ -53,7 +53,7 @@ Follow this workflow EXACTLY for ONE task.
 %s
 ### Step 1: Select ONE Task for Planning
 - Run this command to find tasks needing planning (no design yet OR needs revision):
-  bd ready --json | jq -r '.[] | select(.status == "open") | select(.issue_type == "epic" | not) | select((.design == null or .design == "") or ((.labels // []) | index("needs-revision"))) | {id, title, priority, is_revision: ((.labels // []) | index("needs-revision") != null)}'
+  bd ready --json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.design == null or .design == "") or ((.labels // []) | index("needs-revision"))) | "\(.id) [\(.priority)] \(.title)"'
 - If jq fails, fallback: Run 'bd ready --limit 10' and manually SKIP epics and tasks that already have a --design field (unless they have the 'needs-revision' label)
 - SKIP any task already 'in_progress' by checking 'bd list --status=in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
@@ -182,7 +182,7 @@ You are a disciplined software engineer. Follow this workflow EXACTLY for ONE ta
 %s
 ### Step 1: Select ONE Task
 - Run this command to find tasks ready to implement (has design, not needs-revision):
-  bd ready --json | jq -r '.[] | select(.status == "open") | select(.issue_type == "epic" | not) | select((.design != null and .design != "") and ((.labels // []) | index("needs-revision") == null)) | "\(.id): [\(.priority)] \(.title)"'
+  bd ready --json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select(.design) | select((.design == "") | not) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'
 - If jq fails, fallback: Run 'bd ready --limit 10' and manually SKIP epics, tasks without a --design field, or tasks with 'needs-revision' label
 - Run 'bd list --status=in_progress --json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'bd update <id> --status in_progress --assignee %s')
 - IGNORE existing assignees - if status is 'open', the task is available to claim
