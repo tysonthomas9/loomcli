@@ -462,6 +462,247 @@ func TestGenerateConflictResolutionPrompt_DelegatesToInternal(t *testing.T) {
 	}
 }
 
+func TestGenerateFleetPlanningPrompt(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentName string
+		taskID    string
+		wantParts []string
+	}{
+		{
+			name:      "spark agent with task",
+			agentName: "spark",
+			taskID:    "loomcli-kv6.4",
+			wantParts: []string{
+				"Your agent name is: spark",
+				"loomcli-kv6.4",
+				"Planning Task",
+				"Do NOT write any implementation code",
+				"pre-assigned",
+				"Fleet API",
+				"loom claim loomcli-kv6.4",
+				"bd show loomcli-kv6.4",
+				"status in_progress",
+				"--status review",
+				"needs-revision",
+			},
+		},
+		{
+			name:      "nova agent with different task",
+			agentName: "nova",
+			taskID:    "proj-abc.1",
+			wantParts: []string{
+				"Your agent name is: nova",
+				"proj-abc.1",
+				"loom claim proj-abc.1",
+				"bd show proj-abc.1",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := GenerateFleetPlanningPrompt(tc.agentName, tc.taskID, nil)
+
+			for _, part := range tc.wantParts {
+				if !strings.Contains(prompt, part) {
+					t.Errorf("prompt missing expected part: %q", part)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateFleetTaskPrompt(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentName string
+		taskID    string
+		wantParts []string
+	}{
+		{
+			name:      "spark agent with task",
+			agentName: "spark",
+			taskID:    "loomcli-kv6.4",
+			wantParts: []string{
+				"Your agent name is: spark",
+				"loomcli-kv6.4",
+				"Implementation Task",
+				"pre-assigned",
+				"Fleet API",
+				"loom claim loomcli-kv6.4",
+				"bd show loomcli-kv6.4",
+				"status in_progress",
+				"--design",
+				"git push origin HEAD",
+			},
+		},
+		{
+			name:      "ember agent with different task",
+			agentName: "ember",
+			taskID:    "proj-xyz.2",
+			wantParts: []string{
+				"Your agent name is: ember",
+				"proj-xyz.2",
+				"loom claim proj-xyz.2",
+				"bd show proj-xyz.2",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := GenerateFleetTaskPrompt(tc.agentName, tc.taskID, nil)
+
+			for _, part := range tc.wantParts {
+				if !strings.Contains(prompt, part) {
+					t.Errorf("prompt missing expected part: %q", part)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateFleetPlanningPrompt_Workspace(t *testing.T) {
+	ws := &WorkspaceConfig{
+		Path: "/home/user/myworkspace",
+		Repos: []RepoConfig{
+			{Name: "frontend", Path: "frontend", DefaultBranch: "develop", Remote: "origin"},
+			{Name: "backend", Path: "services/backend", DefaultBranch: "main", Remote: "origin"},
+		},
+	}
+
+	prompt := GenerateFleetPlanningPrompt("falcon", "bd-abc.1", ws)
+
+	wantParts := []string{
+		"Workspace Mode: Multi-Repo Environment",
+		"frontend",
+		"./frontend",
+		"develop",
+		"backend",
+		"./services/backend",
+		"Run `bd` commands from the workspace root",
+		// Standard planning steps must still be present
+		"Step 1:",
+		"Step 2:",
+		"Step 3:",
+		"Step 4:",
+		"Step 5:",
+		"Step 6:",
+		// Fleet-specific
+		"pre-assigned",
+		"bd-abc.1",
+	}
+
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("fleet planning prompt with workspace missing expected part: %q", part)
+		}
+	}
+}
+
+func TestGenerateFleetTaskPrompt_Workspace(t *testing.T) {
+	ws := &WorkspaceConfig{
+		Path: "/home/user/myworkspace",
+		Repos: []RepoConfig{
+			{Name: "api", Path: "api", DefaultBranch: "main", Remote: "origin"},
+			{Name: "web", Path: "web", DefaultBranch: "main", Remote: "origin"},
+		},
+	}
+
+	prompt := GenerateFleetTaskPrompt("nova", "bd-xyz.3", ws)
+
+	wantParts := []string{
+		"Workspace Mode: Multi-Repo Environment",
+		"api",
+		"./api",
+		"web",
+		"./web",
+		"Run `bd` commands from the workspace root",
+		"Run build/test commands from the specific repo subdirectory",
+		"Changes may span multiple repos",
+		// Standard task steps must still be present
+		"Step 1:",
+		"Step 2:",
+		"Step 3:",
+		"Step 4:",
+		"Step 5:",
+		"Step 6:",
+		"Step 7:",
+		"Step 8:",
+		// Fleet-specific
+		"pre-assigned",
+		"bd-xyz.3",
+	}
+
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("fleet task prompt with workspace missing expected part: %q", part)
+		}
+	}
+}
+
+func TestFleetPromptStructure(t *testing.T) {
+	t.Run("fleet planning prompt has required sections", func(t *testing.T) {
+		prompt := GenerateFleetPlanningPrompt("test", "bd-test.1", nil)
+		sections := []string{
+			"Step 1:",
+			"Step 1.5:",
+			"Step 2:",
+			"Step 3:",
+			"Step 4:",
+			"Step 5:",
+			"Step 6:",
+			"CRITICAL:",
+		}
+		for _, section := range sections {
+			if !strings.Contains(prompt, section) {
+				t.Errorf("fleet planning prompt missing section: %q", section)
+			}
+		}
+	})
+
+	t.Run("fleet task prompt has required sections", func(t *testing.T) {
+		prompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil)
+		sections := []string{
+			"Step 1:",
+			"Step 2:",
+			"Step 3:",
+			"Step 4:",
+			"Step 5:",
+			"Step 6:",
+			"Step 7:",
+			"Step 8:",
+			"Step 9:",
+			"CRITICAL:",
+		}
+		for _, section := range sections {
+			if !strings.Contains(prompt, section) {
+				t.Errorf("fleet task prompt missing section: %q", section)
+			}
+		}
+	})
+}
+
+func TestFleetPromptsNoClaimCommand(t *testing.T) {
+	planPrompt := GenerateFleetPlanningPrompt("test", "bd-test.1", nil)
+	taskPrompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil)
+
+	notWantParts := []string{
+		"bd update <id> --claim",
+		"bd ready --json",
+	}
+
+	for _, part := range notWantParts {
+		if strings.Contains(planPrompt, part) {
+			t.Errorf("fleet planning prompt should NOT contain: %q", part)
+		}
+		if strings.Contains(taskPrompt, part) {
+			t.Errorf("fleet task prompt should NOT contain: %q", part)
+		}
+	}
+}
+
 func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 	// Create a temp empty directory and point LOOM_CONFIG_DIR to it
 	tmpDir := t.TempDir()
