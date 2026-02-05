@@ -28,7 +28,7 @@ const (
 // DaemonSubscriber manages the subscription to daemon mutations and
 // bridges them to the SSE hub.
 type DaemonSubscriber struct {
-	pool         *daemon.ConnectionPool
+	pool         daemon.Pool
 	hub          *SSEHub
 	done         chan struct{}
 	wg           sync.WaitGroup
@@ -38,7 +38,7 @@ type DaemonSubscriber struct {
 }
 
 // NewDaemonSubscriber creates a new daemon subscriber.
-func NewDaemonSubscriber(pool *daemon.ConnectionPool, hub *SSEHub) *DaemonSubscriber {
+func NewDaemonSubscriber(pool daemon.Pool, hub *SSEHub) *DaemonSubscriber {
 	return &DaemonSubscriber{
 		pool: pool,
 		hub:  hub,

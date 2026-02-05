@@ -1,7 +1,14 @@
 // Package daemon provides RPC client connection infrastructure for the beads web UI server.
 package daemon
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
+)
+
+// ErrCircuitOpen is an alias for circuitbreaker.ErrCircuitOpen for convenience.
+var ErrCircuitOpen = circuitbreaker.ErrCircuitOpen
 
 // Error types for better HTTP error responses
 var (
@@ -26,8 +33,12 @@ var (
 
 // IsRetryable determines if an operation can be retried.
 // Connection timeout and temporary daemon issues are retryable.
+// Circuit breaker open is not retryable (fast-fail by design).
 func IsRetryable(err error) bool {
 	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrCircuitOpen) {
 		return false
 	}
 	return errors.Is(err, ErrDaemonNotRunning) ||

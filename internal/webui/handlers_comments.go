@@ -39,9 +39,9 @@ type commentConnectionGetter interface {
 	Put(client commentAdder)
 }
 
-// commentPoolAdapter wraps *daemon.ConnectionPool to implement commentConnectionGetter.
+// commentPoolAdapter wraps daemon.Pool to implement commentConnectionGetter.
 type commentPoolAdapter struct {
-	pool *daemon.ConnectionPool
+	pool daemon.Pool
 }
 
 func (p *commentPoolAdapter) Get(ctx context.Context) (commentAdder, error) {
@@ -55,7 +55,7 @@ func (p *commentPoolAdapter) Put(client commentAdder) {
 }
 
 // handleAddComment returns a handler that adds a comment to an issue.
-func handleAddComment(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleAddComment(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return handleAddCommentWithPool(nil)
 	}

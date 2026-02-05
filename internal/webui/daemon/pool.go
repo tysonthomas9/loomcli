@@ -8,6 +8,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
+// Pool is the interface for connection pool operations.
+// Both ConnectionPool and ProtectedPool implement this interface.
+type Pool interface {
+	Get(ctx context.Context) (*rpc.Client, error)
+	Put(client *rpc.Client)
+	Stats() PoolStats
+	Close() error
+}
+
 const (
 	// DefaultPoolSize is the default number of connections in the pool.
 	DefaultPoolSize = 5

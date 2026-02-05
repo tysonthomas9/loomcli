@@ -9,13 +9,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 // setupRoutes configures all HTTP routes for the server.
-func setupRoutes(mux *http.ServeMux, pool *daemon.ConnectionPool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent) {
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent) {
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -60,7 +61,7 @@ func setupRoutes(mux *http.ServeMux, pool *daemon.ConnectionPool, hub *SSEHub, g
 
 // handleHealth returns a simple health check response.
 // This is for load balancers and basic monitoring - it doesn't check daemon connectivity.
-func handleHealth(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleHealth(pool daemon.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -70,11 +71,19 @@ func handleHealth(pool *daemon.ConnectionPool) http.HandlerFunc {
 	}
 }
 
+// CircuitBreakerStatus represents the circuit breaker state in health responses.
+type CircuitBreakerStatus struct {
+	State           string    `json:"state"`
+	FailureCount    int       `json:"failure_count"`
+	LastStateChange time.Time `json:"last_state_change"`
+}
+
 // HealthStatus represents the detailed health status of the API.
 type HealthStatus struct {
-	Status       string            `json:"status"`                  // "ok", "degraded", "unhealthy"
-	Daemon       DaemonStatus      `json:"daemon"`                  // Daemon connection status
-	Pool         *daemon.PoolStats `json:"pool,omitempty"`          // Connection pool stats
+	Status         string                 `json:"status"`                    // "ok", "degraded", "unhealthy"
+	Daemon         DaemonStatus           `json:"daemon"`                    // Daemon connection status
+	Pool           *daemon.PoolStats      `json:"pool,omitempty"`            // Connection pool stats
+	CircuitBreaker *CircuitBreakerStatus  `json:"circuit_breaker,omitempty"` // Circuit breaker state
 }
 
 // DaemonStatus represents the daemon connection status.
@@ -86,8 +95,14 @@ type DaemonStatus struct {
 	Error     string  `json:"error,omitempty"`     // Error message if not connected
 }
 
+// breakerStater is an optional interface for pools that have a circuit breaker.
+type breakerStater interface {
+	BreakerState() circuitbreaker.State
+	BreakerStats() circuitbreaker.BreakerStats
+}
+
 // handleAPIHealth returns a detailed health check including daemon connectivity.
-func handleAPIHealth(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleAPIHealth(pool daemon.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := HealthStatus{
 			Status: "ok",
@@ -100,6 +115,16 @@ func handleAPIHealth(pool *daemon.ConnectionPool) http.HandlerFunc {
 		if pool != nil {
 			poolStats := pool.Stats()
 			status.Pool = &poolStats
+
+			// Include circuit breaker state if available
+			if bs, ok := pool.(breakerStater); ok {
+				stats := bs.BreakerStats()
+				status.CircuitBreaker = &CircuitBreakerStatus{
+					State:           stats.State.String(),
+					FailureCount:    stats.ConsecutiveFail,
+					LastStateChange: stats.LastStateChange,
+				}
+			}
 
 			// Try to get a connection and check daemon health
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -166,9 +191,9 @@ type statsConnectionGetter interface {
 	Put(client statsClient)
 }
 
-// statsPoolAdapter wraps *daemon.ConnectionPool to implement statsConnectionGetter.
+// statsPoolAdapter wraps daemon.Pool to implement statsConnectionGetter.
 type statsPoolAdapter struct {
-	pool *daemon.ConnectionPool
+	pool daemon.Pool
 }
 
 func (p *statsPoolAdapter) Get(ctx context.Context) (statsClient, error) {
@@ -182,7 +207,7 @@ func (p *statsPoolAdapter) Put(client statsClient) {
 }
 
 // handleStats returns project statistics from the daemon.
-func handleStats(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleStats(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return handleStatsWithPool(nil)
 	}

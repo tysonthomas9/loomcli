@@ -13,6 +13,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
@@ -116,19 +117,20 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 
 	// Initialize daemon connection pool
-	var pool *daemon.ConnectionPool
+	var rawPool *daemon.ConnectionPool
+	var pool daemon.Pool // may be ProtectedPool or raw ConnectionPool
 	var poolErr error
 
 	if config.SocketPath != "" {
 		// Use explicit socket path
-		pool, poolErr = daemon.NewConnectionPool(config.SocketPath, config.PoolSize)
+		rawPool, poolErr = daemon.NewConnectionPool(config.SocketPath, config.PoolSize)
 	} else {
 		// Auto-discover daemon from current directory
 		cwd, err := getCwd()
 		if err != nil {
 			log.Printf("Warning: failed to get current directory: %v", err)
 		} else {
-			pool, poolErr = daemon.NewConnectionPoolAutoDiscover(cwd, config.PoolSize)
+			rawPool, poolErr = daemon.NewConnectionPoolAutoDiscover(cwd, config.PoolSize)
 		}
 	}
 
@@ -136,7 +138,19 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Warning: failed to initialize daemon connection pool: %v", poolErr)
 		log.Printf("The web UI will start but API endpoints may not work until a daemon is available")
 	} else {
-		log.Printf("Daemon connection pool initialized")
+		// Wrap pool with circuit breaker for resilience
+		breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
+			FailureThreshold:  5,
+			OpenTimeout:       30 * time.Second,
+			HalfOpenMaxProbes: 1,
+			ShouldTrip:        daemon.DaemonShouldTrip,
+			OnStateChange: func(from, to circuitbreaker.State) {
+				log.Printf("Circuit breaker state change: %s -> %s", from, to)
+			},
+		})
+		pool = daemon.NewProtectedPool(rawPool, breaker)
+		log.Printf("Daemon connection pool initialized with circuit breaker")
+
 		// Test the connection
 		func() {
 			testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

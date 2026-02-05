@@ -2,12 +2,15 @@ package kv
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 )
 
 // ClaimResult represents the outcome of a task claim attempt.
@@ -31,7 +34,8 @@ type CompleteResult struct {
 
 // Client wraps a Redis client and provides atomic task management operations.
 type Client struct {
-	rdb *redis.Client
+	rdb     *redis.Client
+	breaker *circuitbreaker.Breaker
 }
 
 // NewClient creates a new KV client connected to the given Redis instance.
@@ -50,15 +54,56 @@ func NewClientFromRedis(rdb *redis.Client) *Client {
 	return &Client{rdb: rdb}
 }
 
+// SetCircuitBreaker attaches a circuit breaker to the client.
+// When set, all operations are wrapped with circuit breaker protection.
+func (c *Client) SetCircuitBreaker(b *circuitbreaker.Breaker) {
+	c.breaker = b
+}
+
 // Close closes the underlying Redis connection.
 func (c *Client) Close() error {
 	return c.rdb.Close()
+}
+
+// RedisShouldTrip classifies Redis errors for the circuit breaker.
+// Connection-level errors trip the breaker; application errors do not.
+func RedisShouldTrip(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Don't trip on context cancellation
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		return false
+	}
+	// Trip on connection errors
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	// Trip on Redis connection refused / EOF
+	errStr := err.Error()
+	if strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "EOF") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "broken pipe") {
+		return true
+	}
+	return false
 }
 
 // ClaimTask atomically claims a task for a worker.
 // If the task is already claimed by a different worker, it returns success=false
 // with the existing owner's ID. Re-claiming by the same worker is idempotent.
 func (c *Client) ClaimTask(ctx context.Context, workerID, taskID, taskTitle, agentType string) (ClaimResult, error) {
+	if c.breaker != nil {
+		return circuitbreaker.ExecuteWithResult(c.breaker, func() (ClaimResult, error) {
+			return c.claimTask(ctx, workerID, taskID, taskTitle, agentType)
+		})
+	}
+	return c.claimTask(ctx, workerID, taskID, taskTitle, agentType)
+}
+
+func (c *Client) claimTask(ctx context.Context, workerID, taskID, taskTitle, agentType string) (ClaimResult, error) {
 	if err := validateID(workerID, "workerID"); err != nil {
 		return ClaimResult{}, err
 	}
@@ -110,6 +155,15 @@ func (c *Client) ClaimTask(ctx context.Context, workerID, taskID, taskTitle, age
 // Must be called periodically (recommended: every 60 seconds) to prevent
 // key expiration while a worker is active.
 func (c *Client) Heartbeat(ctx context.Context, workerID string) (HeartbeatResult, error) {
+	if c.breaker != nil {
+		return circuitbreaker.ExecuteWithResult(c.breaker, func() (HeartbeatResult, error) {
+			return c.heartbeat(ctx, workerID)
+		})
+	}
+	return c.heartbeat(ctx, workerID)
+}
+
+func (c *Client) heartbeat(ctx context.Context, workerID string) (HeartbeatResult, error) {
 	if err := validateID(workerID, "workerID"); err != nil {
 		return HeartbeatResult{}, err
 	}
@@ -154,6 +208,15 @@ func (c *Client) Heartbeat(ctx context.Context, workerID string) (HeartbeatResul
 // CompleteTask atomically verifies ownership and cleans up after task completion.
 // The worker remains registered but transitions to idle state.
 func (c *Client) CompleteTask(ctx context.Context, workerID, taskID string) (CompleteResult, error) {
+	if c.breaker != nil {
+		return circuitbreaker.ExecuteWithResult(c.breaker, func() (CompleteResult, error) {
+			return c.completeTask(ctx, workerID, taskID)
+		})
+	}
+	return c.completeTask(ctx, workerID, taskID)
+}
+
+func (c *Client) completeTask(ctx context.Context, workerID, taskID string) (CompleteResult, error) {
 	if err := validateID(workerID, "workerID"); err != nil {
 		return CompleteResult{}, err
 	}

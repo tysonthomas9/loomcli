@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -72,9 +73,9 @@ type connectionGetter interface {
 	Put(client issueGetter)
 }
 
-// poolAdapter wraps *daemon.ConnectionPool to implement connectionGetter.
+// poolAdapter wraps daemon.Pool to implement connectionGetter.
 type poolAdapter struct {
-	pool *daemon.ConnectionPool
+	pool daemon.Pool
 }
 
 func (p *poolAdapter) Get(ctx context.Context) (issueGetter, error) {
@@ -99,9 +100,9 @@ type patchConnectionGetter interface {
 	Put(client issueUpdater)
 }
 
-// patchPoolAdapter wraps *daemon.ConnectionPool to implement patchConnectionGetter.
+// patchPoolAdapter wraps daemon.Pool to implement patchConnectionGetter.
 type patchPoolAdapter struct {
-	pool *daemon.ConnectionPool
+	pool daemon.Pool
 }
 
 func (p *patchPoolAdapter) Get(ctx context.Context) (issueUpdater, error) {
@@ -126,9 +127,9 @@ type closeConnectionGetter interface {
 	Put(client issueCloser)
 }
 
-// closePoolAdapter wraps *daemon.ConnectionPool to implement closeConnectionGetter.
+// closePoolAdapter wraps daemon.Pool to implement closeConnectionGetter.
 type closePoolAdapter struct {
-	pool *daemon.ConnectionPool
+	pool daemon.Pool
 }
 
 func (p *closePoolAdapter) Get(ctx context.Context) (issueCloser, error) {
@@ -153,9 +154,9 @@ type graphConnectionGetter interface {
 	Put(client graphClient)
 }
 
-// graphPoolAdapter wraps *daemon.ConnectionPool to implement graphConnectionGetter.
+// graphPoolAdapter wraps daemon.Pool to implement graphConnectionGetter.
 type graphPoolAdapter struct {
-	pool *daemon.ConnectionPool
+	pool daemon.Pool
 }
 
 func (p *graphPoolAdapter) Get(ctx context.Context) (graphClient, error) {
@@ -178,7 +179,7 @@ func writeErrorResponse(w http.ResponseWriter, status int, message string) {
 }
 
 // handleGetIssue returns a handler that retrieves a single issue by ID.
-func handleGetIssue(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleGetIssue(pool daemon.Pool) http.HandlerFunc {
 	return handleGetIssueWithPool(&poolAdapter{pool: pool})
 }
 
@@ -228,7 +229,7 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 }
 
 // handleListIssues returns a handler that lists issues from the daemon.
-func handleListIssues(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -249,7 +250,10 @@ func handleListIssues(pool *daemon.ConnectionPool) http.HandlerFunc {
 			status := http.StatusServiceUnavailable
 			code := "DAEMON_UNAVAILABLE"
 			message := "daemon unavailable"
-			if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+				code = "CIRCUIT_OPEN"
+				message = "service temporarily unavailable: circuit breaker open"
+			} else if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 				code = "CONNECTION_TIMEOUT"
 				message = "timeout connecting to daemon"
@@ -333,7 +337,7 @@ func handleListIssues(pool *daemon.ConnectionPool) http.HandlerFunc {
 }
 
 // handleReady returns issues ready to work on (open/in_progress with no blockers).
-func handleReady(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleReady(pool daemon.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -448,9 +452,9 @@ type blockedConnectionGetter interface {
 	Put(client blockedClient)
 }
 
-// blockedPoolAdapter wraps *daemon.ConnectionPool to implement blockedConnectionGetter.
+// blockedPoolAdapter wraps daemon.Pool to implement blockedConnectionGetter.
 type blockedPoolAdapter struct {
-	pool *daemon.ConnectionPool
+	pool daemon.Pool
 }
 
 func (p *blockedPoolAdapter) Get(ctx context.Context) (blockedClient, error) {
@@ -490,7 +494,7 @@ type GraphResponse struct {
 }
 
 // handleBlocked returns issues that have blocking dependencies (waiting on other issues).
-func handleBlocked(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleBlocked(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return handleBlockedWithPool(nil)
 	}
@@ -595,7 +599,7 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 }
 
 // handleGraph returns issues with full dependency data for graph visualization.
-func handleGraph(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleGraph(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return handleGraphWithPool(nil)
 	}
@@ -1011,7 +1015,7 @@ type PatchIssueResponse struct {
 }
 
 // handlePatchIssue returns a handler that performs partial updates on an issue.
-func handlePatchIssue(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handlePatchIssue(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return handlePatchIssueWithPool(nil)
 	}
@@ -1258,9 +1262,9 @@ type createConnectionGetter interface {
 	Put(client issueCreator)
 }
 
-// createPoolAdapter wraps *daemon.ConnectionPool to implement createConnectionGetter.
+// createPoolAdapter wraps daemon.Pool to implement createConnectionGetter.
 type createPoolAdapter struct {
-	pool *daemon.ConnectionPool
+	pool daemon.Pool
 }
 
 func (p *createPoolAdapter) Get(ctx context.Context) (issueCreator, error) {
@@ -1274,7 +1278,7 @@ func (p *createPoolAdapter) Put(client issueCreator) {
 }
 
 // handleCreateIssue returns a handler that creates a new issue.
-func handleCreateIssue(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleCreateIssue(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -1320,7 +1324,10 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 			status := http.StatusServiceUnavailable
 			code := "DAEMON_UNAVAILABLE"
 			message := "daemon unavailable"
-			if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+				code = "CIRCUIT_OPEN"
+				message = "service temporarily unavailable: circuit breaker open"
+			} else if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 				code = "CONNECTION_TIMEOUT"
 				message = "timeout connecting to daemon"
@@ -1357,7 +1364,7 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 }
 
 // handleCloseIssue returns a handler that closes an issue by ID.
-func handleCloseIssue(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleCloseIssue(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return handleCloseIssueWithPool(nil)
 	}
@@ -1475,9 +1482,9 @@ type dependencyConnectionGetter interface {
 	Put(client dependencyManager)
 }
 
-// dependencyPoolAdapter wraps *daemon.ConnectionPool to implement dependencyConnectionGetter.
+// dependencyPoolAdapter wraps daemon.Pool to implement dependencyConnectionGetter.
 type dependencyPoolAdapter struct {
-	pool *daemon.ConnectionPool
+	pool daemon.Pool
 }
 
 func (p *dependencyPoolAdapter) Get(ctx context.Context) (dependencyManager, error) {
@@ -1491,7 +1498,7 @@ func (p *dependencyPoolAdapter) Put(client dependencyManager) {
 }
 
 // handleAddDependency creates a dependency from the issue to another issue.
-func handleAddDependency(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleAddDependency(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return handleAddDependencyWithPool(nil)
 	}
@@ -1649,7 +1656,7 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 }
 
 // handleRemoveDependency removes a dependency from the issue.
-func handleRemoveDependency(pool *daemon.ConnectionPool) http.HandlerFunc {
+func handleRemoveDependency(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return handleRemoveDependencyWithPool(nil)
 	}
