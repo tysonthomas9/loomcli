@@ -84,7 +84,9 @@ func runReset(cmd *cobra.Command, args []string) {
 		if len(args) > 1 {
 			targetBranch = args[1]
 		}
-		resetWorktree(worktreeName, targetBranch, !resetForce)
+		if !resetWorktree(worktreeName, targetBranch, !resetForce) {
+			os.Exit(1)
+		}
 	}
 }
 
@@ -147,12 +149,20 @@ func resetAllWorktrees(targetBranch string, explicitTarget bool) {
 	}
 
 	// Reset each worktree
+	var failed []string
 	for _, t := range targets {
-		resetWorktree(t.wt.Name, t.branch, false) // Don't ask for each one
+		if !resetWorktree(t.wt.Name, t.branch, false) {
+			failed = append(failed, t.wt.Name)
+		}
 		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
+	if len(failed) > 0 {
+		fmt.Fprintf(os.Stderr, "Failed to reset %d worktree(s): %v\n", len(failed), failed)
+		fmt.Println("=========================================")
+		os.Exit(1)
+	}
 	if perRepoBranches {
 		fmt.Println("All worktrees reset to their integration branches!")
 	} else {
@@ -161,11 +171,11 @@ func resetAllWorktrees(targetBranch string, explicitTarget bool) {
 	fmt.Println("=========================================")
 }
 
-func resetWorktree(worktreeName, targetBranch string, askConfirm bool) {
+func resetWorktree(worktreeName, targetBranch string, askConfirm bool) bool {
 	worktreePath, err := ResolveWorktreePath(worktreeName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return
+		return false
 	}
 
 	fmt.Println("=========================================")
@@ -178,7 +188,7 @@ func resetWorktree(worktreeName, targetBranch string, askConfirm bool) {
 		fmt.Printf("⚠ WARNING: This will discard ALL local changes in '%s'!\n", worktreeName)
 		if !confirmAction("Are you sure?") {
 			fmt.Println("Aborted.")
-			return
+			return true // User abort is not an error
 		}
 		fmt.Println("")
 	}
@@ -187,40 +197,41 @@ func resetWorktree(worktreeName, targetBranch string, askConfirm bool) {
 	currentBranch, err := GetCurrentBranch(worktreePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting current branch: %v\n", err)
-		return
+		return false
 	}
 
 	// Fetch latest
 	if err := GitFetch(worktreePath); err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching: %v\n", err)
-		return
+		return false
 	}
 
 	// Discard local changes
 	fmt.Println("Discarding local changes...")
 	if err := GitReset(worktreePath, "HEAD"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error resetting: %v\n", err)
-		return
+		return false
 	}
 	if err := GitClean(worktreePath); err != nil {
 		fmt.Fprintf(os.Stderr, "Error cleaning: %v\n", err)
-		return
+		return false
 	}
 
 	// Reset to target branch
 	if err := GitReset(worktreePath, "origin/"+targetBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error resetting to %s: %v\n", targetBranch, err)
-		return
+		return false
 	}
 
 	// Force push
 	if err := GitPushForce(worktreePath, currentBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error force pushing: %v\n", err)
-		return
+		return false
 	}
 
 	fmt.Printf("✓ Reset complete: %s is now at origin/%s\n", worktreeName, targetBranch)
 	fmt.Printf("  Branch: %s (force pushed)\n", currentBranch)
+	return true
 }
 
 func confirmAction(prompt string) bool {

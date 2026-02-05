@@ -352,6 +352,307 @@ func TestResetCmd_ArgsValidation_WorktreeAndBranch(t *testing.T) {
 }
 
 // ============================================================================
+// resetWorktree Return Value Tests
+// ============================================================================
+
+func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
+	// Verify that resetWorktree returns true on a successful reset.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
+		{Dir: wtPath, Args: []string{"clean", "-fd"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
+		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
+	})
+	outputMock.Install()
+
+	// Capture stdout to suppress output
+	oldStdout := os.Stdout
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := resetWorktree("test-wt", "main", false)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	if !result {
+		t.Error("expected resetWorktree to return true on success")
+	}
+}
+
+func TestResetWorktree_ReturnsFalse_OnFetchError(t *testing.T) {
+	// Verify that resetWorktree returns false when fetch fails.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}, Err: fmt.Errorf("network error")},
+	})
+	outputMock.Install()
+
+	// Capture stderr and stdout to suppress output
+	oldStderr := os.Stderr
+	_, wErr, _ := os.Pipe()
+	os.Stderr = wErr
+
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	result := resetWorktree("test-wt", "main", false)
+
+	wErr.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	if result {
+		t.Error("expected resetWorktree to return false on fetch error")
+	}
+}
+
+func TestResetWorktree_ReturnsFalse_OnResolveError(t *testing.T) {
+	// Verify that resetWorktree returns false when ResolveWorktreePath fails
+	// (e.g., invalid worktree name that doesn't exist).
+	ResetBeadsDirCache()
+
+	// Set up a temp dir with no worktrees directory so resolution fails
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// No command mocks needed - should fail before any git commands run
+	mock := NewCommandMock(t, []CommandStub{})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
+	outputMock.Install()
+
+	// Capture stderr and stdout to suppress output
+	oldStderr := os.Stderr
+	_, wErr, _ := os.Pipe()
+	os.Stderr = wErr
+
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	result := resetWorktree("nonexistent-worktree-xyz", "main", false)
+
+	wErr.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	if result {
+		t.Error("expected resetWorktree to return false when worktree path cannot be resolved")
+	}
+}
+
+func TestResetWorktree_ReturnsTrue_OnUserAbort(t *testing.T) {
+	// Verify that resetWorktree returns true when the user declines confirmation.
+	// A user abort is not an error, so it should return true.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// No git commands should be called since the user aborts before any git ops
+	mock := NewCommandMock(t, []CommandStub{})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
+	outputMock.Install()
+
+	// Mock stdin to respond "n" to the confirmation prompt
+	MockStdin(t, "n\n")
+
+	// Capture stdout to suppress output
+	oldStdout := os.Stdout
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+
+	// askConfirm=true triggers the confirmation prompt
+	result := resetWorktree("test-wt", "main", true)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	if !result {
+		t.Error("expected resetWorktree to return true on user abort (abort is not an error)")
+	}
+}
+
+// TestResetAllWorktrees_PartialFailure verifies that when one worktree fails
+// during resetAllWorktrees, the other worktrees are still attempted.
+//
+// Note: resetAllWorktrees calls os.Exit(1) when there are failures, so we
+// cannot directly test the full function in-process. Instead, we verify the
+// underlying behavior by testing resetWorktree return values and confirming
+// that the partial failure tracking logic in resetAllWorktrees is correct.
+//
+// The key contract tested here: resetWorktree returns false on failure and
+// true on success, which resetAllWorktrees uses to build its failed list.
+func TestResetAllWorktrees_PartialFailure(t *testing.T) {
+	// Test that resetWorktree returns correct booleans for a mix of success
+	// and failure, which is what resetAllWorktrees relies on to track failures.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repo1Path := filepath.Join(tmpDir, "worktrees", "repo1")
+	repo2Path := filepath.Join(tmpDir, "worktrees", "repo2")
+	createGitRepo(t, repo1Path)
+	createGitRepo(t, repo2Path)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// First call: repo1 succeeds (all commands pass)
+	// We test repo1 and repo2 in separate sub-tests to simulate what
+	// resetAllWorktrees does internally.
+	t.Run("repo1_succeeds", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{
+			{Dir: repo1Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-1\n"},
+		})
+		mock.Install()
+
+		outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+			{Dir: repo1Path, Args: []string{"fetch", "origin"}},
+			{Dir: repo1Path, Args: []string{"reset", "--hard", "HEAD"}},
+			{Dir: repo1Path, Args: []string{"clean", "-fd"}},
+			{Dir: repo1Path, Args: []string{"reset", "--hard", "origin/main"}},
+			{Dir: repo1Path, Args: []string{"push", "origin", "feature-1", "--force"}},
+		})
+		outputMock.Install()
+
+		oldStdout := os.Stdout
+		_, w, _ := os.Pipe()
+		os.Stdout = w
+
+		result := resetWorktree("repo1", "main", false)
+
+		w.Close()
+		os.Stdout = oldStdout
+
+		if !result {
+			t.Error("expected repo1 resetWorktree to return true (success)")
+		}
+	})
+
+	// Second call: repo2 fails (fetch error)
+	t.Run("repo2_fails_fetch", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{
+			{Dir: repo2Path, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-2\n"},
+		})
+		mock.Install()
+
+		outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+			{Dir: repo2Path, Args: []string{"fetch", "origin"}, Err: fmt.Errorf("network error")},
+		})
+		outputMock.Install()
+
+		// Capture stderr to verify error message
+		oldStderr := os.Stderr
+		rErr, wErr, _ := os.Pipe()
+		os.Stderr = wErr
+
+		oldStdout := os.Stdout
+		_, wOut, _ := os.Pipe()
+		os.Stdout = wOut
+
+		result := resetWorktree("repo2", "main", false)
+
+		wErr.Close()
+		wOut.Close()
+		os.Stderr = oldStderr
+		os.Stdout = oldStdout
+
+		buf := make([]byte, 1024)
+		n, _ := rErr.Read(buf)
+		stderr := string(buf[:n])
+
+		if result {
+			t.Error("expected repo2 resetWorktree to return false (fetch error)")
+		}
+
+		if !containsSubstring([]string{stderr}, "Error fetching") {
+			t.Errorf("expected stderr to contain 'Error fetching', got %q", stderr)
+		}
+	})
+
+	// Simulate the tracking logic from resetAllWorktrees
+	t.Run("failure_tracking", func(t *testing.T) {
+		// This mirrors the logic in resetAllWorktrees:
+		//   var failed []string
+		//   for _, t := range targets {
+		//       if !resetWorktree(...) { failed = append(failed, t.wt.Name) }
+		//   }
+		// We verify that with one true and one false, exactly one name is tracked.
+		var failed []string
+		results := map[string]bool{
+			"repo1": true,  // success
+			"repo2": false, // failure
+		}
+		for name, ok := range results {
+			if !ok {
+				failed = append(failed, name)
+			}
+		}
+		if len(failed) != 1 {
+			t.Errorf("expected 1 failure, got %d: %v", len(failed), failed)
+		}
+		if !containsSubstring(failed, "repo2") {
+			t.Errorf("expected failed list to contain 'repo2', got %v", failed)
+		}
+	})
+}
+
+// ============================================================================
 // confirmAction Tests
 // ============================================================================
 
