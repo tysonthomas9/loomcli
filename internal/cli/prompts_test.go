@@ -376,6 +376,92 @@ func TestBuildWorkspaceContextBlock_DefaultBranch(t *testing.T) {
 	}
 }
 
+func TestGenerateConflictResolutionPromptWithPush(t *testing.T) {
+	tests := []struct {
+		name         string
+		sourceBranch string
+		targetBranch string
+		conflicts    []string
+		pushRef      string
+		wantParts    []string
+		notWantParts []string
+	}{
+		{
+			name:         "custom pushRef HEAD:main for detached mode",
+			sourceBranch: "feature/auth",
+			targetBranch: "main",
+			conflicts:    []string{"pkg/auth.go", "pkg/handler.go"},
+			pushRef:      "HEAD:main",
+			wantParts: []string{
+				"feature/auth",
+				"main",
+				"pkg/auth.go",
+				"pkg/handler.go",
+				"git push origin HEAD:main",
+				"Resolve Merge Conflicts",
+			},
+		},
+		{
+			name:         "standard pushRef equals target branch",
+			sourceBranch: "feature/ui",
+			targetBranch: "develop",
+			conflicts:    []string{"src/app.go"},
+			pushRef:      "develop",
+			wantParts: []string{
+				"feature/ui",
+				"develop",
+				"src/app.go",
+				"git push origin develop",
+			},
+		},
+		{
+			name:         "pushRef with refspec format",
+			sourceBranch: "hotfix",
+			targetBranch: "release",
+			conflicts:    []string{"main.go"},
+			pushRef:      "loom-push-temp-123:release",
+			wantParts: []string{
+				"git push origin loom-push-temp-123:release",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := generateConflictResolutionPromptWithPush(tc.sourceBranch, tc.targetBranch, tc.conflicts, tc.pushRef)
+
+			for _, part := range tc.wantParts {
+				if !strings.Contains(prompt, part) {
+					t.Errorf("prompt missing expected part: %q", part)
+				}
+			}
+			for _, part := range tc.notWantParts {
+				if strings.Contains(prompt, part) {
+					t.Errorf("prompt should not contain: %q", part)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateConflictResolutionPrompt_DelegatesToInternal(t *testing.T) {
+	// Verify that GenerateConflictResolutionPrompt delegates to
+	// generateConflictResolutionPromptWithPush with pushRef = targetBranch
+	conflicts := []string{"file.go"}
+
+	publicPrompt := GenerateConflictResolutionPrompt("feature", "main", conflicts)
+	internalPrompt := generateConflictResolutionPromptWithPush("feature", "main", conflicts, "main")
+
+	if publicPrompt != internalPrompt {
+		t.Error("GenerateConflictResolutionPrompt should produce identical output to generateConflictResolutionPromptWithPush with pushRef=targetBranch")
+	}
+
+	// The public function should use targetBranch as the push ref
+	if !strings.Contains(publicPrompt, "git push origin main") {
+		t.Error("expected public prompt to use targetBranch as push ref")
+	}
+}
+
 func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 	// Create a temp empty directory and point LOOM_CONFIG_DIR to it
 	tmpDir := t.TempDir()

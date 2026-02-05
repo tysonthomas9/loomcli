@@ -286,6 +286,12 @@ You have completed ONE task through the full workflow. The human will run you ag
 
 // GenerateConflictResolutionPrompt creates the prompt for merge conflict resolution
 func GenerateConflictResolutionPrompt(sourceBranch, targetBranch string, conflicts []string) string {
+	return generateConflictResolutionPromptWithPush(sourceBranch, targetBranch, conflicts, targetBranch)
+}
+
+// generateConflictResolutionPromptWithPush creates a conflict resolution prompt with a custom push ref.
+// pushRef is used in the "git push origin <pushRef>" command (e.g., "main" or "HEAD:main").
+func generateConflictResolutionPromptWithPush(sourceBranch, targetBranch string, conflicts []string, pushRef string) string {
 	conflictList := strings.Join(conflicts, "\n")
 
 	return fmt.Sprintf(`## WORKFLOW: Resolve Merge Conflicts
@@ -336,7 +342,7 @@ git push origin %s
 - Every conflict marker must be removed
 - The code must compile/build
 - If you cannot resolve a conflict, explain why and do NOT commit
-`, sourceBranch, targetBranch, conflictList, targetBranch, sourceBranch, sourceBranch, targetBranch, conflictList, targetBranch)
+`, sourceBranch, targetBranch, conflictList, targetBranch, sourceBranch, sourceBranch, targetBranch, conflictList, pushRef)
 }
 
 // GenerateLeadPrompt creates the prompt for the interactive lead/manager mode

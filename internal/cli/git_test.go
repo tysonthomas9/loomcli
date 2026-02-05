@@ -1104,3 +1104,262 @@ func TestHasUnmergedFiles_GitError(t *testing.T) {
 		t.Error("expected hasUnmerged to be false when error occurs")
 	}
 }
+
+func TestIsRefCheckedOutInWorktree(t *testing.T) {
+	tests := []struct {
+		name             string
+		branch           string
+		mockOutput       string
+		mockErr          error
+		wantCheckedOut   bool
+		wantWorktreePath string
+		wantErr          bool
+	}{
+		{
+			name:   "branch checked out in another worktree",
+			branch: "main",
+			mockOutput: "worktree /home/user/project\nHEAD abc1234\nbranch refs/heads/develop\n\n" +
+				"worktree /home/user/worktrees/falcon\nHEAD def5678\nbranch refs/heads/main\n\n",
+			wantCheckedOut:   true,
+			wantWorktreePath: "/home/user/worktrees/falcon",
+		},
+		{
+			name:   "branch not checked out anywhere",
+			branch: "feature/new",
+			mockOutput: "worktree /home/user/project\nHEAD abc1234\nbranch refs/heads/main\n\n" +
+				"worktree /home/user/worktrees/falcon\nHEAD def5678\nbranch refs/heads/develop\n\n",
+			wantCheckedOut: false,
+		},
+		{
+			name:           "no worktrees (empty output)",
+			branch:         "main",
+			mockOutput:     "",
+			wantCheckedOut: false,
+		},
+		{
+			name:    "git command fails",
+			branch:  "main",
+			mockErr: errors.New("not a git repository"),
+			wantErr: true,
+		},
+		{
+			name:   "branch checked out in first worktree",
+			branch: "main",
+			mockOutput: "worktree /home/user/project\nHEAD abc1234\nbranch refs/heads/main\n\n" +
+				"worktree /home/user/worktrees/falcon\nHEAD def5678\nbranch refs/heads/falcon\n\n",
+			wantCheckedOut:   true,
+			wantWorktreePath: "/home/user/project",
+		},
+		{
+			name:             "single worktree with matching branch",
+			branch:           "develop",
+			mockOutput:       "worktree /repo\nHEAD abc1234\nbranch refs/heads/develop\n\n",
+			wantCheckedOut:   true,
+			wantWorktreePath: "/repo",
+		},
+		{
+			name:           "detached HEAD worktree (no branch line)",
+			branch:         "main",
+			mockOutput:     "worktree /repo\nHEAD abc1234\ndetached\n\n",
+			wantCheckedOut: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewCommandMock(t, []CommandStub{{
+				Name:   "git",
+				Args:   []string{"worktree", "list", "--porcelain"},
+				Stdout: tc.mockOutput,
+				Err:    tc.mockErr,
+			}})
+			mock.Install()
+
+			checkedOut, wtPath, err := IsRefCheckedOutInWorktree("/repo", tc.branch)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if checkedOut != tc.wantCheckedOut {
+				t.Errorf("checkedOut = %v, want %v", checkedOut, tc.wantCheckedOut)
+			}
+			if tc.wantCheckedOut && wtPath != tc.wantWorktreePath {
+				t.Errorf("worktreePath = %q, want %q", wtPath, tc.wantWorktreePath)
+			}
+		})
+	}
+}
+
+func TestGitCheckoutDetached(t *testing.T) {
+	tests := []struct {
+		name    string
+		dir     string
+		ref     string
+		mockErr error
+		wantErr bool
+	}{
+		{"success", "/repo", "origin/main", nil, false},
+		{"invalid ref", "/repo", "nonexistent", errors.New("pathspec did not match"), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: []string{"checkout", "--detach", tc.ref},
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitCheckoutDetached(tc.dir, tc.ref)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestGitCreateBranchFromHead(t *testing.T) {
+	tests := []struct {
+		name    string
+		dir     string
+		branch  string
+		mockErr error
+		wantErr bool
+	}{
+		{"success", "/repo", "loom-push-temp-123", nil, false},
+		{"branch already exists", "/repo", "existing-branch", errors.New("already exists"), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: []string{"checkout", "-b", tc.branch},
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitCreateBranchFromHead(tc.dir, tc.branch)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestGitDeleteBranch(t *testing.T) {
+	tests := []struct {
+		name    string
+		dir     string
+		branch  string
+		force   bool
+		wantArg string
+		mockErr error
+		wantErr bool
+	}{
+		{"soft delete success", "/repo", "temp-branch", false, "-d", nil, false},
+		{"force delete success", "/repo", "temp-branch", true, "-D", nil, false},
+		{"soft delete fails (unmerged)", "/repo", "unmerged-branch", false, "-d", errors.New("not fully merged"), true},
+		{"force delete fails", "/repo", "protected", true, "-D", errors.New("cannot delete"), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: []string{"branch", tc.wantArg, tc.branch},
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitDeleteBranch(tc.dir, tc.branch, tc.force)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestGitPushRefspec(t *testing.T) {
+	tests := []struct {
+		name       string
+		dir        string
+		remote     string
+		localRef   string
+		remoteRef  string
+		wantRemote string
+		wantArgs   []string
+		mockErr    error
+		wantErr    bool
+	}{
+		{
+			name:       "empty remote defaults to origin",
+			dir:        "/repo",
+			remote:     "",
+			localRef:   "loom-push-temp-123",
+			remoteRef:  "main",
+			wantRemote: "origin",
+			wantArgs:   []string{"push", "origin", "loom-push-temp-123:main"},
+			mockErr:    nil,
+			wantErr:    false,
+		},
+		{
+			name:       "custom remote",
+			dir:        "/repo",
+			remote:     "upstream",
+			localRef:   "temp-branch",
+			remoteRef:  "develop",
+			wantRemote: "upstream",
+			wantArgs:   []string{"push", "upstream", "temp-branch:develop"},
+			mockErr:    nil,
+			wantErr:    false,
+		},
+		{
+			name:       "push fails",
+			dir:        "/repo",
+			remote:     "",
+			localRef:   "temp",
+			remoteRef:  "main",
+			wantRemote: "origin",
+			wantArgs:   []string{"push", "origin", "temp:main"},
+			mockErr:    errors.New("rejected"),
+			wantErr:    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: tc.wantArgs,
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitPushRefspec(tc.dir, tc.remote, tc.localRef, tc.remoteRef)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}

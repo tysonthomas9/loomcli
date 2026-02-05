@@ -119,6 +119,7 @@ func TestPushBranch(t *testing.T) {
 			},
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                             // IsCleanWorkingTree (clean, no stash)
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                                   // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 some commit\n"}, // HasCommitsBetween
 			},
 		},
@@ -134,6 +135,7 @@ func TestPushBranch(t *testing.T) {
 			},
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                          // IsCleanWorkingTree
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: ""}, // no commits
 			},
 		},
@@ -155,7 +157,8 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"checkout", "main"}, Err: errors.New("checkout failed")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""}, // IsCleanWorkingTree
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},           // IsCleanWorkingTree
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""}, // IsRefCheckedOutInWorktree
 			},
 		},
 		{
@@ -168,7 +171,8 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"pull", "origin", "main"}, Err: errors.New("pull failed")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""}, // IsCleanWorkingTree
+				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},           // IsCleanWorkingTree
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""}, // IsRefCheckedOutInWorktree
 			},
 		},
 		{
@@ -184,6 +188,7 @@ func TestPushBranch(t *testing.T) {
 			},
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
 			},
@@ -201,6 +206,7 @@ func TestPushBranch(t *testing.T) {
 			},
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""}, // no conflict files
 			},
@@ -218,6 +224,7 @@ func TestPushBranch(t *testing.T) {
 			},
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 			},
 		},
@@ -233,6 +240,7 @@ func TestPushBranch(t *testing.T) {
 			},
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
 			},
@@ -306,8 +314,10 @@ func TestPushAllWorktrees(t *testing.T) {
 			},
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree (alpha)
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree (alpha)
 				{Name: "git", Args: []string{"log", "main..origin/alpha-branch", "--oneline"}, Stdout: "abc commit\n"},
 				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree (beta)
+				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree (beta)
 				{Name: "git", Args: []string{"log", "main..origin/beta-branch", "--oneline"}, Stdout: "def commit\n"},
 			},
 		},
@@ -417,11 +427,13 @@ func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		// IsCleanWorkingTree + HasCommitsBetweenRemote for repo-a
+		// IsCleanWorkingTree + IsRefCheckedOutInWorktree + HasCommitsBetweenRemote for repo-a
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
-		// IsCleanWorkingTree + HasCommitsBetweenRemote for repo-b
+		// IsCleanWorkingTree + IsRefCheckedOutInWorktree + HasCommitsBetweenRemote for repo-b
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
@@ -474,8 +486,10 @@ func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "develop..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "staging..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
@@ -516,6 +530,7 @@ func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "release..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -554,6 +569,7 @@ func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..upstream/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -587,6 +603,7 @@ func TestRunPush_LegacyMode(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
@@ -632,6 +649,7 @@ func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
@@ -665,6 +683,7 @@ func TestPushBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M dirty.go\n"}, // IsCleanWorkingTree returns false (dirty)
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},     // IsRefCheckedOutInWorktree
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
@@ -698,6 +717,7 @@ func TestPushBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M dirty.go\n"},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "dirty.go\n"}, // HasUnmergedFiles returns true
 	}
@@ -761,6 +781,7 @@ func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -828,6 +849,7 @@ func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file.go\n"}, // HasUnmergedFiles
 	}
@@ -864,6 +886,7 @@ func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""}, // clean
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -973,6 +996,352 @@ func TestPushWorkspaceWorktrees_EmptyList(t *testing.T) {
 
 	// Should not panic or call any commands
 	pushWorkspaceWorktrees(worktrees, "", "main")
+}
+
+func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {
+	// When IsRefCheckedOutInWorktree returns true, pushBranchInRepo should use
+	// the detached HEAD approach instead of the normal checkout flow.
+	worktreeListOutput := "worktree /home/user/project\nHEAD abc1234\nbranch refs/heads/main\n\n" +
+		"worktree /home/user/worktrees/falcon\nHEAD def5678\nbranch refs/heads/falcon\n\n"
+
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},                // GitFetchRemote
+		{Args: nil, Err: nil},                                        // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil},                                        // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: nil},                                        // GitMergeRemote
+		{Args: nil, Err: nil},                                        // GitPushRefspec (temp:main)
+		{Args: nil, Err: nil},                                        // GitDeleteBranch (cleanup temp, deferred)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                    // IsCleanWorkingTree (clean, no stash)
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: worktreeListOutput}, // IsRefCheckedOutInWorktree -> true
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchInRepo("/repo", "feature", "main", "")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPushBranchInRepoDetached_Success(t *testing.T) {
+	// Test the full detached push flow:
+	// checkout detached -> create temp branch -> merge -> push refspec -> cleanup
+	outputStubs := []OutputCommandStub{
+		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: nil}, // GitMergeRemote (origin/feature)
+		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPushBranchInRepoDetached_AlreadyUpToDate(t *testing.T) {
+	// When HasCommitsBetweenRemote returns false, the detached flow should
+	// return early before creating the temp branch, without merging or pushing.
+	outputStubs := []OutputCommandStub{
+		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
+		// No create branch, merge, or push - already up to date
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: ""}, // no commits
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPushBranchInRepoDetached_MergeConflicts_InvokesClaude(t *testing.T) {
+	// When merge fails with conflicts in the detached flow, Claude should be
+	// invoked with a custom pushRef (HEAD:<targetBranch>).
+	outputStubs := []OutputCommandStub{
+		{Args: nil, Err: nil},                      // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil},                      // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: errors.New("CONFLICT")},   // GitMergeRemote fails with conflicts
+		// No push - conflicts
+		{Args: nil, Err: nil},                      // GitDeleteBranch (cleanup temp, deferred)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},    // HasCommitsBetweenRemote
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"}, // GetConflictedFiles
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	claudeCalled := false
+	var capturedPrompt string
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		claudeCalled = true
+		capturedPrompt = prompt
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !claudeCalled {
+		t.Error("expected claude to be invoked for conflict resolution")
+	}
+	// The detached flow should use "HEAD:main" as the push ref
+	if !strings.Contains(capturedPrompt, "HEAD:main") {
+		t.Errorf("expected prompt to contain 'HEAD:main' push ref, but it did not")
+	}
+}
+
+func TestPushBranchInRepoDetached_CheckoutDetachedFails(t *testing.T) {
+	// When GitCheckoutDetached fails, the function should return an error
+	// No cleanup needed since temp branch was never created
+	outputStubs := []OutputCommandStub{
+		{Args: nil, Err: errors.New("checkout failed")}, // GitCheckoutDetached fails
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchInRepoDetached("/repo", "feature", "main", "")
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "detached") {
+		t.Errorf("expected error to mention 'detached', got: %v", err)
+	}
+}
+
+func TestPushBranchInRepoDetached_CustomRemote(t *testing.T) {
+	// Test that custom remote is passed through to all git commands
+	outputStubs := []OutputCommandStub{
+		{Args: nil, Err: nil}, // GitCheckoutDetached (upstream/main)
+		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: nil}, // GitMergeRemote (upstream/feature)
+		{Args: nil, Err: nil}, // GitPushRefspec (temp:main via upstream)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..upstream/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchInRepoDetached("/repo", "feature", "main", "upstream")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
+	// When IsRefCheckedOutInWorktree returns true in legacy pushBranch,
+	// it should use pushBranchDetached instead of the normal checkout flow.
+	worktreeListOutput := "worktree /home/user/project\nHEAD abc1234\nbranch refs/heads/main\n\n"
+
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil}, // GitFetch
+		// Detached flow:
+		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: nil}, // GitMergeOrigin
+		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                          // IsCleanWorkingTree
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: worktreeListOutput},                // IsRefCheckedOutInWorktree -> true for "main"
+		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},   // HasCommitsBetween
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	// pushBranch doesn't return an error - it prints to stderr
+	pushBranch("feature/test", "main")
+}
+
+func TestPushBranchDetached_AlreadyUpToDate(t *testing.T) {
+	// Legacy pushBranchDetached should return early when no commits to merge
+	// No temp branch is created when already up to date
+	outputStubs := []OutputCommandStub{
+		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
+		// No create branch, merge, or push - already up to date
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: ""}, // HasCommitsBetween - no commits
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchDetached("/tmp/test-dir", "feature", "main")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPushBranchDetached_Success(t *testing.T) {
+	// Full detached push flow in legacy mode (uses origin, HasCommitsBetween, GitMergeOrigin)
+	outputStubs := []OutputCommandStub{
+		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: nil}, // GitMergeOrigin (origin/feature)
+		{Args: nil, Err: nil}, // GitPushRefspec (temp:main via origin)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetween
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchDetached("/tmp/test-dir", "feature", "main")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPushBranchDetached_MergeConflicts_InvokesClaude(t *testing.T) {
+	// When merge fails with conflicts in the legacy detached flow,
+	// Claude should be invoked with HEAD:<targetBranch> push ref
+	outputStubs := []OutputCommandStub{
+		{Args: nil, Err: nil},                    // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil},                    // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: errors.New("CONFLICT")}, // GitMergeOrigin fails
+		// No push - conflicts
+		{Args: nil, Err: nil},                    // GitDeleteBranch (cleanup temp, deferred)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},    // HasCommitsBetween
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"}, // GetConflictedFiles
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	claudeCalled := false
+	var capturedPrompt string
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		claudeCalled = true
+		capturedPrompt = prompt
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchDetached("/tmp/test-dir", "feature", "main")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !claudeCalled {
+		t.Error("expected claude to be invoked for conflict resolution")
+	}
+	if !strings.Contains(capturedPrompt, "HEAD:main") {
+		t.Errorf("expected prompt to contain 'HEAD:main' push ref, but it did not")
+	}
 }
 
 func TestPushCmd_WorkspaceModeArgsValidation(t *testing.T) {

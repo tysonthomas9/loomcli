@@ -174,6 +174,62 @@ func HasCommitsBetweenRemote(dir, remote, target, source string) (bool, error) {
 	return strings.TrimSpace(output) != "", nil
 }
 
+// IsRefCheckedOutInWorktree checks if a branch is checked out in any worktree.
+// Returns (isCheckedOut, worktreePath, error).
+func IsRefCheckedOutInWorktree(dir, branch string) (bool, string, error) {
+	output, err := RunGitCommand(dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false, "", err
+	}
+
+	var currentWorktree string
+	for _, line := range strings.Split(output, "\n") {
+		if line == "" {
+			currentWorktree = ""
+			continue
+		}
+		if strings.HasPrefix(line, "worktree ") {
+			currentWorktree = strings.TrimPrefix(line, "worktree ")
+		} else if strings.HasPrefix(line, "branch refs/heads/") {
+			branchName := strings.TrimPrefix(line, "branch refs/heads/")
+			if branchName == branch {
+				return true, currentWorktree, nil
+			}
+		}
+	}
+
+	return false, "", nil
+}
+
+// GitCheckoutDetached checks out a ref in detached HEAD mode
+func GitCheckoutDetached(dir, ref string) error {
+	fmt.Printf("Checking out %s (detached)...\n", ref)
+	return RunGitCommandWithOutput(dir, "checkout", "--detach", ref)
+}
+
+// GitCreateBranchFromHead creates a new branch at the current HEAD and switches to it
+func GitCreateBranchFromHead(dir, name string) error {
+	fmt.Printf("Creating branch %s...\n", name)
+	return RunGitCommandWithOutput(dir, "checkout", "-b", name)
+}
+
+// GitDeleteBranch deletes a local branch. Use force=true for -D (force delete).
+func GitDeleteBranch(dir, name string, force bool) error {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	return RunGitCommandWithOutput(dir, "branch", flag, name)
+}
+
+// GitPushRefspec pushes a local ref to a different remote ref using a refspec
+func GitPushRefspec(dir, remote, localRef, remoteRef string) error {
+	r := resolveRemote(remote)
+	refspec := localRef + ":" + remoteRef
+	fmt.Printf("Pushing %s to %s/%s...\n", localRef, r, remoteRef)
+	return RunGitCommandWithOutput(dir, "push", r, refspec)
+}
+
 // GitStash stashes local changes. Returns true if changes were actually stashed,
 // false if working tree was clean (nothing to stash).
 func GitStash(dir string) (bool, error) {

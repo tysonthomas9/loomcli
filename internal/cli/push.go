@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -269,6 +270,14 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 		}()
 	}
 
+	// Check if target branch is checked out in another worktree
+	checkedOut, worktreePath, _ := IsRefCheckedOutInWorktree(repoPath, targetBranch)
+	if checkedOut {
+		fmt.Printf("⚠ Target branch %s is checked out at: %s\n", targetBranch, worktreePath)
+		fmt.Println("⚠ Using detached HEAD approach")
+		return pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote)
+	}
+
 	// Checkout target branch
 	if err := GitCheckout(repoPath, targetBranch); err != nil {
 		return fmt.Errorf("checking out %s: %v", targetBranch, err)
@@ -315,6 +324,71 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 
 	// Push
 	if err := GitPushRemote(repoPath, remote, targetBranch); err != nil {
+		return fmt.Errorf("pushing: %v", err)
+	}
+
+	fmt.Printf("✓ Pushed to %s/%s\n", r, targetBranch)
+	return nil
+}
+
+// pushBranchInRepoDetached handles pushing when the target branch is checked out
+// in another worktree. Uses detached HEAD + temp branch to avoid conflicts.
+func pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote string) error {
+	r := resolveRemote(remote)
+	tempBranch := fmt.Sprintf("loom-push-temp-%d", time.Now().UnixNano())
+
+	// Checkout origin/<target> detached
+	if err := GitCheckoutDetached(repoPath, r+"/"+targetBranch); err != nil {
+		return fmt.Errorf("checking out %s/%s detached: %v", r, targetBranch, err)
+	}
+
+	// Check if there are commits to merge before creating temp branch
+	hasCommits, err := HasCommitsBetweenRemote(repoPath, remote, targetBranch, sourceBranch)
+	if err == nil && !hasCommits {
+		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
+		return nil
+	}
+
+	// Create temp branch from detached HEAD
+	if err := GitCreateBranchFromHead(repoPath, tempBranch); err != nil {
+		return fmt.Errorf("creating temp branch: %v", err)
+	}
+
+	// Cleanup temp branch on exit (deferred after creation)
+	defer func() {
+		_ = GitDeleteBranch(repoPath, tempBranch, true)
+	}()
+
+	// Attempt merge
+	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
+	if err := GitMergeRemote(repoPath, remote, sourceBranch, mergeMsg); err != nil {
+		// Check for conflicts
+		conflicts, conflictErr := GetConflictedFiles(repoPath)
+		if conflictErr != nil || len(conflicts) == 0 {
+			return fmt.Errorf("merge failed: %v", err)
+		}
+
+		fmt.Println("")
+		fmt.Println("⚠ Merge conflicts detected. Launching Claude to resolve...")
+		fmt.Println("")
+		fmt.Println("Conflicted files:")
+		for _, f := range conflicts {
+			fmt.Printf("  - %s\n", f)
+		}
+		fmt.Println("")
+
+		// Launch Claude with push command using refspec for detached approach
+		prompt := generateConflictResolutionPromptWithPush(sourceBranch, targetBranch, conflicts, fmt.Sprintf("HEAD:%s", targetBranch))
+		if err := InvokeClaude(repoPath, prompt, ""); err != nil {
+			return fmt.Errorf("resolving conflicts: %v", err)
+		}
+		return nil
+	}
+
+	fmt.Println("✓ Push completed successfully (no conflicts)")
+
+	// Push temp branch to remote target using refspec
+	if err := GitPushRefspec(repoPath, remote, tempBranch, targetBranch); err != nil {
 		return fmt.Errorf("pushing: %v", err)
 	}
 
@@ -401,6 +475,17 @@ func pushBranch(sourceBranch, targetBranch string) {
 		}()
 	}
 
+	// Check if target branch is checked out in another worktree
+	checkedOut, worktreePath, _ := IsRefCheckedOutInWorktree(scriptDir, targetBranch)
+	if checkedOut {
+		fmt.Printf("⚠ Target branch %s is checked out at: %s\n", targetBranch, worktreePath)
+		fmt.Println("⚠ Using detached HEAD approach")
+		if err := pushBranchDetached(scriptDir, sourceBranch, targetBranch); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+		return
+	}
+
 	// Checkout target branch
 	if err := GitCheckout(scriptDir, targetBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking out %s: %v\n", targetBranch, err)
@@ -456,4 +541,68 @@ func pushBranch(sourceBranch, targetBranch string) {
 	}
 
 	fmt.Printf("✓ Pushed to origin/%s\n", targetBranch)
+}
+
+// pushBranchDetached handles legacy push when target branch is checked out elsewhere.
+// Uses detached HEAD + temp branch approach with "origin" as the remote.
+func pushBranchDetached(scriptDir, sourceBranch, targetBranch string) error {
+	tempBranch := fmt.Sprintf("loom-push-temp-%d", time.Now().UnixNano())
+
+	// Checkout origin/<target> detached
+	if err := GitCheckoutDetached(scriptDir, "origin/"+targetBranch); err != nil {
+		return fmt.Errorf("checking out origin/%s detached: %v", targetBranch, err)
+	}
+
+	// Check if there are commits to merge before creating temp branch
+	hasCommits, err := HasCommitsBetween(scriptDir, targetBranch, sourceBranch)
+	if err == nil && !hasCommits {
+		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
+		return nil
+	}
+
+	// Create temp branch from detached HEAD
+	if err := GitCreateBranchFromHead(scriptDir, tempBranch); err != nil {
+		return fmt.Errorf("creating temp branch: %v", err)
+	}
+
+	// Cleanup temp branch on exit (deferred after creation)
+	defer func() {
+		_ = GitDeleteBranch(scriptDir, tempBranch, true)
+	}()
+
+	// Attempt merge
+	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
+	if err := GitMergeOrigin(scriptDir, sourceBranch, mergeMsg); err != nil {
+		// Check for conflicts
+		conflicts, conflictErr := GetConflictedFiles(scriptDir)
+		if conflictErr != nil || len(conflicts) == 0 {
+			return fmt.Errorf("merge failed: %v", err)
+		}
+
+		fmt.Println("")
+		fmt.Println("⚠ Merge conflicts detected. Launching Claude to resolve...")
+		fmt.Println("")
+		fmt.Println("Conflicted files:")
+		for _, f := range conflicts {
+			fmt.Printf("  - %s\n", f)
+		}
+		fmt.Println("")
+
+		// Launch Claude with push command using refspec for detached approach
+		prompt := generateConflictResolutionPromptWithPush(sourceBranch, targetBranch, conflicts, fmt.Sprintf("HEAD:%s", targetBranch))
+		if err := InvokeClaude(scriptDir, prompt, ""); err != nil {
+			return fmt.Errorf("resolving conflicts: %v", err)
+		}
+		return nil
+	}
+
+	fmt.Println("✓ Push completed successfully (no conflicts)")
+
+	// Push temp branch to remote target using refspec
+	if err := GitPushRefspec(scriptDir, "", tempBranch, targetBranch); err != nil {
+		return fmt.Errorf("pushing: %v", err)
+	}
+
+	fmt.Printf("✓ Pushed to origin/%s\n", targetBranch)
+	return nil
 }
