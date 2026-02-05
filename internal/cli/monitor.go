@@ -442,7 +442,7 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 	wg.Wait()
 
 	// Process ready tasks, split by workflow stage
-	// Note: bd ready only returns open/in_progress tasks, not review status
+	// Note: bd ready returns tasks not blocked by dependencies (open, in_progress, review)
 	if readyErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(readyOutput), &issues) == nil {
@@ -451,6 +451,10 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 			for _, issue := range issues {
 				// Skip in_progress tasks - they appear in In Progress section
 				if issue.Status == "in_progress" {
+					continue
+				}
+				// Skip review tasks - they appear in Need Review section
+				if issue.Status == "review" {
 					continue
 				}
 				// Skip epics - agents shouldn't work on epics directly

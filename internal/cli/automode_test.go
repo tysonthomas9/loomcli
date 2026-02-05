@@ -47,6 +47,13 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "skip review tasks",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "In review", Status: "review", Design: ""},
+			}),
+			want: false,
+		},
+		{
 			name: "skip epics",
 			bdOutput: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
@@ -124,6 +131,13 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 			name: "skip in_progress tasks",
 			bdOutput: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: "Has design"},
+			}),
+			want: false,
+		},
+		{
+			name: "skip review tasks",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "In review", Status: "review", Design: "Has design"},
 			}),
 			want: false,
 		},
@@ -2074,6 +2088,13 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 			name: "skip in_progress tasks",
 			bdOutput: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
+			}),
+			want: false,
+		},
+		{
+			name: "skip review tasks",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "In review", Status: "review", Design: ""},
 			}),
 			want: false,
 		},

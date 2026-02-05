@@ -26,7 +26,7 @@ func TestRunTask_SingleTask_NoTasksAvailable(t *testing.T) {
 
 	// Mock bd ready returning empty array (no tasks)
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json"}, Stdout: "[]"},
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: "[]"},
 	})
 	mock.Install()
 
@@ -67,7 +67,7 @@ func TestRunTask_SingleTask_Success(t *testing.T) {
 	// Mock bd ready with available task (status=open, has design, no needs-revision label)
 	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"task","title":"Test task","design":"Implementation plan here"}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -174,7 +174,7 @@ func TestRunTask_SkipsEpics(t *testing.T) {
 	// Mock bd ready with only an epic (should be skipped)
 	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"epic","title":"Test epic","design":"Some design"}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -215,7 +215,7 @@ func TestRunTask_SkipsTasksWithoutDesign(t *testing.T) {
 	// Mock bd ready with task that has no design
 	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"task","title":"Test task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -256,7 +256,7 @@ func TestRunTask_SkipsTasksWithNeedsRevision(t *testing.T) {
 	// Mock bd ready with task that has needs-revision label
 	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"task","title":"Test task","design":"Some plan","labels":["needs-revision"]}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -283,7 +283,7 @@ func TestHasAvailableImplementationTasks_Success(t *testing.T) {
 	// Task with design and no needs-revision is available for implementation
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Implementation plan"}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -300,7 +300,7 @@ func TestHasAvailableImplementationTasks_SkipsTasksWithoutDesign(t *testing.T) {
 	// Task without design should be skipped
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -317,7 +317,7 @@ func TestHasAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 	// Task with needs-revision label should be skipped
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan","labels":["needs-revision"]}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -332,7 +332,7 @@ func TestHasAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 
 func TestHasAvailableImplementationTasks_BdError(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json"}, Err: os.ErrNotExist},
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
 	})
 	mock.Install()
 
