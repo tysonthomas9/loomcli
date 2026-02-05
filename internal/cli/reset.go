@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -38,7 +39,7 @@ Arguments:
 
 Flags:
   -a, --all      Reset all worktrees
-  -f, --force    Skip confirmation prompt
+  -f, --force    Skip confirmation prompt and override lock protection
 
 Examples:
   loom reset falcon                        # Reset falcon to integration branch
@@ -62,7 +63,7 @@ Examples:
 
 func init() {
 	resetCmd.Flags().BoolVarP(&resetAll, "all", "a", false, "Reset all worktrees")
-	resetCmd.Flags().BoolVarP(&resetForce, "force", "f", false, "Skip confirmation prompt")
+	resetCmd.Flags().BoolVarP(&resetForce, "force", "f", false, "Skip confirmation prompt and override lock protection")
 	rootCmd.AddCommand(resetCmd)
 }
 
@@ -176,6 +177,27 @@ func resetWorktree(worktreeName, targetBranch string, askConfirm bool) bool {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return false
+	}
+
+	// Check for active agent lock before destructive operation
+	lockInfo, running, checkErr := CheckLock(worktreePath)
+	if checkErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not check agent lock: %v\n", checkErr)
+	} else if running {
+		duration := time.Since(lockInfo.StartedAt).Round(time.Second)
+		taskInfo := ""
+		if lockInfo.TaskID != "" {
+			taskInfo = fmt.Sprintf(" on task %s", lockInfo.TaskID)
+		}
+		if !resetForce {
+			fmt.Fprintf(os.Stderr, "Error: Agent '%s' (PID %d) is actively working%s in worktree '%s' (running %s)\n",
+				lockInfo.AgentName, lockInfo.PID, taskInfo, worktreeName, duration)
+			fmt.Fprintf(os.Stderr, "Use --force to reset anyway (will destroy uncommitted work)\n")
+			return false
+		}
+		fmt.Fprintf(os.Stderr, "Warning: Agent '%s' (PID %d) is actively working%s in worktree '%s' (running %s)\n",
+			lockInfo.AgentName, lockInfo.PID, taskInfo, worktreeName, duration)
+		fmt.Fprintf(os.Stderr, "Proceeding with --force...\n")
 	}
 
 	fmt.Println("=========================================")

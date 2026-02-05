@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -851,5 +854,296 @@ func TestResetWorktree_FetchError(t *testing.T) {
 
 	if stderr == "" || !containsSubstring([]string{stderr}, "Error fetching") {
 		t.Errorf("expected 'Error fetching' in stderr, got %q", stderr)
+	}
+}
+
+// ============================================================================
+// resetWorktree Lock Safety Tests
+// ============================================================================
+
+func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Create an active lock (current process PID so IsProcessRunning returns true)
+	err := AcquireLock(wtPath, "task", "falcon")
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	defer ReleaseLock(wtPath)
+
+	// Ensure --force is NOT set
+	resetForce = false
+	defer func() { resetForce = false }()
+
+	// No git commands should be called - reset should abort before any git ops
+	mock := NewCommandMock(t, []CommandStub{})
+	mock.Install()
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
+	outputMock.Install()
+
+	// Capture stderr
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	result := resetWorktree("test-wt", "main", false)
+
+	w.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 2048)
+	n, _ := r.Read(buf)
+	stderr := string(buf[:n])
+
+	if result {
+		t.Error("expected resetWorktree to return false when lock is active")
+	}
+	if !strings.Contains(stderr, "is actively working") {
+		t.Errorf("expected 'is actively working' warning, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "Use --force") {
+		t.Errorf("expected 'Use --force' hint, got: %q", stderr)
+	}
+}
+
+func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Create a lock with task ID
+	err := AcquireLock(wtPath, "task", "falcon")
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	defer ReleaseLock(wtPath)
+	UpdateLockTask(wtPath, "loomcli-abc", "Fix the bug")
+
+	resetForce = false
+	defer func() { resetForce = false }()
+
+	mock := NewCommandMock(t, []CommandStub{})
+	mock.Install()
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
+	outputMock.Install()
+
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	resetWorktree("test-wt", "main", false)
+
+	w.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 2048)
+	n, _ := r.Read(buf)
+	stderr := string(buf[:n])
+
+	if !strings.Contains(stderr, "on task loomcli-abc") {
+		t.Errorf("expected task ID in warning, got: %q", stderr)
+	}
+}
+
+func TestResetWorktree_ForceOverridesLock(t *testing.T) {
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Create an active lock
+	err := AcquireLock(wtPath, "task", "falcon")
+	if err != nil {
+		t.Fatalf("failed to acquire lock: %v", err)
+	}
+	defer ReleaseLock(wtPath)
+
+	// Set --force
+	resetForce = true
+	defer func() { resetForce = false }()
+
+	// Set up mocks for the git operations (should proceed with --force)
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
+		{Dir: wtPath, Args: []string{"clean", "-fd"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
+		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
+	})
+	outputMock.Install()
+
+	// Capture stderr to verify warning
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	result := resetWorktree("test-wt", "main", false)
+
+	w.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 2048)
+	n, _ := r.Read(buf)
+	stderr := string(buf[:n])
+
+	if !result {
+		t.Error("expected resetWorktree to return true with --force despite active lock")
+	}
+	if !strings.Contains(stderr, "Proceeding with --force") {
+		t.Errorf("expected 'Proceeding with --force' message, got: %q", stderr)
+	}
+}
+
+func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Create a stale lock (non-existent PID)
+	staleLock := LockInfo{
+		PID:       999999999,
+		Command:   "task",
+		AgentName: "dead-agent",
+		StartedAt: time.Now().Add(-1 * time.Hour),
+	}
+	data, _ := json.Marshal(staleLock)
+	lockPath := filepath.Join(wtPath, LockFileName)
+	if err := os.WriteFile(lockPath, data, 0644); err != nil {
+		t.Fatalf("failed to write stale lock: %v", err)
+	}
+
+	resetForce = false
+	defer func() { resetForce = false }()
+
+	// Set up mocks - should proceed normally (stale lock does not block)
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
+		{Dir: wtPath, Args: []string{"clean", "-fd"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
+		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
+	})
+	outputMock.Install()
+
+	// Capture output
+	oldStdout := os.Stdout
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := resetWorktree("test-wt", "main", false)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	if !result {
+		t.Error("expected resetWorktree to proceed with stale lock")
+	}
+}
+
+func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// No lock file created
+
+	resetForce = false
+	defer func() { resetForce = false }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
+		{Dir: wtPath, Args: []string{"clean", "-fd"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
+		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
+	})
+	outputMock.Install()
+
+	oldStdout := os.Stdout
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result := resetWorktree("test-wt", "main", false)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	if !result {
+		t.Error("expected resetWorktree to proceed with no lock")
 	}
 }
