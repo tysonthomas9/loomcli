@@ -2396,3 +2396,365 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// GetAvailable* Tests
+// ============================================================================
+
+func TestGetAvailablePlanningTasks(t *testing.T) {
+	tests := []struct {
+		name      string
+		bdOutput  string
+		bdErr     error
+		wantIDs   []string
+		wantErr   bool
+	}{
+		{
+			name: "returns task needing planning (no design)",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
+			}),
+			wantIDs: []string{"T-1"},
+		},
+		{
+			name: "returns task with needs-revision label",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "existing design", Labels: []string{"needs-revision"}},
+			}),
+			wantIDs: []string{"T-1"},
+		},
+		{
+			name: "excludes task with design and no revision label",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
+			}),
+			wantIDs: nil,
+		},
+		{
+			name: "skips in_progress tasks",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
+			}),
+			wantIDs: nil,
+		},
+		{
+			name: "skips epics",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
+			}),
+			wantIDs: nil,
+		},
+		{
+			name:     "empty list returns empty slice",
+			bdOutput: "[]",
+			wantIDs:  nil,
+		},
+		{
+			name: "multiple valid tasks returns all",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "No design", Status: "open", Design: ""},
+				{ID: "T-2", Title: "Has design no revision", Status: "open", Design: "Plan"},
+				{ID: "T-3", Title: "Needs revision", Status: "open", Design: "Old plan", Labels: []string{"needs-revision"}},
+				{ID: "T-4", Title: "Also no design", Status: "open", Design: ""},
+			}),
+			wantIDs: []string{"T-1", "T-3", "T-4"},
+		},
+		{
+			name:    "bd error propagates",
+			bdErr:   fmt.Errorf("bd error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			}
+
+			got, err := GetAvailablePlanningTasks()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetAvailablePlanningTasks() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+
+			gotIDs := make([]string, len(got))
+			for i, issue := range got {
+				gotIDs[i] = issue.ID
+			}
+			if len(gotIDs) != len(tt.wantIDs) {
+				t.Errorf("GetAvailablePlanningTasks() returned %d tasks %v, want %d tasks %v", len(gotIDs), gotIDs, len(tt.wantIDs), tt.wantIDs)
+				return
+			}
+			for i, id := range gotIDs {
+				if id != tt.wantIDs[i] {
+					t.Errorf("GetAvailablePlanningTasks()[%d].ID = %s, want %s", i, id, tt.wantIDs[i])
+				}
+			}
+		})
+	}
+}
+
+func TestGetAvailableImplementationTasks(t *testing.T) {
+	tests := []struct {
+		name     string
+		bdOutput string
+		bdErr    error
+		wantIDs  []string
+		wantErr  bool
+	}{
+		{
+			name: "returns task with design ready for implementation",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Implementation plan"},
+			}),
+			wantIDs: []string{"T-1"},
+		},
+		{
+			name: "excludes task without design",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
+			}),
+			wantIDs: nil,
+		},
+		{
+			name: "excludes task with needs-revision label",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
+			}),
+			wantIDs: nil,
+		},
+		{
+			name: "skips in_progress tasks",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: "Has design"},
+			}),
+			wantIDs: nil,
+		},
+		{
+			name: "skips epics even with design",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: "Has design"},
+			}),
+			wantIDs: nil,
+		},
+		{
+			name:     "empty list returns empty slice",
+			bdOutput: "[]",
+			wantIDs:  nil,
+		},
+		{
+			name: "multiple valid tasks returns all",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "No design", Status: "open", Design: ""},
+				{ID: "T-2", Title: "Has design", Status: "open", Design: "Plan A"},
+				{ID: "T-3", Title: "Needs revision", Status: "open", Design: "Old plan", Labels: []string{"needs-revision"}},
+				{ID: "T-4", Title: "Also has design", Status: "open", Design: "Plan B"},
+			}),
+			wantIDs: []string{"T-2", "T-4"},
+		},
+		{
+			name:    "bd error propagates",
+			bdErr:   fmt.Errorf("bd error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			}
+
+			got, err := GetAvailableImplementationTasks()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetAvailableImplementationTasks() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+
+			gotIDs := make([]string, len(got))
+			for i, issue := range got {
+				gotIDs[i] = issue.ID
+			}
+			if len(gotIDs) != len(tt.wantIDs) {
+				t.Errorf("GetAvailableImplementationTasks() returned %d tasks %v, want %d tasks %v", len(gotIDs), gotIDs, len(tt.wantIDs), tt.wantIDs)
+				return
+			}
+			for i, id := range gotIDs {
+				if id != tt.wantIDs[i] {
+					t.Errorf("GetAvailableImplementationTasks()[%d].ID = %s, want %s", i, id, tt.wantIDs[i])
+				}
+			}
+		})
+	}
+}
+
+func TestGetAnyAvailableTasks(t *testing.T) {
+	tests := []struct {
+		name     string
+		bdOutput string
+		bdErr    error
+		wantIDs  []string
+		wantErr  bool
+	}{
+		{
+			name: "returns task without design",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
+			}),
+			wantIDs: []string{"T-1"},
+		},
+		{
+			name: "returns task with design",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
+			}),
+			wantIDs: []string{"T-1"},
+		},
+		{
+			name: "returns task with needs-revision label",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "open", Design: "", Labels: []string{"needs-revision"}},
+			}),
+			wantIDs: []string{"T-1"},
+		},
+		{
+			name: "skips in_progress tasks",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
+			}),
+			wantIDs: nil,
+		},
+		{
+			name: "skips epics",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
+			}),
+			wantIDs: nil,
+		},
+		{
+			name:     "empty list returns empty slice",
+			bdOutput: "[]",
+			wantIDs:  nil,
+		},
+		{
+			name: "multiple valid tasks returns all",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "No design", Status: "open", Design: ""},
+				{ID: "T-2", Title: "Big Epic", Status: "open", IssueType: "epic"},
+				{ID: "T-3", Title: "Has design", Status: "open", Design: "Plan"},
+				{ID: "T-4", Title: "In progress", Status: "in_progress", Design: ""},
+				{ID: "T-5", Title: "Revision needed", Status: "open", Labels: []string{"needs-revision"}},
+			}),
+			wantIDs: []string{"T-1", "T-3", "T-5"},
+		},
+		{
+			name:    "bd error propagates",
+			bdErr:   fmt.Errorf("bd error"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			}
+
+			got, err := GetAnyAvailableTasks()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetAnyAvailableTasks() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+
+			gotIDs := make([]string, len(got))
+			for i, issue := range got {
+				gotIDs[i] = issue.ID
+			}
+			if len(gotIDs) != len(tt.wantIDs) {
+				t.Errorf("GetAnyAvailableTasks() returned %d tasks %v, want %d tasks %v", len(gotIDs), gotIDs, len(tt.wantIDs), tt.wantIDs)
+				return
+			}
+			for i, id := range gotIDs {
+				if id != tt.wantIDs[i] {
+					t.Errorf("GetAnyAvailableTasks()[%d].ID = %s, want %s", i, id, tt.wantIDs[i])
+				}
+			}
+		})
+	}
+}
+
+func TestHasAvailableDelegatesToGet(t *testing.T) {
+	bdOutput := mustJSON([]BdIssue{
+		{ID: "T-1", Title: "No design", Status: "open", Design: ""},
+		{ID: "T-2", Title: "Has design", Status: "open", Design: "Plan"},
+	})
+
+	oldExec := execCommand
+	defer func() { execCommand = oldExec }()
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{Stdout: bdOutput}
+	}
+
+	// HasAvailablePlanningTasks should return true (T-1 has no design)
+	hasPlan, err := HasAvailablePlanningTasks()
+	if err != nil {
+		t.Fatalf("HasAvailablePlanningTasks() error = %v", err)
+	}
+	if !hasPlan {
+		t.Error("HasAvailablePlanningTasks() = false, want true")
+	}
+
+	// HasAvailableImplementationTasks should return true (T-2 has design)
+	hasImpl, err := HasAvailableImplementationTasks()
+	if err != nil {
+		t.Fatalf("HasAvailableImplementationTasks() error = %v", err)
+	}
+	if !hasImpl {
+		t.Error("HasAvailableImplementationTasks() = false, want true")
+	}
+
+	// HasAnyAvailableTasks should return true (both T-1 and T-2 are open)
+	hasAny, err := HasAnyAvailableTasks()
+	if err != nil {
+		t.Fatalf("HasAnyAvailableTasks() error = %v", err)
+	}
+	if !hasAny {
+		t.Error("HasAnyAvailableTasks() = false, want true")
+	}
+
+	// Verify Get* returns correct counts
+	planTasks, _ := GetAvailablePlanningTasks()
+	if len(planTasks) != 1 || planTasks[0].ID != "T-1" {
+		t.Errorf("GetAvailablePlanningTasks() = %v, want [T-1]", planTasks)
+	}
+
+	implTasks, _ := GetAvailableImplementationTasks()
+	if len(implTasks) != 1 || implTasks[0].ID != "T-2" {
+		t.Errorf("GetAvailableImplementationTasks() = %v, want [T-2]", implTasks)
+	}
+
+	anyTasks, _ := GetAnyAvailableTasks()
+	if len(anyTasks) != 2 {
+		t.Errorf("GetAnyAvailableTasks() returned %d tasks, want 2", len(anyTasks))
+	}
+}
+

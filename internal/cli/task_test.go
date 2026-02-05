@@ -341,3 +341,70 @@ func TestHasAvailableImplementationTasks_BdError(t *testing.T) {
 		t.Error("expected error when bd command fails")
 	}
 }
+
+// ============================================================================
+// GetAvailableImplementationTasks Tests (CommandMock-based)
+// ============================================================================
+
+func TestGetAvailableImplementationTasks_Success(t *testing.T) {
+	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Implementation plan"}]`
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+	})
+	mock.Install()
+
+	tasks, err := GetAvailableImplementationTasks()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].ID != "bd-1" {
+		t.Errorf("expected task ID 'bd-1', got %q", tasks[0].ID)
+	}
+}
+
+func TestGetAvailableImplementationTasks_ReturnsEmpty(t *testing.T) {
+	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+	})
+	mock.Install()
+
+	tasks, err := GetAvailableImplementationTasks()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(tasks))
+	}
+}
+
+func TestGetAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
+	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan","labels":["needs-revision"]}]`
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+	})
+	mock.Install()
+
+	tasks, err := GetAvailableImplementationTasks()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(tasks))
+	}
+}
+
+func TestGetAvailableImplementationTasks_BdError(t *testing.T) {
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
+	})
+	mock.Install()
+
+	_, err := GetAvailableImplementationTasks()
+	if err == nil {
+		t.Error("expected error when bd command fails")
+	}
+}

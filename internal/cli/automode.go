@@ -108,19 +108,20 @@ func interruptibleSleep(d time.Duration, shutdown <-chan struct{}) bool {
 	}
 }
 
-// HasAvailablePlanningTasks checks if there are tasks that need planning
+// GetAvailablePlanningTasks returns tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
-func HasAvailablePlanningTasks() (bool, error) {
+func GetAvailablePlanningTasks() ([]BdIssue, error) {
 	result := execCommand(GetBeadsDir(), "bd", "ready", "--json", "--limit", "100")
 	if result.Err != nil {
-		return false, fmt.Errorf("failed to check ready tasks: %w", result.Err)
+		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
 
 	var issues []BdIssue
 	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return false, fmt.Errorf("failed to parse task list: %w", err)
+		return nil, fmt.Errorf("failed to parse task list: %w", err)
 	}
 
+	var candidates []BdIssue
 	for _, issue := range issues {
 		// Only consider open tasks - skip in_progress, review, blocked, etc.
 		if issue.Status != "open" {
@@ -135,26 +136,37 @@ func HasAvailablePlanningTasks() (bool, error) {
 		// 2. Has 'needs-revision' label (revision task)
 		hasRevisionLabel := slices.Contains(issue.Labels, "needs-revision")
 		if issue.Design == "" || hasRevisionLabel {
-			return true, nil
+			candidates = append(candidates, issue)
 		}
 	}
 
-	return false, nil
+	return candidates, nil
 }
 
-// HasAvailableImplementationTasks checks if there are tasks ready for implementation
+// HasAvailablePlanningTasks checks if there are tasks that need planning
+// (ready tasks without a design OR with needs-revision label, excluding epics)
+func HasAvailablePlanningTasks() (bool, error) {
+	tasks, err := GetAvailablePlanningTasks()
+	if err != nil {
+		return false, err
+	}
+	return len(tasks) > 0, nil
+}
+
+// GetAvailableImplementationTasks returns tasks ready for implementation
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
-func HasAvailableImplementationTasks() (bool, error) {
+func GetAvailableImplementationTasks() ([]BdIssue, error) {
 	result := execCommand(GetBeadsDir(), "bd", "ready", "--json", "--limit", "100")
 	if result.Err != nil {
-		return false, fmt.Errorf("failed to check ready tasks: %w", result.Err)
+		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
 
 	var issues []BdIssue
 	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return false, fmt.Errorf("failed to parse task list: %w", err)
+		return nil, fmt.Errorf("failed to parse task list: %w", err)
 	}
 
+	var candidates []BdIssue
 	for _, issue := range issues {
 		// Only consider open tasks - skip in_progress, review, blocked, etc.
 		if issue.Status != "open" {
@@ -167,26 +179,37 @@ func HasAvailableImplementationTasks() (bool, error) {
 		// Task ready for implementation if it HAS a design AND no revision label
 		hasRevisionLabel := slices.Contains(issue.Labels, "needs-revision")
 		if issue.Design != "" && !hasRevisionLabel {
-			return true, nil
+			candidates = append(candidates, issue)
 		}
 	}
 
-	return false, nil
+	return candidates, nil
 }
 
-// HasAnyAvailableTasks checks if there are any ready tasks regardless of design status.
+// HasAvailableImplementationTasks checks if there are tasks ready for implementation
+// (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
+func HasAvailableImplementationTasks() (bool, error) {
+	tasks, err := GetAvailableImplementationTasks()
+	if err != nil {
+		return false, err
+	}
+	return len(tasks) > 0, nil
+}
+
+// GetAnyAvailableTasks returns any ready tasks regardless of design status.
 // Used by custom roles with task_filter=any.
-func HasAnyAvailableTasks() (bool, error) {
+func GetAnyAvailableTasks() ([]BdIssue, error) {
 	result := execCommand(GetBeadsDir(), "bd", "ready", "--json", "--limit", "100")
 	if result.Err != nil {
-		return false, fmt.Errorf("failed to check ready tasks: %w", result.Err)
+		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
 
 	var issues []BdIssue
 	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return false, fmt.Errorf("failed to parse task list: %w", err)
+		return nil, fmt.Errorf("failed to parse task list: %w", err)
 	}
 
+	var candidates []BdIssue
 	for _, issue := range issues {
 		// Only consider open tasks - skip in_progress, review, blocked, etc.
 		if issue.Status != "open" {
@@ -195,10 +218,20 @@ func HasAnyAvailableTasks() (bool, error) {
 		if issue.IssueType == "epic" {
 			continue
 		}
-		return true, nil
+		candidates = append(candidates, issue)
 	}
 
-	return false, nil
+	return candidates, nil
+}
+
+// HasAnyAvailableTasks checks if there are any ready tasks regardless of design status.
+// Used by custom roles with task_filter=any.
+func HasAnyAvailableTasks() (bool, error) {
+	tasks, err := GetAnyAvailableTasks()
+	if err != nil {
+		return false, err
+	}
+	return len(tasks) > 0, nil
 }
 
 // agentClaimedTask checks the lock file to determine if the agent claimed a task

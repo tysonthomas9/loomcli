@@ -283,3 +283,54 @@ func TestHasAvailablePlanningTasks_BdError(t *testing.T) {
 		t.Error("expected error when bd command fails")
 	}
 }
+
+// ============================================================================
+// GetAvailablePlanningTasks Tests (CommandMock-based)
+// ============================================================================
+
+func TestGetAvailablePlanningTasks_Success(t *testing.T) {
+	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+	})
+	mock.Install()
+
+	tasks, err := GetAvailablePlanningTasks()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].ID != "bd-1" {
+		t.Errorf("expected task ID 'bd-1', got %q", tasks[0].ID)
+	}
+}
+
+func TestGetAvailablePlanningTasks_ReturnsEmpty(t *testing.T) {
+	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan here"}]`
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+	})
+	mock.Install()
+
+	tasks, err := GetAvailablePlanningTasks()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(tasks))
+	}
+}
+
+func TestGetAvailablePlanningTasks_BdError(t *testing.T) {
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
+	})
+	mock.Install()
+
+	_, err := GetAvailablePlanningTasks()
+	if err == nil {
+		t.Error("expected error when bd command fails")
+	}
+}
