@@ -45,6 +45,9 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	mux.HandleFunc("POST /api/issues/{id}/dependencies", handleAddDependency(pool))
 	mux.HandleFunc("DELETE /api/issues/{id}/dependencies/{depId}", handleRemoveDependency(pool))
 
+	// Fleet claim endpoint for atomic task acquisition by fleet workers
+	mux.HandleFunc("POST /api/fleet/claim", handleFleetClaim(pool))
+
 	// Ready endpoint for issues ready to work on
 	mux.HandleFunc("GET /api/ready", handleReady(pool))
 
