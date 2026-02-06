@@ -904,7 +904,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		wantReadyToImplementLen int
 		wantReviewTasksLen      int
 		wantInProgressTasksLen  int
-		wantBlockedTasksLen     int
+		wantBacklogTasksLen     int
 		wantAgentTasksLen       int
 	}{
 		{
@@ -962,7 +962,7 @@ func TestCollectTaskStatus(t *testing.T) {
 			inProgressOutput:    "[]",
 			needReviewOutput:    "[]",
 			wantBacklog:         2,
-			wantBlockedTasksLen: 2,
+			wantBacklogTasksLen: 2,
 		},
 		{
 			name: "epics are skipped",
@@ -1082,7 +1082,7 @@ func TestCollectTaskStatus(t *testing.T) {
 				return CommandResult{}
 			}
 
-			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, blockedTasks, agentTasks := collectTaskStatus(100)
+			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, agentTasks := collectTaskStatus(100)
 
 			if summary.NeedsPlanning != tt.wantNeedsPlanning {
 				t.Errorf("NeedsPlanning = %d, want %d", summary.NeedsPlanning, tt.wantNeedsPlanning)
@@ -1096,8 +1096,8 @@ func TestCollectTaskStatus(t *testing.T) {
 			if summary.NeedReview != tt.wantNeedReview {
 				t.Errorf("NeedReview = %d, want %d", summary.NeedReview, tt.wantNeedReview)
 			}
-			if summary.Blocked != tt.wantBacklog{
-				t.Errorf("Blocked = %d, want %d", summary.Blocked, tt.wantBacklog)
+			if summary.Backlog != tt.wantBacklog{
+				t.Errorf("Backlog = %d, want %d", summary.Backlog, tt.wantBacklog)
 			}
 			if len(needsPlanningTasks) != tt.wantNeedsPlanningLen {
 				t.Errorf("needsPlanningTasks len = %d, want %d", len(needsPlanningTasks), tt.wantNeedsPlanningLen)
@@ -1111,8 +1111,8 @@ func TestCollectTaskStatus(t *testing.T) {
 			if len(inProgressTasks) != tt.wantInProgressTasksLen {
 				t.Errorf("inProgressTasks len = %d, want %d", len(inProgressTasks), tt.wantInProgressTasksLen)
 			}
-			if len(blockedTasks) != tt.wantBlockedTasksLen {
-				t.Errorf("blockedTasks len = %d, want %d", len(blockedTasks), tt.wantBlockedTasksLen)
+			if len(backlogTasks) != tt.wantBacklogTasksLen {
+				t.Errorf("backlogTasks len = %d, want %d", len(backlogTasks), tt.wantBacklogTasksLen)
 			}
 			if len(agentTasks) != tt.wantAgentTasksLen {
 				t.Errorf("agentTasks len = %d, want %d", len(agentTasks), tt.wantAgentTasksLen)
@@ -1671,7 +1671,7 @@ func TestRenderDashboardWithData(t *testing.T) {
 			ReadyToImplement: 1,
 			InProgress:       1,
 			NeedReview:       1,
-			Blocked:          1,
+			Backlog:          1,
 		},
 		NeedsPlanningTasks: []TaskInfo{
 			{ID: "T-1", Title: "Plan this", Priority: 2},
@@ -1685,7 +1685,7 @@ func TestRenderDashboardWithData(t *testing.T) {
 		InProgressTasks: []TaskInfo{
 			{ID: "T-4", Title: "In progress task", Priority: 1},
 		},
-		BlockedTasks: []TaskInfo{
+		BacklogTasks: []TaskInfo{
 			{ID: "T-5", Title: "Blocked task", Priority: 3},
 		},
 		AgentTasks:    make(map[string]TaskInfo),

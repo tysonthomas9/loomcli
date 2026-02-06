@@ -5,9 +5,8 @@
 /**
  * Unit tests for the Loom Agent API client (agents.ts).
  *
- * These tests verify that the API client correctly handles mapping between
- * API field names and frontend field names, particularly the 'backlog' -> 'blocked'
- * mapping for task status categories.
+ * These tests verify that the API client correctly fetches and passes through
+ * task status categories from the loom server API.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -30,30 +29,7 @@ describe('fetchStatus', () => {
     vi.useRealTimers();
   });
 
-  it('successfully fetches and maps status from API', async () => {
-    const mockResponse: LoomStatusResponse = {
-      agents: null,
-      tasks: {
-        needs_planning: 5,
-        ready_to_implement: 3,
-        in_progress: 2,
-        need_review: 1,
-        blocked: 4, // This is the mapped field (from API "backlog")
-      },
-      agent_tasks: null,
-      sync: {
-        db_synced: true,
-        db_last_sync: '2024-01-15T12:00:00Z',
-      },
-      stats: {
-        open: 15,
-        closed: 25,
-        total: 40,
-        completion: 62.5,
-      },
-      timestamp: '2024-01-15T12:30:00Z',
-    };
-
+  it('successfully fetches status from API', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -63,12 +39,20 @@ describe('fetchStatus', () => {
           ready_to_implement: 3,
           in_progress: 2,
           need_review: 1,
-          backlog: 4, // API sends "backlog"
+          backlog: 4,
         },
         agent_tasks: null,
-        sync: mockResponse.sync,
-        stats: mockResponse.stats,
-        timestamp: mockResponse.timestamp,
+        sync: {
+          db_synced: true,
+          db_last_sync: '2024-01-15T12:00:00Z',
+        },
+        stats: {
+          open: 15,
+          closed: 25,
+          total: 40,
+          completion: 62.5,
+        },
+        timestamp: '2024-01-15T12:30:00Z',
       }),
     });
 
@@ -78,10 +62,10 @@ describe('fetchStatus', () => {
     expect(result.tasks.ready_to_implement).toBe(3);
     expect(result.tasks.in_progress).toBe(2);
     expect(result.tasks.need_review).toBe(1);
-    expect(result.tasks.blocked).toBe(4); // Mapped from "backlog"
+    expect(result.tasks.backlog).toBe(4);
   });
 
-  it('maps API backlog field to frontend blocked field', async () => {
+  it('passes through backlog field directly from API', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -91,7 +75,7 @@ describe('fetchStatus', () => {
           ready_to_implement: 0,
           in_progress: 0,
           need_review: 0,
-          backlog: 10, // API field name
+          backlog: 10,
         },
         agent_tasks: null,
         sync: {
@@ -110,14 +94,11 @@ describe('fetchStatus', () => {
 
     const result = await fetchStatus();
 
-    expect(result.tasks).toHaveProperty('blocked');
-    expect(result.tasks.blocked).toBe(10);
-    // Ensure old field name does not exist in result
-    // Verify the API field name does not leak into the result
-    expect((result.tasks as Record<string, unknown>).backlog).toBeUndefined();
+    expect(result.tasks).toHaveProperty('backlog');
+    expect(result.tasks.backlog).toBe(10);
   });
 
-  it('returns tasks.blocked as 0 when backlog is 0', async () => {
+  it('returns tasks.backlog as 0 when backlog is 0', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -146,10 +127,10 @@ describe('fetchStatus', () => {
 
     const result = await fetchStatus();
 
-    expect(result.tasks.blocked).toBe(0);
+    expect(result.tasks.backlog).toBe(0);
   });
 
-  it('preserves all other task status counts during mapping', async () => {
+  it('preserves all other task status counts', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -183,7 +164,7 @@ describe('fetchStatus', () => {
     expect(result.tasks.ready_to_implement).toBe(20);
     expect(result.tasks.in_progress).toBe(15);
     expect(result.tasks.need_review).toBe(8);
-    expect(result.tasks.blocked).toBe(5);
+    expect(result.tasks.backlog).toBe(5);
   });
 
   it('returns complete FetchStatusResult with all properties', async () => {
@@ -225,7 +206,7 @@ describe('fetchStatus', () => {
     expect(result).toHaveProperty('timestamp');
 
     expect(result.agents).toEqual(agents);
-    expect(result.tasks.blocked).toBe(5);
+    expect(result.tasks.backlog).toBe(5);
     expect(result.timestamp).toBe('2024-01-15T12:30:00Z');
   });
 
@@ -251,13 +232,13 @@ describe('fetchTasks', () => {
     vi.clearAllMocks();
   });
 
-  it('successfully fetches and maps task lists from API', async () => {
+  it('successfully fetches task lists from API', async () => {
     const taskLists = {
       needsPlanning: [{ id: 'bd-001', title: 'Plan feature', priority: 2, status: 'open' }],
       readyToImplement: [{ id: 'bd-002', title: 'Implement feature', priority: 1, status: 'open' }],
       inProgress: [{ id: 'bd-003', title: 'In progress task', priority: 0, status: 'in_progress' }],
       needsReview: [{ id: 'bd-004', title: 'Review code', priority: 1, status: 'review' }],
-      blocked: [{ id: 'bd-005', title: 'Blocked task', priority: 3, status: 'blocked' }],
+      backlog: [{ id: 'bd-005', title: 'Blocked task', priority: 3, status: 'blocked' }],
     };
 
     mockFetch.mockResolvedValueOnce({
@@ -268,13 +249,13 @@ describe('fetchTasks', () => {
           ready_to_implement: 1,
           in_progress: 1,
           need_review: 1,
-          blocked: 1,
+          backlog: 1,
         },
         needs_planning: taskLists.needsPlanning,
         ready_to_implement: taskLists.readyToImplement,
         in_progress: taskLists.inProgress,
         needs_review: taskLists.needsReview,
-        backlog: taskLists.blocked, // API sends "backlog"
+        backlog: taskLists.backlog,
         timestamp: '2024-01-15T12:30:00Z',
       }),
     });
@@ -285,11 +266,11 @@ describe('fetchTasks', () => {
     expect(result.readyToImplement).toEqual(taskLists.readyToImplement);
     expect(result.inProgress).toEqual(taskLists.inProgress);
     expect(result.needsReview).toEqual(taskLists.needsReview);
-    expect(result.blocked).toEqual(taskLists.blocked); // Mapped from "backlog"
+    expect(result.backlog).toEqual(taskLists.backlog);
   });
 
-  it('maps API backlog field to frontend blocked field in task lists', async () => {
-    const blockedTasks = [
+  it('passes through backlog field directly from API', async () => {
+    const backlogTasks = [
       { id: 'bd-100', title: 'First blocked task', priority: 2, status: 'blocked' },
       { id: 'bd-101', title: 'Second blocked task', priority: 3, status: 'blocked' },
     ];
@@ -302,27 +283,24 @@ describe('fetchTasks', () => {
           ready_to_implement: 0,
           in_progress: 0,
           need_review: 0,
-          blocked: 2,
+          backlog: 2,
         },
         needs_planning: null,
         ready_to_implement: null,
         in_progress: null,
         needs_review: null,
-        backlog: blockedTasks, // API field name
+        backlog: backlogTasks,
         timestamp: '2024-01-15T12:30:00Z',
       }),
     });
 
     const result: LoomTaskLists = await fetchTasks();
 
-    expect(result).toHaveProperty('blocked');
-    expect(result.blocked).toEqual(blockedTasks);
-    // Ensure old field name does not exist in result
-    // Verify the API field name does not leak into the result
-    expect((result as Record<string, unknown>).backlog).toBeUndefined();
+    expect(result).toHaveProperty('backlog');
+    expect(result.backlog).toEqual(backlogTasks);
   });
 
-  it('returns empty blocked array when API sends null backlog', async () => {
+  it('returns empty backlog array when API sends null', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -331,24 +309,24 @@ describe('fetchTasks', () => {
           ready_to_implement: 0,
           in_progress: 0,
           need_review: 0,
-          blocked: 0,
+          backlog: 0,
         },
         needs_planning: null,
         ready_to_implement: null,
         in_progress: null,
         needs_review: null,
-        backlog: null, // API sends null
+        backlog: null,
         timestamp: '2024-01-15T12:30:00Z',
       }),
     });
 
     const result = await fetchTasks();
 
-    expect(result.blocked).toEqual([]);
+    expect(result.backlog).toEqual([]);
   });
 
-  it('returns blocked array with multiple tasks', async () => {
-    const blockedTasks = Array.from({ length: 5 }, (_, i) => ({
+  it('returns backlog array with multiple tasks', async () => {
+    const backlogTasks = Array.from({ length: 5 }, (_, i) => ({
       id: `bd-${200 + i}`,
       title: `Blocked task ${i + 1}`,
       priority: Math.floor(Math.random() * 5),
@@ -363,24 +341,24 @@ describe('fetchTasks', () => {
           ready_to_implement: 0,
           in_progress: 0,
           need_review: 0,
-          blocked: 5,
+          backlog: 5,
         },
         needs_planning: null,
         ready_to_implement: null,
         in_progress: null,
         needs_review: null,
-        backlog: blockedTasks,
+        backlog: backlogTasks,
         timestamp: '2024-01-15T12:30:00Z',
       }),
     });
 
     const result = await fetchTasks();
 
-    expect(result.blocked).toHaveLength(5);
-    expect(result.blocked).toEqual(blockedTasks);
+    expect(result.backlog).toHaveLength(5);
+    expect(result.backlog).toEqual(backlogTasks);
   });
 
-  it('preserves all other task lists during mapping', async () => {
+  it('preserves all other task lists', async () => {
     const taskLists = {
       needsPlanning: [{ id: 'bd-010', title: 'Plan', priority: 1, status: 'open' }],
       readyToImplement: [
@@ -389,7 +367,7 @@ describe('fetchTasks', () => {
       ],
       inProgress: [{ id: 'bd-030', title: 'Working', priority: 0, status: 'in_progress' }],
       needsReview: [{ id: 'bd-040', title: 'Review', priority: 1, status: 'review' }],
-      blocked: [{ id: 'bd-050', title: 'Blocked', priority: 2, status: 'blocked' }],
+      backlog: [{ id: 'bd-050', title: 'Blocked', priority: 2, status: 'blocked' }],
     };
 
     mockFetch.mockResolvedValueOnce({
@@ -400,13 +378,13 @@ describe('fetchTasks', () => {
           ready_to_implement: 2,
           in_progress: 1,
           need_review: 1,
-          blocked: 1,
+          backlog: 1,
         },
         needs_planning: taskLists.needsPlanning,
         ready_to_implement: taskLists.readyToImplement,
         in_progress: taskLists.inProgress,
         needs_review: taskLists.needsReview,
-        backlog: taskLists.blocked,
+        backlog: taskLists.backlog,
         timestamp: '2024-01-15T12:30:00Z',
       }),
     });
@@ -418,7 +396,7 @@ describe('fetchTasks', () => {
     expect(result.readyToImplement).toEqual(taskLists.readyToImplement);
     expect(result.inProgress).toEqual(taskLists.inProgress);
     expect(result.needsReview).toEqual(taskLists.needsReview);
-    expect(result.blocked).toEqual(taskLists.blocked);
+    expect(result.backlog).toEqual(taskLists.backlog);
   });
 
   it('returns complete LoomTaskLists with all properties', async () => {
@@ -427,7 +405,7 @@ describe('fetchTasks', () => {
       readyToImplement: [{ id: 'bd-002', title: 'Implement', priority: 1, status: 'open' }],
       inProgress: [{ id: 'bd-003', title: 'In progress', priority: 0, status: 'in_progress' }],
       needsReview: [{ id: 'bd-004', title: 'Review', priority: 1, status: 'review' }],
-      blocked: [{ id: 'bd-005', title: 'Blocked', priority: 3, status: 'blocked' }],
+      backlog: [{ id: 'bd-005', title: 'Blocked', priority: 3, status: 'blocked' }],
     };
 
     mockFetch.mockResolvedValueOnce({
@@ -438,13 +416,13 @@ describe('fetchTasks', () => {
           ready_to_implement: 1,
           in_progress: 1,
           need_review: 1,
-          blocked: 1,
+          backlog: 1,
         },
         needs_planning: taskLists.needsPlanning,
         ready_to_implement: taskLists.readyToImplement,
         in_progress: taskLists.inProgress,
         needs_review: taskLists.needsReview,
-        backlog: taskLists.blocked,
+        backlog: taskLists.backlog,
         timestamp: '2024-01-15T12:30:00Z',
       }),
     });
@@ -455,7 +433,7 @@ describe('fetchTasks', () => {
     expect(result).toHaveProperty('readyToImplement');
     expect(result).toHaveProperty('inProgress');
     expect(result).toHaveProperty('needsReview');
-    expect(result).toHaveProperty('blocked');
+    expect(result).toHaveProperty('backlog');
   });
 
   it('throws error on non-ok HTTP response', async () => {
@@ -475,13 +453,13 @@ describe('fetchTasks', () => {
   });
 });
 
-describe('API field mapping consistency', () => {
+describe('API field consistency', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('both fetchStatus and fetchTasks use consistent blocked field name', async () => {
-    // fetchStatus should map backlog -> blocked
+  it('both fetchStatus and fetchTasks use consistent backlog field name', async () => {
+    // fetchStatus returns backlog directly
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -502,9 +480,9 @@ describe('API field mapping consistency', () => {
 
     const statusResult = await fetchStatus();
 
-    expect(statusResult.tasks.blocked).toBe(7);
+    expect(statusResult.tasks.backlog).toBe(7);
 
-    // fetchTasks should map backlog -> blocked
+    // fetchTasks returns backlog directly
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -513,7 +491,7 @@ describe('API field mapping consistency', () => {
           ready_to_implement: 0,
           in_progress: 0,
           need_review: 0,
-          blocked: 7,
+          backlog: 7,
         },
         needs_planning: null,
         ready_to_implement: null,
@@ -526,7 +504,7 @@ describe('API field mapping consistency', () => {
 
     const tasksResult = await fetchTasks();
 
-    expect(tasksResult.blocked).toHaveLength(1);
-    expect(tasksResult.blocked[0].id).toBe('bd-100');
+    expect(tasksResult.backlog).toHaveLength(1);
+    expect(tasksResult.backlog[0].id).toBe('bd-100');
   });
 });

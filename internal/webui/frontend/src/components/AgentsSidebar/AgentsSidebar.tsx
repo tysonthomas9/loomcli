@@ -117,7 +117,7 @@ export function AgentsSidebar({
       case 'inProgress':
         return { title: 'In Progress', tasks: taskLists.inProgress };
       case 'blocked':
-        return { title: 'Blocked', tasks: taskLists.blocked };
+        return { title: 'Blocked', tasks: taskLists.backlog };
       case 'done':
         return { title: 'Done', tasks: [] };
       default:
@@ -231,10 +231,10 @@ export function AgentsSidebar({
                       type="button"
                       className={styles.queueItem}
                       onClick={() => handleCategoryClick('blocked')}
-                      disabled={tasks.blocked === 0}
+                      disabled={tasks.backlog === 0}
                     >
                       <span className={styles.queueLabel}>Blocked</span>
-                      <span className={styles.queueCount}>{tasks.blocked}</span>
+                      <span className={styles.queueCount}>{tasks.backlog}</span>
                     </button>
                     <button
                       type="button"

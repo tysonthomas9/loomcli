@@ -127,27 +127,14 @@ export interface LoomTaskInfo {
 }
 
 /**
- * Task summary counts from loom server (API response format).
- * Note: API uses "backlog" field which is mapped to "blocked" for frontend use.
- */
-export interface LoomTaskSummaryRaw {
-  needs_planning: number;
-  ready_to_implement: number;
-  in_progress: number;
-  need_review: number;
-  backlog: number; // API field name for blocked tasks
-}
-
-/**
- * Task summary counts (frontend format).
- * Used after mapping from API response.
+ * Task summary counts from loom server.
  */
 export interface LoomTaskSummary {
   needs_planning: number;
   ready_to_implement: number;
   in_progress: number;
   need_review: number;
-  blocked: number; // Mapped from API field "backlog"
+  backlog: number;
 }
 
 /**
@@ -173,11 +160,10 @@ export interface LoomStats {
 
 /**
  * Full status response from GET /api/status on loom server.
- * Uses raw API types; callers should map to frontend types.
  */
 export interface LoomStatusResponse {
   agents: LoomAgentStatus[] | null;
-  tasks: LoomTaskSummaryRaw;
+  tasks: LoomTaskSummary;
   in_progress_list: LoomTaskInfo[] | null;
   agent_tasks: Record<string, LoomTaskInfo> | null;
   stats: LoomStats;
@@ -200,7 +186,7 @@ export interface LoomTasksResponse {
   ready_to_implement: LoomTaskInfo[] | null;
   needs_review: LoomTaskInfo[] | null;
   in_progress: LoomTaskInfo[] | null;
-  backlog: LoomTaskInfo[] | null; // API sends "backlog" (contains blocked tasks)
+  backlog: LoomTaskInfo[] | null;
   timestamp: string;
 }
 
@@ -212,7 +198,7 @@ export interface LoomTaskLists {
   readyToImplement: LoomTaskInfo[];
   needsReview: LoomTaskInfo[];
   inProgress: LoomTaskInfo[];
-  blocked: LoomTaskInfo[];
+  backlog: LoomTaskInfo[];
 }
 
 /**

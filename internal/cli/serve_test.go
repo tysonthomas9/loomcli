@@ -22,7 +22,7 @@ func mockMonitorData() *MonitorData {
 			ReadyToImplement: 5,
 			InProgress:       2,
 			NeedReview:       1,
-			Blocked:          0,
+			Backlog:          0,
 		},
 		NeedsPlanningTasks: []TaskInfo{
 			{ID: "bd-001", Title: "Add feature X", Priority: 1},
@@ -36,7 +36,7 @@ func mockMonitorData() *MonitorData {
 		InProgressTasks: []TaskInfo{
 			{ID: "bd-123", Title: "Current task", Priority: 1, Status: "in_progress"},
 		},
-		BlockedTasks: []TaskInfo{},
+		BacklogTasks: []TaskInfo{},
 		AgentTasks: map[string]TaskInfo{
 			"nova": {ID: "bd-123", Title: "Current task", Priority: 1, Status: "in_progress"},
 		},
@@ -384,7 +384,7 @@ func TestHandleTasks(t *testing.T) {
 				ReadyToImplement:   []TaskInfo{},
 				ReviewTasks:        []TaskInfo{},
 				InProgressTasks:    []TaskInfo{},
-				BlockedTasks:       []TaskInfo{},
+				BacklogTasks:       []TaskInfo{},
 			},
 			wantNeedsPlanningLen:  0,
 			wantReadyToImplLen:    0,
@@ -446,8 +446,8 @@ func TestHandleTasks(t *testing.T) {
 				if resp.Summary.NeedReview != tt.wantSummaryNeedReview {
 					t.Errorf("Summary.NeedReview = %d, want %d", resp.Summary.NeedReview, tt.wantSummaryNeedReview)
 				}
-				if resp.Summary.Blocked != tt.wantSummaryBacklog {
-					t.Errorf("Summary.Blocked = %d, want %d", resp.Summary.Blocked, tt.wantSummaryBacklog)
+				if resp.Summary.Backlog != tt.wantSummaryBacklog {
+					t.Errorf("Summary.Backlog = %d, want %d", resp.Summary.Backlog, tt.wantSummaryBacklog)
 				}
 
 				if resp.Timestamp.IsZero() {

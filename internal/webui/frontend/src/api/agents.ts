@@ -113,16 +113,9 @@ export async function fetchStatus(): Promise<FetchStatusResult> {
   }
 
   const data: LoomStatusResponse = await response.json();
-  // Map API field 'backlog' to frontend field 'blocked'
   return {
     agents: data.agents ?? [],
-    tasks: {
-      needs_planning: data.tasks.needs_planning,
-      ready_to_implement: data.tasks.ready_to_implement,
-      in_progress: data.tasks.in_progress,
-      need_review: data.tasks.need_review,
-      blocked: data.tasks.backlog, // Map backlog → blocked
-    },
+    tasks: data.tasks,
     agentTasks: data.agent_tasks ?? {},
     sync: data.sync,
     stats: data.stats,
@@ -152,6 +145,6 @@ export async function fetchTasks(): Promise<LoomTaskLists> {
     readyToImplement: data.ready_to_implement ?? [],
     needsReview: data.needs_review ?? [],
     inProgress: data.in_progress ?? [],
-    blocked: data.backlog ?? [], // Map API "backlog" to semantic "blocked"
+    backlog: data.backlog ?? [],
   };
 }

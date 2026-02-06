@@ -33,7 +33,7 @@ function createMockStatusResult(overrides?: Partial<FetchStatusResult>): FetchSt
       ready_to_implement: 0,
       in_progress: 0,
       need_review: 0,
-      blocked: 0,
+      backlog: 0,
     },
     agentTasks: {},
     sync: {
@@ -62,7 +62,7 @@ function createMockTaskLists(): LoomTaskLists {
     readyToImplement: [],
     needsReview: [],
     inProgress: [],
-    blocked: [],
+    backlog: [],
   };
 }
 

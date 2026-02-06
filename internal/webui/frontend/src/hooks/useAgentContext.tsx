@@ -53,13 +53,13 @@ export function AgentProvider({ children }: AgentProviderProps): JSX.Element {
 /** Default no-op value returned when useAgentContext is called outside a provider. */
 const NO_AGENT_CONTEXT: AgentContextValue = {
   agents: [],
-  tasks: { needs_planning: 0, ready_to_implement: 0, in_progress: 0, need_review: 0, blocked: 0 },
+  tasks: { needs_planning: 0, ready_to_implement: 0, in_progress: 0, need_review: 0, backlog: 0 },
   taskLists: {
     needsPlanning: [],
     readyToImplement: [],
     needsReview: [],
     inProgress: [],
-    blocked: [],
+    backlog: [],
   },
   agentTasks: {},
   sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },

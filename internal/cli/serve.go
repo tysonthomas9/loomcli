@@ -405,7 +405,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 		ReadyToImplement: data.ReadyToImplement,
 		NeedsReview:      data.ReviewTasks,
 		InProgress:       data.InProgressTasks,
-		Backlog:          data.BlockedTasks,
+		Backlog:          data.BacklogTasks,
 		Timestamp:        data.Timestamp,
 	})
 }

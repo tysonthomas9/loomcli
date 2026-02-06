@@ -107,7 +107,7 @@ describe('useAgentContext', () => {
         ready_to_implement: 0,
         in_progress: 0,
         need_review: 0,
-        blocked: 0,
+        backlog: 0,
       });
     });
 
@@ -119,7 +119,7 @@ describe('useAgentContext', () => {
         readyToImplement: [],
         needsReview: [],
         inProgress: [],
-        blocked: [],
+        backlog: [],
       });
     });
 

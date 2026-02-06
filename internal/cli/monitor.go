@@ -66,7 +66,7 @@ type MonitorData struct {
 	ReadyToImplement   []TaskInfo          // Ready tasks with design (top 5)
 	ReviewTasks        []TaskInfo          // top 5 need review tasks
 	InProgressTasks    []TaskInfo          // all in_progress tasks
-	BlockedTasks       []TaskInfo          // backlog tasks (top 20)
+	BacklogTasks       []TaskInfo          // backlog tasks (top 20)
 	AgentTasks         map[string]TaskInfo // agent name -> current task (from assignee)
 	TaskConflicts      map[string][]string // TaskID -> agent names (if multiple agents claim same task)
 	SyncStatus         SyncInfo
@@ -98,7 +98,7 @@ type TaskSummary struct {
 	ReadyToImplement int `json:"ready_to_implement"` // Ready tasks with approved design
 	InProgress       int `json:"in_progress"`
 	NeedReview       int `json:"need_review"`
-	Blocked          int `json:"backlog"`
+	Backlog          int `json:"backlog"`
 }
 
 
@@ -257,7 +257,7 @@ func collectMonitorData(readyLimit int) *MonitorData {
 	}()
 
 	// Collect tasks (internally parallel) to get agent-task mapping
-	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BlockedTasks, data.AgentTasks = collectTaskStatus(readyLimit)
+	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.AgentTasks = collectTaskStatus(readyLimit)
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
@@ -407,13 +407,13 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	var readyToImplementTasks []TaskInfo
 	var reviewTasks []TaskInfo
 	var inProgressTasks []TaskInfo
-	var blockedTasks []TaskInfo
+	var backlogTasks []TaskInfo
 	agentTasks := make(map[string]TaskInfo)
 
 	// Run all 4 bd commands in parallel
 	var (
-		readyOutput, inProgressOutput, needReviewOutput, blockedOutput string
-		readyErr, inProgressErr, needReviewErr, blockedErr             error
+		readyOutput, inProgressOutput, needReviewOutput, backlogOutput string
+		readyErr, inProgressErr, needReviewErr, backlogErr             error
 		wg                                                              sync.WaitGroup
 	)
 
@@ -436,7 +436,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 
 	go func() {
 		defer wg.Done()
-		blockedOutput, blockedErr = runBdCommand("blocked", "--json")
+		backlogOutput, backlogErr = runBdCommand("blocked", "--json")
 	}()
 
 	wg.Wait()
@@ -542,17 +542,17 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		}
 	}
 
-	// Process blocked tasks
-	if blockedErr == nil {
+	// Process backlog tasks
+	if backlogErr == nil {
 		var issues []BdIssue
-		if json.Unmarshal([]byte(blockedOutput), &issues) == nil {
-			summary.Blocked = len(issues)
-			// Store up to 20 blocked tasks for display
+		if json.Unmarshal([]byte(backlogOutput), &issues) == nil {
+			summary.Backlog = len(issues)
+			// Store up to 20 backlog tasks for display
 			for i, issue := range issues {
 				if i >= 20 {
 					break
 				}
-				blockedTasks = append(blockedTasks, TaskInfo{
+				backlogTasks = append(backlogTasks, TaskInfo{
 					ID:       issue.ID,
 					Title:    issue.Title,
 					Priority: issue.Priority,
@@ -562,7 +562,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		}
 	}
 
-	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, blockedTasks, agentTasks
+	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, agentTasks
 }
 
 // collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).
@@ -718,7 +718,7 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxLine(" WORK QUEUE"))
 	sb.WriteString(renderBoxSeparator())
 	taskSummary := fmt.Sprintf("  Plan: %-3d  Impl: %-3d  Review: %-3d  Active: %-3d  Blocked: %-3d",
-		data.Tasks.NeedsPlanning, data.Tasks.ReadyToImplement, data.Tasks.NeedReview, data.Tasks.InProgress, data.Tasks.Blocked)
+		data.Tasks.NeedsPlanning, data.Tasks.ReadyToImplement, data.Tasks.NeedReview, data.Tasks.InProgress, data.Tasks.Backlog)
 	sb.WriteString(renderBoxLine(taskSummary))
 
 	// Needs Planning tasks (top 5)

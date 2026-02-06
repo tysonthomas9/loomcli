@@ -95,7 +95,7 @@ const DEFAULT_TASKS: LoomTaskSummary = {
   ready_to_implement: 0,
   in_progress: 0,
   need_review: 0,
-  blocked: 0,
+  backlog: 0,
 };
 
 const DEFAULT_SYNC: LoomSyncInfo = {
@@ -117,7 +117,7 @@ const DEFAULT_TASK_LISTS: LoomTaskLists = {
   readyToImplement: [],
   needsReview: [],
   inProgress: [],
-  blocked: [],
+  backlog: [],
 };
 
 // Retry backoff configuration
