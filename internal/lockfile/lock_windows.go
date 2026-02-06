@@ -10,13 +10,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// ErrLockHeld is returned when a non-blocking lock attempt fails because
-// another process already holds the lock.
-var ErrLockHeld = errors.New("lock already held by another process")
+var errDaemonLocked = errors.New("daemon lock already held by another process")
 
-// FlockExclusiveNonBlocking attempts to acquire an exclusive non-blocking lock on the file using LockFileEx.
-// Returns ErrLockHeld if the lock is already held by another process.
-func FlockExclusiveNonBlocking(f *os.File) error {
+// flockExclusive acquires an exclusive non-blocking lock on the file using LockFileEx
+func flockExclusive(f *os.File) error {
 	// LOCKFILE_EXCLUSIVE_LOCK (2) | LOCKFILE_FAIL_IMMEDIATELY (1) = 3
 	const flags = windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY
 
@@ -27,14 +24,14 @@ func FlockExclusiveNonBlocking(f *os.File) error {
 	err := windows.LockFileEx(
 		windows.Handle(f.Fd()),
 		flags,
-		0,             // reserved
-		0xFFFFFFFF,    // number of bytes to lock (low)
-		0xFFFFFFFF,    // number of bytes to lock (high)
+		0,          // reserved
+		0xFFFFFFFF, // number of bytes to lock (low)
+		0xFFFFFFFF, // number of bytes to lock (high)
 		ol,
 	)
 
 	if err == windows.ERROR_LOCK_VIOLATION || err == syscall.EWOULDBLOCK {
-		return ErrLockHeld
+		return errDaemonLocked
 	}
 
 	return err

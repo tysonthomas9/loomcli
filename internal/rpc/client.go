@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/debug"
@@ -32,12 +31,8 @@ func rpcDebugLog(format string, args ...interface{}) {
 // It's set dynamically by main.go from cmd/bd/version.go before making RPC calls
 var ClientVersion = "0.0.0" // Placeholder; overridden at startup
 
-// Client represents an RPC client that connects to the daemon.
-// The client is safe for concurrent use of SetTimeout, SetDatabasePath, and SetActor.
-// However, the underlying connection (conn) is not safe for concurrent RPC calls -
-// use connection pooling for concurrent operations.
+// Client represents an RPC client that connects to the daemon
 type Client struct {
-	mu         sync.RWMutex // protects timeout, dbPath, actor; conn and socketPath are immutable after construction
 	conn       net.Conn
 	socketPath string
 	timeout    time.Duration
@@ -88,12 +83,12 @@ func TryConnectWithTimeout(socketPath string, dialTimeout time.Duration) (*Clien
 	if dialTimeout <= 0 {
 		dialTimeout = 200 * time.Millisecond
 	}
-	
+
 	rpcDebugLog("dialing socket (timeout: %v)", dialTimeout)
 	dialStart := time.Now()
 	conn, err := dialRPC(socketPath, dialTimeout)
 	dialDuration := time.Since(dialStart)
-	
+
 	if err != nil {
 		debug.Logf("failed to connect to RPC endpoint: %v", err)
 		rpcDebugLog("dial failed after %v: %v", dialDuration, err)
@@ -109,7 +104,7 @@ func TryConnectWithTimeout(socketPath string, dialTimeout time.Duration) (*Clien
 		}
 		return nil, nil
 	}
-	
+
 	rpcDebugLog("dial succeeded in %v", dialDuration)
 
 	client := &Client{
@@ -122,7 +117,7 @@ func TryConnectWithTimeout(socketPath string, dialTimeout time.Duration) (*Clien
 	healthStart := time.Now()
 	health, err := client.Health()
 	healthDuration := time.Since(healthStart)
-	
+
 	if err != nil {
 		debug.Logf("health check failed: %v", err)
 		rpcDebugLog("health check failed after %v: %v", healthDuration, err)
@@ -155,22 +150,16 @@ func (c *Client) Close() error {
 
 // SetTimeout sets the request timeout duration
 func (c *Client) SetTimeout(timeout time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.timeout = timeout
 }
 
 // SetDatabasePath sets the expected database path for validation
 func (c *Client) SetDatabasePath(dbPath string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.dbPath = dbPath
 }
 
 // SetActor sets the actor for audit trail (who is performing operations)
 func (c *Client) SetActor(actor string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.actor = actor
 }
 
@@ -181,12 +170,6 @@ func (c *Client) Execute(operation string, args interface{}) (*Response, error) 
 
 // ExecuteWithCwd sends an RPC request with an explicit cwd (or current dir if empty string)
 func (c *Client) ExecuteWithCwd(operation string, args interface{}, cwd string) (*Response, error) {
-	return c.executeWithTimeout(operation, args, cwd, 0)
-}
-
-// executeWithTimeout sends an RPC request with an explicit timeout override.
-// If timeoutOverride is 0, the client's configured timeout is used.
-func (c *Client) executeWithTimeout(operation string, args interface{}, cwd string, timeoutOverride time.Duration) (*Response, error) {
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal args: %w", err)
@@ -197,25 +180,13 @@ func (c *Client) executeWithTimeout(operation string, args interface{}, cwd stri
 		cwd, _ = os.Getwd()
 	}
 
-	// Get mutable fields under read lock
-	c.mu.RLock()
-	actor := c.actor
-	dbPath := c.dbPath
-	timeout := c.timeout
-	c.mu.RUnlock()
-
-	// Use override if provided
-	if timeoutOverride > 0 {
-		timeout = timeoutOverride
-	}
-
 	req := Request{
 		Operation:     operation,
 		Args:          argsJSON,
-		Actor:         actor, // Who is performing this operation
+		Actor:         c.actor, // Who is performing this operation
 		ClientVersion: ClientVersion,
 		Cwd:           cwd,
-		ExpectedDB:    dbPath, // Send expected database path for validation
+		ExpectedDB:    c.dbPath, // Send expected database path for validation
 	}
 
 	reqJSON, err := json.Marshal(req)
@@ -223,8 +194,8 @@ func (c *Client) executeWithTimeout(operation string, args interface{}, cwd stri
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	if timeout > 0 {
-		deadline := time.Now().Add(timeout)
+	if c.timeout > 0 {
+		deadline := time.Now().Add(c.timeout)
 		if err := c.conn.SetDeadline(deadline); err != nil {
 			return nil, fmt.Errorf("failed to set deadline: %w", err)
 		}
@@ -392,15 +363,17 @@ func (c *Client) GetMutations(args *GetMutationsArgs) (*Response, error) {
 // WaitForMutations waits for mutations to occur, returning immediately if any
 // exist since the given timestamp, or blocking until new mutations arrive or timeout.
 func (c *Client) WaitForMutations(args *WaitForMutationsArgs) (*Response, error) {
-	// Calculate appropriate timeout for this blocking call
+	// Temporarily increase timeout for this blocking call
+	oldTimeout := c.timeout
+	// Use request timeout plus buffer, or at least the requested timeout
 	requestTimeout := time.Duration(args.Timeout) * time.Millisecond
 	if args.Timeout == 0 {
 		requestTimeout = 30 * time.Second
 	}
-	blockingTimeout := requestTimeout + 5*time.Second
+	c.timeout = requestTimeout + 5*time.Second
+	defer func() { c.timeout = oldTimeout }()
 
-	// Use executeWithTimeout to avoid modifying struct state
-	return c.executeWithTimeout(OpWaitForMutations, args, "", blockingTimeout)
+	return c.Execute(OpWaitForMutations, args)
 }
 
 // AddDependency adds a dependency via the daemon
@@ -437,8 +410,6 @@ func (c *Client) AddComment(args *CommentAddArgs) (*Response, error) {
 func (c *Client) Batch(args *BatchArgs) (*Response, error) {
 	return c.Execute(OpBatch, args)
 }
-
-
 
 // Export exports the database to JSONL format
 func (c *Client) Export(args *ExportArgs) (*Response, error) {
@@ -557,18 +528,18 @@ func (c *Client) GetGraphData(args *GetGraphDataArgs) (*GetGraphDataResponse, er
 // Only removes pid file - lock file is managed by OS (released on process exit).
 func cleanupStaleDaemonArtifacts(beadsDir string) {
 	pidFile := filepath.Join(beadsDir, "daemon.pid")
-	
+
 	// Check if pid file exists
 	if _, err := os.Stat(pidFile); err != nil {
 		// No pid file to clean up
 		return
 	}
-	
+
 	// Remove stale pid file
 	if err := os.Remove(pidFile); err != nil {
 		debug.Logf("failed to remove stale pid file: %v", err)
 		return
 	}
-	
+
 	debug.Logf("removed stale daemon.pid file (lock free, socket missing)")
 }

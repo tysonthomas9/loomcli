@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"hash"
-	"sort"
 	"strings"
 	"time"
 )
@@ -35,9 +34,9 @@ type Issue struct {
 	EstimatedMinutes *int   `json:"estimated_minutes,omitempty"`
 
 	// ===== Timestamps =====
-	CreatedAt   time.Time  `json:"created_at"`
-	CreatedBy   string     `json:"created_by,omitempty"` // Who created this issue (GH#748)
-	UpdatedAt   time.Time  `json:"updated_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	CreatedBy       string     `json:"created_by,omitempty"` // Who created this issue (GH#748)
+	UpdatedAt       time.Time  `json:"updated_at"`
 	ClosedAt        *time.Time `json:"closed_at,omitempty"`
 	CloseReason     string     `json:"close_reason,omitempty"`      // Reason provided when closing
 	ClosedBySession string     `json:"closed_by_session,omitempty"` // Claude Code session that closed this issue
@@ -143,33 +142,13 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(string(i.IssueType))
 	w.str(i.Assignee)
 	w.str(i.Owner)
-	w.intPtr(i.EstimatedMinutes)
 	w.str(i.CreatedBy)
-	w.str(i.CloseReason)
-	w.str(i.ClosedBySession)
-
-	// Time-based scheduling
-	w.timePtr(i.DueAt)
-	w.timePtr(i.DeferUntil)
 
 	// Optional fields
 	w.strPtr(i.ExternalRef)
 	w.str(i.SourceSystem)
 	w.flag(i.Pinned, "pinned")
 	w.flag(i.IsTemplate, "template")
-	w.flag(i.Ephemeral, "ephemeral")
-
-	// Source tracing fields
-	w.str(i.SourceFormula)
-	w.str(i.SourceLocation)
-
-	// Tombstone fields (excluding DeletedAt timestamp)
-	w.str(i.DeletedBy)
-	w.str(i.DeleteReason)
-	w.str(i.OriginalType)
-
-	// Messaging fields
-	w.str(i.Sender)
 
 	// Bonded molecules
 	for _, br := range i.BondedFrom {
@@ -197,7 +176,9 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(i.AwaitType)
 	w.str(i.AwaitID)
 	w.duration(i.Timeout)
-	w.strings(i.Waiters)
+	for _, waiter := range i.Waiters {
+		w.str(waiter)
+	}
 
 	// Slot fields for exclusive access
 	w.str(i.Holder)
@@ -220,40 +201,6 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(i.Actor)
 	w.str(i.Target)
 	w.str(i.Payload)
-
-	// Relational data (sorted for deterministic hashing)
-	w.strings(i.Labels)
-
-	// Dependencies (sorted by IssueID + DependsOnID)
-	sortedDeps := make([]*Dependency, len(i.Dependencies))
-	copy(sortedDeps, i.Dependencies)
-	sort.Slice(sortedDeps, func(a, b int) bool {
-		if sortedDeps[a].IssueID != sortedDeps[b].IssueID {
-			return sortedDeps[a].IssueID < sortedDeps[b].IssueID
-		}
-		return sortedDeps[a].DependsOnID < sortedDeps[b].DependsOnID
-	})
-	for _, dep := range sortedDeps {
-		w.str(dep.IssueID)
-		w.str(dep.DependsOnID)
-		w.str(string(dep.Type))
-		w.str(dep.CreatedBy)
-		w.str(dep.Metadata)
-		w.str(dep.ThreadID)
-	}
-
-	// Comments (sorted by ID for determinism)
-	sortedComments := make([]*Comment, len(i.Comments))
-	copy(sortedComments, i.Comments)
-	sort.Slice(sortedComments, func(a, b int) bool {
-		return sortedComments[a].ID < sortedComments[b].ID
-	})
-	for _, c := range sortedComments {
-		w.int(int(c.ID))
-		w.str(c.IssueID)
-		w.str(c.Author)
-		w.str(c.Text)
-	}
 
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
@@ -306,29 +253,6 @@ func (w hashFieldWriter) entityRef(e *EntityRef) {
 		w.str(e.Platform)
 		w.str(e.Org)
 		w.str(e.ID)
-	}
-}
-
-func (w hashFieldWriter) intPtr(p *int) {
-	if p != nil {
-		w.h.Write([]byte(fmt.Sprintf("%d", *p)))
-	}
-	w.h.Write([]byte{0})
-}
-
-func (w hashFieldWriter) timePtr(t *time.Time) {
-	if t != nil {
-		w.h.Write([]byte(t.Format(time.RFC3339Nano)))
-	}
-	w.h.Write([]byte{0})
-}
-
-func (w hashFieldWriter) strings(ss []string) {
-	sorted := make([]string, len(ss))
-	copy(sorted, ss)
-	sort.Strings(sorted)
-	for _, s := range sorted {
-		w.str(s)
 	}
 }
 
@@ -456,9 +380,9 @@ func (i *Issue) ValidateForImport(customStatuses []string) error {
 	if !i.Status.IsValidWithCustom(customStatuses) {
 		return fmt.Errorf("invalid status: %s", i.Status)
 	}
-	// Issue type: not validated during import per federation trust model.
-	// Built-in types (bug, feature, task, epic, chore) are valid. Non-built-in
-	// types are trusted from source repo (they validated when issue was created).
+	// Issue type validation: federation trust model
+	// Only validate built-in types (catch typos like "tsak" vs "task")
+	// Non-built-in types are trusted from source repo (child repo already validated)
 	if i.EstimatedMinutes != nil && *i.EstimatedMinutes < 0 {
 		return fmt.Errorf("estimated_minutes cannot be negative")
 	}
@@ -748,7 +672,7 @@ type IssueWithCounts struct {
 // to ensure consistent JSON structure for frontend type guards (GH#bd-rrtu).
 type IssueDetails struct {
 	Issue
-	Labels       []string                      `json:"labels"`
+	Labels       []string                       `json:"labels"`
 	Dependencies []*IssueWithDependencyMetadata `json:"dependencies"`
 	Dependents   []*IssueWithDependencyMetadata `json:"dependents"`
 	Comments     []*Comment                     `json:"comments"`
@@ -771,10 +695,10 @@ const (
 	DepDiscoveredFrom DependencyType = "discovered-from"
 
 	// Graph link types
-	DepRepliesTo  DependencyType = "replies-to"  // Conversation threading
-	DepRelatesTo  DependencyType = "relates-to"  // Loose knowledge graph edges
-	DepDuplicates DependencyType = "duplicates"  // Deduplication link
-	DepSupersedes DependencyType = "supersedes"  // Version chain link
+	DepRepliesTo  DependencyType = "replies-to" // Conversation threading
+	DepRelatesTo  DependencyType = "relates-to" // Loose knowledge graph edges
+	DepDuplicates DependencyType = "duplicates" // Deduplication link
+	DepSupersedes DependencyType = "supersedes" // Version chain link
 
 	// Entity types (HOP foundation - Decision 004)
 	DepAuthoredBy DependencyType = "authored-by" // Creator relationship
@@ -901,14 +825,14 @@ type Comment struct {
 
 // Event represents an audit trail entry
 type Event struct {
-	ID        int64      `json:"id"`
-	IssueID   string     `json:"issue_id"`
-	EventType EventType  `json:"event_type"`
-	Actor     string     `json:"actor"`
-	OldValue  *string    `json:"old_value,omitempty"`
-	NewValue  *string    `json:"new_value,omitempty"`
-	Comment   *string    `json:"comment,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID        int64     `json:"id"`
+	IssueID   string    `json:"issue_id"`
+	EventType EventType `json:"event_type"`
+	Actor     string    `json:"actor"`
+	OldValue  *string   `json:"old_value,omitempty"`
+	NewValue  *string   `json:"new_value,omitempty"`
+	Comment   *string   `json:"comment,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // EventType categorizes audit trail events
@@ -929,11 +853,19 @@ const (
 	EventCompacted         EventType = "compacted"
 )
 
+// BlockerRef contains detailed information about a blocker issue
+type BlockerRef struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Priority int    `json:"priority"`
+}
+
 // BlockedIssue extends Issue with blocking information
 type BlockedIssue struct {
 	Issue
-	BlockedByCount int      `json:"blocked_by_count"`
-	BlockedBy      []string `json:"blocked_by"`
+	BlockedByCount   int          `json:"blocked_by_count"`
+	BlockedBy        []string     `json:"blocked_by"`
+	BlockedByDetails []BlockerRef `json:"blocked_by_details,omitempty"`
 }
 
 // TreeNode represents a node in a dependency tree
@@ -959,17 +891,17 @@ type MoleculeProgressStats struct {
 
 // Statistics provides aggregate metrics
 type Statistics struct {
-	TotalIssues              int     `json:"total_issues"`
-	OpenIssues               int     `json:"open_issues"`
-	InProgressIssues         int     `json:"in_progress_issues"`
-	ClosedIssues             int     `json:"closed_issues"`
-	BlockedIssues            int     `json:"blocked_issues"`
-	DeferredIssues           int     `json:"deferred_issues"`  // Issues on ice
-	ReadyIssues              int     `json:"ready_issues"`
-	TombstoneIssues          int     `json:"tombstone_issues"` // Soft-deleted issues
-	PinnedIssues             int     `json:"pinned_issues"`    // Persistent issues
-	EpicsEligibleForClosure  int     `json:"epics_eligible_for_closure"`
-	AverageLeadTime          float64 `json:"average_lead_time_hours"`
+	TotalIssues             int     `json:"total_issues"`
+	OpenIssues              int     `json:"open_issues"`
+	InProgressIssues        int     `json:"in_progress_issues"`
+	ClosedIssues            int     `json:"closed_issues"`
+	BlockedIssues           int     `json:"blocked_issues"`
+	DeferredIssues          int     `json:"deferred_issues"` // Issues on ice
+	ReadyIssues             int     `json:"ready_issues"`
+	TombstoneIssues         int     `json:"tombstone_issues"` // Soft-deleted issues
+	PinnedIssues            int     `json:"pinned_issues"`    // Persistent issues
+	EpicsEligibleForClosure int     `json:"epics_eligible_for_closure"`
+	AverageLeadTime         float64 `json:"average_lead_time_hours"`
 }
 
 // IssueFilter is used to filter issue queries
@@ -978,18 +910,18 @@ type IssueFilter struct {
 	Priority    *int
 	IssueType   *IssueType
 	Assignee    *string
-	Labels      []string  // AND semantics: issue must have ALL these labels
-	LabelsAny   []string  // OR semantics: issue must have AT LEAST ONE of these labels
+	Labels      []string // AND semantics: issue must have ALL these labels
+	LabelsAny   []string // OR semantics: issue must have AT LEAST ONE of these labels
 	TitleSearch string
-	IDs         []string  // Filter by specific issue IDs
-	IDPrefix    string    // Filter by ID prefix (e.g., "bd-" to match "bd-abc123")
+	IDs         []string // Filter by specific issue IDs
+	IDPrefix    string   // Filter by ID prefix (e.g., "bd-" to match "bd-abc123")
 	Limit       int
 
 	// Pattern matching
 	TitleContains       string
 	DescriptionContains string
 	NotesContains       string
-	
+
 	// Date ranges
 	CreatedAfter  *time.Time
 	CreatedBefore *time.Time
@@ -997,12 +929,12 @@ type IssueFilter struct {
 	UpdatedBefore *time.Time
 	ClosedAfter   *time.Time
 	ClosedBefore  *time.Time
-	
+
 	// Empty/null checks
 	EmptyDescription bool
 	NoAssignee       bool
 	NoLabels         bool
-	
+
 	// Numeric ranges
 	PriorityMin *int
 	PriorityMax *int
@@ -1071,12 +1003,12 @@ func (s SortPolicy) IsValid() bool {
 // WorkFilter is used to filter ready work queries
 type WorkFilter struct {
 	Status     Status
-	Type       string     // Filter by issue type (task, bug, feature, epic, merge-request, etc.)
+	Type       string // Filter by issue type (task, bug, feature, epic, merge-request, etc.)
 	Priority   *int
 	Assignee   *string
-	Unassigned bool       // Filter for issues with no assignee
-	Labels     []string   // AND semantics: issue must have ALL these labels
-	LabelsAny  []string   // OR semantics: issue must have AT LEAST ONE of these labels
+	Unassigned bool     // Filter for issues with no assignee
+	Labels     []string // AND semantics: issue must have ALL these labels
+	LabelsAny  []string // OR semantics: issue must have AT LEAST ONE of these labels
 	Limit      int
 	SortPolicy SortPolicy
 

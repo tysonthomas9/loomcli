@@ -12,14 +12,13 @@ import (
 // Examples: bd-a3f2dd (6), bd-a3f2dda (7), bd-a3f2dda8 (8)
 //
 // The hash is computed from:
-// - Prefix (prevents cross-project collisions)
 // - Title (primary identifier)
 // - Description (additional context)
 // - Created timestamp (RFC3339Nano for precision)
 // - Workspace ID (prevents cross-workspace collisions)
 //
-// Returns prefix-{64-char-hex} for progressive collision handling.
-// Caller extracts prefix-hash[:6] initially, then hash[:7], hash[:8] on collisions.
+// Returns the full 64-char hash for progressive collision handling.
+// Caller extracts hash[:6] initially, then hash[:7], hash[:8] on collisions.
 //
 // Collision probability with 6 chars (24 bits):
 // - 1,000 issues: ~2.94% chance (most extend to 7 chars)
@@ -28,18 +27,16 @@ import (
 // Progressive strategy optimizes for common case: 97% stay at 6 chars.
 func GenerateHashID(prefix, title, description string, created time.Time, workspaceID string) string {
 	h := sha256.New()
-	w := hashFieldWriter{h}
 
-	// Write all components with null byte separators to prevent field boundary collisions
-	w.str(prefix)
-	w.str(title)
-	w.str(description)
-	w.str(created.Format(time.RFC3339Nano))
-	w.str(workspaceID)
+	// Write all components to hash
+	h.Write([]byte(title))
+	h.Write([]byte(description))
+	h.Write([]byte(created.Format(time.RFC3339Nano)))
+	h.Write([]byte(workspaceID))
 
-	// Return prefix-hash for progressive length selection
+	// Return full hash for progressive length selection
 	hash := hex.EncodeToString(h.Sum(nil))
-	return fmt.Sprintf("%s-%s", prefix, hash)
+	return hash
 }
 
 // GenerateChildID creates a hierarchical child ID.
@@ -55,9 +52,10 @@ func GenerateChildID(parentID string, childNumber int) string {
 // Returns: (rootID, parentID, depth)
 //
 // Examples:
-//   "bd-af78e9a2" → ("bd-af78e9a2", "", 0)
-//   "bd-af78e9a2.1" → ("bd-af78e9a2", "bd-af78e9a2", 1)
-//   "bd-af78e9a2.1.2" → ("bd-af78e9a2", "bd-af78e9a2.1", 2)
+//
+//	"bd-af78e9a2" → ("bd-af78e9a2", "", 0)
+//	"bd-af78e9a2.1" → ("bd-af78e9a2", "bd-af78e9a2", 1)
+//	"bd-af78e9a2.1.2" → ("bd-af78e9a2", "bd-af78e9a2.1", 2)
 func ParseHierarchicalID(id string) (rootID, parentID string, depth int) {
 	// Count dots to determine depth
 	depth = 0
@@ -68,12 +66,12 @@ func ParseHierarchicalID(id string) (rootID, parentID string, depth int) {
 			lastDot = i
 		}
 	}
-	
+
 	// Root ID (no parent)
 	if depth == 0 {
 		return id, "", 0
 	}
-	
+
 	// Find root ID (everything before first dot)
 	firstDot := -1
 	for i, ch := range id {
@@ -83,10 +81,10 @@ func ParseHierarchicalID(id string) (rootID, parentID string, depth int) {
 		}
 	}
 	rootID = id[:firstDot]
-	
+
 	// Parent ID (everything before last dot)
 	parentID = id[:lastDot]
-	
+
 	return rootID, parentID, depth
 }
 

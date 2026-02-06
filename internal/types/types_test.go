@@ -2,14 +2,197 @@ package types
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestStatus_IsValid(t *testing.T) {
-	t.Parallel()
+func TestIssueValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		issue   Issue
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid issue",
+			issue: Issue{
+				ID:          "test-1",
+				Title:       "Valid issue",
+				Description: "Description",
+				Status:      StatusOpen,
+				Priority:    2,
+				IssueType:   TypeFeature,
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing title",
+			issue: Issue{
+				ID:        "test-1",
+				Status:    StatusOpen,
+				Priority:  2,
+				IssueType: TypeFeature,
+			},
+			wantErr: true,
+			errMsg:  "title is required",
+		},
+		{
+			name: "title too long",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     string(make([]byte, 501)), // 501 characters
+				Status:    StatusOpen,
+				Priority:  2,
+				IssueType: TypeFeature,
+			},
+			wantErr: true,
+			errMsg:  "title must be 500 characters or less",
+		},
+		{
+			name: "invalid priority too low",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Test",
+				Status:    StatusOpen,
+				Priority:  -1,
+				IssueType: TypeFeature,
+			},
+			wantErr: true,
+			errMsg:  "priority must be between 0 and 4",
+		},
+		{
+			name: "invalid priority too high",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Test",
+				Status:    StatusOpen,
+				Priority:  5,
+				IssueType: TypeFeature,
+			},
+			wantErr: true,
+			errMsg:  "priority must be between 0 and 4",
+		},
+		{
+			name: "invalid status",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Test",
+				Status:    Status("invalid"),
+				Priority:  2,
+				IssueType: TypeFeature,
+			},
+			wantErr: true,
+			errMsg:  "invalid status",
+		},
+		{
+			name: "invalid issue type",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Test",
+				Status:    StatusOpen,
+				Priority:  2,
+				IssueType: IssueType("invalid"),
+			},
+			wantErr: true,
+			errMsg:  "invalid issue type",
+		},
+		{
+			name: "negative estimated minutes",
+			issue: Issue{
+				ID:               "test-1",
+				Title:            "Test",
+				Status:           StatusOpen,
+				Priority:         2,
+				IssueType:        TypeFeature,
+				EstimatedMinutes: intPtr(-10),
+			},
+			wantErr: true,
+			errMsg:  "estimated_minutes cannot be negative",
+		},
+		{
+			name: "valid estimated minutes",
+			issue: Issue{
+				ID:               "test-1",
+				Title:            "Test",
+				Status:           StatusOpen,
+				Priority:         2,
+				IssueType:        TypeFeature,
+				EstimatedMinutes: intPtr(60),
+			},
+			wantErr: false,
+		},
+		{
+			name: "closed issue without closed_at",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Test",
+				Status:    StatusClosed,
+				Priority:  2,
+				IssueType: TypeFeature,
+				ClosedAt:  nil,
+			},
+			wantErr: true,
+			errMsg:  "closed issues must have closed_at timestamp",
+		},
+		{
+			name: "open issue with closed_at",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Test",
+				Status:    StatusOpen,
+				Priority:  2,
+				IssueType: TypeFeature,
+				ClosedAt:  timePtr(time.Now()),
+			},
+			wantErr: true,
+			errMsg:  "non-closed issues cannot have closed_at timestamp",
+		},
+		{
+			name: "in_progress issue with closed_at",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Test",
+				Status:    StatusInProgress,
+				Priority:  2,
+				IssueType: TypeFeature,
+				ClosedAt:  timePtr(time.Now()),
+			},
+			wantErr: true,
+			errMsg:  "non-closed issues cannot have closed_at timestamp",
+		},
+		{
+			name: "closed issue with closed_at",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Test",
+				Status:    StatusClosed,
+				Priority:  2,
+				IssueType: TypeFeature,
+				ClosedAt:  timePtr(time.Now()),
+			},
+			wantErr: false,
+		},
+	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.issue.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error containing %q, got nil", tt.errMsg)
+					return
+				}
+				if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+				}
+			} else if err != nil {
+				t.Errorf("Validate() unexpected error = %v", err)
+			}
+		})
+	}
+}
+
+func TestStatusIsValid(t *testing.T) {
 	tests := []struct {
 		status Status
 		valid  bool
@@ -23,9 +206,8 @@ func TestStatus_IsValid(t *testing.T) {
 		{StatusTombstone, true},
 		{StatusPinned, true},
 		{StatusHooked, true},
-		{"invalid", false},
-		{"", false},
-		{"OPEN", false}, // case sensitive
+		{Status("invalid"), false},
+		{Status(""), false},
 	}
 
 	for _, tt := range tests {
@@ -37,45 +219,347 @@ func TestStatus_IsValid(t *testing.T) {
 	}
 }
 
-func TestStatus_IsValidWithCustom(t *testing.T) {
-	t.Parallel()
-
-	customStatuses := []string{"custom_status", "another_custom"}
-
+func TestIsTombstone(t *testing.T) {
 	tests := []struct {
-		status Status
-		valid  bool
+		name   string
+		issue  Issue
+		expect bool
 	}{
-		{StatusOpen, true},
-		{"custom_status", true},
-		{"another_custom", true},
-		{"invalid", false},
+		{
+			name: "tombstone issue",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+			},
+			expect: true,
+		},
+		{
+			name: "open issue",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Open issue",
+				Status:    StatusOpen,
+				Priority:  2,
+				IssueType: TypeTask,
+			},
+			expect: false,
+		},
+		{
+			name: "closed issue",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Closed issue",
+				Status:    StatusClosed,
+				Priority:  2,
+				IssueType: TypeTask,
+				ClosedAt:  timePtr(time.Now()),
+			},
+			expect: false,
+		},
+		{
+			name: "in_progress issue",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "In progress issue",
+				Status:    StatusInProgress,
+				Priority:  2,
+				IssueType: TypeTask,
+			},
+			expect: false,
+		},
+		{
+			name: "blocked issue",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Blocked issue",
+				Status:    StatusBlocked,
+				Priority:  2,
+				IssueType: TypeTask,
+			},
+			expect: false,
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run(string(tt.status), func(t *testing.T) {
-			if got := tt.status.IsValidWithCustom(customStatuses); got != tt.valid {
-				t.Errorf("Status(%q).IsValidWithCustom() = %v, want %v", tt.status, got, tt.valid)
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.issue.IsTombstone(); got != tt.expect {
+				t.Errorf("Issue.IsTombstone() = %v, want %v", got, tt.expect)
 			}
 		})
 	}
 }
 
-func TestIssueType_IsValid(t *testing.T) {
-	t.Parallel()
+func TestStatusIsValidWithCustom(t *testing.T) {
+	customStatuses := []string{"awaiting_review", "awaiting_testing", "awaiting_docs"}
 
+	tests := []struct {
+		name           string
+		status         Status
+		customStatuses []string
+		valid          bool
+	}{
+		// Built-in statuses should always be valid
+		{"built-in open", StatusOpen, nil, true},
+		{"built-in open with custom", StatusOpen, customStatuses, true},
+		{"built-in closed", StatusClosed, customStatuses, true},
+
+		// Custom statuses with config
+		{"custom awaiting_review", Status("awaiting_review"), customStatuses, true},
+		{"custom awaiting_testing", Status("awaiting_testing"), customStatuses, true},
+		{"custom awaiting_docs", Status("awaiting_docs"), customStatuses, true},
+
+		// Custom statuses without config (should fail)
+		{"custom without config", Status("awaiting_review"), nil, false},
+		{"custom without config empty", Status("awaiting_review"), []string{}, false},
+
+		// Invalid statuses
+		{"invalid status", Status("not_a_status"), customStatuses, false},
+		{"empty status", Status(""), customStatuses, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.status.IsValidWithCustom(tt.customStatuses); got != tt.valid {
+				t.Errorf("Status(%q).IsValidWithCustom(%v) = %v, want %v", tt.status, tt.customStatuses, got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestValidateWithCustomStatuses(t *testing.T) {
+	customStatuses := []string{"awaiting_review", "awaiting_testing"}
+
+	tests := []struct {
+		name           string
+		issue          Issue
+		customStatuses []string
+		wantErr        bool
+	}{
+		{
+			name: "valid issue with built-in status",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: TypeTask,
+			},
+			customStatuses: nil,
+			wantErr:        false,
+		},
+		{
+			name: "valid issue with custom status",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    Status("awaiting_review"),
+				Priority:  1,
+				IssueType: TypeTask,
+			},
+			customStatuses: customStatuses,
+			wantErr:        false,
+		},
+		{
+			name: "invalid custom status without config",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    Status("awaiting_review"),
+				Priority:  1,
+				IssueType: TypeTask,
+			},
+			customStatuses: nil,
+			wantErr:        true,
+		},
+		{
+			name: "invalid custom status not in config",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    Status("unknown_status"),
+				Priority:  1,
+				IssueType: TypeTask,
+			},
+			customStatuses: customStatuses,
+			wantErr:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.issue.ValidateWithCustomStatuses(tt.customStatuses)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateWithCustomStatuses() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateForImport tests the federation trust model (bd-9ji4z):
+// - Built-in types are validated (catch typos)
+// - Non-built-in types are trusted (child repo already validated)
+func TestValidateForImport(t *testing.T) {
+	tests := []struct {
+		name    string
+		issue   Issue
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "built-in type task passes",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: TypeTask,
+			},
+			wantErr: false,
+		},
+		{
+			name: "built-in type bug passes",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: TypeBug,
+			},
+			wantErr: false,
+		},
+		{
+			name: "custom type pm is trusted (not in parent config)",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: IssueType("pm"), // Custom type from child repo
+			},
+			wantErr: false, // Should pass - federation trust model
+		},
+		{
+			name: "custom type llm is trusted",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: IssueType("llm"), // Custom type from child repo
+			},
+			wantErr: false, // Should pass - federation trust model
+		},
+		{
+			name: "custom type passes (federation trust)",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: IssueType("agent"), // Custom type (no longer built-in)
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty type defaults to task (handled by SetDefaults)",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: IssueType(""), // Empty is allowed
+			},
+			wantErr: false,
+		},
+		{
+			name: "other validations still run - missing title",
+			issue: Issue{
+				Title:     "", // Missing required field
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: IssueType("pm"),
+			},
+			wantErr: true,
+			errMsg:  "title is required",
+		},
+		{
+			name: "other validations still run - invalid priority",
+			issue: Issue{
+				Title:     "Test Issue",
+				Status:    StatusOpen,
+				Priority:  10, // Invalid
+				IssueType: IssueType("pm"),
+			},
+			wantErr: true,
+			errMsg:  "priority must be between 0 and 4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.issue.ValidateForImport(nil) // No custom statuses needed for these tests
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ValidateForImport() expected error, got nil")
+					return
+				}
+				if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+					t.Errorf("ValidateForImport() error = %v, want error containing %q", err, tt.errMsg)
+				}
+			} else if err != nil {
+				t.Errorf("ValidateForImport() unexpected error = %v", err)
+			}
+		})
+	}
+}
+
+// TestValidateForImportVsValidateWithCustom contrasts the two validation modes
+func TestValidateForImportVsValidateWithCustom(t *testing.T) {
+	// Issue with custom type that's NOT in customTypes list
+	issue := Issue{
+		Title:     "Test Issue",
+		Status:    StatusOpen,
+		Priority:  1,
+		IssueType: IssueType("pm"), // Custom type not configured in parent
+	}
+
+	// ValidateWithCustom (normal mode): should fail without pm in customTypes
+	err := issue.ValidateWithCustom(nil, nil)
+	if err == nil {
+		t.Error("ValidateWithCustom() should fail for custom type without config")
+	}
+
+	// ValidateWithCustom: should pass with pm in customTypes
+	err = issue.ValidateWithCustom(nil, []string{"pm"})
+	if err != nil {
+		t.Errorf("ValidateWithCustom() with pm config should pass, got: %v", err)
+	}
+
+	// ValidateForImport (federation trust mode): should pass without any config
+	err = issue.ValidateForImport(nil)
+	if err != nil {
+		t.Errorf("ValidateForImport() should trust custom type, got: %v", err)
+	}
+}
+
+func TestIssueTypeIsValid(t *testing.T) {
 	tests := []struct {
 		issueType IssueType
 		valid     bool
 	}{
+		// Core work types are always valid
 		{TypeBug, true},
 		{TypeFeature, true},
 		{TypeTask, true},
 		{TypeEpic, true},
 		{TypeChore, true},
-		{"invalid", false},
-		{"", false},
-		{"BUG", false}, // case sensitive
+		// Gas Town types are now custom types (not built-in)
+		{IssueType("message"), false},
+		{IssueType("merge-request"), false},
+		{IssueType("molecule"), false},
+		{IssueType("gate"), false},
+		{IssueType("agent"), false},
+		{IssueType("role"), false},
+		{IssueType("convoy"), false},
+		{IssueType("event"), false},
+		{IssueType("slot"), false},
+		{IssueType("rig"), false},
+		// Invalid types
+		{IssueType("invalid"), false},
+		{IssueType(""), false},
 	}
 
 	for _, tt := range tests {
@@ -87,183 +571,125 @@ func TestIssueType_IsValid(t *testing.T) {
 	}
 }
 
-func TestIssueType_Normalize(t *testing.T) {
-	t.Parallel()
-
+func TestIssueTypeRequiredSections(t *testing.T) {
 	tests := []struct {
-		input    IssueType
-		expected IssueType
+		issueType     IssueType
+		expectCount   int
+		expectHeading string // First heading if any
 	}{
-		{"enhancement", TypeFeature},
-		{"Enhancement", TypeFeature},
-		{"ENHANCEMENT", TypeFeature},
-		{"feat", TypeFeature},
-		{"Feat", TypeFeature},
-		{"bug", TypeBug},       // unchanged
-		{"task", TypeTask},     // unchanged
-		{"custom", "custom"},   // unchanged
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.input), func(t *testing.T) {
-			if got := tt.input.Normalize(); got != tt.expected {
-				t.Errorf("IssueType(%q).Normalize() = %q, want %q", tt.input, got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestIssueType_RequiredSections(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		issueType IssueType
-		hasSteps  bool // bug has "Steps to Reproduce"
-		hasAC     bool // bug, task, feature have "Acceptance Criteria"
-		hasSC     bool // epic has "Success Criteria"
-	}{
-		{TypeBug, true, true, false},
-		{TypeTask, false, true, false},
-		{TypeFeature, false, true, false},
-		{TypeEpic, false, false, true},
-		{TypeChore, false, false, false},
-		{"custom", false, false, false},
+		{TypeBug, 2, "## Steps to Reproduce"},
+		{TypeFeature, 1, "## Acceptance Criteria"},
+		{TypeTask, 1, "## Acceptance Criteria"},
+		{TypeEpic, 1, "## Success Criteria"},
+		{TypeChore, 0, ""},
+		// Gas Town types are now custom and have no required sections
+		{IssueType("message"), 0, ""},
+		{IssueType("molecule"), 0, ""},
+		{IssueType("gate"), 0, ""},
+		{IssueType("event"), 0, ""},
+		{IssueType("merge-request"), 0, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(string(tt.issueType), func(t *testing.T) {
 			sections := tt.issueType.RequiredSections()
-
-			hasSteps := false
-			hasAC := false
-			hasSC := false
-			for _, s := range sections {
-				if strings.Contains(s.Heading, "Steps to Reproduce") {
-					hasSteps = true
-				}
-				if strings.Contains(s.Heading, "Acceptance Criteria") {
-					hasAC = true
-				}
-				if strings.Contains(s.Heading, "Success Criteria") {
-					hasSC = true
-				}
+			if len(sections) != tt.expectCount {
+				t.Errorf("IssueType(%q).RequiredSections() returned %d sections, want %d",
+					tt.issueType, len(sections), tt.expectCount)
 			}
-
-			if hasSteps != tt.hasSteps || hasAC != tt.hasAC || hasSC != tt.hasSC {
-				t.Errorf("IssueType(%q).RequiredSections() sections mismatch", tt.issueType)
+			if tt.expectCount > 0 && sections[0].Heading != tt.expectHeading {
+				t.Errorf("IssueType(%q).RequiredSections()[0].Heading = %q, want %q",
+					tt.issueType, sections[0].Heading, tt.expectHeading)
 			}
 		})
 	}
 }
 
-func TestAgentState_IsValid(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
+func TestAgentStateIsValid(t *testing.T) {
+	cases := []struct {
+		name  string
 		state AgentState
-		valid bool
+		want  bool
 	}{
-		{StateIdle, true},
-		{StateSpawning, true},
-		{StateRunning, true},
-		{StateWorking, true},
-		{StateStuck, true},
-		{StateDone, true},
-		{StateStopped, true},
-		{StateDead, true},
-		{"", true}, // empty is valid for non-agent beads
-		{"invalid", false},
+		{"idle", StateIdle, true},
+		{"running", StateRunning, true},
+		{"empty", AgentState(""), true}, // empty allowed for non-agent beads
+		{"invalid", AgentState("dormant"), false},
 	}
-
-	for _, tt := range tests {
-		name := string(tt.state)
-		if name == "" {
-			name = "empty"
-		}
-		t.Run(name, func(t *testing.T) {
-			if got := tt.state.IsValid(); got != tt.valid {
-				t.Errorf("AgentState(%q).IsValid() = %v, want %v", tt.state, got, tt.valid)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.state.IsValid(); got != tc.want {
+				t.Fatalf("AgentState(%q).IsValid() = %v, want %v", tc.state, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestMolType_IsValid(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		molType MolType
-		valid   bool
+func TestMolTypeIsValid(t *testing.T) {
+	cases := []struct {
+		name  string
+		type_ MolType
+		want  bool
 	}{
-		{MolTypeSwarm, true},
-		{MolTypePatrol, true},
-		{MolTypeWork, true},
-		{"", true}, // empty defaults to work
-		{"invalid", false},
+		{"swarm", MolTypeSwarm, true},
+		{"patrol", MolTypePatrol, true},
+		{"work", MolTypeWork, true},
+		{"empty", MolType(""), true},
+		{"unknown", MolType("custom"), false},
 	}
-
-	for _, tt := range tests {
-		name := string(tt.molType)
-		if name == "" {
-			name = "empty"
-		}
-		t.Run(name, func(t *testing.T) {
-			if got := tt.molType.IsValid(); got != tt.valid {
-				t.Errorf("MolType(%q).IsValid() = %v, want %v", tt.molType, got, tt.valid)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.type_.IsValid(); got != tc.want {
+				t.Fatalf("MolType(%q).IsValid() = %v, want %v", tc.type_, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestWorkType_IsValid(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		workType WorkType
-		valid    bool
-	}{
-		{WorkTypeMutex, true},
-		{WorkTypeOpenCompetition, true},
-		{"", true}, // empty defaults to mutex
-		{"invalid", false},
+func TestIssueCompoundHelpers(t *testing.T) {
+	issue := &Issue{}
+	if issue.IsCompound() {
+		t.Fatalf("issue with no bonded refs should not be compound")
+	}
+	if constituents := issue.GetConstituents(); constituents != nil {
+		t.Fatalf("expected nil constituents for non-compound issue")
 	}
 
-	for _, tt := range tests {
-		name := string(tt.workType)
-		if name == "" {
-			name = "empty"
-		}
-		t.Run(name, func(t *testing.T) {
-			if got := tt.workType.IsValid(); got != tt.valid {
-				t.Errorf("WorkType(%q).IsValid() = %v, want %v", tt.workType, got, tt.valid)
-			}
-		})
+	bonded := &Issue{BondedFrom: []BondRef{{SourceID: "proto-1", BondType: BondTypeSequential}}}
+	if !bonded.IsCompound() {
+		t.Fatalf("issue with bonded refs should be compound")
+	}
+	refs := bonded.GetConstituents()
+	if len(refs) != 1 || refs[0].SourceID != "proto-1" {
+		t.Fatalf("unexpected constituents: %#v", refs)
 	}
 }
 
-func TestDependencyType_IsValid(t *testing.T) {
-	t.Parallel()
-
+func TestDependencyTypeIsValid(t *testing.T) {
+	// IsValid now accepts any non-empty string up to 50 chars (Decision 004)
 	tests := []struct {
 		depType DependencyType
 		valid   bool
 	}{
 		{DepBlocks, true},
+		{DepRelated, true},
 		{DepParentChild, true},
-		{"custom-type", true}, // valid: 1-50 chars
-		{"", false},           // invalid: empty
-		{DependencyType(strings.Repeat("x", 51)), false}, // invalid: >50 chars
+		{DepDiscoveredFrom, true},
+		{DepRepliesTo, true},
+		{DepRelatesTo, true},
+		{DepDuplicates, true},
+		{DepSupersedes, true},
+		{DepAuthoredBy, true},
+		{DepAssignedTo, true},
+		{DepApprovedBy, true},
+		{DependencyType("custom-type"), true}, // Custom types are now valid
+		{DependencyType("any-string"), true},  // Any non-empty string is valid
+		{DependencyType(""), false},           // Empty is still invalid
+		{DependencyType("this-is-a-very-long-dependency-type-that-exceeds-fifty-characters"), false}, // Too long
 	}
 
 	for _, tt := range tests {
-		name := string(tt.depType)
-		if len(name) > 20 {
-			name = name[:20] + "..."
-		}
-		if name == "" {
-			name = "empty"
-		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(string(tt.depType), func(t *testing.T) {
 			if got := tt.depType.IsValid(); got != tt.valid {
 				t.Errorf("DependencyType(%q).IsValid() = %v, want %v", tt.depType, got, tt.valid)
 			}
@@ -271,438 +697,113 @@ func TestDependencyType_IsValid(t *testing.T) {
 	}
 }
 
-func TestDependencyType_IsWellKnown(t *testing.T) {
-	t.Parallel()
-
-	wellKnownTypes := []DependencyType{
-		DepBlocks, DepParentChild, DepConditionalBlocks, DepWaitsFor,
-		DepRelated, DepDiscoveredFrom, DepRepliesTo, DepRelatesTo,
-		DepDuplicates, DepSupersedes, DepAuthoredBy, DepAssignedTo,
-		DepApprovedBy, DepAttests, DepTracks, DepUntil, DepCausedBy,
-		DepValidates, DepDelegatedFrom,
-	}
-
-	for _, dt := range wellKnownTypes {
-		t.Run(string(dt), func(t *testing.T) {
-			if !dt.IsWellKnown() {
-				t.Errorf("DependencyType(%q).IsWellKnown() = false, want true", dt)
-			}
-		})
-	}
-
-	// Custom types should not be well-known
-	t.Run("custom", func(t *testing.T) {
-		custom := DependencyType("custom-type")
-		if custom.IsWellKnown() {
-			t.Errorf("DependencyType(%q).IsWellKnown() = true, want false", custom)
-		}
-	})
-}
-
-func TestDependencyType_AffectsReadyWork(t *testing.T) {
-	t.Parallel()
-
-	blockingTypes := []DependencyType{DepBlocks, DepParentChild, DepConditionalBlocks, DepWaitsFor}
-	nonBlockingTypes := []DependencyType{DepRelated, DepRepliesTo, DepDuplicates, DepTracks}
-
-	for _, dt := range blockingTypes {
-		t.Run(string(dt)+"_blocks", func(t *testing.T) {
-			if !dt.AffectsReadyWork() {
-				t.Errorf("DependencyType(%q).AffectsReadyWork() = false, want true", dt)
-			}
-		})
-	}
-
-	for _, dt := range nonBlockingTypes {
-		t.Run(string(dt)+"_non_blocking", func(t *testing.T) {
-			if dt.AffectsReadyWork() {
-				t.Errorf("DependencyType(%q).AffectsReadyWork() = true, want false", dt)
-			}
-		})
-	}
-}
-
-func TestEventType_Constants(t *testing.T) {
-	t.Parallel()
-
-	expectedTypes := map[EventType]string{
-		EventCreated:           "created",
-		EventUpdated:           "updated",
-		EventStatusChanged:     "status_changed",
-		EventCommented:         "commented",
-		EventClosed:            "closed",
-		EventReopened:          "reopened",
-		EventDependencyAdded:   "dependency_added",
-		EventDependencyRemoved: "dependency_removed",
-		EventLabelAdded:        "label_added",
-		EventLabelRemoved:      "label_removed",
-		EventCompacted:         "compacted",
-	}
-
-	for et, expected := range expectedTypes {
-		if string(et) != expected {
-			t.Errorf("EventType constant mismatch: got %q, want %q", et, expected)
-		}
-	}
-}
-
-func TestIssue_Validate(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-
+func TestDependencyTypeIsWellKnown(t *testing.T) {
 	tests := []struct {
-		name    string
-		issue   Issue
-		wantErr string
+		depType   DependencyType
+		wellKnown bool
 	}{
-		{
-			name: "valid minimal issue",
-			issue: Issue{
-				Title:     "Test issue",
-				Status:    StatusOpen,
-				IssueType: TypeTask,
-				Priority:  2,
-			},
-			wantErr: "",
-		},
-		{
-			name: "empty title",
-			issue: Issue{
-				Title: "",
-			},
-			wantErr: "title is required",
-		},
-		{
-			name: "title too long",
-			issue: Issue{
-				Title: strings.Repeat("x", 501),
-			},
-			wantErr: "title must be 500 characters or less",
-		},
-		{
-			name: "negative priority",
-			issue: Issue{
-				Title:    "Test",
-				Priority: -1,
-			},
-			wantErr: "priority must be between 0 and 4",
-		},
-		{
-			name: "priority too high",
-			issue: Issue{
-				Title:    "Test",
-				Priority: 5,
-			},
-			wantErr: "priority must be between 0 and 4",
-		},
-		{
-			name: "invalid status",
-			issue: Issue{
-				Title:  "Test",
-				Status: "invalid",
-			},
-			wantErr: "invalid status",
-		},
-		{
-			name: "invalid issue type",
-			issue: Issue{
-				Title:     "Test",
-				Status:    StatusOpen,
-				IssueType: "invalid",
-			},
-			wantErr: "invalid issue type",
-		},
-		{
-			name: "negative estimated minutes",
-			issue: Issue{
-				Title:            "Test",
-				Status:           StatusOpen,
-				IssueType:        TypeTask,
-				EstimatedMinutes: intPtr(-10),
-			},
-			wantErr: "estimated_minutes cannot be negative",
-		},
-		{
-			name: "closed without closed_at",
-			issue: Issue{
-				Title:     "Test",
-				Status:    StatusClosed,
-				IssueType: TypeTask,
-				ClosedAt:  nil,
-			},
-			wantErr: "closed issues must have closed_at timestamp",
-		},
-		{
-			name: "non-closed with closed_at",
-			issue: Issue{
-				Title:     "Test",
-				Status:    StatusOpen,
-				IssueType: TypeTask,
-				ClosedAt:  &now,
-			},
-			wantErr: "non-closed issues cannot have closed_at timestamp",
-		},
-		{
-			name: "tombstone without deleted_at",
-			issue: Issue{
-				Title:     "Test",
-				Status:    StatusTombstone,
-				IssueType: TypeTask,
-				DeletedAt: nil,
-			},
-			wantErr: "tombstone issues must have deleted_at timestamp",
-		},
-		{
-			name: "non-tombstone with deleted_at",
-			issue: Issue{
-				Title:     "Test",
-				Status:    StatusOpen,
-				IssueType: TypeTask,
-				DeletedAt: &now,
-			},
-			wantErr: "non-tombstone issues cannot have deleted_at timestamp",
-		},
-		{
-			name: "invalid agent state",
-			issue: Issue{
-				Title:      "Test",
-				Status:     StatusOpen,
-				IssueType:  TypeTask,
-				AgentState: "invalid_state",
-			},
-			wantErr: "invalid agent state",
-		},
+		{DepBlocks, true},
+		{DepRelated, true},
+		{DepParentChild, true},
+		{DepDiscoveredFrom, true},
+		{DepRepliesTo, true},
+		{DepRelatesTo, true},
+		{DepDuplicates, true},
+		{DepSupersedes, true},
+		{DepAuthoredBy, true},
+		{DepAssignedTo, true},
+		{DepApprovedBy, true},
+		{DepAttests, true},
+		{DepTracks, true},
+		{DepUntil, true},
+		{DepCausedBy, true},
+		{DepValidates, true},
+		{DependencyType("custom-type"), false},
+		{DependencyType("unknown"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.depType), func(t *testing.T) {
+			if got := tt.depType.IsWellKnown(); got != tt.wellKnown {
+				t.Errorf("DependencyType(%q).IsWellKnown() = %v, want %v", tt.depType, got, tt.wellKnown)
+			}
+		})
+	}
+}
+
+func TestDependencyTypeAffectsReadyWork(t *testing.T) {
+	tests := []struct {
+		depType DependencyType
+		affects bool
+	}{
+		{DepBlocks, true},
+		{DepParentChild, true},
+		{DepConditionalBlocks, true},
+		{DepWaitsFor, true},
+		{DepRelated, false},
+		{DepDiscoveredFrom, false},
+		{DepRepliesTo, false},
+		{DepRelatesTo, false},
+		{DepDuplicates, false},
+		{DepSupersedes, false},
+		{DepAuthoredBy, false},
+		{DepAssignedTo, false},
+		{DepApprovedBy, false},
+		{DepAttests, false},
+		{DepTracks, false},
+		{DepUntil, false},
+		{DepCausedBy, false},
+		{DepValidates, false},
+		{DependencyType("custom-type"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.depType), func(t *testing.T) {
+			if got := tt.depType.AffectsReadyWork(); got != tt.affects {
+				t.Errorf("DependencyType(%q).AffectsReadyWork() = %v, want %v", tt.depType, got, tt.affects)
+			}
+		})
+	}
+}
+
+func TestIsFailureClose(t *testing.T) {
+	tests := []struct {
+		name        string
+		closeReason string
+		isFailure   bool
+	}{
+		// Failure keywords
+		{"failed", "Task failed due to timeout", true},
+		{"rejected", "PR was rejected by reviewer", true},
+		{"wontfix", "Closed as wontfix", true},
+		{"won't fix", "Won't fix - by design", true},
+		{"cancelled", "Work cancelled", true},
+		{"canceled", "Work canceled", true},
+		{"abandoned", "Abandoned feature", true},
+		{"blocked", "Blocked by external dependency", true},
+		{"error", "Encountered error during execution", true},
+		{"timeout", "Test timeout exceeded", true},
+		{"aborted", "Build aborted", true},
+
+		// Case insensitive
+		{"FAILED upper", "FAILED", true},
+		{"Failed mixed", "Failed to build", true},
+
+		// Success cases (no failure keywords)
+		{"completed", "Completed successfully", false},
+		{"done", "Done", false},
+		{"merged", "Merged to main", false},
+		{"fixed", "Bug fixed", false},
+		{"implemented", "Feature implemented", false},
+		{"empty", "", false},
+
+		// Partial matches should work
+		{"prefixed", "prefailed", true}, // contains "failed"
+		{"suffixed", "failedtest", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.issue.Validate()
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Errorf("Validate() unexpected error: %v", err)
-				}
-			} else {
-				if err == nil {
-					t.Errorf("Validate() expected error containing %q, got nil", tt.wantErr)
-				} else if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Errorf("Validate() error = %q, want error containing %q", err.Error(), tt.wantErr)
-				}
-			}
-		})
-	}
-}
-
-func TestIssue_ValidateWithCustomStatuses(t *testing.T) {
-	t.Parallel()
-
-	customStatuses := []string{"custom_status"}
-
-	issue := Issue{
-		Title:     "Test",
-		Status:    "custom_status",
-		IssueType: TypeTask,
-	}
-
-	if err := issue.ValidateWithCustomStatuses(customStatuses); err != nil {
-		t.Errorf("ValidateWithCustomStatuses() unexpected error: %v", err)
-	}
-}
-
-func TestIssue_SetDefaults(t *testing.T) {
-	t.Parallel()
-
-	t.Run("empty status defaults to open", func(t *testing.T) {
-		issue := Issue{}
-		issue.SetDefaults()
-		if issue.Status != StatusOpen {
-			t.Errorf("SetDefaults() Status = %q, want %q", issue.Status, StatusOpen)
-		}
-	})
-
-	t.Run("empty issue type defaults to task", func(t *testing.T) {
-		issue := Issue{}
-		issue.SetDefaults()
-		if issue.IssueType != TypeTask {
-			t.Errorf("SetDefaults() IssueType = %q, want %q", issue.IssueType, TypeTask)
-		}
-	})
-
-	t.Run("priority 0 stays 0", func(t *testing.T) {
-		issue := Issue{Priority: 0}
-		issue.SetDefaults()
-		if issue.Priority != 0 {
-			t.Errorf("SetDefaults() Priority = %d, want 0", issue.Priority)
-		}
-	})
-
-	t.Run("existing status not overwritten", func(t *testing.T) {
-		issue := Issue{Status: StatusClosed}
-		issue.SetDefaults()
-		if issue.Status != StatusClosed {
-			t.Errorf("SetDefaults() overwrote existing Status")
-		}
-	})
-}
-
-func TestIssue_IsTombstone(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		status     Status
-		isTombstone bool
-	}{
-		{StatusTombstone, true},
-		{StatusOpen, false},
-		{StatusClosed, false},
-		{StatusBlocked, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.status), func(t *testing.T) {
-			issue := Issue{Status: tt.status}
-			if got := issue.IsTombstone(); got != tt.isTombstone {
-				t.Errorf("Issue.IsTombstone() = %v, want %v", got, tt.isTombstone)
-			}
-		})
-	}
-}
-
-func TestIssue_IsExpired(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	oldTime := now.Add(-40 * 24 * time.Hour) // 40 days ago
-
-	t.Run("non-tombstone never expires", func(t *testing.T) {
-		issue := Issue{Status: StatusOpen}
-		if issue.IsExpired(DefaultTombstoneTTL) {
-			t.Error("Non-tombstone should never expire")
-		}
-	})
-
-	t.Run("tombstone without DeletedAt is not expired", func(t *testing.T) {
-		issue := Issue{Status: StatusTombstone, DeletedAt: nil}
-		if issue.IsExpired(DefaultTombstoneTTL) {
-			t.Error("Tombstone without DeletedAt should not be expired")
-		}
-	})
-
-	t.Run("negative TTL means immediately expired", func(t *testing.T) {
-		issue := Issue{Status: StatusTombstone, DeletedAt: &now}
-		if !issue.IsExpired(-1) {
-			t.Error("Negative TTL should mean immediately expired")
-		}
-	})
-
-	t.Run("zero TTL uses default", func(t *testing.T) {
-		issue := Issue{Status: StatusTombstone, DeletedAt: &oldTime}
-		// 40 days old, default TTL is 30 days + 1 hour grace = expired
-		if !issue.IsExpired(0) {
-			t.Error("Zero TTL should use default and be expired for 40-day-old tombstone")
-		}
-	})
-
-	t.Run("recent tombstone not expired", func(t *testing.T) {
-		recentTime := now.Add(-1 * time.Hour)
-		issue := Issue{Status: StatusTombstone, DeletedAt: &recentTime}
-		if issue.IsExpired(DefaultTombstoneTTL) {
-			t.Error("Recent tombstone should not be expired")
-		}
-	})
-
-	t.Run("clock skew grace for long TTL", func(t *testing.T) {
-		// Tombstone deleted 31 days ago with 30-day TTL + 1-hour grace
-		deletedAt := now.Add(-31 * 24 * time.Hour)
-		issue := Issue{Status: StatusTombstone, DeletedAt: &deletedAt}
-		// Should be expired (31 days > 30 days + 1 hour)
-		if !issue.IsExpired(30 * 24 * time.Hour) {
-			t.Error("31-day-old tombstone should be expired with 30-day TTL")
-		}
-	})
-}
-
-func TestIssue_ComputeContentHash(t *testing.T) {
-	t.Parallel()
-
-	t.Run("determinism", func(t *testing.T) {
-		issue := Issue{
-			Title:       "Test Issue",
-			Description: "Test description",
-			Priority:    2,
-		}
-		h1 := issue.ComputeContentHash()
-		h2 := issue.ComputeContentHash()
-		if h1 != h2 {
-			t.Errorf("ComputeContentHash() not deterministic: %s != %s", h1, h2)
-		}
-	})
-
-	t.Run("different titles produce different hashes", func(t *testing.T) {
-		issue1 := Issue{Title: "Issue A"}
-		issue2 := Issue{Title: "Issue B"}
-		if issue1.ComputeContentHash() == issue2.ComputeContentHash() {
-			t.Error("Different titles should produce different hashes")
-		}
-	})
-
-	t.Run("ignores ID field", func(t *testing.T) {
-		issue1 := Issue{Title: "Test", ID: "bd-123"}
-		issue2 := Issue{Title: "Test", ID: "bd-456"}
-		if issue1.ComputeContentHash() != issue2.ComputeContentHash() {
-			t.Error("ID should be ignored in content hash")
-		}
-	})
-
-	t.Run("ignores timestamps", func(t *testing.T) {
-		now := time.Now()
-		later := now.Add(time.Hour)
-		issue1 := Issue{Title: "Test", CreatedAt: now}
-		issue2 := Issue{Title: "Test", CreatedAt: later}
-		if issue1.ComputeContentHash() != issue2.ComputeContentHash() {
-			t.Error("CreatedAt should be ignored in content hash")
-		}
-	})
-
-	t.Run("ignores compaction metadata", func(t *testing.T) {
-		now := time.Now()
-		issue1 := Issue{Title: "Test", CompactionLevel: 0}
-		issue2 := Issue{Title: "Test", CompactionLevel: 2, CompactedAt: &now}
-		if issue1.ComputeContentHash() != issue2.ComputeContentHash() {
-			t.Error("Compaction metadata should be ignored in content hash")
-		}
-	})
-}
-
-func TestIsFailureClose(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		closeReason string
-		isFailure   bool
-	}{
-		{"", false},
-		{"completed", false},
-		{"done", false},
-		{"failed", true},
-		{"Failed to deploy", true},
-		{"rejected by reviewer", true},
-		{"wontfix", true},
-		{"won't fix", true},
-		{"canceled", true},
-		{"cancelled", true},
-		{"abandoned", true},
-		{"blocked by dependency", true},
-		{"error during build", true},
-		{"timeout", true},
-		{"aborted", true},
-		// Case insensitive
-		{"FAILED", true},
-		{"Rejected", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.closeReason, func(t *testing.T) {
 			if got := IsFailureClose(tt.closeReason); got != tt.isFailure {
 				t.Errorf("IsFailureClose(%q) = %v, want %v", tt.closeReason, got, tt.isFailure)
 			}
@@ -710,159 +811,129 @@ func TestIsFailureClose(t *testing.T) {
 	}
 }
 
-func TestEntityRef(t *testing.T) {
-	t.Parallel()
+func TestIssueStructFields(t *testing.T) {
+	// Test that all time fields work correctly
+	now := time.Now()
+	closedAt := now.Add(time.Hour)
 
-	t.Run("URI generation", func(t *testing.T) {
-		ref := EntityRef{
-			Name:     "polecat/Nux",
-			Platform: "gastown",
-			Org:      "steveyegge",
-			ID:       "polecat-nux",
-		}
-		expected := "entity://hop/gastown/steveyegge/polecat-nux"
-		if got := ref.URI(); got != expected {
-			t.Errorf("EntityRef.URI() = %q, want %q", got, expected)
-		}
-	})
-
-	t.Run("URI with missing fields returns empty", func(t *testing.T) {
-		ref := EntityRef{Platform: "gastown"}
-		if got := ref.URI(); got != "" {
-			t.Errorf("EntityRef.URI() with missing fields = %q, want empty", got)
-		}
-	})
-
-	t.Run("IsEmpty", func(t *testing.T) {
-		var nilRef *EntityRef
-		if !nilRef.IsEmpty() {
-			t.Error("nil EntityRef should be empty")
-		}
-
-		emptyRef := EntityRef{}
-		if !emptyRef.IsEmpty() {
-			t.Error("empty EntityRef should be empty")
-		}
-
-		nonEmpty := EntityRef{Name: "test"}
-		if nonEmpty.IsEmpty() {
-			t.Error("EntityRef with Name should not be empty")
-		}
-	})
-
-	t.Run("String prefers Name", func(t *testing.T) {
-		ref := EntityRef{
-			Name:     "polecat/Nux",
-			Platform: "gastown",
-			Org:      "steveyegge",
-			ID:       "polecat-nux",
-		}
-		if got := ref.String(); got != "polecat/Nux" {
-			t.Errorf("EntityRef.String() = %q, want %q", got, "polecat/Nux")
-		}
-	})
-
-	t.Run("round trip", func(t *testing.T) {
-		original := EntityRef{
-			Name:     "polecat/Nux",
-			Platform: "gastown",
-			Org:      "steveyegge",
-			ID:       "polecat-nux",
-		}
-		uri := original.URI()
-		parsed, err := ParseEntityURI(uri)
-		if err != nil {
-			t.Fatalf("ParseEntityURI() error: %v", err)
-		}
-		// Name is not preserved in URI
-		if parsed.Platform != original.Platform || parsed.Org != original.Org || parsed.ID != original.ID {
-			t.Errorf("Round trip failed: got %+v, want Platform=%s Org=%s ID=%s",
-				parsed, original.Platform, original.Org, original.ID)
-		}
-	})
-}
-
-func TestParseEntityURI(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		uri      string
-		wantErr  bool
-		platform string
-		org      string
-		id       string
-	}{
-		{"entity://hop/gastown/org/id", false, "gastown", "org", "id"},
-		{"entity://hop/github/anthropics/claude", false, "github", "anthropics", "claude"},
-		{"invalid", true, "", "", ""},
-		{"entity://hop/incomplete", true, "", "", ""},
-		{"entity://hop//org/id", true, "", "", ""},
+	issue := Issue{
+		ID:          "test-1",
+		Title:       "Test Issue",
+		Description: "Test description",
+		Status:      StatusClosed,
+		Priority:    1,
+		IssueType:   TypeBug,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		ClosedAt:    &closedAt,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.uri, func(t *testing.T) {
-			ref, err := ParseEntityURI(tt.uri)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("ParseEntityURI(%q) expected error", tt.uri)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("ParseEntityURI(%q) error: %v", tt.uri, err)
-			}
-			if ref.Platform != tt.platform || ref.Org != tt.org || ref.ID != tt.id {
-				t.Errorf("ParseEntityURI(%q) = %+v, want Platform=%s Org=%s ID=%s",
-					tt.uri, ref, tt.platform, tt.org, tt.id)
-			}
-		})
+	if issue.CreatedAt != now {
+		t.Errorf("CreatedAt = %v, want %v", issue.CreatedAt, now)
+	}
+	if issue.ClosedAt == nil || *issue.ClosedAt != closedAt {
+		t.Errorf("ClosedAt = %v, want %v", issue.ClosedAt, closedAt)
 	}
 }
 
-func TestValidation_IsValidOutcome(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		outcome string
-		valid   bool
-	}{
-		{ValidationAccepted, true},
-		{ValidationRejected, true},
-		{ValidationRevisionRequested, true},
-		{"invalid", false},
-		{"", false},
+func TestBlockedIssueEmbedding(t *testing.T) {
+	blocked := BlockedIssue{
+		Issue: Issue{
+			ID:        "test-1",
+			Title:     "Blocked issue",
+			Status:    StatusBlocked,
+			Priority:  2,
+			IssueType: TypeFeature,
+		},
+		BlockedByCount: 2,
+		BlockedBy:      []string{"test-2", "test-3"},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.outcome, func(t *testing.T) {
-			v := Validation{Outcome: tt.outcome}
-			if got := v.IsValidOutcome(); got != tt.valid {
-				t.Errorf("Validation.IsValidOutcome() = %v, want %v", got, tt.valid)
-			}
-		})
+	// Test that embedded Issue fields are accessible
+	if blocked.ID != "test-1" {
+		t.Errorf("BlockedIssue.ID = %q, want %q", blocked.ID, "test-1")
 	}
-}
-
-func TestBondRef_Constants(t *testing.T) {
-	t.Parallel()
-
-	expected := map[string]string{
-		"sequential":  BondTypeSequential,
-		"parallel":    BondTypeParallel,
-		"conditional": BondTypeConditional,
-		"root":        BondTypeRoot,
+	if blocked.BlockedByCount != 2 {
+		t.Errorf("BlockedByCount = %d, want 2", blocked.BlockedByCount)
 	}
-
-	for want, got := range expected {
-		if got != want {
-			t.Errorf("BondType constant mismatch: got %q, want %q", got, want)
-		}
+	if len(blocked.BlockedBy) != 2 {
+		t.Errorf("len(BlockedBy) = %d, want 2", len(blocked.BlockedBy))
 	}
 }
 
-func TestSortPolicy_IsValid(t *testing.T) {
-	t.Parallel()
+func TestTreeNodeEmbedding(t *testing.T) {
+	node := TreeNode{
+		Issue: Issue{
+			ID:        "test-1",
+			Title:     "Root node",
+			Status:    StatusOpen,
+			Priority:  1,
+			IssueType: TypeEpic,
+		},
+		Depth:     0,
+		Truncated: false,
+	}
 
+	// Test that embedded Issue fields are accessible
+	if node.ID != "test-1" {
+		t.Errorf("TreeNode.ID = %q, want %q", node.ID, "test-1")
+	}
+	if node.Depth != 0 {
+		t.Errorf("Depth = %d, want 0", node.Depth)
+	}
+}
+
+func TestComputeContentHash(t *testing.T) {
+	issue1 := Issue{
+		ID:               "test-1",
+		Title:            "Test Issue",
+		Description:      "Description",
+		Status:           StatusOpen,
+		Priority:         2,
+		IssueType:        TypeFeature,
+		EstimatedMinutes: intPtr(60),
+	}
+
+	// Same content should produce same hash
+	issue2 := Issue{
+		ID:               "test-2", // Different ID
+		Title:            "Test Issue",
+		Description:      "Description",
+		Status:           StatusOpen,
+		Priority:         2,
+		IssueType:        TypeFeature,
+		EstimatedMinutes: intPtr(60),
+		CreatedAt:        time.Now(), // Different timestamp
+	}
+
+	hash1 := issue1.ComputeContentHash()
+	hash2 := issue2.ComputeContentHash()
+
+	if hash1 != hash2 {
+		t.Errorf("Expected same hash for identical content, got %s and %s", hash1, hash2)
+	}
+
+	// Different content should produce different hash
+	issue3 := issue1
+	issue3.Title = "Different Title"
+	hash3 := issue3.ComputeContentHash()
+
+	if hash1 == hash3 {
+		t.Errorf("Expected different hash for different content")
+	}
+
+	// Test with external ref
+	externalRef := "EXT-123"
+	issue4 := issue1
+	issue4.ExternalRef = &externalRef
+	hash4 := issue4.ComputeContentHash()
+
+	if hash1 == hash4 {
+		t.Errorf("Expected different hash when external ref is present")
+	}
+}
+
+func TestSortPolicyIsValid(t *testing.T) {
 	tests := []struct {
 		policy SortPolicy
 		valid  bool
@@ -870,16 +941,12 @@ func TestSortPolicy_IsValid(t *testing.T) {
 		{SortPolicyHybrid, true},
 		{SortPolicyPriority, true},
 		{SortPolicyOldest, true},
-		{"", true}, // empty is valid (defaults)
-		{"invalid", false},
+		{SortPolicy(""), true}, // empty is valid
+		{SortPolicy("invalid"), false},
 	}
 
 	for _, tt := range tests {
-		name := string(tt.policy)
-		if name == "" {
-			name = "empty"
-		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(string(tt.policy), func(t *testing.T) {
 			if got := tt.policy.IsValid(); got != tt.valid {
 				t.Errorf("SortPolicy(%q).IsValid() = %v, want %v", tt.policy, got, tt.valid)
 			}
@@ -887,94 +954,865 @@ func TestSortPolicy_IsValid(t *testing.T) {
 	}
 }
 
-func TestLabel_Comment_Struct(t *testing.T) {
-	t.Parallel()
+func TestIsExpired(t *testing.T) {
+	now := time.Now()
 
-	t.Run("Label fields", func(t *testing.T) {
-		label := Label{IssueID: "bd-123", Label: "bug"}
-		if label.IssueID != "bd-123" || label.Label != "bug" {
-			t.Error("Label struct fields not set correctly")
-		}
-	})
-
-	t.Run("Comment fields", func(t *testing.T) {
-		now := time.Now()
-		comment := Comment{
-			ID:        1,
-			IssueID:   "bd-123",
-			Author:    "alice",
-			Text:      "test comment",
-			CreatedAt: now,
-		}
-		if comment.ID != 1 || comment.IssueID != "bd-123" || comment.Author != "alice" {
-			t.Error("Comment struct fields not set correctly")
-		}
-	})
-}
-
-func TestIssue_IsCompound_GetConstituents(t *testing.T) {
-	t.Parallel()
-
-	t.Run("non-compound", func(t *testing.T) {
-		issue := Issue{Title: "Simple issue"}
-		if issue.IsCompound() {
-			t.Error("Issue without BondedFrom should not be compound")
-		}
-		if got := issue.GetConstituents(); got != nil {
-			t.Errorf("GetConstituents() = %v, want nil", got)
-		}
-	})
-
-	t.Run("compound", func(t *testing.T) {
-		issue := Issue{
-			Title: "Compound issue",
-			BondedFrom: []BondRef{
-				{SourceID: "bd-1", BondType: BondTypeSequential},
-				{SourceID: "bd-2", BondType: BondTypeParallel},
+	tests := []struct {
+		name    string
+		issue   Issue
+		ttl     time.Duration
+		expired bool
+	}{
+		{
+			name: "non-tombstone issue never expires",
+			issue: Issue{
+				ID:        "test-1",
+				Title:     "Open issue",
+				Status:    StatusOpen,
+				Priority:  2,
+				IssueType: TypeTask,
 			},
-		}
-		if !issue.IsCompound() {
-			t.Error("Issue with BondedFrom should be compound")
-		}
-		constituents := issue.GetConstituents()
-		if len(constituents) != 2 {
-			t.Errorf("GetConstituents() returned %d items, want 2", len(constituents))
-		}
-	})
+			ttl:     0,
+			expired: false,
+		},
+		{
+			name: "closed issue never expires",
+			issue: Issue{
+				ID:        "test-2",
+				Title:     "Closed issue",
+				Status:    StatusClosed,
+				Priority:  2,
+				IssueType: TypeTask,
+				ClosedAt:  timePtr(now),
+			},
+			ttl:     0,
+			expired: false,
+		},
+		{
+			name: "tombstone without DeletedAt does not expire",
+			issue: Issue{
+				ID:        "test-3",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: nil,
+			},
+			ttl:     0,
+			expired: false,
+		},
+		{
+			name: "tombstone within default TTL (30 days)",
+			issue: Issue{
+				ID:        "test-4",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(-15 * 24 * time.Hour)), // 15 days ago
+			},
+			ttl:     0, // Use default TTL
+			expired: false,
+		},
+		{
+			name: "tombstone past default TTL (30 days)",
+			issue: Issue{
+				ID:        "test-5",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(-35 * 24 * time.Hour)), // 35 days ago (past 30 days + 1 hour grace)
+			},
+			ttl:     0, // Use default TTL
+			expired: true,
+		},
+		{
+			name: "tombstone within custom TTL (7 days)",
+			issue: Issue{
+				ID:        "test-6",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(-3 * 24 * time.Hour)), // 3 days ago
+			},
+			ttl:     7 * 24 * time.Hour,
+			expired: false,
+		},
+		{
+			name: "tombstone past custom TTL (7 days)",
+			issue: Issue{
+				ID:        "test-7",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(-9 * 24 * time.Hour)), // 9 days ago (past 7 days + 1 hour grace)
+			},
+			ttl:     7 * 24 * time.Hour,
+			expired: true,
+		},
+		{
+			name: "tombstone at exact TTL boundary (within grace period)",
+			issue: Issue{
+				ID:        "test-8",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(-30 * 24 * time.Hour)), // Exactly 30 days ago
+			},
+			ttl:     0, // Use default TTL (30 days + 1 hour grace)
+			expired: false,
+		},
+		{
+			name: "tombstone just past TTL boundary (beyond grace period)",
+			issue: Issue{
+				ID:        "test-9",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(-(30*24*time.Hour + 2*time.Hour))), // 30 days + 2 hours ago
+			},
+			ttl:     0, // Use default TTL (30 days + 1 hour grace)
+			expired: true,
+		},
+		{
+			name: "tombstone within grace period",
+			issue: Issue{
+				ID:        "test-10",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(-(30*24*time.Hour + 30*time.Minute))), // 30 days + 30 minutes ago
+			},
+			ttl:     0, // Use default TTL (30 days + 1 hour grace)
+			expired: false,
+		},
+		{
+			name: "tombstone with MinTombstoneTTL (7 days)",
+			issue: Issue{
+				ID:        "test-11",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(-10 * 24 * time.Hour)), // 10 days ago
+			},
+			ttl:     MinTombstoneTTL, // 7 days
+			expired: true,
+		},
+		{
+			name: "tombstone with very short TTL (1 hour)",
+			issue: Issue{
+				ID:        "test-12",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(-3 * time.Hour)), // 3 hours ago
+			},
+			ttl:     1 * time.Hour, // 1 hour + 1 hour grace = 2 hours total
+			expired: true,
+		},
+		{
+			name: "tombstone deleted in the future (clock skew)",
+			issue: Issue{
+				ID:        "test-13",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now.Add(1 * time.Hour)), // 1 hour in the future
+			},
+			ttl:     7 * 24 * time.Hour,
+			expired: false,
+		},
+		{
+			name: "negative TTL means immediately expired (bd-4q8 --hard mode)",
+			issue: Issue{
+				ID:        "test-14",
+				Title:     "(deleted)",
+				Status:    StatusTombstone,
+				Priority:  0,
+				IssueType: TypeTask,
+				DeletedAt: timePtr(now), // Just deleted NOW
+			},
+			ttl:     -1, // Negative TTL = immediate expiration
+			expired: true,
+		},
+		{
+			name: "non-tombstone never expires even with negative TTL",
+			issue: Issue{
+				ID:        "test-15",
+				Title:     "Open issue",
+				Status:    StatusOpen,
+				Priority:  0,
+				IssueType: TypeTask,
+			},
+			ttl:     -1,
+			expired: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.issue.IsExpired(tt.ttl)
+			if got != tt.expired {
+				t.Errorf("Issue.IsExpired(%v) = %v, want %v", tt.ttl, got, tt.expired)
+			}
+		})
+	}
 }
 
-func TestIssue_JSONRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	issue := Issue{
-		ID:          "bd-test123",
-		Title:       "Test Issue",
-		Description: "Test description",
-		Status:      StatusOpen,
-		Priority:    2,
-		IssueType:   TypeTask,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+func TestTombstoneTTLConstants(t *testing.T) {
+	// Test that constants have expected values
+	if DefaultTombstoneTTL != 30*24*time.Hour {
+		t.Errorf("DefaultTombstoneTTL = %v, want %v", DefaultTombstoneTTL, 30*24*time.Hour)
+	}
+	if MinTombstoneTTL != 7*24*time.Hour {
+		t.Errorf("MinTombstoneTTL = %v, want %v", MinTombstoneTTL, 7*24*time.Hour)
+	}
+	if ClockSkewGrace != 1*time.Hour {
+		t.Errorf("ClockSkewGrace = %v, want %v", ClockSkewGrace, 1*time.Hour)
 	}
 
-	data, err := json.Marshal(issue)
-	if err != nil {
-		t.Fatalf("json.Marshal() error: %v", err)
-	}
-
-	var parsed Issue
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("json.Unmarshal() error: %v", err)
-	}
-
-	if parsed.ID != issue.ID || parsed.Title != issue.Title {
-		t.Errorf("JSON round-trip failed: got ID=%s Title=%s, want ID=%s Title=%s",
-			parsed.ID, parsed.Title, issue.ID, issue.Title)
+	// Test that MinTombstoneTTL is less than DefaultTombstoneTTL
+	if MinTombstoneTTL >= DefaultTombstoneTTL {
+		t.Errorf("MinTombstoneTTL (%v) should be less than DefaultTombstoneTTL (%v)", MinTombstoneTTL, DefaultTombstoneTTL)
 	}
 }
 
-// Helper function
+// Helper functions
+
 func intPtr(i int) *int {
 	return &i
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsMiddle(s, substr)))
+}
+
+func containsMiddle(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSetDefaults(t *testing.T) {
+	tests := []struct {
+		name           string
+		issue          Issue
+		expectedStatus Status
+		expectedType   IssueType
+	}{
+		{
+			name:           "empty fields get defaults",
+			issue:          Issue{Title: "Test"},
+			expectedStatus: StatusOpen,
+			expectedType:   TypeTask,
+		},
+		{
+			name: "existing status preserved",
+			issue: Issue{
+				Title:  "Test",
+				Status: StatusInProgress,
+			},
+			expectedStatus: StatusInProgress,
+			expectedType:   TypeTask,
+		},
+		{
+			name: "existing type preserved",
+			issue: Issue{
+				Title:     "Test",
+				IssueType: TypeBug,
+			},
+			expectedStatus: StatusOpen,
+			expectedType:   TypeBug,
+		},
+		{
+			name: "all fields set - no changes",
+			issue: Issue{
+				Title:     "Test",
+				Status:    StatusClosed,
+				IssueType: TypeFeature,
+				ClosedAt:  timePtr(time.Now()),
+			},
+			expectedStatus: StatusClosed,
+			expectedType:   TypeFeature,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issue := tt.issue
+			issue.SetDefaults()
+
+			if issue.Status != tt.expectedStatus {
+				t.Errorf("SetDefaults() Status = %v, want %v", issue.Status, tt.expectedStatus)
+			}
+			if issue.IssueType != tt.expectedType {
+				t.Errorf("SetDefaults() IssueType = %v, want %v", issue.IssueType, tt.expectedType)
+			}
+		})
+	}
+}
+
+// EntityRef tests (bd-nmch: HOP entity tracking foundation)
+
+func TestEntityRefIsEmpty(t *testing.T) {
+	tests := []struct {
+		name   string
+		ref    *EntityRef
+		expect bool
+	}{
+		{"nil ref", nil, true},
+		{"empty ref", &EntityRef{}, true},
+		{"only name", &EntityRef{Name: "test"}, false},
+		{"only platform", &EntityRef{Platform: "gastown"}, false},
+		{"only org", &EntityRef{Org: "steveyegge"}, false},
+		{"only id", &EntityRef{ID: "polecat-nux"}, false},
+		{"full ref", &EntityRef{Name: "polecat/Nux", Platform: "gastown", Org: "steveyegge", ID: "polecat-nux"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ref.IsEmpty(); got != tt.expect {
+				t.Errorf("EntityRef.IsEmpty() = %v, want %v", got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestEntityRefURI(t *testing.T) {
+	tests := []struct {
+		name   string
+		ref    *EntityRef
+		expect string
+	}{
+		{"nil ref", nil, ""},
+		{"empty ref", &EntityRef{}, ""},
+		{"missing platform", &EntityRef{Org: "steveyegge", ID: "polecat-nux"}, ""},
+		{"missing org", &EntityRef{Platform: "gastown", ID: "polecat-nux"}, ""},
+		{"missing id", &EntityRef{Platform: "gastown", Org: "steveyegge"}, ""},
+		{"full ref", &EntityRef{Platform: "gastown", Org: "steveyegge", ID: "polecat-nux"}, "entity://hop/gastown/steveyegge/polecat-nux"},
+		{"with name", &EntityRef{Name: "polecat/Nux", Platform: "gastown", Org: "steveyegge", ID: "polecat-nux"}, "entity://hop/gastown/steveyegge/polecat-nux"},
+		{"github platform", &EntityRef{Platform: "github", Org: "anthropics", ID: "claude-code"}, "entity://hop/github/anthropics/claude-code"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ref.URI(); got != tt.expect {
+				t.Errorf("EntityRef.URI() = %q, want %q", got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestEntityRefString(t *testing.T) {
+	tests := []struct {
+		name   string
+		ref    *EntityRef
+		expect string
+	}{
+		{"nil ref", nil, ""},
+		{"empty ref", &EntityRef{}, ""},
+		{"only name", &EntityRef{Name: "polecat/Nux"}, "polecat/Nux"},
+		{"full ref with name", &EntityRef{Name: "polecat/Nux", Platform: "gastown", Org: "steveyegge", ID: "polecat-nux"}, "polecat/Nux"},
+		{"full ref without name", &EntityRef{Platform: "gastown", Org: "steveyegge", ID: "polecat-nux"}, "entity://hop/gastown/steveyegge/polecat-nux"},
+		{"only id", &EntityRef{ID: "polecat-nux"}, "polecat-nux"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ref.String(); got != tt.expect {
+				t.Errorf("EntityRef.String() = %q, want %q", got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestParseEntityURI(t *testing.T) {
+	tests := []struct {
+		name      string
+		uri       string
+		expect    *EntityRef
+		expectErr bool
+	}{
+		{
+			name:   "valid URI",
+			uri:    "entity://hop/gastown/steveyegge/polecat-nux",
+			expect: &EntityRef{Platform: "gastown", Org: "steveyegge", ID: "polecat-nux"},
+		},
+		{
+			name:   "github URI",
+			uri:    "entity://hop/github/anthropics/claude-code",
+			expect: &EntityRef{Platform: "github", Org: "anthropics", ID: "claude-code"},
+		},
+		{
+			name:   "id with slashes",
+			uri:    "entity://hop/gastown/steveyegge/polecat/nux",
+			expect: &EntityRef{Platform: "gastown", Org: "steveyegge", ID: "polecat/nux"},
+		},
+		{
+			name:      "wrong prefix",
+			uri:       "beads://hop/gastown/steveyegge/polecat-nux",
+			expectErr: true,
+		},
+		{
+			name:      "missing hop",
+			uri:       "entity://gastown/steveyegge/polecat-nux",
+			expectErr: true,
+		},
+		{
+			name:      "too few parts",
+			uri:       "entity://hop/gastown/steveyegge",
+			expectErr: true,
+		},
+		{
+			name:      "empty platform",
+			uri:       "entity://hop//steveyegge/polecat-nux",
+			expectErr: true,
+		},
+		{
+			name:      "empty org",
+			uri:       "entity://hop/gastown//polecat-nux",
+			expectErr: true,
+		},
+		{
+			name:      "empty id",
+			uri:       "entity://hop/gastown/steveyegge/",
+			expectErr: true,
+		},
+		{
+			name:      "empty string",
+			uri:       "",
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseEntityURI(tt.uri)
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("ParseEntityURI(%q) expected error, got nil", tt.uri)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("ParseEntityURI(%q) unexpected error: %v", tt.uri, err)
+				return
+			}
+			if got.Platform != tt.expect.Platform || got.Org != tt.expect.Org || got.ID != tt.expect.ID {
+				t.Errorf("ParseEntityURI(%q) = %+v, want %+v", tt.uri, got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestEntityRefRoundTrip(t *testing.T) {
+	// Test that URI() and ParseEntityURI() are inverses
+	original := &EntityRef{Platform: "gastown", Org: "steveyegge", ID: "polecat-nux"}
+	uri := original.URI()
+	parsed, err := ParseEntityURI(uri)
+	if err != nil {
+		t.Fatalf("ParseEntityURI(%q) error: %v", uri, err)
+	}
+	if parsed.Platform != original.Platform || parsed.Org != original.Org || parsed.ID != original.ID {
+		t.Errorf("Round trip failed: got %+v, want %+v", parsed, original)
+	}
+}
+
+func TestComputeContentHashWithCreator(t *testing.T) {
+	// Test that Creator field affects the content hash (bd-m7ib)
+	issue1 := Issue{
+		Title:     "Test Issue",
+		Status:    StatusOpen,
+		Priority:  2,
+		IssueType: TypeTask,
+	}
+
+	issue2 := Issue{
+		Title:     "Test Issue",
+		Status:    StatusOpen,
+		Priority:  2,
+		IssueType: TypeTask,
+		Creator:   &EntityRef{Name: "polecat/Nux", Platform: "gastown", Org: "steveyegge", ID: "polecat-nux"},
+	}
+
+	hash1 := issue1.ComputeContentHash()
+	hash2 := issue2.ComputeContentHash()
+
+	if hash1 == hash2 {
+		t.Error("Expected different hash when Creator is set")
+	}
+
+	// Same creator should produce same hash
+	issue3 := Issue{
+		Title:     "Test Issue",
+		Status:    StatusOpen,
+		Priority:  2,
+		IssueType: TypeTask,
+		Creator:   &EntityRef{Name: "polecat/Nux", Platform: "gastown", Org: "steveyegge", ID: "polecat-nux"},
+	}
+
+	hash3 := issue3.ComputeContentHash()
+	if hash2 != hash3 {
+		t.Error("Expected same hash for identical Creator")
+	}
+}
+
+// Validation tests (bd-du9h: HOP proof-of-stake)
+
+func TestValidationIsValidOutcome(t *testing.T) {
+	tests := []struct {
+		outcome string
+		valid   bool
+	}{
+		{ValidationAccepted, true},
+		{ValidationRejected, true},
+		{ValidationRevisionRequested, true},
+		{"unknown", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.outcome, func(t *testing.T) {
+			v := &Validation{Outcome: tt.outcome}
+			if got := v.IsValidOutcome(); got != tt.valid {
+				t.Errorf("Validation{Outcome: %q}.IsValidOutcome() = %v, want %v", tt.outcome, got, tt.valid)
+			}
+		})
+	}
+}
+
+func TestComputeContentHashWithValidations(t *testing.T) {
+	// Test that Validations field affects the content hash (bd-du9h)
+	ts := time.Date(2025, 12, 22, 10, 30, 0, 0, time.UTC)
+
+	issue1 := Issue{
+		Title:     "Test Issue",
+		Status:    StatusClosed,
+		Priority:  2,
+		IssueType: TypeTask,
+		ClosedAt:  &ts,
+	}
+
+	issue2 := Issue{
+		Title:     "Test Issue",
+		Status:    StatusClosed,
+		Priority:  2,
+		IssueType: TypeTask,
+		ClosedAt:  &ts,
+		Validations: []Validation{
+			{
+				Validator: &EntityRef{Platform: "gastown", Org: "steveyegge", ID: "refinery"},
+				Outcome:   ValidationAccepted,
+				Timestamp: ts,
+			},
+		},
+	}
+
+	hash1 := issue1.ComputeContentHash()
+	hash2 := issue2.ComputeContentHash()
+
+	if hash1 == hash2 {
+		t.Error("Expected different hash when Validations is set")
+	}
+
+	// Same validations should produce same hash
+	issue3 := Issue{
+		Title:     "Test Issue",
+		Status:    StatusClosed,
+		Priority:  2,
+		IssueType: TypeTask,
+		ClosedAt:  &ts,
+		Validations: []Validation{
+			{
+				Validator: &EntityRef{Platform: "gastown", Org: "steveyegge", ID: "refinery"},
+				Outcome:   ValidationAccepted,
+				Timestamp: ts,
+			},
+		},
+	}
+
+	hash3 := issue3.ComputeContentHash()
+	if hash2 != hash3 {
+		t.Error("Expected same hash for identical Validations")
+	}
+
+	// Test with score
+	score := float32(0.95)
+	issue4 := Issue{
+		Title:     "Test Issue",
+		Status:    StatusClosed,
+		Priority:  2,
+		IssueType: TypeTask,
+		ClosedAt:  &ts,
+		Validations: []Validation{
+			{
+				Validator: &EntityRef{Platform: "gastown", Org: "steveyegge", ID: "refinery"},
+				Outcome:   ValidationAccepted,
+				Timestamp: ts,
+				Score:     &score,
+			},
+		},
+	}
+
+	hash4 := issue4.ComputeContentHash()
+	if hash2 == hash4 {
+		t.Error("Expected different hash when Score is added")
+	}
+}
+
+// TestIssueDetailsJSONStructure verifies that IssueDetails JSON serialization
+// always includes labels, dependencies, dependents, and comments fields,
+// even when they are empty arrays (GH#bd-rrtu).
+//
+// This ensures consistent JSON structure for frontend type guards.
+// The omitempty directive was removed from these fields so they always appear.
+func TestIssueDetailsJSONStructure(t *testing.T) {
+	t.Run("empty_slices_present_in_json", func(t *testing.T) {
+		// Create IssueDetails with explicit empty slices
+		details := IssueDetails{
+			Issue: Issue{
+				ID:        "test-1",
+				Title:     "Test issue",
+				Status:    StatusOpen,
+				Priority:  2,
+				IssueType: TypeTask,
+			},
+			Labels:       []string{},
+			Dependencies: []*IssueWithDependencyMetadata{},
+			Dependents:   []*IssueWithDependencyMetadata{},
+			Comments:     []*Comment{},
+		}
+
+		// Serialize to JSON
+		data, err := json.Marshal(details)
+		if err != nil {
+			t.Fatalf("Failed to marshal IssueDetails: %v", err)
+		}
+
+		// Parse as raw JSON to verify structure
+		var rawJSON map[string]interface{}
+		if err := json.Unmarshal(data, &rawJSON); err != nil {
+			t.Fatalf("Failed to unmarshal raw JSON: %v", err)
+		}
+
+		// Verify all required fields are present (not omitted due to omitempty)
+		requiredFields := []string{"labels", "dependencies", "dependents", "comments"}
+		for _, field := range requiredFields {
+			val, exists := rawJSON[field]
+			if !exists {
+				t.Errorf("Field %q should be present in JSON, but was omitted", field)
+				continue
+			}
+
+			arr, ok := val.([]interface{})
+			if !ok {
+				t.Errorf("Field %q should be array, got %T: %v", field, val, val)
+				continue
+			}
+
+			if len(arr) != 0 {
+				t.Errorf("Field %q should be empty array [], got length %d", field, len(arr))
+			}
+		}
+
+		// Verify the JSON string contains the fields as empty arrays
+		jsonStr := string(data)
+		expectedPatterns := []string{
+			`"labels":[]`,
+			`"dependencies":[]`,
+			`"dependents":[]`,
+			`"comments":[]`,
+		}
+		for _, pattern := range expectedPatterns {
+			if !containsMiddle(jsonStr, pattern) {
+				t.Errorf("Expected JSON to contain %q, but it doesn't. JSON: %s", pattern, jsonStr)
+			}
+		}
+	})
+
+	t.Run("nil_slices_serialize_as_null", func(t *testing.T) {
+		// Create IssueDetails with nil slices
+		// This tests the raw JSON behavior - nil slices become null, not omitted
+		details := IssueDetails{
+			Issue: Issue{
+				ID:        "test-2",
+				Title:     "Test issue with nil slices",
+				Status:    StatusOpen,
+				Priority:  2,
+				IssueType: TypeTask,
+			},
+			Labels:       nil,
+			Dependencies: nil,
+			Dependents:   nil,
+			Comments:     nil,
+		}
+
+		// Serialize to JSON
+		data, err := json.Marshal(details)
+		if err != nil {
+			t.Fatalf("Failed to marshal IssueDetails: %v", err)
+		}
+
+		// Parse as raw JSON to verify structure
+		var rawJSON map[string]interface{}
+		if err := json.Unmarshal(data, &rawJSON); err != nil {
+			t.Fatalf("Failed to unmarshal raw JSON: %v", err)
+		}
+
+		// With omitempty removed, nil slices should be present (as null)
+		requiredFields := []string{"labels", "dependencies", "dependents", "comments"}
+		for _, field := range requiredFields {
+			val, exists := rawJSON[field]
+			if !exists {
+				t.Errorf("Field %q should be present (not omitted) even when nil", field)
+				continue
+			}
+
+			// nil slices serialize as JSON null
+			if val != nil {
+				t.Errorf("Field %q with nil slice should serialize as null, got %T: %v", field, val, val)
+			}
+		}
+	})
+
+	t.Run("populated_slices_present_in_json", func(t *testing.T) {
+		// Create IssueDetails with populated data
+		details := IssueDetails{
+			Issue: Issue{
+				ID:        "test-3",
+				Title:     "Test issue with data",
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: TypeTask,
+			},
+			Labels: []string{"label1", "label2"},
+			Dependencies: []*IssueWithDependencyMetadata{
+				{
+					Issue:          Issue{ID: "dep-1", Title: "Dependency 1"},
+					DependencyType: DepBlocks,
+				},
+			},
+			Dependents: []*IssueWithDependencyMetadata{
+				{
+					Issue:          Issue{ID: "dependent-1", Title: "Dependent 1"},
+					DependencyType: DepBlocks,
+				},
+			},
+			Comments: []*Comment{
+				{ID: 1, IssueID: "test-3", Author: "author", Text: "comment text"},
+			},
+		}
+
+		// Serialize to JSON
+		data, err := json.Marshal(details)
+		if err != nil {
+			t.Fatalf("Failed to marshal IssueDetails: %v", err)
+		}
+
+		// Parse as raw JSON to verify structure
+		var rawJSON map[string]interface{}
+		if err := json.Unmarshal(data, &rawJSON); err != nil {
+			t.Fatalf("Failed to unmarshal raw JSON: %v", err)
+		}
+
+		// Verify all required fields are present with correct lengths
+		testCases := []struct {
+			field    string
+			expected int
+		}{
+			{"labels", 2},
+			{"dependencies", 1},
+			{"dependents", 1},
+			{"comments", 1},
+		}
+
+		for _, tc := range testCases {
+			val, exists := rawJSON[tc.field]
+			if !exists {
+				t.Errorf("Field %q should be present in JSON", tc.field)
+				continue
+			}
+
+			arr, ok := val.([]interface{})
+			if !ok {
+				t.Errorf("Field %q should be array, got %T", tc.field, val)
+				continue
+			}
+
+			if len(arr) != tc.expected {
+				t.Errorf("Field %q should have %d elements, got %d", tc.field, tc.expected, len(arr))
+			}
+		}
+	})
+
+	t.Run("roundtrip_preserves_empty_slices", func(t *testing.T) {
+		// Create IssueDetails with empty slices
+		original := IssueDetails{
+			Issue: Issue{
+				ID:        "test-4",
+				Title:     "Roundtrip test",
+				Status:    StatusOpen,
+				Priority:  2,
+				IssueType: TypeTask,
+			},
+			Labels:       []string{},
+			Dependencies: []*IssueWithDependencyMetadata{},
+			Dependents:   []*IssueWithDependencyMetadata{},
+			Comments:     []*Comment{},
+		}
+
+		// Serialize
+		data, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("Failed to marshal: %v", err)
+		}
+
+		// Deserialize
+		var decoded IssueDetails
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatalf("Failed to unmarshal: %v", err)
+		}
+
+		// Verify non-nil empty slices after roundtrip
+		// Note: Go's encoding/json unmarshals "[]" into nil slices, not empty slices
+		// This is expected behavior. The important thing is that the fields are PRESENT
+		// in the JSON output, not omitted.
+
+		// Re-serialize the decoded struct
+		data2, err := json.Marshal(decoded)
+		if err != nil {
+			t.Fatalf("Failed to re-marshal: %v", err)
+		}
+
+		// Verify the re-serialized JSON still has all required fields
+		// (even if they're now null due to nil slices from the unmarshal)
+		var rawJSON map[string]interface{}
+		if err := json.Unmarshal(data2, &rawJSON); err != nil {
+			t.Fatalf("Failed to unmarshal raw JSON: %v", err)
+		}
+
+		requiredFields := []string{"labels", "dependencies", "dependents", "comments"}
+		for _, field := range requiredFields {
+			_, exists := rawJSON[field]
+			if !exists {
+				t.Errorf("Field %q should be present after roundtrip", field)
+			}
+		}
+	})
 }

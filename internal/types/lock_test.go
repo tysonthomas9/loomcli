@@ -2,207 +2,173 @@ package types
 
 import (
 	"encoding/json"
-	"os"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestNewExclusiveLock(t *testing.T) {
-	t.Parallel()
+func TestExclusiveLock_MarshalJSON(t *testing.T) {
+	lock := &ExclusiveLock{
+		Holder:    "test-tool",
+		PID:       12345,
+		Hostname:  "test-host",
+		StartedAt: time.Date(2025, 10, 25, 12, 0, 0, 0, time.UTC),
+		Version:   "1.0.0",
+	}
 
-	lock, err := NewExclusiveLock("test-holder", "1.0.0")
+	data, err := json.Marshal(lock)
 	if err != nil {
-		t.Fatalf("NewExclusiveLock() error: %v", err)
+		t.Fatalf("failed to marshal lock: %v", err)
 	}
 
-	if lock.Holder != "test-holder" {
-		t.Errorf("Holder = %q, want %q", lock.Holder, "test-holder")
-	}
-
-	if lock.Version != "1.0.0" {
-		t.Errorf("Version = %q, want %q", lock.Version, "1.0.0")
-	}
-
-	if lock.PID != os.Getpid() {
-		t.Errorf("PID = %d, want %d", lock.PID, os.Getpid())
-	}
-
-	hostname, _ := os.Hostname()
-	if lock.Hostname != hostname {
-		t.Errorf("Hostname = %q, want %q", lock.Hostname, hostname)
-	}
-
-	if lock.StartedAt.IsZero() {
-		t.Error("StartedAt should not be zero")
-	}
-
-	// StartedAt should be recent (within last second)
-	if time.Since(lock.StartedAt) > time.Second {
-		t.Error("StartedAt should be recent")
+	expected := `{"holder":"test-tool","pid":12345,"hostname":"test-host","started_at":"2025-10-25T12:00:00Z","version":"1.0.0"}`
+	if string(data) != expected {
+		t.Errorf("unexpected JSON:\ngot:  %s\nwant: %s", string(data), expected)
 	}
 }
 
-func TestExclusiveLock_MarshalJSON_RoundTrip(t *testing.T) {
-	t.Parallel()
+func TestExclusiveLock_UnmarshalJSON(t *testing.T) {
+	data := []byte(`{"holder":"test-tool","pid":12345,"hostname":"test-host","started_at":"2025-10-25T12:00:00Z","version":"1.0.0"}`)
 
-	original := ExclusiveLock{
-		Holder:    "test-holder",
-		PID:       12345,
-		Hostname:  "test-host",
-		StartedAt: time.Now().UTC().Truncate(time.Millisecond),
-		Version:   "2.0.0",
-	}
-
-	// Marshal
-	data, err := json.Marshal(&original)
+	var lock ExclusiveLock
+	err := json.Unmarshal(data, &lock)
 	if err != nil {
-		t.Fatalf("json.Marshal() error: %v", err)
+		t.Fatalf("failed to unmarshal lock: %v", err)
 	}
 
-	// Unmarshal
-	var restored ExclusiveLock
-	if err := json.Unmarshal(data, &restored); err != nil {
-		t.Fatalf("json.Unmarshal() error: %v", err)
+	if lock.Holder != "test-tool" {
+		t.Errorf("unexpected holder: got %s, want test-tool", lock.Holder)
+	}
+	if lock.PID != 12345 {
+		t.Errorf("unexpected PID: got %d, want 12345", lock.PID)
+	}
+	if lock.Hostname != "test-host" {
+		t.Errorf("unexpected hostname: got %s, want test-host", lock.Hostname)
+	}
+	if lock.Version != "1.0.0" {
+		t.Errorf("unexpected version: got %s, want 1.0.0", lock.Version)
 	}
 
-	// Compare fields
-	if restored.Holder != original.Holder {
-		t.Errorf("Holder = %q, want %q", restored.Holder, original.Holder)
-	}
-	if restored.PID != original.PID {
-		t.Errorf("PID = %d, want %d", restored.PID, original.PID)
-	}
-	if restored.Hostname != original.Hostname {
-		t.Errorf("Hostname = %q, want %q", restored.Hostname, original.Hostname)
-	}
-	if restored.Version != original.Version {
-		t.Errorf("Version = %q, want %q", restored.Version, original.Version)
-	}
-	if !restored.StartedAt.Equal(original.StartedAt) {
-		t.Errorf("StartedAt = %v, want %v", restored.StartedAt, original.StartedAt)
+	expected := time.Date(2025, 10, 25, 12, 0, 0, 0, time.UTC)
+	if !lock.StartedAt.Equal(expected) {
+		t.Errorf("unexpected started_at: got %v, want %v", lock.StartedAt, expected)
 	}
 }
 
 func TestExclusiveLock_Validate(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-
 	tests := []struct {
 		name    string
-		lock    ExclusiveLock
-		wantErr string
+		lock    *ExclusiveLock
+		wantErr bool
 	}{
 		{
 			name: "valid lock",
-			lock: ExclusiveLock{
-				Holder:    "test-holder",
+			lock: &ExclusiveLock{
+				Holder:    "test-tool",
 				PID:       12345,
 				Hostname:  "test-host",
-				StartedAt: now,
+				StartedAt: time.Now(),
 				Version:   "1.0.0",
 			},
-			wantErr: "",
+			wantErr: false,
 		},
 		{
-			name: "empty holder",
-			lock: ExclusiveLock{
-				Holder:    "",
+			name: "missing holder",
+			lock: &ExclusiveLock{
 				PID:       12345,
 				Hostname:  "test-host",
-				StartedAt: now,
+				StartedAt: time.Now(),
+				Version:   "1.0.0",
 			},
-			wantErr: "holder is required",
+			wantErr: true,
 		},
 		{
-			name: "zero PID",
-			lock: ExclusiveLock{
-				Holder:    "test-holder",
+			name: "invalid PID (zero)",
+			lock: &ExclusiveLock{
+				Holder:    "test-tool",
 				PID:       0,
 				Hostname:  "test-host",
-				StartedAt: now,
+				StartedAt: time.Now(),
+				Version:   "1.0.0",
 			},
-			wantErr: "pid must be positive",
+			wantErr: true,
 		},
 		{
-			name: "negative PID",
-			lock: ExclusiveLock{
-				Holder:    "test-holder",
+			name: "invalid PID (negative)",
+			lock: &ExclusiveLock{
+				Holder:    "test-tool",
 				PID:       -1,
 				Hostname:  "test-host",
-				StartedAt: now,
+				StartedAt: time.Now(),
+				Version:   "1.0.0",
 			},
-			wantErr: "pid must be positive",
+			wantErr: true,
 		},
 		{
-			name: "empty hostname",
-			lock: ExclusiveLock{
-				Holder:    "test-holder",
+			name: "missing hostname",
+			lock: &ExclusiveLock{
+				Holder:    "test-tool",
 				PID:       12345,
-				Hostname:  "",
-				StartedAt: now,
+				StartedAt: time.Now(),
+				Version:   "1.0.0",
 			},
-			wantErr: "hostname is required",
+			wantErr: true,
 		},
 		{
-			name: "zero StartedAt",
-			lock: ExclusiveLock{
-				Holder:   "test-holder",
+			name: "missing started_at",
+			lock: &ExclusiveLock{
+				Holder:   "test-tool",
 				PID:      12345,
 				Hostname: "test-host",
+				Version:  "1.0.0",
 			},
-			wantErr: "started_at is required",
+			wantErr: true,
+		},
+		{
+			name: "missing version (allowed)",
+			lock: &ExclusiveLock{
+				Holder:    "test-tool",
+				PID:       12345,
+				Hostname:  "test-host",
+				StartedAt: time.Now(),
+			},
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.lock.Validate()
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Errorf("Validate() unexpected error: %v", err)
-				}
-			} else {
-				if err == nil {
-					t.Errorf("Validate() expected error containing %q, got nil", tt.wantErr)
-				} else if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Errorf("Validate() error = %q, want error containing %q", err.Error(), tt.wantErr)
-				}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestExclusiveLock_JSONFields(t *testing.T) {
-	t.Parallel()
-
-	lock := ExclusiveLock{
-		Holder:    "test-holder",
-		PID:       12345,
-		Hostname:  "test-host",
-		StartedAt: time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
-		Version:   "1.0.0",
-	}
-
-	data, err := json.Marshal(&lock)
+func TestNewExclusiveLock(t *testing.T) {
+	lock, err := NewExclusiveLock("test-tool", "1.0.0")
 	if err != nil {
-		t.Fatalf("json.Marshal() error: %v", err)
+		t.Fatalf("NewExclusiveLock failed: %v", err)
 	}
 
-	// Verify JSON field names
-	jsonStr := string(data)
-	expectedFields := []string{
-		`"holder"`,
-		`"pid"`,
-		`"hostname"`,
-		`"started_at"`,
-		`"version"`,
+	if lock.Holder != "test-tool" {
+		t.Errorf("unexpected holder: got %s, want test-tool", lock.Holder)
+	}
+	if lock.Version != "1.0.0" {
+		t.Errorf("unexpected version: got %s, want 1.0.0", lock.Version)
+	}
+	if lock.PID <= 0 {
+		t.Errorf("PID should be positive, got %d", lock.PID)
+	}
+	if lock.Hostname == "" {
+		t.Error("hostname should not be empty")
+	}
+	if lock.StartedAt.IsZero() {
+		t.Error("started_at should not be zero")
 	}
 
-	for _, field := range expectedFields {
-		if !strings.Contains(jsonStr, field) {
-			t.Errorf("JSON missing field %s: %s", field, jsonStr)
-		}
+	// Validate should pass
+	if err := lock.Validate(); err != nil {
+		t.Errorf("newly created lock should be valid: %v", err)
 	}
 }
