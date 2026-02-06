@@ -9,6 +9,23 @@ import (
 	"syscall"
 )
 
+// ClaudeBackend implements the Backend interface for the Claude CLI.
+type ClaudeBackend struct{}
+
+func (c *ClaudeBackend) Name() string { return "claude" }
+
+func (c *ClaudeBackend) InvokeInteractive(workDir, prompt, agentName string) error {
+	return claudeInvoker(workDir, prompt, agentName)
+}
+
+func (c *ClaudeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
+}
+
+func init() {
+	RegisterBackend(&ClaudeBackend{})
+}
+
 // debugStreamParsing enables verbose output for JSON parsing errors
 var debugStreamParsing = os.Getenv("LOOM_DEBUG_STREAM") != ""
 

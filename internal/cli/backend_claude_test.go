@@ -280,3 +280,70 @@ func TestInvokeClaudeForConflicts_MockInvoker(t *testing.T) {
 		t.Errorf("expected empty agentName for conflicts, got %q", inv.AgentName)
 	}
 }
+
+func TestClaudeBackendName(t *testing.T) {
+	b := &ClaudeBackend{}
+	if got := b.Name(); got != "claude" {
+		t.Errorf("expected 'claude', got %q", got)
+	}
+}
+
+func TestClaudeBackendRegistered(t *testing.T) {
+	// After init(), the Claude backend should be registered
+	backendMu.RLock()
+	b, ok := backends["claude"]
+	backendMu.RUnlock()
+
+	if !ok {
+		t.Fatal("expected 'claude' backend to be registered via init()")
+	}
+	if _, isClaudeBackend := b.(*ClaudeBackend); !isClaudeBackend {
+		t.Fatalf("expected *ClaudeBackend, got %T", b)
+	}
+}
+
+func TestClaudeBackendInvokeInteractive(t *testing.T) {
+	recorder := SetupMockClaudeInvoker(t, nil)
+
+	b := &ClaudeBackend{}
+	err := b.InvokeInteractive("/work", "do stuff", "agent1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(recorder.Invocations) != 1 {
+		t.Fatalf("expected 1 invocation, got %d", len(recorder.Invocations))
+	}
+	inv := recorder.Invocations[0]
+	if inv.WorkDir != "/work" || inv.Prompt != "do stuff" || inv.AgentName != "agent1" {
+		t.Errorf("unexpected invocation args: %+v", inv)
+	}
+}
+
+func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
+	// Save and restore the non-interactive invoker
+	orig := claudeNonInteractiveInvoker
+	var called bool
+	var gotWorkDir, gotPrompt, gotAgent string
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		called = true
+		gotWorkDir = workDir
+		gotPrompt = prompt
+		gotAgent = agentName
+		return nil
+	}
+	t.Cleanup(func() { claudeNonInteractiveInvoker = orig })
+
+	b := &ClaudeBackend{}
+	shutdown := make(chan struct{})
+	err := b.InvokeNonInteractive("/work", "task prompt", "agent2", shutdown)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected claudeNonInteractiveInvoker to be called")
+	}
+	if gotWorkDir != "/work" || gotPrompt != "task prompt" || gotAgent != "agent2" {
+		t.Errorf("unexpected args: workDir=%q prompt=%q agent=%q", gotWorkDir, gotPrompt, gotAgent)
+	}
+}
