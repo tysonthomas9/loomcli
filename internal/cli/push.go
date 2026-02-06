@@ -305,7 +305,7 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 		}
 
 		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching Claude to resolve...")
+		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
 		fmt.Println("")
 		fmt.Println("Conflicted files:")
 		for _, f := range conflicts {
@@ -314,7 +314,7 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 		fmt.Println("")
 
 		// Launch Claude for conflict resolution
-		if err := InvokeClaudeForConflicts(repoPath, sourceBranch, targetBranch, conflicts); err != nil {
+		if err := InvokeAgentForConflicts(repoPath, sourceBranch, targetBranch, conflicts); err != nil {
 			return fmt.Errorf("resolving conflicts: %v", err)
 		}
 		return nil
@@ -369,7 +369,7 @@ func pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote strin
 		}
 
 		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching Claude to resolve...")
+		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
 		fmt.Println("")
 		fmt.Println("Conflicted files:")
 		for _, f := range conflicts {
@@ -379,7 +379,7 @@ func pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote strin
 
 		// Launch Claude with push command using refspec for detached approach
 		prompt := generateConflictResolutionPromptWithPush(sourceBranch, targetBranch, conflicts, fmt.Sprintf("HEAD:%s", targetBranch))
-		if err := InvokeClaude(repoPath, prompt, ""); err != nil {
+		if err := InvokeAgent(repoPath, prompt, ""); err != nil {
 			return fmt.Errorf("resolving conflicts: %v", err)
 		}
 		return nil
@@ -516,7 +516,7 @@ func pushBranch(sourceBranch, targetBranch string) {
 		}
 
 		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching Claude to resolve...")
+		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
 		fmt.Println("")
 		fmt.Println("Conflicted files:")
 		for _, f := range conflicts {
@@ -525,7 +525,7 @@ func pushBranch(sourceBranch, targetBranch string) {
 		fmt.Println("")
 
 		// Launch Claude for conflict resolution
-		if err := InvokeClaudeForConflicts(scriptDir, sourceBranch, targetBranch, conflicts); err != nil {
+		if err := InvokeAgentForConflicts(scriptDir, sourceBranch, targetBranch, conflicts); err != nil {
 			fmt.Fprintf(os.Stderr, "Error resolving conflicts: %v\n", err)
 			return
 		}
@@ -580,7 +580,7 @@ func pushBranchDetached(scriptDir, sourceBranch, targetBranch string) error {
 		}
 
 		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching Claude to resolve...")
+		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
 		fmt.Println("")
 		fmt.Println("Conflicted files:")
 		for _, f := range conflicts {
@@ -590,7 +590,7 @@ func pushBranchDetached(scriptDir, sourceBranch, targetBranch string) error {
 
 		// Launch Claude with push command using refspec for detached approach
 		prompt := generateConflictResolutionPromptWithPush(sourceBranch, targetBranch, conflicts, fmt.Sprintf("HEAD:%s", targetBranch))
-		if err := InvokeClaude(scriptDir, prompt, ""); err != nil {
+		if err := InvokeAgent(scriptDir, prompt, ""); err != nil {
 			return fmt.Errorf("resolving conflicts: %v", err)
 		}
 		return nil

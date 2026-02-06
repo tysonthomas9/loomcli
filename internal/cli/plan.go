@@ -17,10 +17,10 @@ var (
 
 var planCmd = &cobra.Command{
 	Use:               "plan [worktree|workspace]",
-	Short:             "Run a Claude planning agent",
+	Short:             "Run a planning agent",
 	GroupID:           "agents",
 	ValidArgsFunction: worktreeCompletion,
-	Long: `Run a Claude planning agent in the specified worktree or workspace.
+	Long: `Run a planning agent in the specified worktree or workspace.
 
 The planning agent will:
   1. Pick the highest priority task (or one with needs-revision label)
@@ -92,7 +92,7 @@ func runPlan(cmd *cobra.Command, args []string) {
 		}
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := GeneratePlanningPrompt(agentName, workspace)
-		if err := InvokeClaude(worktreePath, prompt, agentName); err != nil { // Interactive mode, nice output
+		if err := InvokeAgent(worktreePath, prompt, agentName); err != nil { // Interactive mode, nice output
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -158,8 +158,8 @@ func runPlan(cmd *cobra.Command, args []string) {
 	// Generate and run the planning prompt
 	workspace, _ := ResolveActiveWorkspace()
 	prompt := GeneratePlanningPrompt(agentName, workspace)
-	if err := InvokeClaude(worktreePath, prompt, agentName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
+	if err := InvokeAgent(worktreePath, prompt, agentName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
 		os.Exit(1)
 	}
 }

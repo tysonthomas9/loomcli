@@ -51,8 +51,8 @@ func defaultClaudeInvoker(workDir, prompt, agentName string) error {
 	return cmd.Run()
 }
 
-// InvokeClaude runs Claude with the given prompt using --dangerously-skip-permissions
-// agentName is used to set BD_ACTOR for atomic task claiming (pass "" if not claiming tasks)
+// InvokeClaude runs Claude directly, bypassing the backend registry.
+// Deprecated: Use InvokeAgent() instead which dispatches through the active backend.
 func InvokeClaude(workDir, prompt, agentName string) error {
 	return claudeInvoker(workDir, prompt, agentName)
 }
@@ -182,16 +182,15 @@ func displayStreamEvent(line string) {
 	}
 }
 
-// InvokeClaudeNonInteractive runs Claude in non-interactive mode (for auto mode)
-// Claude will process the prompt and exit, rather than waiting for more input
-// The shutdown channel allows the caller to signal that the process should be terminated
-// agentName is used to set BD_ACTOR for atomic task claiming
+// InvokeClaudeNonInteractive runs Claude directly in non-interactive mode.
+// Deprecated: Use InvokeAgentNonInteractive() instead which dispatches through the active backend.
 func InvokeClaudeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
 }
 
-// InvokeClaudeForConflicts runs Claude to resolve merge conflicts
+// InvokeClaudeForConflicts runs Claude to resolve merge conflicts.
+// Deprecated: Use InvokeAgentForConflicts() instead which dispatches through the active backend.
 func InvokeClaudeForConflicts(workDir, sourceBranch, targetBranch string, conflicts []string) error {
 	prompt := GenerateConflictResolutionPrompt(sourceBranch, targetBranch, conflicts)
-	return InvokeClaude(workDir, prompt, "") // No agent name for conflict resolution
+	return InvokeClaude(workDir, prompt, "")
 }

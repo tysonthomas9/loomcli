@@ -19,10 +19,10 @@ var (
 
 var agentCmd = &cobra.Command{
 	Use:               "agent <worktree> --prompt <path> [flags]",
-	Short:             "Run a custom Claude agent with a user-defined prompt",
+	Short:             "Run a custom agent with a user-defined prompt",
 	GroupID:           "agents",
 	ValidArgsFunction: worktreeCompletion,
-	Long: `Run a custom Claude agent with a user-defined prompt template.
+	Long: `Run a custom agent with a user-defined prompt template.
 
 The agent command allows you to define custom agent roles by providing a prompt
 template file. This is useful for specialized workflows like code review,
@@ -118,7 +118,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 		}
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := promptGen(agentName, workspace)
-		if err := InvokeClaude(worktreePath, prompt, agentName); err != nil {
+		if err := InvokeAgent(worktreePath, prompt, agentName); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -190,8 +190,8 @@ func runAgent(cmd *cobra.Command, args []string) {
 	// Generate and run the custom prompt
 	workspace, _ := ResolveActiveWorkspace()
 	prompt := promptGen(agentName, workspace)
-	if err := InvokeClaude(worktreePath, prompt, agentName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
+	if err := InvokeAgent(worktreePath, prompt, agentName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
 		os.Exit(1)
 	}
 }

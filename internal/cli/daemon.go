@@ -269,14 +269,27 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 
 	var cmd *exec.Cmd
 
+	// Resolve backend for this agent: per-agent > project > global > default
+	agentBackend := ap.entry.Backend
+	if agentBackend == "" {
+		agentBackend = d.config.Backend
+	}
+
 	if builtInRoles[ap.entry.Role] {
 		// Built-in role: loom <role> <worktree> --auto --daemon-mode
-		cmd = exec.Command("loom", ap.entry.Role, ap.worktreePath, "--auto", "--daemon-mode")
+		args := []string{ap.entry.Role, ap.worktreePath, "--auto", "--daemon-mode"}
+		if agentBackend != "" {
+			args = append(args, "--backend", agentBackend)
+		}
+		cmd = exec.Command("loom", args...)
 	} else {
 		// Custom role: loom agent <worktree> --prompt <path> --task-filter <filter> --auto --daemon-mode
 		args := []string{"agent", ap.worktreePath, "--prompt", ap.roleConfig.PromptFile, "--auto", "--daemon-mode"}
 		if ap.roleConfig.TaskFilter != "" {
 			args = append(args, "--task-filter", ap.roleConfig.TaskFilter)
+		}
+		if agentBackend != "" {
+			args = append(args, "--backend", agentBackend)
 		}
 		cmd = exec.Command("loom", args...)
 	}

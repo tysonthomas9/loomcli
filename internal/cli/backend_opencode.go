@@ -1,0 +1,93 @@
+package cli
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"os/exec"
+	"syscall"
+)
+
+// OpenCodeBackend implements the Backend interface for the OpenCode CLI.
+type OpenCodeBackend struct{}
+
+func (o *OpenCodeBackend) Name() string { return "opencode" }
+
+func (o *OpenCodeBackend) InvokeInteractive(workDir, prompt, agentName string) error {
+	cmd := exec.Command("opencode", "run", prompt)
+	cmd.Dir = workDir
+	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	if agentName != "" {
+		env = append(env, "BD_ACTOR="+agentName)
+	}
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	fmt.Println("Launching OpenCode agent...")
+	fmt.Println("")
+
+	return cmd.Run()
+}
+
+func (o *OpenCodeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	cmd := exec.Command("opencode", "run", "--format", "json", prompt)
+	cmd.Dir = workDir
+	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	if agentName != "" {
+		env = append(env, "BD_ACTOR="+agentName)
+	}
+	cmd.Env = env
+
+	// Create a pipe and close write end to send EOF
+	r, w, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("failed to create pipe: %w", err)
+	}
+	w.Close()
+	cmd.Stdin = r
+
+	// Pipe stdout directly (no stream-json parsing for OpenCode in v1)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		r.Close()
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	cmd.Stderr = os.Stderr
+
+	fmt.Println("Launching OpenCode agent (non-interactive)...")
+	fmt.Println("")
+
+	if err := cmd.Start(); err != nil {
+		r.Close()
+		return fmt.Errorf("failed to start opencode: %w", err)
+	}
+
+	// Monitor for shutdown signal
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-shutdown:
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+		case <-done:
+		}
+	}()
+
+	// Pipe stdout directly to os.Stdout (no JSON parsing)
+	scanner := bufio.NewScanner(stdout)
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+	for scanner.Scan() {
+		fmt.Println(scanner.Text())
+	}
+
+	runErr := cmd.Wait()
+	close(done)
+	r.Close()
+	return runErr
+}
+
+func init() {
+	RegisterBackend(&OpenCodeBackend{})
+}

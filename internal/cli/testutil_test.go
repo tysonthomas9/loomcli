@@ -349,9 +349,9 @@ func SetupMultiWorktreeEnv(t *testing.T, names []string, withLock map[string]*Lo
 	return tmpDir
 }
 
-// MockClaudeInvokerRecorder records invocations of the mocked Claude invoker.
+// MockAgentInvokerRecorder records invocations of the mocked agent invoker.
 // Thread-safe for concurrent invocations within a single test.
-type MockClaudeInvokerRecorder struct {
+type MockAgentInvokerRecorder struct {
 	mu          sync.Mutex
 	Invocations []struct {
 		WorkDir   string
@@ -361,12 +361,12 @@ type MockClaudeInvokerRecorder struct {
 	ReturnErr error
 }
 
-// SetupMockClaudeInvoker installs a mock Claude invoker and registers cleanup.
+// SetupMockAgentInvoker installs a mock agent invoker and registers cleanup.
 // WARNING: This modifies global state (claudeInvoker). Tests using this mock
 // MUST NOT use t.Parallel() as it would cause race conditions.
-func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockClaudeInvokerRecorder {
+func SetupMockAgentInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecorder {
 	t.Helper()
-	recorder := &MockClaudeInvokerRecorder{ReturnErr: returnErr}
+	recorder := &MockAgentInvokerRecorder{ReturnErr: returnErr}
 	orig := claudeInvoker
 
 	claudeInvoker = func(workDir, prompt, agentName string) error {
@@ -385,6 +385,14 @@ func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockClaudeInvokerRec
 	})
 
 	return recorder
+}
+
+// MockClaudeInvokerRecorder is a backwards-compatible alias.
+type MockClaudeInvokerRecorder = MockAgentInvokerRecorder
+
+// SetupMockClaudeInvoker is a backwards-compatible alias for SetupMockAgentInvoker.
+func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecorder {
+	return SetupMockAgentInvoker(t, returnErr)
 }
 
 // containsSubstring checks if any element in the slice contains the substring

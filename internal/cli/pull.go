@@ -285,7 +285,7 @@ func pullRepoWorktree(repoPath, currentBranch, sourceBranch, remote string) erro
 		}
 
 		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching Claude to resolve...")
+		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
 		fmt.Println("")
 		fmt.Println("Conflicted files:")
 		for _, f := range conflicts {
@@ -294,7 +294,7 @@ func pullRepoWorktree(repoPath, currentBranch, sourceBranch, remote string) erro
 		fmt.Println("")
 
 		// Launch Claude for conflict resolution
-		if err := InvokeClaudeForConflicts(repoPath, sourceBranch, currentBranch, conflicts); err != nil {
+		if err := InvokeAgentForConflicts(repoPath, sourceBranch, currentBranch, conflicts); err != nil {
 			return fmt.Errorf("resolving conflicts: %v", err)
 		}
 		return nil
@@ -381,7 +381,7 @@ func pullWorktree(worktreeName, sourceBranch string) {
 		}
 
 		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching Claude to resolve...")
+		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
 		fmt.Println("")
 		fmt.Println("Conflicted files:")
 		for _, f := range conflicts {
@@ -390,7 +390,7 @@ func pullWorktree(worktreeName, sourceBranch string) {
 		fmt.Println("")
 
 		// Launch Claude for conflict resolution
-		if err := InvokeClaudeForConflicts(worktreePath, sourceBranch, currentBranch, conflicts); err != nil {
+		if err := InvokeAgentForConflicts(worktreePath, sourceBranch, currentBranch, conflicts); err != nil {
 			fmt.Fprintf(os.Stderr, "Error resolving conflicts: %v\n", err)
 			return
 		}

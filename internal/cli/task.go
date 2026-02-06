@@ -17,10 +17,10 @@ var (
 
 var taskCmd = &cobra.Command{
 	Use:               "task [worktree|workspace]",
-	Short:             "Run a Claude implementation agent",
+	Short:             "Run an implementation agent",
 	GroupID:           "agents",
 	ValidArgsFunction: worktreeCompletion,
-	Long: `Run a Claude implementation agent in the specified worktree or workspace.
+	Long: `Run an implementation agent in the specified worktree or workspace.
 
 The implementation agent will:
   1. Pick the highest priority ready task (skipping tasks needing revision)
@@ -92,7 +92,7 @@ func runTask(cmd *cobra.Command, args []string) {
 		}
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := GenerateTaskPrompt(agentName, workspace)
-		if err := InvokeClaude(worktreePath, prompt, agentName); err != nil { // Interactive mode, nice output
+		if err := InvokeAgent(worktreePath, prompt, agentName); err != nil { // Interactive mode, nice output
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -158,8 +158,8 @@ func runTask(cmd *cobra.Command, args []string) {
 	// Generate and run the task prompt
 	workspace, _ := ResolveActiveWorkspace()
 	prompt := GenerateTaskPrompt(agentName, workspace)
-	if err := InvokeClaude(worktreePath, prompt, agentName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running Claude: %v\n", err)
+	if err := InvokeAgent(worktreePath, prompt, agentName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -16,6 +18,7 @@ type Backend interface {
 var (
 	backends      = make(map[string]Backend)
 	activeBackend = "claude"
+	backendFlag   string // set by --backend persistent flag in root.go
 	backendMu     sync.RWMutex
 )
 
@@ -64,8 +67,41 @@ func listBackendsLocked() []string {
 	return names
 }
 
-// InvokeBackend dispatches an interactive invocation to the active backend.
-func InvokeBackend(workDir, prompt, agentName string) error {
+// ResolveBackendName returns the backend name using the precedence chain:
+// --backend flag > LOOM_BACKEND env > config file > default ("claude").
+func ResolveBackendName() string {
+	// 1. --backend flag (highest priority)
+	if backendFlag != "" {
+		return backendFlag
+	}
+	// 2. LOOM_BACKEND environment variable
+	if env := os.Getenv("LOOM_BACKEND"); env != "" {
+		return env
+	}
+	// 3. Config file backend setting
+	cfg, err := LoadConfig()
+	if err == nil && cfg != nil && cfg.Backend != "" {
+		return cfg.Backend
+	}
+	// 4. Default
+	return "claude"
+}
+
+// ResolveAndSetBackend resolves the backend name from the precedence chain
+// and sets it as the active backend. Returns an error if the resolved name
+// is not a registered backend.
+func ResolveAndSetBackend() error {
+	name := ResolveBackendName()
+	return SetBackend(name)
+}
+
+// ValidBackendNames returns a formatted string of valid backend names for help text.
+func ValidBackendNames() string {
+	return strings.Join(ListBackends(), ", ")
+}
+
+// InvokeAgent dispatches an interactive invocation to the active backend.
+func InvokeAgent(workDir, prompt, agentName string) error {
 	backendMu.RLock()
 	name := activeBackend
 	b, ok := backends[name]
@@ -76,8 +112,8 @@ func InvokeBackend(workDir, prompt, agentName string) error {
 	return b.InvokeInteractive(workDir, prompt, agentName)
 }
 
-// InvokeBackendNonInteractive dispatches a non-interactive invocation to the active backend.
-func InvokeBackendNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+// InvokeAgentNonInteractive dispatches a non-interactive invocation to the active backend.
+func InvokeAgentNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	backendMu.RLock()
 	name := activeBackend
 	b, ok := backends[name]
@@ -86,4 +122,10 @@ func InvokeBackendNonInteractive(workDir, prompt, agentName string, shutdown <-c
 		return fmt.Errorf("backend %q not registered", name)
 	}
 	return b.InvokeNonInteractive(workDir, prompt, agentName, shutdown)
+}
+
+// InvokeAgentForConflicts runs the active backend to resolve merge conflicts.
+func InvokeAgentForConflicts(workDir, sourceBranch, targetBranch string, conflicts []string) error {
+	prompt := GenerateConflictResolutionPrompt(sourceBranch, targetBranch, conflicts)
+	return InvokeAgent(workDir, prompt, "")
 }

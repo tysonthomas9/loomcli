@@ -350,22 +350,22 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			fmt.Printf("[auto] Warning: failed to clear task ID: %v\n", clearErr)
 		}
 
-		// Invoke Claude to work on one task
+		// Invoke agent to work on one task
 		fmt.Println("")
 		fmt.Printf("[auto] === Starting task %d ===\n", state.TasksCompleted+1)
 		fmt.Println("")
 
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := generatePrompt(opts.AgentName, workspace)
-		err = InvokeClaudeNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown)
+		err = InvokeAgentNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown)
 
-		// Return to idle state after Claude finishes
+		// Return to idle state after agent finishes
 		if updateErr := UpdateLockState(opts.WorktreePath, StateIdle); updateErr != nil {
 			fmt.Printf("[auto] Warning: failed to update state: %v\n", updateErr)
 		}
 
 		if err != nil {
-			fmt.Printf("[auto] Claude exited with error: %v\n", err)
+			fmt.Printf("[auto] Agent exited with error: %v\n", err)
 			state.ConsecutiveErrors++
 
 			// Stop after 3 consecutive errors
@@ -638,6 +638,11 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	// Build the loom command to run inside tmux
 	// TERM=dumb disables alternate screen buffer, enabling output streaming via capture-pane
 	loomCmd := fmt.Sprintf("TERM=dumb loom %s %s --daemon-mode", opts.AgentType, opts.WorktreePath)
+
+	// Propagate backend selection to subprocess
+	if resolved := GetBackendName(); resolved != "claude" {
+		loomCmd += fmt.Sprintf(" --backend %s", resolved)
+	}
 
 	// Create detached session with current terminal dimensions
 	args := []string{"new-session", "-d", "-s", sessionName}

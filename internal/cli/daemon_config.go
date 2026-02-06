@@ -37,20 +37,23 @@ type AgentEntry struct {
 	Worktree string `yaml:"worktree"`
 	Role     string `yaml:"role"`
 	Auto     bool   `yaml:"auto,omitempty"`
+	Backend  string `yaml:"backend,omitempty"`
 }
 
 // ProjectFile represents the project-local loom.yaml.
 type ProjectFile struct {
-	Daemon *DaemonSettings       `yaml:"daemon,omitempty"`
-	Roles  map[string]RoleConfig `yaml:"roles,omitempty"`
-	Agents []AgentEntry          `yaml:"agents,omitempty"`
+	Backend string                `yaml:"backend,omitempty"`
+	Daemon  *DaemonSettings       `yaml:"daemon,omitempty"`
+	Roles   map[string]RoleConfig `yaml:"roles,omitempty"`
+	Agents  []AgentEntry          `yaml:"agents,omitempty"`
 }
 
 // DaemonConfig is the merged, resolved configuration used by callers.
 type DaemonConfig struct {
-	Daemon DaemonSettings
-	Roles  map[string]RoleConfig
-	Agents []AgentEntry
+	Backend string
+	Daemon  DaemonSettings
+	Roles   map[string]RoleConfig
+	Agents  []AgentEntry
 }
 
 // PromptData is the template context for custom prompt files.
@@ -109,6 +112,11 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		Roles: make(map[string]RoleConfig),
 	}
 
+	// Overlay global backend setting
+	if globalCfg != nil && globalCfg.Backend != "" {
+		dc.Backend = globalCfg.Backend
+	}
+
 	// Overlay global daemon settings
 	if globalCfg != nil && globalCfg.Daemon != nil {
 		overlayDaemonSettings(&dc.Daemon, globalCfg.Daemon)
@@ -116,6 +124,9 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 
 	// Overlay local daemon settings (local wins)
 	if projectFile != nil {
+		if projectFile.Backend != "" {
+			dc.Backend = projectFile.Backend
+		}
 		if projectFile.Daemon != nil {
 			overlayDaemonSettings(&dc.Daemon, projectFile.Daemon)
 		}

@@ -11,6 +11,7 @@ import (
 // LoomConfig is the top-level configuration from ~/.loom/config.yaml
 type LoomConfig struct {
 	DefaultWorkspace string                     `yaml:"default_workspace,omitempty"`
+	Backend          string                     `yaml:"backend,omitempty"`
 	Workspaces       map[string]WorkspaceConfig `yaml:"workspaces"`
 	Daemon           *DaemonSettings            `yaml:"daemon,omitempty"`
 }

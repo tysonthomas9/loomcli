@@ -70,10 +70,12 @@ COMMANDS
 
 GLOBAL FLAGS
   -w, --worktrees        Override worktrees directory (takes precedence over env)
+      --backend          AI backend CLI (claude, codex, opencode). Env: LOOM_BACKEND
 
 ENVIRONMENT VARIABLES
   LOOM_DEFAULT_BRANCH    Default integration branch (default: main)
   LOOM_WORKTREES_DIR     Worktrees directory (default: ./worktrees)
+  LOOM_BACKEND           AI backend CLI to use (default: claude)
 
 EXAMPLES
   loom plan falcon              # Run planning agent in falcon worktree
@@ -95,6 +97,12 @@ EXAMPLES
 func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "Print version information")
 	rootCmd.PersistentFlags().StringVarP(&worktreesFlag, "worktrees", "w", "", "Override worktrees directory (takes precedence over LOOM_WORKTREES_DIR)")
+	rootCmd.PersistentFlags().StringVar(&backendFlag, "backend", "", "AI backend CLI to use (claude, codex, opencode). Env: LOOM_BACKEND")
+
+	// Resolve and set active backend before any subcommand runs
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		return ResolveAndSetBackend()
+	}
 
 	// Add command groups for organized help
 	rootCmd.AddGroup(&cobra.Group{ID: "agents", Title: "Agent Commands:"})
