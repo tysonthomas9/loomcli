@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1164,4 +1165,128 @@ func TestHandleAgents_LegacyMode_NoByWorkspace(t *testing.T) {
 			t.Errorf("ByWorkspace = %v, want nil in legacy mode", resp.ByWorkspace)
 		}
 	})
+}
+
+func TestHandleMetrics_ContentType(t *testing.T) {
+	mockData := mockMonitorData()
+
+	withMockData(t, mockData, func() {
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		rr := httptest.NewRecorder()
+
+		handleMetrics(rr, req)
+
+		// Check status code
+		if rr.Code != http.StatusOK {
+			t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
+		}
+
+		// Check Content-Type header
+		wantContentType := "text/plain; version=0.0.4; charset=utf-8"
+		if ct := rr.Header().Get("Content-Type"); ct != wantContentType {
+			t.Errorf("Content-Type = %q, want %q", ct, wantContentType)
+		}
+	})
+}
+
+func TestHandleMetrics_Format(t *testing.T) {
+	mockData := mockMonitorData()
+
+	withMockData(t, mockData, func() {
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		rr := httptest.NewRecorder()
+
+		handleMetrics(rr, req)
+
+		body := rr.Body.String()
+
+		// Verify loom_ready_tasks metric format
+		expectedStrings := []string{
+			"# HELP loom_ready_tasks",
+			"# TYPE loom_ready_tasks gauge",
+			`loom_ready_tasks{priority="0"}`,
+			`loom_ready_tasks{priority="1"}`,
+			`loom_ready_tasks{priority="2"}`,
+			`loom_ready_tasks{priority="3"}`,
+			`loom_ready_tasks{priority="4"}`,
+			// Verify loom_in_progress_tasks metric format
+			"# HELP loom_in_progress_tasks",
+			"# TYPE loom_in_progress_tasks gauge",
+			"loom_in_progress_tasks",
+			// Verify loom_fleet_workers metric format
+			"# HELP loom_fleet_workers",
+			"# TYPE loom_fleet_workers gauge",
+			`loom_fleet_workers{status="active"}`,
+			`loom_fleet_workers{status="idle"}`,
+			`loom_fleet_workers{status="blocked"}`,
+		}
+
+		for _, expected := range expectedStrings {
+			if !strings.Contains(body, expected) {
+				t.Errorf("response body missing %q\n\nFull body:\n%s", expected, body)
+			}
+		}
+	})
+}
+
+func TestHandleMetrics_InProgressCount(t *testing.T) {
+	mockData := mockMonitorData() // Tasks.InProgress = 2
+
+	withMockData(t, mockData, func() {
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		rr := httptest.NewRecorder()
+
+		handleMetrics(rr, req)
+
+		body := rr.Body.String()
+
+		// Verify the in-progress count matches mock data (InProgress=2)
+		if !strings.Contains(body, "loom_in_progress_tasks 2") {
+			t.Errorf("expected 'loom_in_progress_tasks 2' in response body\n\nFull body:\n%s", body)
+		}
+	})
+}
+
+func TestHandleMetrics_NilData(t *testing.T) {
+	// collectDataFunc returns nil
+	withMockData(t, nil, func() {
+		req := httptest.NewRequest("GET", "/metrics", nil)
+		rr := httptest.NewRecorder()
+
+		handleMetrics(rr, req)
+
+		// Check status code - should still succeed
+		if rr.Code != http.StatusOK {
+			t.Errorf("status code = %d, want %d", rr.Code, http.StatusOK)
+		}
+
+		body := rr.Body.String()
+
+		// When data is nil, in-progress tasks should be 0
+		if !strings.Contains(body, "loom_in_progress_tasks 0") {
+			t.Errorf("expected 'loom_in_progress_tasks 0' when data is nil\n\nFull body:\n%s", body)
+		}
+	})
+}
+
+func TestCollectWorkerStatusCounts_NoDaemon(t *testing.T) {
+	// When no daemon is running, collectWorkerStatusCounts should return all zeros
+	counts := collectWorkerStatusCounts()
+
+	expectedStatuses := []string{"active", "idle", "blocked"}
+	for _, status := range expectedStatuses {
+		val, ok := counts[status]
+		if !ok {
+			t.Errorf("missing key %q in worker status counts", status)
+			continue
+		}
+		if val != 0 {
+			t.Errorf("counts[%q] = %d, want 0 (no daemon running)", status, val)
+		}
+	}
+
+	// Verify no unexpected keys
+	if len(counts) != 3 {
+		t.Errorf("len(counts) = %d, want 3", len(counts))
+	}
 }

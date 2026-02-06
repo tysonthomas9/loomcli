@@ -617,6 +617,54 @@ func collectStatistics() MonitorStats {
 	return stats
 }
 
+// collectReadyTasksByPriority returns counts of ready tasks grouped by priority (0-4).
+// It iterates ready tasks (excluding epics, in_progress, and review) and returns
+// a map of priority -> count for Prometheus metrics.
+func collectReadyTasksByPriority() map[int]int {
+	counts := make(map[int]int)
+	// Initialize all priorities to 0
+	for i := 0; i <= 4; i++ {
+		counts[i] = 0
+	}
+
+	output, err := runBdCommand("ready", "--json", "--limit", "100")
+	if err != nil {
+		return counts
+	}
+
+	var issues []BdIssue
+	if json.Unmarshal([]byte(output), &issues) != nil {
+		return counts
+	}
+
+	for _, issue := range issues {
+		if issue.Status == "in_progress" || issue.Status == "review" {
+			continue
+		}
+		if issue.IssueType == "epic" {
+			continue
+		}
+		// Skip tasks with needs-revision label (consistent with collectTaskStatus)
+		hasRevisionLabel := false
+		for _, label := range issue.Labels {
+			if label == "needs-revision" {
+				hasRevisionLabel = true
+				break
+			}
+		}
+		if hasRevisionLabel {
+			continue
+		}
+		p := issue.Priority
+		if p < 0 || p > 4 {
+			p = 4
+		}
+		counts[p]++
+	}
+
+	return counts
+}
+
 func runBdCommand(args ...string) (string, error) {
 	result := execCommand(GetBeadsDir(), "bd", args...)
 	if result.Err != nil {

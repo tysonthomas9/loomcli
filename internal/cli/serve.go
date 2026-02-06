@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/kv"
+	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
@@ -44,6 +46,7 @@ that want to display agent status and task information.
 
 ENDPOINTS
   GET /health          Health check
+  GET /metrics         Prometheus metrics for KEDA scaling
   GET /api/status      Full dashboard data (agents, tasks, stats, sync)
   GET /api/agents      Just agent status
   GET /api/tasks       Task queue and lists
@@ -155,6 +158,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	mux.HandleFunc("GET /api/sync", handleSync)
 	mux.HandleFunc("GET /api/workspaces", handleWorkspaces)
 	mux.HandleFunc("GET /api/stale-detector", handleStaleDetector)
+	mux.HandleFunc("GET /metrics", handleMetrics)
 
 	// Wrap with CORS middleware
 	handler := corsMiddleware(serveCorsOrigin, mux)
@@ -396,6 +400,89 @@ func handleStaleDetector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, staleDetectorInstance.Status())
+}
+
+func handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+	// Collect task data
+	data := collectDataFunc()
+
+	// Get ready tasks broken down by priority
+	readyByPriority := collectReadyTasksByPriority()
+
+	// Get in-progress count
+	inProgress := 0
+	if data != nil {
+		inProgress = data.Tasks.InProgress
+	}
+
+	// Write loom_ready_tasks metric
+	fmt.Fprintf(w, "# HELP loom_ready_tasks Number of tasks ready to be claimed\n")
+	fmt.Fprintf(w, "# TYPE loom_ready_tasks gauge\n")
+	for p := 0; p <= 4; p++ {
+		fmt.Fprintf(w, "loom_ready_tasks{priority=\"%d\"} %d\n", p, readyByPriority[p])
+	}
+
+	// Write loom_in_progress_tasks metric
+	fmt.Fprintf(w, "\n# HELP loom_in_progress_tasks Number of tasks currently being worked on\n")
+	fmt.Fprintf(w, "# TYPE loom_in_progress_tasks gauge\n")
+	fmt.Fprintf(w, "loom_in_progress_tasks %d\n", inProgress)
+
+	// Write loom_fleet_workers metric
+	workerCounts := collectWorkerStatusCounts()
+	fmt.Fprintf(w, "\n# HELP loom_fleet_workers Number of fleet workers by status\n")
+	fmt.Fprintf(w, "# TYPE loom_fleet_workers gauge\n")
+	for _, status := range []string{"active", "idle", "blocked"} {
+		fmt.Fprintf(w, "loom_fleet_workers{status=\"%s\"} %d\n", status, workerCounts[status])
+	}
+}
+
+// collectWorkerStatusCounts connects to the daemon via RPC and aggregates
+// worker counts by status. Returns zeros if daemon is unavailable.
+func collectWorkerStatusCounts() map[string]int {
+	counts := map[string]int{"active": 0, "idle": 0, "blocked": 0}
+
+	beadsDir := GetBeadsDir()
+	if beadsDir == "" {
+		beadsDir = "."
+	}
+
+	// Resolve absolute path for socket discovery
+	absPath, err := filepath.Abs(beadsDir)
+	if err != nil {
+		log.Printf("metrics: failed to resolve beads dir: %v", err)
+		return counts
+	}
+
+	socketPath := rpc.ShortSocketPath(absPath)
+	client, err := rpc.TryConnect(socketPath)
+	if err != nil || client == nil {
+		// Daemon not running - return zeros
+		return counts
+	}
+	defer client.Close()
+
+	resp, err := client.GetWorkerStatus(&rpc.GetWorkerStatusArgs{})
+	if err != nil || resp == nil {
+		log.Printf("metrics: failed to get worker status: %v", err)
+		return counts
+	}
+
+	for _, worker := range resp.Workers {
+		switch worker.Status {
+		case "in_progress", "active":
+			counts["active"]++
+		case "idle", "":
+			counts["idle"]++
+		case "blocked":
+			counts["blocked"]++
+		default:
+			log.Printf("metrics: unknown worker status %q for %s", worker.Status, worker.Assignee)
+		}
+	}
+
+	return counts
 }
 
 // writeJSON writes a JSON response.
