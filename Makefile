@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test lint clean install help frontend build-all
+.PHONY: all build test lint clean install help frontend build-all sync-beads update-beads
 
 # Default target
 all: build
@@ -36,6 +36,11 @@ clean:
 # Frontend directory
 FRONTEND_DIR := internal/webui/frontend
 
+# Beads subtree config
+BEADS_REMOTE := https://github.com/tysonthomas9/beads
+BEADS_BRANCH := feature/web-ui
+BEADS_PREFIX := third_party/beads
+
 # Build frontend (requires Node.js >= 20)
 # Run this after modifying frontend source; pre-built dist/ is committed for go build without Node.js
 frontend:
@@ -44,6 +49,17 @@ frontend:
 
 # Build everything (frontend + Go binary)
 build-all: frontend build
+
+# Sync beads library packages (rewrite imports from vendored copy)
+sync-beads:
+	@echo "Syncing beads library packages..."
+	./scripts/sync-beads.sh
+
+# Pull latest beads from upstream and sync
+update-beads:
+	@echo "Pulling latest beads from $(BEADS_REMOTE) ($(BEADS_BRANCH))..."
+	git subtree pull --prefix=$(BEADS_PREFIX) $(BEADS_REMOTE) $(BEADS_BRANCH) --squash
+	$(MAKE) sync-beads
 
 # Show help
 help:
@@ -54,5 +70,7 @@ help:
 	@echo "  make install - Install loom to GOPATH/bin"
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
 	@echo "  make build-all - Build frontend + Go binary"
-	@echo "  make clean     - Remove build artifacts"
-	@echo "  make help      - Show this help message"
+	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
+	@echo "  make update-beads - Pull latest beads + sync"
+	@echo "  make clean        - Remove build artifacts"
+	@echo "  make help         - Show this help message"
