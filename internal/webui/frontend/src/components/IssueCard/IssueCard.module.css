@@ -10,14 +10,20 @@
   padding: var(--space-3) var(--space-4);
   background-color: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.08),
+    0 2px 5px rgba(0, 0, 0, 0.12);
   cursor: default;
   transition:
     box-shadow 0.15s ease,
-    transform 0.15s ease,
     border-color var(--transition-fast),
     background-color var(--transition-fast);
+}
+
+/* Hover state for all cards */
+.issueCard:hover {
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.14);
 }
 
 /* Interactive state when onClick is provided */
@@ -27,9 +33,6 @@
 
 .issueCard[role='button']:hover {
   background-color: var(--color-bg-secondary);
-  box-shadow: var(--shadow-lg);
-  border-color: var(--color-border-light);
-  transform: translateY(-1px);
 }
 
 .issueCard[role='button']:focus {
@@ -46,6 +49,13 @@
   outline-offset: 2px;
 }
 
+/* Selected card state - blue border with glow (overrides priority borders) */
+.issueCard.selected,
+.issueCard.selected[data-priority] {
+  border: 2px solid #5b85f7;
+  box-shadow: 0 0 0 1px #5b85f7;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -55,7 +65,7 @@
 
 .id {
   font-family: var(--font-family-mono);
-  font-size: var(--font-size-xs);
+  font-size: 0.7rem;
   color: var(--color-text-muted, #9ca3af);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -64,8 +74,8 @@
 
 .priorityBadge {
   flex-shrink: 0;
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--font-size-xs);
+  padding: 2px 6px;
+  font-size: 0.7rem;
   font-weight: var(--font-weight-semibold);
   line-height: 1;
   border-radius: var(--radius-sm);
@@ -76,16 +86,20 @@
 .priority0 {
   background-color: var(--color-priority-0);
 }
+
 .priority1 {
   background-color: var(--color-priority-1);
 }
+
 .priority2 {
   background-color: var(--color-priority-2);
   color: var(--color-text); /* Dark text for WCAG AA contrast */
 }
+
 .priority3 {
   background-color: var(--color-priority-3);
 }
+
 .priority4 {
   background-color: var(--color-priority-4);
 }
@@ -96,29 +110,27 @@
 
 /* P0: Critical - strong visual indicator with red border and subtle background */
 .issueCard[data-priority='0'] {
-  border-left: 3px solid var(--color-priority-0);
-  background-color: #fef2f2; /* Fallback for older browsers */
-  background-color: color-mix(in srgb, var(--color-priority-0) 5%, var(--color-bg));
+  border-left: 1px solid var(--color-border);
 }
 
 /* P1: High - orange border for urgency */
 .issueCard[data-priority='1'] {
-  border-left: 3px solid var(--color-priority-1);
+  border-left: 1px solid var(--color-border);
 }
 
 /* P2: Medium - subtle yellow border */
 .issueCard[data-priority='2'] {
-  border-left: 3px solid var(--color-priority-2);
+  border-left: 1px solid var(--color-border);
 }
 
 /* P3: Normal - very subtle border, de-emphasized */
 .issueCard[data-priority='3'] {
-  border-left: 2px solid var(--color-border);
+  border-left: 1px solid var(--color-border);
 }
 
 /* P4: Backlog - minimal visual weight */
 .issueCard[data-priority='4'] {
-  border-left: 2px solid var(--color-border-light);
+  border-left: 1px solid var(--color-border);
 }
 
 /* =================================
@@ -127,13 +139,13 @@
  * ================================= */
 
 .issueCard[data-column='in_progress'][data-priority] {
-  border-left: 3px solid var(--color-primary);
+  border-left: 1px solid var(--color-border);
 }
 
 .title {
   margin: 0;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font-size: 0.82rem;
+  font-weight: 600;
   color: var(--color-text, #111827);
   line-height: var(--line-height-normal);
   /* Truncate to 2 lines */
@@ -179,7 +191,7 @@
 
 .issueCard[data-in-backlog='true'] {
   opacity: 0.7;
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg);
   filter: saturate(0.5);
 }
 

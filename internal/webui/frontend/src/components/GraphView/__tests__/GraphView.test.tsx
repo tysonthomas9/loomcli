@@ -6,13 +6,19 @@
  * Unit tests for GraphView component.
  */
 
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import '@testing-library/jest-dom';
+
+import { useAutoLayout } from '@/hooks/useAutoLayout';
+import { useBlockedIssues } from '@/hooks/useBlockedIssues';
+import { useGraphData } from '@/hooks/useGraphData';
+import type { Issue, IssueNode, DependencyEdge, BlockedIssue } from '@/types';
 
 import { GraphView } from '../GraphView';
 import type { GraphViewProps } from '../GraphView';
-import type { Issue, IssueNode, DependencyEdge, BlockedIssue } from '@/types';
+
+// Import mocks after vi.mock calls
 
 // Mock the hooks
 vi.mock('@/hooks/useGraphData', () => ({
@@ -59,97 +65,107 @@ vi.mock('@xyflow/react', () => ({
 vi.mock('@/components', () => ({
   IssueNode: vi.fn(() => <div data-testid="issue-node" />),
   DependencyEdge: vi.fn(() => <div data-testid="dependency-edge" />),
-  GraphControls: vi.fn(({ highlightReady, onHighlightReadyChange, showClosed, onShowClosedChange, statusFilter, onStatusFilterChange, dependencyTypeFilter, onDependencyTypeFilterChange, className }) => (
-    <div
-      data-testid="graph-controls"
-      data-highlight-ready={highlightReady}
-      data-show-closed={showClosed}
-      data-status-filter={statusFilter}
-      data-dep-type-filter={dependencyTypeFilter ? JSON.stringify([...dependencyTypeFilter]) : ''}
-      className={className}
-    >
-      <input
-        type="checkbox"
-        data-testid="highlight-ready-checkbox"
-        checked={highlightReady}
-        onChange={(e) => onHighlightReadyChange(e.target.checked)}
-      />
-      <input
-        type="checkbox"
-        data-testid="show-closed-checkbox"
-        checked={showClosed}
-        onChange={(e) => onShowClosedChange(e.target.checked)}
-      />
-      <select
-        data-testid="status-filter-select"
-        value={statusFilter}
-        onChange={(e) => onStatusFilterChange(e.target.value)}
+  GraphControls: vi.fn(
+    ({
+      highlightReady,
+      onHighlightReadyChange,
+      showClosed,
+      onShowClosedChange,
+      statusFilter,
+      onStatusFilterChange,
+      dependencyTypeFilter,
+      onDependencyTypeFilterChange,
+      className,
+    }) => (
+      <div
+        data-testid="graph-controls"
+        data-highlight-ready={highlightReady}
+        data-show-closed={showClosed}
+        data-status-filter={statusFilter}
+        data-dep-type-filter={dependencyTypeFilter ? JSON.stringify([...dependencyTypeFilter]) : ''}
+        className={className}
       >
-        <option value="all">All</option>
-        <option value="open">Open</option>
-        <option value="in_progress">In Progress</option>
-        <option value="blocked">Blocked</option>
-        <option value="deferred">Deferred</option>
-        <option value="closed">Closed</option>
-      </select>
-      {onDependencyTypeFilterChange && dependencyTypeFilter && (
-        <div data-testid="dep-type-filter-group">
-          <input
-            type="checkbox"
-            data-testid="dep-type-blocking-checkbox"
-            checked={dependencyTypeFilter.has('blocking')}
-            onChange={(e) => {
-              const newFilter = new Set(dependencyTypeFilter);
-              if (e.target.checked) {
-                newFilter.add('blocking');
-              } else {
-                newFilter.delete('blocking');
-              }
-              onDependencyTypeFilterChange(newFilter);
-            }}
-          />
-          <input
-            type="checkbox"
-            data-testid="dep-type-parent-child-checkbox"
-            checked={dependencyTypeFilter.has('parent-child')}
-            onChange={(e) => {
-              const newFilter = new Set(dependencyTypeFilter);
-              if (e.target.checked) {
-                newFilter.add('parent-child');
-              } else {
-                newFilter.delete('parent-child');
-              }
-              onDependencyTypeFilterChange(newFilter);
-            }}
-          />
-          <input
-            type="checkbox"
-            data-testid="dep-type-non-blocking-checkbox"
-            checked={dependencyTypeFilter.has('non-blocking')}
-            onChange={(e) => {
-              const newFilter = new Set(dependencyTypeFilter);
-              if (e.target.checked) {
-                newFilter.add('non-blocking');
-              } else {
-                newFilter.delete('non-blocking');
-              }
-              onDependencyTypeFilterChange(newFilter);
-            }}
-          />
-        </div>
-      )}
-    </div>
-  )),
+        <input
+          type="checkbox"
+          data-testid="highlight-ready-checkbox"
+          checked={highlightReady}
+          onChange={(e) => onHighlightReadyChange(e.target.checked)}
+        />
+        <input
+          type="checkbox"
+          data-testid="show-closed-checkbox"
+          checked={showClosed}
+          onChange={(e) => onShowClosedChange(e.target.checked)}
+        />
+        <select
+          data-testid="status-filter-select"
+          value={statusFilter}
+          onChange={(e) => onStatusFilterChange(e.target.value)}
+        >
+          <option value="all">All</option>
+          <option value="open">Open</option>
+          <option value="in_progress">In Progress</option>
+          <option value="blocked">Blocked</option>
+          <option value="deferred">Deferred</option>
+          <option value="closed">Closed</option>
+        </select>
+        {onDependencyTypeFilterChange && dependencyTypeFilter && (
+          <div data-testid="dep-type-filter-group">
+            <input
+              type="checkbox"
+              data-testid="dep-type-blocking-checkbox"
+              checked={dependencyTypeFilter.has('blocking')}
+              onChange={(e) => {
+                const newFilter = new Set(dependencyTypeFilter);
+                if (e.target.checked) {
+                  newFilter.add('blocking');
+                } else {
+                  newFilter.delete('blocking');
+                }
+                onDependencyTypeFilterChange(newFilter);
+              }}
+            />
+            <input
+              type="checkbox"
+              data-testid="dep-type-parent-child-checkbox"
+              checked={dependencyTypeFilter.has('parent-child')}
+              onChange={(e) => {
+                const newFilter = new Set(dependencyTypeFilter);
+                if (e.target.checked) {
+                  newFilter.add('parent-child');
+                } else {
+                  newFilter.delete('parent-child');
+                }
+                onDependencyTypeFilterChange(newFilter);
+              }}
+            />
+            <input
+              type="checkbox"
+              data-testid="dep-type-non-blocking-checkbox"
+              checked={dependencyTypeFilter.has('non-blocking')}
+              onChange={(e) => {
+                const newFilter = new Set(dependencyTypeFilter);
+                if (e.target.checked) {
+                  newFilter.add('non-blocking');
+                } else {
+                  newFilter.delete('non-blocking');
+                }
+                onDependencyTypeFilterChange(newFilter);
+              }}
+            />
+          </div>
+        )}
+      </div>
+    )
+  ),
   GraphLegend: vi.fn(({ collapsed, onToggle, className }) => (
-    <div
-      data-testid="graph-legend"
-      data-collapsed={collapsed}
-      className={className}
-    >
-      <button onClick={onToggle} data-testid="legend-toggle">Legend</button>
+    <div data-testid="graph-legend" data-collapsed={collapsed} className={className}>
+      <button onClick={onToggle} data-testid="legend-toggle">
+        Legend
+      </button>
     </div>
   )),
-  NodeTooltip: vi.fn(({ issue, position }) => (
+  NodeTooltip: vi.fn(({ issue, position }) =>
     issue && position ? (
       <div
         data-testid="node-tooltip"
@@ -158,13 +174,8 @@ vi.mock('@/components', () => ({
         data-position-y={position.y}
       />
     ) : null
-  )),
+  ),
 }));
-
-// Import mocks after vi.mock calls
-import { useGraphData } from '@/hooks/useGraphData';
-import { useAutoLayout } from '@/hooks/useAutoLayout';
-import { useBlockedIssues } from '@/hooks/useBlockedIssues';
 
 /**
  * Create a minimal test issue with required fields.
@@ -243,11 +254,13 @@ function createTestProps(overrides: Partial<GraphViewProps> = {}): GraphViewProp
 /**
  * Setup mocks with default return values.
  */
-function setupMocks(options: {
-  nodes?: IssueNode[];
-  edges?: DependencyEdge[];
-  blockedIssues?: BlockedIssue[] | null;
-} = {}) {
+function setupMocks(
+  options: {
+    nodes?: IssueNode[];
+    edges?: DependencyEdge[];
+    blockedIssues?: BlockedIssue[] | null;
+  } = {}
+) {
   const { nodes = [], edges = [], blockedIssues = null } = options;
 
   (useGraphData as Mock).mockReturnValue({
@@ -335,9 +348,7 @@ describe('GraphView', () => {
     });
 
     it('passes issues to useGraphData hook', () => {
-      const issues = [
-        createTestIssue({ id: 'issue-1', title: 'First Issue' }),
-      ];
+      const issues = [createTestIssue({ id: 'issue-1', title: 'First Issue' })];
 
       const props = createTestProps({ issues });
       render(<GraphView {...props} />);
@@ -432,7 +443,11 @@ describe('GraphView', () => {
       const issues = [
         createTestIssue({ id: 'issue-open', title: 'Open Issue', status: 'open' }),
         createTestIssue({ id: 'issue-closed', title: 'Closed Issue', status: 'closed' }),
-        createTestIssue({ id: 'issue-progress', title: 'In Progress Issue', status: 'in_progress' }),
+        createTestIssue({
+          id: 'issue-progress',
+          title: 'In Progress Issue',
+          status: 'in_progress',
+        }),
       ];
       const nodes = createTestNodes(issues.filter((i) => i.status !== 'closed'));
 
@@ -480,9 +495,7 @@ describe('GraphView', () => {
 
       // Initially showClosed is true - verify first call includes all issues
       expect(useGraphData).toHaveBeenLastCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({ id: 'issue-closed' }),
-        ]),
+        expect.arrayContaining([expect.objectContaining({ id: 'issue-closed' })]),
         expect.any(Object)
       );
 
@@ -494,7 +507,9 @@ describe('GraphView', () => {
       fireEvent.click(checkbox);
 
       // After toggle, closed issues should be filtered out
-      const lastCall = (useGraphData as Mock).mock.calls[(useGraphData as Mock).mock.calls.length - 1];
+      const lastCall = (useGraphData as Mock).mock.calls[
+        (useGraphData as Mock).mock.calls.length - 1
+      ];
       const closedIssueInLastCall = lastCall[0].find((issue: Issue) => issue.id === 'issue-closed');
       expect(closedIssueInLastCall).toBeUndefined();
     });
@@ -900,9 +915,7 @@ describe('GraphView', () => {
 
       // With showClosed false, only non-closed issues should be passed
       expect(useGraphData).toHaveBeenCalledWith(
-        expect.not.arrayContaining([
-          expect.objectContaining({ id: 'closed-1' }),
-        ]),
+        expect.not.arrayContaining([expect.objectContaining({ id: 'closed-1' })]),
         expect.any(Object)
       );
 
@@ -994,7 +1007,9 @@ describe('GraphView', () => {
 
       // Should re-render with filtered issues
       expect(useGraphData).toHaveBeenCalled();
-      const lastCallArgs = (useGraphData as Mock).mock.calls[(useGraphData as Mock).mock.calls.length - 1][0];
+      const lastCallArgs = (useGraphData as Mock).mock.calls[
+        (useGraphData as Mock).mock.calls.length - 1
+      ][0];
       expect(lastCallArgs).toHaveLength(1);
       expect(lastCallArgs[0].id).toBe('open-1');
     });
@@ -1028,10 +1043,10 @@ describe('GraphView', () => {
 
       // The mock returns nodes with isClosed set appropriately
       // Verify the closed node has isClosed: true in its data
-      const closedNode = nodes.find(n => n.id === 'node-closed-issue');
+      const closedNode = nodes.find((n) => n.id === 'node-closed-issue');
       expect(closedNode?.data.isClosed).toBe(true);
 
-      const openNode = nodes.find(n => n.id === 'node-open-issue');
+      const openNode = nodes.find((n) => n.id === 'node-open-issue');
       expect(openNode?.data.isClosed).toBe(false);
     });
 
@@ -1239,7 +1254,10 @@ describe('GraphView', () => {
     });
 
     it('ignores invalid dependency type groups in localStorage', () => {
-      localStorage.setItem('graph-dep-type-filter', JSON.stringify(['blocking', 'invalid-type', 'parent-child']));
+      localStorage.setItem(
+        'graph-dep-type-filter',
+        JSON.stringify(['blocking', 'invalid-type', 'parent-child'])
+      );
 
       const props = createTestProps();
       render(<GraphView {...props} />);
@@ -1279,7 +1297,11 @@ describe('GraphView', () => {
       expect(useGraphData).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          includeDependencyTypes: expect.arrayContaining(['blocks', 'conditional-blocks', 'waits-for']),
+          includeDependencyTypes: expect.arrayContaining([
+            'blocks',
+            'conditional-blocks',
+            'waits-for',
+          ]),
         })
       );
     });
@@ -1307,7 +1329,11 @@ describe('GraphView', () => {
       expect(useGraphData).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          includeDependencyTypes: expect.arrayContaining(['related', 'discovered-from', 'replies-to']),
+          includeDependencyTypes: expect.arrayContaining([
+            'related',
+            'discovered-from',
+            'replies-to',
+          ]),
         })
       );
     });
@@ -1411,7 +1437,10 @@ describe('GraphView', () => {
     });
 
     it('checkbox reflects correct checked state for all groups selected', () => {
-      localStorage.setItem('graph-dep-type-filter', JSON.stringify(['blocking', 'parent-child', 'non-blocking']));
+      localStorage.setItem(
+        'graph-dep-type-filter',
+        JSON.stringify(['blocking', 'parent-child', 'non-blocking'])
+      );
 
       const props = createTestProps();
       render(<GraphView {...props} />);

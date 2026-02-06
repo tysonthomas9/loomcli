@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -39,11 +38,47 @@ type IssuesResponse struct {
 	Code    string          `json:"code,omitempty"`
 }
 
+// ReadyIssueWithParent extends Issue with parent info for /api/ready.
+// This enables epic swimlane grouping in the Kanban view.
+type ReadyIssueWithParent struct {
+	*types.Issue
+	Parent      *string `json:"parent,omitempty"`       // Parent issue ID (null for root-level issues)
+	ParentTitle *string `json:"parent_title,omitempty"` // Parent issue title for display
+}
+
 // ReadyResponse wraps the ready issues data for JSON response.
 type ReadyResponse struct {
-	Success bool           `json:"success"`
-	Data    []*types.Issue `json:"data,omitempty"`
-	Error   string         `json:"error,omitempty"`
+	Success bool                    `json:"success"`
+	Data    []*ReadyIssueWithParent `json:"data,omitempty"`
+	Error   string                  `json:"error,omitempty"`
+}
+
+// readyClient is an internal interface for testing ready issue operations.
+// The production code uses *rpc.Client which implements this interface.
+type readyClient interface {
+	Ready(args *rpc.ReadyArgs) (*rpc.Response, error)
+	GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error)
+}
+
+// readyConnectionGetter is an internal interface for testing ready handler pool operations.
+type readyConnectionGetter interface {
+	Get(ctx context.Context) (readyClient, error)
+	Put(client readyClient)
+}
+
+// readyPoolAdapter wraps daemon.Pool to implement readyConnectionGetter.
+type readyPoolAdapter struct {
+	pool daemon.Pool
+}
+
+func (p *readyPoolAdapter) Get(ctx context.Context) (readyClient, error) {
+	return p.pool.Get(ctx)
+}
+
+func (p *readyPoolAdapter) Put(client readyClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Put(c)
+	}
 }
 
 // CloseRequest represents the JSON body for the close endpoint.
@@ -250,10 +285,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			status := http.StatusServiceUnavailable
 			code := "DAEMON_UNAVAILABLE"
 			message := "daemon unavailable"
-			if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
-				code = "CIRCUIT_OPEN"
-				message = "service temporarily unavailable: circuit breaker open"
-			} else if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 				code = "CONNECTION_TIMEOUT"
 				message = "timeout connecting to daemon"
@@ -338,6 +370,14 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 
 // handleReady returns issues ready to work on (open/in_progress with no blockers).
 func handleReady(pool daemon.Pool) http.HandlerFunc {
+	if pool == nil {
+		return handleReadyWithPool(nil)
+	}
+	return handleReadyWithPool(&readyPoolAdapter{pool: pool})
+}
+
+// handleReadyWithPool is the internal implementation that accepts an interface for testing.
+func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -423,10 +463,49 @@ func handleReady(pool daemon.Pool) http.HandlerFunc {
 			return
 		}
 
+		// If no issues, return empty response
+		if len(issues) == 0 {
+			w.WriteHeader(http.StatusOK)
+			if err := json.NewEncoder(w).Encode(ReadyResponse{
+				Success: true,
+				Data:    []*ReadyIssueWithParent{},
+			}); err != nil {
+				log.Printf("Failed to encode ready response: %v", err)
+			}
+			return
+		}
+
+		// Extract issue IDs for parent lookup
+		issueIDs := make([]string, len(issues))
+		for i, issue := range issues {
+			issueIDs[i] = issue.ID
+		}
+
+		// Get parent info for all issues
+		parentResp, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs})
+		if err != nil {
+			// Non-fatal: log and continue without parent info
+			log.Printf("Failed to get parent IDs for ready issues: %v", err)
+			parentResp = &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
+		}
+
+		// Build response with parent info
+		issuesWithParent := make([]*ReadyIssueWithParent, len(issues))
+		for i, issue := range issues {
+			iwp := &ReadyIssueWithParent{
+				Issue: issue,
+			}
+			if parentInfo, ok := parentResp.Parents[issue.ID]; ok {
+				iwp.Parent = &parentInfo.ParentID
+				iwp.ParentTitle = &parentInfo.ParentTitle
+			}
+			issuesWithParent[i] = iwp
+		}
+
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(ReadyResponse{
 			Success: true,
-			Data:    issues,
+			Data:    issuesWithParent,
 		}); err != nil {
 			log.Printf("Failed to encode ready response: %v", err)
 		}
@@ -803,7 +882,7 @@ func parseListParams(r *http.Request) *rpc.ListArgs {
 
 	// Labels (comma-separated)
 	if v := query.Get("labels"); v != "" {
-		args.Labels = splitTrimmed(v)
+		args.Labels = splitAndTrim(v)
 	}
 
 	// Limit (capped at MaxListLimit to prevent DoS)
@@ -943,19 +1022,6 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 	return args, nil
 }
 
-// splitTrimmed splits a comma-separated string and trims whitespace.
-func splitTrimmed(s string) []string {
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
-}
-
 // splitAndTrim splits a comma-separated string and trims whitespace from each element.
 func splitAndTrim(s string) []string {
 	if s == "" {
@@ -1052,9 +1118,23 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			return
 		}
 
+		// Limit request body size to prevent DoS attacks
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+
 		// Parse request body
 		var req PatchIssueRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				if err := json.NewEncoder(w).Encode(PatchIssueResponse{
+					Success: false,
+					Error:   "request body too large (max 1MB)",
+				}); err != nil {
+					log.Printf("Failed to encode patch response: %v", err)
+				}
+				return
+			}
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
 				Success: false,
@@ -1324,10 +1404,7 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 			status := http.StatusServiceUnavailable
 			code := "DAEMON_UNAVAILABLE"
 			message := "daemon unavailable"
-			if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
-				code = "CIRCUIT_OPEN"
-				message = "service temporarily unavailable: circuit breaker open"
-			} else if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 				code = "CONNECTION_TIMEOUT"
 				message = "timeout connecting to daemon"
@@ -1383,10 +1460,18 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 			return
 		}
 
+		// Limit request body size to prevent DoS attacks
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+
 		// Parse optional JSON body
 		var req CloseRequest
 		if r.Body != nil && r.ContentLength > 0 {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				var maxBytesErr *http.MaxBytesError
+				if errors.As(err, &maxBytesErr) {
+					writeErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
+					return
+				}
 				writeErrorResponse(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 				return
 			}
@@ -1535,9 +1620,23 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 			return
 		}
 
+		// Limit request body size to prevent DoS attacks
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+
 		// Parse JSON body
 		var req AddDependencyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				if err := json.NewEncoder(w).Encode(DependencyResponse{
+					Success: false,
+					Error:   "request body too large (max 1MB)",
+				}); err != nil {
+					log.Printf("Failed to encode add dependency response: %v", err)
+				}
+				return
+			}
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(DependencyResponse{
 				Success: false,

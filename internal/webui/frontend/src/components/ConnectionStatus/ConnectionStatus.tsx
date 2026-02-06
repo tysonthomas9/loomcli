@@ -4,6 +4,7 @@
  */
 
 import type { ConnectionState } from '@/api/sse';
+
 import styles from './ConnectionStatus.module.css';
 
 /**
@@ -16,6 +17,8 @@ export interface ConnectionStatusProps {
   className?: string;
   /** Display variant */
   variant?: 'badge' | 'inline';
+  /** Compact mode for tight UI (default: false) */
+  compact?: boolean;
   /** Show status text (default: true) */
   showText?: boolean;
   /** Current reconnect attempt count (from useSSE) */
@@ -55,6 +58,7 @@ export function ConnectionStatus({
   state,
   className,
   variant = 'inline',
+  compact = false,
   showText = true,
   reconnectAttempts,
   onRetry,
@@ -82,6 +86,7 @@ export function ConnectionStatus({
       aria-label={`Connection status: ${statusText}`}
       data-state={state}
       data-variant={variant}
+      data-compact={compact ? 'true' : undefined}
     >
       <span className={styles.indicator} aria-hidden="true" />
       {showText && <span className={styles.text}>{statusText}</span>}

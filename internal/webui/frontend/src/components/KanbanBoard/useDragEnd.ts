@@ -5,6 +5,7 @@
  */
 
 import type { DragEndEvent } from '@dnd-kit/core';
+
 import { updateIssue } from '@/api';
 import type { Issue, Status } from '@/types';
 

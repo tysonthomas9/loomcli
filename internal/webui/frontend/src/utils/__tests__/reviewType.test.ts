@@ -9,7 +9,6 @@
 import { describe, it, expect } from 'vitest';
 
 import { getReviewType } from '../reviewType';
-import type { ReviewType } from '../reviewType';
 
 describe('getReviewType', () => {
   describe('plan review', () => {

@@ -4,10 +4,10 @@
  */
 
 import type { ISODateString } from './common';
+import type { MutationType, MutationPayload } from '../api/sse';
 
 // Re-export mutation types from SSE for convenient imports
 export type { MutationType, MutationPayload } from '../api/sse';
-import type { MutationType, MutationPayload } from '../api/sse';
 
 /**
  * Mutation type constants.

@@ -4,6 +4,7 @@
  */
 
 import { useMemo } from 'react';
+
 import type { Issue, Status, Priority, IssueType } from '@/types';
 
 /**

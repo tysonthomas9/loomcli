@@ -4,10 +4,10 @@
  * Only included in development builds.
  */
 
-import type { IssueDetails, Priority } from '@/types';
-import type { Status } from '@/types/status';
 import { IssueDetailPanel, ToastContainer } from '@/components';
 import { useToast } from '@/hooks';
+import type { IssueDetails, Priority } from '@/types';
+import type { Status } from '@/types/status';
 
 /**
  * Valid priority values.
@@ -82,7 +82,15 @@ export function ErrorTriggerFixture(): JSX.Element {
   }
 
   return (
-    <div data-testid="error-boundary-content" style={{ padding: '2rem', background: 'var(--bg-primary, #1a1a1a)', color: 'var(--text-primary, #fff)', minHeight: '100vh' }}>
+    <div
+      data-testid="error-boundary-content"
+      style={{
+        padding: '2rem',
+        background: 'var(--bg-primary, #1a1a1a)',
+        color: 'var(--text-primary, #fff)',
+        minHeight: '100vh',
+      }}
+    >
       <h1>Error Boundary Test Fixture</h1>
       <p>This content renders when no error is thrown.</p>
     </div>
@@ -104,14 +112,12 @@ export function IssueDetailPanelFixture(): JSX.Element {
         <h1>IssueDetailPanel Test Fixture</h1>
         <p>Missing or invalid URL parameters.</p>
         <p>
-          Required: <code>id</code>, <code>title</code>, <code>status</code>,{' '}
-          <code>priority</code> (0-4)
+          Required: <code>id</code>, <code>title</code>, <code>status</code>, <code>priority</code>{' '}
+          (0-4)
         </p>
         <p>
           Example:{' '}
-          <code>
-            /test/issue-detail-panel?id=test-1&title=Test%20Issue&status=open&priority=2
-          </code>
+          <code>/test/issue-detail-panel?id=test-1&title=Test%20Issue&status=open&priority=2</code>
         </p>
       </div>
     );
@@ -119,11 +125,7 @@ export function IssueDetailPanelFixture(): JSX.Element {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #1a1a1a)' }}>
-      <IssueDetailPanel
-        isOpen={true}
-        issue={issue}
-        onClose={() => window.history.back()}
-      />
+      <IssueDetailPanel isOpen={true} issue={issue} onClose={() => window.history.back()} />
     </div>
   );
 }
@@ -198,7 +200,9 @@ export function ToastTestFixture(): JSX.Element {
 
         <button
           data-testid="trigger-persistent-toast"
-          onClick={() => showToast('Persistent toast (no auto-dismiss)', { type: 'info', duration: 0 })}
+          onClick={() =>
+            showToast('Persistent toast (no auto-dismiss)', { type: 'info', duration: 0 })
+          }
           style={{ padding: '8px 16px', cursor: 'pointer' }}
         >
           Persistent Toast

@@ -31,3 +31,6 @@ export type {
 // Agent API functions (loom server)
 export { fetchAgents, checkLoomHealth, fetchStatus, fetchTasks } from './agents';
 export type { FetchStatusResult } from './agents';
+
+// Log streaming API functions
+export { getTaskLogPhases, getAgentLogStreamUrl, getTaskLogStreamUrl } from './logs';

@@ -4,7 +4,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { fetchStatus, fetchTasks } from '@/api';
+
+import { fetchAgents, fetchStatus, fetchTasks } from '@/api';
 import type {
   LoomAgentStatus,
   LoomTaskSummary,
@@ -123,6 +124,25 @@ const DEFAULT_TASK_LISTS: LoomTaskLists = {
 const INITIAL_RETRY_DELAY = 5; // seconds
 const MAX_RETRY_DELAY = 60; // seconds
 const BACKOFF_MULTIPLIER = 2;
+const LOOM_FETCH_TIMEOUT_MS = 15000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timeout`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
   const { pollInterval = 5000, enabled = true } = options ?? {};
@@ -190,17 +210,15 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
     clearRetryTimers();
 
     try {
-      // Fetch status and task lists in parallel
-      const [statusResult, tasksResult] = await Promise.all([fetchStatus(), fetchTasks()]);
+      const agentsResult = await withTimeout(
+        fetchAgents(),
+        LOOM_FETCH_TIMEOUT_MS,
+        'Loom agents fetch'
+      );
 
       // Only update state if still mounted
       if (mountedRef.current) {
-        setAgents(statusResult.agents);
-        setTasks(statusResult.tasks);
-        setTaskLists(tasksResult);
-        setAgentTasks(statusResult.agentTasks);
-        setSync(statusResult.sync);
-        setStats(statusResult.stats);
+        setAgents(agentsResult);
         // Connected if we successfully got a response (no error thrown)
         setIsConnected(true);
         setWasEverConnected(true);
@@ -209,6 +227,45 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
         setError(null);
         setLastUpdated(new Date());
       }
+
+      void (async () => {
+        try {
+          const statusResult = await withTimeout(
+            fetchStatus(),
+            LOOM_FETCH_TIMEOUT_MS,
+            'Loom status fetch'
+          );
+          if (mountedRef.current) {
+            setTasks(statusResult.tasks);
+            setAgentTasks(statusResult.agentTasks);
+            setSync(statusResult.sync);
+            setStats(statusResult.stats);
+          }
+        } catch (statusError) {
+          console.warn(
+            'Loom status fetch failed:',
+            statusError instanceof Error ? statusError.message : String(statusError)
+          );
+        }
+      })();
+
+      void (async () => {
+        try {
+          const tasksResult = await withTimeout(
+            fetchTasks(),
+            LOOM_FETCH_TIMEOUT_MS,
+            'Loom tasks fetch'
+          );
+          if (mountedRef.current) {
+            setTaskLists(tasksResult);
+          }
+        } catch (taskError) {
+          console.warn(
+            'Loom tasks fetch failed:',
+            taskError instanceof Error ? taskError.message : String(taskError)
+          );
+        }
+      })();
     } catch (err) {
       // Only update state if still mounted
       if (mountedRef.current) {

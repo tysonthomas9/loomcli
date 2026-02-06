@@ -2,12 +2,13 @@
  * @vitest-environment jsdom
  */
 
+import { renderHook, act, render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
-import { render, screen, fireEvent } from '@testing-library/react';
+
 import '@testing-library/jest-dom';
-import { useBulkPriority, PRIORITY_OPTIONS } from './useBulkPriority';
 import * as api from '@/api';
+
+import { useBulkPriority, PRIORITY_OPTIONS } from './useBulkPriority';
 
 // Mock the API module
 vi.mock('@/api', () => ({

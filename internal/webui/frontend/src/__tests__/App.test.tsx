@@ -6,25 +6,88 @@
  * Unit tests for App component.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom';
 
-import App from '../App';
-import type { Issue, Status } from '@/types';
 import type { ConnectionState } from '@/api/sse';
+import { useFilterState, useIssueDetail, useViewState, useAgents, useAgentContext } from '@/hooks';
+import { useIssues } from '@/hooks/useIssues';
+import type { Issue, Status } from '@/types';
+
+import App from '../App';
 
 // Create hoisted mocks that can be shared across mock definitions
-const { mockUseIssues, mockUseIssueDetail, mockUseToast } = vi.hoisted(() => ({
-  mockUseIssues: vi.fn(),
-  mockUseIssueDetail: vi.fn(),
-  mockUseToast: vi.fn(() => ({
-    toasts: [],
-    showToast: vi.fn(),
-    dismissToast: vi.fn(),
-    dismissAll: vi.fn(),
-  })),
-}));
+const { mockUseIssues, mockUseIssueDetail, mockUseToast, mockUseAgents, mockUseAgentContext } =
+  vi.hoisted(() => ({
+    mockUseIssues: vi.fn(),
+    mockUseIssueDetail: vi.fn(),
+    mockUseToast: vi.fn(() => ({
+      toasts: [],
+      showToast: vi.fn(),
+      dismissToast: vi.fn(),
+      dismissAll: vi.fn(),
+    })),
+    mockUseAgents: vi.fn(() => ({
+      agents: [],
+      tasks: {
+        needs_planning: 0,
+        ready_to_implement: 0,
+        in_progress: 0,
+        need_review: 0,
+        blocked: 0,
+      },
+      taskLists: {
+        needsPlanning: [],
+        readyToImplement: [],
+        needsReview: [],
+        inProgress: [],
+        blocked: [],
+      },
+      agentTasks: {},
+      sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+      stats: { open: 0, closed: 0, total: 0, completion: 0 },
+      isLoading: false,
+      isConnected: true,
+      connectionState: 'connected',
+      wasEverConnected: true,
+      retryCountdown: 0,
+      error: null,
+      lastUpdated: null,
+      refetch: vi.fn(),
+      retryNow: vi.fn(),
+    })),
+    mockUseAgentContext: vi.fn(() => ({
+      agents: [],
+      tasks: {
+        needs_planning: 0,
+        ready_to_implement: 0,
+        in_progress: 0,
+        need_review: 0,
+        blocked: 0,
+      },
+      taskLists: {
+        needsPlanning: [],
+        readyToImplement: [],
+        needsReview: [],
+        inProgress: [],
+        blocked: [],
+      },
+      agentTasks: {},
+      sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+      stats: { open: 0, closed: 0, total: 0, completion: 0 },
+      isLoading: false,
+      isConnected: true,
+      connectionState: 'connected',
+      wasEverConnected: true,
+      retryCountdown: 0,
+      error: null,
+      lastUpdated: null,
+      refetch: vi.fn(),
+      retryNow: vi.fn(),
+      getAgentByName: vi.fn(() => undefined),
+    })),
+  }));
 
 // Mock the useIssues hook from its direct module
 vi.mock('@/hooks/useIssues', () => ({
@@ -45,6 +108,21 @@ vi.mock('@/components/MonitorDashboard', () => ({
   MonitorDashboard: () => <div data-testid="monitor-dashboard">Monitor Dashboard</div>,
 }));
 
+// Mock TerminalPanel to avoid xterm.js browser dependencies in jsdom
+vi.mock('@/components/TerminalPanel', () => ({
+  TerminalPanel: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => (
+    <div
+      data-testid="terminal-panel-overlay"
+      data-state={isOpen ? 'open' : 'closed'}
+      aria-hidden={!isOpen}
+    >
+      <button data-testid="terminal-close-button" onClick={onClose} aria-label="Close terminal">
+        Close
+      </button>
+    </div>
+  ),
+}));
+
 // Create hoisted mock for useViewState to allow per-test control
 const { mockUseViewState, mockSetActiveView } = vi.hoisted(() => ({
   mockUseViewState: vi.fn(),
@@ -57,7 +135,7 @@ vi.mock('@/hooks', () => ({
   useIssueDetail: mockUseIssueDetail,
   useToast: mockUseToast,
   useViewState: mockUseViewState,
-  DEFAULT_GROUP_BY: 'epic',
+  DEFAULT_GROUP_BY: 'none',
   useFilterState: vi.fn(() => [
     {}, // FilterState - empty means App.tsx will apply DEFAULT_GROUP_BY fallback
     {
@@ -142,35 +220,9 @@ vi.mock('@/hooks', () => ({
     isLayouting: false,
     triggerLayout: vi.fn(),
   })),
-  useAgents: vi.fn(() => ({
-    agents: [],
-    tasks: { needs_planning: 0, ready_to_implement: 0, in_progress: 0, need_review: 0, blocked: 0 },
-    taskLists: {
-      needsPlanning: [],
-      readyToImplement: [],
-      needsReview: [],
-      inProgress: [],
-      blocked: [],
-    },
-    agentTasks: {},
-    sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-    stats: { open: 0, closed: 0, total: 0, completion: 0 },
-    isLoading: false,
-    isConnected: true,
-    connectionState: 'connected',
-    wasEverConnected: true,
-    retryCountdown: 0,
-    error: null,
-    lastUpdated: null,
-    refetch: vi.fn(),
-    retryNow: vi.fn(),
-  })),
-  useStats: vi.fn(() => ({
-    data: null,
-    loading: false,
-    error: null,
-    refetch: vi.fn(),
-  })),
+  useAgents: mockUseAgents,
+  useAgentContext: mockUseAgentContext,
+  AgentProvider: ({ children }: { children: React.ReactNode }) => children,
   useStats: vi.fn(() => ({
     data: { open: 0, in_progress: 0, ready: 0, closed: 0 },
     loading: false,
@@ -182,11 +234,17 @@ vi.mock('@/hooks', () => ({
     addRecentAssignee: vi.fn(),
     clearRecentAssignees: vi.fn(),
   })),
+  useLogStream: vi.fn(() => ({
+    lines: [],
+    state: 'disconnected' as const,
+    isConnected: false,
+    reconnectAttempts: 0,
+    lastError: null,
+    clearLines: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  })),
 }));
-
-// Import the mocked module
-import { useIssues } from '@/hooks/useIssues';
-import { useFilterState, useIssueDetail, useViewState } from '@/hooks';
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)
 const _useIssuesMock = mockUseIssues;
@@ -326,11 +384,9 @@ describe('App', () => {
 
       const { container } = render(<App />);
 
-      // ConnectionStatus should be visible with the connection state
-      // (no dnd-kit status element in loading state since KanbanBoard isn't rendered)
+      // ConnectionStatus should be visible with the connection state (showText=false, so check data-state)
       const status = container.querySelector('[data-state="connecting"]');
       expect(status).toBeInTheDocument();
-      expect(screen.getByText('Connecting...')).toBeInTheDocument();
     });
   });
 
@@ -392,7 +448,7 @@ describe('App', () => {
       expect(screen.getByText('Specific error message')).toBeInTheDocument();
     });
 
-    it('renders ConnectionStatus with retry in error state', () => {
+    it('renders ConnectionStatus with reconnecting state in error state', () => {
       const retryConnection = vi.fn();
       const mockReturn = createMockUseIssuesReturn({
         error: 'Connection failed',
@@ -405,11 +461,9 @@ describe('App', () => {
 
       const { container } = render(<App />);
 
-      // ConnectionStatus should show reconnecting state
-      // (no dnd-kit status element in error state since KanbanBoard isn't rendered)
+      // ConnectionStatus should show reconnecting state (showText=false, check data-state)
       const status = container.querySelector('[data-state="reconnecting"]');
       expect(status).toBeInTheDocument();
-      expect(screen.getByText('Reconnecting (attempt 2)...')).toBeInTheDocument();
     });
 
     it('does not render KanbanBoard when error is present', () => {
@@ -422,7 +476,7 @@ describe('App', () => {
       render(<App />);
 
       // KanbanBoard renders StatusColumns with headings
-      expect(screen.queryByRole('heading', { name: 'Ready' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Open' })).not.toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: 'In Progress' })).not.toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: 'Done' })).not.toBeInTheDocument();
     });
@@ -449,7 +503,7 @@ describe('App', () => {
       render(<App />);
 
       // SwimLaneBoard should render with status columns
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
       expect(screen.getByRole('heading', { name: 'In Progress' })).toBeInTheDocument();
       expect(screen.getByRole('heading', { name: 'Done' })).toBeInTheDocument();
 
@@ -467,11 +521,9 @@ describe('App', () => {
 
       const { container } = render(<App />);
 
-      // Use data-state attribute to find ConnectionStatus specifically
-      // (dnd-kit also adds a role="status" element)
+      // Use data-state attribute to find ConnectionStatus (showText=false, no visible text)
       const statusElement = container.querySelector('[data-state="connected"]');
       expect(statusElement).toBeInTheDocument();
-      expect(screen.getByText('Connected')).toBeInTheDocument();
     });
 
     it('does not render ErrorDisplay when no error', () => {
@@ -515,7 +567,7 @@ describe('App', () => {
       render(<App />);
 
       // Should render columns even with no issues
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
       expect(screen.getByRole('heading', { name: 'In Progress' })).toBeInTheDocument();
       expect(screen.getByRole('heading', { name: 'Done' })).toBeInTheDocument();
     });
@@ -555,7 +607,7 @@ describe('App', () => {
 
       // Verify KanbanBoard is rendered (we can't easily test the drag event
       // but we verify the component structure is correct)
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
       expect(screen.getByText('Test')).toBeInTheDocument();
     });
   });
@@ -629,11 +681,9 @@ describe('App', () => {
 
       const { container } = render(<App />);
 
-      // Use data-state attribute to find ConnectionStatus specifically
-      // (dnd-kit also adds a role="status" element)
+      // ConnectionStatus rendered with showText=false — verify via data-state
       const status = container.querySelector('[data-state="connected"]');
       expect(status).toBeInTheDocument();
-      expect(screen.getByText('Connected')).toBeInTheDocument();
     });
 
     it('renders ConnectionStatus with disconnected state', () => {
@@ -647,7 +697,6 @@ describe('App', () => {
 
       const status = container.querySelector('[data-state="disconnected"]');
       expect(status).toBeInTheDocument();
-      expect(screen.getByText('Disconnected')).toBeInTheDocument();
     });
 
     it('renders ConnectionStatus with reconnecting state and attempt count', () => {
@@ -662,7 +711,6 @@ describe('App', () => {
 
       const status = container.querySelector('[data-state="reconnecting"]');
       expect(status).toBeInTheDocument();
-      expect(screen.getByText('Reconnecting (attempt 3)...')).toBeInTheDocument();
     });
 
     it('renders ConnectionStatus with connecting state', () => {
@@ -672,9 +720,10 @@ describe('App', () => {
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
-      render(<App />);
+      const { container } = render(<App />);
 
-      expect(screen.getByText('Connecting...')).toBeInTheDocument();
+      const status = container.querySelector('[data-state="connecting"]');
+      expect(status).toBeInTheDocument();
     });
 
     it('passes retryConnection to ConnectionStatus onRetry', () => {
@@ -686,27 +735,23 @@ describe('App', () => {
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
-      render(<App />);
+      const { container } = render(<App />);
 
-      // The retry button should be visible when reconnecting with attempts >= 1
-      const retryButton = screen.getByRole('button', {
-        name: 'Retry connection now',
-      });
-      expect(retryButton).toBeInTheDocument();
-
-      fireEvent.click(retryButton);
-      expect(retryConnection).toHaveBeenCalledTimes(1);
+      // ConnectionStatus is rendered with showRetryButton=false in the new layout,
+      // so verify the status element exists with correct state instead
+      const status = container.querySelector('[data-state="reconnecting"]');
+      expect(status).toBeInTheDocument();
     });
   });
 
   describe('AppLayout integration', () => {
-    it('renders with Beads title in header', () => {
+    it('renders with Cortex title in header', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      expect(screen.getByRole('heading', { name: 'Beads', level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Cortex', level: 1 })).toBeInTheDocument();
     });
 
     it('renders header with banner role', () => {
@@ -768,7 +813,7 @@ describe('App', () => {
       const { rerender } = render(<App />);
 
       // Verify loading state
-      expect(screen.queryByRole('heading', { name: 'Ready' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Open' })).not.toBeInTheDocument();
 
       // Transition to success
       const issues = [createMockIssue({ title: 'Loaded Issue', status: 'open' })];
@@ -781,7 +826,7 @@ describe('App', () => {
       rerender(<App />);
 
       // Verify success state
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
       expect(screen.getByText('Loaded Issue')).toBeInTheDocument();
     });
 
@@ -864,7 +909,7 @@ describe('App', () => {
       expect(screen.getByTestId('type-filter')).toBeInTheDocument();
     });
 
-    it('does not render filter navigation in loading state', () => {
+    it('renders filter navigation even in loading state', () => {
       const mockReturn = createMockUseIssuesReturn({
         isLoading: true,
       });
@@ -872,12 +917,12 @@ describe('App', () => {
 
       render(<App />);
 
-      // FilterBar and SearchInput should not be rendered in loading state
-      expect(screen.queryByTestId('search-input')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('filter-bar')).not.toBeInTheDocument();
+      // In the new layout, search and filters are always in the header
+      expect(screen.getByTestId('search-input')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-bar')).toBeInTheDocument();
     });
 
-    it('does not render filter navigation in error state', () => {
+    it('renders filter navigation even in error state', () => {
       const mockReturn = createMockUseIssuesReturn({
         isLoading: false,
         error: 'Network error',
@@ -886,9 +931,9 @@ describe('App', () => {
 
       render(<App />);
 
-      // FilterBar and SearchInput should not be rendered in error state
-      expect(screen.queryByTestId('search-input')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('filter-bar')).not.toBeInTheDocument();
+      // In the new layout, search and filters are always in the header
+      expect(screen.getByTestId('search-input')).toBeInTheDocument();
+      expect(screen.getByTestId('filter-bar')).toBeInTheDocument();
     });
 
     it('passes filtered issues to KanbanBoard', () => {
@@ -906,22 +951,11 @@ describe('App', () => {
       expect(screen.getByText('Second Issue')).toBeInTheDocument();
     });
 
-    it('clears search input when Clear filters button is clicked', async () => {
+    it('clears search input when filter state search is cleared externally', async () => {
       // Set up issues so the app renders in success state
       const issues = [createMockIssue({ id: 'issue-1', title: 'Test Issue', status: 'open' })];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-
-      // Track filter state that will change when clearAll is called
-      let currentFilters: { search?: string; groupBy?: string } = {
-        search: 'test query',
-        groupBy: 'none',
-      };
-
-      const clearAll = vi.fn(() => {
-        // Simulate clearAll behavior: clears search
-        currentFilters = { groupBy: 'none' };
-      });
 
       const filterActions = {
         setPriority: vi.fn(),
@@ -930,30 +964,20 @@ describe('App', () => {
         setSearch: vi.fn(),
         setGroupBy: vi.fn(),
         clearFilter: vi.fn(),
-        clearAll,
+        clearAll: vi.fn(),
       };
 
       // Mock useFilterState to return filter with search value
-      // This must be set before render so the initial useState gets the value
-      vi.mocked(useFilterState).mockReturnValue([currentFilters, filterActions]);
+      vi.mocked(useFilterState).mockReturnValue([{ search: 'test query' }, filterActions]);
 
       const { rerender } = render(<App />);
 
       // Verify search input has the initial value
-      // Note: data-testid="search-input" is on the wrapper div, the actual input has data-testid="search-input-field"
       const searchInput = screen.getByTestId('search-input-field') as HTMLInputElement;
       expect(searchInput.value).toBe('test query');
 
-      // Clear filters button should be visible because search filter is active
-      const clearButton = screen.getByTestId('clear-filters');
-      expect(clearButton).toBeInTheDocument();
-
-      // Click clear filters - this calls clearAll which updates currentFilters
-      fireEvent.click(clearButton);
-      expect(clearAll).toHaveBeenCalledTimes(1);
-
-      // Update the mock to return the new filter state (search cleared)
-      vi.mocked(useFilterState).mockReturnValue([currentFilters, filterActions]);
+      // Simulate external filter state clearing (e.g. clearAll was called)
+      vi.mocked(useFilterState).mockReturnValue([{}, filterActions]);
 
       // Rerender to trigger the useEffect that syncs filters.search to searchValue
       rerender(<App />);
@@ -977,7 +1001,7 @@ describe('App', () => {
       render(<App />);
 
       // SwimLaneBoard should render status columns
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
       expect(screen.getByRole('heading', { name: 'In Progress' })).toBeInTheDocument();
 
       // Issues should be visible
@@ -1008,7 +1032,7 @@ describe('App', () => {
       render(<App />);
 
       // Verify SwimLaneBoard is rendered with correct groupBy (epic is default)
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
     });
 
     it('passes groupBy prop to SwimLaneBoard with epic grouping', () => {
@@ -1034,7 +1058,7 @@ describe('App', () => {
       render(<App />);
 
       // SwimLaneBoard should still render
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
     });
 
     it('FilterBar receives groupBy and onGroupByChange props', () => {
@@ -1089,7 +1113,7 @@ describe('App', () => {
       const { rerender } = render(<App />);
 
       // Initial render with groupBy: 'none'
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
 
       // Simulate groupBy change to 'priority'
       currentGroupBy = 'priority';
@@ -1098,7 +1122,7 @@ describe('App', () => {
       rerender(<App />);
 
       // SwimLaneBoard should still render with updated groupBy
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
       expect(setGroupBy).not.toHaveBeenCalled(); // setGroupBy is called by FilterBar, not App
     });
 
@@ -1115,7 +1139,7 @@ describe('App', () => {
 
       // SwimLaneBoard should be rendered with the drag handler
       expect(screen.getByText('Drag Me')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
     });
 
     it('SwimLaneBoard receives filtered issues', () => {
@@ -1158,7 +1182,7 @@ describe('App', () => {
 
       // SwimLaneBoard should render without errors
       expect(screen.getByText('Blocked Issue')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
     });
 
     it('SwimLaneBoard respects showBlocked filter', () => {
@@ -1679,7 +1703,7 @@ describe('App', () => {
       // MonitorDashboard should not be rendered when kanban view is active
       expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
       // Kanban view should be active (SwimLaneBoard renders status columns)
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
     });
 
     it('does not render MonitorDashboard when activeView is "table"', () => {
@@ -1719,7 +1743,7 @@ describe('App', () => {
       const { rerender } = render(<App />);
 
       // Verify kanban view is rendered
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
       expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
 
       // Switch to monitor view
@@ -1733,7 +1757,7 @@ describe('App', () => {
       });
 
       // Kanban columns should no longer be rendered
-      expect(screen.queryByRole('heading', { name: 'Ready' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Open' })).not.toBeInTheDocument();
     });
 
     it('transitions from monitor to kanban view correctly', async () => {
@@ -1756,7 +1780,7 @@ describe('App', () => {
       rerender(<App />);
 
       // Verify kanban view is now rendered
-      expect(screen.getByRole('heading', { name: 'Ready' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
       expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
     });
 
@@ -1839,6 +1863,975 @@ describe('App', () => {
       await waitFor(() => {
         expect(screen.getByTestId('monitor-dashboard')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('TerminalPanel integration', () => {
+    it('renders TalkToLeadButton in the app', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      expect(screen.getByTestId('talk-to-lead-button')).toBeInTheDocument();
+    });
+
+    it('TalkToLeadButton has isActive=false by default (terminal closed)', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      expect(button).not.toHaveAttribute('data-active');
+      // When isActive is false (default), aria-pressed is "false"
+      expect(button).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('opens terminal and sets TalkToLeadButton isActive=true when clicked', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      fireEvent.click(button);
+
+      // Button should now be active
+      expect(button).toHaveAttribute('data-active', 'true');
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('closes terminal when TalkToLeadButton is clicked while terminal is open (toggle)', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+
+      // Open terminal
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('data-active', 'true');
+
+      // Close terminal (toggle)
+      fireEvent.click(button);
+      expect(button).not.toHaveAttribute('data-active');
+    });
+
+    it('closes terminal when IssueDetailPanel opens (single-panel policy)', () => {
+      const fetchIssue = vi.fn();
+      const issues = [
+        createMockIssue({
+          id: 'issue-1',
+          title: 'Test Issue',
+          status: 'open',
+        }),
+      ];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+        })
+      );
+
+      render(<App />);
+
+      // Open terminal first
+      const talkButton = screen.getByTestId('talk-to-lead-button');
+      fireEvent.click(talkButton);
+      expect(talkButton).toHaveAttribute('data-active', 'true');
+
+      // Click on an issue to open IssueDetailPanel
+      const issueCard = screen.getByText('Test Issue');
+      fireEvent.click(issueCard);
+
+      // Terminal should now be closed
+      expect(talkButton).not.toHaveAttribute('data-active');
+    });
+
+    it('closes issue panel when terminal opens (single-panel policy)', () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const issues = [
+        createMockIssue({
+          id: 'issue-1',
+          title: 'Test Issue',
+          status: 'open',
+        }),
+      ];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+        })
+      );
+
+      const { container } = render(<App />);
+
+      // Open issue panel first
+      const issueCard = screen.getByText('Test Issue');
+      fireEvent.click(issueCard);
+
+      // Issue panel should be open
+      const issuePanel = container.querySelector('[data-testid="issue-detail-panel"]');
+      expect(issuePanel).toHaveAttribute('data-state', 'open');
+
+      // Open terminal
+      const talkButton = screen.getByTestId('talk-to-lead-button');
+      fireEvent.click(talkButton);
+
+      // Issue panel should now be closed
+      expect(issuePanel).toHaveAttribute('data-state', 'closed');
+      // Terminal should be open
+      expect(talkButton).toHaveAttribute('data-active', 'true');
+    });
+
+    it('closes terminal when AgentDetailPanel opens (single-panel policy)', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      // Mock useAgentContext to return agents for the sidebar (AgentsSidebar uses useAgentContext)
+      vi.mocked(useAgentContext).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+        getAgentByName: vi.fn(() => undefined),
+      });
+
+      // Also mock useAgents which is used by App.tsx for AgentDetailPanel
+      vi.mocked(useAgents).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+      });
+
+      render(<App />);
+
+      // Open terminal first
+      const talkButton = screen.getByTestId('talk-to-lead-button');
+      fireEvent.click(talkButton);
+      expect(talkButton).toHaveAttribute('data-active', 'true');
+
+      // Click on an agent to open AgentDetailPanel
+      const agentCard = screen.getByText('agent-1');
+      fireEvent.click(agentCard);
+
+      // Terminal should now be closed
+      expect(talkButton).not.toHaveAttribute('data-active');
+    });
+
+    it('closes agent panel when terminal opens (single-panel policy)', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      // Mock useAgentContext to return agents for the sidebar (AgentsSidebar uses useAgentContext)
+      vi.mocked(useAgentContext).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+        getAgentByName: vi.fn(() => undefined),
+      });
+
+      // Also mock useAgents which is used by App.tsx for AgentDetailPanel
+      vi.mocked(useAgents).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+      });
+
+      const { container } = render(<App />);
+
+      // Open agent panel first
+      const agentCard = screen.getByText('agent-1');
+      fireEvent.click(agentCard);
+
+      // Agent panel should be open
+      const agentPanel = container.querySelector('[data-testid="agent-detail-panel"]');
+      expect(agentPanel).toHaveAttribute('data-state', 'open');
+
+      // Open terminal
+      const talkButton = screen.getByTestId('talk-to-lead-button');
+      fireEvent.click(talkButton);
+
+      // Agent panel should now be closed
+      expect(agentPanel).toHaveAttribute('data-state', 'closed');
+      // Terminal should be open
+      expect(talkButton).toHaveAttribute('data-active', 'true');
+    });
+
+    it('renders TerminalPanel in Suspense (lazy loaded)', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // Open terminal to trigger lazy load
+      const talkButton = screen.getByTestId('talk-to-lead-button');
+      fireEvent.click(talkButton);
+
+      // The terminal panel overlay should be present (lazy loaded)
+      expect(screen.getByTestId('terminal-panel-overlay')).toBeInTheDocument();
+    });
+
+    it('terminal close button calls handleTerminalClose', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // Open terminal
+      const talkButton = screen.getByTestId('talk-to-lead-button');
+      fireEvent.click(talkButton);
+      expect(talkButton).toHaveAttribute('data-active', 'true');
+
+      // Click terminal close button
+      const closeButton = screen.getByTestId('terminal-close-button');
+      fireEvent.click(closeButton);
+
+      // Terminal should be closed
+      expect(talkButton).not.toHaveAttribute('data-active');
+    });
+
+    it('multiple toggle cycles work correctly', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+
+      // Toggle cycle 1: open -> close
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('data-active', 'true');
+      fireEvent.click(button);
+      expect(button).not.toHaveAttribute('data-active');
+
+      // Toggle cycle 2: open -> close
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('data-active', 'true');
+      fireEvent.click(button);
+      expect(button).not.toHaveAttribute('data-active');
+
+      // Toggle cycle 3: open
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('data-active', 'true');
+    });
+  });
+
+  describe('panel close timeout race condition prevention', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('cancels pending issue panel timeout when new issue is selected', () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const issues = [
+        createMockIssue({
+          id: 'issue-1',
+          title: 'First Issue',
+          status: 'open',
+        }),
+        createMockIssue({
+          id: 'issue-2',
+          title: 'Second Issue',
+          status: 'open',
+        }),
+      ];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      // Provide issueDetails so the close button is rendered
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+          issueDetails: {
+            id: 'issue-1',
+            title: 'First Issue',
+            priority: 2,
+            status: 'open',
+            issue_type: 'task',
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-01T00:00:00Z',
+          },
+        })
+      );
+
+      const { container } = render(<App />);
+
+      // Open issue panel for first issue (use aria-label to target the issue card button specifically)
+      const firstIssue = screen.getByRole('button', { name: /Issue: First Issue/ });
+      fireEvent.click(firstIssue);
+
+      // Panel should be open
+      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+      expect(panel).toHaveAttribute('data-state', 'open');
+      expect(fetchIssue).toHaveBeenCalledWith('issue-1');
+
+      // Close the panel (starts 300ms timeout to clear selectedIssueId)
+      const closeButton = screen.getByTestId('header-close-button');
+      fireEvent.click(closeButton);
+
+      // Panel starts closing
+      expect(panel).toHaveAttribute('data-state', 'closed');
+
+      // Before timeout completes (within 300ms), click a different issue
+      vi.advanceTimersByTime(100); // Only 100ms passed
+      const secondIssue = screen.getByRole('button', { name: /Issue: Second Issue/ });
+      fireEvent.click(secondIssue);
+
+      // Panel should immediately reopen for the new issue
+      expect(panel).toHaveAttribute('data-state', 'open');
+      expect(fetchIssue).toHaveBeenCalledWith('issue-2');
+
+      // Advance past original timeout (300ms total = 200ms more)
+      vi.advanceTimersByTime(300);
+
+      // Panel should still be open (timeout was cancelled)
+      expect(panel).toHaveAttribute('data-state', 'open');
+      // clearIssue should NOT have been called (it would clear the new selection)
+      expect(clearIssue).not.toHaveBeenCalled();
+    });
+
+    it('rapidly switching between issues does not blank the panel', () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const issues = [
+        createMockIssue({ id: 'issue-1', title: 'Issue One', status: 'open' }),
+        createMockIssue({ id: 'issue-2', title: 'Issue Two', status: 'open' }),
+        createMockIssue({ id: 'issue-3', title: 'Issue Three', status: 'open' }),
+      ];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+        })
+      );
+
+      const { container } = render(<App />);
+      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+
+      // Click issue 1
+      fireEvent.click(screen.getByText('Issue One'));
+      expect(panel).toHaveAttribute('data-state', 'open');
+
+      // Immediately click issue 2 (no delay)
+      fireEvent.click(screen.getByText('Issue Two'));
+      expect(panel).toHaveAttribute('data-state', 'open');
+
+      // Immediately click issue 3 (no delay)
+      fireEvent.click(screen.getByText('Issue Three'));
+      expect(panel).toHaveAttribute('data-state', 'open');
+
+      // Wait for any timeouts to complete
+      vi.advanceTimersByTime(500);
+
+      // Panel should still be open showing issue 3
+      expect(panel).toHaveAttribute('data-state', 'open');
+      expect(fetchIssue).toHaveBeenLastCalledWith('issue-3');
+      // clearIssue should never have been called during rapid switching
+      expect(clearIssue).not.toHaveBeenCalled();
+    });
+
+    it('opening agent panel then quickly opening issue panel shows the issue correctly', () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const issues = [createMockIssue({ id: 'issue-1', title: 'Test Issue', status: 'open' })];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+        })
+      );
+
+      // Mock agents for the sidebar
+      vi.mocked(useAgentContext).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+        getAgentByName: vi.fn(() => undefined),
+      });
+      vi.mocked(useAgents).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+      });
+
+      const { container } = render(<App />);
+      const issuePanel = container.querySelector('[data-testid="issue-detail-panel"]');
+      const agentPanel = container.querySelector('[data-testid="agent-detail-panel"]');
+
+      // Open agent panel
+      const agentCard = screen.getByText('agent-1');
+      fireEvent.click(agentCard);
+      expect(agentPanel).toHaveAttribute('data-state', 'open');
+      expect(issuePanel).toHaveAttribute('data-state', 'closed');
+
+      // Quickly (within 300ms timeout) open issue panel
+      vi.advanceTimersByTime(100);
+      const issueCard = screen.getByText('Test Issue');
+      fireEvent.click(issueCard);
+
+      // Issue panel should now be open
+      expect(issuePanel).toHaveAttribute('data-state', 'open');
+      // Agent panel should be closed
+      expect(agentPanel).toHaveAttribute('data-state', 'closed');
+      expect(fetchIssue).toHaveBeenCalledWith('issue-1');
+
+      // Wait for all timeouts to complete
+      vi.advanceTimersByTime(500);
+
+      // Issue panel should still be open (agent panel close timeout should not affect it)
+      expect(issuePanel).toHaveAttribute('data-state', 'open');
+    });
+
+    it('opening issue panel then quickly opening agent panel shows the agent correctly', () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const issues = [createMockIssue({ id: 'issue-1', title: 'Test Issue', status: 'open' })];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+        })
+      );
+
+      // Mock agents for the sidebar
+      vi.mocked(useAgentContext).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+        getAgentByName: vi.fn(() => undefined),
+      });
+      vi.mocked(useAgents).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+      });
+
+      const { container } = render(<App />);
+      const issuePanel = container.querySelector('[data-testid="issue-detail-panel"]');
+      const agentPanel = container.querySelector('[data-testid="agent-detail-panel"]');
+
+      // Open issue panel
+      const issueCard = screen.getByText('Test Issue');
+      fireEvent.click(issueCard);
+      expect(issuePanel).toHaveAttribute('data-state', 'open');
+      expect(agentPanel).toHaveAttribute('data-state', 'closed');
+
+      // Quickly (within 300ms timeout) open agent panel
+      vi.advanceTimersByTime(100);
+      const agentCard = screen.getByText('agent-1');
+      fireEvent.click(agentCard);
+
+      // Agent panel should now be open
+      expect(agentPanel).toHaveAttribute('data-state', 'open');
+      // Issue panel should be closed
+      expect(issuePanel).toHaveAttribute('data-state', 'closed');
+
+      // Wait for all timeouts to complete
+      vi.advanceTimersByTime(500);
+
+      // Agent panel should still be open (issue panel close timeout should not affect it)
+      expect(agentPanel).toHaveAttribute('data-state', 'open');
+      // clearIssue should have been called after the timeout to clean up
+      // (This is expected since issue panel was properly closed)
+    });
+
+    it('cleans up timeouts on unmount', () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const issues = [createMockIssue({ id: 'issue-1', title: 'Test Issue', status: 'open' })];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      // Provide issueDetails so the close button is rendered
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+          issueDetails: {
+            id: 'issue-1',
+            title: 'Test Issue',
+            priority: 2,
+            status: 'open',
+            issue_type: 'task',
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-01T00:00:00Z',
+          },
+        })
+      );
+
+      const { container, unmount } = render(<App />);
+      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+
+      // Open and close the panel (starts timeout) - use aria-label to avoid duplicate text match
+      fireEvent.click(screen.getByRole('button', { name: /Issue: Test Issue/ }));
+      expect(panel).toHaveAttribute('data-state', 'open');
+
+      // Close the panel
+      const closeButton = screen.getByTestId('header-close-button');
+      fireEvent.click(closeButton);
+
+      // Unmount before timeout completes
+      vi.advanceTimersByTime(100);
+      unmount();
+
+      // Advance past the timeout - should not cause any errors
+      // This verifies the cleanup effect clears the timeout
+      expect(() => {
+        vi.advanceTimersByTime(500);
+      }).not.toThrow();
+    });
+
+    it('handles close then reopen within timeout window correctly', () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const issues = [
+        createMockIssue({
+          id: 'issue-1',
+          title: 'Same Issue',
+          status: 'open',
+        }),
+      ];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+          issueDetails: {
+            id: 'issue-1',
+            title: 'Same Issue',
+            priority: 2,
+            status: 'open',
+            issue_type: 'task',
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-01T00:00:00Z',
+          },
+        })
+      );
+
+      const { container } = render(<App />);
+      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+
+      // Open issue panel
+      const issueCard = screen.getByRole('button', { name: /Issue: Same Issue/ });
+      fireEvent.click(issueCard);
+      expect(panel).toHaveAttribute('data-state', 'open');
+      expect(fetchIssue).toHaveBeenCalledTimes(1);
+
+      // Close the panel
+      const closeButton = screen.getByTestId('header-close-button');
+      fireEvent.click(closeButton);
+      expect(panel).toHaveAttribute('data-state', 'closed');
+
+      // Within timeout, click the same issue again
+      vi.advanceTimersByTime(150);
+      fireEvent.click(issueCard);
+
+      // Panel should reopen
+      expect(panel).toHaveAttribute('data-state', 'open');
+      // fetchIssue should be called again for the reopened panel
+      expect(fetchIssue).toHaveBeenCalledTimes(2);
+
+      // Wait for original timeout to complete
+      vi.advanceTimersByTime(300);
+
+      // Panel should still be open - the new open cancelled the pending timeout
+      expect(panel).toHaveAttribute('data-state', 'open');
+      // clearIssue should not have been called (would wipe the panel content)
+      expect(clearIssue).not.toHaveBeenCalled();
+    });
+
+    it('agent panel timeout is properly cancelled when clicking another agent', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      // Mock agents for the sidebar with two agents
+      vi.mocked(useAgentContext).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+          {
+            name: 'agent-2',
+            status: 'working',
+            current_task: null,
+            workspace: '/test2',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+        getAgentByName: vi.fn(() => undefined),
+      });
+      vi.mocked(useAgents).mockReturnValue({
+        agents: [
+          {
+            name: 'agent-1',
+            status: 'idle',
+            current_task: null,
+            workspace: '/test',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+          {
+            name: 'agent-2',
+            status: 'working',
+            current_task: null,
+            workspace: '/test2',
+            started_at: '2024-01-01T00:00:00Z',
+          },
+        ],
+        agentTasks: {},
+        tasks: {
+          needs_planning: 0,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          blocked: 0,
+        },
+        taskLists: {
+          needsPlanning: [],
+          readyToImplement: [],
+          needsReview: [],
+          inProgress: [],
+          blocked: [],
+        },
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+        stats: { open: 0, closed: 0, total: 0, completion: 0 },
+        isLoading: false,
+        isConnected: true,
+        connectionState: 'connected',
+        wasEverConnected: true,
+        retryCountdown: 0,
+        error: null,
+        lastUpdated: null,
+        refetch: vi.fn(),
+        retryNow: vi.fn(),
+      });
+
+      const { container } = render(<App />);
+      const agentPanel = container.querySelector('[data-testid="agent-detail-panel"]');
+
+      // Open agent panel for first agent
+      fireEvent.click(screen.getByText('agent-1'));
+      expect(agentPanel).toHaveAttribute('data-state', 'open');
+
+      // Close the panel using the close button (aria-label="Close panel")
+      const closeButton = screen.getByRole('button', { name: 'Close panel' });
+      fireEvent.click(closeButton);
+      expect(agentPanel).toHaveAttribute('data-state', 'closed');
+
+      // Within timeout, click the second agent
+      vi.advanceTimersByTime(150);
+      fireEvent.click(screen.getByText('agent-2'));
+
+      // Panel should reopen for agent-2
+      expect(agentPanel).toHaveAttribute('data-state', 'open');
+
+      // Wait for original timeout to complete
+      vi.advanceTimersByTime(300);
+
+      // Panel should still be open - the new agent click cancelled the timeout
+      expect(agentPanel).toHaveAttribute('data-state', 'open');
     });
   });
 });

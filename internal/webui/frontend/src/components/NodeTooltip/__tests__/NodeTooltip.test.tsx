@@ -6,12 +6,13 @@
  * Unit tests for NodeTooltip component.
  */
 
-import { describe, it, expect, vi as _vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi as _vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { NodeTooltip } from '../NodeTooltip';
 import type { Issue } from '@/types';
+
+import { NodeTooltip } from '../NodeTooltip';
 import type { TooltipPosition } from '../NodeTooltip';
 
 /**
@@ -300,7 +301,7 @@ describe('NodeTooltip', () => {
     });
 
     it('handles custom/unknown status values', () => {
-      const issue = createTestIssue({ status: 'custom_status' as any });
+      const issue = createTestIssue({ status: 'custom_status' });
       render(<NodeTooltip issue={issue} position={defaultPosition} />);
 
       expect(screen.getByText('Custom_status')).toBeInTheDocument();

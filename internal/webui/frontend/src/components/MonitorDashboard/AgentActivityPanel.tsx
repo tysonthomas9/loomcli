@@ -4,9 +4,17 @@
  */
 
 import { useMemo } from 'react';
-import { AgentCard } from '../AgentCard';
-import type { LoomAgentStatus, LoomSyncInfo, LoomTaskInfo, LoomConnectionState, ParsedLoomStatus } from '@/types';
+
+import type {
+  LoomAgentStatus,
+  LoomSyncInfo,
+  LoomTaskInfo,
+  LoomConnectionState,
+  ParsedLoomStatus,
+} from '@/types';
 import { parseLoomStatus } from '@/types';
+
+import { AgentCard } from '../AgentCard';
 import styles from './AgentActivityPanel.module.css';
 
 /**
@@ -41,9 +49,9 @@ export interface AgentActivityPanelProps {
  * Summary statistics computed from agent list.
  */
 interface AgentSummary {
-  active: number;    // working or planning
-  idle: number;      // ready, idle, done
-  error: number;     // error state
+  active: number; // working or planning
+  idle: number; // ready, idle, done
+  error: number; // error state
   needsPush: number; // agents with commits ahead
 }
 
@@ -117,7 +125,9 @@ export function AgentActivityPanel({
   if (isLoading && agents.length === 0) {
     return (
       <div className={rootClassName} data-testid="agent-activity-panel">
-        <div className={styles.loading} role="status" aria-live="polite">Loading agents...</div>
+        <div className={styles.loading} role="status" aria-live="polite">
+          Loading agents...
+        </div>
       </div>
     );
   }
@@ -175,11 +185,13 @@ export function AgentActivityPanel({
       {/* Summary bar */}
       <div className={styles.summary} role="status" aria-label="Agent activity summary">
         <span className={styles.summaryItem} data-type="active">
+          <span className={styles.summaryDot} data-type="active" aria-hidden="true" />
           <span className={styles.summaryCount}>{summary.active}</span>
           <span className={styles.summaryLabel}>active</span>
         </span>
         <span className={styles.summarySeparator}>·</span>
         <span className={styles.summaryItem} data-type="idle">
+          <span className={styles.summaryDot} data-type="idle" aria-hidden="true" />
           <span className={styles.summaryCount}>{summary.idle}</span>
           <span className={styles.summaryLabel}>idle</span>
         </span>
@@ -187,6 +199,7 @@ export function AgentActivityPanel({
           <>
             <span className={styles.summarySeparator}>·</span>
             <span className={styles.summaryItem} data-type="error">
+              <span className={styles.summaryDot} data-type="error" aria-hidden="true" />
               <span className={styles.summaryCount}>{summary.error}</span>
               <span className={styles.summaryLabel}>error</span>
             </span>
@@ -196,6 +209,7 @@ export function AgentActivityPanel({
           <>
             <span className={styles.summarySeparator}>·</span>
             <span className={styles.summaryItem} data-type="sync">
+              <span className={styles.summaryDot} data-type="sync" aria-hidden="true" />
               <span className={styles.summaryCount}>{summary.needsPush}</span>
               <span className={styles.summaryLabel}>need push</span>
             </span>
@@ -206,9 +220,7 @@ export function AgentActivityPanel({
       {/* Agent grid */}
       <div className={styles.agentGrid}>
         {agents.map((agent) => {
-          const handleClick = onAgentClick
-            ? () => onAgentClick(agent.name)
-            : undefined;
+          const handleClick = onAgentClick ? () => onAgentClick(agent.name) : undefined;
           return (
             <AgentCard
               key={agent.name}

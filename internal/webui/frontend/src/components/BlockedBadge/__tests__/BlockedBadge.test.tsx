@@ -6,8 +6,8 @@
  * Unit tests for BlockedBadge component.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
 import { BlockedBadge } from '../BlockedBadge';
@@ -90,12 +90,7 @@ describe('BlockedBadge', () => {
 
   describe('tooltip behavior', () => {
     it('shows tooltip on mouse enter', () => {
-      render(
-        <BlockedBadge
-          count={2}
-          issueIds={['issue-1', 'issue-2']}
-        />
-      );
+      render(<BlockedBadge count={2} issueIds={['issue-1', 'issue-2']} />);
 
       const badge = screen.getByLabelText('Blocked by 2 issues');
       fireEvent.mouseEnter(badge);
@@ -107,12 +102,7 @@ describe('BlockedBadge', () => {
     });
 
     it('hides tooltip on mouse leave', () => {
-      render(
-        <BlockedBadge
-          count={2}
-          issueIds={['issue-1', 'issue-2']}
-        />
-      );
+      render(<BlockedBadge count={2} issueIds={['issue-1', 'issue-2']} />);
 
       const badge = screen.getByLabelText('Blocked by 2 issues');
       fireEvent.mouseEnter(badge);
@@ -143,12 +133,7 @@ describe('BlockedBadge', () => {
     });
 
     it('tooltip has correct header for blockedBy variant', () => {
-      render(
-        <BlockedBadge
-          count={1}
-          issueIds={['blocker-id']}
-        />
-      );
+      render(<BlockedBadge count={1} issueIds={['blocker-id']} />);
 
       const badge = screen.getByLabelText('Blocked by 1 issue');
       fireEvent.mouseEnter(badge);
@@ -157,13 +142,7 @@ describe('BlockedBadge', () => {
     });
 
     it('tooltip has correct header for blocks variant', () => {
-      render(
-        <BlockedBadge
-          count={1}
-          issueIds={['blocked-id']}
-          variant="blocks"
-        />
-      );
+      render(<BlockedBadge count={1} issueIds={['blocked-id']} variant="blocks" />);
 
       const badge = screen.getByLabelText('Blocks 1 issue');
       fireEvent.mouseEnter(badge);
@@ -172,12 +151,7 @@ describe('BlockedBadge', () => {
     });
 
     it('tooltip displays issues as list items', () => {
-      render(
-        <BlockedBadge
-          count={3}
-          issueIds={['blocker-1', 'blocker-2', 'blocker-3']}
-        />
-      );
+      render(<BlockedBadge count={3} issueIds={['blocker-1', 'blocker-2', 'blocker-3']} />);
 
       const badge = screen.getByLabelText('Blocked by 3 issues');
       fireEvent.mouseEnter(badge);
@@ -317,12 +291,7 @@ describe('BlockedBadge', () => {
   describe('edge cases', () => {
     it('handles count mismatch with issueIds array length', () => {
       // count says 10 but only 3 issues provided
-      render(
-        <BlockedBadge
-          count={10}
-          issueIds={['blocker-1', 'blocker-2', 'blocker-3']}
-        />
-      );
+      render(<BlockedBadge count={10} issueIds={['blocker-1', 'blocker-2', 'blocker-3']} />);
 
       // Count should reflect prop value
       expect(screen.getByText('10')).toBeInTheDocument();

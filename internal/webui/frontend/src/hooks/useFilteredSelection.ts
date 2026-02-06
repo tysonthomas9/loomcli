@@ -7,29 +7,30 @@
  * bulk actions could affect issues the user can no longer see.
  */
 
-import { useEffect, useRef } from 'react'
-import type { Issue } from '@/types'
+import { useEffect, useRef } from 'react';
+
 import {
   useIssueFilter,
   useSelection,
   type UseIssueFilterOptions,
   type UseSelectionReturn,
-} from '@/hooks'
+} from '@/hooks';
+import type { Issue } from '@/types';
 
 /**
  * Options for the useFilteredSelection hook.
  */
 export interface UseFilteredSelectionOptions {
   /** Issues to filter and select from */
-  issues: Issue[]
+  issues: Issue[];
   /** Filter options for useIssueFilter */
-  filterOptions: UseIssueFilterOptions
+  filterOptions: UseIssueFilterOptions;
   /** Initial selection (passed to useSelection) */
-  initialSelection?: Set<string> | string[]
+  initialSelection?: Set<string> | string[];
   /** Callback when selection changes (passed to useSelection) */
-  onSelectionChange?: (selectedIds: Set<string>) => void
+  onSelectionChange?: (selectedIds: Set<string>) => void;
   /** Whether to auto-prune selection when filter changes (default: true) */
-  autoPrune?: boolean
+  autoPrune?: boolean;
 }
 
 /**
@@ -37,16 +38,16 @@ export interface UseFilteredSelectionOptions {
  */
 export interface UseFilteredSelectionReturn {
   /** Filtered issues */
-  filteredIssues: Issue[]
+  filteredIssues: Issue[];
   /** Filter metadata from useIssueFilter */
   filterMeta: {
-    count: number
-    totalCount: number
-    hasActiveFilters: boolean
-    activeFilters: string[]
-  }
+    count: number;
+    totalCount: number;
+    hasActiveFilters: boolean;
+    activeFilters: string[];
+  };
   /** Selection state and actions from useSelection */
-  selection: UseSelectionReturn
+  selection: UseSelectionReturn;
 }
 
 /**
@@ -93,17 +94,13 @@ export interface UseFilteredSelectionReturn {
 export function useFilteredSelection(
   options: UseFilteredSelectionOptions
 ): UseFilteredSelectionReturn {
-  const {
-    issues,
-    filterOptions,
-    initialSelection,
-    onSelectionChange,
-    autoPrune = true,
-  } = options
+  const { issues, filterOptions, initialSelection, onSelectionChange, autoPrune = true } = options;
 
   // Apply filtering
-  const { filteredIssues, count, totalCount, hasActiveFilters, activeFilters } =
-    useIssueFilter(issues, filterOptions)
+  const { filteredIssues, count, totalCount, hasActiveFilters, activeFilters } = useIssueFilter(
+    issues,
+    filterOptions
+  );
 
   // Manage selection with filtered issues as visible items
   // Only pass optional props when defined (required for exactOptionalPropertyTypes)
@@ -111,22 +108,22 @@ export function useFilteredSelection(
     visibleItems: filteredIssues,
     ...(initialSelection !== undefined && { initialSelection }),
     ...(onSelectionChange !== undefined && { onSelectionChange }),
-  })
+  });
 
   // Store pruneSelection in a ref to ensure stable dependency for useEffect
   // (Follows the pattern used in useSelection.ts for onSelectionChange)
-  const pruneSelectionRef = useRef(selection.pruneSelection)
+  const pruneSelectionRef = useRef(selection.pruneSelection);
 
   useEffect(() => {
-    pruneSelectionRef.current = selection.pruneSelection
-  }, [selection.pruneSelection])
+    pruneSelectionRef.current = selection.pruneSelection;
+  }, [selection.pruneSelection]);
 
   // Auto-prune selection when filtered issues change
   useEffect(() => {
     if (autoPrune) {
-      pruneSelectionRef.current(filteredIssues)
+      pruneSelectionRef.current(filteredIssues);
     }
-  }, [filteredIssues, autoPrune])
+  }, [filteredIssues, autoPrune]);
 
   return {
     filteredIssues,
@@ -137,5 +134,5 @@ export function useFilteredSelection(
       activeFilters,
     },
     selection,
-  }
+  };
 }

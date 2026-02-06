@@ -6,8 +6,8 @@
  * Unit tests for AppLayout component.
  */
 
-import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
 import '@testing-library/jest-dom';
 
 import { AppLayout } from '../AppLayout';
@@ -262,6 +262,37 @@ describe('AppLayout', () => {
     });
   });
 
+  describe('CSS classes - header redesign', () => {
+    it('brand div gets the brand CSS class', () => {
+      const { container } = render(
+        <AppLayout title="Test Title">
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const header = container.querySelector('header');
+      const brandDiv = header?.querySelector('[class*="brand"]');
+
+      expect(brandDiv).toBeInTheDocument();
+      // CSS Modules mangles class names, so we check for partial match
+      expect(brandDiv?.className).toMatch(/brand/);
+    });
+
+    it('brand div contains the title heading', () => {
+      const { container } = render(
+        <AppLayout title="Test Title">
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const header = container.querySelector('header');
+      const brandDiv = header?.querySelector('[class*="brand"]');
+      const title = brandDiv?.querySelector('h1');
+
+      expect(title).toHaveTextContent('Test Title');
+    });
+  });
+
   describe('props', () => {
     it('preserves existing classes when adding custom className', () => {
       const { container } = render(
@@ -322,10 +353,7 @@ describe('AppLayout', () => {
 
     it('renders both navigation and actions when provided', () => {
       render(
-        <AppLayout
-          navigation={<button>Nav</button>}
-          actions={<button>Action</button>}
-        >
+        <AppLayout navigation={<button>Nav</button>} actions={<button>Action</button>}>
           <p>Content</p>
         </AppLayout>
       );

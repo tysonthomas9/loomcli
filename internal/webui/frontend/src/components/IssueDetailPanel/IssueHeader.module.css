@@ -38,23 +38,23 @@
   background-color: var(--color-bg-active);
 }
 
-.priorityBadge[data-priority="0"],
-.priorityBadge[data-priority="1"] {
+.priorityBadge[data-priority='0'],
+.priorityBadge[data-priority='1'] {
   background-color: var(--color-danger-bg);
   color: var(--color-danger);
 }
 
-.priorityBadge[data-priority="0"]:hover,
-.priorityBadge[data-priority="1"]:hover {
+.priorityBadge[data-priority='0']:hover,
+.priorityBadge[data-priority='1']:hover {
   background-color: #fecaca;
 }
 
-.priorityBadge[data-priority="2"] {
+.priorityBadge[data-priority='2'] {
   background-color: var(--color-warning-bg);
   color: var(--color-warning);
 }
 
-.priorityBadge[data-priority="2"]:hover {
+.priorityBadge[data-priority='2']:hover {
   background-color: #fde68a;
 }
 
@@ -75,27 +75,27 @@
   color: var(--color-text-secondary);
 }
 
-.statusBadge[data-status="open"] {
+.statusBadge[data-status='open'] {
   background-color: var(--color-info-bg);
   color: var(--color-info);
 }
 
-.statusBadge[data-status="in_progress"] {
+.statusBadge[data-status='in_progress'] {
   background-color: var(--color-warning-bg);
   color: var(--color-warning);
 }
 
-.statusBadge[data-status="closed"] {
+.statusBadge[data-status='closed'] {
   background-color: var(--color-success-bg);
   color: var(--color-success);
 }
 
-.statusBadge[data-status="blocked"] {
+.statusBadge[data-status='blocked'] {
   background-color: var(--color-danger-bg);
   color: var(--color-danger);
 }
 
-.statusBadge[data-status="deferred"] {
+.statusBadge[data-status='deferred'] {
   background-color: var(--color-bg-tertiary);
   color: var(--color-text-muted);
 }
@@ -119,7 +119,10 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--font-size-sm);
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .approveButton {
@@ -158,7 +161,9 @@
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .fullscreenButton:hover {
@@ -183,7 +188,9 @@
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .closeButton:hover {

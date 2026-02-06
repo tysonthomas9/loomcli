@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
+
 import { type ViewMode, DEFAULT_VIEW } from '@/components/ViewSwitcher';
 
 /**

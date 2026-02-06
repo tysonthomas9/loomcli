@@ -1,4 +1,4 @@
-// Package daemon provides RPC client connection infrastructure for the beads web UI server.
+// Package daemon provides RPC client connection infrastructure for the loomcli web UI server.
 package daemon
 
 import (

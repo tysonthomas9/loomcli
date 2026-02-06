@@ -7,7 +7,27 @@
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
-import type { Issue, Status } from '@/types';
+
+import { updateIssue, addComment } from '@/api';
+import {
+  AppLayout,
+  SwimLaneBoard,
+  IssueTable,
+  LoadingSkeleton,
+  ErrorDisplay,
+  ConnectionStatus,
+  ToastContainer,
+  FilterBar,
+  SearchInput,
+  IssueDetailPanel,
+  AgentDetailPanel,
+  AgentsSidebar,
+  AssigneePrompt,
+  BulkActionToolbar,
+  TalkToLeadButton,
+  NavRail,
+} from '@/components';
+import type { BlockedInfo } from '@/components/KanbanBoard';
 import {
   useIssues,
   useViewState,
@@ -18,32 +38,13 @@ import {
   useBlockedIssues,
   useIssueDetail,
   useToast,
-  useStats,
   useRecentAssignees,
   useSelection,
+  useAgents,
 } from '@/hooks';
-import { updateIssue, addComment } from '@/api';
-import type { BlockedInfo } from '@/components/KanbanBoard';
+import type { Issue, Status } from '@/types';
+
 import styles from './App.module.css';
-import {
-  AppLayout,
-  SwimLaneBoard,
-  IssueTable,
-  ViewSwitcher,
-  LoadingSkeleton,
-  ErrorDisplay,
-  ConnectionStatus,
-  BlockedSummary,
-  ToastContainer,
-  FilterBar,
-  SearchInput,
-  IssueDetailPanel,
-  AgentsSidebar,
-  StatsHeader,
-  AssigneePrompt,
-  BulkActionToolbar,
-  TalkToLeadButton,
-} from '@/components';
 
 // Lazy load GraphView (React Flow ~100KB)
 const GraphView = lazy(() =>
@@ -53,6 +54,11 @@ const GraphView = lazy(() =>
 // Lazy load MonitorDashboard (multi-agent operator view)
 const MonitorDashboard = lazy(() =>
   import('@/components/MonitorDashboard').then((m) => ({ default: m.MonitorDashboard }))
+);
+
+// Lazy load TerminalPanel (xterm.js ~100KB)
+const TerminalPanel = lazy(() =>
+  import('@/components/TerminalPanel').then((m) => ({ default: m.TerminalPanel }))
 );
 
 function App() {
@@ -118,15 +124,23 @@ function App() {
   }, [blockedIssuesData]);
 
   const { toasts, showToast, dismissToast } = useToast();
-  const {
-    data: stats,
-    loading: statsLoading,
-    error: statsError,
-    refetch: refetchStats,
-  } = useStats({
-    pollInterval: 30000,
-  });
   const mountedRef = useRef(true);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Timeout refs for panel close animations (prevents race conditions)
+  const issuePanelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentPanelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Helper to clear a timeout ref safely
+  const clearTimeoutRef = useCallback(
+    (ref: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
+      if (ref.current !== null) {
+        clearTimeout(ref.current);
+        ref.current = null;
+      }
+    },
+    []
+  );
 
   // Bulk selection state for Table view
   const {
@@ -146,6 +160,17 @@ function App() {
     clearIssue,
   } = useIssueDetail();
 
+  // Agent data (shared between AgentsSidebar, MonitorDashboard, and AgentDetailPanel)
+  const { agents, agentTasks } = useAgents({ pollInterval: 5000 });
+
+  // Agent detail panel state
+  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
+  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(null);
+
+  // Terminal panel state
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+
   // Assignee prompt state for Ready → In Progress drag
   const { recentAssignees, addRecentAssignee } = useRecentAssignees();
   const [pendingDragData, setPendingDragData] = useState<{
@@ -159,8 +184,23 @@ function App() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      // Clear any pending panel close timeouts
+      clearTimeoutRef(issuePanelTimeoutRef);
+      clearTimeoutRef(agentPanelTimeoutRef);
     };
-  }, []);
+  }, [clearTimeoutRef]);
+
+  // Close profile menu on outside click
+  useEffect(() => {
+    if (!isProfileMenuOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!profileMenuRef.current?.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isProfileMenuOpen]);
 
   const handleDragEnd = useCallback(
     async (issueId: string, newStatus: Status, oldStatus: Status) => {
@@ -290,55 +330,229 @@ function App() {
         return;
       }
 
+      // Cancel any pending issue panel timeout (prevents wiping the new selection)
+      clearTimeoutRef(issuePanelTimeoutRef);
+
+      // Close agent panel if open (only one panel at a time)
+      if (isAgentPanelOpen) {
+        // Cancel pending agent panel timeout before starting new one
+        clearTimeoutRef(agentPanelTimeoutRef);
+        setIsAgentPanelOpen(false);
+        agentPanelTimeoutRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
+          setSelectedAgentName(null);
+        }, 300);
+      }
+
+      // Close terminal if open
+      if (isTerminalOpen) {
+        setIsTerminalOpen(false);
+      }
+
       setSelectedIssueId(issue.id);
       setIsPanelOpen(true);
       fetchIssue(issue.id);
     },
-    [selectedIssueId, isPanelOpen, fetchIssue]
+    [selectedIssueId, isPanelOpen, isAgentPanelOpen, isTerminalOpen, fetchIssue, clearTimeoutRef]
   );
 
   // Handle panel close
   const handlePanelClose = useCallback(() => {
     setIsPanelOpen(false);
     // Clear issue details after animation completes
-    setTimeout(() => {
+    // Store timeout ID to allow cancellation if panel reopens quickly
+    issuePanelTimeoutRef.current = setTimeout(() => {
       if (!mountedRef.current) return;
       clearIssue();
       setSelectedIssueId(null);
     }, 300); // Match CSS transition duration
   }, [clearIssue]);
 
-  // Handle blocked issue click from BlockedSummary dropdown
-  const handleBlockedIssueClick = useCallback(
-    (issueId: string) => {
-      if (issueId === '__show_all_blocked__') {
-        // Toggle showBlocked filter to true
-        filterActions.setShowBlocked(true);
+  // Handle agent click from AgentsSidebar or MonitorDashboard
+  const handleAgentClick = useCallback(
+    (agentName: string) => {
+      // Cancel any pending agent panel timeout (prevents wiping the new selection)
+      clearTimeoutRef(agentPanelTimeoutRef);
+
+      // Close issue panel if open (only one panel at a time)
+      if (isPanelOpen) {
+        // Cancel pending issue panel timeout before starting new one
+        clearTimeoutRef(issuePanelTimeoutRef);
+        setIsPanelOpen(false);
+        issuePanelTimeoutRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
+          clearIssue();
+          setSelectedIssueId(null);
+        }, 300);
       }
-      // Individual issue clicks could navigate to issue detail in the future
-      // For now, just show all blocked issues
+
+      // Close terminal if open
+      if (isTerminalOpen) {
+        setIsTerminalOpen(false);
+      }
+
+      setSelectedAgentName(agentName);
+      setIsAgentPanelOpen(true);
     },
-    [filterActions]
+    [isPanelOpen, isTerminalOpen, clearIssue, clearTimeoutRef]
   );
 
-  // Loading state: show skeleton columns (ViewSwitcher disabled, no filters)
+  // Handle agent panel close
+  const handleAgentPanelClose = useCallback(() => {
+    setIsAgentPanelOpen(false);
+    // Store timeout ID to allow cancellation if panel reopens quickly
+    agentPanelTimeoutRef.current = setTimeout(() => {
+      if (!mountedRef.current) return;
+      setSelectedAgentName(null);
+    }, 300);
+  }, []);
+
+  // Handle Talk to Lead button click
+  const handleTalkToLeadClick = useCallback(() => {
+    if (isTerminalOpen) {
+      // Close terminal
+      setIsTerminalOpen(false);
+    } else {
+      // Close other panels first (single-panel policy)
+      if (isPanelOpen) {
+        // Cancel pending issue panel timeout before starting new one
+        clearTimeoutRef(issuePanelTimeoutRef);
+        setIsPanelOpen(false);
+        issuePanelTimeoutRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
+          clearIssue();
+          setSelectedIssueId(null);
+        }, 300);
+      }
+      if (isAgentPanelOpen) {
+        // Cancel pending agent panel timeout before starting new one
+        clearTimeoutRef(agentPanelTimeoutRef);
+        setIsAgentPanelOpen(false);
+        agentPanelTimeoutRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
+          setSelectedAgentName(null);
+        }, 300);
+      }
+      setIsTerminalOpen(true);
+    }
+  }, [isTerminalOpen, isPanelOpen, isAgentPanelOpen, clearIssue, clearTimeoutRef]);
+
+  // Handle terminal panel close
+  const handleTerminalClose = useCallback(() => {
+    setIsTerminalOpen(false);
+  }, []);
+
+  // Handle task click from agent panel (opens IssueDetailPanel for that task)
+  const handleAgentTaskClick = useCallback(
+    (taskId: string) => {
+      // Cancel any pending issue panel timeout to prevent it from wiping the new selection
+      clearTimeoutRef(issuePanelTimeoutRef);
+      // Cancel any pending agent panel timeout before the transition
+      clearTimeoutRef(agentPanelTimeoutRef);
+      // Close agent panel first
+      setIsAgentPanelOpen(false);
+      agentPanelTimeoutRef.current = setTimeout(() => {
+        if (!mountedRef.current) return;
+        setSelectedAgentName(null);
+        // Open issue panel for the task
+        setSelectedIssueId(taskId);
+        setIsPanelOpen(true);
+        fetchIssue(taskId);
+      }, 300);
+    },
+    [fetchIssue, clearTimeoutRef]
+  );
+
+  const toggleProfileMenu = useCallback(() => {
+    setIsProfileMenuOpen((prev) => !prev);
+  }, []);
+
+  const closeProfileMenu = useCallback(() => {
+    setIsProfileMenuOpen(false);
+  }, []);
+
+  const headerNavigation = (
+    <div className={styles.headerControls}>
+      <div className={styles.searchWrapper}>
+        <SearchInput
+          value={searchValue}
+          onChange={setSearchValue}
+          onClear={handleSearchClear}
+          placeholder="Search issues..."
+          size="md"
+        />
+      </div>
+      <div className={styles.filtersWrapper}>
+        <FilterBar
+          filters={filters}
+          actions={filterActions}
+          groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
+          onGroupByChange={filterActions.setGroupBy}
+          showClear={false}
+        />
+      </div>
+    </div>
+  );
+
+  const headerActions = (
+    <div className={styles.headerActions}>
+      <ConnectionStatus
+        state={connectionState}
+        onRetry={retryConnection}
+        reconnectAttempts={reconnectAttempts}
+        showText={false}
+        showRetryButton={false}
+        compact
+      />
+      <div className={styles.profileMenu} ref={profileMenuRef}>
+        <button
+          type="button"
+          className={styles.profileButton}
+          onClick={toggleProfileMenu}
+          aria-haspopup="true"
+          aria-expanded={isProfileMenuOpen}
+          aria-label="Open profile menu"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        {isProfileMenuOpen && (
+          <div className={styles.profileDropdown} role="menu">
+            <button type="button" className={styles.profileItem} onClick={closeProfileMenu}>
+              Settings
+            </button>
+            <button type="button" className={styles.profileItem} onClick={closeProfileMenu}>
+              Logout
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // Loading state: show skeleton columns
   if (isLoading) {
     return (
       <AppLayout
-        navigation={<ViewSwitcher activeView={activeView} onChange={setActiveView} disabled />}
-        actions={
-          <div className={styles.actionsContainer}>
-            <StatsHeader
-              stats={stats}
-              loading={statsLoading}
-              error={statsError}
-              onRetry={refetchStats}
-            />
-            <BlockedSummary onIssueClick={handleBlockedIssueClick} />
-            <ConnectionStatus state={connectionState} />
-          </div>
+        title="Cortex"
+        navigation={headerNavigation}
+        actions={headerActions}
+        navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
+        sidebar={
+          <AgentsSidebar
+            onAgentClick={handleAgentClick}
+            defaultCollapsed={false}
+            collapsible={false}
+          />
         }
-        sidebar={<AgentsSidebar />}
       >
         <div className={styles.loadingContainer} data-testid="loading-container">
           <LoadingSkeleton.Column />
@@ -349,28 +563,21 @@ function App() {
     );
   }
 
-  // Error state: show error display with retry (ViewSwitcher disabled, no filters)
+  // Error state: show error display with retry
   if (error && !isLoading) {
     return (
       <AppLayout
-        navigation={<ViewSwitcher activeView={activeView} onChange={setActiveView} disabled />}
-        actions={
-          <div className={styles.actionsContainer}>
-            <StatsHeader
-              stats={stats}
-              loading={statsLoading}
-              error={statsError}
-              onRetry={refetchStats}
-            />
-            <BlockedSummary onIssueClick={handleBlockedIssueClick} />
-            <ConnectionStatus
-              state={connectionState}
-              onRetry={retryConnection}
-              reconnectAttempts={reconnectAttempts}
-            />
-          </div>
+        title="Cortex"
+        navigation={headerNavigation}
+        actions={headerActions}
+        navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
+        sidebar={
+          <AgentsSidebar
+            onAgentClick={handleAgentClick}
+            defaultCollapsed={false}
+            collapsible={false}
+          />
         }
-        sidebar={<AgentsSidebar />}
       >
         <ErrorDisplay
           variant="fetch-error"
@@ -382,47 +589,20 @@ function App() {
     );
   }
 
-  // Navigation element with view switcher, search, and filters (success state only)
-  const navigation = (
-    <div className={styles.navigationBar} data-testid="navigation-bar">
-      <ViewSwitcher activeView={activeView} onChange={setActiveView} />
-      <SearchInput
-        value={searchValue}
-        onChange={setSearchValue}
-        onClear={handleSearchClear}
-        placeholder="Search issues..."
-        size="sm"
-      />
-      <FilterBar
-        filters={filters}
-        actions={filterActions}
-        groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-        onGroupByChange={filterActions.setGroupBy}
-      />
-    </div>
-  );
-
   // Success state: show view based on activeView with filtered issues
   return (
     <AppLayout
-      navigation={navigation}
-      actions={
-        <div className={styles.actionsContainer}>
-          <StatsHeader
-            stats={stats}
-            loading={statsLoading}
-            error={statsError}
-            onRetry={refetchStats}
-          />
-          <BlockedSummary onIssueClick={handleBlockedIssueClick} />
-          <ConnectionStatus
-            state={connectionState}
-            onRetry={retryConnection}
-            reconnectAttempts={reconnectAttempts}
-          />
-        </div>
+      title="Cortex"
+      navigation={headerNavigation}
+      actions={headerActions}
+      navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
+      sidebar={
+        <AgentsSidebar
+          onAgentClick={handleAgentClick}
+          defaultCollapsed={false}
+          collapsible={false}
+        />
       }
-      sidebar={<AgentsSidebar />}
     >
       {activeView === 'kanban' && (
         <SwimLaneBoard
@@ -459,7 +639,11 @@ function App() {
       )}
       {activeView === 'monitor' && (
         <Suspense fallback={<LoadingSkeleton.Monitor />}>
-          <MonitorDashboard onViewChange={setActiveView} />
+          <MonitorDashboard
+            onViewChange={setActiveView}
+            onIssueClick={handleIssueClick}
+            onAgentClick={handleAgentClick}
+          />
         </Suspense>
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
@@ -472,13 +656,24 @@ function App() {
         onApprove={handleApprove}
         onReject={handleReject}
       />
-      <TalkToLeadButton />
+      <AgentDetailPanel
+        isOpen={isAgentPanelOpen}
+        agentName={selectedAgentName}
+        agents={agents}
+        agentTasks={agentTasks}
+        onClose={handleAgentPanelClose}
+        onTaskClick={handleAgentTaskClick}
+      />
+      <TalkToLeadButton onClick={handleTalkToLeadClick} isActive={isTerminalOpen} />
       <AssigneePrompt
         isOpen={pendingDragData !== null}
         onConfirm={handleAssigneeConfirm}
         onSkip={handleAssigneeSkip}
         recentNames={recentAssignees}
       />
+      <Suspense fallback={null}>
+        <TerminalPanel isOpen={isTerminalOpen} onClose={handleTerminalClose} />
+      </Suspense>
     </AppLayout>
   );
 }

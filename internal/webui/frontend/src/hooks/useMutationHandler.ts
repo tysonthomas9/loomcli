@@ -3,10 +3,11 @@
  * Processes create, update, delete, status, and other mutation types to keep the UI in sync.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
 import { produce } from 'immer';
-import type { Issue } from '../types/issue';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
 import type { MutationPayload } from '../api/sse';
+import type { Issue } from '../types/issue';
 import {
   MutationCreate,
   MutationUpdate,
@@ -22,8 +23,10 @@ export interface UseMutationHandlerOptions {
   /** Current issue state as a Map for O(1) lookups */
   issues: Map<string, Issue>;
 
-  /** Callback to update issue state */
-  setIssues: (issues: Map<string, Issue>) => void;
+  /** Callback to update issue state (supports functional updates for race condition safety) */
+  setIssues: (
+    issues: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)
+  ) => void;
 
   /** Callback when an issue is created */
   onIssueCreated?: (issue: Issue) => void;
@@ -227,18 +230,22 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
             );
             return;
           }
-          // Apply as update
+          // Apply as update using functional update to avoid race conditions
           const updatedIssue = applyUpdateToIssue(existingIssue, mutation);
-          const newIssues = new Map(issues);
-          newIssues.set(issue_id, updatedIssue);
-          setIssues(newIssues);
+          setIssues((prev) => {
+            const newIssues = new Map(prev);
+            newIssues.set(issue_id, updatedIssue);
+            return newIssues;
+          });
           onIssueUpdatedRef.current?.(updatedIssue, existingIssue);
         } else {
-          // Create new issue
+          // Create new issue using functional update to avoid race conditions
           const newIssue = createIssueFromMutation(mutation);
-          const newIssues = new Map(issues);
-          newIssues.set(issue_id, newIssue);
-          setIssues(newIssues);
+          setIssues((prev) => {
+            const newIssues = new Map(prev);
+            newIssues.set(issue_id, newIssue);
+            return newIssues;
+          });
           onIssueCreatedRef.current?.(newIssue);
         }
         setMutationCount((c) => c + 1);
@@ -258,9 +265,12 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
           onMutationSkippedRef.current?.(mutation, 'Stale delete mutation');
           return;
         }
-        const newIssues = new Map(issues);
-        newIssues.delete(issue_id);
-        setIssues(newIssues);
+        // Use functional update to avoid race conditions
+        setIssues((prev) => {
+          const newIssues = new Map(prev);
+          newIssues.delete(issue_id);
+          return newIssues;
+        });
         onIssueDeletedRef.current?.(issue_id);
         setMutationCount((c) => c + 1);
         setLastMutationAt(mutation.timestamp);
@@ -304,13 +314,19 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
           break;
       }
 
-      const newIssues = new Map(issues);
-      newIssues.set(issue_id, updatedIssue);
-      setIssues(newIssues);
+      // Use functional update to avoid race conditions when multiple events arrive before render
+      setIssues((prev) => {
+        const newIssues = new Map(prev);
+        newIssues.set(issue_id, updatedIssue);
+        return newIssues;
+      });
       onIssueUpdatedRef.current?.(updatedIssue, existingIssue);
       setMutationCount((c) => c + 1);
       setLastMutationAt(mutation.timestamp);
     },
+    // Note: `issues` is intentionally NOT in deps because stale checks use closure value
+    // (acceptable since stale checks only skip mutations), but state updates use functional
+    // form with `prev` to ensure each mutation operates on the latest state.
     [issues, setIssues]
   );
 

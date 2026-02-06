@@ -166,6 +166,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.bottleneckTitle {
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin: 0 var(--space-2);
+  text-align: left;
 }
 
 .bottleneckBlockCount {
@@ -191,7 +203,7 @@
 }
 
 /* Responsive */
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .panel {
     flex-direction: column;
   }

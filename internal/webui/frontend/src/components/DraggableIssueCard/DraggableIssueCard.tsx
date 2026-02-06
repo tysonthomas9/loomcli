@@ -5,6 +5,7 @@
  */
 
 import { useDraggable } from '@dnd-kit/core';
+
 import { IssueCard, type IssueCardProps } from '../IssueCard';
 import styles from './DraggableIssueCard.module.css';
 

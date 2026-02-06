@@ -7,8 +7,9 @@
  * Tests localStorage persistence of recent assignee names.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
 import { useRecentAssignees } from '../useRecentAssignees';
 
 /**
@@ -88,10 +89,7 @@ describe('useRecentAssignees', () => {
     });
 
     it('loads initial state from localStorage', () => {
-      mockStorage.store.set(
-        'beads-recent-assignees',
-        JSON.stringify(['Alice', 'Bob', 'Charlie'])
-      );
+      mockStorage.store.set('beads-recent-assignees', JSON.stringify(['Alice', 'Bob', 'Charlie']));
 
       const { result } = renderHook(() => useRecentAssignees());
 
@@ -107,10 +105,7 @@ describe('useRecentAssignees', () => {
     });
 
     it('handles non-array JSON in localStorage gracefully', () => {
-      mockStorage.store.set(
-        'beads-recent-assignees',
-        JSON.stringify({ invalid: 'object' })
-      );
+      mockStorage.store.set('beads-recent-assignees', JSON.stringify({ invalid: 'object' }));
 
       const { result } = renderHook(() => useRecentAssignees());
 
@@ -191,13 +186,7 @@ describe('useRecentAssignees', () => {
       });
 
       expect(result.current.recentAssignees).toHaveLength(5);
-      expect(result.current.recentAssignees).toEqual([
-        'Six',
-        'Five',
-        'Four',
-        'Three',
-        'Two',
-      ]);
+      expect(result.current.recentAssignees).toEqual(['Six', 'Five', 'Four', 'Three', 'Two']);
       // 'One' should have been dropped
       expect(result.current.recentAssignees).not.toContain('One');
     });
@@ -256,10 +245,7 @@ describe('useRecentAssignees', () => {
 
   describe('clearRecentAssignees', () => {
     it('clears all recent assignees', () => {
-      mockStorage.store.set(
-        'beads-recent-assignees',
-        JSON.stringify(['Alice', 'Bob', 'Charlie'])
-      );
+      mockStorage.store.set('beads-recent-assignees', JSON.stringify(['Alice', 'Bob', 'Charlie']));
 
       const { result } = renderHook(() => useRecentAssignees());
 
@@ -273,10 +259,7 @@ describe('useRecentAssignees', () => {
     });
 
     it('persists the empty state to localStorage', () => {
-      mockStorage.store.set(
-        'beads-recent-assignees',
-        JSON.stringify(['Alice', 'Bob'])
-      );
+      mockStorage.store.set('beads-recent-assignees', JSON.stringify(['Alice', 'Bob']));
 
       const { result } = renderHook(() => useRecentAssignees());
 
@@ -285,10 +268,7 @@ describe('useRecentAssignees', () => {
       });
 
       // Check localStorage was updated to empty array
-      expect(mockStorage.setItem).toHaveBeenCalledWith(
-        'beads-recent-assignees',
-        '[]'
-      );
+      expect(mockStorage.setItem).toHaveBeenCalledWith('beads-recent-assignees', '[]');
     });
   });
 
@@ -318,8 +298,7 @@ describe('useRecentAssignees', () => {
       });
 
       // Get the last call to setItem
-      const lastCall =
-        mockStorage.setItem.mock.calls[mockStorage.setItem.mock.calls.length - 1];
+      const lastCall = mockStorage.setItem.mock.calls[mockStorage.setItem.mock.calls.length - 1];
       expect(lastCall[0]).toBe('beads-recent-assignees');
       expect(JSON.parse(lastCall[1] as string)).toEqual(['Bob', 'Alice']);
     });

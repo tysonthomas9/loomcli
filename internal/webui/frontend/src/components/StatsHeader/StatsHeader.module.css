@@ -98,6 +98,7 @@
   100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }
@@ -132,7 +133,7 @@
 /* ===========================
  * Responsive - Hide Labels on Mobile
  * =========================== */
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .label {
     display: none;
   }

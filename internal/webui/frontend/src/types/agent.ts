@@ -64,10 +64,10 @@ export const WorkTypeOpenCompetition: WorkType = 'open_competition';
  * Used to provide appropriate UI feedback for different connection scenarios.
  */
 export type LoomConnectionState =
-  | 'never_connected'  // Initial state before first successful fetch
-  | 'connected'        // Healthy connection
-  | 'disconnected'     // Lost connection (may have cached data)
-  | 'reconnecting';    // Actively trying to reconnect
+  | 'never_connected' // Initial state before first successful fetch
+  | 'connected' // Healthy connection
+  | 'disconnected' // Lost connection (may have cached data)
+  | 'reconnecting'; // Actively trying to reconnect
 
 /**
  * Agent status from the loom server.
@@ -90,7 +90,16 @@ export interface LoomAgentStatus {
  */
 export interface ParsedLoomStatus {
   /** The raw status type */
-  type: 'ready' | 'working' | 'planning' | 'done' | 'review' | 'idle' | 'error' | 'dirty' | 'changes';
+  type:
+    | 'ready'
+    | 'working'
+    | 'planning'
+    | 'done'
+    | 'review'
+    | 'idle'
+    | 'error'
+    | 'dirty'
+    | 'changes';
   /** Task ID if working on a task */
   taskId?: string;
   /** Duration string (e.g., "5m", "2h30m") */
@@ -118,14 +127,27 @@ export interface LoomTaskInfo {
 }
 
 /**
- * Task summary counts from loom server.
+ * Task summary counts from loom server (API response format).
+ * Note: API uses "backlog" field which is mapped to "blocked" for frontend use.
+ */
+export interface LoomTaskSummaryRaw {
+  needs_planning: number;
+  ready_to_implement: number;
+  in_progress: number;
+  need_review: number;
+  backlog: number; // API field name for blocked tasks
+}
+
+/**
+ * Task summary counts (frontend format).
+ * Used after mapping from API response.
  */
 export interface LoomTaskSummary {
   needs_planning: number;
   ready_to_implement: number;
   in_progress: number;
   need_review: number;
-  blocked: number;
+  blocked: number; // Mapped from API field "backlog"
 }
 
 /**
@@ -151,10 +173,11 @@ export interface LoomStats {
 
 /**
  * Full status response from GET /api/status on loom server.
+ * Uses raw API types; callers should map to frontend types.
  */
 export interface LoomStatusResponse {
   agents: LoomAgentStatus[] | null;
-  tasks: LoomTaskSummary;
+  tasks: LoomTaskSummaryRaw;
   in_progress_list: LoomTaskInfo[] | null;
   agent_tasks: Record<string, LoomTaskInfo> | null;
   stats: LoomStats;
@@ -177,7 +200,7 @@ export interface LoomTasksResponse {
   ready_to_implement: LoomTaskInfo[] | null;
   needs_review: LoomTaskInfo[] | null;
   in_progress: LoomTaskInfo[] | null;
-  blocked: LoomTaskInfo[] | null;
+  backlog: LoomTaskInfo[] | null; // API sends "backlog" (contains blocked tasks)
   timestamp: string;
 }
 
@@ -218,7 +241,9 @@ export function parseLoomStatus(status: string): ParsedLoomStatus {
 
   // Check for status with task ID and duration
   // Pattern: "working: bd-123 (5m)" or "planning: ... (2m)"
-  const taskMatch = status.match(/^(working|planning|done|review|error|idle):\s*(.+?)?\s*\(([^)]+)\)$/);
+  const taskMatch = status.match(
+    /^(working|planning|done|review|error|idle):\s*(.+?)?\s*\(([^)]+)\)$/
+  );
   if (taskMatch && taskMatch[1] !== undefined && taskMatch[3] !== undefined) {
     const type = taskMatch[1] as ParsedLoomStatus['type'];
     const taskId = taskMatch[2]?.trim();

@@ -3,14 +3,11 @@
  * Renders edges between issue nodes with visual styles based on dependency type.
  */
 
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
 import { memo } from 'react';
-import {
-  BaseEdge,
-  EdgeLabelRenderer,
-  getSmoothStepPath,
-  type EdgeProps,
-} from '@xyflow/react';
+
 import type { DependencyEdge as DependencyEdgeType, DependencyType } from '@/types';
+
 import styles from './DependencyEdge.module.css';
 
 /**
@@ -58,6 +55,7 @@ function DependencyEdgeComponent({
   targetPosition,
   data,
   selected,
+  markerEnd,
 }: DependencyEdgeProps): JSX.Element {
   // Use smooth step path for cleaner graph appearance
   const [edgePath, labelX, labelY] = getSmoothStepPath({
@@ -81,9 +79,7 @@ function DependencyEdgeComponent({
     edgeClassName = `${edgeClassName} ${styles.highlighted}`;
   }
 
-  const labelClassName = selected
-    ? `${styles.edgeLabel} ${styles.selected}`
-    : styles.edgeLabel;
+  const labelClassName = selected ? `${styles.edgeLabel} ${styles.selected}` : styles.edgeLabel;
 
   return (
     <>
@@ -91,7 +87,7 @@ function DependencyEdgeComponent({
         id={id}
         path={edgePath}
         className={edgeClassName}
-        markerEnd="url(#arrow)"
+        {...(markerEnd != null && { markerEnd })}
       />
       <EdgeLabelRenderer>
         <div

@@ -44,7 +44,8 @@
   font-weight: var(--font-weight-medium);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: color var(--transition-fast),
+  transition:
+    color var(--transition-fast),
     background-color var(--transition-fast),
     border-color var(--transition-fast),
     opacity var(--transition-fast);
@@ -104,7 +105,7 @@
 }
 
 /* Responsive: full width on mobile */
-@media (max-width: 480px) {
+@media (width <= 480px) {
   .toolbar {
     left: var(--space-4);
     right: var(--space-4);

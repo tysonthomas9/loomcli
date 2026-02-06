@@ -6,11 +6,13 @@
  * DependencySection component tests.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import '@testing-library/jest-dom';
-import { DependencySection, type DependencySectionProps } from '../DependencySection';
 import type { IssueWithDependencyMetadata } from '@/types';
+
+import { DependencySection, type DependencySectionProps } from '../DependencySection';
 
 // Helper to create test dependencies
 function createDependency(
@@ -229,7 +231,9 @@ describe('DependencySection', () => {
       fireEvent.change(screen.getByTestId('dependency-input'), { target: { value: 'issue-1' } });
       fireEvent.click(screen.getByTestId('confirm-add-dependency'));
 
-      expect(screen.getByTestId('dependency-error')).toHaveTextContent('Cannot add self as dependency');
+      expect(screen.getByTestId('dependency-error')).toHaveTextContent(
+        'Cannot add self as dependency'
+      );
     });
 
     it('shows error when adding duplicate dependency', () => {
@@ -237,7 +241,9 @@ describe('DependencySection', () => {
       render(<DependencySection {...defaultProps({ dependencies: deps })} />);
 
       fireEvent.click(screen.getByTestId('add-dependency-button'));
-      fireEvent.change(screen.getByTestId('dependency-input'), { target: { value: 'existing-dep' } });
+      fireEvent.change(screen.getByTestId('dependency-input'), {
+        target: { value: 'existing-dep' },
+      });
       fireEvent.click(screen.getByTestId('confirm-add-dependency'));
 
       expect(screen.getByTestId('dependency-error')).toHaveTextContent('Already a dependency');
@@ -248,7 +254,9 @@ describe('DependencySection', () => {
       render(<DependencySection {...defaultProps({ onAddDependency })} />);
 
       fireEvent.click(screen.getByTestId('add-dependency-button'));
-      fireEvent.change(screen.getByTestId('dependency-input'), { target: { value: 'nonexistent' } });
+      fireEvent.change(screen.getByTestId('dependency-input'), {
+        target: { value: 'nonexistent' },
+      });
       fireEvent.click(screen.getByTestId('confirm-add-dependency'));
 
       await waitFor(() => {
@@ -258,9 +266,12 @@ describe('DependencySection', () => {
 
     it('shows loading state while adding', async () => {
       let resolveAdd: () => void;
-      const onAddDependency = vi.fn().mockImplementation(() => new Promise(resolve => {
-        resolveAdd = resolve;
-      }));
+      const onAddDependency = vi.fn().mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveAdd = resolve;
+          })
+      );
       render(<DependencySection {...defaultProps({ onAddDependency })} />);
 
       fireEvent.click(screen.getByTestId('add-dependency-button'));
@@ -312,9 +323,12 @@ describe('DependencySection', () => {
 
     it('shows loading state while removing', async () => {
       let resolveRemove: () => void;
-      const onRemoveDependency = vi.fn().mockImplementation(() => new Promise(resolve => {
-        resolveRemove = resolve;
-      }));
+      const onRemoveDependency = vi.fn().mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveRemove = resolve;
+          })
+      );
       const deps = [createDependency('dep-1', 'Test dep')];
       render(<DependencySection {...defaultProps({ dependencies: deps, onRemoveDependency })} />);
 
@@ -331,13 +345,13 @@ describe('DependencySection', () => {
 
     it('disables all buttons during removal', async () => {
       let resolveRemove: () => void;
-      const onRemoveDependency = vi.fn().mockImplementation(() => new Promise(resolve => {
-        resolveRemove = resolve;
-      }));
-      const deps = [
-        createDependency('dep-1', 'First'),
-        createDependency('dep-2', 'Second'),
-      ];
+      const onRemoveDependency = vi.fn().mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveRemove = resolve;
+          })
+      );
+      const deps = [createDependency('dep-1', 'First'), createDependency('dep-2', 'Second')];
       render(<DependencySection {...defaultProps({ dependencies: deps, onRemoveDependency })} />);
 
       fireEvent.click(screen.getByTestId('remove-dependency-dep-1'));
@@ -377,10 +391,7 @@ describe('DependencySection', () => {
 
       fireEvent.click(screen.getByTestId('add-dependency-button'));
 
-      expect(screen.getByTestId('dependency-input')).toHaveAttribute(
-        'aria-label',
-        'Issue ID'
-      );
+      expect(screen.getByTestId('dependency-input')).toHaveAttribute('aria-label', 'Issue ID');
     });
 
     it('error has role="alert"', () => {

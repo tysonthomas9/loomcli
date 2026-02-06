@@ -71,9 +71,7 @@ export function GraphLegend({
   onToggle,
   className,
 }: GraphLegendProps): JSX.Element {
-  const rootClassName = className
-    ? `${styles.graphLegend} ${className}`
-    : styles.graphLegend;
+  const rootClassName = className ? `${styles.graphLegend} ${className}` : styles.graphLegend;
 
   return (
     <aside className={rootClassName} data-testid="graph-legend">
@@ -134,11 +132,7 @@ export function GraphLegend({
             <dl className={styles.list}>
               {EDGE_ITEMS.map((item) => (
                 <div key={item.type} className={styles.legendItem}>
-                  <dt
-                    className={styles.edgeSwatch}
-                    data-style={item.style}
-                    aria-hidden="true"
-                  />
+                  <dt className={styles.edgeSwatch} data-style={item.style} aria-hidden="true" />
                   <dd>{item.label}</dd>
                 </div>
               ))}
@@ -151,11 +145,7 @@ export function GraphLegend({
             <dl className={styles.list}>
               {INDICATOR_ITEMS.map((item) => (
                 <div key={item.type} className={styles.legendItem}>
-                  <dt
-                    className={styles.indicatorSwatch}
-                    data-type={item.type}
-                    aria-hidden="true"
-                  />
+                  <dt className={styles.indicatorSwatch} data-type={item.type} aria-hidden="true" />
                   <dd title={item.description}>{item.label}</dd>
                 </div>
               ))}

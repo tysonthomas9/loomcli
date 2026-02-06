@@ -4,12 +4,15 @@
  * Includes work queue summary, project stats, and sync status.
  */
 
+import type { ReactNode } from 'react';
 import { useState, useCallback, useEffect } from 'react';
-import { useAgents } from '@/hooks';
+
+import { useAgentContext } from '@/hooks';
+import type { LoomTaskInfo } from '@/types';
+
 import { AgentCard } from '../AgentCard';
 import { TaskDrawer } from '../TaskDrawer';
 import type { TaskCategory } from '../TaskDrawer';
-import type { LoomTaskInfo } from '@/types';
 import styles from './AgentsSidebar.module.css';
 
 /**
@@ -20,6 +23,12 @@ export interface AgentsSidebarProps {
   className?: string;
   /** Default collapsed state */
   defaultCollapsed?: boolean;
+  /** Allow collapsing the sidebar (default: true) */
+  collapsible?: boolean;
+  /** Callback when an agent card is clicked */
+  onAgentClick?: (agentName: string) => void;
+  /** Optional content to render at the top of the sidebar (e.g., ViewSwitcher) */
+  viewSwitcher?: ReactNode;
 }
 
 const COLLAPSE_STORAGE_KEY = 'agents-sidebar-collapsed';
@@ -31,6 +40,9 @@ const WORK_QUEUE_STORAGE_KEY = 'agents-sidebar-work-queue-expanded';
 export function AgentsSidebar({
   className,
   defaultCollapsed = false,
+  collapsible = true,
+  onAgentClick,
+  viewSwitcher,
 }: AgentsSidebarProps): JSX.Element {
   // Load initial collapsed state from localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -56,9 +68,7 @@ export function AgentsSidebar({
   const [selectedCategory, setSelectedCategory] = useState<TaskCategory | null>(null);
 
   const { agents, tasks, taskLists, agentTasks, sync, stats, isLoading, isConnected, lastUpdated } =
-    useAgents({
-      pollInterval: 5000,
-    });
+    useAgentContext();
 
   // Persist collapsed state
   useEffect(() => {
@@ -79,8 +89,9 @@ export function AgentsSidebar({
   }, [isWorkQueueExpanded]);
 
   const handleToggle = useCallback(() => {
+    if (!collapsible) return;
     setIsCollapsed((prev) => !prev);
-  }, []);
+  }, [collapsible]);
 
   const handleWorkQueueToggle = useCallback(() => {
     setIsWorkQueueExpanded((prev) => !prev);
@@ -98,15 +109,17 @@ export function AgentsSidebar({
   const getDrawerData = useCallback((): { title: string; tasks: LoomTaskInfo[] } => {
     switch (selectedCategory) {
       case 'plan':
-        return { title: 'Needs Planning', tasks: taskLists.needsPlanning };
+        return { title: 'Backlog', tasks: taskLists.needsPlanning };
       case 'impl':
-        return { title: 'Ready to Implement', tasks: taskLists.readyToImplement };
+        return { title: 'Open', tasks: taskLists.readyToImplement };
       case 'review':
         return { title: 'Needs Review', tasks: taskLists.needsReview };
       case 'inProgress':
         return { title: 'In Progress', tasks: taskLists.inProgress };
       case 'blocked':
         return { title: 'Blocked', tasks: taskLists.blocked };
+      case 'done':
+        return { title: 'Done', tasks: [] };
       default:
         return { title: '', tasks: [] };
     }
@@ -114,7 +127,9 @@ export function AgentsSidebar({
 
   const drawerData = getDrawerData();
 
-  const rootClassName = [styles.sidebar, isCollapsed && styles.collapsed, className]
+  const collapsed = collapsible ? isCollapsed : false;
+
+  const rootClassName = [styles.sidebar, collapsed && styles.collapsed, className]
     .filter(Boolean)
     .join(' ');
 
@@ -128,23 +143,31 @@ export function AgentsSidebar({
 
   return (
     <aside className={rootClassName} data-collapsed={isCollapsed}>
-      <button
-        type="button"
-        className={styles.toggleButton}
-        onClick={handleToggle}
-        aria-expanded={!isCollapsed}
-        aria-label={isCollapsed ? 'Expand agents sidebar' : 'Collapse agents sidebar'}
-      >
-        {!isCollapsed && (
-          <span className={styles.toggleText}>
-            Agents
-            {activeCount > 0 && <span className={styles.activeCount}>{activeCount}</span>}
-          </span>
-        )}
-        <span className={styles.toggleIcon}>{isCollapsed ? '>' : '<'}</span>
-      </button>
+      {!collapsed && viewSwitcher && <div className={styles.viewSwitcherSlot}>{viewSwitcher}</div>}
+      {collapsible ? (
+        <button
+          type="button"
+          className={styles.toggleButton}
+          onClick={handleToggle}
+          aria-expanded={!isCollapsed}
+          aria-label={isCollapsed ? 'Expand agents sidebar' : 'Collapse agents sidebar'}
+        >
+          {!collapsed && (
+            <>
+              <span className={styles.toggleText}>Agents</span>
+              <span className={styles.sectionCount}>{agents.length}</span>
+            </>
+          )}
+          <span className={styles.toggleIcon}>{collapsed ? '>' : '<'}</span>
+        </button>
+      ) : (
+        <div className={styles.headerRow}>
+          <span className={styles.toggleText}>Agents</span>
+          <span className={styles.sectionCount}>{agents.length}</span>
+        </div>
+      )}
 
-      {!isCollapsed && (
+      {!collapsed && (
         <div className={styles.content}>
           {!isConnected && !isLoading && (
             <div className={styles.disconnected}>
@@ -168,6 +191,7 @@ export function AgentsSidebar({
                   key={agent.name}
                   agent={agent}
                   taskTitle={agentTasks[agent.name]?.title}
+                  {...(onAgentClick !== undefined && { onClick: () => onAgentClick(agent.name) })}
                 />
               ))}
             </div>
@@ -192,21 +216,10 @@ export function AgentsSidebar({
                     <button
                       type="button"
                       className={styles.queueItem}
-                      onClick={() => handleCategoryClick('plan')}
-                      disabled={tasks.needs_planning === 0}
-                    >
-                      <span className={styles.queueLabel}>Plan</span>
-                      <span className={styles.queueCount} data-highlight={tasks.needs_planning > 0}>
-                        {tasks.needs_planning}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.queueItem}
                       onClick={() => handleCategoryClick('impl')}
                       disabled={tasks.ready_to_implement === 0}
                     >
-                      <span className={styles.queueLabel}>Impl</span>
+                      <span className={styles.queueLabel}>Open</span>
                       <span
                         className={styles.queueCount}
                         data-highlight={tasks.ready_to_implement > 0}
@@ -217,10 +230,33 @@ export function AgentsSidebar({
                     <button
                       type="button"
                       className={styles.queueItem}
+                      onClick={() => handleCategoryClick('blocked')}
+                      disabled={tasks.blocked === 0}
+                    >
+                      <span className={styles.queueLabel}>Blocked</span>
+                      <span className={styles.queueCount}>{tasks.blocked}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.queueItem}
+                      onClick={() => handleCategoryClick('inProgress')}
+                      disabled={(tasks.in_progress ?? 0) === 0}
+                    >
+                      <span className={styles.queueLabel}>In Progress</span>
+                      <span
+                        className={styles.queueCount}
+                        data-highlight={(tasks.in_progress ?? 0) > 0}
+                      >
+                        {tasks.in_progress ?? 0}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.queueItem}
                       onClick={() => handleCategoryClick('review')}
                       disabled={tasks.need_review === 0}
                     >
-                      <span className={styles.queueLabel}>Review</span>
+                      <span className={styles.queueLabel}>Needs Review</span>
                       <span className={styles.queueCount} data-highlight={tasks.need_review > 0}>
                         {tasks.need_review}
                       </span>
@@ -228,11 +264,11 @@ export function AgentsSidebar({
                     <button
                       type="button"
                       className={styles.queueItem}
-                      onClick={() => handleCategoryClick('blocked')}
-                      disabled={tasks.blocked === 0}
+                      disabled
+                      aria-label="Done count"
                     >
-                      <span className={styles.queueLabel}>Blocked</span>
-                      <span className={styles.queueCount}>{tasks.blocked}</span>
+                      <span className={styles.queueLabel}>Done</span>
+                      <span className={styles.queueCount}>{stats.closed}</span>
                     </button>
                   </div>
                 </div>
@@ -288,7 +324,7 @@ export function AgentsSidebar({
         </div>
       )}
 
-      {isCollapsed && activeCount > 0 && (
+      {collapsed && activeCount > 0 && (
         <div className={styles.collapsedBadge} title={`${activeCount} active agent(s)`}>
           {activeCount}
         </div>

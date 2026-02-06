@@ -4,8 +4,10 @@
  * issue counts, and bottleneck detection.
  */
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
+
 import type { LoomStats, BlockedIssue, Issue } from '@/types';
+
 import styles from './ProjectHealthPanel.module.css';
 
 /**
@@ -37,22 +39,32 @@ export interface ProjectHealthPanelProps {
 /**
  * Derive bottlenecks from blocked issues.
  * Returns issues that block multiple others, sorted by impact.
+ * Uses blocked_by_details when available for title and priority info.
  */
 function deriveBottlenecks(blockedIssues: BlockedIssue[] | null): Bottleneck[] {
   if (!blockedIssues || blockedIssues.length === 0) {
     return [];
   }
 
-  // Build frequency map: blockerId -> { count, info from first blocked issue }
-  const blockerMap = new Map<string, { count: number; title?: string; priority?: number }>();
+  // Build frequency map: blockerId -> { count, title, priority }
+  const blockerMap = new Map<string, { count: number; title: string; priority: number }>();
 
   for (const issue of blockedIssues) {
-    for (const blockerId of issue.blocked_by) {
-      const existing = blockerMap.get(blockerId);
+    // Use blocked_by_details if available, otherwise fall back to blocked_by IDs
+    const details = issue.blocked_by_details || [];
+    const blockerInfos =
+      details.length > 0 ? details : issue.blocked_by.map((id) => ({ id, title: id, priority: 2 }));
+
+    for (const blocker of blockerInfos) {
+      const existing = blockerMap.get(blocker.id);
       if (existing) {
         existing.count++;
       } else {
-        blockerMap.set(blockerId, { count: 1 });
+        blockerMap.set(blocker.id, {
+          count: 1,
+          title: blocker.title || blocker.id,
+          priority: blocker.priority ?? 2,
+        });
       }
     }
   }
@@ -63,8 +75,8 @@ function deriveBottlenecks(blockedIssues: BlockedIssue[] | null): Bottleneck[] {
     if (data.count > 1) {
       bottlenecks.push({
         id,
-        title: data.title || id, // Fallback to ID if title not available
-        priority: data.priority ?? 2,
+        title: data.title,
+        priority: data.priority,
         blockingCount: data.count,
       });
     }
@@ -80,7 +92,7 @@ function deriveBottlenecks(blockedIssues: BlockedIssue[] | null): Bottleneck[] {
 /**
  * ProjectHealthPanel displays project health metrics in a compact format.
  */
-export function ProjectHealthPanel({
+function ProjectHealthPanelComponent({
   stats,
   blockedIssues,
   isLoading,
@@ -154,8 +166,12 @@ export function ProjectHealthPanel({
                   }
                   disabled={!onBottleneckClick}
                   aria-current={index === 0 ? 'true' : undefined}
+                  title={bottleneck.title !== bottleneck.id ? bottleneck.title : undefined}
                 >
                   <span className={styles.bottleneckId}>{bottleneck.id}</span>
+                  {bottleneck.title !== bottleneck.id && (
+                    <span className={styles.bottleneckTitle}>{bottleneck.title}</span>
+                  )}
                   <span className={styles.bottleneckBlockCount}>
                     blocks {bottleneck.blockingCount}
                   </span>
@@ -168,3 +184,5 @@ export function ProjectHealthPanel({
     </div>
   );
 }
+
+export const ProjectHealthPanel = memo(ProjectHealthPanelComponent);

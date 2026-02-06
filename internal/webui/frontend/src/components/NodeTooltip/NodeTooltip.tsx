@@ -6,7 +6,10 @@
  */
 
 import { memo, useMemo } from 'react';
+
 import type { Issue } from '@/types';
+import { formatIssueId } from '@/utils/formatIssueId';
+
 import styles from './NodeTooltip.module.css';
 
 /**
@@ -27,15 +30,6 @@ export interface NodeTooltipProps {
   position: TooltipPosition | null;
   /** Additional CSS class name */
   className?: string;
-}
-
-/**
- * Format issue ID for display (last 7 chars if long).
- */
-function formatIssueId(id: string): string {
-  if (!id) return 'unknown';
-  if (id.length <= 10) return id;
-  return id.slice(-7);
 }
 
 /**
@@ -69,9 +63,12 @@ function getStatusDisplay(status: string | undefined): string {
 /**
  * Calculate adjusted tooltip position to keep within viewport bounds.
  */
-function calculateAdjustedPosition(
-  position: TooltipPosition
-): { x: number; y: number; flipX: boolean; flipY: boolean } {
+function calculateAdjustedPosition(position: TooltipPosition): {
+  x: number;
+  y: number;
+  flipX: boolean;
+  flipY: boolean;
+} {
   if (typeof window === 'undefined') {
     return { x: position.x, y: position.y, flipX: false, flipY: false };
   }
@@ -119,9 +116,7 @@ function NodeTooltipComponent({
   const rawPriority = issue.priority ?? 4;
   const priority = rawPriority < 0 || rawPriority > 4 ? 4 : rawPriority;
 
-  const rootClassName = className
-    ? `${styles.nodeTooltip} ${className}`
-    : styles.nodeTooltip;
+  const rootClassName = className ? `${styles.nodeTooltip} ${className}` : styles.nodeTooltip;
 
   return (
     <div
@@ -146,10 +141,7 @@ function NodeTooltipComponent({
         <span className={styles.statusBadge} data-status={issue.status || 'open'}>
           {statusDisplay}
         </span>
-        <span
-          className={styles.priorityBadge}
-          data-priority={priority}
-        >
+        <span className={styles.priorityBadge} data-priority={priority}>
           {priorityLabel}
         </span>
       </div>

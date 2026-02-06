@@ -7,6 +7,7 @@
  */
 
 import { useState, useCallback, memo } from 'react';
+
 import styles from './BlockedBadge.module.css';
 
 /**
@@ -77,9 +78,7 @@ function BlockedBadgeComponent({
     return null;
   }
 
-  const rootClassName = className
-    ? `${styles.blockedBadge} ${className}`
-    : styles.blockedBadge;
+  const rootClassName = className ? `${styles.blockedBadge} ${className}` : styles.blockedBadge;
 
   const issueList = formatIssueList(issueIds);
   const isBlockedBy = variant === 'blockedBy';

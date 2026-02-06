@@ -4,7 +4,9 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+
 import type { Priority } from '@/types';
+
 import styles from './PriorityDropdown.module.css';
 
 /**

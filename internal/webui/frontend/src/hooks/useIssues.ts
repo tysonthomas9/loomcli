@@ -7,11 +7,13 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import type { Issue, WorkFilter, Status } from '@/types';
+
 import type { ConnectionState, GraphFilter } from '@/api';
 import { getReadyIssues, updateIssue as apiUpdateIssue, fetchGraphIssues } from '@/api';
-import { useSSE } from './useSSE';
+import type { Issue, WorkFilter, Status } from '@/types';
+
 import { useMutationHandler } from './useMutationHandler';
+import { useSSE } from './useSSE';
 import { useToast } from './useToast';
 
 // Threshold for triggering a full refetch after reconnection
@@ -116,10 +118,20 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
   const fetchTimestampRef = useRef<number>(0);
   const mountedRef = useRef(true);
 
+  // Track fetch state for race condition prevention
+  const fetchingRef = useRef(false);
+  const deletedDuringFetchRef = useRef<Set<string>>(new Set());
+
   // Mutation handler setup
   const { handleMutation, mutationCount } = useMutationHandler({
     issues: issuesMap,
     setIssues: setIssuesMap,
+    onIssueDeleted: (issueId) => {
+      // Track deletions during fetch to prevent re-adding from stale API response
+      if (fetchingRef.current) {
+        deletedDuringFetchRef.current.add(issueId);
+      }
+    },
     onMutationSkipped: (mutation, reason) => {
       // Debug logging for development
       if (process.env.NODE_ENV === 'development') {
@@ -157,6 +169,8 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     setIsLoading(true);
     setError(null);
     fetchTimestampRef.current = Date.now();
+    fetchingRef.current = true;
+    deletedDuringFetchRef.current.clear();
 
     try {
       let data: Issue[];
@@ -167,12 +181,45 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       }
       if (!mountedRef.current) return;
 
-      // Convert array to Map
-      const newMap = new Map<string, Issue>();
-      for (const issue of data) {
-        newMap.set(issue.id, issue);
-      }
-      setIssuesMap(newMap);
+      // Capture deleted IDs before merge to avoid race condition with finally block clear()
+      const deletedDuringFetch = new Set(deletedDuringFetchRef.current);
+
+      // Merge API data with current state, preserving SSE mutations received during fetch
+      setIssuesMap((currentMap) => {
+        const mergedMap = new Map<string, Issue>();
+
+        // Start with API data (authoritative for which issues should exist)
+        for (const issue of data) {
+          // Skip if deleted during fetch window by SSE mutation
+          if (deletedDuringFetch.has(issue.id)) {
+            continue;
+          }
+          mergedMap.set(issue.id, issue);
+        }
+
+        // Preserve fresher mutations from current state
+        for (const [id, currentIssue] of currentMap) {
+          const apiIssue = mergedMap.get(id);
+
+          if (!apiIssue) {
+            // Keep if created during fetch (SSE create mutation)
+            const createdTime = Date.parse(currentIssue.created_at);
+            if (!isNaN(createdTime) && createdTime >= fetchTimestampRef.current) {
+              mergedMap.set(id, currentIssue);
+            }
+            continue;
+          }
+
+          // Keep current if newer (SSE mutation during fetch)
+          const currentTime = Date.parse(currentIssue.updated_at);
+          const apiTime = Date.parse(apiIssue.updated_at);
+          if (!isNaN(currentTime) && !isNaN(apiTime) && currentTime > apiTime) {
+            mergedMap.set(id, currentIssue);
+          }
+        }
+
+        return mergedMap;
+      });
     } catch (err) {
       if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : 'Failed to fetch issues';
@@ -181,6 +228,8 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       if (mountedRef.current) {
         setIsLoading(false);
       }
+      fetchingRef.current = false;
+      deletedDuringFetchRef.current.clear();
     }
   }, [filter, mode, graphFilter]);
 
@@ -241,10 +290,6 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
         throw new Error(`Issue ${issueId} not found`);
       }
 
-      // Capture state for rollback BEFORE optimistic update to avoid race conditions
-      // with SSE mutations that might arrive during the API call
-      const preUpdateMap = new Map(issuesMap);
-
       // Optimistic update
       const optimisticIssue: Issue = {
         ...existingIssue,
@@ -258,10 +303,14 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       try {
         await apiUpdateIssue(issueId, { status: newStatus });
       } catch (err) {
-        // Rollback on failure using pre-update state
+        // Rollback on failure using functional update to only restore this single issue,
+        // preserving any SSE mutations that arrived during the API call
         if (!mountedRef.current) return;
-        preUpdateMap.set(issueId, existingIssue);
-        setIssuesMap(preUpdateMap);
+        setIssuesMap((currentMap) => {
+          const newMap = new Map(currentMap);
+          newMap.set(issueId, existingIssue);
+          return newMap;
+        });
         throw err;
       }
     },

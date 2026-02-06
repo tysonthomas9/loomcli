@@ -24,10 +24,7 @@
 .graphView :global(.react-flow) {
   /* Ensure React Flow fills the graphView container using absolute positioning */
   position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
+  inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
 }
@@ -54,11 +51,6 @@
 .miniMapNode {
   fill: var(--color-border);
   stroke: none;
-}
-
-/* Arrow marker definition for edges */
-.graphView :global(#arrow) path {
-  fill: var(--color-border);
 }
 
 /* Legend positioned at bottom-left */

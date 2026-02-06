@@ -6,19 +6,46 @@
  * Unit tests for IssueDetailPanel component.
  */
 
-import { describe, it, expect, vi, beforeEach as _beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach as _beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { IssueDetailPanel } from '../IssueDetailPanel';
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from '@/types';
+
+import { IssueDetailPanel } from '../IssueDetailPanel';
+
+// Create hoisted mocks
+const { mockGetTaskLogPhases, mockUseLogStream } = vi.hoisted(() => ({
+  mockGetTaskLogPhases: vi.fn().mockResolvedValue([]),
+  mockUseLogStream: vi.fn(() => ({
+    lines: [],
+    state: 'disconnected' as const,
+    isConnected: false,
+    reconnectAttempts: 0,
+    lastError: null,
+    clearLines: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  })),
+}));
 
 // Mock the API module
 vi.mock('@/api', () => ({
   updateIssue: vi.fn(),
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
+  getTaskLogPhases: mockGetTaskLogPhases,
+  getTaskLogStreamUrl: vi.fn().mockReturnValue('/api/tasks/test/logs/planning/stream'),
 }));
+
+// Mock the useLogStream hook
+vi.mock('@/hooks', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('@/hooks')>();
+  return {
+    ...orig,
+    useLogStream: mockUseLogStream,
+  };
+});
 
 /**
  * Create a minimal test issue with required fields.

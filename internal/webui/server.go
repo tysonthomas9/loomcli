@@ -1,17 +1,21 @@
-// Package webui provides the web UI server for Beads.
+// Package webui provides the web UI server for loomcli.
 //
 // This server embeds the React frontend at compile time and serves it
-// along with API endpoints for interacting with the beads daemon.
+// along with API endpoints for interacting with the loomcli daemon.
 package webui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"time"
+
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -34,6 +38,7 @@ type ServerConfig struct {
 	CORSOrigins     []string
 	ShutdownTimeout time.Duration
 	MaxPortAttempts int
+	TerminalCmd     string
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.
@@ -95,7 +100,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 
 	// Log configuration
-	log.Printf("Starting beads-web-ui server")
+	log.Printf("Starting loomcli web UI server")
 	log.Printf("Port: %d", config.Port)
 	log.Printf("Connection pool size: %d", config.PoolSize)
 	if config.SocketPath != "" {
@@ -180,14 +185,29 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Daemon subscriber started")
 	}
 
+	// Initialize terminal manager for WebSocket terminal sessions
+	var termMgr *TerminalManager
+	termMgr, err = NewTerminalManager(config.TerminalCmd, fmt.Sprintf("%d", actualPort))
+	if err != nil {
+		if errors.Is(err, ErrTmuxNotFound) {
+			log.Printf("Warning: tmux not found, terminal feature disabled")
+		} else {
+			log.Printf("Warning: failed to initialize terminal manager: %v", err)
+		}
+		termMgr = nil
+	}
+	if termMgr != nil {
+		log.Printf("Terminal manager initialized (default command: %s)", config.TerminalCmd)
+	}
+
 	// Create HTTP server
 	mux := http.NewServeMux()
-	setupRoutes(mux, pool, hub, getMutationsSince)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd)
 
 	// Wrap with CORS middleware if enabled
 	corsMiddleware := NewCORSMiddleware(corsConfig)
 	securityMiddleware := NewSecurityHeadersMiddleware()
-	handler := securityMiddleware(corsMiddleware(mux))
+	handler := h2c.NewHandler(securityMiddleware(corsMiddleware(mux)), &http2.Server{})
 
 	// Create a shutdown context that all request contexts will derive from.
 	// When cancelled, in-flight handlers' r.Context().Done() fires, causing
@@ -199,7 +219,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		Addr:         fmt.Sprintf(":%d", actualPort),
 		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 0, // Disabled: HTTP/2 streams (SSE, WebSocket) are long-lived; h2c handles flow control
 		IdleTimeout:  60 * time.Second,
 		BaseContext: func(_ net.Listener) context.Context {
 			return shutdownCtx
@@ -242,6 +262,15 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	log.Println("Server stopped")
 
 	// Stop components in reverse-initialization order now that no handlers are running.
+
+	// Stop terminal manager (kill tmux sessions and close PTYs)
+	if termMgr != nil {
+		if err := termMgr.Shutdown(); err != nil {
+			log.Printf("Warning: error shutting down terminal manager: %v", err)
+		} else {
+			log.Printf("Terminal manager stopped")
+		}
+	}
 
 	// Stop daemon subscriber (no more handlers need it)
 	if subscriber != nil {

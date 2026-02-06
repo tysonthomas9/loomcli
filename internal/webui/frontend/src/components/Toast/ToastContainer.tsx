@@ -3,27 +3,28 @@
  * Renders a stack of toasts in a fixed position on the screen.
  */
 
-import { Toast } from './Toast'
-import type { Toast as ToastData } from '@/hooks/useToast'
-import styles from './Toast.module.css'
+import type { Toast as ToastData } from '@/hooks/useToast';
+
+import { Toast } from './Toast';
+import styles from './Toast.module.css';
 
 /**
  * Position options for the toast container.
  */
-export type ToastPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left'
+export type ToastPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
 /**
  * Props for the ToastContainer component.
  */
 export interface ToastContainerProps {
   /** Active toasts to render */
-  toasts: ToastData[]
+  toasts: ToastData[];
   /** Callback when a toast is dismissed */
-  onDismiss: (id: string) => void
+  onDismiss: (id: string) => void;
   /** Position on screen (default: 'bottom-right') */
-  position?: ToastPosition
+  position?: ToastPosition;
   /** Additional CSS class */
-  className?: string
+  className?: string;
 }
 
 /**
@@ -36,21 +37,14 @@ export function ToastContainer({
   position = 'bottom-right',
   className,
 }: ToastContainerProps): JSX.Element {
-  const positionClass = styles[position.replace('-', '') as keyof typeof styles] ?? styles.bottomright
+  const positionClass =
+    styles[position.replace('-', '') as keyof typeof styles] ?? styles.bottomright;
 
-  const rootClassName = [
-    styles.container,
-    positionClass,
-    className,
-  ].filter(Boolean).join(' ')
+  const rootClassName = [styles.container, positionClass, className].filter(Boolean).join(' ');
 
   return (
-    <div
-      className={rootClassName}
-      aria-label="Notifications"
-      data-testid="toast-container"
-    >
-      {toasts.map(toast => (
+    <div className={rootClassName} aria-label="Notifications" data-testid="toast-container">
+      {toasts.map((toast) => (
         <Toast
           key={toast.id}
           id={toast.id}
@@ -60,5 +54,5 @@ export function ToastContainer({
         />
       ))}
     </div>
-  )
+  );
 }

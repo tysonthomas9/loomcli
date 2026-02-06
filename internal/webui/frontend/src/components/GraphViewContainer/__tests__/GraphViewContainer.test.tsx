@@ -6,12 +6,16 @@
  * Unit tests for GraphViewContainer component.
  */
 
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen, fireEvent, waitFor as _waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { GraphViewContainer } from '../GraphViewContainer';
+import { useIssueDetail } from '@/hooks/useIssueDetail';
 import type { Issue, IssueDetails } from '@/types';
+
+import { GraphViewContainer } from '../GraphViewContainer';
+
+// Import mocks after vi.mock calls
 
 // Mock the hooks
 vi.mock('@/hooks/useIssueDetail', () => ({
@@ -51,9 +55,6 @@ vi.mock('@/components', () => ({
     </div>
   )),
 }));
-
-// Import mocks after vi.mock calls
-import { useIssueDetail } from '@/hooks/useIssueDetail';
 
 /**
  * Create a minimal test issue with required fields.

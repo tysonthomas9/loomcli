@@ -4,6 +4,7 @@
  */
 
 import type { ReactNode } from 'react';
+
 import styles from './AppLayout.module.css';
 
 /**
@@ -12,6 +13,8 @@ import styles from './AppLayout.module.css';
 export interface AppLayoutProps {
   /** Main content to render in the content area */
   children: ReactNode;
+  /** Optional left navigation rail */
+  navRail?: ReactNode;
   /** Optional element to render in the header navigation area (center) */
   navigation?: ReactNode;
   /** Optional element to render in the header actions area (right) */
@@ -31,6 +34,7 @@ export interface AppLayoutProps {
  */
 export function AppLayout({
   children,
+  navRail,
   navigation,
   actions,
   sidebar,
@@ -58,6 +62,7 @@ export function AppLayout({
         </div>
       </header>
       <div className={styles.contentWrapper}>
+        {navRail}
         {sidebar}
         <main className={styles.main} role="main" id="main-content">
           {children}

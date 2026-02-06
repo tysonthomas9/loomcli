@@ -6,13 +6,14 @@
  * Unit tests for IssueNode component.
  */
 
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
+import { describe, it, expect } from 'vitest';
+
+import type { Issue, IssueNodeData } from '@/types';
 
 import { IssueNode } from '../IssueNode';
-import type { Issue, IssueNodeData } from '@/types';
 import type { IssueNodeProps } from '../IssueNode';
 
 /**

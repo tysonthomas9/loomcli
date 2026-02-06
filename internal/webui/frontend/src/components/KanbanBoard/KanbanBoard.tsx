@@ -3,11 +3,10 @@
  * Wraps content in @dnd-kit DndContext to enable drag-and-drop between status columns.
  * Renders StatusColumns for each status and uses DragOverlay for visual drag feedback.
  *
- * Supports 5-column layout: Ready, Backlog, In Progress, Review, Done
+ * Supports 6-column layout: Backlog, Open, Blocked, In Progress, Needs Review, Done
  * where columns can be computed from issue data (status + blocked dependencies + title patterns).
  */
 
-import { useState, useMemo, useCallback } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -19,15 +18,18 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import type { Issue, Status } from '@/types';
-import type { FilterState } from '@/hooks/useFilterState';
-import { StatusColumn } from '@/components/StatusColumn';
+import { useState, useMemo, useCallback } from 'react';
+
 import { DraggableIssueCard } from '@/components/DraggableIssueCard';
 import { EmptyColumn } from '@/components/EmptyColumn';
+import { StatusColumn } from '@/components/StatusColumn';
 import { formatStatusLabel } from '@/components/StatusColumn/utils';
-import type { KanbanColumnConfig } from './types';
+import type { FilterState } from '@/hooks/useFilterState';
+import type { Issue, Status } from '@/types';
+
 import { DEFAULT_COLUMNS } from './columnConfigs';
 import styles from './KanbanBoard.module.css';
+import type { KanbanColumnConfig } from './types';
 
 /**
  * Blocked issue info for lookup.
@@ -43,7 +45,7 @@ export interface BlockedInfo {
 export interface KanbanBoardProps {
   /** Issues to display in the board */
   issues: Issue[];
-  /** Column configurations (default: 5-column kanban layout) */
+  /** Column configurations (default: 6-column kanban layout) */
   columns?: KanbanColumnConfig[];
   /** @deprecated Use columns prop instead. Status columns for backward compatibility */
   statuses?: Status[];
@@ -255,27 +257,28 @@ export function KanbanBoard({
                 ? styles.highlightedColumn
                 : undefined;
 
-          // Determine column type and icon for special columns
+          // Determine column type for special columns
           const isBacklogColumn = col.id === 'backlog';
+          const isBlockedColumn = col.id === 'blocked';
           const isReviewColumn = col.id === 'review';
+          const isMutedColumn = isBacklogColumn || isBlockedColumn;
           const columnType = isBacklogColumn
             ? ('backlog' as const)
             : isReviewColumn
               ? ('review' as const)
               : undefined;
-          const headerIcon = isBacklogColumn ? '⏳' : isReviewColumn ? '👀' : undefined;
 
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const statusColumnProps = {
             status: col.id,
             statusLabel: col.label,
             count: colIssues.length,
+            ...(col.headerIcon !== undefined && { headerIcon: col.headerIcon }),
             ...(col.droppableDisabled !== undefined && {
               droppableDisabled: col.droppableDisabled,
             }),
             ...(columnClassName !== undefined && { className: columnClassName }),
             ...(columnType !== undefined && { columnType }),
-            ...(headerIcon !== undefined && { headerIcon }),
           };
 
           return (
@@ -295,7 +298,7 @@ export function KanbanBoard({
                         blockedByCount: blockedInfo.blockedByCount,
                         blockedBy: blockedInfo.blockedBy,
                       })}
-                      {...(isBacklogColumn && { isBacklog: true })}
+                      {...(isMutedColumn && { isBacklog: true })}
                       {...(onApprove !== undefined && { onApprove })}
                       {...(onReject !== undefined && { onReject })}
                     />
@@ -310,7 +313,7 @@ export function KanbanBoard({
         {activeIssue &&
           (() => {
             const blockedInfo = blockedIssues?.get(activeIssue.id);
-            const isBacklogCard = sourceColumnId === 'backlog';
+            const isMutedCard = sourceColumnId === 'backlog' || sourceColumnId === 'blocked';
             return (
               <DraggableIssueCard
                 issue={activeIssue}
@@ -319,7 +322,7 @@ export function KanbanBoard({
                   blockedByCount: blockedInfo.blockedByCount,
                   blockedBy: blockedInfo.blockedBy,
                 })}
-                {...(isBacklogCard && { isBacklog: true })}
+                {...(isMutedCard && { isBacklog: true })}
               />
             );
           })()}

@@ -6,13 +6,14 @@
  * Unit tests for FilterBar component.
  */
 
-import { describe, it, expect, vi, beforeEach as _beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach as _beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { FilterBar } from '../FilterBar';
 import type { FilterState, FilterActions } from '@/hooks/useFilterState';
 import type { IssueType } from '@/types';
+
+import { FilterBar } from '../FilterBar';
 
 /**
  * Create mock filter actions for controlled mode testing.
@@ -847,7 +848,7 @@ describe('FilterBar', () => {
       const options = select.querySelectorAll('option');
 
       expect(options).toHaveLength(6);
-      expect(options[0]).toHaveTextContent('None');
+      expect(options[0]).toHaveTextContent('All');
       expect(options[1]).toHaveTextContent('Epic');
       expect(options[2]).toHaveTextContent('Assignee');
       expect(options[3]).toHaveTextContent('Priority');

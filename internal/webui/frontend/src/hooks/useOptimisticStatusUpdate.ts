@@ -3,8 +3,9 @@
  * Used by KanbanBoard to handle drag-and-drop status changes with immediate UI feedback.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
 import { produce } from 'immer';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
 import { updateIssue, ApiError } from '@/api';
 import type { Issue, Status } from '@/types';
 

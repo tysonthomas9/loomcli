@@ -6,6 +6,15 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+
+import {
+  updateIssue,
+  addDependency,
+  removeDependency,
+  getTaskLogPhases,
+  getTaskLogStreamUrl,
+} from '@/api';
+import { useLogStream } from '@/hooks';
 import type {
   Issue,
   IssueDetails,
@@ -16,18 +25,19 @@ import type {
   Comment,
 } from '@/types';
 import type { Status } from '@/types/status';
-import { updateIssue, addDependency, removeDependency } from '@/api';
 import { getReviewType } from '@/utils/reviewType';
-import { IssueHeader } from './IssueHeader';
+
+import { CommentForm } from './CommentForm';
+import { CommentsSection } from './CommentsSection';
+import { DependencySection } from './DependencySection';
 import { EditableDescription } from './EditableDescription';
+import { IssueHeader } from './IssueHeader';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { PriorityDropdown } from './PriorityDropdown';
-import { TypeDropdown } from './TypeDropdown';
-import { DependencySection } from './DependencySection';
-import { CommentsSection } from './CommentsSection';
-import { CommentForm } from './CommentForm';
 import { RejectCommentForm } from './RejectCommentForm';
+import { TypeDropdown } from './TypeDropdown';
 import { ErrorToast } from '../ErrorToast';
+import { LogViewer } from '../LogViewer';
 import styles from './IssueDetailPanel.module.css';
 
 /**
@@ -232,6 +242,76 @@ function DefaultContent({
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
+
+  // Log tab state (only for task-type issues)
+  type LogTabType = 'details' | 'planning' | 'implementation';
+  const [activeLogTab, setActiveLogTab] = useState<LogTabType>('details');
+  const [availablePhases, setAvailablePhases] = useState<string[]>([]);
+
+  // Check if this is a task-type issue (log tabs only apply to tasks)
+  const isTaskType = issue?.issue_type === 'task';
+
+  // Fetch available log phases when issue changes
+  useEffect(() => {
+    if (!issue || !isTaskType) {
+      setAvailablePhases([]);
+      setActiveLogTab('details');
+      return;
+    }
+
+    let cancelled = false;
+    getTaskLogPhases(issue.id)
+      .then((phases) => {
+        if (!cancelled) {
+          setAvailablePhases(phases);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAvailablePhases([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // issue is intentionally excluded - we only need to refetch when ID changes or type changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issue?.id, isTaskType]);
+
+  // Reset tab when issue changes
+  useEffect(() => {
+    setActiveLogTab('details');
+  }, [issue?.id]);
+
+  // Determine which log URL to connect to
+  const shouldConnectToLogs =
+    isTaskType && (activeLogTab === 'planning' || activeLogTab === 'implementation');
+  const logStreamUrl =
+    issue && shouldConnectToLogs ? getTaskLogStreamUrl(issue.id, activeLogTab) : '';
+
+  // Log stream hook
+  const {
+    lines: logLines,
+    state: logConnectionState,
+    lastError: logError,
+    connect: connectLogs,
+    disconnect: disconnectLogs,
+    clearLines: clearLogLines,
+  } = useLogStream({
+    url: logStreamUrl,
+    autoConnect: false,
+  });
+
+  // Connect/disconnect logs based on tab
+  useEffect(() => {
+    if (shouldConnectToLogs && logStreamUrl) {
+      clearLogLines();
+      connectLogs();
+    } else {
+      disconnectLogs();
+    }
+  }, [shouldConnectToLogs, logStreamUrl, connectLogs, disconnectLogs, clearLogLines]);
 
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);
@@ -522,191 +602,242 @@ function DefaultContent({
       {/* Blocking Banner */}
       <BlockingBanner openBlockerCount={openBlockerCount} />
 
-      {/* Scrollable Content */}
-      <div className={styles.scrollableContent}>
-        {isFullscreen && issue.design ? (
-          /* Two-column layout in fullscreen when design exists */
-          <div className={styles.twoColumnLayout}>
-            <div className={styles.leftColumn}>
-              <div className={styles.detailContent}>
-                {/* Priority/Type dropdowns for editing */}
-                <div className={styles.statusRow}>
-                  <PriorityDropdown
-                    priority={issue.priority as Priority}
-                    onSave={handlePrioritySave}
-                    isSaving={isSavingPriority}
-                  />
-                  <TypeDropdown
-                    type={issue.issue_type}
-                    onSave={handleTypeSave}
-                    isSaving={isSavingType}
-                  />
+      {/* Log Tab Bar (only for task-type issues with available phases) */}
+      {isTaskType && (availablePhases.length > 0 || activeLogTab !== 'details') && (
+        <div className={styles.logTabBar}>
+          <button
+            type="button"
+            className={`${styles.logTab} ${activeLogTab === 'details' ? styles.activeLogTab : ''}`}
+            onClick={() => setActiveLogTab('details')}
+            aria-selected={activeLogTab === 'details'}
+            role="tab"
+          >
+            Details
+          </button>
+          {availablePhases.includes('planning') && (
+            <button
+              type="button"
+              className={`${styles.logTab} ${activeLogTab === 'planning' ? styles.activeLogTab : ''}`}
+              onClick={() => setActiveLogTab('planning')}
+              aria-selected={activeLogTab === 'planning'}
+              role="tab"
+            >
+              Planning
+            </button>
+          )}
+          {availablePhases.includes('implementation') && (
+            <button
+              type="button"
+              className={`${styles.logTab} ${activeLogTab === 'implementation' ? styles.activeLogTab : ''}`}
+              onClick={() => setActiveLogTab('implementation')}
+              aria-selected={activeLogTab === 'implementation'}
+              role="tab"
+            >
+              Implementation
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Log Viewer (shown when Planning or Implementation tab is active) */}
+      {shouldConnectToLogs ? (
+        <div className={styles.logsContainer}>
+          <LogViewer
+            lines={logLines}
+            connectionState={logConnectionState}
+            error={logError}
+            height="100%"
+          />
+        </div>
+      ) : (
+        /* Scrollable Content (Details tab) */
+        <div className={styles.scrollableContent}>
+          {isFullscreen && issue.design ? (
+            /* Two-column layout in fullscreen when design exists */
+            <div className={styles.twoColumnLayout}>
+              <div className={styles.leftColumn}>
+                <div className={styles.detailContent}>
+                  {/* Priority/Type dropdowns for editing */}
+                  <div className={styles.statusRow}>
+                    <PriorityDropdown
+                      priority={issue.priority as Priority}
+                      onSave={handlePrioritySave}
+                      isSaving={isSavingPriority}
+                    />
+                    <TypeDropdown
+                      type={issue.issue_type}
+                      onSave={handleTypeSave}
+                      isSaving={isSavingType}
+                    />
+                  </div>
+
+                  {/* Description */}
+                  <section className={styles.section}>
+                    <h3 className={styles.sectionTitle}>Description</h3>
+                    <EditableDescription
+                      description={issue.description}
+                      isEditable={true}
+                      onSave={async (newDescription) => {
+                        const updatedIssue = await updateIssue(issue.id, {
+                          description: newDescription,
+                        });
+                        onIssueUpdate?.(updatedIssue);
+                      }}
+                    />
+                  </section>
+
+                  {/* Dependencies (blocking this issue) - editable */}
+                  {hasDetails && (
+                    <DependencySection
+                      issueId={issue.id}
+                      dependencies={dependencies ?? []}
+                      onAddDependency={handleAddDependency}
+                      onRemoveDependency={handleRemoveDependency}
+                      disabled={isLoading}
+                    />
+                  )}
+
+                  {/* Dependents (this issue blocks) */}
+                  {dependents && dependents.length > 0 && (
+                    <section className={styles.section}>
+                      <h3 className={styles.sectionTitle}>Blocks ({dependents.length})</h3>
+                      <ul className={styles.dependencyList}>
+                        {dependents.map(renderDependencyItem)}
+                      </ul>
+                    </section>
+                  )}
+
+                  {/* Comments */}
+                  <CommentsSection comments={localComments} />
+                  <CommentForm issueId={issue.id} onCommentAdded={handleCommentAdded} />
+
+                  {/* Labels */}
+                  {issue.labels && issue.labels.length > 0 && (
+                    <section className={styles.section}>
+                      <h3 className={styles.sectionTitle}>Labels</h3>
+                      <div className={styles.labels}>
+                        {issue.labels.map((label) => (
+                          <span key={label} className={styles.label}>
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    </section>
+                  )}
                 </div>
-
-                {/* Description */}
-                <section className={styles.section}>
-                  <h3 className={styles.sectionTitle}>Description</h3>
-                  <EditableDescription
-                    description={issue.description}
-                    isEditable={true}
-                    onSave={async (newDescription) => {
-                      const updatedIssue = await updateIssue(issue.id, {
-                        description: newDescription,
-                      });
-                      onIssueUpdate?.(updatedIssue);
-                    }}
-                  />
-                </section>
-
-                {/* Dependencies (blocking this issue) - editable */}
-                {hasDetails && (
-                  <DependencySection
-                    issueId={issue.id}
-                    dependencies={dependencies ?? []}
-                    onAddDependency={handleAddDependency}
-                    onRemoveDependency={handleRemoveDependency}
-                    disabled={isLoading}
-                  />
-                )}
-
-                {/* Dependents (this issue blocks) */}
-                {dependents && dependents.length > 0 && (
+              </div>
+              <div className={styles.rightColumn}>
+                <div className={styles.detailContent}>
+                  {/* Design (always expanded in fullscreen) */}
                   <section className={styles.section}>
-                    <h3 className={styles.sectionTitle}>Blocks ({dependents.length})</h3>
-                    <ul className={styles.dependencyList}>
-                      {dependents.map(renderDependencyItem)}
-                    </ul>
+                    <h3 className={styles.sectionTitle}>Design</h3>
+                    <MarkdownRenderer content={issue.design} />
                   </section>
-                )}
 
-                {/* Comments */}
-                <CommentsSection comments={localComments} />
-                <CommentForm issueId={issue.id} onCommentAdded={handleCommentAdded} />
-
-                {/* Labels */}
-                {issue.labels && issue.labels.length > 0 && (
-                  <section className={styles.section}>
-                    <h3 className={styles.sectionTitle}>Labels</h3>
-                    <div className={styles.labels}>
-                      {issue.labels.map((label) => (
-                        <span key={label} className={styles.label}>
-                          {label}
-                        </span>
-                      ))}
-                    </div>
-                  </section>
-                )}
+                  {/* Notes */}
+                  {issue.notes && (
+                    <section className={styles.section}>
+                      <h3 className={styles.sectionTitle}>Notes</h3>
+                      <MarkdownRenderer content={issue.notes} />
+                    </section>
+                  )}
+                </div>
               </div>
             </div>
-            <div className={styles.rightColumn}>
-              <div className={styles.detailContent}>
-                {/* Design (always expanded in fullscreen) */}
-                <section className={styles.section}>
-                  <h3 className={styles.sectionTitle}>Design</h3>
+          ) : (
+            /* Single-column layout (panel mode or fullscreen without design) */
+            <div className={styles.detailContent}>
+              {/* Priority/Type dropdowns for editing */}
+              <div className={styles.statusRow}>
+                <PriorityDropdown
+                  priority={issue.priority as Priority}
+                  onSave={handlePrioritySave}
+                  isSaving={isSavingPriority}
+                />
+                <TypeDropdown
+                  type={issue.issue_type}
+                  onSave={handleTypeSave}
+                  isSaving={isSavingType}
+                />
+              </div>
+
+              {/* Description */}
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>Description</h3>
+                <EditableDescription
+                  description={issue.description}
+                  isEditable={true}
+                  onSave={async (newDescription) => {
+                    const updatedIssue = await updateIssue(issue.id, {
+                      description: newDescription,
+                    });
+                    onIssueUpdate?.(updatedIssue);
+                  }}
+                />
+              </section>
+
+              {/* Design (collapsible, markdown rendered) */}
+              {issue.design && (
+                <CollapsibleSection
+                  title="Design"
+                  defaultExpanded={!shouldCollapseDesign}
+                  testId="design-section"
+                >
                   <MarkdownRenderer content={issue.design} />
+                </CollapsibleSection>
+              )}
+
+              {/* Notes (collapsible) */}
+              {issue.notes && (
+                <CollapsibleSection
+                  title="Notes"
+                  defaultExpanded={!shouldCollapseNotes}
+                  testId="notes-section"
+                >
+                  <MarkdownRenderer content={issue.notes} />
+                </CollapsibleSection>
+              )}
+
+              {/* Dependencies (blocking this issue) - editable */}
+              {hasDetails && (
+                <DependencySection
+                  issueId={issue.id}
+                  dependencies={dependencies ?? []}
+                  onAddDependency={handleAddDependency}
+                  onRemoveDependency={handleRemoveDependency}
+                  disabled={isLoading}
+                />
+              )}
+
+              {/* Dependents (this issue blocks) */}
+              {dependents && dependents.length > 0 && (
+                <section className={styles.section}>
+                  <h3 className={styles.sectionTitle}>Blocks ({dependents.length})</h3>
+                  <ul className={styles.dependencyList}>{dependents.map(renderDependencyItem)}</ul>
                 </section>
+              )}
 
-                {/* Notes */}
-                {issue.notes && (
-                  <section className={styles.section}>
-                    <h3 className={styles.sectionTitle}>Notes</h3>
-                    <MarkdownRenderer content={issue.notes} />
-                  </section>
-                )}
-              </div>
+              {/* Comments */}
+              <CommentsSection comments={localComments} />
+              <CommentForm issueId={issue.id} onCommentAdded={handleCommentAdded} />
+
+              {/* Labels */}
+              {issue.labels && issue.labels.length > 0 && (
+                <section className={styles.section}>
+                  <h3 className={styles.sectionTitle}>Labels</h3>
+                  <div className={styles.labels}>
+                    {issue.labels.map((label) => (
+                      <span key={label} className={styles.label}>
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
-          </div>
-        ) : (
-          /* Single-column layout (panel mode or fullscreen without design) */
-          <div className={styles.detailContent}>
-            {/* Priority/Type dropdowns for editing */}
-            <div className={styles.statusRow}>
-              <PriorityDropdown
-                priority={issue.priority as Priority}
-                onSave={handlePrioritySave}
-                isSaving={isSavingPriority}
-              />
-              <TypeDropdown
-                type={issue.issue_type}
-                onSave={handleTypeSave}
-                isSaving={isSavingType}
-              />
-            </div>
-
-            {/* Description */}
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>Description</h3>
-              <EditableDescription
-                description={issue.description}
-                isEditable={true}
-                onSave={async (newDescription) => {
-                  const updatedIssue = await updateIssue(issue.id, { description: newDescription });
-                  onIssueUpdate?.(updatedIssue);
-                }}
-              />
-            </section>
-
-            {/* Design (collapsible, markdown rendered) */}
-            {issue.design && (
-              <CollapsibleSection
-                title="Design"
-                defaultExpanded={!shouldCollapseDesign}
-                testId="design-section"
-              >
-                <MarkdownRenderer content={issue.design} />
-              </CollapsibleSection>
-            )}
-
-            {/* Notes (collapsible) */}
-            {issue.notes && (
-              <CollapsibleSection
-                title="Notes"
-                defaultExpanded={!shouldCollapseNotes}
-                testId="notes-section"
-              >
-                <MarkdownRenderer content={issue.notes} />
-              </CollapsibleSection>
-            )}
-
-            {/* Dependencies (blocking this issue) - editable */}
-            {hasDetails && (
-              <DependencySection
-                issueId={issue.id}
-                dependencies={dependencies ?? []}
-                onAddDependency={handleAddDependency}
-                onRemoveDependency={handleRemoveDependency}
-                disabled={isLoading}
-              />
-            )}
-
-            {/* Dependents (this issue blocks) */}
-            {dependents && dependents.length > 0 && (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>Blocks ({dependents.length})</h3>
-                <ul className={styles.dependencyList}>{dependents.map(renderDependencyItem)}</ul>
-              </section>
-            )}
-
-            {/* Comments */}
-            <CommentsSection comments={localComments} />
-            <CommentForm issueId={issue.id} onCommentAdded={handleCommentAdded} />
-
-            {/* Labels */}
-            {issue.labels && issue.labels.length > 0 && (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>Labels</h3>
-                <div className={styles.labels}>
-                  {issue.labels.map((label) => (
-                    <span key={label} className={styles.label}>
-                      {label}
-                    </span>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Error toast for status change failures */}
       {statusError && (

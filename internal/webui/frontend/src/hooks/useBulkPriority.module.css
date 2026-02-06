@@ -22,7 +22,8 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: color var(--transition-fast),
+  transition:
+    color var(--transition-fast),
     background-color var(--transition-fast),
     border-color var(--transition-fast),
     opacity var(--transition-fast);

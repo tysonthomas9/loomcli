@@ -6,8 +6,8 @@
  * Unit tests for TalkToLeadButton component.
  */
 
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
 import { TalkToLeadButton } from './TalkToLeadButton';
@@ -167,6 +167,73 @@ describe('TalkToLeadButton', () => {
       // Verify button contains text
       const buttonText = button?.textContent?.trim();
       expect(buttonText).toContain('Talk to Lead');
+    });
+  });
+
+  describe('onClick prop', () => {
+    it('calls onClick when button is clicked', () => {
+      const handleClick = vi.fn();
+      render(<TalkToLeadButton onClick={handleClick} />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      fireEvent.click(button);
+
+      expect(handleClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('renders without onClick (no error)', () => {
+      render(<TalkToLeadButton />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      fireEvent.click(button);
+
+      expect(button).toBeInTheDocument();
+    });
+  });
+
+  describe('data-active attribute', () => {
+    it('sets data-active="true" when isActive is true', () => {
+      render(<TalkToLeadButton isActive={true} />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      expect(button).toHaveAttribute('data-active', 'true');
+    });
+
+    it('does not set data-active when isActive is false', () => {
+      render(<TalkToLeadButton isActive={false} />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      expect(button).not.toHaveAttribute('data-active');
+    });
+
+    it('does not set data-active when isActive is undefined', () => {
+      render(<TalkToLeadButton />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      expect(button).not.toHaveAttribute('data-active');
+    });
+  });
+
+  describe('accessibility', () => {
+    it('sets aria-pressed="true" when isActive is true', () => {
+      render(<TalkToLeadButton isActive={true} />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('sets aria-pressed="false" when isActive is false', () => {
+      render(<TalkToLeadButton isActive={false} />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      expect(button).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('does not set aria-pressed when isActive is undefined', () => {
+      render(<TalkToLeadButton />);
+
+      const button = screen.getByTestId('talk-to-lead-button');
+      expect(button).not.toHaveAttribute('aria-pressed');
     });
   });
 });

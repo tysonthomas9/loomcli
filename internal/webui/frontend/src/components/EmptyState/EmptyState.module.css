@@ -58,7 +58,9 @@
   border: 1px solid var(--color-primary);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .action button:hover {

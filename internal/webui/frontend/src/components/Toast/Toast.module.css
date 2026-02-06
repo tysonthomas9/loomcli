@@ -56,6 +56,7 @@
     opacity: 0;
     transform: translateY(var(--space-4));
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -114,10 +115,12 @@
   background-color: transparent;
   border: none;
   border-radius: var(--radius-md);
-  color: currentColor;
+  color: currentcolor;
   cursor: pointer;
   opacity: 0.7;
-  transition: opacity var(--transition-fast), background-color var(--transition-fast);
+  transition:
+    opacity var(--transition-fast),
+    background-color var(--transition-fast);
 }
 
 .dismissButton:hover {

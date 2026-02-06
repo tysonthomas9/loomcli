@@ -22,11 +22,7 @@ export interface BlockedCellProps {
  * BlockedCell renders the blocked column cell content.
  * Shows a badge with count when blocked, dash when not.
  */
-export function BlockedCell({
-  blockedByCount,
-  blockedBy = [],
-  onClick,
-}: BlockedCellProps) {
+export function BlockedCell({ blockedByCount, blockedBy = [], onClick }: BlockedCellProps) {
   // Not blocked - show dash
   if (blockedByCount === 0) {
     return <span className="issue-table__blocked issue-table__blocked--none">—</span>;
@@ -60,7 +56,9 @@ export function BlockedCell({
       onClick={handleClick}
       aria-label={`Blocked by ${blockedByCount} issue${blockedByCount === 1 ? '' : 's'}`}
     >
-      <span className="issue-table__blocked-icon" aria-hidden="true">⛔</span>
+      <span className="issue-table__blocked-icon" aria-hidden="true">
+        ⛔
+      </span>
       <span className="issue-table__blocked-count">{displayCount}</span>
     </button>
   );

@@ -6,8 +6,8 @@
  * Unit tests for GraphControls component.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
 import { GraphControls } from '../GraphControls';
@@ -414,7 +414,7 @@ describe('GraphControls', () => {
 
       const select = screen.getByTestId('status-filter');
       const options = select.querySelectorAll('option');
-      const optionValues = Array.from(options).map(o => o.value);
+      const optionValues = Array.from(options).map((o) => o.value);
 
       expect(optionValues).toContain('all');
       expect(optionValues).toContain('open');

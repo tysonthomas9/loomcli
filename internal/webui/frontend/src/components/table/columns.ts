@@ -43,9 +43,7 @@ export function getPriorityClassName(priority: Priority): string {
  */
 export function formatStatus(status: Status | undefined): string {
   if (!status) return '-';
-  return status
-    .replace(/_/g, ' ')
-    .replace(/^\w/, (c) => c.toUpperCase());
+  return status.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 }
 
 /**

@@ -3,7 +3,6 @@
  * Acts as the primary interface between React components and the Go backend.
  */
 
-import { get, post, patch, del, ApiError } from './client';
 import type {
   Issue,
   IssueDetails,
@@ -16,6 +15,8 @@ import type {
   DependencyType,
   Comment,
 } from '@/types';
+
+import { get, post, patch, del, ApiError } from './client';
 
 // ============= Response Types =============
 

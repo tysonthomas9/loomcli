@@ -72,13 +72,7 @@ export const CONNECTION_STATES = {
 /**
  * Issue statuses used in the kanban board.
  */
-export const ISSUE_STATUSES = [
-  'open',
-  'in_progress',
-  'review',
-  'blocked',
-  'closed',
-] as const;
+export const ISSUE_STATUSES = ['open', 'in_progress', 'review', 'blocked', 'closed'] as const;
 
 /**
  * Priority levels and their visual styling.

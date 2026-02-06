@@ -8,12 +8,12 @@
  * and accessibility attributes.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { TableHeader, SortState, SortDirection } from '../TableHeader';
 import { ColumnDef } from '../columns';
+import { TableHeader, SortState, SortDirection } from '../TableHeader';
 
 // Helper type for test columns
 interface TestItem {
@@ -23,9 +23,7 @@ interface TestItem {
 }
 
 // Helper to create sortable test columns
-function createTestColumns(
-  overrides: Partial<ColumnDef<TestItem>>[] = []
-): ColumnDef<TestItem>[] {
+function createTestColumns(overrides: Partial<ColumnDef<TestItem>>[] = []): ColumnDef<TestItem>[] {
   const defaults: ColumnDef<TestItem>[] = [
     { id: 'id', header: 'ID', accessor: 'id', sortable: true },
     { id: 'name', header: 'Name', accessor: 'name', sortable: true },
@@ -53,11 +51,7 @@ describe('TableHeader', () => {
   describe('rendering', () => {
     it('renders thead element', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const thead = container.querySelector('thead');
       expect(thead).toBeInTheDocument();
@@ -66,11 +60,7 @@ describe('TableHeader', () => {
 
     it('renders all column headers', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const headerCells = container.querySelectorAll('th');
       expect(headerCells).toHaveLength(3);
@@ -87,19 +77,11 @@ describe('TableHeader', () => {
 
     it('renders with correct data-column attributes', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       expect(container.querySelector('[data-column="id"]')).toBeInTheDocument();
-      expect(
-        container.querySelector('[data-column="name"]')
-      ).toBeInTheDocument();
-      expect(
-        container.querySelector('[data-column="value"]')
-      ).toBeInTheDocument();
+      expect(container.querySelector('[data-column="name"]')).toBeInTheDocument();
+      expect(container.querySelector('[data-column="value"]')).toBeInTheDocument();
     });
 
     it('applies correct width from column definition', () => {
@@ -107,11 +89,7 @@ describe('TableHeader', () => {
         { id: 'id', header: 'ID', accessor: 'id', width: '100px' },
         { id: 'name', header: 'Name', accessor: 'name', width: '1fr' },
       ];
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const idCell = container.querySelector('[data-column="id"]');
       const nameCell = container.querySelector('[data-column="name"]');
@@ -126,11 +104,7 @@ describe('TableHeader', () => {
         { id: 'name', header: 'Name', accessor: 'name', align: 'center' },
         { id: 'value', header: 'Value', accessor: 'value', align: 'right' },
       ];
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       expect(container.querySelector('[data-column="id"]')).toHaveStyle({
         textAlign: 'left',
@@ -144,14 +118,8 @@ describe('TableHeader', () => {
     });
 
     it('defaults to left alignment when not specified', () => {
-      const columns: ColumnDef<TestItem>[] = [
-        { id: 'id', header: 'ID', accessor: 'id' },
-      ];
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const columns: ColumnDef<TestItem>[] = [{ id: 'id', header: 'ID', accessor: 'id' }];
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       expect(container.querySelector('[data-column="id"]')).toHaveStyle({
         textAlign: 'left',
@@ -159,11 +127,7 @@ describe('TableHeader', () => {
     });
 
     it('handles empty columns array', () => {
-      const { container } = renderTableHeader(
-        [],
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader([], { key: null, direction: 'asc' }, vi.fn());
 
       const thead = container.querySelector('thead');
       expect(thead).toBeInTheDocument();
@@ -176,11 +140,7 @@ describe('TableHeader', () => {
   describe('sort indicators', () => {
     it('shows ascending indicator when sorted ascending', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'asc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
       const indicator = idHeader?.querySelector('.issue-table__sort-indicator');
@@ -191,11 +151,7 @@ describe('TableHeader', () => {
 
     it('shows descending indicator when sorted descending', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'desc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'desc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
       const indicator = idHeader?.querySelector('.issue-table__sort-indicator');
@@ -206,11 +162,7 @@ describe('TableHeader', () => {
 
     it('shows neutral indicator for unsorted sortable columns', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'asc' }, vi.fn());
 
       // Name column is sortable but not currently sorted
       const nameHeader = container.querySelector('[data-column="name"]');
@@ -223,11 +175,7 @@ describe('TableHeader', () => {
 
     it('does not show indicator for non-sortable columns', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       // Value column is not sortable
       const valueHeader = container.querySelector('[data-column="value"]');
@@ -253,11 +201,7 @@ describe('TableHeader', () => {
 
     it('indicator has aria-hidden="true"', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'asc' }, vi.fn());
 
       const indicator = container.querySelector('.issue-table__sort-indicator');
       expect(indicator).toHaveAttribute('aria-hidden', 'true');
@@ -269,11 +213,7 @@ describe('TableHeader', () => {
   describe('click handling', () => {
     it('sortable header has cursor pointer class', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
       expect(idHeader).toHaveClass('issue-table__header-cell--sortable');
@@ -281,11 +221,7 @@ describe('TableHeader', () => {
 
     it('non-sortable header does not have cursor pointer class', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const valueHeader = container.querySelector('[data-column="value"]');
       expect(valueHeader).not.toHaveClass('issue-table__header-cell--sortable');
@@ -294,11 +230,7 @@ describe('TableHeader', () => {
     it('click on sortable header calls onSort with columnId', () => {
       const columns = createTestColumns();
       const handleSort = vi.fn();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        handleSort
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, handleSort);
 
       const idHeader = container.querySelector('[data-column="id"]');
       fireEvent.click(idHeader!);
@@ -310,11 +242,7 @@ describe('TableHeader', () => {
     it('click on non-sortable header does not call onSort', () => {
       const columns = createTestColumns();
       const handleSort = vi.fn();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        handleSort
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, handleSort);
 
       const valueHeader = container.querySelector('[data-column="value"]');
       fireEvent.click(valueHeader!);
@@ -324,11 +252,7 @@ describe('TableHeader', () => {
 
     it('sorted header has sorted class', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'asc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
       expect(idHeader).toHaveClass('issue-table__header-cell--sorted');
@@ -336,11 +260,7 @@ describe('TableHeader', () => {
 
     it('unsorted header does not have sorted class', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'asc' }, vi.fn());
 
       const nameHeader = container.querySelector('[data-column="name"]');
       expect(nameHeader).not.toHaveClass('issue-table__header-cell--sorted');
@@ -353,11 +273,7 @@ describe('TableHeader', () => {
     it('Enter key triggers onSort for sortable column', () => {
       const columns = createTestColumns();
       const handleSort = vi.fn();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        handleSort
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, handleSort);
 
       const idHeader = container.querySelector('[data-column="id"]');
       fireEvent.keyDown(idHeader!, { key: 'Enter' });
@@ -369,11 +285,7 @@ describe('TableHeader', () => {
     it('Space key triggers onSort for sortable column', () => {
       const columns = createTestColumns();
       const handleSort = vi.fn();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        handleSort
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, handleSort);
 
       const idHeader = container.querySelector('[data-column="id"]');
       fireEvent.keyDown(idHeader!, { key: ' ' });
@@ -385,11 +297,7 @@ describe('TableHeader', () => {
     it('other keys do not trigger onSort', () => {
       const columns = createTestColumns();
       const handleSort = vi.fn();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        handleSort
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, handleSort);
 
       const idHeader = container.querySelector('[data-column="id"]');
       fireEvent.keyDown(idHeader!, { key: 'Tab' });
@@ -403,11 +311,7 @@ describe('TableHeader', () => {
     it('keyboard events on non-sortable column do not trigger onSort', () => {
       const columns = createTestColumns();
       const handleSort = vi.fn();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        handleSort
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, handleSort);
 
       const valueHeader = container.querySelector('[data-column="value"]');
       fireEvent.keyDown(valueHeader!, { key: 'Enter' });
@@ -418,11 +322,7 @@ describe('TableHeader', () => {
 
     it('sortable headers have tabIndex 0', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
       const nameHeader = container.querySelector('[data-column="name"]');
@@ -433,11 +333,7 @@ describe('TableHeader', () => {
 
     it('non-sortable headers do not have tabIndex', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const valueHeader = container.querySelector('[data-column="value"]');
       expect(valueHeader).not.toHaveAttribute('tabIndex');
@@ -449,11 +345,7 @@ describe('TableHeader', () => {
   describe('accessibility', () => {
     it('sorted ascending column has aria-sort="ascending"', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'asc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
       expect(idHeader).toHaveAttribute('aria-sort', 'ascending');
@@ -461,11 +353,7 @@ describe('TableHeader', () => {
 
     it('sorted descending column has aria-sort="descending"', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'desc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'desc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
       expect(idHeader).toHaveAttribute('aria-sort', 'descending');
@@ -473,11 +361,7 @@ describe('TableHeader', () => {
 
     it('unsorted sortable column has aria-sort="none"', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'asc' }, vi.fn());
 
       // name is sortable but not currently sorted
       const nameHeader = container.querySelector('[data-column="name"]');
@@ -486,11 +370,7 @@ describe('TableHeader', () => {
 
     it('non-sortable column has no aria-sort', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const valueHeader = container.querySelector('[data-column="value"]');
       expect(valueHeader).not.toHaveAttribute('aria-sort');
@@ -498,11 +378,7 @@ describe('TableHeader', () => {
 
     it('sortable headers have role="button"', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
       expect(idHeader).toHaveAttribute('role', 'button');
@@ -510,11 +386,7 @@ describe('TableHeader', () => {
 
     it('non-sortable headers do not have role="button"', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const valueHeader = container.querySelector('[data-column="value"]');
       expect(valueHeader).not.toHaveAttribute('role');
@@ -522,11 +394,7 @@ describe('TableHeader', () => {
 
     it('sortable header has aria-label describing sort action', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
       expect(idHeader).toHaveAttribute('aria-label', 'Sort by ID');
@@ -534,41 +402,23 @@ describe('TableHeader', () => {
 
     it('sorted ascending header has aria-label with current state', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'id', direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'id', direction: 'asc' }, vi.fn());
 
       const idHeader = container.querySelector('[data-column="id"]');
-      expect(idHeader).toHaveAttribute(
-        'aria-label',
-        'Sort by ID, currently sorted ascending'
-      );
+      expect(idHeader).toHaveAttribute('aria-label', 'Sort by ID, currently sorted ascending');
     });
 
     it('sorted descending header has aria-label with current state', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: 'name', direction: 'desc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: 'name', direction: 'desc' }, vi.fn());
 
       const nameHeader = container.querySelector('[data-column="name"]');
-      expect(nameHeader).toHaveAttribute(
-        'aria-label',
-        'Sort by Name, currently sorted descending'
-      );
+      expect(nameHeader).toHaveAttribute('aria-label', 'Sort by Name, currently sorted descending');
     });
 
     it('non-sortable header has no aria-label', () => {
       const columns = createTestColumns();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        vi.fn()
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, vi.fn());
 
       const valueHeader = container.querySelector('[data-column="value"]');
       expect(valueHeader).not.toHaveAttribute('aria-label');
@@ -599,20 +449,14 @@ describe('TableHeader', () => {
         { id: 'name', header: 'Name', accessor: 'name', sortable: false },
       ];
       const handleSort = vi.fn();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        handleSort
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, handleSort);
 
       // Click should not trigger anything
       const idHeader = container.querySelector('[data-column="id"]');
       fireEvent.click(idHeader!);
 
       expect(handleSort).not.toHaveBeenCalled();
-      expect(
-        container.querySelectorAll('.issue-table__sort-indicator')
-      ).toHaveLength(0);
+      expect(container.querySelectorAll('.issue-table__sort-indicator')).toHaveLength(0);
     });
 
     it('handles column with undefined sortable (treated as false)', () => {
@@ -620,11 +464,7 @@ describe('TableHeader', () => {
         { id: 'id', header: 'ID', accessor: 'id' }, // sortable not specified
       ];
       const handleSort = vi.fn();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        handleSort
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, handleSort);
 
       const idHeader = container.querySelector('[data-column="id"]');
       fireEvent.click(idHeader!);
@@ -636,11 +476,7 @@ describe('TableHeader', () => {
     it('handles rapid repeated clicks', () => {
       const columns = createTestColumns();
       const handleSort = vi.fn();
-      const { container } = renderTableHeader(
-        columns,
-        { key: null, direction: 'asc' },
-        handleSort
-      );
+      const { container } = renderTableHeader(columns, { key: null, direction: 'asc' }, handleSort);
 
       const idHeader = container.querySelector('[data-column="id"]');
       fireEvent.click(idHeader!);

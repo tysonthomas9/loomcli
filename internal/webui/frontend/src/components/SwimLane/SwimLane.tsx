@@ -5,12 +5,14 @@
  */
 
 import { useMemo } from 'react';
-import type { Issue } from '@/types';
+
+import { DraggableIssueCard } from '@/components/DraggableIssueCard';
+import { EmptyColumn } from '@/components/EmptyColumn';
 import type { BlockedInfo } from '@/components/KanbanBoard';
 import type { KanbanColumnConfig } from '@/components/KanbanBoard/types';
 import { StatusColumn } from '@/components/StatusColumn';
-import { DraggableIssueCard } from '@/components/DraggableIssueCard';
-import { EmptyColumn } from '@/components/EmptyColumn';
+import type { Issue } from '@/types';
+
 import styles from './SwimLane.module.css';
 
 /**
@@ -136,10 +138,11 @@ export function SwimLane({
                 ? styles.highlightedColumn
                 : undefined;
 
-          // Determine column type and icon for backlog column
+          // Determine column type for backlog/blocked columns
           const isBacklogColumn = col.id === 'backlog';
+          const isBlockedColumn = col.id === 'blocked';
+          const isMutedColumn = isBacklogColumn || isBlockedColumn;
           const columnType = isBacklogColumn ? ('backlog' as const) : undefined;
-          const headerIcon = isBacklogColumn ? '⏳' : undefined;
 
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const isDropDisabled = isCollapsed || col.droppableDisabled === true;
@@ -150,7 +153,6 @@ export function SwimLane({
             ...(isDropDisabled && { droppableDisabled: true }),
             ...(columnClassName !== undefined && { className: columnClassName }),
             ...(columnType !== undefined && { columnType }),
-            ...(headerIcon !== undefined && { headerIcon }),
           };
 
           return (
@@ -168,7 +170,7 @@ export function SwimLane({
                       blockedByCount: blockedInfo.blockedByCount,
                       blockedBy: blockedInfo.blockedBy,
                     }),
-                    ...(isBacklogColumn && { isBacklog: true }),
+                    ...(isMutedColumn && { isBacklog: true }),
                     ...(onApprove !== undefined && { onApprove }),
                     ...(onReject !== undefined && { onReject }),
                   };

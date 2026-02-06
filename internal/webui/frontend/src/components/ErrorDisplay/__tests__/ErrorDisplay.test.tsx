@@ -6,8 +6,9 @@
  * Unit tests for ErrorDisplay component.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+
 import '@testing-library/jest-dom';
 import { ErrorDisplay } from '../ErrorDisplay';
 
@@ -169,7 +170,10 @@ describe('ErrorDisplay', () => {
 
     it('applies data-variant attribute', () => {
       render(<ErrorDisplay variant="connection-error" />);
-      expect(screen.getByTestId('error-display')).toHaveAttribute('data-variant', 'connection-error');
+      expect(screen.getByTestId('error-display')).toHaveAttribute(
+        'data-variant',
+        'connection-error'
+      );
     });
 
     it('applies data-variant for custom variant', () => {

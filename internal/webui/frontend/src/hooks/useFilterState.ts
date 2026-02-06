@@ -3,22 +3,27 @@
  * Provides centralized filter state management for Kanban board and list views.
  */
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
-import type { Priority } from '@/types'
-import type { IssueType } from '@/types'
+import { useState, useCallback, useEffect, useMemo } from 'react';
+
+import type { Priority, IssueType } from '@/types';
 
 /**
  * Group by option for swim lane grouping.
  * 'none' = flat view (no grouping).
  */
-export type GroupByOption = 'none' | 'epic' | 'assignee' | 'priority' | 'type' | 'label'
+export type GroupByOption = 'none' | 'epic' | 'assignee' | 'priority' | 'type' | 'label';
 
 /**
  * Valid group by options for URL validation.
  */
 const VALID_GROUP_BY_OPTIONS: ReadonlySet<string> = new Set([
-  'none', 'epic', 'assignee', 'priority', 'type', 'label'
-])
+  'none',
+  'epic',
+  'assignee',
+  'priority',
+  'type',
+  'label',
+]);
 
 /**
  * Filter state for UI filtering.
@@ -26,17 +31,17 @@ const VALID_GROUP_BY_OPTIONS: ReadonlySet<string> = new Set([
  */
 export interface FilterState {
   /** Priority filter (0-4), undefined for "all" */
-  priority?: Priority
+  priority?: Priority;
   /** Issue type filter, undefined for "all" */
-  type?: IssueType
+  type?: IssueType;
   /** Label filters */
-  labels?: string[]
+  labels?: string[];
   /** Free-text search */
-  search?: string
+  search?: string;
   /** Whether to show blocked issues (default: false = hide blocked) */
-  showBlocked?: boolean
+  showBlocked?: boolean;
   /** Group by option for swim lanes */
-  groupBy?: GroupByOption
+  groupBy?: GroupByOption;
 }
 
 /**
@@ -44,21 +49,21 @@ export interface FilterState {
  */
 export interface FilterActions {
   /** Set priority filter */
-  setPriority: (priority: Priority | undefined) => void
+  setPriority: (priority: Priority | undefined) => void;
   /** Set issue type filter */
-  setType: (type: IssueType | undefined) => void
+  setType: (type: IssueType | undefined) => void;
   /** Set label filters */
-  setLabels: (labels: string[] | undefined) => void
+  setLabels: (labels: string[] | undefined) => void;
   /** Set search text */
-  setSearch: (search: string | undefined) => void
+  setSearch: (search: string | undefined) => void;
   /** Set show blocked toggle */
-  setShowBlocked: (showBlocked: boolean | undefined) => void
+  setShowBlocked: (showBlocked: boolean | undefined) => void;
   /** Set group by option */
-  setGroupBy: (groupBy: GroupByOption | undefined) => void
+  setGroupBy: (groupBy: GroupByOption | undefined) => void;
   /** Clear a specific filter */
-  clearFilter: (key: keyof FilterState) => void
+  clearFilter: (key: keyof FilterState) => void;
   /** Clear all filters */
-  clearAll: () => void
+  clearAll: () => void;
 }
 
 /**
@@ -66,30 +71,30 @@ export interface FilterActions {
  */
 export interface UseFilterStateOptions {
   /** Whether to sync with URL (default: true) */
-  syncUrl?: boolean
+  syncUrl?: boolean;
 }
 
 /**
  * Return type for useFilterState hook.
  */
-export type UseFilterStateReturn = [FilterState, FilterActions]
+export type UseFilterStateReturn = [FilterState, FilterActions];
 
 /**
  * Default group by option for swim lane display.
  * When no groupBy is specified in URL, the UI defaults to epic swim lanes.
  */
-export const DEFAULT_GROUP_BY: GroupByOption = 'epic'
+export const DEFAULT_GROUP_BY: GroupByOption = 'none';
 
 /**
  * Default empty filter state.
  */
-const DEFAULT_FILTER_STATE: FilterState = {}
+const DEFAULT_FILTER_STATE: FilterState = {};
 
 /**
  * Check if running in browser environment.
  */
 function isBrowser(): boolean {
-  return typeof window !== 'undefined' && typeof window.location !== 'undefined'
+  return typeof window !== 'undefined' && typeof window.location !== 'undefined';
 }
 
 /**
@@ -97,10 +102,10 @@ function isBrowser(): boolean {
  * Returns undefined for invalid values.
  */
 function parsePriority(value: string | null): Priority | undefined {
-  if (value === null) return undefined
-  const num = parseInt(value, 10)
-  if (isNaN(num) || num < 0 || num > 4) return undefined
-  return num as Priority
+  if (value === null) return undefined;
+  const num = parseInt(value, 10);
+  if (isNaN(num) || num < 0 || num > 4) return undefined;
+  return num as Priority;
 }
 
 /**
@@ -108,9 +113,9 @@ function parsePriority(value: string | null): Priority | undefined {
  * Labels are comma-separated in URL.
  */
 function parseLabels(value: string | null): string[] | undefined {
-  if (value === null || value === '') return undefined
-  const labels = value.split(',').filter((l) => l.length > 0)
-  return labels.length > 0 ? labels : undefined
+  if (value === null || value === '') return undefined;
+  const labels = value.split(',').filter((l) => l.length > 0);
+  return labels.length > 0 ? labels : undefined;
 }
 
 /**
@@ -118,16 +123,16 @@ function parseLabels(value: string | null): string[] | undefined {
  * Returns undefined for empty values, allows any non-empty string.
  */
 function parseType(value: string | null): IssueType | undefined {
-  if (value === null || value === '') return undefined
-  return value as IssueType
+  if (value === null || value === '') return undefined;
+  return value as IssueType;
 }
 
 /**
  * Parse search from URL parameter.
  */
 function parseSearch(value: string | null): string | undefined {
-  if (value === null || value === '') return undefined
-  return value
+  if (value === null || value === '') return undefined;
+  return value;
 }
 
 /**
@@ -135,8 +140,8 @@ function parseSearch(value: string | null): string | undefined {
  * Returns true if 'true', undefined otherwise (default is false/hidden).
  */
 function parseShowBlocked(value: string | null): boolean | undefined {
-  if (value === 'true') return true
-  return undefined
+  if (value === 'true') return true;
+  return undefined;
 }
 
 /**
@@ -144,9 +149,9 @@ function parseShowBlocked(value: string | null): boolean | undefined {
  * Returns undefined for invalid values (defaults to 'none' in UI).
  */
 function parseGroupBy(value: string | null): GroupByOption | undefined {
-  if (value === null || value === '') return undefined
-  if (VALID_GROUP_BY_OPTIONS.has(value)) return value as GroupByOption
-  return undefined
+  if (value === null || value === '') return undefined;
+  if (VALID_GROUP_BY_OPTIONS.has(value)) return value as GroupByOption;
+  return undefined;
 }
 
 /**
@@ -161,23 +166,23 @@ function buildFilterState(
   showBlocked: boolean | undefined,
   groupBy: GroupByOption | undefined
 ): FilterState {
-  const state: FilterState = {}
-  if (priority !== undefined) state.priority = priority
-  if (type !== undefined) state.type = type
-  if (labels !== undefined) state.labels = labels
-  if (search !== undefined) state.search = search
-  if (showBlocked !== undefined) state.showBlocked = showBlocked
-  if (groupBy !== undefined) state.groupBy = groupBy
-  return state
+  const state: FilterState = {};
+  if (priority !== undefined) state.priority = priority;
+  if (type !== undefined) state.type = type;
+  if (labels !== undefined) state.labels = labels;
+  if (search !== undefined) state.search = search;
+  if (showBlocked !== undefined) state.showBlocked = showBlocked;
+  if (groupBy !== undefined) state.groupBy = groupBy;
+  return state;
 }
 
 /**
  * Parse filter state from URL search parameters.
  */
 function parseFromUrl(): FilterState {
-  if (!isBrowser()) return DEFAULT_FILTER_STATE
+  if (!isBrowser()) return DEFAULT_FILTER_STATE;
 
-  const params = new URLSearchParams(window.location.search)
+  const params = new URLSearchParams(window.location.search);
 
   return buildFilterState(
     parsePriority(params.get('priority')),
@@ -186,50 +191,54 @@ function parseFromUrl(): FilterState {
     parseSearch(params.get('search')),
     parseShowBlocked(params.get('showBlocked')),
     parseGroupBy(params.get('groupBy'))
-  )
+  );
 }
 
 /**
  * Serialize filter state to URL query string.
  */
 function toQueryString(state: FilterState): string {
-  const params = new URLSearchParams()
+  const params = new URLSearchParams();
 
   if (state.priority !== undefined) {
-    params.set('priority', state.priority.toString())
+    params.set('priority', state.priority.toString());
   }
   if (state.type !== undefined) {
-    params.set('type', state.type)
+    params.set('type', state.type);
   }
   if (state.labels !== undefined && state.labels.length > 0) {
-    params.set('labels', state.labels.join(','))
+    params.set('labels', state.labels.join(','));
   }
   if (state.search !== undefined && state.search !== '') {
-    params.set('search', state.search)
+    params.set('search', state.search);
   }
   if (state.showBlocked === true) {
-    params.set('showBlocked', 'true')
+    params.set('showBlocked', 'true');
   }
-  if (state.groupBy !== undefined && state.groupBy !== 'none' && state.groupBy !== DEFAULT_GROUP_BY) {
-    params.set('groupBy', state.groupBy)
+  if (
+    state.groupBy !== undefined &&
+    state.groupBy !== 'none' &&
+    state.groupBy !== DEFAULT_GROUP_BY
+  ) {
+    params.set('groupBy', state.groupBy);
   }
 
-  return params.toString()
+  return params.toString();
 }
 
 /**
  * Update URL with filter state without triggering navigation.
  */
 function updateUrl(state: FilterState): void {
-  if (!isBrowser()) return
+  if (!isBrowser()) return;
 
-  const queryString = toQueryString(state)
+  const queryString = toQueryString(state);
   const newUrl = queryString
     ? `${window.location.pathname}?${queryString}`
-    : window.location.pathname
+    : window.location.pathname;
 
   // Use replaceState to avoid polluting browser history
-  window.history.replaceState(null, '', newUrl)
+  window.history.replaceState(null, '', newUrl);
 }
 
 /**
@@ -244,7 +253,7 @@ function isEmptyFilter(state: FilterState): boolean {
     (state.labels === undefined || state.labels.length === 0) &&
     (state.search === undefined || state.search === '') &&
     (state.groupBy === undefined || state.groupBy === 'none' || state.groupBy === DEFAULT_GROUP_BY)
-  )
+  );
 }
 
 /**
@@ -256,13 +265,13 @@ function updateFilterState<K extends keyof FilterState>(
   key: K,
   value: FilterState[K] | undefined
 ): FilterState {
-  const next = { ...prev }
+  const next = { ...prev };
   if (value === undefined) {
-    delete next[key]
+    delete next[key];
   } else {
-    next[key] = value
+    next[key] = value;
   }
-  return next
+  return next;
 }
 
 /**
@@ -287,71 +296,71 @@ function updateFilterState<K extends keyof FilterState>(
  * ```
  */
 export function useFilterState(options: UseFilterStateOptions = {}): UseFilterStateReturn {
-  const { syncUrl = true } = options
+  const { syncUrl = true } = options;
 
   // Initialize state from URL if in browser
   const [state, setState] = useState<FilterState>(() => {
     if (syncUrl) {
-      return parseFromUrl()
+      return parseFromUrl();
     }
-    return DEFAULT_FILTER_STATE
-  })
+    return DEFAULT_FILTER_STATE;
+  });
 
   // Sync URL when state changes
   useEffect(() => {
     if (syncUrl && isBrowser()) {
-      updateUrl(state)
+      updateUrl(state);
     }
-  }, [state, syncUrl])
+  }, [state, syncUrl]);
 
   // Handle browser back/forward navigation
   useEffect(() => {
-    if (!syncUrl || !isBrowser()) return
+    if (!syncUrl || !isBrowser()) return;
 
     const handlePopState = () => {
-      setState(parseFromUrl())
-    }
+      setState(parseFromUrl());
+    };
 
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [syncUrl])
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [syncUrl]);
 
   // Memoized actions
   const setPriority = useCallback((priority: Priority | undefined) => {
-    setState((prev) => updateFilterState(prev, 'priority', priority))
-  }, [])
+    setState((prev) => updateFilterState(prev, 'priority', priority));
+  }, []);
 
   const setType = useCallback((type: IssueType | undefined) => {
-    setState((prev) => updateFilterState(prev, 'type', type))
-  }, [])
+    setState((prev) => updateFilterState(prev, 'type', type));
+  }, []);
 
   const setLabels = useCallback((labels: string[] | undefined) => {
-    setState((prev) => updateFilterState(prev, 'labels', labels))
-  }, [])
+    setState((prev) => updateFilterState(prev, 'labels', labels));
+  }, []);
 
   const setSearch = useCallback((search: string | undefined) => {
-    setState((prev) => updateFilterState(prev, 'search', search))
-  }, [])
+    setState((prev) => updateFilterState(prev, 'search', search));
+  }, []);
 
   const setShowBlocked = useCallback((showBlocked: boolean | undefined) => {
-    setState((prev) => updateFilterState(prev, 'showBlocked', showBlocked))
-  }, [])
+    setState((prev) => updateFilterState(prev, 'showBlocked', showBlocked));
+  }, []);
 
   const setGroupBy = useCallback((groupBy: GroupByOption | undefined) => {
-    setState((prev) => updateFilterState(prev, 'groupBy', groupBy))
-  }, [])
+    setState((prev) => updateFilterState(prev, 'groupBy', groupBy));
+  }, []);
 
   const clearFilter = useCallback((key: keyof FilterState) => {
     setState((prev) => {
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
-  }, [])
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   const clearAll = useCallback(() => {
-    setState(DEFAULT_FILTER_STATE)
-  }, [])
+    setState(DEFAULT_FILTER_STATE);
+  }, []);
 
   // Stable actions object
   const actions = useMemo<FilterActions>(
@@ -366,10 +375,10 @@ export function useFilterState(options: UseFilterStateOptions = {}): UseFilterSt
       clearAll,
     }),
     [setPriority, setType, setLabels, setSearch, setShowBlocked, setGroupBy, clearFilter, clearAll]
-  )
+  );
 
-  return [state, actions]
+  return [state, actions];
 }
 
 // Export helpers for testing
-export { toQueryString, parseFromUrl, isEmptyFilter }
+export { toQueryString, parseFromUrl, isEmptyFilter };

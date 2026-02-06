@@ -5,7 +5,6 @@
  * When groupBy='none', delegates to KanbanBoard for a flat view.
  */
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -17,15 +16,18 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import type { Issue, Status } from '@/types';
-import type { FilterState } from '@/hooks/useFilterState';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+
+import { DraggableIssueCard } from '@/components/DraggableIssueCard';
 import type { BlockedInfo } from '@/components/KanbanBoard';
-import type { KanbanColumnConfig } from '@/components/KanbanBoard/types';
 import { KanbanBoard } from '@/components/KanbanBoard';
 import { DEFAULT_COLUMNS } from '@/components/KanbanBoard/columnConfigs';
+import type { KanbanColumnConfig } from '@/components/KanbanBoard/types';
 import { formatStatusLabel } from '@/components/StatusColumn/utils';
 import { SwimLane } from '@/components/SwimLane';
-import { DraggableIssueCard } from '@/components/DraggableIssueCard';
+import type { FilterState } from '@/hooks/useFilterState';
+import type { Issue, Status } from '@/types';
+
 import { groupIssuesByField, sortLanes, type GroupByField, type LaneGroup } from './groupingUtils';
 import styles from './SwimLaneBoard.module.css';
 

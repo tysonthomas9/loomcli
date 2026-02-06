@@ -4,6 +4,7 @@
  */
 
 import type { Status } from '@/types';
+
 import styles from './EmptyColumn.module.css';
 
 /**

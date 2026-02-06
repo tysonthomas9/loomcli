@@ -4,23 +4,24 @@
  * Used to show rollback error messages when Kanban drag-and-drop status changes fail.
  */
 
-import { useEffect, useCallback } from 'react'
-import styles from './ErrorToast.module.css'
+import { useEffect, useCallback } from 'react';
+
+import styles from './ErrorToast.module.css';
 
 /**
  * Props for the ErrorToast component.
  */
 export interface ErrorToastProps {
   /** Error message to display */
-  message: string
+  message: string;
   /** Callback when toast is dismissed (auto or manual) */
-  onDismiss: () => void
+  onDismiss: () => void;
   /** Auto-dismiss duration in milliseconds (default: 5000) */
-  duration?: number
+  duration?: number;
   /** Additional CSS class name */
-  className?: string
+  className?: string;
   /** Test ID for testing */
-  testId?: string
+  testId?: string;
 }
 
 /**
@@ -58,31 +59,31 @@ export function ErrorToast({
 }: ErrorToastProps): JSX.Element {
   // Auto-dismiss after duration
   useEffect(() => {
-    if (duration <= 0) return
+    if (duration <= 0) return;
 
     const timeoutId = setTimeout(() => {
-      onDismiss()
-    }, duration)
+      onDismiss();
+    }, duration);
 
-    return () => clearTimeout(timeoutId)
-  }, [duration, onDismiss])
+    return () => clearTimeout(timeoutId);
+  }, [duration, onDismiss]);
 
   // Handle dismiss button click
   const handleDismiss = useCallback(() => {
-    onDismiss()
-  }, [onDismiss])
+    onDismiss();
+  }, [onDismiss]);
 
   // Handle keyboard dismiss (Escape key)
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onDismiss()
+        onDismiss();
       }
     },
     [onDismiss]
-  )
+  );
 
-  const rootClassName = className ? `${styles.toast} ${className}` : styles.toast
+  const rootClassName = className ? `${styles.toast} ${className}` : styles.toast;
 
   return (
     <div
@@ -133,5 +134,5 @@ export function ErrorToast({
         </svg>
       </button>
     </div>
-  )
+  );
 }

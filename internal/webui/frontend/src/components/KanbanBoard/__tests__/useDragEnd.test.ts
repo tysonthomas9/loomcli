@@ -6,12 +6,13 @@
  * Unit tests for useDragEnd handler factory.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { DragEndEvent, Active, Over } from '@dnd-kit/core';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+import * as api from '@/api';
+import type { Issue, Status } from '@/types';
 
 import { createDragEndHandler, isDraggableData, isDroppableData } from '../useDragEnd';
-import type { Issue, Status } from '@/types';
-import * as api from '@/api';
 
 // Mock the API module
 vi.mock('@/api', () => ({

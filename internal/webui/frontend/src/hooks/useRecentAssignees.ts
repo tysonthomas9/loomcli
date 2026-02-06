@@ -64,9 +64,7 @@ function saveToStorage(names: string[]): void {
  * ```
  */
 export function useRecentAssignees(): UseRecentAssigneesReturn {
-  const [recentAssignees, setRecentAssignees] = useState<string[]>(() =>
-    loadFromStorage()
-  );
+  const [recentAssignees, setRecentAssignees] = useState<string[]>(() => loadFromStorage());
 
   // Sync state to localStorage when it changes
   useEffect(() => {
@@ -79,9 +77,7 @@ export function useRecentAssignees(): UseRecentAssigneesReturn {
     setRecentAssignees((prev) => {
       // Remove duplicates (case-insensitive comparison but preserve original case)
       const trimmedName = name.trim();
-      const filtered = prev.filter(
-        (n) => n.toLowerCase() !== trimmedName.toLowerCase()
-      );
+      const filtered = prev.filter((n) => n.toLowerCase() !== trimmedName.toLowerCase());
       // Add to front and trim to max
       const updated = [trimmedName, ...filtered].slice(0, MAX_RECENT);
       return updated;

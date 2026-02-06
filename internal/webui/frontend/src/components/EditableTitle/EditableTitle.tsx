@@ -4,6 +4,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
+
 import styles from './EditableTitle.module.css';
 
 export interface EditableTitleProps {
@@ -91,22 +92,28 @@ export function EditableTitle({
     }
   }, [draftTitle, title, onSave]);
 
-  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      saveTitle();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      cancelEdit();
-    }
-  }, [saveTitle, cancelEdit]);
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        saveTitle();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelEdit();
+      }
+    },
+    [saveTitle, cancelEdit]
+  );
 
-  const handleDisplayKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      enterEditMode();
-    }
-  }, [enterEditMode]);
+  const handleDisplayKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        enterEditMode();
+      }
+    },
+    [enterEditMode]
+  );
 
   const rootClassName = [styles.editableTitle, className].filter(Boolean).join(' ');
 

@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+
 import type { ConnectionState } from '../api/sse';
 
 /**

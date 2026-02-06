@@ -28,13 +28,13 @@ const (
 // DaemonSubscriber manages the subscription to daemon mutations and
 // bridges them to the SSE hub.
 type DaemonSubscriber struct {
-	pool         daemon.Pool
-	hub          *SSEHub
-	done         chan struct{}
-	wg           sync.WaitGroup
-	lastSince    int64
-	mu           sync.RWMutex
-	useFallback  bool // true if wait_for_mutations is not supported
+	pool        daemon.Pool
+	hub         *SSEHub
+	done        chan struct{}
+	wg          sync.WaitGroup
+	lastSince   int64
+	mu          sync.RWMutex
+	useFallback bool // true if wait_for_mutations is not supported
 }
 
 // NewDaemonSubscriber creates a new daemon subscriber.
@@ -138,7 +138,6 @@ func (s *DaemonSubscriber) waitForMutations() {
 		s.waitWithDone(subscriptionRetryDelay)
 		return
 	}
-	defer s.pool.Put(client)
 
 	s.mu.RLock()
 	since := s.lastSince
@@ -151,6 +150,11 @@ func (s *DaemonSubscriber) waitForMutations() {
 
 	resp, err := client.WaitForMutations(args)
 	if err != nil {
+		// Discard the connection on error — after a timeout or error, the
+		// connection may have a stale response in the pipe, making it unsafe
+		// to reuse. Discarding forces a fresh connection next time.
+		s.pool.Discard(client)
+
 		// Check if this is an "unknown operation" error indicating the daemon
 		// doesn't support wait_for_mutations
 		if isUnknownOperationError(err) {
@@ -165,6 +169,9 @@ func (s *DaemonSubscriber) waitForMutations() {
 		s.waitWithDone(subscriptionRetryDelay)
 		return
 	}
+
+	// Success — return connection to pool for reuse
+	s.pool.Put(client)
 
 	if !resp.Success {
 		log.Printf("WaitForMutations failed: %s", resp.Error)

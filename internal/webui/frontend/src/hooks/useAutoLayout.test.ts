@@ -1,11 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { Position } from '@xyflow/react';
-import { useAutoLayout } from './useAutoLayout';
+import { describe, it, expect } from 'vitest';
+
 import type { IssueNode, DependencyEdge, Issue, DependencyType } from '@/types';
+
+import { useAutoLayout } from './useAutoLayout';
 
 /**
  * Helper to create a test issue node with required fields.

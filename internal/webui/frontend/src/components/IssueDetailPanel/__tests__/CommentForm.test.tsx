@@ -6,20 +6,21 @@
  * Unit tests for CommentForm component.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { CommentForm } from '../CommentForm';
+import { addComment } from '@/api';
 import type { Comment } from '@/types';
+
+import { CommentForm } from '../CommentForm';
+
+// Import the mocked function for use in tests
 
 // Mock the API module
 vi.mock('@/api', () => ({
   addComment: vi.fn(),
 }));
-
-// Import the mocked function for use in tests
-import { addComment } from '@/api';
 const mockAddComment = vi.mocked(addComment);
 
 /**

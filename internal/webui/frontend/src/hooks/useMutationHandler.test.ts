@@ -1,11 +1,12 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import { useMutationHandler } from './useMutationHandler';
-import type { Issue } from '../types/issue';
 import type { MutationPayload } from '../api/sse';
+import type { Issue } from '../types/issue';
 
 /**
  * Helper to create a test issue with required fields.
@@ -31,6 +32,22 @@ function createMutationPayload(overrides: Partial<MutationPayload> = {}): Mutati
     timestamp: '2025-01-23T12:00:00Z',
     ...overrides,
   };
+}
+
+/**
+ * Helper to extract the resulting Map from a setIssues call.
+ * Handles both direct Map values and functional updates.
+ */
+function getResultingMap(
+  mockSetIssues: ReturnType<typeof vi.fn>,
+  callIndex: number,
+  currentIssues: Map<string, Issue>
+): Map<string, Issue> {
+  const arg = mockSetIssues.mock.calls[callIndex][0];
+  if (typeof arg === 'function') {
+    return arg(currentIssues);
+  }
+  return arg as Map<string, Issue>;
 }
 
 describe('useMutationHandler', () => {
@@ -94,7 +111,7 @@ describe('useMutationHandler', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalledTimes(1);
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       expect(newIssuesMap.has('new-issue-1')).toBe(true);
 
       const createdIssue = newIssuesMap.get('new-issue-1');
@@ -123,7 +140,7 @@ describe('useMutationHandler', () => {
         result.current.handleMutation(mutation);
       });
 
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const createdIssue = newIssuesMap.get('new-issue-1');
       expect(createdIssue?.status).toBe('active');
     });
@@ -148,7 +165,7 @@ describe('useMutationHandler', () => {
         result.current.handleMutation(mutation);
       });
 
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const createdIssue = newIssuesMap.get('new-issue-1');
       expect(createdIssue?.assignee).toBe('user@example.com');
     });
@@ -214,7 +231,7 @@ describe('useMutationHandler', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalledTimes(1);
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const updatedIssue = newIssuesMap.get('existing-issue');
       expect(updatedIssue?.title).toBe('Updated Title');
 
@@ -288,7 +305,7 @@ describe('useMutationHandler', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalledTimes(1);
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const updatedIssue = newIssuesMap.get('test-issue');
       expect(updatedIssue?.title).toBe('Updated Title');
       expect(updatedIssue?.updated_at).toBe('2025-01-23T12:00:00Z');
@@ -383,7 +400,7 @@ describe('useMutationHandler', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalledTimes(1);
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       expect(newIssuesMap.has('test-issue')).toBe(false);
     });
 
@@ -473,7 +490,7 @@ describe('useMutationHandler', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalledTimes(1);
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const updatedIssue = newIssuesMap.get('test-issue');
       expect(updatedIssue?.status).toBe('active');
       expect(updatedIssue?.updated_at).toBe('2025-01-23T12:00:00Z');
@@ -535,7 +552,7 @@ describe('useMutationHandler', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalledTimes(1);
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const updatedIssue = newIssuesMap.get('test-issue');
       // Title should remain unchanged
       expect(updatedIssue?.title).toBe('Original Title');
@@ -573,7 +590,7 @@ describe('useMutationHandler', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalledTimes(1);
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const updatedIssue = newIssuesMap.get('child-issue');
       expect(updatedIssue?.updated_at).toBe('2025-01-23T12:00:00Z');
     });
@@ -605,7 +622,7 @@ describe('useMutationHandler', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalledTimes(1);
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const updatedIssue = newIssuesMap.get('test-issue');
       expect(updatedIssue?.updated_at).toBe('2025-01-23T12:00:00Z');
     });
@@ -637,7 +654,7 @@ describe('useMutationHandler', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalledTimes(1);
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const updatedIssue = newIssuesMap.get('test-issue');
       expect(updatedIssue?.updated_at).toBe('2025-01-23T12:00:00Z');
     });
@@ -744,7 +761,7 @@ describe('useMutationHandler', () => {
         result.current.handleMutation(mutation);
       });
 
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const updatedIssue = newIssuesMap.get('test-issue');
       expect(updatedIssue?.title).toBe('Updated Title');
       expect(updatedIssue?.assignee).toBe('original@example.com'); // Preserved
@@ -778,7 +795,7 @@ describe('useMutationHandler', () => {
         result.current.handleMutation(mutation);
       });
 
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       const updatedIssue = newIssuesMap.get('test-issue');
       expect(updatedIssue?.title).toBe('Original Title'); // Preserved
       expect(updatedIssue?.assignee).toBe('new@example.com');
@@ -1311,8 +1328,230 @@ describe('useMutationHandler', () => {
         );
       });
 
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
       expect(newIssuesMap).not.toBe(mockIssues);
+    });
+  });
+
+  describe('Race condition fix - functional updates', () => {
+    it('setIssues receives a function, not a direct Map (for race condition safety)', () => {
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        })
+      );
+
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'create',
+            issue_id: 'new-issue',
+            title: 'New Issue',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+      });
+
+      expect(mockSetIssues).toHaveBeenCalledTimes(1);
+      // The argument should be a function, not a direct Map
+      const arg = mockSetIssues.mock.calls[0][0];
+      expect(typeof arg).toBe('function');
+    });
+
+    it('functional update correctly uses previous state (simulates race condition scenario)', () => {
+      // This test verifies that functional updates operate on the PREVIOUS state,
+      // not the closure-captured state, which prevents race conditions.
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        })
+      );
+
+      // Simulate two rapid mutations
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'create',
+            issue_id: 'issue-1',
+            title: 'First Issue',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'create',
+            issue_id: 'issue-2',
+            title: 'Second Issue',
+            timestamp: '2025-01-23T12:00:01Z',
+          })
+        );
+      });
+
+      expect(mockSetIssues).toHaveBeenCalledTimes(2);
+
+      // Both calls should be functions
+      expect(typeof mockSetIssues.mock.calls[0][0]).toBe('function');
+      expect(typeof mockSetIssues.mock.calls[1][0]).toBe('function');
+
+      // Simulate React's batched update by chaining the functional updates
+      // This mimics what React does: apply each update function to the previous result
+      const emptyMap = new Map<string, Issue>();
+      const afterFirst = mockSetIssues.mock.calls[0][0](emptyMap);
+      const afterSecond = mockSetIssues.mock.calls[1][0](afterFirst);
+
+      // Both issues should be present in the final state
+      expect(afterSecond.has('issue-1')).toBe(true);
+      expect(afterSecond.has('issue-2')).toBe(true);
+      expect(afterSecond.get('issue-1')?.title).toBe('First Issue');
+      expect(afterSecond.get('issue-2')?.title).toBe('Second Issue');
+    });
+
+    it('functional update preserves existing issues when adding new ones', () => {
+      const existingIssue = createTestIssue({
+        id: 'existing-issue',
+        title: 'Existing Issue',
+        updated_at: '2025-01-23T09:00:00Z',
+      });
+      mockIssues.set('existing-issue', existingIssue);
+
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        })
+      );
+
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'create',
+            issue_id: 'new-issue',
+            title: 'New Issue',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+      });
+
+      // Get the functional update
+      const updateFn = mockSetIssues.mock.calls[0][0] as (
+        prev: Map<string, Issue>
+      ) => Map<string, Issue>;
+
+      // Apply it to a state that includes the existing issue
+      const previousState = new Map<string, Issue>();
+      previousState.set('existing-issue', existingIssue);
+
+      const newState = updateFn(previousState);
+
+      // Both issues should be in the new state
+      expect(newState.has('existing-issue')).toBe(true);
+      expect(newState.has('new-issue')).toBe(true);
+      expect(newState.get('existing-issue')?.title).toBe('Existing Issue');
+      expect(newState.get('new-issue')?.title).toBe('New Issue');
+    });
+
+    it('delete mutation uses functional update', () => {
+      const existingIssue = createTestIssue({
+        id: 'test-issue',
+        title: 'Test Issue',
+      });
+      mockIssues.set('test-issue', existingIssue);
+
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        })
+      );
+
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'delete',
+            issue_id: 'test-issue',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+      });
+
+      expect(mockSetIssues).toHaveBeenCalledTimes(1);
+      expect(typeof mockSetIssues.mock.calls[0][0]).toBe('function');
+
+      // Apply the update function
+      const updateFn = mockSetIssues.mock.calls[0][0] as (
+        prev: Map<string, Issue>
+      ) => Map<string, Issue>;
+      const previousState = new Map<string, Issue>();
+      previousState.set('test-issue', existingIssue);
+      previousState.set('other-issue', createTestIssue({ id: 'other-issue' }));
+
+      const newState = updateFn(previousState);
+
+      // Only the deleted issue should be removed
+      expect(newState.has('test-issue')).toBe(false);
+      expect(newState.has('other-issue')).toBe(true);
+    });
+
+    it('update mutation uses functional update', () => {
+      const existingIssue = createTestIssue({
+        id: 'test-issue',
+        title: 'Original Title',
+        updated_at: '2025-01-23T10:00:00Z',
+      });
+      mockIssues.set('test-issue', existingIssue);
+
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        })
+      );
+
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'update',
+            issue_id: 'test-issue',
+            title: 'Updated Title',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+      });
+
+      expect(mockSetIssues).toHaveBeenCalledTimes(1);
+      expect(typeof mockSetIssues.mock.calls[0][0]).toBe('function');
+    });
+
+    it('status mutation uses functional update', () => {
+      const existingIssue = createTestIssue({
+        id: 'test-issue',
+        status: 'open',
+        updated_at: '2025-01-23T10:00:00Z',
+      });
+      mockIssues.set('test-issue', existingIssue);
+
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        })
+      );
+
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'status',
+            issue_id: 'test-issue',
+            new_status: 'active',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+      });
+
+      expect(mockSetIssues).toHaveBeenCalledTimes(1);
+      expect(typeof mockSetIssues.mock.calls[0][0]).toBe('function');
     });
   });
 });

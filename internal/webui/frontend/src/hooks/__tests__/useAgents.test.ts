@@ -1,20 +1,24 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useAgents } from '../useAgents';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+import { fetchAgents, fetchStatus, fetchTasks } from '@/api';
 import type { FetchStatusResult } from '@/api/agents';
 import type { LoomTaskLists } from '@/types';
 
+import { useAgents } from '../useAgents';
+
+// Import the mocked functions for test manipulation
+
 // Mock the agent API functions
 vi.mock('@/api', () => ({
+  fetchAgents: vi.fn(),
   fetchStatus: vi.fn(),
   fetchTasks: vi.fn(),
 }));
-
-// Import the mocked functions for test manipulation
-import { fetchStatus, fetchTasks } from '@/api';
+const mockFetchAgents = vi.mocked(fetchAgents);
 const mockFetchStatus = vi.mocked(fetchStatus);
 const mockFetchTasks = vi.mocked(fetchTasks);
 
@@ -80,6 +84,7 @@ function setupSuccessThenFail() {
   const taskLists = createMockTaskLists();
 
   // First call succeeds, subsequent calls fail
+  mockFetchAgents.mockResolvedValueOnce(statusResult.agents);
   mockFetchStatus.mockResolvedValueOnce(statusResult);
   mockFetchTasks.mockResolvedValueOnce(taskLists);
 
@@ -90,6 +95,7 @@ function setupSuccessThenFail() {
  * Helper to make subsequent fetches fail.
  */
 function makeNextFetchFail() {
+  mockFetchAgents.mockRejectedValueOnce(new Error('Connection refused'));
   mockFetchStatus.mockRejectedValueOnce(new Error('Connection refused'));
   mockFetchTasks.mockRejectedValueOnce(new Error('Connection refused'));
 }
@@ -97,6 +103,7 @@ function makeNextFetchFail() {
 describe('useAgents', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mockFetchAgents.mockReset();
     mockFetchStatus.mockReset();
     mockFetchTasks.mockReset();
   });
@@ -138,9 +145,9 @@ describe('useAgents', () => {
       expect(result.current.isConnected).toBe(false);
       expect(result.current.error).toBeInstanceOf(Error);
 
-      // Count retry-related timer calls (setTimeout with delay >= 1000ms is retry,
-      // setInterval with 1000ms delay is countdown)
-      const retryTimeouts = setTimeoutSpy.mock.calls.filter((call) => (call[1] as number) >= 1000);
+      // Count retry-related timer calls. Use exact 5000ms match for retry timeout
+      // to exclude withTimeout calls (15000ms) from the count.
+      const retryTimeouts = setTimeoutSpy.mock.calls.filter((call) => (call[1] as number) === 5000);
       const retryIntervals = setIntervalSpy.mock.calls.filter(
         (call) => (call[1] as number) === 1000
       );
@@ -148,9 +155,6 @@ describe('useAgents', () => {
       // Should have exactly one retry timeout (5s delay) and one countdown interval (1s)
       expect(retryTimeouts.length).toBe(1);
       expect(retryIntervals.length).toBe(1);
-
-      // The retry timeout should be 5000ms (INITIAL_RETRY_DELAY * 1000)
-      expect(retryTimeouts[0][1]).toBe(5000);
 
       setTimeoutSpy.mockRestore();
       setIntervalSpy.mockRestore();
@@ -179,8 +183,9 @@ describe('useAgents', () => {
       });
       await flushPromises();
 
+      // Use exact delay match (5000ms) to exclude withTimeout calls (15000ms)
       const firstTimeoutCount = setTimeoutSpy.mock.calls.filter(
-        (call) => (call[1] as number) >= 1000
+        (call) => (call[1] as number) === 5000
       ).length;
       const firstIntervalCount = setIntervalSpy.mock.calls.filter(
         (call) => (call[1] as number) === 1000
@@ -198,7 +203,7 @@ describe('useAgents', () => {
       await flushPromises();
 
       const secondTimeoutCount = setTimeoutSpy.mock.calls.filter(
-        (call) => (call[1] as number) >= 1000
+        (call) => (call[1] as number) === 5000
       ).length;
       const secondIntervalCount = setIntervalSpy.mock.calls.filter(
         (call) => (call[1] as number) === 1000
@@ -206,8 +211,6 @@ describe('useAgents', () => {
 
       // After the second failure and refetch, the retry effect will run again.
       // The refetch clears retry timers, so the effect reschedules. That's expected.
-      // But we should never see MORE than the expected count (one set per error transition
-      // that doesn't have existing timers).
       // Each refetch that fails clears timers then the effect reschedules, so we get 2 total.
       expect(secondTimeoutCount).toBe(2);
       expect(secondIntervalCount).toBe(2);
@@ -304,7 +307,7 @@ describe('useAgents', () => {
       await flushPromises();
 
       // Reset mock to track the retry call
-      const callCountBeforeRetry = mockFetchStatus.mock.calls.length;
+      const callCountBeforeRetry = mockFetchAgents.mock.calls.length;
 
       // Make the retry also fail (so we can observe the retry happened)
       makeNextFetchFail();
@@ -315,8 +318,8 @@ describe('useAgents', () => {
       });
       await flushPromises();
 
-      // fetchStatus should have been called again (the retry)
-      expect(mockFetchStatus.mock.calls.length).toBeGreaterThan(callCountBeforeRetry);
+      // fetchAgents should have been called again (the retry)
+      expect(mockFetchAgents.mock.calls.length).toBeGreaterThan(callCountBeforeRetry);
     });
 
     it('uses exponential backoff for successive retries', async () => {
@@ -462,6 +465,7 @@ describe('useAgents', () => {
   describe('retry only when previously connected', () => {
     it('does not schedule retry if never connected', async () => {
       // All fetches fail - never establishes connection
+      mockFetchAgents.mockRejectedValue(new Error('Connection refused'));
       mockFetchStatus.mockRejectedValue(new Error('Connection refused'));
       mockFetchTasks.mockRejectedValue(new Error('Connection refused'));
 
@@ -477,6 +481,7 @@ describe('useAgents', () => {
 
   describe('connection state', () => {
     it('returns connected when fetch succeeds', async () => {
+      mockFetchAgents.mockResolvedValue([]);
       mockFetchStatus.mockResolvedValue(createMockStatusResult());
       mockFetchTasks.mockResolvedValue(createMockTaskLists());
 
@@ -507,6 +512,7 @@ describe('useAgents', () => {
 
     it('returns never_connected when first fetch has not completed', async () => {
       // Never resolves
+      mockFetchAgents.mockImplementation(() => new Promise(() => {}));
       mockFetchStatus.mockImplementation(() => new Promise(() => {}));
       mockFetchTasks.mockImplementation(() => new Promise(() => {}));
 

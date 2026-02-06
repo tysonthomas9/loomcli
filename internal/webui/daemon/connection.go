@@ -18,7 +18,7 @@ const (
 	HealthCheckInterval = 5 * time.Second
 )
 
-// DaemonConnection manages the connection to the beads daemon.
+// DaemonConnection manages the connection to the loomcli daemon.
 // It handles connection lifecycle, health checks, and reconnection.
 type DaemonConnection struct {
 	socketPath     string

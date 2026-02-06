@@ -22,15 +22,15 @@
 }
 
 /* Interactive state when clickable */
-.blockedBadge[role="button"] {
+.blockedBadge[role='button'] {
   cursor: pointer;
 }
 
-.blockedBadge[role="button"]:hover {
+.blockedBadge[role='button']:hover {
   transform: scale(1.05);
 }
 
-.blockedBadge[role="button"]:focus-visible {
+.blockedBadge[role='button']:focus-visible {
   outline: 2px solid var(--color-text-inverse);
   outline-offset: 1px;
 }

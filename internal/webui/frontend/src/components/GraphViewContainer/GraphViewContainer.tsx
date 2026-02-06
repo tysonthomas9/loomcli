@@ -4,10 +4,12 @@
  */
 
 import { useState, useCallback } from 'react';
-import type { Issue } from '@/types';
+
 import { IssueDetailPanel } from '@/components';
 import { GraphView, type GraphViewProps } from '@/components/GraphView';
 import { useIssueDetail } from '@/hooks/useIssueDetail';
+import type { Issue } from '@/types';
+
 import styles from './GraphViewContainer.module.css';
 
 /**
@@ -83,9 +85,7 @@ export function GraphViewContainer({
     }, 300); // Match CSS transition duration
   }, [clearIssue]);
 
-  const rootClassName = className
-    ? `${styles.container} ${className}`
-    : styles.container;
+  const rootClassName = className ? `${styles.container} ${className}` : styles.container;
 
   // Build GraphView props, only including optional props when defined
   const graphViewProps: GraphViewProps = {

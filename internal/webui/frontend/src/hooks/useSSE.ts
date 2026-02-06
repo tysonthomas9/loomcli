@@ -8,28 +8,29 @@
  * - Automatic catch-up of missed events on reconnect
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react';
+
 import {
   BeadsSSEClient,
   type SSEClientOptions,
   type ConnectionState,
   type MutationPayload,
-} from '../api/sse'
+} from '../api/sse';
 
 /**
  * Options for the useSSE hook.
  */
 export interface UseSSEOptions {
   /** Called when a mutation event is received */
-  onMutation?: (mutation: MutationPayload) => void
+  onMutation?: (mutation: MutationPayload) => void;
   /** Called when an error occurs */
-  onError?: (error: string) => void
+  onError?: (error: string) => void;
   /** Called when the connection state changes */
-  onStateChange?: (state: ConnectionState) => void
+  onStateChange?: (state: ConnectionState) => void;
   /** Auto-connect on mount. Default: true */
-  autoConnect?: boolean
+  autoConnect?: boolean;
   /** Initial timestamp (ms) for catch-up events when connecting */
-  since?: number | undefined
+  since?: number | undefined;
 }
 
 /**
@@ -38,21 +39,21 @@ export interface UseSSEOptions {
  */
 export interface UseSSEReturn {
   /** Current connection state (reactive) */
-  state: ConnectionState
+  state: ConnectionState;
   /** Last error message, if any (reactive) */
-  lastError: string | null
+  lastError: string | null;
   /** Convenience boolean - true when state === 'connected' */
-  isConnected: boolean
+  isConnected: boolean;
   /** Current number of reconnection attempts (reactive) */
-  reconnectAttempts: number
+  reconnectAttempts: number;
   /** Last event ID received from server (for debugging/catch-up tracking) */
-  lastEventId: number | undefined
+  lastEventId: number | undefined;
   /** Connect to the SSE endpoint */
-  connect: () => void
+  connect: () => void;
   /** Disconnect from the SSE endpoint */
-  disconnect: () => void
+  disconnect: () => void;
   /** Immediately retry connection (only works in 'reconnecting' state) */
-  retryNow: () => void
+  retryNow: () => void;
 }
 
 /**
@@ -74,110 +75,109 @@ export interface UseSSEReturn {
  * ```
  */
 export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
-  const { autoConnect = true, since, onMutation, onError, onStateChange } =
-    options
+  const { autoConnect = true, since, onMutation, onError, onStateChange } = options;
 
   // Reactive state
-  const [state, setState] = useState<ConnectionState>('disconnected')
-  const [lastError, setLastError] = useState<string | null>(null)
-  const [reconnectAttempts, setReconnectAttempts] = useState(0)
-  const [lastEventId, setLastEventId] = useState<number | undefined>(undefined)
+  const [state, setState] = useState<ConnectionState>('disconnected');
+  const [lastError, setLastError] = useState<string | null>(null);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [lastEventId, setLastEventId] = useState<number | undefined>(undefined);
 
   // Refs for stable references across renders
-  const clientRef = useRef<BeadsSSEClient | null>(null)
-  const mountedRef = useRef(true)
+  const clientRef = useRef<BeadsSSEClient | null>(null);
+  const mountedRef = useRef(true);
 
   // Store callbacks in refs to avoid stale closures
-  const onMutationRef = useRef(onMutation)
-  const onErrorRef = useRef(onError)
-  const onStateChangeRef = useRef(onStateChange)
-  const sinceRef = useRef(since)
+  const onMutationRef = useRef(onMutation);
+  const onErrorRef = useRef(onError);
+  const onStateChangeRef = useRef(onStateChange);
+  const sinceRef = useRef(since);
 
   // Update refs when callbacks/values change
   useEffect(() => {
-    onMutationRef.current = onMutation
-  }, [onMutation])
+    onMutationRef.current = onMutation;
+  }, [onMutation]);
 
   useEffect(() => {
-    onErrorRef.current = onError
-  }, [onError])
+    onErrorRef.current = onError;
+  }, [onError]);
 
   useEffect(() => {
-    onStateChangeRef.current = onStateChange
-  }, [onStateChange])
+    onStateChangeRef.current = onStateChange;
+  }, [onStateChange]);
 
   useEffect(() => {
-    sinceRef.current = since
-  }, [since])
+    sinceRef.current = since;
+  }, [since]);
 
   // Create client on mount
   useEffect(() => {
     // Guard against SSR (no window)
-    if (typeof window === 'undefined') return
+    if (typeof window === 'undefined') return;
 
-    mountedRef.current = true
+    mountedRef.current = true;
 
     const clientOptions: SSEClientOptions = {
       onMutation: (mutation: MutationPayload) => {
-        if (!mountedRef.current) return
+        if (!mountedRef.current) return;
         // Update lastEventId from the client after each mutation
-        const eventId = clientRef.current?.getLastEventId()
+        const eventId = clientRef.current?.getLastEventId();
         if (eventId !== undefined) {
-          setLastEventId(eventId)
+          setLastEventId(eventId);
         }
-        onMutationRef.current?.(mutation)
+        onMutationRef.current?.(mutation);
       },
       onError: (error: string) => {
-        if (!mountedRef.current) return
-        setLastError(error)
-        onErrorRef.current?.(error)
+        if (!mountedRef.current) return;
+        setLastError(error);
+        onErrorRef.current?.(error);
       },
       onStateChange: (newState: ConnectionState) => {
-        if (!mountedRef.current) return
-        setState(newState)
+        if (!mountedRef.current) return;
+        setState(newState);
         // Clear error on successful connection
         if (newState === 'connected') {
-          setLastError(null)
+          setLastError(null);
         }
-        onStateChangeRef.current?.(newState)
+        onStateChangeRef.current?.(newState);
       },
       onReconnect: (attempt: number) => {
-        if (!mountedRef.current) return
-        setReconnectAttempts(attempt)
+        if (!mountedRef.current) return;
+        setReconnectAttempts(attempt);
       },
-    }
+    };
 
-    const client = new BeadsSSEClient(clientOptions)
-    clientRef.current = client
+    const client = new BeadsSSEClient(clientOptions);
+    clientRef.current = client;
 
     // Auto-connect if enabled
     if (autoConnect) {
-      client.connect(sinceRef.current)
+      client.connect(sinceRef.current);
     }
 
     // Cleanup on unmount
     return () => {
-      mountedRef.current = false
-      client.destroy()
-      clientRef.current = null
-    }
-  }, [autoConnect])
+      mountedRef.current = false;
+      client.destroy();
+      clientRef.current = null;
+    };
+  }, [autoConnect]);
 
   // Stable method references
   const connect = useCallback(() => {
-    clientRef.current?.connect(sinceRef.current)
-  }, [])
+    clientRef.current?.connect(sinceRef.current);
+  }, []);
 
   const disconnect = useCallback(() => {
-    clientRef.current?.disconnect()
-  }, [])
+    clientRef.current?.disconnect();
+  }, []);
 
   const retryNow = useCallback(() => {
-    clientRef.current?.retryNow()
-  }, [])
+    clientRef.current?.retryNow();
+  }, []);
 
   // Computed values
-  const isConnected = state === 'connected'
+  const isConnected = state === 'connected';
 
   return {
     state,
@@ -188,5 +188,5 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
     connect,
     disconnect,
     retryNow,
-  }
+  };
 }

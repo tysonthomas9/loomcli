@@ -6,14 +6,15 @@
  * Unit tests for SwimLane component.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within, fireEvent } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import { DndContext } from '@dnd-kit/core';
+import '@testing-library/jest-dom';
+import { render, screen, within, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+import type { BlockedInfo, KanbanColumnConfig } from '@/components/KanbanBoard';
+import type { Issue, Status } from '@/types';
 
 import { SwimLane } from '../SwimLane';
-import type { Issue, Status } from '@/types';
-import type { BlockedInfo, KanbanColumnConfig } from '@/components/KanbanBoard';
 
 /**
  * Helper to render SwimLane within a DndContext for droppable tests.
@@ -650,7 +651,7 @@ describe('SwimLane', () => {
       expect(screen.getByText('No blocked or deferred issues')).toBeInTheDocument();
     });
 
-    it('sets headerIcon to hourglass for backlog column', () => {
+    it('renders backlog column without emoji headerIcon', () => {
       const columns: KanbanColumnConfig[] = [
         {
           id: 'backlog',
@@ -664,8 +665,9 @@ describe('SwimLane', () => {
         <SwimLane id="test-lane" title="Test Lane" issues={[]} columns={columns} />
       );
 
-      // The hourglass icon should be rendered in the backlog column header
-      expect(screen.getByText('⏳')).toBeInTheDocument();
+      // Backlog column should render with its label but no emoji icon
+      expect(screen.getByText('Backlog')).toBeInTheDocument();
+      expect(screen.queryByText('⏳')).not.toBeInTheDocument();
     });
   });
 

@@ -1,11 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useViewState, parseViewFromUrl, isValidViewMode } from '../useViewState';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
 import { DEFAULT_VIEW } from '@/components/ViewSwitcher';
 import type { ViewMode as _ViewMode } from '@/components/ViewSwitcher';
+
+import { useViewState, parseViewFromUrl, isValidViewMode } from '../useViewState';
 
 /**
  * Mock window.location for URL sync tests.

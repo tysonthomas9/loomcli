@@ -1,11 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useSort, SortDirection as _SortDirection } from './useSort';
+import { describe, it, expect } from 'vitest';
+
 import type { ColumnDef } from '@/components/table/columns';
 import type { Issue } from '@/types';
+
+import { useSort, SortDirection as _SortDirection } from './useSort';
 
 // Test data types
 interface SimpleRow {

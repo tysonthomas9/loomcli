@@ -4,9 +4,11 @@
  */
 
 import { useMemo } from 'react';
-import type { Issue } from '@/types';
+
 import type { BlockedInfo } from '@/components/KanbanBoard';
 import { useSort, SortDirection } from '@/hooks';
+import type { Issue } from '@/types';
+
 import { ColumnDef, DEFAULT_ISSUE_COLUMNS } from './columns';
 import { IssueRow } from './IssueRow';
 import { TableHeader, SortState } from './TableHeader';

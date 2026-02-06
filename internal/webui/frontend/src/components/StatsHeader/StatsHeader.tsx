@@ -3,25 +3,27 @@
  * Shows Open, In Progress, Ready, and Closed counts with color-coded badges.
  */
 
-import { memo } from 'react'
-import type { Statistics } from '@/types'
-import { StatBadge } from './StatBadge'
-import styles from './StatsHeader.module.css'
+import { memo } from 'react';
+
+import type { Statistics } from '@/types';
+
+import { StatBadge } from './StatBadge';
+import styles from './StatsHeader.module.css';
 
 /**
  * Props for the StatsHeader component.
  */
 export interface StatsHeaderProps {
   /** Statistics data to display */
-  stats: Statistics | null
+  stats: Statistics | null;
   /** Whether data is loading */
-  loading?: boolean
+  loading?: boolean;
   /** Error from stats fetch */
-  error?: Error | null
+  error?: Error | null;
   /** Callback to retry fetch on error */
-  onRetry?: () => void
+  onRetry?: () => void;
   /** Additional CSS class */
-  className?: string
+  className?: string;
 }
 
 /**
@@ -35,7 +37,7 @@ export const StatsHeader = memo(function StatsHeader({
   onRetry,
   className,
 }: StatsHeaderProps): JSX.Element {
-  const classNames = [styles.statsHeader, className].filter(Boolean).join(' ')
+  const classNames = [styles.statsHeader, className].filter(Boolean).join(' ');
 
   // Loading state: show skeleton badges
   if (loading && !stats) {
@@ -46,7 +48,7 @@ export const StatsHeader = memo(function StatsHeader({
         <div className={styles.skeleton} />
         <div className={styles.skeleton} />
       </div>
-    )
+    );
   }
 
   // Error state: show compact error with retry
@@ -64,12 +66,12 @@ export const StatsHeader = memo(function StatsHeader({
           <span>Stats unavailable</span>
         </button>
       </div>
-    )
+    );
   }
 
   // No data yet (shouldn't happen in normal flow)
   if (!stats) {
-    return <div className={classNames} data-testid="stats-header-empty" />
+    return <div className={classNames} data-testid="stats-header-empty" />;
   }
 
   // Success state: show stat badges
@@ -80,5 +82,5 @@ export const StatsHeader = memo(function StatsHeader({
       <StatBadge label="Ready" value={stats.ready_issues} variant="ready" />
       <StatBadge label="Closed" value={stats.closed_issues} variant="closed" />
     </div>
-  )
-})
+  );
+});

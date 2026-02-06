@@ -16,12 +16,7 @@ import {
   NETWORK_PATTERNS,
   A11Y_ATTRIBUTES,
 } from '../chrome-visual-helpers';
-
-import type {
-  ConnectionStateKey,
-  IssueStatus,
-  PriorityLevel,
-} from '../chrome-visual-helpers';
+import type { ConnectionStateKey, IssueStatus, PriorityLevel } from '../chrome-visual-helpers';
 
 /**
  * Regex patterns to validate CSS selector string format.
@@ -51,33 +46,23 @@ function isValidCssSelectorFormat(selector: string): boolean {
 describe('TEST_SELECTORS', () => {
   describe('static selectors follow valid CSS format', () => {
     it('connectionStatus is a valid CSS attribute selector', () => {
-      expect(isValidCssSelectorFormat(TEST_SELECTORS.connectionStatus)).toBe(
-        true
-      );
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.connectionStatus)).toBe(true);
     });
 
     it('connectedState is a valid CSS attribute selector', () => {
-      expect(isValidCssSelectorFormat(TEST_SELECTORS.connectedState)).toBe(
-        true
-      );
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.connectedState)).toBe(true);
     });
 
     it('connectingState is a valid CSS attribute selector', () => {
-      expect(isValidCssSelectorFormat(TEST_SELECTORS.connectingState)).toBe(
-        true
-      );
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.connectingState)).toBe(true);
     });
 
     it('reconnectingState is a valid CSS attribute selector', () => {
-      expect(isValidCssSelectorFormat(TEST_SELECTORS.reconnectingState)).toBe(
-        true
-      );
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.reconnectingState)).toBe(true);
     });
 
     it('disconnectedState is a valid CSS attribute selector', () => {
-      expect(isValidCssSelectorFormat(TEST_SELECTORS.disconnectedState)).toBe(
-        true
-      );
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.disconnectedState)).toBe(true);
     });
 
     it('retryButton is a valid CSS attribute selector', () => {
@@ -101,9 +86,7 @@ describe('TEST_SELECTORS', () => {
     });
 
     it('columnWithItems is a valid CSS element with attribute selector', () => {
-      expect(isValidCssSelectorFormat(TEST_SELECTORS.columnWithItems)).toBe(
-        true
-      );
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.columnWithItems)).toBe(true);
     });
 
     it('emptyColumn is a valid CSS element with pseudo selector', () => {
@@ -115,47 +98,25 @@ describe('TEST_SELECTORS', () => {
     });
 
     it('activeDropTarget is a valid CSS attribute selector', () => {
-      expect(isValidCssSelectorFormat(TEST_SELECTORS.activeDropTarget)).toBe(
-        true
-      );
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.activeDropTarget)).toBe(true);
     });
   });
 
   describe('dynamic selector functions return valid CSS format', () => {
     it('issueCardByPriority returns valid CSS element with attribute selectors', () => {
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(0))
-      ).toBe(true);
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(1))
-      ).toBe(true);
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(2))
-      ).toBe(true);
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(3))
-      ).toBe(true);
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(4))
-      ).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(0))).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(1))).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(2))).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(3))).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.issueCardByPriority(4))).toBe(true);
     });
 
     it('columnByStatus returns valid CSS element with attribute selectors', () => {
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('open'))
-      ).toBe(true);
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('in_progress'))
-      ).toBe(true);
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('review'))
-      ).toBe(true);
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('blocked'))
-      ).toBe(true);
-      expect(
-        isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('closed'))
-      ).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('open'))).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('in_progress'))).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('review'))).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('blocked'))).toBe(true);
+      expect(isValidCssSelectorFormat(TEST_SELECTORS.columnByStatus('closed'))).toBe(true);
     });
   });
 
@@ -164,38 +125,24 @@ describe('TEST_SELECTORS', () => {
       expect(TEST_SELECTORS.connectionStatus).toBe('[data-state]');
       expect(TEST_SELECTORS.connectedState).toBe('[data-state="connected"]');
       expect(TEST_SELECTORS.connectingState).toBe('[data-state="connecting"]');
-      expect(TEST_SELECTORS.reconnectingState).toBe(
-        '[data-state="reconnecting"]'
-      );
-      expect(TEST_SELECTORS.disconnectedState).toBe(
-        '[data-state="disconnected"]'
-      );
+      expect(TEST_SELECTORS.reconnectingState).toBe('[data-state="reconnecting"]');
+      expect(TEST_SELECTORS.disconnectedState).toBe('[data-state="disconnected"]');
     });
 
     it('issueCard selectors use data-priority attribute', () => {
       expect(TEST_SELECTORS.issueCard).toBe('article[data-priority]');
-      expect(TEST_SELECTORS.issueCardByPriority(0)).toBe(
-        'article[data-priority="0"]'
-      );
-      expect(TEST_SELECTORS.issueCardByPriority(2)).toBe(
-        'article[data-priority="2"]'
-      );
+      expect(TEST_SELECTORS.issueCardByPriority(0)).toBe('article[data-priority="0"]');
+      expect(TEST_SELECTORS.issueCardByPriority(2)).toBe('article[data-priority="2"]');
     });
 
     it('statusColumn selectors use data-status attribute', () => {
       expect(TEST_SELECTORS.statusColumn).toBe('section[data-status]');
-      expect(TEST_SELECTORS.columnByStatus('open')).toBe(
-        'section[data-status="open"]'
-      );
-      expect(TEST_SELECTORS.columnByStatus('closed')).toBe(
-        'section[data-status="closed"]'
-      );
+      expect(TEST_SELECTORS.columnByStatus('open')).toBe('section[data-status="open"]');
+      expect(TEST_SELECTORS.columnByStatus('closed')).toBe('section[data-status="closed"]');
     });
 
     it('retryButton uses aria-label attribute', () => {
-      expect(TEST_SELECTORS.retryButton).toBe(
-        '[aria-label="Retry connection now"]'
-      );
+      expect(TEST_SELECTORS.retryButton).toBe('[aria-label="Retry connection now"]');
     });
   });
 });
@@ -278,18 +225,14 @@ describe('CONNECTION_STATES', () => {
 
     it('reconnecting has correct boolean values', () => {
       expect(typeof CONNECTION_STATES.reconnecting.showsRetry).toBe('boolean');
-      expect(typeof CONNECTION_STATES.reconnecting.hasAnimation).toBe(
-        'boolean'
-      );
+      expect(typeof CONNECTION_STATES.reconnecting.hasAnimation).toBe('boolean');
       expect(CONNECTION_STATES.reconnecting.showsRetry).toBe(true);
       expect(CONNECTION_STATES.reconnecting.hasAnimation).toBe(true);
     });
 
     it('disconnected has correct boolean values', () => {
       expect(typeof CONNECTION_STATES.disconnected.showsRetry).toBe('boolean');
-      expect(typeof CONNECTION_STATES.disconnected.hasAnimation).toBe(
-        'boolean'
-      );
+      expect(typeof CONNECTION_STATES.disconnected.hasAnimation).toBe('boolean');
       expect(CONNECTION_STATES.disconnected.showsRetry).toBe(false);
       expect(CONNECTION_STATES.disconnected.hasAnimation).toBe(false);
     });
@@ -306,16 +249,12 @@ describe('CONNECTION_STATES', () => {
 
     it('reconnecting has regex pattern for dynamic text', () => {
       expect(CONNECTION_STATES.reconnecting.textPattern).toBeInstanceOf(RegExp);
-      expect(
-        CONNECTION_STATES.reconnecting.textPattern.test(
-          'Reconnecting (attempt 1)...'
-        )
-      ).toBe(true);
-      expect(
-        CONNECTION_STATES.reconnecting.textPattern.test(
-          'Reconnecting (attempt 5)...'
-        )
-      ).toBe(true);
+      expect(CONNECTION_STATES.reconnecting.textPattern.test('Reconnecting (attempt 1)...')).toBe(
+        true
+      );
+      expect(CONNECTION_STATES.reconnecting.textPattern.test('Reconnecting (attempt 5)...')).toBe(
+        true
+      );
     });
 
     it('disconnected has static text', () => {
@@ -336,13 +275,7 @@ describe('CONNECTION_STATES', () => {
 
 describe('ISSUE_STATUSES', () => {
   it('contains all expected statuses', () => {
-    expect(ISSUE_STATUSES).toEqual([
-      'open',
-      'in_progress',
-      'review',
-      'blocked',
-      'closed',
-    ]);
+    expect(ISSUE_STATUSES).toEqual(['open', 'in_progress', 'review', 'blocked', 'closed']);
   });
 
   it('has exactly 5 statuses', () => {
@@ -466,12 +399,8 @@ describe('NETWORK_PATTERNS', () => {
 
   it('issueEndpoint is a valid RegExp', () => {
     expect(NETWORK_PATTERNS.issueEndpoint).toBeInstanceOf(RegExp);
-    expect(NETWORK_PATTERNS.issueEndpoint.test('/api/issues/bd-123')).toBe(
-      true
-    );
-    expect(NETWORK_PATTERNS.issueEndpoint.test('/api/issues/bd-abcd')).toBe(
-      true
-    );
+    expect(NETWORK_PATTERNS.issueEndpoint.test('/api/issues/bd-123')).toBe(true);
+    expect(NETWORK_PATTERNS.issueEndpoint.test('/api/issues/bd-abcd')).toBe(true);
     expect(NETWORK_PATTERNS.issueEndpoint.test('/api/issues/')).toBe(false);
     expect(NETWORK_PATTERNS.issueEndpoint.test('/api/issues')).toBe(false);
   });
@@ -500,13 +429,9 @@ describe('A11Y_ATTRIBUTES', () => {
     });
 
     it('has ariaLabelPattern as RegExp', () => {
-      expect(A11Y_ATTRIBUTES.connectionStatus.ariaLabelPattern).toBeInstanceOf(
-        RegExp
-      );
+      expect(A11Y_ATTRIBUTES.connectionStatus.ariaLabelPattern).toBeInstanceOf(RegExp);
       expect(
-        A11Y_ATTRIBUTES.connectionStatus.ariaLabelPattern.test(
-          'Connection status: Connected'
-        )
+        A11Y_ATTRIBUTES.connectionStatus.ariaLabelPattern.test('Connection status: Connected')
       ).toBe(true);
     });
   });
@@ -518,23 +443,15 @@ describe('A11Y_ATTRIBUTES', () => {
 
     it('has ariaLabelPattern as RegExp', () => {
       expect(A11Y_ATTRIBUTES.issueCard.ariaLabelPattern).toBeInstanceOf(RegExp);
-      expect(
-        A11Y_ATTRIBUTES.issueCard.ariaLabelPattern.test('Issue: Fix login bug')
-      ).toBe(true);
+      expect(A11Y_ATTRIBUTES.issueCard.ariaLabelPattern.test('Issue: Fix login bug')).toBe(true);
     });
   });
 
   describe('statusColumn attributes', () => {
     it('has ariaLabelPattern as RegExp', () => {
-      expect(A11Y_ATTRIBUTES.statusColumn.ariaLabelPattern).toBeInstanceOf(
-        RegExp
-      );
-      expect(
-        A11Y_ATTRIBUTES.statusColumn.ariaLabelPattern.test('Open issues')
-      ).toBe(true);
-      expect(
-        A11Y_ATTRIBUTES.statusColumn.ariaLabelPattern.test('In Progress issues')
-      ).toBe(true);
+      expect(A11Y_ATTRIBUTES.statusColumn.ariaLabelPattern).toBeInstanceOf(RegExp);
+      expect(A11Y_ATTRIBUTES.statusColumn.ariaLabelPattern.test('Open issues')).toBe(true);
+      expect(A11Y_ATTRIBUTES.statusColumn.ariaLabelPattern.test('In Progress issues')).toBe(true);
     });
   });
 
@@ -569,13 +486,7 @@ describe('Type exports', () => {
 
   describe('IssueStatus type', () => {
     it('matches values in ISSUE_STATUSES array', () => {
-      const statuses: IssueStatus[] = [
-        'open',
-        'in_progress',
-        'review',
-        'blocked',
-        'closed',
-      ];
+      const statuses: IssueStatus[] = ['open', 'in_progress', 'review', 'blocked', 'closed'];
 
       expect(statuses).toEqual([...ISSUE_STATUSES]);
     });

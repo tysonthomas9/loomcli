@@ -7,13 +7,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  groupIssuesByField,
-  sortLanes,
-  type GroupByField,
-  type LaneGroup,
-} from '../groupingUtils';
+
 import type { Issue } from '@/types';
+
+import { groupIssuesByField, sortLanes, type GroupByField, type LaneGroup } from '../groupingUtils';
 
 /**
  * Create a mock issue for testing.
@@ -100,9 +97,7 @@ describe('groupIssuesByField', () => {
     });
 
     it('uses parent ID as title when parent_title is not available', () => {
-      const issues = [
-        createMockIssue({ id: 'issue-1', parent: 'epic-id-123' }),
-      ];
+      const issues = [createMockIssue({ id: 'issue-1', parent: 'epic-id-123' })];
 
       const result = groupIssuesByField(issues, 'epic');
 
@@ -198,10 +193,7 @@ describe('groupIssuesByField', () => {
         updated_at: '2024-01-01T00:00:00Z',
       };
 
-      const issues = [
-        createMockIssue({ id: 'issue-1', priority: 1 }),
-        issueWithoutPriority,
-      ];
+      const issues = [createMockIssue({ id: 'issue-1', priority: 1 }), issueWithoutPriority];
 
       const result = groupIssuesByField(issues, 'priority');
 
@@ -212,9 +204,7 @@ describe('groupIssuesByField', () => {
     });
 
     it('handles unknown priority values gracefully', () => {
-      const issues = [
-        createMockIssue({ id: 'issue-1', priority: 99 }),
-      ];
+      const issues = [createMockIssue({ id: 'issue-1', priority: 99 })];
 
       const result = groupIssuesByField(issues, 'priority');
 
@@ -399,7 +389,11 @@ describe('sortLanes', () => {
     it('sorts lanes by issue count descending', () => {
       const lanes: LaneGroup[] = [
         { id: '1', title: 'Small', issues: [createMockIssue()] },
-        { id: '2', title: 'Large', issues: [createMockIssue(), createMockIssue(), createMockIssue()] },
+        {
+          id: '2',
+          title: 'Large',
+          issues: [createMockIssue(), createMockIssue(), createMockIssue()],
+        },
         { id: '3', title: 'Medium', issues: [createMockIssue(), createMockIssue()] },
       ];
 
@@ -418,7 +412,13 @@ describe('sortLanes', () => {
     it('places special lanes at the end regardless of count', () => {
       const lanes: LaneGroup[] = [
         { id: '1', title: 'Small', issues: [createMockIssue()] },
-        { id: '2', title: 'Unassigned', issues: Array(10).fill(null).map(() => createMockIssue()) },
+        {
+          id: '2',
+          title: 'Unassigned',
+          issues: Array(10)
+            .fill(null)
+            .map(() => createMockIssue()),
+        },
         { id: '3', title: 'Medium', issues: [createMockIssue(), createMockIssue()] },
       ];
 
@@ -448,9 +448,7 @@ describe('sortLanes', () => {
     });
 
     it('returns a new array', () => {
-      const lanes: LaneGroup[] = [
-        { id: '1', title: 'A', issues: [] },
-      ];
+      const lanes: LaneGroup[] = [{ id: '1', title: 'A', issues: [] }];
 
       const result = sortLanes(lanes, 'title');
 
@@ -465,9 +463,7 @@ describe('sortLanes', () => {
     });
 
     it('handles single lane', () => {
-      const lanes: LaneGroup[] = [
-        { id: '1', title: 'Only Lane', issues: [] },
-      ];
+      const lanes: LaneGroup[] = [{ id: '1', title: 'Only Lane', issues: [] }];
 
       const result = sortLanes(lanes, 'title');
 

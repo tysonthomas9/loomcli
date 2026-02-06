@@ -6,12 +6,13 @@
  * Unit tests for CommentsSection component.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { CommentsSection } from '../CommentsSection';
 import type { Comment } from '@/types';
+
+import { CommentsSection } from '../CommentsSection';
 
 /**
  * Create a test comment with default values.

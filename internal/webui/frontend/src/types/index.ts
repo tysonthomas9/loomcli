@@ -78,12 +78,7 @@ export type { Label } from './label';
 
 // Entity types (HOP)
 export type { EntityRef, ValidationOutcome, Validation, BondRef } from './entity';
-export {
-  BondTypeSequential,
-  BondTypeParallel,
-  BondTypeConditional,
-  BondTypeRoot,
-} from './entity';
+export { BondTypeSequential, BondTypeParallel, BondTypeConditional, BondTypeRoot } from './entity';
 
 // Agent types
 export type {
@@ -126,6 +121,7 @@ export type {
   IssueWithDependencyMetadata,
   IssueWithCounts,
   IssueDetails,
+  BlockerRef,
   BlockedIssue,
   TreeNode,
   MoleculeProgressStats,
@@ -138,19 +134,10 @@ export type { Statistics, EpicStatus } from './statistics';
 
 // Filter types
 export type { SortPolicy, IssueFilter, WorkFilter, StaleFilter } from './filter';
-export {
-  SortPolicyHybrid,
-  SortPolicyPriority,
-  SortPolicyOldest,
-} from './filter';
+export { SortPolicyHybrid, SortPolicyPriority, SortPolicyOldest } from './filter';
 
 // API types
-export type {
-  ApiResponse,
-  ApiError,
-  ApiResult,
-  PaginatedResponse,
-} from './api';
+export type { ApiResponse, ApiError, ApiResult, PaginatedResponse } from './api';
 export { isApiSuccess, isApiError } from './api';
 
 // Event types

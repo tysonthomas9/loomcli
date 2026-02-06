@@ -5,6 +5,7 @@
 
 import type { LoomAgentStatus, ParsedLoomStatus } from '@/types';
 import { parseLoomStatus } from '@/types';
+
 import styles from './AgentCard.module.css';
 
 /**
@@ -38,12 +39,12 @@ const AVATAR_COLORS = [
 /**
  * Get a deterministic avatar background color from agent name.
  */
-function getAvatarColor(name: string): string {
+export function getAvatarColor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
   }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]!;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? '#9DC08B';
 }
 
 /**
@@ -62,7 +63,7 @@ function shouldUseWhiteText(hex: string): boolean {
 /**
  * Get status dot color based on parsed status type.
  */
-function getStatusDotColor(type: ParsedLoomStatus['type']): string {
+export function getStatusDotColor(type: ParsedLoomStatus['type']): string {
   switch (type) {
     case 'working':
     case 'planning':
@@ -82,42 +83,45 @@ function getStatusDotColor(type: ParsedLoomStatus['type']): string {
   }
 }
 
+const ROLE_MAP: Record<string, string> = {
+  cobalt: 'Developer',
+  dev1: 'Developer',
+  ember: 'QA',
+  falcon: 'Developer',
+  nova: 'Architecture',
+  zephyr: 'Developer',
+};
+
+function getRoleLabel(name: string): string {
+  const key = name.toLowerCase();
+  return ROLE_MAP[key] ?? 'Developer';
+}
+
 /**
- * Build the status line text (e.g., "2 changes - webui/cobalt" or "Error - webui/ember").
+ * Build the status label text for the right-hand meta column.
  */
-function getStatusLine(parsed: ParsedLoomStatus, branch: string): string {
-  let label: string;
+export function getStatusLabel(parsed: ParsedLoomStatus): string {
   switch (parsed.type) {
     case 'working':
-      label = parsed.taskId ? `Working: ${parsed.taskId}` : 'Working...';
-      break;
+      return 'Working';
     case 'planning':
-      label = parsed.taskId ? `Planning: ${parsed.taskId}` : 'Planning...';
-      break;
+      return 'Planning';
     case 'done':
-      label = parsed.taskId ? `Done: ${parsed.taskId}` : 'Done';
-      break;
+      return 'Done';
     case 'review':
-      label = parsed.taskId ? `Review: ${parsed.taskId}` : 'Awaiting review';
-      break;
+      return 'Review';
     case 'idle':
-      label = 'Idle';
-      break;
+      return 'Idle';
     case 'error':
-      label = parsed.taskId ? `Error: ${parsed.taskId}` : 'Error';
-      break;
+      return 'Error';
     case 'dirty':
-      label = 'Uncommitted changes';
-      break;
+      return 'Uncommitted changes';
     case 'changes':
-      label = `${parsed.changeCount ?? 0} change${parsed.changeCount === 1 ? '' : 's'}`;
-      break;
+      return `${parsed.changeCount ?? 0} change${parsed.changeCount === 1 ? '' : 's'}`;
     case 'ready':
     default:
-      label = 'Ready';
+      return 'Ready';
   }
-
-  return `${label} \u2022 ${branch}`;
 }
 
 /**
@@ -127,10 +131,11 @@ export function AgentCard({ agent, taskTitle, className, onClick }: AgentCardPro
   const parsed = parseLoomStatus(agent.status);
   const avatarColor = getAvatarColor(agent.name);
   const dotColor = getStatusDotColor(parsed.type);
-  const statusLine = getStatusLine(parsed, agent.branch);
+  const statusLabel = getStatusLabel(parsed);
   const isError = parsed.type === 'error';
   const initial = agent.name.charAt(0) || '?';
   const textColor = shouldUseWhiteText(avatarColor) ? '#fff' : '#1f2937';
+  const roleLabel = getRoleLabel(agent.name);
 
   const rootClassName = [styles.card, className].filter(Boolean).join(' ');
 
@@ -170,20 +175,23 @@ export function AgentCard({ agent, taskTitle, className, onClick }: AgentCardPro
 
       <div className={styles.info}>
         <span className={styles.name}>{agent.name}</span>
+        <span className={styles.role}>{roleLabel}</span>
+      </div>
+
+      <div className={styles.meta}>
+        {agent.ahead > 0 && (
+          <span className={styles.commitCount} title={`${agent.ahead} commits ahead`}>
+            +{agent.ahead}
+          </span>
+        )}
         <span
           className={styles.statusLine}
           data-error={isError || undefined}
-          title={taskTitle || statusLine}
+          title={taskTitle || statusLabel}
         >
-          {statusLine}
+          {statusLabel}
         </span>
       </div>
-
-      {agent.ahead > 0 && (
-        <span className={styles.commitCount} title={`${agent.ahead} commits ahead`}>
-          +{agent.ahead}
-        </span>
-      )}
     </div>
   );
 }

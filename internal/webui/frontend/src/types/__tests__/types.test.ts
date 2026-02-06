@@ -2,9 +2,7 @@
  * Unit tests for type guard functions and type constants.
  */
 
-import { describe, it, expect } from 'vitest';
-
-import { vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
   // Status exports
@@ -51,7 +49,6 @@ import {
   isSquashedMutation,
   isBurnedMutation,
 } from '../index';
-
 import type { ApiResult, MutationPayload, MutationEvent } from '../index';
 
 describe('Status type guards', () => {
@@ -172,13 +169,7 @@ describe('IssueType type guards', () => {
 
 describe('IssueType constants', () => {
   it('KNOWN_ISSUE_TYPES contains all expected types', () => {
-    expect(KNOWN_ISSUE_TYPES).toEqual([
-      'bug',
-      'feature',
-      'task',
-      'epic',
-      'chore',
-    ]);
+    expect(KNOWN_ISSUE_TYPES).toEqual(['bug', 'feature', 'task', 'epic', 'chore']);
   });
 
   it('KNOWN_ISSUE_TYPES is readonly (has 5 items)', () => {

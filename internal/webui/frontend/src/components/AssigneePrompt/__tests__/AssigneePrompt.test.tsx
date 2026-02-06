@@ -7,8 +7,9 @@
  * Tests modal behavior for entering assignee name on drag to In Progress.
  */
 
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
+
 import '@testing-library/jest-dom';
 import { AssigneePrompt } from '../AssigneePrompt';
 
@@ -105,9 +106,7 @@ describe('AssigneePrompt', () => {
 
     it('clicking recent name calls onConfirm with [H] prefix', () => {
       const onConfirm = vi.fn();
-      render(
-        <AssigneePrompt {...defaultProps} onConfirm={onConfirm} recentNames={['Alice']} />
-      );
+      render(<AssigneePrompt {...defaultProps} onConfirm={onConfirm} recentNames={['Alice']} />);
 
       fireEvent.click(screen.getByTestId('recent-name-Alice'));
 
@@ -116,9 +115,7 @@ describe('AssigneePrompt', () => {
 
     it('clicking recent name calls onConfirm once', () => {
       const onConfirm = vi.fn();
-      render(
-        <AssigneePrompt {...defaultProps} onConfirm={onConfirm} recentNames={['Alice']} />
-      );
+      render(<AssigneePrompt {...defaultProps} onConfirm={onConfirm} recentNames={['Alice']} />);
 
       fireEvent.click(screen.getByTestId('recent-name-Alice'));
 
@@ -411,10 +408,10 @@ describe('AssigneePrompt', () => {
       render(<AssigneePrompt {...defaultProps} onConfirm={onConfirm} />);
 
       const input = screen.getByTestId('assignee-name-input');
-      fireEvent.change(input, { target: { value: 'John O\'Connor-Smith' } });
+      fireEvent.change(input, { target: { value: "John O'Connor-Smith" } });
       fireEvent.click(screen.getByTestId('assignee-confirm-button'));
 
-      expect(onConfirm).toHaveBeenCalledWith('[H] John O\'Connor-Smith');
+      expect(onConfirm).toHaveBeenCalledWith("[H] John O'Connor-Smith");
     });
 
     it('handles unicode characters in name', () => {
@@ -456,17 +453,11 @@ describe('AssigneePrompt', () => {
     it('handles isOpen changing from false to true', () => {
       const { rerender } = render(<AssigneePrompt {...defaultProps} isOpen={false} />);
 
-      expect(screen.getByTestId('assignee-prompt-overlay')).toHaveAttribute(
-        'aria-hidden',
-        'true'
-      );
+      expect(screen.getByTestId('assignee-prompt-overlay')).toHaveAttribute('aria-hidden', 'true');
 
       rerender(<AssigneePrompt {...defaultProps} isOpen={true} />);
 
-      expect(screen.getByTestId('assignee-prompt-overlay')).toHaveAttribute(
-        'aria-hidden',
-        'false'
-      );
+      expect(screen.getByTestId('assignee-prompt-overlay')).toHaveAttribute('aria-hidden', 'false');
     });
 
     it('handles recentNames prop changes', () => {
@@ -488,9 +479,7 @@ describe('AssigneePrompt', () => {
         <AssigneePrompt {...defaultProps} onConfirm={onConfirm1} recentNames={['Alice']} />
       );
 
-      rerender(
-        <AssigneePrompt {...defaultProps} onConfirm={onConfirm2} recentNames={['Alice']} />
-      );
+      rerender(<AssigneePrompt {...defaultProps} onConfirm={onConfirm2} recentNames={['Alice']} />);
 
       fireEvent.click(screen.getByTestId('recent-name-Alice'));
 

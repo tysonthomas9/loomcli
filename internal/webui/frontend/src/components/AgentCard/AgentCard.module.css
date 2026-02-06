@@ -8,13 +8,13 @@
   flex-direction: row;
   align-items: center;
   gap: 0.75rem;
-  padding: 1rem 1.5rem;
-  border-top: 1px solid var(--color-border);
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--color-border);
   transition: background-color 0.15s ease;
 }
 
-.card:first-child {
-  border-top: none;
+.card:last-child {
+  border-bottom: none;
 }
 
 .card[role='button'] {
@@ -22,7 +22,7 @@
 }
 
 .card[role='button']:hover {
-  background: var(--color-bg-hover);
+  background: var(--color-bg-secondary);
 }
 
 .card[role='button']:focus {
@@ -45,7 +45,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--font-size-xs, 0.75rem);
+  font-size: 0.8rem;
   font-weight: var(--font-weight-semibold, 600);
   text-transform: uppercase;
   color: #fff;
@@ -53,13 +53,13 @@
 }
 
 .statusDot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   position: absolute;
-  bottom: -2px;
-  right: -2px;
-  border: 2px solid var(--color-bg-secondary, #fff);
+  bottom: -1px;
+  right: -1px;
+  border: 2px solid var(--color-bg, #fff);
 }
 
 /* Pulse animation for active statuses */
@@ -73,6 +73,7 @@
   100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }
@@ -82,20 +83,33 @@
 .info {
   display: flex;
   flex-direction: column;
-  flex: 1;
   min-width: 0;
   gap: 2px;
 }
 
 .name {
   font-weight: var(--font-weight-bold, 700);
-  font-size: var(--font-size-sm, 0.875rem);
+  font-size: 0.78rem;
   color: var(--color-text-primary);
   line-height: 1.2;
 }
 
+.role {
+  font-size: 0.6rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.2;
+}
+
+.meta {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
 .statusLine {
-  font-size: 10px;
+  font-size: 0.6rem;
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -109,7 +123,7 @@
 
 /* Commit count badge */
 .commitCount {
-  font-size: var(--font-size-xs, 0.75rem);
+  font-size: 0.65rem;
   color: var(--color-success, #16a34a);
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono, ui-monospace, monospace);

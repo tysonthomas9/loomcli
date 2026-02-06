@@ -6,9 +6,9 @@
  * Unit tests for SearchInput component.
  */
 
+import { render, screen, fireEvent } from '@testing-library/react';
 import { createRef } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import { SearchInput } from '../SearchInput';
@@ -94,9 +94,7 @@ describe('SearchInput', () => {
     });
 
     it('updates when value prop changes', () => {
-      const { rerender } = render(
-        <SearchInput value="initial" onChange={() => {}} />
-      );
+      const { rerender } = render(<SearchInput value="initial" onChange={() => {}} />);
 
       expect(screen.getByTestId('search-input-field')).toHaveValue('initial');
 
@@ -232,9 +230,7 @@ describe('SearchInput', () => {
   describe('onClear callback', () => {
     it('fires when clear button is clicked', () => {
       const handleClear = vi.fn();
-      render(
-        <SearchInput value="query" onChange={() => {}} onClear={handleClear} />
-      );
+      render(<SearchInput value="query" onChange={() => {}} onClear={handleClear} />);
 
       const clearButton = screen.getByTestId('search-input-clear');
       fireEvent.click(clearButton);
@@ -428,9 +424,7 @@ describe('SearchInput', () => {
     });
 
     it('custom aria-label overrides placeholder', () => {
-      render(
-        <SearchInput placeholder="Search..." aria-label="Custom search label" />
-      );
+      render(<SearchInput placeholder="Search..." aria-label="Custom search label" />);
 
       const input = screen.getByTestId('search-input-field');
       expect(input).toHaveAttribute('aria-label', 'Custom search label');
@@ -498,9 +492,7 @@ describe('SearchInput', () => {
   describe('edge cases', () => {
     it('handles rapid value changes', () => {
       const handleChange = vi.fn();
-      const { rerender } = render(
-        <SearchInput value="" onChange={handleChange} />
-      );
+      const { rerender } = render(<SearchInput value="" onChange={handleChange} />);
 
       rerender(<SearchInput value="a" onChange={handleChange} />);
       rerender(<SearchInput value="ab" onChange={handleChange} />);

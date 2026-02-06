@@ -6,14 +6,14 @@
  * Unit tests for DraggableIssueCard component.
  */
 
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { DndContext, useDraggable } from '@dnd-kit/core';
 import '@testing-library/jest-dom';
-import { DndContext } from '@dnd-kit/core';
-import { useDraggable } from '@dnd-kit/core';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+
+import type { Issue } from '@/types';
 
 import { DraggableIssueCard } from '../DraggableIssueCard';
-import type { Issue } from '@/types';
 
 // Mock useDraggable hook
 vi.mock('@dnd-kit/core', async () => {
@@ -113,9 +113,7 @@ describe('DraggableIssueCard', () => {
 
     it('applies data-dragging attribute based on state', () => {
       const mockIssue = createMockIssue();
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ isDragging: true })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ isDragging: true }));
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
@@ -125,9 +123,7 @@ describe('DraggableIssueCard', () => {
 
     it('does not apply data-dragging when not dragging', () => {
       const mockIssue = createMockIssue();
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ isDragging: false })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ isDragging: false }));
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
@@ -169,9 +165,7 @@ describe('DraggableIssueCard', () => {
         onKeyDown: vi.fn(),
         onPointerDown: vi.fn(),
       };
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ listeners: mockListeners })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ listeners: mockListeners }));
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
@@ -189,9 +183,7 @@ describe('DraggableIssueCard', () => {
         'aria-roledescription': 'draggable',
         'aria-describedby': 'dnd-describedby-test',
       };
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ attributes: mockAttributes })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ attributes: mockAttributes }));
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
@@ -205,9 +197,7 @@ describe('DraggableIssueCard', () => {
 
     it('setNodeRef is applied to wrapper element', () => {
       const setNodeRef = vi.fn();
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ setNodeRef })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ setNodeRef }));
       const mockIssue = createMockIssue();
 
       render(<DraggableIssueCard issue={mockIssue} />);
@@ -220,9 +210,7 @@ describe('DraggableIssueCard', () => {
   describe('visual state', () => {
     it('has opacity: 0.5 when isDragging is true', () => {
       const mockIssue = createMockIssue();
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ isDragging: true })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ isDragging: true }));
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
@@ -232,9 +220,7 @@ describe('DraggableIssueCard', () => {
 
     it('has opacity: 1 when not dragging', () => {
       const mockIssue = createMockIssue();
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ isDragging: false })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ isDragging: false }));
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
@@ -260,9 +246,7 @@ describe('DraggableIssueCard', () => {
 
     it('no transform style when transform is null', () => {
       const mockIssue = createMockIssue();
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ transform: null })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ transform: null }));
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
@@ -288,14 +272,10 @@ describe('DraggableIssueCard', () => {
         onKeyDown: vi.fn(),
         onPointerDown: vi.fn(),
       };
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ listeners: mockListeners })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ listeners: mockListeners }));
       const mockIssue = createMockIssue();
 
-      const { container } = render(
-        <DraggableIssueCard issue={mockIssue} isOverlay={true} />
-      );
+      const { container } = render(<DraggableIssueCard issue={mockIssue} isOverlay={true} />);
 
       const wrapper = container.firstChild as HTMLElement;
       // In overlay mode, listeners should NOT be applied
@@ -306,9 +286,7 @@ describe('DraggableIssueCard', () => {
     it('isOverlay mode renders with overlay CSS class', () => {
       const mockIssue = createMockIssue();
 
-      const { container } = render(
-        <DraggableIssueCard issue={mockIssue} isOverlay={true} />
-      );
+      const { container } = render(<DraggableIssueCard issue={mockIssue} isOverlay={true} />);
 
       const wrapper = container.firstChild as HTMLElement;
       expect(wrapper.className).toContain('overlay');
@@ -317,9 +295,7 @@ describe('DraggableIssueCard', () => {
     it('isOverlay mode does not have draggable CSS class', () => {
       const mockIssue = createMockIssue();
 
-      const { container } = render(
-        <DraggableIssueCard issue={mockIssue} isOverlay={true} />
-      );
+      const { container } = render(<DraggableIssueCard issue={mockIssue} isOverlay={true} />);
 
       const wrapper = container.firstChild as HTMLElement;
       // Overlay uses 'overlay' class, not 'draggable'
@@ -336,14 +312,10 @@ describe('DraggableIssueCard', () => {
 
     it('isOverlay mode does not have setNodeRef applied', () => {
       const setNodeRef = vi.fn();
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ setNodeRef })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ setNodeRef }));
       const mockIssue = createMockIssue();
 
-      const { container } = render(
-        <DraggableIssueCard issue={mockIssue} isOverlay={true} />
-      );
+      const { container } = render(<DraggableIssueCard issue={mockIssue} isOverlay={true} />);
 
       // In overlay mode, the wrapper should not have ref set
       const wrapper = container.firstChild as HTMLElement;
@@ -370,9 +342,7 @@ describe('DraggableIssueCard', () => {
         'aria-roledescription': 'draggable',
         'aria-describedby': 'dnd-describedby-test',
       };
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ attributes: mockAttributes })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ attributes: mockAttributes }));
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
@@ -386,9 +356,7 @@ describe('DraggableIssueCard', () => {
       const mockAttributes = {
         tabIndex: 0,
       };
-      mockedUseDraggable.mockReturnValue(
-        createMockDraggableReturn({ attributes: mockAttributes })
-      );
+      mockedUseDraggable.mockReturnValue(createMockDraggableReturn({ attributes: mockAttributes }));
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
@@ -416,9 +384,7 @@ describe('DraggableIssueCard', () => {
       mockedUseDraggable.mockReturnValue(createMockDraggableReturn());
       const mockIssue = createMockIssue();
 
-      const { container } = renderWithDndContext(
-        <DraggableIssueCard issue={mockIssue} />
-      );
+      const { container } = renderWithDndContext(<DraggableIssueCard issue={mockIssue} />);
 
       // Should have the draggable wrapper
       const wrapper = container.firstChild as HTMLElement;
@@ -457,12 +423,8 @@ describe('DraggableIssueCard', () => {
       );
 
       // useDraggable should be called twice with different ids
-      expect(mockedUseDraggable).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'issue-a' })
-      );
-      expect(mockedUseDraggable).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'issue-b' })
-      );
+      expect(mockedUseDraggable).toHaveBeenCalledWith(expect.objectContaining({ id: 'issue-a' }));
+      expect(mockedUseDraggable).toHaveBeenCalledWith(expect.objectContaining({ id: 'issue-b' }));
     });
   });
 
@@ -470,9 +432,7 @@ describe('DraggableIssueCard', () => {
     it('className prop is passed through to IssueCard', () => {
       const mockIssue = createMockIssue();
 
-      render(
-        <DraggableIssueCard issue={mockIssue} className="custom-class" />
-      );
+      render(<DraggableIssueCard issue={mockIssue} className="custom-class" />);
 
       const article = screen.getByRole('article');
       expect(article).toHaveClass('custom-class');
@@ -542,9 +502,7 @@ describe('DraggableIssueCard', () => {
     it('is not rendered in overlay mode', () => {
       const mockIssue = createMockIssue();
 
-      const { container } = render(
-        <DraggableIssueCard issue={mockIssue} isOverlay={true} />
-      );
+      const { container } = render(<DraggableIssueCard issue={mockIssue} isOverlay={true} />);
 
       const svg = container.querySelector('svg');
       expect(svg).not.toBeInTheDocument();
@@ -632,9 +590,7 @@ describe('DraggableIssueCard', () => {
     it('does NOT render in overlay mode', () => {
       const mockIssue = createMockIssue();
 
-      const { container } = render(
-        <DraggableIssueCard issue={mockIssue} isOverlay={true} />
-      );
+      const { container } = render(<DraggableIssueCard issue={mockIssue} isOverlay={true} />);
 
       const dragHandle = container.querySelector('svg.dragHandle, svg[class*="dragHandle"]');
       expect(dragHandle).not.toBeInTheDocument();
@@ -664,13 +620,7 @@ describe('DraggableIssueCard', () => {
       const mockIssue = createMockIssue();
       const blockers = ['blocker-1', 'blocker-2'];
 
-      render(
-        <DraggableIssueCard
-          issue={mockIssue}
-          blockedByCount={2}
-          blockedBy={blockers}
-        />
-      );
+      render(<DraggableIssueCard issue={mockIssue} blockedByCount={2} blockedBy={blockers} />);
 
       // Hover to show tooltip
       const badge = screen.getByLabelText('Blocked by 2 issues');
@@ -715,9 +665,7 @@ describe('DraggableIssueCard', () => {
     it('IssueCard has data-blocked attribute when blocked', () => {
       const mockIssue = createMockIssue();
 
-      const { container } = render(
-        <DraggableIssueCard issue={mockIssue} blockedByCount={1} />
-      );
+      const { container } = render(<DraggableIssueCard issue={mockIssue} blockedByCount={1} />);
 
       const article = container.querySelector('article');
       expect(article).toHaveAttribute('data-blocked', 'true');

@@ -14,45 +14,119 @@
 }
 
 /* ===========================
- * Navigation Bar
+ * Actions Container (user-area)
  * =========================== */
-.navigationBar {
+.headerControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-4);
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.headerActions {
   display: flex;
+  align-items: center;
   gap: var(--space-4);
-  align-items: center;
-  flex-wrap: nowrap;
-  min-width: 200px; /* Prevent collapse */
 }
 
-/* Responsive: tablet adjustments */
-@media (max-width: 768px) {
-  .navigationBar {
-    gap: var(--space-3);
-    min-width: 150px;
-  }
-
-  .actionsContainer {
-    gap: var(--space-2);
-  }
+.searchWrapper {
+  width: 380px;
+  justify-self: center;
+  grid-column: 2;
 }
 
-/* Responsive: allow horizontal scroll on narrow viewports */
-@media (max-width: 640px) {
-  .navigationBar {
-    gap: var(--space-2);
-    min-width: min-content; /* Prevent full collapse while allowing shrinking */
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch; /* Legacy iOS momentum scrolling */
-  }
-}
-
-/* ===========================
- * Actions Container
- * =========================== */
-.actionsContainer {
+.filtersWrapper {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  flex-shrink: 0;
-  margin-left: var(--space-2); /* Visual separation from navigation */
+  justify-self: end;
+  grid-column: 3;
+}
+
+.profileMenu {
+  position: relative;
+}
+
+.profileButton {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background-color: #d1d5db;
+  color: #4b5563;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.profileButton:hover {
+  background-color: #cbd5e1;
+  border-color: var(--color-border-hover);
+}
+
+.profileButton svg {
+  width: 18px;
+  height: 18px;
+}
+
+.profileDropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 160px;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-1) 0;
+  z-index: var(--z-dropdown);
+}
+
+.profileItem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.profileItem:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+@media (width <= 1024px) {
+  .headerControls {
+    margin: 0;
+    padding-left: var(--space-2);
+    padding-right: var(--space-2);
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+  }
+
+  .searchWrapper {
+    width: 100%;
+    position: static;
+    transform: none;
+    grid-column: auto;
+  }
+
+  .filtersWrapper {
+    width: 100%;
+    justify-self: start;
+  }
 }

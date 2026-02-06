@@ -8,13 +8,14 @@
  * and cell content rendering.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { IssueRow, IssueRowProps } from '../IssueRow';
-import { DEFAULT_ISSUE_COLUMNS, ColumnDef } from '../columns';
 import type { Issue, Status } from '@/types';
+
+import { DEFAULT_ISSUE_COLUMNS, ColumnDef } from '../columns';
+import { IssueRow, IssueRowProps } from '../IssueRow';
 
 // Helper to create mock issues for testing
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {
@@ -99,34 +100,22 @@ describe('IssueRow', () => {
       });
 
       // Check ID cell
-      expect(container.querySelector('[data-column="id"]')).toHaveTextContent(
-        'bd-xyz'
-      );
+      expect(container.querySelector('[data-column="id"]')).toHaveTextContent('bd-xyz');
 
       // Check priority cell
-      expect(
-        container.querySelector('[data-column="priority"]')
-      ).toHaveTextContent('P1');
+      expect(container.querySelector('[data-column="priority"]')).toHaveTextContent('P1');
 
       // Check title cell
-      expect(container.querySelector('[data-column="title"]')).toHaveTextContent(
-        'My Title'
-      );
+      expect(container.querySelector('[data-column="title"]')).toHaveTextContent('My Title');
 
       // Check status cell
-      expect(
-        container.querySelector('[data-column="status"]')
-      ).toHaveTextContent('In progress');
+      expect(container.querySelector('[data-column="status"]')).toHaveTextContent('In progress');
 
       // Check issue_type cell
-      expect(
-        container.querySelector('[data-column="issue_type"]')
-      ).toHaveTextContent('Bug');
+      expect(container.querySelector('[data-column="issue_type"]')).toHaveTextContent('Bug');
 
       // Check assignee cell
-      expect(
-        container.querySelector('[data-column="assignee"]')
-      ).toHaveTextContent('alice');
+      expect(container.querySelector('[data-column="assignee"]')).toHaveTextContent('alice');
     });
 
     it('applies text alignment from column definition', () => {
@@ -244,10 +233,7 @@ describe('IssueRow', () => {
         onClick: vi.fn(),
       });
 
-      expect(container.querySelector('tr')).toHaveAttribute(
-        'aria-selected',
-        'false'
-      );
+      expect(container.querySelector('tr')).toHaveAttribute('aria-selected', 'false');
     });
 
     it('aria-selected is true when isSelected is true and row is clickable', () => {
@@ -260,10 +246,7 @@ describe('IssueRow', () => {
         onClick: vi.fn(),
       });
 
-      expect(container.querySelector('tr')).toHaveAttribute(
-        'aria-selected',
-        'true'
-      );
+      expect(container.querySelector('tr')).toHaveAttribute('aria-selected', 'true');
     });
   });
 
@@ -279,9 +262,7 @@ describe('IssueRow', () => {
         onClick: vi.fn(),
       });
 
-      expect(container.querySelector('tr')).toHaveClass(
-        'issue-table__row--clickable'
-      );
+      expect(container.querySelector('tr')).toHaveClass('issue-table__row--clickable');
     });
 
     it('no clickable class when isClickable is false', () => {
@@ -292,9 +273,7 @@ describe('IssueRow', () => {
         isClickable: false,
       });
 
-      expect(container.querySelector('tr')).not.toHaveClass(
-        'issue-table__row--clickable'
-      );
+      expect(container.querySelector('tr')).not.toHaveClass('issue-table__row--clickable');
     });
 
     it('no clickable class when isClickable is undefined', () => {
@@ -304,9 +283,7 @@ describe('IssueRow', () => {
         columns: DEFAULT_ISSUE_COLUMNS,
       });
 
-      expect(container.querySelector('tr')).not.toHaveClass(
-        'issue-table__row--clickable'
-      );
+      expect(container.querySelector('tr')).not.toHaveClass('issue-table__row--clickable');
     });
 
     it('onClick called with issue data when row clicked', () => {
@@ -479,23 +456,18 @@ describe('IssueRow', () => {
 
   describe('cell content', () => {
     describe('priority badge', () => {
-      it.each([0, 1, 2, 3, 4] as const)(
-        'priority %d has correct class priority-%d',
-        (priority) => {
-          const issue = createMockIssue({ priority });
-          const { container } = renderIssueRow({
-            issue,
-            columns: DEFAULT_ISSUE_COLUMNS,
-          });
+      it.each([0, 1, 2, 3, 4] as const)('priority %d has correct class priority-%d', (priority) => {
+        const issue = createMockIssue({ priority });
+        const { container } = renderIssueRow({
+          issue,
+          columns: DEFAULT_ISSUE_COLUMNS,
+        });
 
-          const priorityCell = container.querySelector('[data-column="priority"]');
-          const priorityBadge = priorityCell?.querySelector(
-            '.issue-table__priority'
-          );
+        const priorityCell = container.querySelector('[data-column="priority"]');
+        const priorityBadge = priorityCell?.querySelector('.issue-table__priority');
 
-          expect(priorityBadge).toHaveClass(`priority-${priority}`);
-        }
-      );
+        expect(priorityBadge).toHaveClass(`priority-${priority}`);
+      });
 
       it('displays priority value as P0-P4', () => {
         const issue = createMockIssue({ priority: 3 });

@@ -44,7 +44,7 @@
   transition: transform var(--transition-fast);
 }
 
-.chevron[data-collapsed="true"] {
+.chevron[data-collapsed='true'] {
   transform: rotate(-90deg);
 }
 
@@ -114,7 +114,7 @@
   background-color: var(--color-border);
 }
 
-.edgeSwatch[data-style="dashed"] {
+.edgeSwatch[data-style='dashed'] {
   background: repeating-linear-gradient(
     90deg,
     var(--color-blocked) 0,
@@ -124,7 +124,7 @@
   );
 }
 
-.edgeSwatch[data-style="solid"] {
+.edgeSwatch[data-style='solid'] {
   background-color: var(--color-border);
 }
 
@@ -140,14 +140,14 @@
 }
 
 /* Root blocker indicator - red circle */
-.indicatorSwatch[data-type="rootBlocker"] {
+.indicatorSwatch[data-type='rootBlocker'] {
   background-color: var(--color-blocked);
   opacity: 0.8;
   box-shadow: 0 0 3px var(--color-blocked);
 }
 
 /* Blocked count badge indicator - red pill */
-.indicatorSwatch[data-type="blockedBadge"] {
+.indicatorSwatch[data-type='blockedBadge'] {
   width: 18px;
   height: 14px;
   border-radius: 7px;
@@ -156,8 +156,8 @@
 }
 
 /* Add "3" text to the badge indicator */
-.indicatorSwatch[data-type="blockedBadge"]::after {
-  content: "3";
+.indicatorSwatch[data-type='blockedBadge']::after {
+  content: '3';
   position: absolute;
   inset: 0;
   display: flex;

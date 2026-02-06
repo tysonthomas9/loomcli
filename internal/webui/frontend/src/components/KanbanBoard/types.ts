@@ -3,7 +3,10 @@
  * Columns can filter issues by status, dependencies, or title patterns.
  */
 
+import type { ReactNode } from 'react';
+
 import type { Issue, Status } from '@/types';
+
 import type { BlockedInfo } from './KanbanBoard';
 
 /**
@@ -16,6 +19,8 @@ export interface KanbanColumnConfig {
   id: string;
   /** Display label for column header */
   label: string;
+  /** Optional header icon */
+  headerIcon?: ReactNode;
   /** Filter function to determine which issues appear in this column */
   filter: (issue: Issue, blockedInfo?: BlockedInfo) => boolean;
   /** Status to set when an issue is dropped in this column */

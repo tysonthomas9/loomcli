@@ -62,9 +62,11 @@
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.6;
   }
@@ -79,7 +81,9 @@
   font-weight: var(--font-weight-medium);
   color: var(--color-text);
   cursor: pointer;
-  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .retryButton:hover:not(:disabled) {
@@ -98,7 +102,7 @@
 }
 
 /* Mobile: Stack vertically */
-@media (max-width: 600px) {
+@media (width <= 600px) {
   .banner {
     flex-wrap: wrap;
   }

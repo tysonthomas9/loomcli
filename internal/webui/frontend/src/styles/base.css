@@ -16,9 +16,19 @@ body {
   font-weight: var(--font-weight-normal, 400);
   line-height: var(--line-height-normal, 1.5);
   color: var(--color-text, #111827);
-  background-color: var(--color-bg, #ffffff);
+  background-color: var(--color-bg-secondary, #eae8e1);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  flex: 1;
+  min-height: 0;
 }
 
 /* Headings */

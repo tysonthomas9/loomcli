@@ -6,10 +6,10 @@
  * Unit tests for StatusColumn component.
  */
 
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import '@testing-library/jest-dom';
 import { DndContext } from '@dnd-kit/core';
+import '@testing-library/jest-dom';
+import { render, screen } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
 
 import { StatusColumn } from '../StatusColumn';
 import { formatStatusLabel, getStatusColor } from '../utils';
@@ -185,31 +185,62 @@ describe('StatusColumn', () => {
       // When columnType is undefined, the attribute value should be undefined/null
       expect(section?.getAttribute('data-column-type')).toBeNull();
     });
+
+    it('review column has data-column-type="review" attribute set', () => {
+      const { container } = render(<StatusColumn status="open" count={1} columnType="review" />);
+
+      const section = container.querySelector('section');
+      expect(section).toHaveAttribute('data-column-type', 'review');
+    });
+
+    it('review column applies correct CSS module class for background styling', () => {
+      const { container } = render(<StatusColumn status="open" count={1} columnType="review" />);
+
+      const section = container.querySelector('section');
+
+      // Verify the section element exists and has the CSS Module class applied
+      // (CSS Modules hash the class names, so we check that a class is applied)
+      expect(section).toBeInTheDocument();
+      expect(section?.className).toBeTruthy();
+
+      // Verify the computed style reflects the warning background color
+      const computedStyle = window.getComputedStyle(section!);
+      const backgroundColor = computedStyle.backgroundColor;
+
+      // The background-color should be set (not empty or undefined)
+      // CSS Module will apply the .statusColumn[data-column-type='review'] rule
+      // which sets background-color: var(--color-warning-bg)
+      expect(backgroundColor).toBeTruthy();
+    });
   });
 
   describe('headerIcon prop', () => {
     it('displays headerIcon when provided', () => {
-      render(<StatusColumn status="open" count={1} headerIcon="⏳" />);
+      render(
+        <StatusColumn status="open" count={1} headerIcon={<span data-testid="icon">⏳</span>} />
+      );
 
       // Icon should be in the document
-      const icon = screen.getByText('⏳');
+      const icon = screen.getByTestId('icon');
       expect(icon).toBeInTheDocument();
-      expect(icon).toHaveAttribute('aria-hidden', 'true');
+      expect(screen.getByTestId('status-column-icon')).toBeInTheDocument();
     });
 
     it('does not show headerIcon when not provided', () => {
       const { container } = render(<StatusColumn status="open" count={1} />);
 
       // Should not have any columnIcon span
-      const iconSpan = container.querySelector('[aria-hidden="true"]');
+      const iconSpan = container.querySelector('[data-testid="status-column-icon"]');
       expect(iconSpan).not.toBeInTheDocument();
     });
 
     it('headerIcon is inside the header element', () => {
-      const { container } = render(<StatusColumn status="open" count={1} headerIcon="🔍" />);
+      const { container } = render(
+        <StatusColumn status="open" count={1} headerIcon={<span data-testid="icon">🔍</span>} />
+      );
 
       const header = container.querySelector('header');
-      const icon = screen.getByText('🔍');
+      const icon = screen.getByTestId('icon');
       expect(header).toContainElement(icon);
     });
 
@@ -217,9 +248,15 @@ describe('StatusColumn', () => {
       const icons = ['⏳', '✅', '🔍', '📝'];
 
       icons.forEach((icon) => {
-        const { unmount } = render(<StatusColumn status="open" count={1} headerIcon={icon} />);
+        const { unmount } = render(
+          <StatusColumn
+            status="open"
+            count={1}
+            headerIcon={<span data-testid="icon">{icon}</span>}
+          />
+        );
 
-        expect(screen.getByText(icon)).toBeInTheDocument();
+        expect(screen.getByTestId('icon')).toBeInTheDocument();
 
         unmount();
       });

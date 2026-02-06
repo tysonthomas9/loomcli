@@ -1,12 +1,20 @@
 import styles from './TalkToLeadButton.module.css';
 
-export function TalkToLeadButton() {
+export interface TalkToLeadButtonProps {
+  onClick?: () => void;
+  isActive?: boolean;
+}
+
+export function TalkToLeadButton({ onClick, isActive }: TalkToLeadButtonProps) {
   return (
     <button
       className={styles.fab}
       type="button"
       data-testid="talk-to-lead-button"
       aria-label="Talk to Lead"
+      onClick={onClick}
+      data-active={isActive ? 'true' : undefined}
+      aria-pressed={isActive}
     >
       <svg
         width="20"

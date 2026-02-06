@@ -2,10 +2,10 @@
  * Filter types for list/query operations.
  */
 
-import type { ISODateString } from './common';
-import type { Status } from './status';
-import type { IssueType } from './issueType';
 import type { MolType } from './agent';
+import type { ISODateString } from './common';
+import type { IssueType } from './issueType';
+import type { Status } from './status';
 
 /**
  * Sort policy for ready work.

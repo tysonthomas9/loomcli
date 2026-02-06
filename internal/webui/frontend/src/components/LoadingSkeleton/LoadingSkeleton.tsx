@@ -111,9 +111,7 @@ export function LoadingSkeleton({
  * Use when loading cards in the Kanban board.
  */
 function Card({ className }: LoadingSkeletonCardProps): JSX.Element {
-  const rootClassName = className
-    ? `${styles.card} ${className}`
-    : styles.card;
+  const rootClassName = className ? `${styles.card} ${className}` : styles.card;
 
   return (
     <div className={rootClassName} aria-hidden="true">
@@ -130,13 +128,8 @@ function Card({ className }: LoadingSkeletonCardProps): JSX.Element {
  * Column skeleton matching StatusColumn header.
  * Use when loading columns in the Kanban board.
  */
-function Column({
-  className,
-  cardCount = 3,
-}: LoadingSkeletonColumnProps): JSX.Element {
-  const rootClassName = className
-    ? `${styles.column} ${className}`
-    : styles.column;
+function Column({ className, cardCount = 3 }: LoadingSkeletonColumnProps): JSX.Element {
+  const rootClassName = className ? `${styles.column} ${className}` : styles.column;
 
   return (
     <div className={rootClassName} aria-hidden="true">
@@ -159,9 +152,7 @@ function Column({
  * Shows a placeholder with simulated nodes and edges.
  */
 function Graph({ className }: LoadingSkeletonGraphProps): JSX.Element {
-  const rootClassName = className
-    ? `${styles.graph} ${className}`
-    : styles.graph;
+  const rootClassName = className ? `${styles.graph} ${className}` : styles.graph;
 
   return (
     <div className={rootClassName} aria-hidden="true" data-testid="loading-skeleton-graph">
@@ -191,9 +182,7 @@ function Graph({ className }: LoadingSkeletonGraphProps): JSX.Element {
  * Shows a 2x2 grid of placeholder panels.
  */
 function Monitor({ className }: LoadingSkeletonMonitorProps): JSX.Element {
-  const rootClassName = className
-    ? `${styles.monitor} ${className}`
-    : styles.monitor;
+  const rootClassName = className ? `${styles.monitor} ${className}` : styles.monitor;
 
   return (
     <div className={rootClassName} aria-hidden="true" data-testid="loading-skeleton-monitor">

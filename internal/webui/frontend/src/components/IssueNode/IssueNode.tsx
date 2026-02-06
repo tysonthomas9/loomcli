@@ -3,10 +3,13 @@
  * Displays an issue as a node with connection handles.
  */
 
-import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import type { IssueNode as IssueNodeType } from '@/types';
+import { memo } from 'react';
+
 import { BlockedBadge } from '@/components/BlockedBadge';
+import type { IssueNode as IssueNodeType } from '@/types';
+import { formatIssueId } from '@/utils/formatIssueId';
+
 import styles from './IssueNode.module.css';
 
 export interface IssueNodeProps extends NodeProps<IssueNodeType> {
@@ -14,15 +17,6 @@ export interface IssueNodeProps extends NodeProps<IssueNodeType> {
   // Extended with chain highlighting
   /** Whether this node is part of a highlighted blocking chain */
   'data-in-chain'?: boolean;
-}
-
-/**
- * Format issue ID for display (last 7 chars if long).
- */
-function formatIssueId(id: string): string {
-  if (!id) return 'unknown';
-  if (id.length <= 10) return id;
-  return id.slice(-7);
 }
 
 /**
@@ -54,9 +48,7 @@ function IssueNodeComponent({ data, selected }: IssueNodeProps): JSX.Element {
   const displayTitle = title || 'Untitled';
   const priorityLevel = getPriorityLevel(priority);
 
-  const rootClassName = selected
-    ? `${styles.issueNode} ${styles.selected}`
-    : styles.issueNode;
+  const rootClassName = selected ? `${styles.issueNode} ${styles.selected}` : styles.issueNode;
 
   return (
     <article
@@ -68,12 +60,7 @@ function IssueNodeComponent({ data, selected }: IssueNodeProps): JSX.Element {
       aria-label={`Issue: ${displayTitle}`}
     >
       {/* Target handle for incoming dependencies */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className={styles.handle}
-        id="target"
-      />
+      <Handle type="target" position={Position.Left} className={styles.handle} id="target" />
 
       {/* Blocked count badge - positioned at top-right corner */}
       {blockedCount > 0 && (
@@ -110,12 +97,7 @@ function IssueNodeComponent({ data, selected }: IssueNodeProps): JSX.Element {
       </footer>
 
       {/* Source handle for outgoing dependencies */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className={styles.handle}
-        id="source"
-      />
+      <Handle type="source" position={Position.Right} className={styles.handle} id="source" />
     </article>
   );
 }

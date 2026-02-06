@@ -14,10 +14,7 @@ interface SearchIconProps {
  * SearchIcon renders a magnifying glass SVG icon.
  * Uses currentColor for fill, allowing it to inherit text color.
  */
-export function SearchIcon({
-  size = 16,
-  className,
-}: SearchIconProps) {
+export function SearchIcon({ size = 16, className }: SearchIconProps) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"

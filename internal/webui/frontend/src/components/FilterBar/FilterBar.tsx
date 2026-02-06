@@ -5,8 +5,10 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { Priority, IssueType } from '@/types';
+
 import { type FilterState, type FilterActions, isEmptyFilter } from '@/hooks/useFilterState';
+import type { Priority, IssueType } from '@/types';
+
 import styles from './FilterBar.module.css';
 
 /**
@@ -74,7 +76,7 @@ interface GroupByOptionItem {
  * Group by options for the dropdown.
  */
 const GROUP_BY_OPTIONS: GroupByOptionItem[] = [
-  { label: 'None', value: 'none' },
+  { label: 'All', value: 'none' },
   { label: 'Epic', value: 'epic' },
   { label: 'Assignee', value: 'assignee' },
   { label: 'Priority', value: 'priority' },
@@ -204,8 +206,7 @@ export function FilterBar({
   return (
     <div className={rootClassName} data-testid="filter-bar">
       <div className={styles.filters}>
-        {/* Priority dropdown */}
-        <div className={styles.filterGroup}>
+        <div className={styles.filterGroup} data-filter="priority">
           <label htmlFor="priority-filter" className={styles.label}>
             Priority
           </label>
@@ -225,8 +226,7 @@ export function FilterBar({
           </select>
         </div>
 
-        {/* Type dropdown */}
-        <div className={styles.filterGroup}>
+        <div className={styles.filterGroup} data-filter="type">
           <label htmlFor="type-filter" className={styles.label}>
             Type
           </label>

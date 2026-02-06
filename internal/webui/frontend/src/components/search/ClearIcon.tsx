@@ -14,10 +14,7 @@ interface ClearIconProps {
  * ClearIcon renders an X/close SVG icon.
  * Uses currentColor for fill, allowing it to inherit text color.
  */
-export function ClearIcon({
-  size = 16,
-  className,
-}: ClearIconProps) {
+export function ClearIcon({ size = 16, className }: ClearIconProps) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"

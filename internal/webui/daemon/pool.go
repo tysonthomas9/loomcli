@@ -2,20 +2,12 @@ package daemon
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
-
-// Pool is the interface for connection pool operations.
-// Both ConnectionPool and ProtectedPool implement this interface.
-type Pool interface {
-	Get(ctx context.Context) (*rpc.Client, error)
-	Put(client *rpc.Client)
-	Stats() PoolStats
-	Close() error
-}
 
 const (
 	// DefaultPoolSize is the default number of connections in the pool.
@@ -27,6 +19,16 @@ const (
 	// maxRetries limits the number of retry attempts when finding stale connections.
 	maxRetries = 3
 )
+
+// Pool is the interface for connection pool operations.
+// Both ConnectionPool and ProtectedPool implement this interface.
+type Pool interface {
+	Get(ctx context.Context) (*rpc.Client, error)
+	Put(client *rpc.Client)
+	Discard(client *rpc.Client)
+	Stats() PoolStats
+	Close() error
+}
 
 // ConnectionPool manages a pool of connections to the daemon.
 // It provides concurrent access for multiple HTTP requests.
@@ -220,6 +222,21 @@ func (p *ConnectionPool) Put(client *rpc.Client) {
 	}
 }
 
+// Discard closes a connection without returning it to the pool.
+// Use this instead of Put when the connection is known to be in a bad state
+// (e.g., after a timeout or protocol error).
+func (p *ConnectionPool) Discard(client *rpc.Client) {
+	if client == nil {
+		return
+	}
+
+	_ = client.Close()
+	p.mu.Lock()
+	p.activeCount--
+	p.createdCount--
+	p.mu.Unlock()
+}
+
 // Close closes all pooled connections.
 func (p *ConnectionPool) Close() error {
 	p.mu.Lock()
@@ -250,21 +267,21 @@ func (p *ConnectionPool) Stats() PoolStats {
 	defer p.mu.Unlock()
 
 	return PoolStats{
-		Size:         p.poolSize,
-		Created:      p.createdCount,
-		Active:       p.activeCount,
-		Available:    len(p.available),
-		Closed:       p.closed,
+		Size:      p.poolSize,
+		Created:   p.createdCount,
+		Active:    p.activeCount,
+		Available: len(p.available),
+		Closed:    p.closed,
 	}
 }
 
 // PoolStats contains statistics about the connection pool.
 type PoolStats struct {
-	Size      int  `json:"size"`       // Configured pool size
-	Created   int  `json:"created"`    // Number of connections created
-	Active    int  `json:"active"`     // Number of connections currently in use
-	Available int  `json:"available"`  // Number of connections available in pool
-	Closed    bool `json:"closed"`     // Whether the pool is closed
+	Size      int  `json:"size"`      // Configured pool size
+	Created   int  `json:"created"`   // Number of connections created
+	Active    int  `json:"active"`    // Number of connections currently in use
+	Available int  `json:"available"` // Number of connections available in pool
+	Closed    bool `json:"closed"`    // Whether the pool is closed
 }
 
 // SetDialTimeout sets the timeout for creating new connections.
@@ -307,6 +324,9 @@ func (p *ConnectionPool) validateConnection(client *rpc.Client) bool {
 	}
 
 	// Try a ping to validate the connection
-	err := client.Ping()
-	return err == nil
+	if err := client.Ping(); err != nil {
+		log.Printf("Pool: connection validation failed: %v", err)
+		return false
+	}
+	return true
 }

@@ -5,7 +5,9 @@
  */
 
 import { useState, useCallback, useRef, useEffect, type KeyboardEvent } from 'react';
+
 import type { IssueWithDependencyMetadata, DependencyType } from '@/types';
+
 import styles from './DependencySection.module.css';
 
 /**
@@ -84,7 +86,7 @@ export function DependencySection({
     }
 
     // Check if already a dependency
-    if (dependencies.some(dep => dep.id === trimmedId)) {
+    if (dependencies.some((dep) => dep.id === trimmedId)) {
       setError('Already a dependency');
       return;
     }
@@ -105,31 +107,37 @@ export function DependencySection({
     }
   }, [inputValue, issueId, dependencies, onAddDependency]);
 
-  const handleRemove = useCallback(async (depId: string) => {
-    if (disabled || removingId) return;
+  const handleRemove = useCallback(
+    async (depId: string) => {
+      if (disabled || removingId) return;
 
-    setError(null);
-    setRemovingId(depId);
+      setError(null);
+      setRemovingId(depId);
 
-    try {
-      await onRemoveDependency(depId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to remove dependency';
-      setError(message);
-    } finally {
-      setRemovingId(null);
-    }
-  }, [disabled, removingId, onRemoveDependency]);
+      try {
+        await onRemoveDependency(depId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to remove dependency';
+        setError(message);
+      } finally {
+        setRemovingId(null);
+      }
+    },
+    [disabled, removingId, onRemoveDependency]
+  );
 
-  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleAdd();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      handleCancelAdd();
-    }
-  }, [handleAdd, handleCancelAdd]);
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleAdd();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleCancelAdd();
+      }
+    },
+    [handleAdd, handleCancelAdd]
+  );
 
   const rootClassName = [styles.dependencySection, className].filter(Boolean).join(' ');
   const isBusy = savingId !== null || removingId !== null;
@@ -238,7 +246,13 @@ export function DependencySection({
                     {isRemoving ? (
                       <span className={styles.spinner} />
                     ) : (
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 14 14"
+                        fill="none"
+                        aria-hidden="true"
+                      >
                         <path
                           d="M3 3L11 11M11 3L3 11"
                           stroke="currentColor"

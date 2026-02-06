@@ -2,10 +2,12 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor as _waitFor } from '@testing-library/react';
-import { useBulkClose } from './useBulkClose';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import * as api from '@/api';
+
+import { useBulkClose } from './useBulkClose';
 
 // Mock the API module
 vi.mock('@/api', () => ({

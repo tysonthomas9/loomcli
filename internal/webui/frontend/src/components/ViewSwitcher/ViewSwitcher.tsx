@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useRef } from 'react';
+
 import styles from './ViewSwitcher.module.css';
 
 /**
@@ -46,6 +47,8 @@ export interface ViewSwitcherProps {
   className?: string;
   /** Disable view switching (e.g., during loading) */
   disabled?: boolean;
+  /** Layout orientation (default: 'horizontal') */
+  orientation?: 'horizontal' | 'vertical';
 }
 
 /**
@@ -57,6 +60,7 @@ export function ViewSwitcher({
   onChange,
   className,
   disabled = false,
+  orientation = 'horizontal',
 }: ViewSwitcherProps): JSX.Element {
   const tabRefs = useRef<Map<ViewMode, HTMLButtonElement | null>>(new Map());
 
@@ -107,23 +111,26 @@ export function ViewSwitcher({
     [activeView, onChange, disabled]
   );
 
-  const rootClassName = className
-    ? `${styles.viewSwitcher} ${className}`
-    : styles.viewSwitcher;
+  const rootClassName = [
+    styles.viewSwitcher,
+    orientation === 'vertical' && styles.vertical,
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div
       className={rootClassName}
       role="tablist"
       aria-label="View selector"
+      aria-orientation={orientation}
       onKeyDown={handleKeyDown}
       data-testid="view-switcher"
     >
       {VIEWS.map((view) => {
         const isActive = activeView === view.id;
-        const tabClassName = isActive
-          ? `${styles.tab} ${styles.active}`
-          : styles.tab;
+        const tabClassName = isActive ? `${styles.tab} ${styles.active}` : styles.tab;
 
         return (
           <button

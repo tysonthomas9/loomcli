@@ -1,12 +1,13 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
 import { useOptimisticStatusUpdate } from './useOptimisticStatusUpdate';
+import * as api from '../api';
 import type { Issue } from '../types/issue';
 import type { Status as _Status } from '../types/status';
-import * as api from '../api';
 
 // Mock the API module
 vi.mock('../api', () => ({

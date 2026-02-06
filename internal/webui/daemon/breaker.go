@@ -33,6 +33,12 @@ func (p *ProtectedPool) Put(client *rpc.Client) {
 	p.pool.Put(client)
 }
 
+// Discard closes a connection without returning it to the pool.
+// Use this instead of Put when the connection is known to be in a bad state.
+func (p *ProtectedPool) Discard(client *rpc.Client) {
+	p.pool.Discard(client)
+}
+
 // Stats returns pool statistics from the underlying pool.
 func (p *ProtectedPool) Stats() PoolStats {
 	return p.pool.Stats()

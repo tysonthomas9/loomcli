@@ -6,12 +6,13 @@
  * Unit tests for ConnectionStatus component.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { ConnectionStatus } from '../ConnectionStatus';
 import type { ConnectionState } from '@/api/sse';
+
+import { ConnectionStatus } from '../ConnectionStatus';
 
 describe('ConnectionStatus', () => {
   describe('rendering', () => {

@@ -4,8 +4,9 @@
  */
 
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
-import { MarkdownRenderer } from './MarkdownRenderer';
+
 import styles from './EditableDescription.module.css';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 export interface EditableDescriptionProps {
   /** Current description value */
@@ -106,16 +107,19 @@ export function EditableDescription({
     }
   }, [draftDescription, description, onSave]);
 
-  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Cmd/Ctrl+Enter to save
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      saveDescription();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      cancelEdit();
-    }
-  }, [saveDescription, cancelEdit]);
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Cmd/Ctrl+Enter to save
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        saveDescription();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelEdit();
+      }
+    },
+    [saveDescription, cancelEdit]
+  );
 
   const rootClassName = [styles.editableDescription, className].filter(Boolean).join(' ');
 

@@ -6,12 +6,13 @@
  * Unit tests for AgentCard component.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { AgentCard } from './AgentCard';
 import type { LoomAgentStatus } from '@/types';
+
+import { AgentCard } from './AgentCard';
 
 /** Helper to build a minimal agent object. */
 function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
@@ -99,101 +100,76 @@ describe('AgentCard', () => {
   });
 
   describe('status line', () => {
-    it('shows "Ready" with branch for ready status', () => {
+    it('shows "Ready" for ready status', () => {
       render(<AgentCard agent={makeAgent({ status: 'ready', branch: 'main' })} />);
 
-      expect(screen.getByText(/Ready.*main/)).toBeInTheDocument();
+      expect(screen.getByText('Ready')).toBeInTheDocument();
     });
 
-    it('shows "Idle" with branch for idle status', () => {
+    it('shows "Idle" for idle status', () => {
       render(<AgentCard agent={makeAgent({ status: 'idle', branch: 'dev' })} />);
 
-      expect(screen.getByText(/Idle.*dev/)).toBeInTheDocument();
+      expect(screen.getByText('Idle')).toBeInTheDocument();
     });
 
-    it('shows "Working..." for working without task ID', () => {
+    it('shows "Working" for working status', () => {
       render(<AgentCard agent={makeAgent({ status: 'working', branch: 'b' })} />);
 
-      expect(screen.getByText(/Working\.\.\./)).toBeInTheDocument();
+      expect(screen.getByText('Working')).toBeInTheDocument();
     });
 
-    it('shows "Working: bd-123" for working with task ID', () => {
+    it('shows "Working" for working with task ID', () => {
       render(<AgentCard agent={makeAgent({ status: 'working: bd-123 (5m)', branch: 'b' })} />);
 
-      expect(screen.getByText(/Working: bd-123.*b/)).toBeInTheDocument();
+      expect(screen.getByText('Working')).toBeInTheDocument();
     });
 
-    it('shows "Planning..." for planning without task ID', () => {
+    it('shows "Planning" for planning status', () => {
       render(<AgentCard agent={makeAgent({ status: 'planning', branch: 'b' })} />);
 
-      expect(screen.getByText(/Planning\.\.\./)).toBeInTheDocument();
+      expect(screen.getByText('Planning')).toBeInTheDocument();
     });
 
-    it('shows "Planning: bd-456" for planning with task ID', () => {
+    it('shows "Planning" for planning with task ID', () => {
       render(<AgentCard agent={makeAgent({ status: 'planning: bd-456 (2m)', branch: 'b' })} />);
 
-      expect(screen.getByText(/Planning: bd-456.*b/)).toBeInTheDocument();
+      expect(screen.getByText('Planning')).toBeInTheDocument();
     });
 
-    it('shows "Done" for done without task ID', () => {
+    it('shows "Done" for done status', () => {
       render(<AgentCard agent={makeAgent({ status: 'done', branch: 'b' })} />);
 
-      expect(screen.getByText(/Done.*b/)).toBeInTheDocument();
+      expect(screen.getByText('Done')).toBeInTheDocument();
     });
 
-    it('shows "Done: bd-789" for done with task ID', () => {
-      render(<AgentCard agent={makeAgent({ status: 'done: bd-789 (10m)', branch: 'b' })} />);
-
-      expect(screen.getByText(/Done: bd-789.*b/)).toBeInTheDocument();
-    });
-
-    it('shows "Awaiting review" for review without task ID', () => {
+    it('shows "Review" for review status', () => {
       render(<AgentCard agent={makeAgent({ status: 'review', branch: 'b' })} />);
 
-      expect(screen.getByText(/Awaiting review.*b/)).toBeInTheDocument();
+      expect(screen.getByText('Review')).toBeInTheDocument();
     });
 
-    it('shows "Review: bd-100" for review with task ID', () => {
-      render(<AgentCard agent={makeAgent({ status: 'review: bd-100 (3m)', branch: 'b' })} />);
-
-      expect(screen.getByText(/Review: bd-100.*b/)).toBeInTheDocument();
-    });
-
-    it('shows "Error" for error without task ID', () => {
+    it('shows "Error" for error status', () => {
       render(<AgentCard agent={makeAgent({ status: 'error', branch: 'b' })} />);
 
-      expect(screen.getByText(/Error.*b/)).toBeInTheDocument();
-    });
-
-    it('shows "Error: bd-999" for error with task ID', () => {
-      render(<AgentCard agent={makeAgent({ status: 'error: bd-999 (1m)', branch: 'b' })} />);
-
-      expect(screen.getByText(/Error: bd-999.*b/)).toBeInTheDocument();
+      expect(screen.getByText('Error')).toBeInTheDocument();
     });
 
     it('shows "Uncommitted changes" for dirty status', () => {
       render(<AgentCard agent={makeAgent({ status: 'dirty', branch: 'b' })} />);
 
-      expect(screen.getByText(/Uncommitted changes.*b/)).toBeInTheDocument();
+      expect(screen.getByText('Uncommitted changes')).toBeInTheDocument();
     });
 
     it('shows "2 changes" for changes status', () => {
       render(<AgentCard agent={makeAgent({ status: '2 changes', branch: 'b' })} />);
 
-      expect(screen.getByText(/2 changes.*b/)).toBeInTheDocument();
+      expect(screen.getByText('2 changes')).toBeInTheDocument();
     });
 
     it('shows "1 change" (singular) for single change', () => {
       render(<AgentCard agent={makeAgent({ status: '1 change', branch: 'b' })} />);
 
-      expect(screen.getByText(/1 change.*b/)).toBeInTheDocument();
-    });
-
-    it('includes bullet separator between label and branch', () => {
-      render(<AgentCard agent={makeAgent({ status: 'ready', branch: 'main' })} />);
-
-      // Unicode bullet \u2022
-      expect(screen.getByText(/Ready \u2022 main/)).toBeInTheDocument();
+      expect(screen.getByText('1 change')).toBeInTheDocument();
     });
   });
 
@@ -201,14 +177,14 @@ describe('AgentCard', () => {
     it('sets data-error on status line when status is error', () => {
       render(<AgentCard agent={makeAgent({ status: 'error', branch: 'b' })} />);
 
-      const statusLine = screen.getByText(/Error.*b/);
+      const statusLine = screen.getByText('Error');
       expect(statusLine).toHaveAttribute('data-error');
     });
 
     it('does not set data-error for non-error statuses', () => {
       render(<AgentCard agent={makeAgent({ status: 'ready', branch: 'b' })} />);
 
-      const statusLine = screen.getByText(/Ready.*b/);
+      const statusLine = screen.getByText('Ready');
       expect(statusLine).not.toHaveAttribute('data-error');
     });
   });
@@ -348,7 +324,7 @@ describe('AgentCard', () => {
     it('uses status line text as title when taskTitle is not provided', () => {
       render(<AgentCard agent={makeAgent({ status: 'ready', branch: 'main' })} />);
 
-      expect(screen.getByTitle('Ready \u2022 main')).toBeInTheDocument();
+      expect(screen.getByTitle('Ready')).toBeInTheDocument();
     });
   });
 
@@ -367,7 +343,7 @@ describe('AgentCard', () => {
       );
 
       expect(container.firstChild).toHaveAttribute('data-status', 'ready');
-      expect(screen.getByText(/Ready.*b/)).toBeInTheDocument();
+      expect(screen.getByText('Ready')).toBeInTheDocument();
     });
 
     it('handles large ahead count', () => {

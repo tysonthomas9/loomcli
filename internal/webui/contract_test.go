@@ -353,14 +353,14 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 	})
 
 	tests := []struct {
-		name           string
-		handler        http.HandlerFunc
-		method         string
-		path           string
-		body           string
-		wantStatus     int
-		dataFieldName  string // "data" or "issues" for graph
-		expectData     bool   // whether data/issues field is expected to be present
+		name          string
+		handler       http.HandlerFunc
+		method        string
+		path          string
+		body          string
+		wantStatus    int
+		dataFieldName string // "data" or "issues" for graph
+		expectData    bool   // whether data/issues field is expected to be present
 	}{
 		{
 			name: "GET /api/issues/{id} success",
@@ -526,7 +526,7 @@ func TestContractEnvelope_SuccessResponses(t *testing.T) {
 	}
 
 	// Note: handleReady, handleListIssues, and handleAPIHealth do not have WithPool
-	// variants, so they cannot be tested with mocks here. They use *daemon.ConnectionPool
+	// variants, so they cannot be tested with mocks here. They use daemon.Pool
 	// directly. Their envelope shapes are tested indirectly through the response types.
 	// The health endpoints have dedicated tests in TestContractEnvelope_HealthEndpoints.
 

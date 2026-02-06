@@ -19,7 +19,23 @@ import type {
  * Default loom server URL.
  * Can be overridden via environment variable or config.
  */
-const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? 'http://localhost:9000';
+const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? '/api/loom';
+const LOOM_REQUEST_TIMEOUT_MS = 15000;
+
+async function fetchWithTimeout(
+  input: RequestInfo,
+  init: RequestInit,
+  timeoutMs = LOOM_REQUEST_TIMEOUT_MS
+) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
 
 /**
  * Fetch agents from the loom server.
@@ -27,7 +43,7 @@ const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? 'http://localhos
  */
 export async function fetchAgents(): Promise<LoomAgentStatus[]> {
   try {
-    const response = await fetch(`${LOOM_SERVER_URL}/api/agents`, {
+    const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/agents`, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
@@ -43,7 +59,10 @@ export async function fetchAgents(): Promise<LoomAgentStatus[]> {
     return data.agents ?? [];
   } catch (error) {
     // Loom server not available - this is expected when not running agents
-    console.warn('Loom server not available:', error instanceof Error ? error.message : 'Unknown error');
+    console.warn(
+      'Loom server not available:',
+      error instanceof Error ? error.message : 'Unknown error'
+    );
     return [];
   }
 }
@@ -53,7 +72,7 @@ export async function fetchAgents(): Promise<LoomAgentStatus[]> {
  */
 export async function checkLoomHealth(): Promise<boolean> {
   try {
-    const response = await fetch(`${LOOM_SERVER_URL}/health`, {
+    const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/health`, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
@@ -82,7 +101,7 @@ export interface FetchStatusResult {
  * Throws on network errors or invalid responses so callers can handle connection state.
  */
 export async function fetchStatus(): Promise<FetchStatusResult> {
-  const response = await fetch(`${LOOM_SERVER_URL}/api/status`, {
+  const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/status`, {
     method: 'GET',
     headers: {
       Accept: 'application/json',
@@ -94,9 +113,16 @@ export async function fetchStatus(): Promise<FetchStatusResult> {
   }
 
   const data: LoomStatusResponse = await response.json();
+  // Map API field 'backlog' to frontend field 'blocked'
   return {
     agents: data.agents ?? [],
-    tasks: data.tasks,
+    tasks: {
+      needs_planning: data.tasks.needs_planning,
+      ready_to_implement: data.tasks.ready_to_implement,
+      in_progress: data.tasks.in_progress,
+      need_review: data.tasks.need_review,
+      blocked: data.tasks.backlog, // Map backlog → blocked
+    },
     agentTasks: data.agent_tasks ?? {},
     sync: data.sync,
     stats: data.stats,
@@ -109,7 +135,7 @@ export async function fetchStatus(): Promise<FetchStatusResult> {
  * Throws on network errors or invalid responses so callers can handle connection state.
  */
 export async function fetchTasks(): Promise<LoomTaskLists> {
-  const response = await fetch(`${LOOM_SERVER_URL}/api/tasks`, {
+  const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/tasks`, {
     method: 'GET',
     headers: {
       Accept: 'application/json',
@@ -126,6 +152,6 @@ export async function fetchTasks(): Promise<LoomTaskLists> {
     readyToImplement: data.ready_to_implement ?? [],
     needsReview: data.needs_review ?? [],
     inProgress: data.in_progress ?? [],
-    blocked: data.blocked ?? [],
+    blocked: data.backlog ?? [], // Map API "backlog" to semantic "blocked"
   };
 }

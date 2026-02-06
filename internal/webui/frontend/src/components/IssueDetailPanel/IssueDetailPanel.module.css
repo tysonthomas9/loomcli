@@ -37,7 +37,7 @@
   flex-direction: column;
 }
 
-@media (max-width: 520px) {
+@media (width <= 520px) {
   .panel {
     width: 100%;
   }
@@ -49,8 +49,7 @@
 
 .content {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden auto;
   display: flex;
   flex-direction: column;
 }
@@ -189,7 +188,7 @@
 /* ============= Detail Content ============= */
 
 .detailContent {
-  padding: 0 20px 16px 20px;
+  padding: 0 20px 16px;
   flex: 1;
 }
 
@@ -201,12 +200,58 @@
   margin-bottom: 20px;
 }
 
+/* ============= Log Tab Bar ============= */
+
+.logTabBar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  flex-shrink: 0;
+}
+
+.logTab {
+  padding: 10px 16px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: var(--font-size-sm, 13px);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.logTab:hover {
+  color: var(--color-text);
+}
+
+.logTab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.logTab.activeLogTab {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+/* ============= Logs Container ============= */
+
+.logsContainer {
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
+}
+
 /* ============= Scrollable Content ============= */
 
 .scrollableContent {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden auto;
 }
 
 /* ============= Collapsible Sections ============= */
@@ -278,13 +323,13 @@
   color: var(--color-text-secondary);
 }
 
-.priorityBadge[data-priority="0"],
-.priorityBadge[data-priority="1"] {
+.priorityBadge[data-priority='0'],
+.priorityBadge[data-priority='1'] {
   background-color: var(--color-danger-bg);
   color: var(--color-danger);
 }
 
-.priorityBadge[data-priority="2"] {
+.priorityBadge[data-priority='2'] {
   background-color: var(--color-warning-bg);
   color: var(--color-warning);
 }
@@ -298,7 +343,7 @@
   font-size: var(--font-sm);
   font-weight: 600;
   color: var(--color-text);
-  margin: 0 0 8px 0;
+  margin: 0 0 8px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -416,16 +461,15 @@
 }
 
 .fullscreen .panel {
-  top: 32px;
-  right: 32px;
-  bottom: 32px;
-  left: 32px;
+  inset: 32px;
   width: auto;
   max-width: none;
   border-radius: var(--radius-lg);
   transform: scale(0.95);
   opacity: 0;
-  transition: transform var(--transition-slow), opacity var(--transition-slow);
+  transition:
+    transform var(--transition-slow),
+    opacity var(--transition-slow);
 }
 
 .fullscreen.open .panel {
@@ -451,7 +495,7 @@
   overflow-y: auto;
 }
 
-@media (max-width: 900px) {
+@media (width <= 900px) {
   .twoColumnLayout {
     grid-template-columns: 1fr;
   }
@@ -462,12 +506,9 @@
   }
 }
 
-@media (max-width: 520px) {
+@media (width <= 520px) {
   .fullscreen .panel {
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
+    inset: 0;
     border-radius: 0;
   }
 }

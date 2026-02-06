@@ -4,8 +4,11 @@
  */
 
 import type { ReactNode } from 'react';
-import type { Issue, Priority, Status, IssueType } from '@/types';
+
 import type { BlockedInfo } from '@/components/KanbanBoard';
+import type { Issue, Priority, Status, IssueType } from '@/types';
+
+import { BlockedCell } from './BlockedCell';
 import {
   formatPriority,
   getPriorityClassName,
@@ -14,7 +17,6 @@ import {
   formatIssueType,
   formatDate,
 } from './columns';
-import { BlockedCell } from './BlockedCell';
 
 /**
  * Options for rendering cell content.
@@ -44,9 +46,7 @@ export function renderCellContent(
       const priority = value as Priority;
       const validPriority = priority >= 0 && priority <= 4 ? priority : 2;
       return (
-        <span
-          className={`issue-table__priority ${getPriorityClassName(validPriority)}`}
-        >
+        <span className={`issue-table__priority ${getPriorityClassName(validPriority)}`}>
           {formatPriority(validPriority)}
         </span>
       );
@@ -81,24 +81,14 @@ export function renderCellContent(
 
     case 'issue_type': {
       const issueType = value as IssueType | undefined;
-      return (
-        <span className="issue-table__type">{formatIssueType(issueType)}</span>
-      );
+      return <span className="issue-table__type">{formatIssueType(issueType)}</span>;
     }
 
     case 'assignee':
-      return (
-        <span className="issue-table__assignee">
-          {value ? String(value) : '-'}
-        </span>
-      );
+      return <span className="issue-table__assignee">{value ? String(value) : '-'}</span>;
 
     case 'updated_at':
-      return (
-        <span className="issue-table__date">
-          {formatDate(value as string | undefined)}
-        </span>
-      );
+      return <span className="issue-table__date">{formatDate(value as string | undefined)}</span>;
 
     default:
       return value != null ? String(value) : '-';

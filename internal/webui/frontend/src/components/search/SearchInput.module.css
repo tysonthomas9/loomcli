@@ -8,28 +8,29 @@
   display: inline-flex;
   align-items: center;
   width: 100%;
-  max-width: 200px;
+  max-width: none;
 }
 
 .icon {
   position: absolute;
-  left: var(--space-3);
-  color: var(--color-text-muted);
+  left: 10px;
+  color: var(--color-text-secondary);
   pointer-events: none;
   transition: color var(--transition-fast);
 }
 
 .input {
   width: 100%;
-  padding: var(--space-2) var(--space-4);
-  padding-left: calc(var(--space-3) + 16px + var(--space-2)); /* icon offset */
+  padding: 6px 12px;
+  padding-left: 34px; /* icon offset */
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
   color: var(--color-text);
   background-color: var(--color-bg);
-  border: 1px solid var(--color-border);
+  border: 1px solid #000;
   border-radius: var(--radius-md);
-  transition: border-color var(--transition-fast),
+  transition:
+    border-color var(--transition-fast),
     background-color var(--transition-fast),
     box-shadow var(--transition-fast);
 }
@@ -48,19 +49,19 @@
 
 /* Hover state */
 .input:hover:not(:disabled) {
-  border-color: var(--color-text-muted);
+  border-color: var(--color-text);
 }
 
 /* Focus state */
 .input:focus {
   outline: none;
-  border-color: var(--color-primary);
-  background-color: var(--color-bg-secondary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  border-color: var(--color-text);
+  background-color: var(--color-bg);
+  box-shadow: none;
 }
 
 .searchInput:focus-within .icon {
-  color: var(--color-primary);
+  color: var(--color-text);
 }
 
 /* Disabled state */
@@ -85,7 +86,8 @@
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: color var(--transition-fast),
+  transition:
+    color var(--transition-fast),
     background-color var(--transition-fast);
 }
 
@@ -108,25 +110,25 @@
 .sm .input {
   height: 32px;
   font-size: var(--font-size-xs);
-  padding-left: calc(var(--space-2) + 14px + var(--space-2));
+  padding-left: 30px;
 }
 
 .sm .icon {
-  left: var(--space-2);
+  left: 8px;
 }
 
 /* Size variants - Medium */
 .md .input {
-  height: 40px;
+  height: 30px;
 }
 
 /* Size variants - Large */
 .lg .input {
-  height: 48px;
-  font-size: var(--font-size-base);
-  padding-left: calc(var(--space-4) + 18px + var(--space-2));
+  height: 40px;
+  font-size: var(--font-size-sm);
+  padding-left: 38px;
 }
 
 .lg .icon {
-  left: var(--space-4);
+  left: 12px;
 }

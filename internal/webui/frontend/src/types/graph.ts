@@ -3,10 +3,11 @@
  */
 
 import type { Node, Edge } from '@xyflow/react';
-import type { Issue } from './issue';
-import type { DependencyType } from './dependency';
-import type { Status } from './status';
+
 import type { Priority } from './common';
+import type { DependencyType } from './dependency';
+import type { Issue } from './issue';
+import type { Status } from './status';
 
 /**
  * Data attached to IssueNode in the graph.

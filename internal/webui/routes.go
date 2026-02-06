@@ -16,7 +16,8 @@ import (
 )
 
 // setupRoutes configures all HTTP routes for the server.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent) {
+// defaultTerminalCmd is the command to run in terminal sessions when not specified via query parameter.
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string) {
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -28,6 +29,9 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 
 	// SSE hub metrics endpoint
 	mux.HandleFunc("GET /api/metrics", handleMetrics(hub))
+
+	// Daemon status endpoint - exposes daemon configuration (auto-commit, auto-push, etc.)
+	mux.HandleFunc("GET /api/daemon/status", handleDaemonStatus(pool))
 
 	// Issue endpoints
 	mux.HandleFunc("GET /api/issues/{id}", handleGetIssue(pool))
@@ -54,6 +58,23 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	if hub != nil {
 		mux.HandleFunc("GET /api/events", handleSSE(hub, getMutationsSince))
 	}
+
+	// Loom proxy for agent status endpoints (same-origin to avoid CORS/CSP issues)
+	if loomProxy := newLoomProxy(); loomProxy != nil {
+		mux.Handle("/api/loom/", loomProxy)
+	}
+
+	// Terminal WebSocket endpoint for real-time terminal relay
+	if termManager != nil {
+		mux.HandleFunc("GET /api/terminal/ws", handleTerminalWS(termManager, defaultTerminalCmd))
+	}
+
+	// Log streaming endpoints
+	mux.HandleFunc("GET /api/agents/{name}/logs", handleGetAgentLog())
+	mux.HandleFunc("GET /api/agents/{name}/logs/stream", handleAgentLogStream())
+	mux.HandleFunc("GET /api/tasks/{id}/logs", handleListTaskPhases())
+	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}", handleGetTaskLog())
+	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}/stream", handleTaskLogStream())
 
 	// Static file serving with SPA routing (must be last - catches all paths)
 	mux.Handle("/", frontendHandler())
@@ -86,19 +107,19 @@ type HealthStatus struct {
 	CircuitBreaker *CircuitBreakerStatus  `json:"circuit_breaker,omitempty"` // Circuit breaker state
 }
 
-// DaemonStatus represents the daemon connection status.
-type DaemonStatus struct {
-	Connected bool    `json:"connected"`           // Whether we can connect to daemon
-	Status    string  `json:"status,omitempty"`    // Daemon health status if connected
-	Uptime    float64 `json:"uptime,omitempty"`    // Daemon uptime in seconds if connected
-	Version   string  `json:"version,omitempty"`   // Daemon version if connected
-	Error     string  `json:"error,omitempty"`     // Error message if not connected
-}
-
 // breakerStater is an optional interface for pools that have a circuit breaker.
 type breakerStater interface {
 	BreakerState() circuitbreaker.State
 	BreakerStats() circuitbreaker.BreakerStats
+}
+
+// DaemonStatus represents the daemon connection status.
+type DaemonStatus struct {
+	Connected bool    `json:"connected"`         // Whether we can connect to daemon
+	Status    string  `json:"status,omitempty"`  // Daemon health status if connected
+	Uptime    float64 `json:"uptime,omitempty"`  // Daemon uptime in seconds if connected
+	Version   string  `json:"version,omitempty"` // Daemon version if connected
+	Error     string  `json:"error,omitempty"`   // Error message if not connected
 }
 
 // handleAPIHealth returns a detailed health check including daemon connectivity.
@@ -294,6 +315,74 @@ func handleStatsWithPool(pool statsConnectionGetter) http.HandlerFunc {
 			Data:    &stats,
 		}); err != nil {
 			log.Printf("Failed to encode stats response: %v", err)
+		}
+	}
+}
+
+// DaemonStatusResponse wraps the daemon status for JSON response.
+type DaemonStatusResponse struct {
+	Success bool                `json:"success"`
+	Data    *rpc.StatusResponse `json:"data,omitempty"`
+	Error   string              `json:"error,omitempty"`
+}
+
+// handleDaemonStatus returns the daemon's runtime configuration.
+// This includes auto-commit, auto-push, auto-pull, local-mode, sync-interval, and daemon-mode.
+func handleDaemonStatus(pool daemon.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if pool == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if err := json.NewEncoder(w).Encode(DaemonStatusResponse{
+				Success: false,
+				Error:   "connection pool not initialized",
+			}); err != nil {
+				log.Printf("Failed to encode daemon status response: %v", err)
+			}
+			return
+		}
+
+		// Acquire connection with timeout
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		client, err := pool.Get(ctx)
+		if err != nil {
+			status := http.StatusServiceUnavailable
+			if errors.Is(err, context.DeadlineExceeded) {
+				status = http.StatusGatewayTimeout
+			}
+			w.WriteHeader(status)
+			if err := json.NewEncoder(w).Encode(DaemonStatusResponse{
+				Success: false,
+				Error:   err.Error(),
+			}); err != nil {
+				log.Printf("Failed to encode daemon status response: %v", err)
+			}
+			return
+		}
+		defer pool.Put(client)
+
+		// Get daemon status
+		daemonStatus, err := client.Status()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			if err := json.NewEncoder(w).Encode(DaemonStatusResponse{
+				Success: false,
+				Error:   fmt.Sprintf("rpc error: %v", err),
+			}); err != nil {
+				log.Printf("Failed to encode daemon status response: %v", err)
+			}
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(DaemonStatusResponse{
+			Success: true,
+			Data:    daemonStatus,
+		}); err != nil {
+			log.Printf("Failed to encode daemon status response: %v", err)
 		}
 	}
 }

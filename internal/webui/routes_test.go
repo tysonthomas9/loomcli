@@ -608,10 +608,109 @@ func TestHandleAPIHealth_NilPool(t *testing.T) {
 	}
 }
 
+// TestSetupRoutes_TerminalEndpointNotRegisteredWithNilManager tests that
+// the terminal WebSocket endpoint is NOT registered when termManager is nil.
+func TestSetupRoutes_TerminalEndpointNotRegisteredWithNilManager(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "") // nil termManager
+
+	// Request to terminal endpoint should fall through to frontend handler
+	// (the SPA catch-all) since the route is not registered
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// When termManager is nil, the route is not registered, so the request
+	// falls through to the frontend handler "/" which returns 200 with index.html
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected /api/terminal/ws to fall through to frontend with status %d when termManager is nil, got %d",
+			http.StatusOK, rr.Code)
+	}
+
+	// Verify it's serving HTML (the SPA index.html), not JSON
+	ct := rr.Header().Get("Content-Type")
+	if ct != "text/html; charset=utf-8" {
+		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	}
+}
+
+// TestSetupRoutes_TerminalEndpointRegisteredWithManager tests that
+// the terminal WebSocket endpoint IS registered when termManager is non-nil.
+func TestSetupRoutes_TerminalEndpointRegisteredWithManager(t *testing.T) {
+	// Create a terminal manager - skip if tmux not available
+	termMgr, err := NewTerminalManager("bash", "")
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer termMgr.Shutdown()
+
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, termMgr, "") // non-nil termManager
+
+	// Request to terminal endpoint should be handled by the terminal handler,
+	// not fall through to frontend. Without WebSocket upgrade headers,
+	// it should return a 400 or other error, but NOT serve HTML.
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// When termManager is non-nil, the route IS registered.
+	// Without proper WebSocket upgrade headers, the handler should return an error.
+	// The exact status depends on the WebSocket library - it might be 400 or 500.
+	// The key is it should NOT be 200 with HTML content (which would indicate
+	// the request fell through to the frontend handler).
+	if rr.Code == http.StatusOK {
+		ct := rr.Header().Get("Content-Type")
+		// If it's HTML, then the route wasn't registered properly
+		if ct == "text/html; charset=utf-8" {
+			t.Error("expected terminal route to be registered, but request fell through to frontend handler")
+		}
+	}
+
+	// Additional verification: the response should be JSON (our handler's error response)
+	// OR a WebSocket upgrade failure, not HTML
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Errorf("expected non-HTML response when terminal route is registered, got Content-Type %q", ct)
+	}
+}
+
+// TestSetupRoutes_TerminalEndpointNilManagerReturns503 tests that
+// calling handleTerminalWS directly with nil manager returns 503.
+// This complements the route registration test by verifying handler behavior.
+func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
+	handler := handleTerminalWS(nil, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d for nil manager, got %d", http.StatusServiceUnavailable, rr.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != false {
+		t.Error("expected success to be false")
+	}
+
+	if resp["error"] != "terminal manager not initialized" {
+		t.Errorf("expected error 'terminal manager not initialized', got %q", resp["error"])
+	}
+}
+
 // TestSetupRoutes_StatsEndpoint tests that stats endpoint is registered.
 func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, "")
 
 	// Test that stats endpoint is registered
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
@@ -640,7 +739,7 @@ func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 // catch-all frontend handler "/" which returns index.html (200 OK).
 func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, "")
 
 	// POST to GET-only endpoint falls through to frontend handler
 	req := httptest.NewRequest(http.MethodPost, "/api/stats", nil)

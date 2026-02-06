@@ -13,8 +13,9 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--transition-fast),
-              border-color var(--transition-fast);
+  transition:
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
   cursor: grab;
 }
 
@@ -37,7 +38,9 @@
 
 .issueNode.selected {
   border-color: var(--color-primary);
-  box-shadow: var(--shadow-md), 0 0 0 2px var(--color-primary);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 2px var(--color-primary);
 }
 
 /* Priority-based left border (matches IssueCard) */
@@ -99,11 +102,26 @@
 }
 
 /* Priority-specific badge colors (class-based for CSS Modules compatibility) */
-.priority0 { background-color: var(--color-priority-0); }
-.priority1 { background-color: var(--color-priority-1); }
-.priority2 { background-color: var(--color-priority-2); color: var(--color-text); /* Dark text for WCAG AA contrast */ }
-.priority3 { background-color: var(--color-priority-3); }
-.priority4 { background-color: var(--color-priority-4); }
+.priority0 {
+  background-color: var(--color-priority-0);
+}
+
+.priority1 {
+  background-color: var(--color-priority-1);
+}
+
+.priority2 {
+  background-color: var(--color-priority-2);
+  color: var(--color-text); /* Dark text for WCAG AA contrast */
+}
+
+.priority3 {
+  background-color: var(--color-priority-3);
+}
+
+.priority4 {
+  background-color: var(--color-priority-4);
+}
 
 .title {
   margin: 0;
@@ -190,19 +208,23 @@
  * ================================= */
 
 /* Ready nodes get enhanced when in highlight mode */
-:global([data-highlight-ready="true"]) :local(.issueNode)[data-is-ready="true"] {
-  box-shadow: var(--shadow-md), 0 0 8px color-mix(in srgb, var(--color-ready) 30%, transparent);
+:global([data-highlight-ready='true']) :local(.issueNode)[data-is-ready='true'] {
+  box-shadow:
+    var(--shadow-md),
+    0 0 8px color-mix(in srgb, var(--color-ready) 30%, transparent);
 }
 
 /* Non-ready nodes get dimmed when in highlight mode */
-:global([data-highlight-ready="true"]) :local(.issueNode)[data-is-ready="false"] {
+:global([data-highlight-ready='true']) :local(.issueNode)[data-is-ready='false'] {
   opacity: 0.4;
   filter: grayscale(50%);
-  transition: opacity var(--transition-normal), filter var(--transition-normal);
+  transition:
+    opacity var(--transition-normal),
+    filter var(--transition-normal);
 }
 
 /* Override: selected nodes should never be fully dimmed */
-:global([data-highlight-ready="true"]) :local(.issueNode.selected)[data-is-ready="false"] {
+:global([data-highlight-ready='true']) :local(.issueNode.selected)[data-is-ready='false'] {
   opacity: 0.8;
   filter: grayscale(20%);
 }
@@ -212,8 +234,8 @@
  * Nodes that block others but are not blocked themselves
  * ================================= */
 
-.issueNode[data-is-root-blocker="true"]::before {
-  content: "";
+.issueNode[data-is-root-blocker='true']::before {
+  content: '';
   position: absolute;
   top: -6px;
   left: -6px;
@@ -232,21 +254,25 @@
  * ================================= */
 
 /* Node is part of an active blocking chain highlight */
-:global([data-chain-highlight="true"]) :local(.issueNode)[data-in-chain="true"] {
+:global([data-chain-highlight='true']) :local(.issueNode)[data-in-chain='true'] {
   border-color: var(--color-blocked);
-  box-shadow: var(--shadow-md), 0 0 8px color-mix(in srgb, var(--color-blocked) 40%, transparent);
+  box-shadow:
+    var(--shadow-md),
+    0 0 8px color-mix(in srgb, var(--color-blocked) 40%, transparent);
   z-index: 10;
 }
 
 /* Nodes NOT in the chain get dimmed when chain highlighting is active */
-:global([data-chain-highlight="true"]) :local(.issueNode)[data-in-chain="false"] {
+:global([data-chain-highlight='true']) :local(.issueNode)[data-in-chain='false'] {
   opacity: 0.3;
   filter: grayscale(60%);
-  transition: opacity var(--transition-normal), filter var(--transition-normal);
+  transition:
+    opacity var(--transition-normal),
+    filter var(--transition-normal);
 }
 
 /* Selected nodes should never be fully dimmed even when not in chain */
-:global([data-chain-highlight="true"]) :local(.issueNode.selected)[data-in-chain="false"] {
+:global([data-chain-highlight='true']) :local(.issueNode.selected)[data-in-chain='false'] {
   opacity: 0.6;
   filter: grayscale(30%);
 }
@@ -256,6 +282,8 @@
  * When filtering to show only blocked issues
  * ================================= */
 
-:global([data-show-blocked-only="true"]) :local(.issueNode)[data-status="blocked"] {
-  box-shadow: var(--shadow-md), 0 0 6px color-mix(in srgb, var(--color-blocked) 30%, transparent);
+:global([data-show-blocked-only='true']) :local(.issueNode)[data-status='blocked'] {
+  box-shadow:
+    var(--shadow-md),
+    0 0 6px color-mix(in srgb, var(--color-blocked) 30%, transparent);
 }

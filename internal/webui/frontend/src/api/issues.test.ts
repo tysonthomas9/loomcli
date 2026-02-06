@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+import type { Issue, IssueDetails, Statistics, WorkFilter } from '@/types';
+
+import { ApiError, get, post, patch } from './client';
 import {
   getIssue,
   getReadyIssues,
@@ -12,8 +16,8 @@ import {
   mapWorkFilterToQueryParams,
 } from './issues';
 import type { CreateIssueRequest, UpdateIssueRequest } from './issues';
-import { ApiError } from './client';
-import type { Issue, IssueDetails, Statistics, WorkFilter } from '@/types';
+
+// Import mocked functions after mock setup
 
 // Mock the client module
 vi.mock('./client', () => ({
@@ -31,9 +35,6 @@ vi.mock('./client', () => ({
     }
   },
 }));
-
-// Import mocked functions after mock setup
-import { get, post, patch } from './client';
 
 const mockGet = get as ReturnType<typeof vi.fn>;
 const mockPost = post as ReturnType<typeof vi.fn>;

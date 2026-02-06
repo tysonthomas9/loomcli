@@ -6,12 +6,13 @@
  * Unit tests for IssueHeader component.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { IssueHeader } from '../IssueHeader';
 import type { Issue } from '@/types';
+
+import { IssueHeader } from '../IssueHeader';
 
 const mockIssue: Issue = {
   id: 'test-123',
@@ -200,9 +201,7 @@ describe('IssueHeader', () => {
 
   describe('fullscreen button', () => {
     it('renders fullscreen button when onToggleFullscreen is provided', () => {
-      render(
-        <IssueHeader issue={mockIssue} onClose={() => {}} onToggleFullscreen={() => {}} />
-      );
+      render(<IssueHeader issue={mockIssue} onClose={() => {}} onToggleFullscreen={() => {}} />);
       expect(screen.getByTestId('header-fullscreen-button')).toBeInTheDocument();
     });
 
@@ -321,13 +320,7 @@ describe('IssueHeader', () => {
       });
 
       it('does not render review actions when no callbacks are provided', () => {
-        render(
-          <IssueHeader
-            issue={mockIssue}
-            onClose={() => {}}
-            isReviewItem={true}
-          />
-        );
+        render(<IssueHeader issue={mockIssue} onClose={() => {}} isReviewItem={true} />);
 
         expect(screen.queryByTestId('header-review-actions')).not.toBeInTheDocument();
       });

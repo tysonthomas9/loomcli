@@ -12,6 +12,7 @@
   100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }
@@ -24,6 +25,10 @@
   font-family: var(--font-family-base);
 }
 
+.connectionStatus[data-compact='true'] {
+  gap: 0;
+}
+
 /* Status indicator dot */
 .indicator {
   width: 10px;
@@ -33,6 +38,11 @@
   transition:
     background-color var(--transition-fast),
     box-shadow var(--transition-fast);
+}
+
+.connectionStatus[data-compact='true'] .indicator {
+  width: 8px;
+  height: 8px;
 }
 
 /* Status text */

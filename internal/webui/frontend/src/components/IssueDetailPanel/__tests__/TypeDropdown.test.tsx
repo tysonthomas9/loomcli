@@ -6,11 +6,13 @@
  * Unit tests for TypeDropdown component.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import '@testing-library/jest-dom';
-import { TypeDropdown } from '../TypeDropdown';
 import type { IssueType } from '@/types';
+
+import { TypeDropdown } from '../TypeDropdown';
 
 describe('TypeDropdown', () => {
   const defaultProps = {
@@ -274,9 +276,7 @@ describe('TypeDropdown', () => {
 
       for (const targetType of types) {
         const onSave = vi.fn().mockResolvedValue(undefined);
-        const { unmount } = render(
-          <TypeDropdown {...defaultProps} type="task" onSave={onSave} />
-        );
+        const { unmount } = render(<TypeDropdown {...defaultProps} type="task" onSave={onSave} />);
 
         fireEvent.click(screen.getByTestId('type-dropdown-trigger'));
         await act(async () => {

@@ -5,9 +5,10 @@
 
 import type { Issue, IssueDetails, Priority } from '@/types';
 import type { Status } from '@/types/status';
+
 import { EditableTitle } from '../EditableTitle';
-import { StatusDropdown } from '../StatusDropdown';
 import { formatStatusLabel } from '../StatusColumn/utils';
+import { StatusDropdown } from '../StatusDropdown';
 import styles from './IssueHeader.module.css';
 
 /**
@@ -94,11 +95,9 @@ export function IssueHeader({
   isFullscreen,
   onToggleFullscreen,
 }: IssueHeaderProps): JSX.Element {
-  const rootClassName = [
-    styles.issueHeader,
-    sticky && styles.sticky,
-    className,
-  ].filter(Boolean).join(' ');
+  const rootClassName = [styles.issueHeader, sticky && styles.sticky, className]
+    .filter(Boolean)
+    .join(' ');
 
   const priority = issue.priority as Priority;
   const defaultPriorityInfo = { short: 'P2', full: 'Medium' };
@@ -175,11 +174,23 @@ export function IssueHeader({
           >
             {isFullscreen ? (
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M10 2v4h4M6 14v-4H2M10 6L14 2M6 10l-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M10 2v4h4M6 14v-4H2M10 6L14 2M6 10l-4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             ) : (
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M14 2h-4M14 2v4M14 2l-4 4M2 14h4M2 14v-4M2 14l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M14 2h-4M14 2v4M14 2l-4 4M2 14h4M2 14v-4M2 14l4-4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             )}
           </button>
@@ -201,11 +212,7 @@ export function IssueHeader({
         </button>
       </div>
       {onTitleSave ? (
-        <EditableTitle
-          title={issue.title}
-          onSave={onTitleSave}
-          isSaving={isSavingTitle ?? false}
-        />
+        <EditableTitle title={issue.title} onSave={onTitleSave} isSaving={isSavingTitle ?? false} />
       ) : (
         <h2 className={styles.title} data-testid="issue-title">
           {issue.title}

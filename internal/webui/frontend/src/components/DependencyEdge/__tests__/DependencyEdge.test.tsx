@@ -6,14 +6,14 @@
  * Unit tests for DependencyEdge component.
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { ReactFlowProvider } from '@xyflow/react';
-import { Position } from '@xyflow/react';
+import { render, screen } from '@testing-library/react';
+import { ReactFlowProvider, Position } from '@xyflow/react';
+import { describe, it, expect, vi } from 'vitest';
+
+import type { DependencyEdgeData, DependencyType } from '@/types';
 
 import { DependencyEdge } from '../DependencyEdge';
-import type { DependencyEdgeData, DependencyType } from '@/types';
 
 // Mock EdgeLabelRenderer to render children inline (it normally uses a portal)
 vi.mock('@xyflow/react', async () => {
@@ -191,9 +191,7 @@ describe('DependencyEdge', () => {
       delete props.data;
 
       // Should not throw
-      expect(() =>
-        renderWithProvider(<DependencyEdge {...props} />)
-      ).not.toThrow();
+      expect(() => renderWithProvider(<DependencyEdge {...props} />)).not.toThrow();
     });
 
     it('defaults to typeBlocks when dependencyType is undefined', () => {
@@ -217,9 +215,7 @@ describe('DependencyEdge', () => {
 
       positions.forEach((coords) => {
         const props = { ...createTestProps(), ...coords };
-        expect(() =>
-          renderWithProvider(<DependencyEdge {...props} />)
-        ).not.toThrow();
+        expect(() => renderWithProvider(<DependencyEdge {...props} />)).not.toThrow();
       });
     });
   });
@@ -277,12 +273,12 @@ describe('DependencyEdge', () => {
   });
 
   describe('marker', () => {
-    it('renders with arrow marker end', () => {
-      const props = createTestProps();
+    it('passes markerEnd prop through to the rendered path', () => {
+      const props = { ...createTestProps(), markerEnd: 'url(#test-marker)' };
       const { container } = renderWithProvider(<DependencyEdge {...props} />);
 
       const path = container.querySelector('path.react-flow__edge-path');
-      expect(path).toHaveAttribute('marker-end', 'url(#arrow)');
+      expect(path).toHaveAttribute('marker-end', 'url(#test-marker)');
     });
   });
 
@@ -302,9 +298,7 @@ describe('DependencyEdge', () => {
       const { container } = renderWithProvider(<DependencyEdge {...props} />);
 
       // React Flow adds an interaction path for easier clicking
-      const interactionPath = container.querySelector(
-        'path.react-flow__edge-interaction'
-      );
+      const interactionPath = container.querySelector('path.react-flow__edge-interaction');
       expect(interactionPath).toBeInTheDocument();
     });
   });
@@ -324,17 +318,14 @@ describe('DependencyEdge', () => {
       'supersedes',
     ] as const;
 
-    it.each(dependencyTypes)(
-      'displays "%s" label for dependency type %s',
-      (dependencyType) => {
-        const props = createTestProps({ dependencyType });
-        renderWithProvider(<DependencyEdge {...props} />);
+    it.each(dependencyTypes)('displays "%s" label for dependency type %s', (dependencyType) => {
+      const props = createTestProps({ dependencyType });
+      renderWithProvider(<DependencyEdge {...props} />);
 
-        // EdgeLabelRenderer creates a portal, find label by text content
-        const label = screen.getByText(dependencyType);
-        expect(label).toBeInTheDocument();
-      }
-    );
+      // EdgeLabelRenderer creates a portal, find label by text content
+      const label = screen.getByText(dependencyType);
+      expect(label).toBeInTheDocument();
+    });
 
     it('displays dependency type as-is without transformation', () => {
       // Use a mixed-case type to verify no casing transformation occurs

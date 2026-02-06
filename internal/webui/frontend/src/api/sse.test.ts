@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
 import { BeadsSSEClient, getSSEUrl } from './sse';
 import type { MutationPayload } from './sse';
 

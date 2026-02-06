@@ -6,12 +6,13 @@
  * Unit tests for AgentActivityPanel component.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { AgentActivityPanel } from '../AgentActivityPanel';
 import type { LoomAgentStatus, LoomSyncInfo, LoomTaskInfo, LoomConnectionState } from '@/types';
+
+import { AgentActivityPanel } from '../AgentActivityPanel';
 
 /**
  * Create a mock agent status for testing.
@@ -457,6 +458,61 @@ describe('AgentActivityPanel', () => {
       // 2 agents need push
       expect(screen.getByText('need push')).toBeInTheDocument();
       expect(screen.getByText('2')).toBeInTheDocument();
+    });
+  });
+
+  describe('colored summary dots', () => {
+    it('renders colored dots in summary bar for each status', () => {
+      const agents = [
+        createAgent({ name: 'a1', status: 'working: bd-1 (5m)' }),
+        createAgent({ name: 'a2', status: 'ready' }),
+        createAgent({ name: 'a3', status: 'error: bd-2 (1m)' }),
+        createAgent({ name: 'a4', status: 'ready', ahead: 2 }),
+      ];
+
+      render(<AgentActivityPanel {...defaultProps} agents={agents} />);
+
+      const summary = screen.getByRole('status', { name: /summary/i });
+      const dots = summary.querySelectorAll('[data-type][aria-hidden="true"]');
+      // 4 dots: active, idle, error, sync
+      expect(dots.length).toBe(4);
+    });
+
+    it('renders dots with correct data-type attributes', () => {
+      const agents = [
+        createAgent({ name: 'a1', status: 'working: bd-1 (5m)' }),
+        createAgent({ name: 'a2', status: 'ready' }),
+        createAgent({ name: 'a3', status: 'error: bd-2 (1m)' }),
+        createAgent({ name: 'a4', status: 'ready', ahead: 1 }),
+      ];
+
+      render(<AgentActivityPanel {...defaultProps} agents={agents} />);
+
+      const summary = screen.getByRole('status', { name: /summary/i });
+      const dots = summary.querySelectorAll('[data-type][aria-hidden="true"]');
+      const dotTypes = Array.from(dots).map((d) => d.getAttribute('data-type'));
+      expect(dotTypes).toContain('active');
+      expect(dotTypes).toContain('idle');
+      expect(dotTypes).toContain('error');
+      expect(dotTypes).toContain('sync');
+    });
+
+    it('only renders active and idle dots when no errors or push needed', () => {
+      const agents = [
+        createAgent({ name: 'a1', status: 'working: bd-1 (5m)' }),
+        createAgent({ name: 'a2', status: 'ready' }),
+      ];
+
+      render(<AgentActivityPanel {...defaultProps} agents={agents} />);
+
+      const summary = screen.getByRole('status', { name: /summary/i });
+      const dots = summary.querySelectorAll('[aria-hidden="true"]');
+      expect(dots.length).toBe(2);
+      const dotTypes = Array.from(dots).map((d) => d.getAttribute('data-type'));
+      expect(dotTypes).toContain('active');
+      expect(dotTypes).toContain('idle');
+      expect(dotTypes).not.toContain('error');
+      expect(dotTypes).not.toContain('sync');
     });
   });
 

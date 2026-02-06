@@ -6,10 +6,10 @@
 .swimLane {
   display: flex;
   flex-direction: column;
-  background-color: var(--color-bg);
+  background-color: transparent;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  border: 1px solid var(--color-border-light);
+  border: 1px solid var(--color-border);
   flex: 1 0 auto; /* Grow to fill space, don't shrink, auto content basis */
   min-height: 250px; /* Ensure reasonable minimum height for cards */
 }
@@ -23,8 +23,8 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  background-color: var(--color-bg-secondary);
-  border-bottom: 1px solid var(--color-border-light);
+  background-color: transparent;
+  border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 
@@ -40,7 +40,9 @@
   color: var(--color-text-secondary);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .collapseToggle:hover {
@@ -79,8 +81,8 @@
   padding: var(--space-1) var(--space-2);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
-  background-color: var(--color-bg-tertiary);
+  color: #555555;
+  background-color: #e5e5e5;
   border-radius: var(--radius-full);
   text-align: center;
 }
@@ -88,18 +90,23 @@
 .laneContent {
   display: flex;
   flex-direction: row;
-  gap: var(--space-3);
+  gap: 0;
   padding: var(--space-3);
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: auto hidden;
   flex: 1; /* Fill available space from swimLane */
   min-height: 0; /* Allow flex calculations to work */
   opacity: 1;
-  transition: opacity 0.15s ease-out, padding 0.2s ease-out;
+  transition:
+    opacity 0.15s ease-out,
+    padding 0.2s ease-out;
 }
 
 .laneContent > * {
   flex-shrink: 0;
+}
+
+.laneContent > :last-child {
+  border-right: none;
 }
 
 .laneContent[data-collapsed='true'] {

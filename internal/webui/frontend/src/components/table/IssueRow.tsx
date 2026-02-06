@@ -4,11 +4,13 @@
  */
 
 import type { KeyboardEvent, ChangeEvent, MouseEvent } from 'react';
-import type { Issue } from '@/types';
+
 import type { BlockedInfo } from '@/components/KanbanBoard';
+import type { Issue } from '@/types';
+
+import { renderCellContent } from './cellRenderers';
 import type { ColumnDef } from './columns';
 import { getCellValue } from './columns';
-import { renderCellContent } from './cellRenderers';
 
 /**
  * Props for IssueRow component.
@@ -95,10 +97,7 @@ export function IssueRow<T extends Issue>({
       data-testid={`issue-row-${issue.id}`}
     >
       {showCheckbox && (
-        <td
-          className="issue-table__cell issue-table__cell--checkbox"
-          onClick={handleCheckboxClick}
-        >
+        <td className="issue-table__cell issue-table__cell--checkbox" onClick={handleCheckboxClick}>
           <input
             type="checkbox"
             className="issue-table__checkbox"

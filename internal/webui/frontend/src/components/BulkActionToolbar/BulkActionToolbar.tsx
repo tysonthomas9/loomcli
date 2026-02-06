@@ -5,6 +5,7 @@
  */
 
 import { useCallback } from 'react';
+
 import styles from './BulkActionToolbar.module.css';
 
 /**

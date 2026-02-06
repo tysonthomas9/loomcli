@@ -2,13 +2,13 @@
  * Core Issue type and related types.
  */
 
-import type { ISODateString, Priority, Duration } from './common';
-import type { Status } from './status';
-import type { IssueType } from './issueType';
-import type { Dependency, DependencyType } from './dependency';
-import type { Comment } from './comment';
-import type { EntityRef, Validation, BondRef } from './entity';
 import type { AgentState, MolType, WorkType } from './agent';
+import type { Comment } from './comment';
+import type { ISODateString, Priority, Duration } from './common';
+import type { Dependency, DependencyType } from './dependency';
+import type { EntityRef, Validation, BondRef } from './entity';
+import type { IssueType } from './issueType';
+import type { Status } from './status';
 
 /**
  * Core Issue interface.
@@ -64,8 +64,8 @@ export interface Issue {
   comments?: Comment[];
 
   // Parent-child hierarchy
-  parent?: string;        // Parent issue ID
-  parent_title?: string;  // Parent title for display
+  parent?: string; // Parent issue ID
+  parent_title?: string; // Parent title for display
 
   // Tombstone Fields
   deleted_at?: ISODateString | null;
@@ -165,12 +165,25 @@ export interface GraphIssue extends Omit<Issue, 'dependencies'> {
  * Maps to Go types.IssueDetails.
  * Uses Omit to override the dependencies field type from Dependency[] to IssueWithDependencyMetadata[].
  */
-export interface IssueDetails extends Omit<Issue, 'dependencies' | 'labels' | 'comments' | 'parent'> {
+export interface IssueDetails extends Omit<
+  Issue,
+  'dependencies' | 'labels' | 'comments' | 'parent'
+> {
   labels?: string[];
   dependencies?: IssueWithDependencyMetadata[];
   dependents?: IssueWithDependencyMetadata[];
   comments?: Comment[];
   parent?: string | null;
+}
+
+/**
+ * Blocker reference with title and priority.
+ * Maps to Go types.BlockerRef.
+ */
+export interface BlockerRef {
+  id: string;
+  title: string;
+  priority: number;
 }
 
 /**
@@ -180,6 +193,7 @@ export interface IssueDetails extends Omit<Issue, 'dependencies' | 'labels' | 'c
 export interface BlockedIssue extends Issue {
   blocked_by_count: number;
   blocked_by: string[];
+  blocked_by_details?: BlockerRef[];
 }
 
 /**

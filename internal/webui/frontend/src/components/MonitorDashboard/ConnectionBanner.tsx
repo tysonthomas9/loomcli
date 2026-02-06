@@ -56,7 +56,7 @@ export function ConnectionBanner({
   const rootClassName = [styles.banner, className].filter(Boolean).join(' ');
 
   const relativeTime = lastUpdated ? formatRelativeTime(lastUpdated) : 'unknown';
-  const isStale = lastUpdated && (new Date().getTime() - lastUpdated.getTime()) > 5 * 60 * 1000;
+  const isStale = lastUpdated && new Date().getTime() - lastUpdated.getTime() > 5 * 60 * 1000;
 
   return (
     <div
@@ -70,9 +70,7 @@ export function ConnectionBanner({
       </span>
       <span className={styles.message}>
         <strong>Disconnected from loom server</strong>
-        <span className={styles.detail}>
-          Last updated {relativeTime}
-        </span>
+        <span className={styles.detail}>Last updated {relativeTime}</span>
       </span>
       <div className={styles.actions}>
         {retryCountdown > 0 && (

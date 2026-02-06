@@ -6,8 +6,8 @@
  * Unit tests for LoadingSkeleton component.
  */
 
-import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
 import '@testing-library/jest-dom';
 
 import { LoadingSkeleton } from '../LoadingSkeleton';
@@ -121,9 +121,7 @@ describe('LoadingSkeleton', () => {
     });
 
     it('preserves skeleton and shape classes when custom className is added', () => {
-      const { container } = render(
-        <LoadingSkeleton shape="circle" className="my-custom-class" />
-      );
+      const { container } = render(<LoadingSkeleton shape="circle" className="my-custom-class" />);
 
       const skeleton = container.firstChild as HTMLElement;
       expect(skeleton.className).toContain('skeleton');
@@ -165,9 +163,7 @@ describe('LoadingSkeleton', () => {
     });
 
     it('last line has reduced width (60%)', () => {
-      const { container } = render(
-        <LoadingSkeleton shape="text" lines={3} width={100} />
-      );
+      const { container } = render(<LoadingSkeleton shape="text" lines={3} width={100} />);
 
       const textContainer = container.firstChild as HTMLElement;
       const lines = textContainer.children;
@@ -180,9 +176,7 @@ describe('LoadingSkeleton', () => {
     });
 
     it('applies height to each line', () => {
-      const { container } = render(
-        <LoadingSkeleton shape="text" lines={2} height={20} />
-      );
+      const { container } = render(<LoadingSkeleton shape="text" lines={2} height={20} />);
 
       const textContainer = container.firstChild as HTMLElement;
       const lines = textContainer.children;
@@ -276,18 +270,14 @@ describe('LoadingSkeleton.Card', () => {
 
   describe('custom className', () => {
     it('applies custom className to card', () => {
-      const { container } = render(
-        <LoadingSkeleton.Card className="custom-card-class" />
-      );
+      const { container } = render(<LoadingSkeleton.Card className="custom-card-class" />);
 
       const card = container.firstChild as HTMLElement;
       expect(card).toHaveClass('custom-card-class');
     });
 
     it('preserves card class when custom className is added', () => {
-      const { container } = render(
-        <LoadingSkeleton.Card className="my-class" />
-      );
+      const { container } = render(<LoadingSkeleton.Card className="my-class" />);
 
       const card = container.firstChild as HTMLElement;
       expect(card.className).toContain('card');
@@ -378,18 +368,14 @@ describe('LoadingSkeleton.Column', () => {
 
   describe('custom className', () => {
     it('applies custom className to column', () => {
-      const { container } = render(
-        <LoadingSkeleton.Column className="custom-column-class" />
-      );
+      const { container } = render(<LoadingSkeleton.Column className="custom-column-class" />);
 
       const column = container.firstChild as HTMLElement;
       expect(column).toHaveClass('custom-column-class');
     });
 
     it('preserves column class when custom className is added', () => {
-      const { container } = render(
-        <LoadingSkeleton.Column className="my-column" />
-      );
+      const { container } = render(<LoadingSkeleton.Column className="my-column" />);
 
       const column = container.firstChild as HTMLElement;
       expect(column.className).toContain('column');
@@ -473,18 +459,14 @@ describe('LoadingSkeleton.Graph', () => {
 
   describe('custom className', () => {
     it('applies custom className to graph', () => {
-      const { container } = render(
-        <LoadingSkeleton.Graph className="custom-graph-class" />
-      );
+      const { container } = render(<LoadingSkeleton.Graph className="custom-graph-class" />);
 
       const graph = container.firstChild as HTMLElement;
       expect(graph).toHaveClass('custom-graph-class');
     });
 
     it('preserves graph class when custom className is added', () => {
-      const { container } = render(
-        <LoadingSkeleton.Graph className="my-graph" />
-      );
+      const { container } = render(<LoadingSkeleton.Graph className="my-graph" />);
 
       const graph = container.firstChild as HTMLElement;
       expect(graph.className).toContain('graph');

@@ -5,23 +5,19 @@
  * issues as nodes and dependencies as edges in an interactive DAG layout.
  */
 
+import { ReactFlow, Background, MiniMap, Panel, type NodeMouseHandler } from '@xyflow/react';
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import {
-  ReactFlow,
-  Background,
-  MiniMap,
-  Panel,
-  type NodeMouseHandler,
-} from '@xyflow/react';
+
 import '@xyflow/react/dist/style.css';
-import type { Issue, IssueNode as IssueNodeType, DependencyType } from '@/types';
-import type { Status } from '@/types/status';
-import { useGraphData, type UseGraphDataOptions } from '@/hooks/useGraphData';
-import { useAutoLayout, type UseAutoLayoutOptions } from '@/hooks/useAutoLayout';
-import { useBlockedIssues } from '@/hooks/useBlockedIssues';
 import { IssueNode, DependencyEdge, GraphControls, GraphLegend, NodeTooltip } from '@/components';
 import type { DependencyTypeGroup } from '@/components/GraphControls';
 import type { TooltipPosition } from '@/components/NodeTooltip';
+import { useAutoLayout, type UseAutoLayoutOptions } from '@/hooks/useAutoLayout';
+import { useBlockedIssues } from '@/hooks/useBlockedIssues';
+import { useGraphData, type UseGraphDataOptions } from '@/hooks/useGraphData';
+import type { Issue, IssueNode as IssueNodeType, DependencyType } from '@/types';
+import type { Status } from '@/types/status';
+
 import styles from './GraphView.module.css';
 
 const STORAGE_KEY_SHOW_CLOSED = 'graph-show-closed';
@@ -217,8 +213,9 @@ export function GraphView({
           return DEFAULT_DEP_TYPE_FILTER;
         }
         // Validate all values are strings and valid groups
-        const validGroups = parsed.filter((g): g is DependencyTypeGroup =>
-          typeof g === 'string' && VALID_DEP_TYPE_GROUPS.includes(g as DependencyTypeGroup)
+        const validGroups = parsed.filter(
+          (g): g is DependencyTypeGroup =>
+            typeof g === 'string' && VALID_DEP_TYPE_GROUPS.includes(g as DependencyTypeGroup)
         );
         return new Set(validGroups);
       }
@@ -262,11 +259,11 @@ export function GraphView({
 
     // If a specific status is selected, filter to only that status
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(issue => issue.status === statusFilter);
+      filtered = filtered.filter((issue) => issue.status === statusFilter);
     } else {
       // When 'all' is selected, respect the showClosed toggle
       if (!showClosed) {
-        filtered = filtered.filter(issue => issue.status !== 'closed');
+        filtered = filtered.filter((issue) => issue.status !== 'closed');
       }
     }
 
@@ -274,16 +271,13 @@ export function GraphView({
   }, [issues, statusFilter, showClosed]);
 
   // Transform issues to nodes and edges
-  const graphDataOptions: UseGraphDataOptions = useMemo(
-    () => {
-      const opts: UseGraphDataOptions = { blockedIssueIds };
-      if (includeDependencyTypes) {
-        opts.includeDependencyTypes = includeDependencyTypes;
-      }
-      return opts;
-    },
-    [blockedIssueIds, includeDependencyTypes]
-  );
+  const graphDataOptions: UseGraphDataOptions = useMemo(() => {
+    const opts: UseGraphDataOptions = { blockedIssueIds };
+    if (includeDependencyTypes) {
+      opts.includeDependencyTypes = includeDependencyTypes;
+    }
+    return opts;
+  }, [blockedIssueIds, includeDependencyTypes]);
   const { nodes: rawNodes, edges } = useGraphData(visibleIssues, graphDataOptions);
 
   // Apply auto-layout
@@ -322,18 +316,13 @@ export function GraphView({
   );
 
   // Handle node mouse leave - clears tooltip state and calls external callback
-  const handleNodeMouseLeave: NodeMouseHandler<IssueNodeType> = useCallback(
-    () => {
-      setHoveredIssue(null);
-      setTooltipPosition(null);
-      onNodeMouseLeave?.();
-    },
-    [onNodeMouseLeave]
-  );
+  const handleNodeMouseLeave: NodeMouseHandler<IssueNodeType> = useCallback(() => {
+    setHoveredIssue(null);
+    setTooltipPosition(null);
+    onNodeMouseLeave?.();
+  }, [onNodeMouseLeave]);
 
-  const rootClassName = className
-    ? `${styles.graphView} ${className}`
-    : styles.graphView;
+  const rootClassName = className ? `${styles.graphView} ${className}` : styles.graphView;
 
   // Build ReactFlow props conditionally to avoid passing undefined
   const reactFlowProps: Record<string, unknown> = {

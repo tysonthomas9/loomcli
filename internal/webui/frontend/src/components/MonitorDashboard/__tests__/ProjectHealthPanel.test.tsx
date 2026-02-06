@@ -6,12 +6,13 @@
  * Unit tests for ProjectHealthPanel component.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
-import { ProjectHealthPanel } from '../ProjectHealthPanel';
 import type { LoomStats, BlockedIssue, Priority } from '@/types';
+
+import { ProjectHealthPanel } from '../ProjectHealthPanel';
 
 /**
  * Create default stats for testing.
@@ -537,6 +538,195 @@ describe('ProjectHealthPanel', () => {
 
       const button = screen.getByRole('button', { name: /bottleneck-1/i });
       expect(button).toHaveAttribute('type', 'button');
+    });
+  });
+
+  describe('BlockedByDetails integration', () => {
+    it('uses blocked_by_details title when available', () => {
+      const blockedIssues = [
+        createBlockedIssue({
+          id: 'blocked-1',
+          blocked_by: ['bn-1'],
+          blocked_by_details: [{ id: 'bn-1', title: 'Critical API Bug', priority: 0 }],
+        }),
+        createBlockedIssue({
+          id: 'blocked-2',
+          blocked_by: ['bn-1'],
+          blocked_by_details: [{ id: 'bn-1', title: 'Critical API Bug', priority: 0 }],
+        }),
+      ];
+
+      const onBottleneckClick = vi.fn();
+      render(
+        <ProjectHealthPanel
+          stats={createStats()}
+          blockedIssues={blockedIssues}
+          isLoading={false}
+          onBottleneckClick={onBottleneckClick}
+        />
+      );
+
+      // Should display the title from blocked_by_details
+      expect(screen.getByText('Critical API Bug')).toBeInTheDocument();
+
+      // Click and verify the callback receives the correct title
+      const button = screen.getByRole('button', { name: /bn-1/i });
+      fireEvent.click(button);
+
+      expect(onBottleneckClick).toHaveBeenCalledWith({
+        id: 'bn-1',
+        title: 'Critical API Bug',
+      });
+    });
+
+    it('falls back to blocked_by IDs when blocked_by_details is undefined', () => {
+      const blockedIssues = [
+        createBlockedIssue({
+          id: 'blocked-1',
+          blocked_by: ['bn-fallback'],
+          // No blocked_by_details
+        }),
+        createBlockedIssue({
+          id: 'blocked-2',
+          blocked_by: ['bn-fallback'],
+          // No blocked_by_details
+        }),
+      ];
+
+      render(
+        <ProjectHealthPanel stats={createStats()} blockedIssues={blockedIssues} isLoading={false} />
+      );
+
+      // Should show the ID since details are not available
+      expect(screen.getByText('bn-fallback')).toBeInTheDocument();
+    });
+
+    it('falls back to blocked_by IDs when blocked_by_details is empty array', () => {
+      const blockedIssues = [
+        createBlockedIssue({
+          id: 'blocked-1',
+          blocked_by: ['bn-empty'],
+          blocked_by_details: [],
+        }),
+        createBlockedIssue({
+          id: 'blocked-2',
+          blocked_by: ['bn-empty'],
+          blocked_by_details: [],
+        }),
+      ];
+
+      render(
+        <ProjectHealthPanel stats={createStats()} blockedIssues={blockedIssues} isLoading={false} />
+      );
+
+      // Should show the ID since details array is empty
+      expect(screen.getByText('bn-empty')).toBeInTheDocument();
+    });
+
+    it('handles mixed data where some issues have details and others do not', () => {
+      // Some issues have blocked_by_details (new format), others only have blocked_by (legacy format)
+      const blockedIssues = [
+        // Issues with blocked_by_details (new format with titles)
+        createBlockedIssue({
+          id: 'blocked-1',
+          blocked_by: ['bn-titled'],
+          blocked_by_details: [{ id: 'bn-titled', title: 'Titled Blocker', priority: 1 }],
+        }),
+        createBlockedIssue({
+          id: 'blocked-2',
+          blocked_by: ['bn-titled'],
+          blocked_by_details: [{ id: 'bn-titled', title: 'Titled Blocker', priority: 1 }],
+        }),
+        // Issues without blocked_by_details (legacy format without titles)
+        createBlockedIssue({
+          id: 'blocked-3',
+          blocked_by: ['bn-legacy'],
+          // No blocked_by_details - uses legacy format
+        }),
+        createBlockedIssue({
+          id: 'blocked-4',
+          blocked_by: ['bn-legacy'],
+          // No blocked_by_details - uses legacy format
+        }),
+      ];
+
+      render(
+        <ProjectHealthPanel stats={createStats()} blockedIssues={blockedIssues} isLoading={false} />
+      );
+
+      // bn-titled blocks 2 issues, should show title from blocked_by_details
+      expect(screen.getByText('Titled Blocker')).toBeInTheDocument();
+      // bn-legacy blocks 2 issues, should show ID as fallback (no details)
+      expect(screen.getByText('bn-legacy')).toBeInTheDocument();
+    });
+
+    it('uses priority from blocked_by_details when available', () => {
+      // This test verifies priority is correctly extracted from blocked_by_details
+      const blockedIssues = [
+        createBlockedIssue({
+          id: 'blocked-1',
+          blocked_by: ['high-priority', 'low-priority'],
+          blocked_by_details: [
+            { id: 'high-priority', title: 'P0 Blocker', priority: 0 },
+            { id: 'low-priority', title: 'P3 Blocker', priority: 3 },
+          ],
+        }),
+        createBlockedIssue({
+          id: 'blocked-2',
+          blocked_by: ['high-priority', 'low-priority'],
+          blocked_by_details: [
+            { id: 'high-priority', title: 'P0 Blocker', priority: 0 },
+            { id: 'low-priority', title: 'P3 Blocker', priority: 3 },
+          ],
+        }),
+      ];
+
+      render(
+        <ProjectHealthPanel stats={createStats()} blockedIssues={blockedIssues} isLoading={false} />
+      );
+
+      // Both should appear since they both block 2 issues
+      expect(screen.getByText('P0 Blocker')).toBeInTheDocument();
+      expect(screen.getByText('P3 Blocker')).toBeInTheDocument();
+    });
+
+    it('handles blocker with empty title by using ID as fallback', () => {
+      const blockedIssues = [
+        createBlockedIssue({
+          id: 'blocked-1',
+          blocked_by: ['bn-empty-title'],
+          blocked_by_details: [{ id: 'bn-empty-title', title: '', priority: 2 }],
+        }),
+        createBlockedIssue({
+          id: 'blocked-2',
+          blocked_by: ['bn-empty-title'],
+          blocked_by_details: [{ id: 'bn-empty-title', title: '', priority: 2 }],
+        }),
+      ];
+
+      render(
+        <ProjectHealthPanel stats={createStats()} blockedIssues={blockedIssues} isLoading={false} />
+      );
+
+      // Should show ID when title is empty string
+      expect(screen.getByText('bn-empty-title')).toBeInTheDocument();
+    });
+
+    it('backward compatibility: existing tests with only blocked_by still work', () => {
+      // This test verifies that the original blocked_by-only data format still works
+      const blockedIssues = [
+        createBlockedIssue({ id: 'issue-1', blocked_by: ['legacy-blocker'] }),
+        createBlockedIssue({ id: 'issue-2', blocked_by: ['legacy-blocker'] }),
+        createBlockedIssue({ id: 'issue-3', blocked_by: ['legacy-blocker', 'another'] }),
+      ];
+
+      render(
+        <ProjectHealthPanel stats={createStats()} blockedIssues={blockedIssues} isLoading={false} />
+      );
+
+      // legacy-blocker blocks 3 issues
+      expect(screen.getByText('legacy-blocker')).toBeInTheDocument();
+      expect(screen.getByText('blocks 3')).toBeInTheDocument();
     });
   });
 

@@ -4,8 +4,10 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type { IssueType, KnownIssueType } from '@/types';
+
 import { TypeIcon } from '@/components/TypeIcon';
+import type { IssueType, KnownIssueType } from '@/types';
+
 import styles from './TypeDropdown.module.css';
 
 /**

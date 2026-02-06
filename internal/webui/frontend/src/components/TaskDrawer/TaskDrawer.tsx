@@ -4,13 +4,15 @@
  */
 
 import { useEffect, useCallback } from 'react';
+
 import type { LoomTaskInfo } from '@/types';
+
 import styles from './TaskDrawer.module.css';
 
 /**
  * Category type for work queue items.
  */
-export type TaskCategory = 'plan' | 'impl' | 'review' | 'inProgress' | 'blocked';
+export type TaskCategory = 'plan' | 'impl' | 'review' | 'inProgress' | 'blocked' | 'done';
 
 /**
  * Props for the TaskDrawer component.
@@ -92,19 +94,10 @@ export function TaskDrawer({
   return (
     <div className={styles.container} data-open={isOpen}>
       {/* Overlay */}
-      <div
-        className={styles.overlay}
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      <div className={styles.overlay} onClick={onClose} aria-hidden="true" />
 
       {/* Drawer */}
-      <div
-        className={styles.drawer}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="drawer-title"
-      >
+      <div className={styles.drawer} role="dialog" aria-modal="true" aria-labelledby="drawer-title">
         {/* Header */}
         <div className={styles.header}>
           <h2 id="drawer-title" className={styles.title}>
@@ -124,9 +117,7 @@ export function TaskDrawer({
         {/* Task list */}
         <div className={styles.taskList}>
           {tasks.length === 0 ? (
-            <div className={styles.emptyState}>
-              No tasks in this category
-            </div>
+            <div className={styles.emptyState}>No tasks in this category</div>
           ) : (
             tasks.map((task) => (
               <div key={task.id} className={styles.taskItem}>

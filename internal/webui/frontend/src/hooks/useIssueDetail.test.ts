@@ -1,18 +1,20 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor as _waitFor } from '@testing-library/react';
-import { useIssueDetail } from './useIssueDetail';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+import { getIssue } from '@/api/issues';
 import type { IssueDetails } from '@/types';
+
+import { useIssueDetail } from './useIssueDetail';
+
+// Import after mocking
 
 // Mock the getIssue API function
 vi.mock('@/api/issues', () => ({
   getIssue: vi.fn(),
 }));
-
-// Import after mocking
-import { getIssue } from '@/api/issues';
 
 const mockGetIssue = vi.mocked(getIssue);
 

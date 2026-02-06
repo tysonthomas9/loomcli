@@ -9,6 +9,7 @@
   0% {
     background-position: -200% 0;
   }
+
   100% {
     background-position: 200% 0;
   }
@@ -175,7 +176,7 @@
   padding: var(--space-4);
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .monitor {
     grid-template-columns: 1fr;
     grid-template-rows: repeat(4, minmax(150px, auto));

@@ -5,9 +5,12 @@
  */
 
 import { useDroppable } from '@dnd-kit/core';
+import type { ReactNode } from 'react';
+
 import type { Status } from '@/types';
-import { formatStatusLabel } from './utils';
+
 import styles from './StatusColumn.module.css';
+import { formatStatusLabel } from './utils';
 
 /**
  * Column type for visual variants (different from status value).
@@ -33,8 +36,8 @@ export interface StatusColumnProps {
   droppableDisabled?: boolean;
   /** Column type for visual styling (defaults to 'default') */
   columnType?: ColumnType;
-  /** Icon to display in header (e.g., '📦' for backlog) */
-  headerIcon?: string;
+  /** Icon to display in header */
+  headerIcon?: ReactNode;
 }
 
 /**
@@ -79,12 +82,14 @@ export function StatusColumn({
       aria-label={`${displayLabel} issues`}
     >
       <header className={styles.header}>
-        {headerIcon && (
-          <span className={styles.columnIcon} aria-hidden="true">
-            {headerIcon}
-          </span>
-        )}
-        <h2 className={styles.title}>{displayLabel}</h2>
+        <div className={styles.headerLabel}>
+          {headerIcon && (
+            <span className={styles.columnIcon} aria-hidden="true" data-testid="status-column-icon">
+              {headerIcon}
+            </span>
+          )}
+          <h2 className={styles.title}>{displayLabel}</h2>
+        </div>
         <span className={styles.count} aria-label={`${count} ${issueWord}`}>
           {count}
         </span>

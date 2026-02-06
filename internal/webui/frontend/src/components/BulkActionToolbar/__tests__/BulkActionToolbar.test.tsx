@@ -6,8 +6,8 @@
  * Unit tests for BulkActionToolbar component.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom';
 
 import { BulkActionToolbar, type BulkAction } from '../BulkActionToolbar';
@@ -112,9 +112,7 @@ describe('BulkActionToolbar', () => {
 
     it('calls action onClick with selectedIds', () => {
       const onClick = vi.fn();
-      const actions: BulkAction[] = [
-        { id: 'close', label: 'Close', onClick },
-      ];
+      const actions: BulkAction[] = [{ id: 'close', label: 'Close', onClick }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       fireEvent.click(screen.getByTestId('bulk-action-close'));
       expect(onClick).toHaveBeenCalledWith(defaultProps.selectedIds);
@@ -130,9 +128,7 @@ describe('BulkActionToolbar', () => {
 
     it('disables button when disabled', () => {
       const onClick = vi.fn();
-      const actions: BulkAction[] = [
-        { id: 'close', label: 'Close', onClick, disabled: true },
-      ];
+      const actions: BulkAction[] = [{ id: 'close', label: 'Close', onClick, disabled: true }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       const button = screen.getByTestId('bulk-action-close');
       expect(button).toBeDisabled();
@@ -142,9 +138,7 @@ describe('BulkActionToolbar', () => {
 
     it('disables button when loading', () => {
       const onClick = vi.fn();
-      const actions: BulkAction[] = [
-        { id: 'close', label: 'Close', onClick, loading: true },
-      ];
+      const actions: BulkAction[] = [{ id: 'close', label: 'Close', onClick, loading: true }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       const button = screen.getByTestId('bulk-action-close');
       expect(button).toBeDisabled();
@@ -152,9 +146,7 @@ describe('BulkActionToolbar', () => {
 
     it('does not call onClick when disabled', () => {
       const onClick = vi.fn();
-      const actions: BulkAction[] = [
-        { id: 'close', label: 'Close', onClick, disabled: true },
-      ];
+      const actions: BulkAction[] = [{ id: 'close', label: 'Close', onClick, disabled: true }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       fireEvent.click(screen.getByTestId('bulk-action-close'));
       expect(onClick).not.toHaveBeenCalled();
@@ -162,9 +154,7 @@ describe('BulkActionToolbar', () => {
 
     it('does not call onClick when loading', () => {
       const onClick = vi.fn();
-      const actions: BulkAction[] = [
-        { id: 'close', label: 'Close', onClick, loading: true },
-      ];
+      const actions: BulkAction[] = [{ id: 'close', label: 'Close', onClick, loading: true }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       fireEvent.click(screen.getByTestId('bulk-action-close'));
       expect(onClick).not.toHaveBeenCalled();
@@ -184,9 +174,7 @@ describe('BulkActionToolbar', () => {
     });
 
     it('does not render icon when not provided', () => {
-      const actions: BulkAction[] = [
-        { id: 'close', label: 'Close', onClick: vi.fn() },
-      ];
+      const actions: BulkAction[] = [{ id: 'close', label: 'Close', onClick: vi.fn() }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       const button = screen.getByTestId('bulk-action-close');
       // The icon wrapper should not exist
@@ -201,9 +189,7 @@ describe('BulkActionToolbar', () => {
     });
 
     it('action buttons are type="button"', () => {
-      const actions: BulkAction[] = [
-        { id: 'close', label: 'Close', onClick: vi.fn() },
-      ];
+      const actions: BulkAction[] = [{ id: 'close', label: 'Close', onClick: vi.fn() }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       expect(screen.getByTestId('bulk-action-close')).toHaveAttribute('type', 'button');
     });
@@ -238,9 +224,7 @@ describe('BulkActionToolbar', () => {
     });
 
     it('defaults to secondary variant when not specified', () => {
-      const actions: BulkAction[] = [
-        { id: 'action', label: 'Action', onClick: vi.fn() },
-      ];
+      const actions: BulkAction[] = [{ id: 'action', label: 'Action', onClick: vi.fn() }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       const button = screen.getByTestId('bulk-action-action');
       expect(button.className).toMatch(/secondary/);
@@ -262,14 +246,9 @@ describe('BulkActionToolbar', () => {
     });
 
     it('action buttons have aria-label', () => {
-      const actions: BulkAction[] = [
-        { id: 'close', label: 'Close', onClick: vi.fn() },
-      ];
+      const actions: BulkAction[] = [{ id: 'close', label: 'Close', onClick: vi.fn() }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
-      expect(screen.getByTestId('bulk-action-close')).toHaveAttribute(
-        'aria-label',
-        'Close'
-      );
+      expect(screen.getByTestId('bulk-action-close')).toHaveAttribute('aria-label', 'Close');
     });
 
     it('deselect button has aria-label', () => {
@@ -281,9 +260,7 @@ describe('BulkActionToolbar', () => {
     });
 
     it('action buttons can be found by role', () => {
-      const actions: BulkAction[] = [
-        { id: 'close', label: 'Close', onClick: vi.fn() },
-      ];
+      const actions: BulkAction[] = [{ id: 'close', label: 'Close', onClick: vi.fn() }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
       // Should find 2 buttons: action + deselect
       const buttons = screen.getAllByRole('button');
@@ -304,9 +281,7 @@ describe('BulkActionToolbar', () => {
 
   describe('edge cases', () => {
     it('handles large selection count', () => {
-      const largeSet = new Set(
-        Array.from({ length: 1000 }, (_, i) => `issue-${i}`)
-      );
+      const largeSet = new Set(Array.from({ length: 1000 }, (_, i) => `issue-${i}`));
       render(
         <BulkActionToolbar
           selectedIds={largeSet}
@@ -344,9 +319,7 @@ describe('BulkActionToolbar', () => {
 
     it('handles async onClick handlers', async () => {
       const asyncHandler = vi.fn().mockResolvedValue(undefined);
-      const actions: BulkAction[] = [
-        { id: 'async', label: 'Async Action', onClick: asyncHandler },
-      ];
+      const actions: BulkAction[] = [{ id: 'async', label: 'Async Action', onClick: asyncHandler }];
       render(<BulkActionToolbar {...defaultProps} actions={actions} />);
 
       fireEvent.click(screen.getByTestId('bulk-action-async'));

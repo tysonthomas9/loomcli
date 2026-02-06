@@ -2,10 +2,12 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen as _screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+
 import '@testing-library/jest-dom';
-import { IssueTable, IssueTableProps } from './IssueTable';
+import type { Issue, Status } from '@/types';
+
 import {
   ColumnDef,
   DEFAULT_ISSUE_COLUMNS,
@@ -17,7 +19,7 @@ import {
   formatDate,
   getCellValue,
 } from './columns';
-import type { Issue, Status } from '@/types';
+import { IssueTable, IssueTableProps } from './IssueTable';
 
 // Helper to create mock issues for testing
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {

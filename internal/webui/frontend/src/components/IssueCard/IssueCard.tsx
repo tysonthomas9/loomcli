@@ -5,12 +5,19 @@
  */
 
 import { useState, useCallback } from 'react';
-import type { Issue } from '@/types';
+
+import { getAvatarColor, getStatusDotColor, getStatusLabel } from '@/components/AgentCard';
 import { BlockedBadge } from '@/components/BlockedBadge';
+import { useAgentContext } from '@/hooks';
+import type { Issue } from '@/types';
+import { parseLoomStatus } from '@/types';
+import { formatIssueId } from '@/utils/formatIssueId';
 import { getReviewType } from '@/utils/reviewType';
 import type { ReviewType } from '@/utils/reviewType';
-import { RejectCommentForm } from './RejectCommentForm';
+
+import { AgentRow } from './AgentRow';
 import styles from './IssueCard.module.css';
+import { RejectCommentForm } from './RejectCommentForm';
 
 /**
  * Review badge configuration by type.
@@ -47,18 +54,6 @@ export interface IssueCardProps {
 }
 
 /**
- * Format issue ID for display.
- * Shows last 7 characters of the ID for readability.
- */
-function formatIssueId(id: string): string {
-  if (!id) return 'unknown';
-  // If ID is short enough, return as-is
-  if (id.length <= 10) return id;
-  // Otherwise show last 7 characters
-  return id.slice(-7);
-}
-
-/**
  * Get priority level, defaulting to 4 (backlog) if undefined or out of range.
  */
 function getPriorityLevel(priority: number | undefined): 0 | 1 | 2 | 3 | 4 {
@@ -89,11 +84,18 @@ export function IssueCard({
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
 
+  const { getAgentByName } = useAgentContext();
+
   const priority = getPriorityLevel(issue.priority);
   const displayId = formatIssueId(issue.id);
   const displayTitle = issue.title || 'Untitled';
   const isBlocked = (blockedByCount ?? 0) > 0;
   const reviewType = getReviewType(issue);
+
+  // Compute agent row data for in_progress cards with an assignee
+  const showAgentRow = columnId === 'in_progress' && !!issue.assignee;
+  const assignedAgent = issue.assignee ? getAgentByName(issue.assignee) : undefined;
+  const agentParsedStatus = assignedAgent ? parseLoomStatus(assignedAgent.status) : null;
 
   // Show action buttons only in review column with callbacks provided
   const showReviewActions =
@@ -209,6 +211,17 @@ export function IssueCard({
         </span>
       </header>
       <h3 className={styles.title}>{displayTitle}</h3>
+      {showAgentRow && issue.assignee && (
+        <AgentRow
+          agentName={issue.assignee}
+          status={agentParsedStatus}
+          avatarColor={getAvatarColor(issue.assignee.replace(/^\[H\]\s*/, ''))}
+          dotColor={agentParsedStatus ? getStatusDotColor(agentParsedStatus.type) : undefined}
+          activity={
+            agentParsedStatus && assignedAgent ? getStatusLabel(agentParsedStatus) : undefined
+          }
+        />
+      )}
       {showReviewActions && !showRejectForm && (
         <div className={styles.reviewActions}>
           {onApprove && (

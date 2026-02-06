@@ -38,7 +38,9 @@
 .issue-table__header-cell--sortable {
   cursor: pointer;
   user-select: none;
-  transition: color var(--transition-fast), background-color var(--transition-fast);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast);
 }
 
 .issue-table__header-cell--sortable:hover {
@@ -345,44 +347,44 @@
  * =========================== */
 
 /* ID column sticky positioning */
-.issue-table__header-cell[data-column="id"],
-.issue-table__cell[data-column="id"] {
+.issue-table__header-cell[data-column='id'],
+.issue-table__cell[data-column='id'] {
   position: sticky;
   left: 0;
   z-index: var(--z-sticky);
 }
 
 /* Header sticky cells need explicit background */
-.issue-table__header-cell[data-column="id"] {
+.issue-table__header-cell[data-column='id'] {
   background-color: var(--color-bg-secondary);
 }
 
 /* Body sticky cells need opaque background */
-.issue-table__cell[data-column="id"] {
+.issue-table__cell[data-column='id'] {
   background-color: var(--color-bg);
 }
 
 /* Match hover state background for sticky cells */
-.issue-table__row:hover .issue-table__cell[data-column="id"] {
+.issue-table__row:hover .issue-table__cell[data-column='id'] {
   background-color: var(--color-bg-secondary);
 }
 
 /* Match selected state background for sticky cells */
-.issue-table__row--selected .issue-table__cell[data-column="id"],
-.issue-table__row--selected:hover .issue-table__cell[data-column="id"] {
+.issue-table__row--selected .issue-table__cell[data-column='id'],
+.issue-table__row--selected:hover .issue-table__cell[data-column='id'] {
   background-color: var(--color-bg-tertiary);
 }
 
 /* Visual separator shadow on sticky column's right edge */
-.issue-table__header-cell[data-column="id"]::after,
-.issue-table__cell[data-column="id"]::after {
+.issue-table__header-cell[data-column='id']::after,
+.issue-table__cell[data-column='id']::after {
   content: '';
   position: absolute;
   top: 0;
   right: -4px;
   bottom: 0;
   width: 4px;
-  background: linear-gradient(to right, rgba(0,0,0,0.05), transparent);
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.05), transparent);
   pointer-events: none;
 }
 
@@ -414,7 +416,7 @@
 }
 
 /* When checkbox is present, ID column shifts right */
-.issue-table__header-cell--checkbox ~ .issue-table__header-cell[data-column="id"],
-.issue-table__cell--checkbox ~ .issue-table__cell[data-column="id"] {
+.issue-table__header-cell--checkbox ~ .issue-table__header-cell[data-column='id'],
+.issue-table__cell--checkbox ~ .issue-table__cell[data-column='id'] {
   left: 40px; /* width of checkbox column */
 }
