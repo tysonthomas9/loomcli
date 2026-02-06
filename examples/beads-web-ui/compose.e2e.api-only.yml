@@ -1,0 +1,59 @@
+version: "3.8"
+
+# Simplified E2E Testing Compose file for API-only tests
+# Does not include loom service (not needed for most API tests)
+#
+# Usage:
+#   podman-compose -f compose.e2e.api-only.yml up -d
+#   podman-compose -f compose.e2e.api-only.yml down -v --remove-orphans
+
+volumes:
+  beads-data:  # Shared workspace volume for daemon socket and data
+
+networks:
+  e2e-network:
+    driver: bridge
+
+services:
+  # beads daemon - creates socket and manages data
+  daemon:
+    build:
+      context: .
+      dockerfile: Containerfile.e2e.simple
+      target: daemon
+    volumes:
+      - beads-data:/app/.beads
+    healthcheck:
+      test: ["CMD", "test", "-S", "/app/.beads/bd.sock"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks:
+      - e2e-network
+    restart: "no"
+
+  # beads-web-ui - serves frontend and API on port 8080
+  web:
+    build:
+      context: .
+      dockerfile: Containerfile.e2e.simple
+      target: web
+    ports:
+      - "8080:8080"
+    volumes:
+      - beads-data:/app/.beads
+    environment:
+      - BEADS_SOCKET=/app/.beads/bd.sock
+    depends_on:
+      daemon:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks:
+      - e2e-network
+    restart: "no"

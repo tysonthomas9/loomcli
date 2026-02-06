@@ -1,0 +1,175 @@
+/**
+ * LogViewer component styles.
+ * Terminal-style log display with dark background and monospace font.
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  background-color: #1e1e1e;
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+}
+
+/* ============= Header ============= */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: #2d2d2d;
+  border-bottom: 1px solid #404040;
+  flex-shrink: 0;
+}
+
+.statusContainer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.statusDot[data-pulsing='true'] {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.statusLabel {
+  font-size: var(--font-size-sm, 13px);
+  color: #a0a0a0;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.autoScrollButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background-color: transparent;
+  border: 1px solid #505050;
+  border-radius: var(--radius-sm, 4px);
+  color: #a0a0a0;
+  font-size: var(--font-size-xs, 12px);
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.autoScrollButton:hover {
+  background-color: #404040;
+  border-color: #606060;
+  color: #e0e0e0;
+}
+
+.autoScrollButton:focus-visible {
+  outline: 2px solid var(--color-primary, #3b82f6);
+  outline-offset: 1px;
+}
+
+.autoScrollButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ============= Error Banner ============= */
+
+.errorBanner {
+  padding: 8px 12px;
+  background-color: rgba(239, 68, 68, 0.15);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  font-size: var(--font-size-sm, 13px);
+  flex-shrink: 0;
+}
+
+/* ============= Scroll Container ============= */
+
+.scrollContainer {
+  flex: 1;
+  overflow: hidden auto;
+  min-height: 0;
+}
+
+.scrollContainer:focus {
+  outline: none;
+}
+
+.scrollContainer:focus-visible {
+  outline: 2px solid var(--color-primary, #3b82f6);
+  outline-offset: -2px;
+}
+
+/* ============= Log Content ============= */
+
+.logContent {
+  padding: 12px;
+  font-family: var(
+    --font-mono,
+    'SF Mono',
+    'Monaco',
+    'Inconsolata',
+    'Fira Mono',
+    'Droid Sans Mono',
+    'Source Code Pro',
+    monospace
+  );
+  font-size: var(--font-xs, 12px);
+  line-height: 1.5;
+}
+
+.empty {
+  color: #6b7280;
+  font-style: italic;
+  padding: 20px 0;
+  text-align: center;
+}
+
+.line {
+  display: flex;
+  gap: 12px;
+  padding: 1px 0;
+  transition: background-color 0.1s;
+}
+
+.line:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.lineNumber {
+  min-width: 40px;
+  text-align: right;
+  color: #6b7280;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.lineContent {
+  color: #e5e5e5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  flex: 1;
+}

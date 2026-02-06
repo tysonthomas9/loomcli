@@ -1,0 +1,151 @@
+/**
+ * AppLayout component styles.
+ * Provides the top-level application layout with sticky header.
+ * Uses CSS Modules for component-scoped styling.
+ */
+
+.appLayout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--color-bg-secondary);
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  background-color: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  height: var(--unified-header-height);
+}
+
+.headerContent {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  gap: var(--space-4);
+}
+
+.brand {
+  flex-shrink: 0;
+  width: 292px;
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  padding-left: 24px;
+  height: 100%;
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--color-text);
+}
+
+.navigation {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  flex: 1;
+  justify-content: stretch;
+  padding: 0 var(--space-5);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-right: 24px;
+}
+
+.contentWrapper {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  background-color: var(--color-bg-secondary);
+}
+
+.main {
+  flex: 1;
+  min-width: 0; /* Prevents flex item from overflowing */
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  padding: 0;
+  background-color: var(--color-bg-secondary);
+}
+
+/* Responsive: tablet adjustments */
+@media (width <= 1024px) {
+  .actions {
+    gap: var(--space-2);
+  }
+}
+
+/* Responsive: mobile adjustments */
+@media (width <= 640px) {
+  .brand {
+    width: auto;
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+    border-right: none;
+  }
+
+  .title {
+    font-size: var(--font-size-base);
+  }
+
+  .actions {
+    padding-right: var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .main {
+    padding: var(--space-3);
+  }
+}
+
+/* ===========================
+ * Skip Link - Accessibility
+ * =========================== */
+.skipLink {
+  position: absolute;
+  left: var(--space-4);
+  transform: translateY(-100%);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  z-index: var(--z-overlay);
+  transition: transform var(--transition-fast);
+}
+
+.skipLink:focus {
+  transform: translateY(var(--space-2));
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.skipLink:focus:not(:focus-visible) {
+  transform: translateY(var(--space-2));
+  outline: none;
+}
+
+.skipLink:focus-visible {
+  transform: translateY(var(--space-2));
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skipLink {
+    transition: none;
+  }
+}

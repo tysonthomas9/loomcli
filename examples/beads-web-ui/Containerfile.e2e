@@ -1,0 +1,212 @@
+# syntax=docker/dockerfile:1.4
+# Multi-target Containerfile for E2E testing
+# Build context should be repository root (../../ from this file)
+#
+# Usage:
+#   podman build --target daemon -t beads-daemon:test -f Containerfile.e2e ../..
+#   podman build --target web -t beads-web:test -f Containerfile.e2e ../..
+#   podman build --target loom -t loom:test -f Containerfile.e2e ../..
+
+# Build args for version configuration
+ARG GO_VERSION=1.24.0
+ARG ALPINE_VERSION=3.21
+ARG NODE_VERSION=20
+
+# =============================================================================
+# Stage: go-installer
+# Downloads and installs Go from official tarball
+# =============================================================================
+FROM alpine:${ALPINE_VERSION} AS go-installer
+
+ARG GO_VERSION
+ARG TARGETARCH
+
+RUN apk add --no-cache curl ca-certificates
+
+# Download and install Go
+RUN case "${TARGETARCH}" in \
+      "amd64") GOARCH="amd64" ;; \
+      "arm64") GOARCH="arm64" ;; \
+      *) echo "Unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" | tar -xzC /usr/local
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# =============================================================================
+# Stage: base-builder
+# Shared Go compilation environment for daemon and web targets
+# =============================================================================
+FROM go-installer AS base-builder
+
+# Install build dependencies (including gcc for CGO)
+RUN apk add --no-cache \
+    git \
+    musl-dev \
+    gcc \
+    ca-certificates
+
+# Enable CGO for sqlite3
+ENV CGO_ENABLED=1
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+WORKDIR /build
+
+# Copy go.mod and go.sum first for better layer caching
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+# Copy the entire source tree
+COPY . .
+
+# =============================================================================
+# Stage: daemon-builder
+# Builds the bd (beads daemon) binary
+# =============================================================================
+FROM base-builder AS daemon-builder
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o /bd ./cmd/bd
+
+# =============================================================================
+# Stage: daemon
+# Runtime image for beads daemon
+# =============================================================================
+FROM alpine:${ALPINE_VERSION} AS daemon
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    curl \
+    ca-certificates
+
+# Copy the bd binary BEFORE switching to non-root user
+COPY --from=daemon-builder /bd /usr/local/bin/bd
+
+# Create non-root user for security
+RUN adduser -D -u 1000 beads
+USER beads
+
+WORKDIR /app
+
+# Set HOME to ensure daemon creates socket in expected location
+ENV HOME=/app
+
+# The daemon will create its socket and data in /app/.beads
+# This directory will be mounted as a shared volume
+VOLUME ["/app/.beads"]
+
+# Health check: verify socket exists
+HEALTHCHECK --interval=2s --timeout=5s --retries=30 --start-period=10s \
+    CMD test -S /app/.beads/bd.sock
+
+ENTRYPOINT ["bd", "daemon", "start", "--foreground"]
+
+# =============================================================================
+# Stage: web-builder
+# Builds the frontend and beads-web-ui binary
+# =============================================================================
+FROM base-builder AS web-builder
+
+# Install Node.js for frontend build
+ARG NODE_VERSION
+RUN apk add --no-cache nodejs npm
+
+# Build frontend with npm cache
+WORKDIR /build/examples/beads-web-ui/frontend
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci && npm run build
+
+# Build beads-web-ui binary (embeds frontend) with go caches
+WORKDIR /build/examples/beads-web-ui
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o /beads-web-ui .
+
+# =============================================================================
+# Stage: web
+# Runtime image for beads-web-ui server
+# =============================================================================
+FROM alpine:${ALPINE_VERSION} AS web
+
+# Install runtime dependencies
+# tmux is required for the terminal feature
+RUN apk add --no-cache \
+    curl \
+    ca-certificates \
+    tmux
+
+# Copy the beads-web-ui binary BEFORE switching to non-root user
+COPY --from=web-builder /beads-web-ui /usr/local/bin/beads-web-ui
+
+# Create non-root user for security
+RUN adduser -D -u 1000 beads
+USER beads
+
+WORKDIR /app
+
+# Set HOME to ensure socket discovery works correctly
+ENV HOME=/app
+
+# The web server needs access to the daemon socket
+VOLUME ["/app/.beads"]
+
+# Expose HTTP port
+EXPOSE 8080
+
+# Health check: HTTP endpoint
+HEALTHCHECK --interval=2s --timeout=5s --retries=30 --start-period=10s \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["beads-web-ui", "-port", "8080"]
+
+# =============================================================================
+# Stage: loom-builder
+# Installs loom from external loomcli module
+# =============================================================================
+FROM go-installer AS loom-builder
+
+RUN apk add --no-cache git ca-certificates
+
+# Install loom from external module
+# CGO not needed for loom
+ENV CGO_ENABLED=0
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go install github.com/tysonthomas9/loomcli/cmd/loom@latest
+
+# =============================================================================
+# Stage: loom
+# Runtime image for loom server
+# =============================================================================
+FROM alpine:${ALPINE_VERSION} AS loom
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    curl \
+    ca-certificates
+
+# Copy the loom binary BEFORE switching to non-root user
+COPY --from=loom-builder /root/go/bin/loom /usr/local/bin/loom
+
+# Create non-root user for security
+RUN adduser -D -u 1000 beads
+USER beads
+
+WORKDIR /app
+
+# Set HOME for consistent behavior
+ENV HOME=/app
+
+# Loom may need access to beads data for monitoring
+VOLUME ["/app/.beads"]
+
+# Expose HTTP port
+EXPOSE 9000
+
+# Health check: HTTP endpoint
+HEALTHCHECK --interval=2s --timeout=5s --retries=30 --start-period=10s \
+    CMD curl -f http://localhost:9000/health || exit 1
+
+ENTRYPOINT ["loom", "serve", "--port", "9000"]

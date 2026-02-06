@@ -1,0 +1,8 @@
+dist/
+node_modules/
+coverage/
+*.config.js
+*.config.ts
+package-lock.json
+playwright-report/
+test-results/

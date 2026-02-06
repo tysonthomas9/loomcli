@@ -1,0 +1,35 @@
+/**
+ * TypeIcon component styles.
+ * Uses CSS Modules for component-scoped styling.
+ */
+
+.typeIcon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast);
+}
+
+/* Type-specific icon colors */
+.typeIcon[data-type='bug'] {
+  color: var(--color-danger);
+}
+
+.typeIcon[data-type='feature'] {
+  color: var(--color-primary);
+}
+
+.typeIcon[data-type='task'] {
+  color: var(--color-success);
+}
+
+.typeIcon[data-type='epic'] {
+  color: var(--color-type-epic);
+}
+
+.typeIcon[data-type='chore'] {
+  color: var(--color-text-muted);
+}
+
+.typeIcon[data-type='unknown'] {
+  color: var(--color-text-muted);
+}

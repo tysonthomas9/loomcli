@@ -1,0 +1,209 @@
+/**
+ * StatusColumn component styles.
+ * Uses CSS Modules for component-scoped styling.
+ */
+
+.statusColumn {
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
+  /* Use flexbox stretch from parent instead of percentage height */
+  flex: 1 1 auto;
+  min-height: 0;
+  background-color: var(--color-column-bg);
+  border-radius: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--color-border);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background-color: var(--color-bg-secondary);
+}
+
+.headerLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Status-specific header accent colors */
+.statusColumn[data-status='open'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+.statusColumn[data-status='in_progress'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+.statusColumn[data-status='closed'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+.statusColumn[data-status='blocked'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+/* Deferred uses secondary color to indicate inactive/low-priority */
+.statusColumn[data-status='deferred'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+.statusColumn[data-status='review'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+/* New 5-column layout column IDs */
+.statusColumn[data-status='ready'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+.statusColumn[data-status='backlog'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+.statusColumn[data-status='done'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+.columnIcon {
+  flex-shrink: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  color: #8b8b8b;
+  display: inline-flex;
+  align-items: center;
+}
+
+.columnIcon svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+  line-height: var(--line-height-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 8px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #5f6368;
+  background-color: #e5e5e5;
+  border-radius: var(--radius-full);
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.content {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  border-radius: 0;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+  border: 1px solid transparent;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  /* Smooth momentum scrolling on iOS */
+  -webkit-overflow-scrolling: touch;
+  /* Firefox scrollbar styling */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+/* Webkit scrollbar styling (Chrome, Safari, Edge) */
+.content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+  transition: background var(--transition-fast);
+}
+
+.content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Drop target visual feedback when dragging over */
+.contentDropOver {
+  background-color: var(--accent-bg);
+  border-color: var(--color-border);
+}
+
+/* =================================
+ * Backlog column styling (blocked by deps, blocked status, or deferred)
+ * ================================= */
+
+.statusColumn[data-column-type='backlog'] {
+  background-color: var(--color-column-bg-muted);
+}
+
+.statusColumn[data-column-type='backlog'] .header {
+  border-bottom-color: var(--color-border);
+}
+
+.statusColumn[data-column-type='backlog'] .title {
+  color: #777777;
+}
+
+.statusColumn[data-column-type='backlog'] .count {
+  background-color: #e5e5e5;
+}
+
+/* =================================
+ * Review column styling (needs attention)
+ * ================================= */
+
+@keyframes reviewPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+.statusColumn[data-column-type='review'] {
+  background-color: var(--color-warning-bg);
+  animation: reviewPulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusColumn[data-column-type='review'] {
+    animation: none;
+  }
+}
