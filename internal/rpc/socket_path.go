@@ -7,9 +7,8 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
-
-	"github.com/tysonthomas9/loomcli/internal/utils"
 )
 
 // MaxUnixSocketPath is the maximum length for Unix socket paths.
@@ -30,7 +29,7 @@ const MaxUnixSocketPath = 103
 // This preserves backwards compatibility for workspaces with short paths.
 func ShortSocketPath(workspacePath string) string {
 	// Canonicalize path for consistent hashing across symlinks and case
-	canonical := utils.NormalizePathForComparison(workspacePath)
+	canonical := normalizePathForComparison(workspacePath)
 	if canonical == "" {
 		canonical = workspacePath
 	}
@@ -103,4 +102,24 @@ func CleanupSocketDir(socketPath string) error {
 func NeedsShortPath(workspacePath string) bool {
 	naturalPath := filepath.Join(workspacePath, ".beads", "bd.sock")
 	return len(naturalPath) > MaxUnixSocketPath
+}
+
+// normalizePathForComparison canonicalizes a path for consistent hashing.
+// Resolves symlinks and lowercases on case-insensitive filesystems (macOS, Windows).
+func normalizePathForComparison(path string) string {
+	if path == "" {
+		return ""
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+	canonical, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		canonical = absPath
+	}
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		canonical = strings.ToLower(canonical)
+	}
+	return canonical
 }
