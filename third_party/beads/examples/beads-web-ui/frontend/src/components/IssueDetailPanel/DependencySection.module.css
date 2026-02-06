@@ -1,0 +1,262 @@
+/**
+ * DependencySection component styles.
+ * Editable dependency list with add/remove functionality.
+ */
+
+.dependencySection {
+  margin-bottom: 20px;
+}
+
+/* ============= Header ============= */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sectionTitle {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.addButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: var(--font-xs);
+  font-weight: 500;
+  color: var(--color-primary);
+  background: none;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.addButton:hover:not(:disabled) {
+  background-color: var(--color-primary);
+  color: white;
+}
+
+.addButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============= Error ============= */
+
+.error {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  font-size: var(--font-xs);
+  color: var(--color-danger);
+  background-color: var(--color-danger-bg);
+  border-radius: var(--radius-sm);
+}
+
+/* ============= Add Form ============= */
+
+.addForm {
+  margin-bottom: 12px;
+}
+
+.input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: var(--font-sm);
+  font-family: inherit;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  outline: none;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-bg);
+}
+
+.input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.input:disabled {
+  background-color: var(--color-bg-subtle);
+  cursor: not-allowed;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cancelButton {
+  padding: 6px 12px;
+  font-size: var(--font-xs);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.cancelButton:hover:not(:disabled) {
+  background-color: var(--color-bg-subtle);
+  border-color: var(--color-text-muted);
+}
+
+.cancelButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.confirmButton {
+  padding: 6px 12px;
+  font-size: var(--font-xs);
+  font-weight: 500;
+  color: white;
+  background-color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.confirmButton:hover:not(:disabled) {
+  background-color: var(--color-primary-hover);
+}
+
+.confirmButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============= Dependency List ============= */
+
+.dependencyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dependencyItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-sm);
+}
+
+.dependencyItem:last-child {
+  border-bottom: none;
+}
+
+.dependencyItem.removing {
+  opacity: 0.5;
+}
+
+.dependencyId {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.dependencyTitle {
+  flex: 1;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dependencyType {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.dependencyClosed .dependencyTitle {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.removeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--transition-fast),
+    color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.dependencyItem:hover .removeButton,
+.removeButton:focus {
+  opacity: 1;
+}
+
+.removeButton:hover:not(:disabled) {
+  color: var(--color-danger);
+  background-color: var(--color-danger-bg);
+}
+
+.removeButton:disabled {
+  cursor: not-allowed;
+}
+
+/* ============= Empty State ============= */
+
+.emptyMessage {
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  margin: 0;
+  padding: 8px 0;
+}
+
+/* ============= Spinner ============= */
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-text-muted);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

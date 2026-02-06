@@ -1,0 +1,82 @@
+/**
+ * EditableTitle component styles.
+ * Inline editable heading with edit mode transition.
+ */
+
+.editableTitle {
+  position: relative;
+}
+
+/* Display mode */
+.title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  margin: 0;
+  line-height: var(--line-height-tight);
+  word-break: break-word;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.editHint {
+  opacity: 0;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: opacity var(--transition-fast);
+  margin-top: 4px; /* Align with text baseline */
+}
+
+.editableTitle:hover .editHint,
+.editableTitle:focus .editHint {
+  opacity: 1;
+}
+
+.editableTitle:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Edit mode */
+.input {
+  width: 100%;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 2px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  margin: -6px -10px; /* Compensate for padding/border to maintain visual alignment */
+  line-height: var(--line-height-tight);
+}
+
+.input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.input:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Error state */
+.error {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+  margin-top: 4px;
+}
+
+/* Saving indicator */
+.saving {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}

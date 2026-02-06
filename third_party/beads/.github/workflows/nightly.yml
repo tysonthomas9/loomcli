@@ -1,0 +1,93 @@
+name: Nightly Full Tests
+
+on:
+  schedule:
+    # Run at 2am UTC daily
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  full-test:
+    name: Full Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@beads.test"
+
+      - name: Build
+        run: go build -v ./cmd/bd
+
+      - name: Full Test Suite (including integration tests)
+        run: go test -v -race -tags=integration -coverprofile=coverage.out -timeout=30m ./...
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Coverage: $COVERAGE%"
+          if (( $(echo "$COVERAGE < 50" | bc -l) )); then
+            echo "❌ Coverage is below 50% threshold"
+            exit 1
+          elif (( $(echo "$COVERAGE < 55" | bc -l) )); then
+            echo "⚠️  Coverage is below 55% (warning threshold)"
+          else
+            echo "✅ Coverage meets threshold"
+          fi
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: success()
+        with:
+          file: ./coverage.out
+          fail_ci_if_error: false
+
+  e2e-integration:
+    name: E2E Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install podman-compose
+        run: pip3 install podman-compose
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: examples/beads-web-ui/frontend
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        working-directory: examples/beads-web-ui/frontend
+        run: npx playwright install chromium --with-deps
+
+      - name: Run E2E integration tests
+        working-directory: examples/beads-web-ui/frontend
+        run: npm run test:e2e:integration
+        env:
+          RUN_INTEGRATION_TESTS: '1'
+
+      - name: Upload test results on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-integration-report
+          path: |
+            examples/beads-web-ui/frontend/test-results/
+            examples/beads-web-ui/frontend/playwright-report/
+          retention-days: 7
+
+      - name: Cleanup containers on failure
+        if: failure()
+        run: |
+          cd examples/beads-web-ui
+          podman-compose -f compose.e2e.yml down --volumes --remove-orphans 2>/dev/null || true

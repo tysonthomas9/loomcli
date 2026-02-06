@@ -1,0 +1,25 @@
+# Pre-push hook: Run frontend unit tests before pushing
+# Bypass with: git push --no-verify
+
+cd examples/beads-web-ui/frontend || exit 0
+
+# Skip if node_modules not installed (allows non-frontend devs to push)
+if [ ! -d "node_modules" ]; then
+    echo "⚠️  Skipping pre-push tests: node_modules not found"
+    echo "   Run 'npm install' in examples/beads-web-ui/frontend first"
+    exit 0
+fi
+
+echo "🧪 Running frontend unit tests..."
+
+# Run unit tests only (fast, ~6s)
+npm run test:unit -- --reporter=dot
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Tests failed. Push blocked."
+    echo "   Fix failing tests or bypass with: git push --no-verify"
+    exit 1
+fi
+
+echo "✅ All tests passed. Proceeding with push."

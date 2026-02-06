@@ -1,0 +1,36 @@
+/**
+ * KanbanBoard component styles.
+ * Uses CSS Modules for component-scoped styling.
+ */
+
+.board {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0; /* Allow flex item to shrink below content height */
+  overflow: auto hidden;
+  background-color: var(--color-bg-secondary);
+}
+
+/* Ensure columns don't shrink when scrolling */
+.board > * {
+  flex-shrink: 0;
+}
+
+.board > :last-child {
+  border-right: none;
+}
+
+/* Muted column style (Backlog - issues not yet actionable) */
+.mutedColumn {
+  opacity: 1;
+  background-color: transparent;
+}
+
+/* Highlighted column style (Review - needs human attention) */
+.highlightedColumn {
+  border-left: 3px solid var(--color-status-review);
+}

@@ -1,0 +1,84 @@
+# Simplified Containerfile for E2E testing
+# Uses pre-built binaries from host to avoid disk space issues during container builds
+#
+# Prerequisites:
+#   CGO_ENABLED=1 go build -ldflags '-linkmode external -extldflags "-static"' -o /tmp/bd-static ./cmd/bd
+#   CGO_ENABLED=0 go build -o /tmp/beads-web-ui-static ./examples/beads-web-ui
+#
+# Usage:
+#   podman build --target daemon -t beads-daemon:test -f Containerfile.e2e.simple .
+#   podman build --target web -t beads-web:test -f Containerfile.e2e.simple .
+
+ARG ALPINE_VERSION=3.21
+
+# =============================================================================
+# Stage: daemon
+# Runtime image for beads daemon (uses pre-built binary from host)
+# =============================================================================
+FROM alpine:${ALPINE_VERSION} AS daemon
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    curl \
+    ca-certificates
+
+# Copy the pre-built bd binary (must be in build context)
+COPY bd-static /usr/local/bin/bd
+
+# Copy entrypoint script that handles db initialization
+COPY docker-entrypoint-daemon.sh /usr/local/bin/docker-entrypoint.sh
+
+# Create non-root user for security
+RUN adduser -D -u 1000 beads
+USER beads
+
+WORKDIR /app
+
+# Set HOME to ensure daemon creates socket in expected location
+ENV HOME=/app
+
+# The daemon will create its socket and data in /app/.beads
+VOLUME ["/app/.beads"]
+
+# Health check: verify socket exists
+HEALTHCHECK --interval=2s --timeout=5s --retries=30 --start-period=10s \
+    CMD test -S /app/.beads/bd.sock
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
+# =============================================================================
+# Stage: web
+# Runtime image for beads-web-ui server (uses pre-built binary from host)
+# =============================================================================
+FROM alpine:${ALPINE_VERSION} AS web
+
+# Install runtime dependencies
+# tmux is required for the terminal feature
+RUN apk add --no-cache \
+    curl \
+    ca-certificates \
+    tmux
+
+# Copy the pre-built beads-web-ui binary (must be in build context)
+COPY beads-web-ui-static /usr/local/bin/beads-web-ui
+
+# Create non-root user for security
+RUN adduser -D -u 1000 beads
+USER beads
+
+WORKDIR /app
+
+# Set HOME to ensure socket discovery works correctly
+ENV HOME=/app
+
+# The web server needs access to the daemon socket
+VOLUME ["/app/.beads"]
+
+# Expose HTTP port
+EXPOSE 8080
+
+# Health check: HTTP endpoint
+HEALTHCHECK --interval=2s --timeout=5s --retries=30 --start-period=10s \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["beads-web-ui", "-port", "8080"]

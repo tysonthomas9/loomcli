@@ -1,0 +1,201 @@
+/**
+ * BlockingDependenciesCanvas styles.
+ * Rich dependency graph canvas for Monitor Dashboard.
+ */
+
+.canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Expand button - absolute top-right */
+.expandButton {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.expandButton:hover {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.expandButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.expandIcon {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast);
+}
+
+.expandButton:hover .expandIcon {
+  color: var(--color-text);
+}
+
+/* Empty state */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 300px;
+  gap: var(--space-2);
+}
+
+.emptyIcon {
+  font-size: var(--font-size-2xl);
+  color: var(--color-status-closed);
+}
+
+.emptyText {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* React Flow overrides */
+.canvas :global(.react-flow) {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.canvas :global(.react-flow__renderer) {
+  cursor: default;
+}
+
+.canvas :global(.react-flow__node) {
+  border: none;
+  background: none;
+  padding: 0;
+  visibility: visible !important;
+}
+
+.canvas :global(.react-flow__edge-path) {
+  stroke-width: 2;
+}
+
+/* Hide minimap and background */
+.canvas :global(.react-flow__minimap),
+.canvas :global(.react-flow__background) {
+  display: none;
+}
+
+/* Zoom controls styling */
+.controls {
+  margin: var(--space-2) !important;
+}
+
+.canvas :global(.react-flow__controls-button) {
+  width: 24px;
+  height: 24px;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-bottom: none;
+}
+
+.canvas :global(.react-flow__controls-button:last-child) {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.canvas :global(.react-flow__controls-button svg) {
+  max-width: 14px;
+  max-height: 14px;
+}
+
+/* Color-coded legend */
+.legend {
+  position: absolute;
+  bottom: var(--space-2);
+  left: var(--space-2);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background-color: color-mix(in srgb, var(--color-bg) 92%, transparent);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(4px);
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.legendDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legendHealthy {
+  background-color: var(--color-status-closed, #10b981);
+}
+
+.legendBlocking {
+  background-color: var(--color-blocked, #ef4444);
+}
+
+.legendBlocked {
+  background-color: transparent;
+  border: 2px solid var(--color-blocked, #ef4444);
+}
+
+.legendLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .expandButton {
+    transition: none;
+  }
+
+  .expandIcon {
+    transition: none;
+  }
+}
+
+/* Mobile: smaller legend */
+@media (width <= 768px) {
+  .legend {
+    padding: var(--space-1);
+  }
+
+  .legendDot {
+    width: 8px;
+    height: 8px;
+  }
+
+  .legendLabel {
+    font-size: 10px;
+  }
+}
