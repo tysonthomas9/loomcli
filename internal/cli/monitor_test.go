@@ -1082,7 +1082,7 @@ func TestCollectTaskStatus(t *testing.T) {
 				return CommandResult{}
 			}
 
-			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, blockedTasks, agentTasks := collectTaskStatus()
+			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, blockedTasks, agentTasks := collectTaskStatus(100)
 
 			if summary.NeedsPlanning != tt.wantNeedsPlanning {
 				t.Errorf("NeedsPlanning = %d, want %d", summary.NeedsPlanning, tt.wantNeedsPlanning)
@@ -1122,7 +1122,7 @@ func TestCollectTaskStatus(t *testing.T) {
 }
 
 func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
-	// This test specifically verifies that the "ready" command is called with --limit 50
+	// This test verifies that the "ready" command is called with the passed readyLimit
 	oldExec := execCommand
 	defer func() { execCommand = oldExec }()
 
@@ -1137,7 +1137,7 @@ func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
 		return CommandResult{Stdout: "[]"}
 	}
 
-	collectTaskStatus()
+	collectTaskStatus(100)
 
 	// Verify the ready command was called with correct args
 	expectedArgs := []string{"ready", "--json", "--limit", "100"}
@@ -1435,7 +1435,7 @@ func TestCollectMonitorData(t *testing.T) {
 		return CommandResult{}
 	}
 
-	data := collectMonitorData()
+	data := collectMonitorData(100)
 
 	// Verify all sections populated
 	if data.Timestamp.IsZero() {
@@ -2703,5 +2703,76 @@ func TestRenderDashboardWithDaemonManagedAgents(t *testing.T) {
 	// But nova should still appear
 	if !strings.Contains(output, "nova") {
 		t.Error("expected 'nova' in output")
+	}
+}
+
+// TestCollectTaskStatusReadyLimitParam verifies that collectTaskStatus passes
+// the readyLimit parameter through to the bd ready command. The existing
+// TestCollectTaskStatusReadyCommandArgs tests limit=100 (monitor default);
+// this test covers limit=50 (serve default).
+func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
+	oldExec := execCommand
+	defer func() { execCommand = oldExec }()
+
+	var capturedReadyArgs []string
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		if len(args) > 0 && args[0] == "ready" {
+			capturedReadyArgs = args
+			return CommandResult{Stdout: "[]"}
+		}
+		return CommandResult{Stdout: "[]"}
+	}
+
+	collectTaskStatus(50)
+
+	expectedArgs := []string{"ready", "--json", "--limit", "50"}
+	if len(capturedReadyArgs) != len(expectedArgs) {
+		t.Fatalf("ready command called with %d args, want %d. Got: %v", len(capturedReadyArgs), len(expectedArgs), capturedReadyArgs)
+	}
+	for i, expected := range expectedArgs {
+		if capturedReadyArgs[i] != expected {
+			t.Errorf("ready command arg[%d] = %q, want %q. Full args: %v", i, capturedReadyArgs[i], expected, capturedReadyArgs)
+		}
+	}
+}
+
+// TestCollectReadyTasksByPriorityReadyLimitParam verifies that
+// collectReadyTasksByPriority passes the readyLimit parameter through to the
+// bd ready command (limit=50, matching the serve use case).
+func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
+	oldExec := execCommand
+	defer func() { execCommand = oldExec }()
+
+	var capturedReadyArgs []string
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		if len(args) > 0 && args[0] == "ready" {
+			capturedReadyArgs = args
+			return CommandResult{Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "P1 task", Status: "open", Priority: 1, Design: "plan"},
+				{ID: "T-2", Title: "P2 task", Status: "open", Priority: 2, Design: ""},
+			})}
+		}
+		return CommandResult{Stdout: "[]"}
+	}
+
+	counts := collectReadyTasksByPriority(50)
+
+	// Verify the ready command was called with --limit 50
+	expectedArgs := []string{"ready", "--json", "--limit", "50"}
+	if len(capturedReadyArgs) != len(expectedArgs) {
+		t.Fatalf("ready command called with %d args, want %d. Got: %v", len(capturedReadyArgs), len(expectedArgs), capturedReadyArgs)
+	}
+	for i, expected := range expectedArgs {
+		if capturedReadyArgs[i] != expected {
+			t.Errorf("ready command arg[%d] = %q, want %q. Full args: %v", i, capturedReadyArgs[i], expected, capturedReadyArgs)
+		}
+	}
+
+	// Also verify the function correctly counted by priority
+	if counts[1] != 1 {
+		t.Errorf("expected priority 1 count=1, got %d", counts[1])
+	}
+	if counts[2] != 1 {
+		t.Errorf("expected priority 2 count=1, got %d", counts[2])
 	}
 }

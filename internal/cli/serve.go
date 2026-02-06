@@ -31,7 +31,7 @@ var (
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
-	collectDataFunc = collectMonitorData
+	collectDataFunc = func() *MonitorData { return collectMonitorData(50) }
 
 	// staleDetectorInstance holds the running stale detector for status queries.
 	staleDetectorInstance *kv.StaleDetector
@@ -441,7 +441,7 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
 
 	// Get ready tasks broken down by priority
-	readyByPriority := collectReadyTasksByPriority()
+	readyByPriority := collectReadyTasksByPriority(50)
 
 	// Get in-progress count
 	inProgress := 0

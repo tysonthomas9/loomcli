@@ -127,7 +127,7 @@ func TestMonitorDataCollection(t *testing.T) {
 
 	mock.Install()
 
-	data := collectMonitorData()
+	data := collectMonitorData(100)
 
 	// Verify task counts
 	if data.Tasks.NeedsPlanning != 1 {
@@ -432,7 +432,7 @@ func TestMultiAgentConflictDetection(t *testing.T) {
 	mock.AddStub("git", []string{"rev-parse"}, CommandResult{Stdout: "main"})
 	mock.Install()
 
-	data := collectMonitorData()
+	data := collectMonitorData(100)
 
 	// Verify conflict detected
 	if len(data.TaskConflicts) == 0 {
@@ -495,7 +495,7 @@ func TestNoConflictForDifferentTasks(t *testing.T) {
 	mock.AddStub("git", []string{"rev-parse"}, CommandResult{Stdout: "main"})
 	mock.Install()
 
-	data := collectMonitorData()
+	data := collectMonitorData(100)
 
 	// Verify NO conflict detected (different tasks)
 	if len(data.TaskConflicts) != 0 {
@@ -650,7 +650,7 @@ func TestMonitorAgentStatusVariants(t *testing.T) {
 			mock.AddStub("git", []string{"rev-parse"}, CommandResult{Stdout: "main"})
 			mock.Install()
 
-			data := collectMonitorData()
+			data := collectMonitorData(100)
 
 			// Verify agent status
 			if len(data.Agents) != 1 {

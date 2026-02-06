@@ -193,7 +193,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		fmt.Print("\033[?25h")  // Show cursor
 
 		// Collect first batch before entering loop (loading message visible during this)
-		data := collectMonitorData()
+		data := collectMonitorData(100)
 		output := renderDashboard(data)
 		fullOutput := output + fmt.Sprintf("\nPress Ctrl+C to exit (refreshing every %ds)", monitorInterval)
 		fmt.Print("\033[?25l")
@@ -205,7 +205,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		// Watch mode - refresh in place without flickering
 		for {
 			time.Sleep(time.Duration(monitorInterval) * time.Second)
-			data = collectMonitorData()
+			data = collectMonitorData(100)
 			output = renderDashboard(data)
 
 			// Build complete output including status line (no trailing newline)
@@ -222,7 +222,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 	} else {
 		// One-shot mode - show loading message on stderr
 		fmt.Fprint(os.Stderr, "Loading...")
-		data := collectMonitorData()
+		data := collectMonitorData(100)
 		fmt.Fprint(os.Stderr, "\r          \r") // Clear loading message
 		fmt.Print(renderDashboard(data))
 	}
@@ -231,10 +231,10 @@ func runMonitor(cmd *cobra.Command, args []string) {
 // CollectMonitorData gathers all dashboard data.
 // Exported for use by the HTTP server.
 func CollectMonitorData() *MonitorData {
-	return collectMonitorData()
+	return collectMonitorData(100)
 }
 
-func collectMonitorData() *MonitorData {
+func collectMonitorData(readyLimit int) *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
 	// Start stats and sync bd call in parallel with task collection
@@ -257,7 +257,7 @@ func collectMonitorData() *MonitorData {
 	}()
 
 	// Collect tasks (internally parallel) to get agent-task mapping
-	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BlockedTasks, data.AgentTasks = collectTaskStatus()
+	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BlockedTasks, data.AgentTasks = collectTaskStatus(readyLimit)
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
@@ -401,7 +401,7 @@ func getWorktreeGitSyncStatus(path, defaultBranch string) (ahead, behind int) {
 	return ahead, behind
 }
 
-func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
+func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
 	var summary TaskSummary
 	var needsPlanningTasks []TaskInfo
 	var readyToImplementTasks []TaskInfo
@@ -421,7 +421,7 @@ func collectTaskStatus() (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []Tas
 
 	go func() {
 		defer wg.Done()
-		readyOutput, readyErr = runBdCommand("ready", "--json", "--limit", "100")
+		readyOutput, readyErr = runBdCommand("ready", "--json", "--limit", strconv.Itoa(readyLimit))
 	}()
 
 	go func() {
@@ -620,14 +620,14 @@ func collectStatistics() MonitorStats {
 // collectReadyTasksByPriority returns counts of ready tasks grouped by priority (0-4).
 // It iterates ready tasks (excluding epics, in_progress, and review) and returns
 // a map of priority -> count for Prometheus metrics.
-func collectReadyTasksByPriority() map[int]int {
+func collectReadyTasksByPriority(readyLimit int) map[int]int {
 	counts := make(map[int]int)
 	// Initialize all priorities to 0
 	for i := 0; i <= 4; i++ {
 		counts[i] = 0
 	}
 
-	output, err := runBdCommand("ready", "--json", "--limit", "100")
+	output, err := runBdCommand("ready", "--json", "--limit", strconv.Itoa(readyLimit))
 	if err != nil {
 		return counts
 	}
