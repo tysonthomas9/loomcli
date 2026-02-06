@@ -26,6 +26,7 @@ var (
 	serveWebUIPort   int
 	serveWebUISocket string
 	serveNoWebUI     bool
+	serveNoDaemon    bool
 	serveRedisAddr   string
 
 	// collectDataFunc is the function used to collect monitor data.
@@ -43,6 +44,9 @@ var serveCmd = &cobra.Command{
 
 This server is designed to be consumed by web UIs (like beads-web-ui)
 that want to display agent status and task information.
+
+The server automatically starts the bd daemon if it's not running.
+Use --no-daemon to disable this behavior.
 
 ENDPOINTS
   GET /health          Health check
@@ -82,6 +86,7 @@ func init() {
 	serveCmd.Flags().IntVar(&serveWebUIPort, "webui-port", 8080, "Port for the web UI server")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
 	serveCmd.Flags().BoolVar(&serveNoWebUI, "no-webui", false, "Disable the web UI server, run only the API")
+	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip auto-starting the bd daemon")
 
 	defaultRedisAddr := os.Getenv("LOOM_REDIS_ADDR")
 	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", defaultRedisAddr, "Redis address for fleet coordination (enables stale detector)")
@@ -96,6 +101,32 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Signal handling
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	// Auto-start bd daemon if needed (unless --no-daemon)
+	var daemonWeStarted bool
+	if !serveNoDaemon {
+		started, err := EnsureBdDaemonRunning(5 * time.Second)
+		if err != nil {
+			log.Printf("Warning: failed to auto-start bd daemon: %v", err)
+			log.Printf("Some API endpoints may return incomplete data. Run 'bd daemon start' manually.")
+		} else if started {
+			daemonWeStarted = true
+			log.Printf("Auto-started bd daemon")
+		} else {
+			log.Printf("bd daemon already running")
+		}
+	}
+
+	// Ensure daemon cleanup on any exit path (including os.Exit in error handlers)
+	if daemonWeStarted {
+		defer func() {
+			log.Printf("Stopping bd daemon (we started it)...")
+			result := execCommand(GetBeadsDir(), "bd", "daemon", "stop")
+			if result.Err != nil {
+				log.Printf("Warning: failed to stop bd daemon: %v", result.Err)
+			}
+		}()
+	}
 
 	// Start webui server in goroutine (unless --no-webui)
 	webuiErr := make(chan error, 1)
@@ -229,6 +260,7 @@ func runServe(cmd *cobra.Command, args []string) {
 			log.Printf("Warning: webui server did not shut down within timeout")
 		}
 	}
+
 }
 
 // corsMiddleware adds CORS headers to responses.
