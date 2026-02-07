@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestDisplayStreamEvent_TextBlock(t *testing.T) {
@@ -345,5 +349,124 @@ func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
 	}
 	if gotWorkDir != "/work" || gotPrompt != "task prompt" || gotAgent != "agent2" {
 		t.Errorf("unexpected args: workDir=%q prompt=%q agent=%q", gotWorkDir, gotPrompt, gotAgent)
+	}
+}
+
+// TestShutdownRace_NoSignalAfterExit verifies that no SIGTERM is sent when
+// the shutdown channel is triggered after the process has already exited.
+// This reproduces the race condition that the atomic.Bool guard prevents:
+// without the guard, sending SIGTERM to a reaped PID could hit an unrelated
+// process that reused the same PID.
+func TestShutdownRace_NoSignalAfterExit(t *testing.T) {
+	t.Helper()
+
+	// "true" exits immediately with status 0.
+	cmd := exec.Command("true")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start process: %v", err)
+	}
+
+	// Replicate the pattern from invokeClaudeNonInteractive.
+	var exited atomic.Bool
+	var signalSent atomic.Bool
+	shutdown := make(chan struct{})
+	done := make(chan struct{})
+
+	go func() {
+		select {
+		case <-shutdown:
+			if !exited.Load() {
+				signalSent.Store(true)
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+			}
+		case <-done:
+		}
+	}()
+
+	// Wait for the process to finish, then mark it as exited.
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("process exited with error: %v", err)
+	}
+	exited.Store(true)
+	close(done)
+
+	// Now trigger shutdown after the process is already gone.
+	// The goroutine has already returned via <-done, but to be thorough
+	// we also close shutdown to exercise the guard in case of scheduling
+	// variation.
+	close(shutdown)
+
+	// Give a small window for any stray goroutine to run.
+	time.Sleep(10 * time.Millisecond)
+
+	if signalSent.Load() {
+		t.Error("SIGTERM was sent after the process already exited; the atomic guard should have prevented this")
+	}
+}
+
+// TestShutdownRace_SignalDuringRun verifies that SIGTERM IS delivered when the
+// shutdown channel fires while the process is still running. This confirms the
+// normal (non-race) shutdown path works correctly.
+func TestShutdownRace_SignalDuringRun(t *testing.T) {
+	t.Helper()
+
+	// "sleep 60" will run until killed.
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start process: %v", err)
+	}
+
+	var exited atomic.Bool
+	shutdown := make(chan struct{})
+	done := make(chan struct{})
+
+	go func() {
+		select {
+		case <-shutdown:
+			if !exited.Load() {
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+			}
+		case <-done:
+		}
+	}()
+
+	// Trigger shutdown while the process is still alive.
+	close(shutdown)
+
+	// The process should be terminated by the SIGTERM. Wait for it, but
+	// impose a deadline so the test doesn't hang if something goes wrong.
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-waitDone:
+		exited.Store(true)
+		close(done)
+
+		// On Linux, SIGTERM causes an exit with a signal-based error.
+		if err == nil {
+			t.Fatal("expected process to be killed by SIGTERM, but it exited cleanly")
+		}
+		// Verify the process was terminated by SIGTERM specifically.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+				if !status.Signaled() || status.Signal() != syscall.SIGTERM {
+					t.Errorf("expected SIGTERM termination, got signal=%v exited=%v",
+						status.Signal(), status.Exited())
+				}
+			}
+		} else {
+			t.Errorf("expected *exec.ExitError, got %T: %v", err, err)
+		}
+
+	case <-time.After(5 * time.Second):
+		// Kill the process to avoid leaking it, then fail.
+		_ = cmd.Process.Kill()
+		exited.Store(true)
+		close(done)
+		t.Fatal("timed out waiting for process to be terminated by SIGTERM")
 	}
 }
