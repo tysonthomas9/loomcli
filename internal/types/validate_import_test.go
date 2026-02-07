@@ -320,7 +320,3 @@ func TestValidateForImport_EstimatedMinutes(t *testing.T) {
 	}
 }
 
-// Helper functions
-func timePtr(t time.Time) *time.Time {
-	return &t
-}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -11,6 +12,7 @@ import (
 func TestRunLead_InvokesClaude(t *testing.T) {
 	// Setup temp directory as working directory
 	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir) // macOS /var -> /private/var
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })

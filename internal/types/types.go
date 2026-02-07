@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"hash"
+	"sort"
 	"strings"
 	"time"
 )
@@ -149,6 +150,27 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(i.SourceSystem)
 	w.flag(i.Pinned, "pinned")
 	w.flag(i.IsTemplate, "template")
+	w.intPtr(i.EstimatedMinutes)
+	w.timePtr(i.DueAt)
+	w.timePtr(i.DeferUntil)
+	w.str(i.CloseReason)
+	w.str(i.ClosedBySession)
+	w.str(i.Sender)
+	w.str(i.SourceFormula)
+	w.str(i.SourceLocation)
+	w.boolField(i.Ephemeral, "ephemeral")
+	w.str(i.DeletedBy)
+	w.str(i.DeleteReason)
+	w.str(i.OriginalType)
+
+	// Labels (sorted for order-independence)
+	w.sortedStrings(i.Labels)
+
+	// Dependencies (sorted by key for order-independence)
+	w.dependencies(i.Dependencies)
+
+	// Comments (sorted by ID for order-independence)
+	w.comments(i.Comments)
 
 	// Bonded molecules
 	for _, br := range i.BondedFrom {
@@ -176,9 +198,7 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(i.AwaitType)
 	w.str(i.AwaitID)
 	w.duration(i.Timeout)
-	for _, waiter := range i.Waiters {
-		w.str(waiter)
-	}
+	w.sortedStrings(i.Waiters)
 
 	// Slot fields for exclusive access
 	w.str(i.Holder)
@@ -243,6 +263,65 @@ func (w hashFieldWriter) duration(d time.Duration) {
 func (w hashFieldWriter) flag(b bool, label string) {
 	if b {
 		w.h.Write([]byte(label))
+	}
+	w.h.Write([]byte{0})
+}
+
+func (w hashFieldWriter) intPtr(p *int) {
+	if p != nil {
+		w.h.Write([]byte(fmt.Sprintf("set:%d", *p)))
+	}
+	w.h.Write([]byte{0})
+}
+
+func (w hashFieldWriter) timePtr(t *time.Time) {
+	if t != nil {
+		w.h.Write([]byte("set:" + t.Format(time.RFC3339Nano)))
+	}
+	w.h.Write([]byte{0})
+}
+
+func (w hashFieldWriter) boolField(b bool, label string) {
+	if b {
+		w.h.Write([]byte(label))
+	}
+	w.h.Write([]byte{0})
+}
+
+func (w hashFieldWriter) sortedStrings(ss []string) {
+	sorted := make([]string, len(ss))
+	copy(sorted, ss)
+	sort.Strings(sorted)
+	for _, s := range sorted {
+		w.str(s)
+	}
+	w.h.Write([]byte{0})
+}
+
+func (w hashFieldWriter) dependencies(deps []*Dependency) {
+	keys := make([]string, 0, len(deps))
+	for _, d := range deps {
+		keys = append(keys, fmt.Sprintf("%s:%s:%s:%s", d.IssueID, d.DependsOnID, d.Type, d.CreatedBy))
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		w.str(k)
+	}
+	w.h.Write([]byte{0})
+}
+
+func (w hashFieldWriter) comments(comments []*Comment) {
+	type commentKey struct {
+		id  int64
+		key string
+	}
+	keys := make([]commentKey, 0, len(comments))
+	for _, c := range comments {
+		keys = append(keys, commentKey{c.ID, fmt.Sprintf("%d:%s:%s:%s", c.ID, c.IssueID, c.Author, c.Text)})
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].id < keys[j].id })
+	for _, k := range keys {
+		w.str(k.key)
 	}
 	w.h.Write([]byte{0})
 }

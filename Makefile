@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test lint clean install help frontend build-all sync-beads update-beads
+.PHONY: all build test lint clean install help frontend build-all sync-beads update-beads gate hooks
 
 # Default target
 all: build
@@ -61,6 +61,20 @@ update-beads:
 	git subtree pull --prefix=$(BEADS_PREFIX) $(BEADS_REMOTE) $(BEADS_BRANCH) --squash
 	$(MAKE) sync-beads
 
+# Quality gate — build + vet + test (used by pre-push hook)
+gate:
+	@echo "=== Quality Gate ==="
+	@go build ./...
+	@go vet ./...
+	@go test -timeout 3m ./...
+	@echo "=== Quality Gate PASSED ==="
+
+# Install git hooks (pre-push quality gate, applies to all worktrees)
+hooks:
+	@cp scripts/hooks/pre-push .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push
+	@echo "Pre-push hook installed (applies to all worktrees)"
+
 # Show help
 help:
 	@echo "Loomcli Makefile targets:"
@@ -72,5 +86,7 @@ help:
 	@echo "  make build-all - Build frontend + Go binary"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
 	@echo "  make update-beads - Pull latest beads + sync"
+	@echo "  make gate         - Quality gate (build + vet + test)"
+	@echo "  make hooks        - Install git hooks (pre-push gate)"
 	@echo "  make clean        - Remove build artifacts"
 	@echo "  make help         - Show this help message"

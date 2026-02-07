@@ -263,8 +263,10 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 This ensures the task is properly tracked as blocked, not orphaned in error state.
 
 ### Step 9: Complete and Signal
-- Run the full test suite one final time
-- Ensure all tests pass
+- Run the quality gate (MANDATORY - DO NOT SKIP):
+  make gate
+- If it fails, fix ALL failures and re-run until it passes
+- Do NOT commit or push with failing tests
 - Run 'bd close <id> --reason "Completed with tests and code review"'
 - Run 'bd sync'
 - Stage and commit: git add -A && git commit -m "<brief description> (<task-id>)
@@ -497,8 +499,10 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 This ensures the task is properly tracked as blocked, not orphaned in error state.
 
 ### Step 9: Complete and Signal
-- Run the full test suite one final time
-- Ensure all tests pass
+- Run the quality gate (MANDATORY - DO NOT SKIP):
+  make gate
+- If it fails, fix ALL failures and re-run until it passes
+- Do NOT commit or push with failing tests
 - Run 'bd close <id> --reason "Completed with tests and code review"'
 - Run 'bd sync'
 - Stage and commit: git add -A && git commit -m "<brief description> (<task-id>)
