@@ -95,6 +95,12 @@ func NewLogStreamerFixed(fp string) (*LogStreamer, error) {
 // ReadLastNLines reads the last N lines from the file.
 // Returns lines and the starting line number.
 func ReadLastNLines(filepath string, n int) ([]string, int64, error) {
+	return readLastNLinesFromFile(filepath, n, nil)
+}
+
+// readLastNLinesFromFile reads the last N lines. If secureDir is non-nil,
+// uses openLogFileSecure to prevent symlink attacks.
+func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string, int64, error) {
 	if n <= 0 {
 		n = logReadDefaultLines
 	}
@@ -102,7 +108,13 @@ func ReadLastNLines(filepath string, n int) ([]string, int64, error) {
 		n = logReadMaxLines
 	}
 
-	file, err := os.Open(filepath)
+	var file *os.File
+	var err error
+	if secureDir != nil {
+		file, err = openLogFileSecure(filepath, *secureDir)
+	} else {
+		file, err = os.Open(filepath)
+	}
 	if err != nil {
 		return nil, 0, err
 	}
@@ -149,7 +161,11 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startLi
 	flusher.Flush()
 
 	// Open file and seek to position
-	file, err := os.Open(s.logFilePath)
+	logDir, dirErr := getLogDir()
+	if dirErr != nil {
+		return dirErr
+	}
+	file, err := openLogFileSecure(s.logFilePath, logDir)
 	if err != nil {
 		return err
 	}
@@ -245,7 +261,11 @@ var errFileTruncated = fmt.Errorf("file truncated")
 
 // readNewLines reads any new lines from the file and sends them.
 func (s *LogStreamer) readNewLines(w http.ResponseWriter, flusher http.Flusher) error {
-	file, err := os.Open(s.logFilePath)
+	logDir, dirErr := getLogDir()
+	if dirErr != nil {
+		return dirErr
+	}
+	file, err := openLogFileSecure(s.logFilePath, logDir)
 	if err != nil {
 		return err
 	}
@@ -416,6 +436,21 @@ func listTaskPhases(taskID string) ([]string, error) {
 		return nil, err
 	}
 
+	// Verify directory is not a symlink before reading
+	fi, err := os.Lstat(taskDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("refusing to follow symlink for task directory")
+	}
+	if !fi.IsDir() {
+		return nil, fmt.Errorf("task log path is not a directory")
+	}
+
 	entries, err := os.ReadDir(taskDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -439,11 +474,16 @@ func listTaskPhases(taskID string) ([]string, error) {
 
 // fileExists checks if a file exists.
 func fileExists(path string) bool {
-	_, err := os.Stat(path)
+	_, err := os.Lstat(path)
 	return err == nil
 }
 
 // readFileLastLines is a helper that handles the common log reading pattern.
+// It uses openLogFileSecure to prevent symlink TOCTOU attacks.
 func readFileLastLines(filepath string, lines int) ([]string, int64, error) {
-	return ReadLastNLines(filepath, lines)
+	logDir, err := getLogDir()
+	if err != nil {
+		return nil, 0, err
+	}
+	return readLastNLinesFromFile(filepath, lines, &logDir)
 }
