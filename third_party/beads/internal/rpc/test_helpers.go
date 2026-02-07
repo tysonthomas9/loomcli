@@ -30,6 +30,16 @@ func newTestStore(t *testing.T, dbPath string) *sqlite.SQLiteStorage {
 	return store
 }
 
+// newTestRequest creates a Request with the auth token loaded from the socket path.
+// Used by tests that construct raw connections instead of using TryConnect.
+func newTestRequest(t *testing.T, socketPath string, op string) Request {
+	t.Helper()
+	return Request{
+		Operation: op,
+		AuthToken: loadAuthToken(socketPath),
+	}
+}
+
 func newTestSocketPath(t *testing.T) string {
 	t.Helper()
 

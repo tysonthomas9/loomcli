@@ -26,6 +26,11 @@ func (s *Server) Start(_ context.Context) error {
 		return fmt.Errorf("failed to remove old socket: %w", err)
 	}
 
+	// Generate auth token before listening (defense-in-depth)
+	if err := s.generateAuthToken(); err != nil {
+		return fmt.Errorf("failed to generate auth token (set BEADS_RPC_NO_AUTH=1 to disable): %w", err)
+	}
+
 	listener, err := listenRPC(s.socketPath)
 	if err != nil {
 		return fmt.Errorf("failed to initialize RPC listener: %w", err)
@@ -106,6 +111,10 @@ func (s *Server) Stop() error {
 		// Signal cleanup goroutine to stop
 		close(s.shutdownChan)
 
+		// Remove auth token file before closing socket
+		tokenPath := tokenFilePath(s.socketPath)
+		_ = os.Remove(tokenPath)
+
 		// Close storage
 		if s.storage != nil {
 			if closeErr := s.storage.Close(); closeErr != nil {
@@ -152,6 +161,27 @@ func (s *Server) ensureSocketDir() error {
 	return nil
 }
 
+// generateAuthToken creates a random shared-secret token, writes it to disk,
+// and stores it in memory for request validation. Skipped if BEADS_RPC_NO_AUTH=1.
+func (s *Server) generateAuthToken() error {
+	if os.Getenv("BEADS_RPC_NO_AUTH") == "1" {
+		return nil
+	}
+
+	token, err := generateToken()
+	if err != nil {
+		return err
+	}
+
+	tokenPath := tokenFilePath(s.socketPath)
+	if err := writeTokenFile(tokenPath, token); err != nil {
+		return fmt.Errorf("failed to write token file %s: %w", tokenPath, err)
+	}
+
+	s.authToken = token
+	return nil
+}
+
 func (s *Server) removeOldSocket() error {
 	if _, err := os.Stat(s.socketPath); err == nil {
 		// Socket exists - check if it's stale before removing
@@ -168,6 +198,11 @@ func (s *Server) removeOldSocket() error {
 			return err
 		}
 	}
+
+	// Also remove stale token file if present
+	tokenPath := tokenFilePath(s.socketPath)
+	_ = os.Remove(tokenPath) // Best-effort; ignore errors
+
 	return nil
 }
 
