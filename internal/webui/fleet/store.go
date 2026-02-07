@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -78,6 +79,16 @@ func NewStore(cfg RedisConfig, logger *slog.Logger) (*Store, error) {
 		logger = slog.Default()
 	}
 
+	// Resolve password: YAML config > FLEET_REDIS_PASSWORD > LOOM_REDIS_PASSWORD
+	password := cfg.Password
+	if password == "" {
+		if p := os.Getenv("FLEET_REDIS_PASSWORD"); p != "" {
+			password = p
+		} else if p := os.Getenv("LOOM_REDIS_PASSWORD"); p != "" {
+			password = p
+		}
+	}
+
 	poolSize := cfg.PoolSize
 	if poolSize == 0 {
 		poolSize = 10
@@ -85,7 +96,7 @@ func NewStore(cfg RedisConfig, logger *slog.Logger) (*Store, error) {
 
 	client := redis.NewClient(&redis.Options{
 		Addr:     cfg.Address,
-		Password: cfg.Password,
+		Password: password,
 		DB:       cfg.DB,
 		PoolSize: poolSize,
 	})

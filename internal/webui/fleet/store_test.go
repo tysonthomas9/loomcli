@@ -482,6 +482,50 @@ func TestValidateID_InvalidChars(t *testing.T) {
 	}
 }
 
+func TestNewStore_PasswordFromEnv(t *testing.T) {
+	mr := miniredis.RunT(t)
+
+	t.Run("FLEET_REDIS_PASSWORD takes precedence over LOOM_REDIS_PASSWORD", func(t *testing.T) {
+		t.Setenv("FLEET_REDIS_PASSWORD", "fleet-secret")
+		t.Setenv("LOOM_REDIS_PASSWORD", "loom-secret")
+		store, err := NewStore(RedisConfig{Address: mr.Addr()}, nil)
+		if err != nil {
+			t.Fatalf("NewStore() error = %v", err)
+		}
+		store.Close()
+	})
+
+	t.Run("LOOM_REDIS_PASSWORD used as fallback", func(t *testing.T) {
+		t.Setenv("FLEET_REDIS_PASSWORD", "")
+		t.Setenv("LOOM_REDIS_PASSWORD", "loom-secret")
+		store, err := NewStore(RedisConfig{Address: mr.Addr()}, nil)
+		if err != nil {
+			t.Fatalf("NewStore() error = %v", err)
+		}
+		store.Close()
+	})
+
+	t.Run("YAML password takes precedence over env vars", func(t *testing.T) {
+		t.Setenv("FLEET_REDIS_PASSWORD", "fleet-secret")
+		t.Setenv("LOOM_REDIS_PASSWORD", "loom-secret")
+		store, err := NewStore(RedisConfig{Address: mr.Addr(), Password: "yaml-secret"}, nil)
+		if err != nil {
+			t.Fatalf("NewStore() error = %v", err)
+		}
+		store.Close()
+	})
+
+	t.Run("no password when all sources empty", func(t *testing.T) {
+		t.Setenv("FLEET_REDIS_PASSWORD", "")
+		t.Setenv("LOOM_REDIS_PASSWORD", "")
+		store, err := NewStore(RedisConfig{Address: mr.Addr()}, nil)
+		if err != nil {
+			t.Fatalf("NewStore() error = %v", err)
+		}
+		store.Close()
+	})
+}
+
 func TestClose(t *testing.T) {
 	mr := miniredis.RunT(t)
 	store, err := NewStore(RedisConfig{Address: mr.Addr()}, nil)
