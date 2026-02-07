@@ -21,7 +21,7 @@ type rotatingWriter struct {
 // in append mode. It initializes the current size from the existing file.
 func newRotatingWriter(path string, maxSize int64, maxBackups int) (*rotatingWriter, error) {
 	// #nosec G304 - controlled path from CLI flags
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file for rotating writer: %w", err)
 	}
@@ -87,7 +87,7 @@ func (w *rotatingWriter) rotate() error {
 
 	// Open fresh file at the original path
 	// #nosec G304 - controlled path from CLI flags
-	f, err := os.OpenFile(w.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(w.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to open new file after rotation: %w", err)
 	}

@@ -515,7 +515,7 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	}
 	logDir := filepath.Join(homeDir, ".loom", "logs")
 	agentLogDir := filepath.Join(logDir, "agents")
-	if err := os.MkdirAll(agentLogDir, 0755); err != nil {
+	if err := os.MkdirAll(agentLogDir, 0700); err != nil {
 		fmt.Printf("[auto] Warning: could not create log directory: %v\n", err)
 	}
 	logFile := filepath.Join(agentLogDir, fmt.Sprintf("%s.log", opts.AgentName))

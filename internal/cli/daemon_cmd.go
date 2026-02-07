@@ -131,7 +131,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: creating PID directory: %v\n", err)
 		os.Exit(1)
 	}
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0700); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating log directory: %v\n", err)
 		os.Exit(1)
 	}

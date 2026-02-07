@@ -557,6 +557,55 @@ func TestWrite_RotatesTaskLogWhenMaxSizeExceeded(t *testing.T) {
 	}
 }
 
+func TestLogFilePermissions(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0700); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Check agent log file permissions
+	agentLogPath := filepath.Join(tmpDir, "agents", "test-agent.log")
+	info, err := os.Stat(agentLogPath)
+	if err != nil {
+		t.Fatalf("stat agent log: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("agent log permissions = %o, want 0600", perm)
+	}
+
+	// Set task to create task log
+	if err := router.SetTask("task-123", "planning"); err != nil {
+		t.Fatalf("SetTask failed: %v", err)
+	}
+
+	// Check task directory permissions
+	taskDir := filepath.Join(tmpDir, "tasks", "task-123")
+	dirInfo, err := os.Stat(taskDir)
+	if err != nil {
+		t.Fatalf("stat task dir: %v", err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0700 {
+		t.Errorf("task dir permissions = %o, want 0700", perm)
+	}
+
+	// Check task log file permissions
+	taskLogPath := filepath.Join(taskDir, "planning.log")
+	taskInfo, err := os.Stat(taskLogPath)
+	if err != nil {
+		t.Fatalf("stat task log: %v", err)
+	}
+	if perm := taskInfo.Mode().Perm(); perm != 0600 {
+		t.Errorf("task log permissions = %o, want 0600", perm)
+	}
+}
+
 func TestClose_FlushesAllBuffers(t *testing.T) {
 	tmpDir := t.TempDir()
 

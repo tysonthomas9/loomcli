@@ -97,7 +97,7 @@ func (r *LogRouter) SetTask(taskID, phase string) error {
 
 	// Create task log directory
 	taskLogDir := filepath.Join(r.baseDir, "tasks", taskID)
-	if err := os.MkdirAll(taskLogDir, 0755); err != nil {
+	if err := os.MkdirAll(taskLogDir, 0700); err != nil {
 		return fmt.Errorf("failed to create task log directory: %w", err)
 	}
 

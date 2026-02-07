@@ -44,7 +44,7 @@ func main() {
 
 	// Create base directories
 	agentLogDir := filepath.Join(*baseDir, "agents")
-	if err := os.MkdirAll(agentLogDir, 0755); err != nil {
+	if err := os.MkdirAll(agentLogDir, 0700); err != nil {
 		fmt.Fprintf(os.Stderr, "error creating agent log directory: %v\n", err)
 		os.Exit(1)
 	}
