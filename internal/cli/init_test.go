@@ -576,6 +576,111 @@ func TestCreateSingleWorktree_PathTraversal(t *testing.T) {
 	}
 }
 
+func TestValidateNewWorktreeName(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+		errMsg  string // substring expected in error message
+	}{
+		// Valid names
+		{"falcon", false, ""},
+		{"nova", false, ""},
+		{"my-agent", false, ""},
+		{"agent_1", false, ""},
+		{"Agent2", false, ""},
+		{".hidden", false, ""},
+
+		// Invalid — empty
+		{"", true, "cannot be empty"},
+
+		// Invalid — starts with '-'
+		{"-flag", true, "must not start with '-'"},
+		{"--orphan", true, "must not start with '-'"},
+		{"-", true, "must not start with '-'"},
+
+		// Invalid — path traversal dots
+		{"..", true, "must not be '.' or '..'"},
+		{".", true, "must not be '.' or '..'"},
+
+		// Invalid — contains '..' (invalid git branch name)
+		{"a..b", true, "must not contain '..'"},
+		{"foo..bar", true, "must not contain '..'"},
+
+		// Invalid — contains '/' (also catches ../evil)
+		{"../evil", true, "must not contain '..'"},
+		{"foo/bar", true, "invalid characters"},
+
+		// Invalid — special characters
+		{"a b", true, "invalid characters"},
+		{"a:b", true, "invalid characters"},
+		{"a*b", true, "invalid characters"},
+		{"a?b", true, "invalid characters"},
+		{"a<b", true, "invalid characters"},
+		{"a>b", true, "invalid characters"},
+		{"a|b", true, "invalid characters"},
+		{"a\\b", true, "invalid characters"},
+		{"a\"b", true, "invalid characters"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateNewWorktreeName(tc.name)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateNewWorktreeName(%q) error = %v, wantErr %v", tc.name, err, tc.wantErr)
+			}
+			if err != nil && tc.errMsg != "" && !strings.Contains(err.Error(), tc.errMsg) {
+				t.Errorf("validateNewWorktreeName(%q) error = %v, want error containing %q", tc.name, err, tc.errMsg)
+			}
+		})
+	}
+}
+
+func TestCreateSingleWorktree_InvalidName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// No command mock stubs — if git were called, the mock would panic
+	mock := NewCommandMock(t, []CommandStub{})
+	mock.Install()
+
+	invalidNames := []string{"--orphan", "-flag", ".", "a b", "a/b"}
+	for _, name := range invalidNames {
+		t.Run(name, func(t *testing.T) {
+			result := createSingleWorktree(tmpDir, name)
+			if result {
+				t.Errorf("createSingleWorktree(%q, %q) should return false for invalid name", tmpDir, name)
+			}
+		})
+	}
+}
+
+func TestCreateWorktrees_SkipsInvalidNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	os.MkdirAll(worktreesDir, 0755)
+
+	origYes := initYes
+	origNames := initNames
+	initYes = true
+	initNames = "valid,--evil,ok"
+	defer func() { initYes = origYes; initNames = origNames }()
+
+	// Only "valid" and "ok" should trigger git commands; "--evil" is skipped
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "valid"), "-b", "valid"}, Stdout: "Created"},
+		{Name: "git", Args: []string{"worktree", "add", filepath.Join(worktreesDir, "ok"), "-b", "ok"}, Stdout: "Created"},
+	})
+	mock.Install()
+
+	names := createWorktrees(worktreesDir)
+	// Should have 2 created names (valid, ok) — "--evil" skipped
+	if len(names) != 2 {
+		t.Fatalf("createWorktrees returned %d names, want 2", len(names))
+	}
+	if names[0] != "valid" || names[1] != "ok" {
+		t.Errorf("createWorktrees = %v, want [valid ok]", names)
+	}
+}
+
 // --- showSummary tests ---
 
 func TestShowSummary_MultipleNames(t *testing.T) {

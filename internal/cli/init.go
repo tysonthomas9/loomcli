@@ -367,6 +367,28 @@ func listExistingWorktrees(dir string) []string {
 	return names
 }
 
+// validateNewWorktreeName checks that a worktree name is safe for creation.
+// This is stricter than validateWorktreeName (which only blocks path traversal)
+// because new worktree names must also avoid git flag injection and invalid characters.
+func validateNewWorktreeName(name string) error {
+	if name == "" {
+		return fmt.Errorf("worktree name cannot be empty")
+	}
+	if strings.HasPrefix(name, "-") {
+		return fmt.Errorf("invalid worktree name %q: must not start with '-'", name)
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("invalid worktree name %q: must not be '.' or '..'", name)
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("invalid worktree name %q: must not contain '..'", name)
+	}
+	if strings.ContainsAny(name, "/ \\:*?\"<>|") {
+		return fmt.Errorf("invalid worktree name %q: contains invalid characters", name)
+	}
+	return nil
+}
+
 // parseNames splits comma-separated names
 func parseNames(names string) []string {
 	parts := strings.Split(names, ",")
@@ -433,19 +455,13 @@ func promptForWorktreeNames(existing []string) []string {
 			name := promptString(fmt.Sprintf("Name for worktree %d", i+1), defaultName)
 			name = strings.TrimSpace(name)
 
-			if name == "" {
-				fmt.Println("  Name cannot be empty, try again")
+			if err := validateNewWorktreeName(name); err != nil {
+				fmt.Printf("  %v, try again\n", err)
 				continue
 			}
 
 			if existingSet[name] {
 				fmt.Printf("  '%s' already exists, choose a different name\n", name)
-				continue
-			}
-
-			// Check for invalid characters
-			if strings.ContainsAny(name, "/ \\:*?\"<>|") {
-				fmt.Println("  Name contains invalid characters, try again")
 				continue
 			}
 
@@ -461,8 +477,8 @@ func promptForWorktreeNames(existing []string) []string {
 
 // createSingleWorktree creates one worktree
 func createSingleWorktree(worktreesDir, name string) bool {
-	if err := validateWorktreeName(name); err != nil {
-		fmt.Fprintf(os.Stderr, "  ✗ %v\n", err)
+	if err := validateNewWorktreeName(name); err != nil {
+		fmt.Fprintf(os.Stderr, "  ✗ Skipping worktree: %v\n", err)
 		return false
 	}
 	worktreePath := filepath.Join(worktreesDir, name)
