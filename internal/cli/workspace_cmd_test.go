@@ -258,6 +258,44 @@ func TestWorkspaceCreate_EmptyRepos(t *testing.T) {
 	// runWorkspaceCreate checks: len(repoPaths) == 1 && repoPaths[0] == "" -> os.Exit(1)
 }
 
+func TestWorkspaceCreate_InvalidBranch(t *testing.T) {
+	resetWorkspaceFlags(t)
+
+	// Combined validation: isValidWorkspaceName(branch) && !strings.HasPrefix(branch, "-")
+	// This rejects names with invalid chars, empty names, and names starting with "-".
+	isValid := func(name string) bool {
+		return isValidWorkspaceName(name) && !strings.HasPrefix(name, "-")
+	}
+
+	tests := []struct {
+		branch string
+		valid  bool
+	}{
+		// Invalid: git argument injection and special characters
+		{"--orphan", false},
+		{"-b", false},
+		{"--detach", false},
+		{"-flag", false},
+		{"branch with spaces", false},
+		{"branch..name", false},
+		{"branch:name", false},
+
+		// Valid: normal branch names
+		{"feature-x", true},
+		{"my_branch", true},
+		{"v2", true},
+		{"hotfix-123", true},
+		{"ABC", true},
+	}
+
+	for _, tt := range tests {
+		got := isValid(tt.branch)
+		if got != tt.valid {
+			t.Errorf("isValidWorkspaceName(%q) && !HasPrefix(-) = %v, want %v", tt.branch, got, tt.valid)
+		}
+	}
+}
+
 func TestWorkspaceList_NoWorkspaces(t *testing.T) {
 	resetWorkspaceFlags(t)
 

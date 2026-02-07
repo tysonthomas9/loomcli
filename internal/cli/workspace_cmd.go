@@ -121,6 +121,12 @@ func runWorkspaceCreate(cmd *cobra.Command, args []string) {
 		branch = wsName
 	}
 
+	// Validate branch name (wsName is already validated above, but --branch flag is not)
+	if !isValidWorkspaceName(branch) || strings.HasPrefix(branch, "-") {
+		fmt.Fprintf(os.Stderr, "Error: branch name %q is invalid. Must contain only alphanumeric, hyphens, and underscores, and must not start with a dash.\n", branch)
+		os.Exit(1)
+	}
+
 	// Parse repos
 	repoPaths := strings.Split(wsCreateRepos, ",")
 	if len(repoPaths) == 0 || (len(repoPaths) == 1 && repoPaths[0] == "") {
