@@ -64,10 +64,11 @@ func handleGetAgentLog() http.HandlerFunc {
 		// Get log file path
 		logPath, err := getAgentLogPath(agentName)
 		if err != nil {
+			log.Printf("Agent log path error for %s: %v", agentName, err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(LogContentResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "failed to resolve log path",
 			}); err != nil {
 				log.Printf("Failed to encode log response: %v", err)
 			}
@@ -89,10 +90,11 @@ func handleGetAgentLog() http.HandlerFunc {
 		// Read log content
 		content, lineCount, err := readFileLastLines(logPath, lines)
 		if err != nil {
+			log.Printf("Failed to read agent log for %s: %v", agentName, err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(LogContentResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "failed to read log file",
 			}); err != nil {
 				log.Printf("Failed to encode log response: %v", err)
 			}
@@ -148,11 +150,12 @@ func handleAgentLogStream() http.HandlerFunc {
 		// Get log file path
 		logPath, err := getAgentLogPath(agentName)
 		if err != nil {
+			log.Printf("Agent log path error for %s: %v", agentName, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(LogContentResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "failed to resolve log path",
 			}); err != nil {
 				log.Printf("Failed to encode log response: %v", err)
 			}
@@ -183,11 +186,12 @@ func handleAgentLogStream() http.HandlerFunc {
 		// Create log streamer
 		streamer, err := NewLogStreamerFixed(logPath)
 		if err != nil {
+			log.Printf("Log streamer error for agent %s: %v", agentName, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(LogContentResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "failed to open log stream",
 			}); err != nil {
 				log.Printf("Failed to encode log response: %v", err)
 			}
@@ -237,10 +241,11 @@ func handleListTaskPhases() http.HandlerFunc {
 		// List available phases
 		phases, err := listTaskPhases(taskID)
 		if err != nil {
+			log.Printf("Failed to list task phases for %s: %v", taskID, err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(TaskPhasesResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "failed to list task phases",
 			}); err != nil {
 				log.Printf("Failed to encode log response: %v", err)
 			}
@@ -331,10 +336,11 @@ func handleGetTaskLog() http.HandlerFunc {
 		// Get log file path
 		logPath, err := getTaskLogPath(taskID, phase)
 		if err != nil {
+			log.Printf("Task log path error for %s/%s: %v", taskID, phase, err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(LogContentResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "failed to resolve log path",
 			}); err != nil {
 				log.Printf("Failed to encode log response: %v", err)
 			}
@@ -356,10 +362,11 @@ func handleGetTaskLog() http.HandlerFunc {
 		// Read log content
 		content, lineCount, err := readFileLastLines(logPath, lines)
 		if err != nil {
+			log.Printf("Failed to read task log for %s/%s: %v", taskID, phase, err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(LogContentResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "failed to read log file",
 			}); err != nil {
 				log.Printf("Failed to encode log response: %v", err)
 			}
@@ -442,11 +449,12 @@ func handleTaskLogStream() http.HandlerFunc {
 		// Get log file path
 		logPath, err := getTaskLogPath(taskID, phase)
 		if err != nil {
+			log.Printf("Task log path error for %s/%s: %v", taskID, phase, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(LogContentResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "failed to resolve log path",
 			}); err != nil {
 				log.Printf("Failed to encode log response: %v", err)
 			}
@@ -477,11 +485,12 @@ func handleTaskLogStream() http.HandlerFunc {
 		// Create log streamer
 		streamer, err := NewLogStreamerFixed(logPath)
 		if err != nil {
+			log.Printf("Log streamer error for task %s/%s: %v", taskID, phase, err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(LogContentResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "failed to open log stream",
 			}); err != nil {
 				log.Printf("Failed to encode log response: %v", err)
 			}

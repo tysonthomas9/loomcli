@@ -247,7 +247,8 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 				writeErrorResponse(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
 				return
 			}
-			writeErrorResponse(w, http.StatusInternalServerError, err.Error())
+			log.Printf("RPC error in handleGetIssue for %s: %v", issueID, err)
+			writeErrorResponse(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 
@@ -415,10 +416,11 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
+			log.Printf("Pool error in handleReady: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(ReadyResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "daemon not available",
 			}); err != nil {
 				log.Printf("Failed to encode ready response: %v", err)
 			}
@@ -429,10 +431,11 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 		// Execute Ready RPC call
 		resp, err := client.Ready(args)
 		if err != nil {
+			log.Printf("RPC error in handleReady: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(ReadyResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode ready response: %v", err)
 			}
@@ -619,10 +622,11 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
+			log.Printf("Pool error in handleBlocked: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(BlockedResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "daemon not available",
 			}); err != nil {
 				log.Printf("Failed to encode blocked response: %v", err)
 			}
@@ -633,10 +637,11 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 		// Execute Blocked RPC call
 		resp, err := client.Blocked(args)
 		if err != nil {
+			log.Printf("RPC error in handleBlocked: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(BlockedResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode blocked response: %v", err)
 			}
@@ -727,10 +732,11 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				httpStatus = http.StatusGatewayTimeout
 			}
+			log.Printf("Pool error in handleGraph: %v", err)
 			w.WriteHeader(httpStatus)
 			if err := json.NewEncoder(w).Encode(GraphResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "daemon not available",
 			}); err != nil {
 				log.Printf("Failed to encode graph response: %v", err)
 			}
@@ -755,10 +761,11 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 		// Single RPC call replaces List + N×Show
 		result, err := client.GetGraphData(graphArgs)
 		if err != nil {
+			log.Printf("RPC error in handleGraph: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(GraphResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode graph response: %v", err)
 			}
@@ -1135,10 +1142,11 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 				}
 				return
 			}
+			log.Printf("Invalid request body in handlePatchIssue: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid request body: %v", err),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode patch response: %v", err)
 			}
@@ -1155,10 +1163,11 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
+			log.Printf("Pool error in handlePatchIssue: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "daemon not available",
 			}); err != nil {
 				log.Printf("Failed to encode patch response: %v", err)
 			}
@@ -1197,10 +1206,11 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			if strings.Contains(errMsg, "not found") {
 				status = http.StatusNotFound
 			}
+			log.Printf("RPC error in handlePatchIssue for %s: %v", issueID, err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode patch response: %v", err)
 			}
@@ -1385,7 +1395,8 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 				writeIssuesError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)", "REQUEST_TOO_LARGE")
 				return
 			}
-			writeIssuesError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error(), "INVALID_JSON")
+			log.Printf("Invalid JSON body in handleCreateIssue: %v", err)
+			writeIssuesError(w, http.StatusBadRequest, "invalid request body", "INVALID_JSON")
 			return
 		}
 
@@ -1420,7 +1431,7 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 		resp, err := client.Create(createArgs)
 		if err != nil {
 			log.Printf("RPC error: %v", err)
-			writeIssuesError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error(), "RPC_ERROR")
+			writeIssuesError(w, http.StatusInternalServerError, "failed to create issue", "RPC_ERROR")
 			return
 		}
 
@@ -1472,7 +1483,8 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 					writeErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
 					return
 				}
-				writeErrorResponse(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+				log.Printf("Invalid request body in handleCloseIssue: %v", err)
+				writeErrorResponse(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
 		}
@@ -1520,7 +1532,8 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 				writeErrorResponse(w, http.StatusConflict, err.Error())
 				return
 			}
-			writeErrorResponse(w, http.StatusInternalServerError, err.Error())
+			log.Printf("RPC error in handleCloseIssue for %s: %v", issueID, err)
+			writeErrorResponse(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 
@@ -1637,10 +1650,11 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 				}
 				return
 			}
+			log.Printf("Invalid request body in handleAddDependency: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(DependencyResponse{
 				Success: false,
-				Error:   "invalid request body: " + err.Error(),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode add dependency response: %v", err)
 			}
@@ -1715,10 +1729,11 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 			} else if strings.Contains(err.Error(), "already exists") {
 				status = http.StatusConflict
 			}
+			log.Printf("RPC error in handleAddDependency: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(DependencyResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode add dependency response: %v", err)
 			}
@@ -1837,10 +1852,11 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 			if strings.Contains(err.Error(), "not found") {
 				status = http.StatusNotFound
 			}
+			log.Printf("RPC error in handleRemoveDependency: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(DependencyResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode remove dependency response: %v", err)
 			}

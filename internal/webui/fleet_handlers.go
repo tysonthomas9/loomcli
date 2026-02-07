@@ -133,10 +133,11 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 				}
 				return
 			}
+			log.Printf("Invalid request body in handleFleetRegister: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid request body: %v", err),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode fleet register response: %v", err)
 			}
@@ -287,10 +288,11 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 				}
 				return
 			}
+			log.Printf("Invalid request body in handleFleetDone: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid request body: %v", err),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode fleet done response: %v", err)
 			}
@@ -492,10 +494,11 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter) http.HandlerFunc {
 					}
 					return
 				}
+				log.Printf("Invalid request body in handleFleetClaim: %v", err)
 				w.WriteHeader(http.StatusBadRequest)
 				if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 					Success: false,
-					Error:   fmt.Sprintf("invalid request body: %v", err),
+					Error:   "invalid request body",
 				}); err != nil {
 					log.Printf("Failed to encode fleet claim response: %v", err)
 				}
@@ -543,10 +546,11 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter) http.HandlerFunc {
 
 		resp, err := client.Ready(readyArgs)
 		if err != nil {
+			log.Printf("RPC error in handleFleetClaim (ready): %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode fleet claim response: %v", err)
 			}
@@ -611,10 +615,11 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 		if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound
 		}
+		log.Printf("RPC error in claimSpecificIssue for %s: %v", issueID, err)
 		w.WriteHeader(status)
 		if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 			Success: false,
-			Error:   err.Error(),
+			Error:   "internal server error",
 		}); err != nil {
 			log.Printf("Failed to encode fleet claim response: %v", err)
 		}
@@ -763,10 +768,11 @@ func handleFleetHeartbeatWithStore(store heartbeatStore) http.HandlerFunc {
 				}
 				return
 			}
+			log.Printf("Invalid request body in handleFleetHeartbeat: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid request body: %v", err),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode heartbeat response: %v", err)
 			}

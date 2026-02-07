@@ -534,8 +534,8 @@ func TestHandleGetIssue_InternalError(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if response["error"] != "database connection failed" {
-		t.Errorf("error = %q, want %q", response["error"], "database connection failed")
+	if response["error"] != "internal server error" {
+		t.Errorf("error = %q, want %q", response["error"], "internal server error")
 	}
 }
 
@@ -2335,8 +2335,8 @@ func TestHandleCreateIssue_MalformedJSON(t *testing.T) {
 	if resp.Code != "INVALID_JSON" {
 		t.Errorf("code = %q, want %q", resp.Code, "INVALID_JSON")
 	}
-	if !containsSubstring(resp.Error, "invalid JSON body") {
-		t.Errorf("error = %q, expected to contain 'invalid JSON body'", resp.Error)
+	if !containsSubstring(resp.Error, "invalid request body") {
+		t.Errorf("error = %q, expected to contain 'invalid request body'", resp.Error)
 	}
 }
 
@@ -3218,8 +3218,8 @@ func TestHandlePatchIssue_NotFound(t *testing.T) {
 	if resp.Success {
 		t.Error("expected success=false")
 	}
-	if !strings.Contains(resp.Error, "not found") {
-		t.Errorf("error = %q, expected to contain %q", resp.Error, "not found")
+	if !strings.Contains(resp.Error, "internal server error") {
+		t.Errorf("error = %q, expected to contain %q", resp.Error, "internal server error")
 	}
 }
 
@@ -3301,8 +3301,8 @@ func TestHandlePatchIssue_InternalError(t *testing.T) {
 	if resp.Success {
 		t.Error("expected success=false")
 	}
-	if !strings.Contains(resp.Error, "database connection failed") {
-		t.Errorf("error = %q, expected to contain %q", resp.Error, "database connection failed")
+	if !strings.Contains(resp.Error, "internal server error") {
+		t.Errorf("error = %q, expected to contain %q", resp.Error, "internal server error")
 	}
 }
 
@@ -3883,8 +3883,8 @@ func TestHandlePatchIssue_PoolGetServiceUnavailable(t *testing.T) {
 	if resp.Success {
 		t.Error("expected success=false")
 	}
-	if resp.Error != "pool exhausted" {
-		t.Errorf("error = %q, want %q", resp.Error, "pool exhausted")
+	if resp.Error != "daemon not available" {
+		t.Errorf("error = %q, want %q", resp.Error, "daemon not available")
 	}
 }
 
@@ -4042,8 +4042,8 @@ func TestHandleCloseIssue_InvalidBody(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if !strings.HasPrefix(resp["error"], "invalid request body:") {
-		t.Errorf("error = %q, want prefix %q", resp["error"], "invalid request body:")
+	if resp["error"] != "invalid request body" {
+		t.Errorf("error = %q, want %q", resp["error"], "invalid request body")
 	}
 }
 
@@ -4625,8 +4625,8 @@ func TestHandleGraph_RPCError(t *testing.T) {
 	if resp.Success {
 		t.Error("Success = true, want false")
 	}
-	if !containsSubstring(resp.Error, "rpc error") {
-		t.Errorf("Error = %q, expected to contain 'rpc error'", resp.Error)
+	if !containsSubstring(resp.Error, "internal server error") {
+		t.Errorf("Error = %q, expected to contain 'internal server error'", resp.Error)
 	}
 }
 
@@ -4665,8 +4665,8 @@ func TestHandleGraph_DaemonError(t *testing.T) {
 	if resp.Success {
 		t.Error("Success = true, want false")
 	}
-	if !containsSubstring(resp.Error, "database locked") {
-		t.Errorf("Error = %q, want to contain %q", resp.Error, "database locked")
+	if !containsSubstring(resp.Error, "internal server error") {
+		t.Errorf("Error = %q, want to contain %q", resp.Error, "internal server error")
 	}
 }
 
@@ -5756,8 +5756,8 @@ func TestHandleBlocked_RPCError(t *testing.T) {
 		t.Error("Success = true, want false")
 	}
 
-	if !strings.Contains(resp.Error, "rpc error") {
-		t.Errorf("Error = %q, expected to contain 'rpc error'", resp.Error)
+	if !strings.Contains(resp.Error, "internal server error") {
+		t.Errorf("Error = %q, expected to contain 'internal server error'", resp.Error)
 	}
 }
 
