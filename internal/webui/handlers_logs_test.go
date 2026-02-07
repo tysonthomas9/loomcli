@@ -2,6 +2,7 @@ package webui
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -680,6 +681,201 @@ func TestReadLastNLines_FileNotExists(t *testing.T) {
 	_, _, err := ReadLastNLines("/nonexistent/path/to/file.log", 100)
 	if err == nil {
 		t.Error("ReadLastNLines() expected error for non-existent file, got nil")
+	}
+}
+
+// TestReadLastNLines_NoTrailingNewline tests reading from a file with no trailing newline.
+func TestReadLastNLines_NoTrailingNewline(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "notrail.log")
+	content := "line1\nline2\nline3"
+	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	lines, startLine, err := ReadLastNLines(logFile, 2)
+	if err != nil {
+		t.Fatalf("ReadLastNLines() error = %v", err)
+	}
+
+	if len(lines) != 2 {
+		t.Errorf("len(lines) = %d, want 2", len(lines))
+	}
+	if startLine != 2 {
+		t.Errorf("startLine = %d, want 2", startLine)
+	}
+	if len(lines) >= 1 && lines[0] != "line2" {
+		t.Errorf("lines[0] = %q, want %q", lines[0], "line2")
+	}
+	if len(lines) >= 2 && lines[1] != "line3" {
+		t.Errorf("lines[1] = %q, want %q", lines[1], "line3")
+	}
+}
+
+// TestReadLastNLines_SingleLine tests reading from a file with exactly one line (trailing newline).
+func TestReadLastNLines_SingleLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "single.log")
+	content := "hello\n"
+	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	lines, startLine, err := ReadLastNLines(logFile, 100)
+	if err != nil {
+		t.Fatalf("ReadLastNLines() error = %v", err)
+	}
+
+	if len(lines) != 1 {
+		t.Errorf("len(lines) = %d, want 1", len(lines))
+	}
+	if startLine != 1 {
+		t.Errorf("startLine = %d, want 1", startLine)
+	}
+	if len(lines) >= 1 && lines[0] != "hello" {
+		t.Errorf("lines[0] = %q, want %q", lines[0], "hello")
+	}
+}
+
+// TestReadLastNLines_SingleLineNoNewline tests reading from a file with one line and no trailing newline.
+func TestReadLastNLines_SingleLineNoNewline(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "singlenolf.log")
+	content := "hello"
+	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	lines, startLine, err := ReadLastNLines(logFile, 100)
+	if err != nil {
+		t.Fatalf("ReadLastNLines() error = %v", err)
+	}
+
+	if len(lines) != 1 {
+		t.Errorf("len(lines) = %d, want 1", len(lines))
+	}
+	if startLine != 1 {
+		t.Errorf("startLine = %d, want 1", startLine)
+	}
+	if len(lines) >= 1 && lines[0] != "hello" {
+		t.Errorf("lines[0] = %q, want %q", lines[0], "hello")
+	}
+}
+
+// TestReadLastNLines_LargeFile tests reading last N lines from a large file with 100,000 lines.
+func TestReadLastNLines_LargeFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "large.log")
+
+	// Create a file with 100,000 lines
+	var builder strings.Builder
+	for i := 1; i <= 100000; i++ {
+		builder.WriteString("line " + itoa(i) + "\n")
+	}
+	if err := os.WriteFile(logFile, []byte(builder.String()), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// Request last 200 lines
+	lines, startLine, err := ReadLastNLines(logFile, 200)
+	if err != nil {
+		t.Fatalf("ReadLastNLines() error = %v", err)
+	}
+
+	if len(lines) != 200 {
+		t.Errorf("len(lines) = %d, want 200", len(lines))
+	}
+	if startLine != 99801 {
+		t.Errorf("startLine = %d, want 99801", startLine)
+	}
+	if len(lines) >= 1 && lines[0] != "line 99801" {
+		t.Errorf("lines[0] = %q, want %q", lines[0], "line 99801")
+	}
+	if len(lines) >= 200 && lines[199] != "line 100000" {
+		t.Errorf("lines[199] = %q, want %q", lines[199], "line 100000")
+	}
+
+	// Verify a few lines in the middle
+	if len(lines) >= 100 && lines[99] != "line 99900" {
+		t.Errorf("lines[99] = %q, want %q", lines[99], "line 99900")
+	}
+}
+
+// TestReadLastNLines_ExactBoundary tests reading when the last N lines start exactly at
+// a 32KB (readChunkSize) boundary. This verifies the backward seek logic handles the
+// boundary condition correctly.
+func TestReadLastNLines_ExactBoundary(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "boundary.log")
+
+	// readChunkSize is 32 * 1024 = 32768 bytes.
+	// Strategy: create a file where the first section is exactly 32768 bytes,
+	// then append known "tail" lines after that boundary.
+	//
+	// Use fixed-length lines of 64 bytes each (including the newline).
+	// 32768 / 64 = 512 lines will fill exactly one chunk.
+	// Then we append 10 more tail lines, and request exactly 10.
+	// The backward scan should find all 10 newlines in the second chunk and
+	// set readOffset to exactly 32768.
+	const lineLen = 64 // including newline
+	const chunkSize = 32 * 1024
+	const prefixLines = chunkSize / lineLen // 512 lines
+	const tailLines = 10
+
+	var builder strings.Builder
+	// Write prefix lines that fill exactly 32768 bytes.
+	// Each line: "PPPP-NNNN-" + padding + "\n" = 64 bytes
+	for i := 0; i < prefixLines; i++ {
+		line := fmt.Sprintf("PPPP-%04d-", i)
+		// Pad to lineLen-1 chars, then add newline
+		for len(line) < lineLen-1 {
+			line += "X"
+		}
+		builder.WriteString(line + "\n")
+	}
+
+	// Verify prefix section is exactly chunkSize bytes
+	if builder.Len() != chunkSize {
+		t.Fatalf("prefix section is %d bytes, want %d", builder.Len(), chunkSize)
+	}
+
+	// Write tail lines with the same fixed length
+	for i := 0; i < tailLines; i++ {
+		line := fmt.Sprintf("TAIL-%04d-", i)
+		for len(line) < lineLen-1 {
+			line += "Y"
+		}
+		builder.WriteString(line + "\n")
+	}
+
+	if err := os.WriteFile(logFile, []byte(builder.String()), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	lines, startLine, err := ReadLastNLines(logFile, tailLines)
+	if err != nil {
+		t.Fatalf("ReadLastNLines() error = %v", err)
+	}
+
+	if len(lines) != tailLines {
+		t.Errorf("len(lines) = %d, want %d", len(lines), tailLines)
+	}
+
+	// startLine should be prefixLines + 1 = 513
+	expectedStartLine := int64(prefixLines + 1)
+	if startLine != expectedStartLine {
+		t.Errorf("startLine = %d, want %d", startLine, expectedStartLine)
+	}
+
+	// Verify each tail line
+	for i := 0; i < tailLines; i++ {
+		expected := fmt.Sprintf("TAIL-%04d-", i)
+		for len(expected) < lineLen-1 {
+			expected += "Y"
+		}
+		if i < len(lines) && lines[i] != expected {
+			t.Errorf("lines[%d] = %q, want %q", i, lines[i], expected)
+		}
 	}
 }
 
