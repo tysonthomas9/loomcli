@@ -109,6 +109,23 @@ func NewStoreFromClient(client *redis.Client, logger *slog.Logger) *Store {
 	return s
 }
 
+// NewSigningKeyManagerFromStore creates a SigningKeyManager using the same Redis
+// connection as the Store. This avoids exposing the raw Redis client while allowing
+// the signing key manager to share the Store's connection pool.
+func NewSigningKeyManagerFromStore(s *Store) *SigningKeyManager {
+	return NewSigningKeyManager(s.client, s.logger)
+}
+
+// NewRedisClient creates a bare redis.Client for use outside of the Store.
+// This is useful when only the SigningKeyManager is needed without a full Store.
+func NewRedisClient(addr, password string, db int) *redis.Client {
+	return redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Password: password,
+		DB:       db,
+	})
+}
+
 // Close closes the underlying Redis connection.
 func (s *Store) Close() error {
 	return s.client.Close()

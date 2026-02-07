@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/kv"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 var (
@@ -128,6 +130,42 @@ func runServe(cmd *cobra.Command, args []string) {
 		}()
 	}
 
+	// Provision shared JWT signing key from Redis (if configured) or environment
+	var fleetJWTKey []byte
+	var fleetRedisConfig *fleet.RedisConfig
+	if serveRedisAddr != "" {
+		fleetRedisConfig = &fleet.RedisConfig{Address: serveRedisAddr}
+
+		if envKey := os.Getenv("LOOM_FLEET_JWT_KEY"); envKey != "" {
+			decoded, err := hex.DecodeString(envKey)
+			if err != nil || len(decoded) < 32 {
+				log.Fatalf("LOOM_FLEET_JWT_KEY must be a hex-encoded string of at least 32 bytes")
+			}
+			fleetJWTKey = decoded
+			log.Printf("Using JWT signing key from LOOM_FLEET_JWT_KEY environment variable")
+		} else {
+			// Get or create shared signing key from Redis
+			redisClient := fleet.NewRedisClient(serveRedisAddr, "", 0)
+			mgr := fleet.NewSigningKeyManager(redisClient, nil)
+			key, err := mgr.GetOrCreateSigningKey(ctx)
+			redisClient.Close()
+			if err != nil {
+				log.Printf("Warning: failed to provision JWT signing key from Redis: %v", err)
+				log.Printf("Fleet auth will use an ephemeral key (tokens won't validate on other servers)")
+			} else {
+				fleetJWTKey = key
+				log.Printf("JWT signing key provisioned from Redis")
+			}
+		}
+	} else if envKey := os.Getenv("LOOM_FLEET_JWT_KEY"); envKey != "" {
+		decoded, err := hex.DecodeString(envKey)
+		if err != nil || len(decoded) < 32 {
+			log.Fatalf("LOOM_FLEET_JWT_KEY must be a hex-encoded string of at least 32 bytes")
+		}
+		fleetJWTKey = decoded
+		log.Printf("Using JWT signing key from LOOM_FLEET_JWT_KEY environment variable")
+	}
+
 	// Start webui server in goroutine (unless --no-webui)
 	webuiErr := make(chan error, 1)
 	if !serveNoWebUI {
@@ -135,6 +173,8 @@ func runServe(cmd *cobra.Command, args []string) {
 			cfg := webui.ServerConfig{
 				Port:       serveWebUIPort,
 				SocketPath: serveWebUISocket,
+				FleetRedis: fleetRedisConfig,
+				FleetJWTKey: fleetJWTKey,
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true

@@ -42,6 +42,7 @@ type ServerConfig struct {
 	MaxPortAttempts int
 	TerminalCmd     string
 	FleetRedis      *fleet.RedisConfig
+	FleetJWTKey     []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.
@@ -212,13 +213,20 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		if err != nil {
 			log.Printf("Warning: failed to initialize fleet store: %v", err)
 		} else {
-			// Generate random signing key for JWT (32 bytes for HS256)
-			jwtKey := make([]byte, 32)
-			if _, err := rand.Read(jwtKey); err != nil {
-				log.Printf("Warning: failed to generate JWT signing key: %v", err)
-				fleetStore.Close()
-				fleetStore = nil
+			// Use pre-provisioned key if available, otherwise generate ephemeral key
+			var jwtKey []byte
+			if len(config.FleetJWTKey) > 0 {
+				jwtKey = config.FleetJWTKey
+				log.Printf("Using pre-provisioned JWT signing key")
 			} else {
+				jwtKey = make([]byte, 32)
+				if _, err := rand.Read(jwtKey); err != nil {
+					log.Printf("Warning: failed to generate JWT signing key: %v", err)
+					fleetStore.Close()
+					fleetStore = nil
+				}
+			}
+			if fleetStore != nil {
 				tokenCfg = &TokenConfig{
 					SigningKey: jwtKey,
 					Expiry:    time.Hour,
