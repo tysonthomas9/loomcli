@@ -9,6 +9,11 @@ import (
 )
 
 // Backend is the interface that all AI coding agent backends must implement.
+//
+// Name returns a unique identifier for the backend (e.g. "claude", "codex").
+// InvokeInteractive starts a live, interactive agent session in the terminal.
+// InvokeNonInteractive runs a headless agent session that can be cancelled via
+// the shutdown channel.
 type Backend interface {
 	Name() string
 	InvokeInteractive(workDir, prompt, agentName string) error
