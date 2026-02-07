@@ -46,7 +46,7 @@ func runClaim(cmd *cobra.Command, args []string) {
 	}
 
 	// Get task title from bd show
-	taskTitle := getTaskTitle(taskID)
+	taskTitle := getTaskTitle(cwd, taskID)
 
 	// Update the lock file
 	if err := UpdateLockTask(cwd, taskID, taskTitle); err != nil {
@@ -60,8 +60,8 @@ func runClaim(cmd *cobra.Command, args []string) {
 	}
 }
 
-func getTaskTitle(taskID string) string {
-	result := execCommand(GetBeadsDir(), "bd", "show", taskID, "--json")
+func getTaskTitle(dir string, taskID string) string {
+	result := execCommand(dir, "bd", "show", taskID, "--json")
 	if result.Err != nil {
 		return ""
 	}

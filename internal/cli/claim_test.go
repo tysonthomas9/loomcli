@@ -27,10 +27,10 @@ func TestRunClaim_Success(t *testing.T) {
 	lockData, _ := json.Marshal(lockInfo)
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
-	// Mock bd show command
+	// Mock bd show command - verify it receives the worktree dir (tmpDir), not "."
 	taskJSON := `[{"id": "bd-123", "title": "Test Task Title"}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"show", "bd-123", "--json"}, Stdout: taskJSON},
+		{Dir: tmpDir, Name: "bd", Args: []string{"show", "bd-123", "--json"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -89,9 +89,9 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	lockData, _ := json.Marshal(lockInfo)
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
-	// Mock bd show command with error
+	// Mock bd show command with error - verify it receives the worktree dir (tmpDir)
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"show", "bd-456", "--json"}, Err: errors.New("bd error")},
+		{Dir: tmpDir, Name: "bd", Args: []string{"show", "bd-456", "--json"}, Err: errors.New("bd error")},
 	})
 	mock.Install()
 
@@ -120,11 +120,11 @@ func TestRunClaim_NoTitle(t *testing.T) {
 func TestGetTaskTitle_Success(t *testing.T) {
 	taskJSON := `[{"id": "bd-789", "title": "My Task Title"}]`
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"show", "bd-789", "--json"}, Stdout: taskJSON},
+		{Dir: ".", Name: "bd", Args: []string{"show", "bd-789", "--json"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
-	title := getTaskTitle("bd-789")
+	title := getTaskTitle(".", "bd-789")
 	if title != "My Task Title" {
 		t.Errorf("expected 'My Task Title', got %q", title)
 	}
@@ -132,11 +132,11 @@ func TestGetTaskTitle_Success(t *testing.T) {
 
 func TestGetTaskTitle_BdError(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"show", "bd-error", "--json"}, Err: errors.New("bd error")},
+		{Dir: ".", Name: "bd", Args: []string{"show", "bd-error", "--json"}, Err: errors.New("bd error")},
 	})
 	mock.Install()
 
-	title := getTaskTitle("bd-error")
+	title := getTaskTitle(".", "bd-error")
 	if title != "" {
 		t.Errorf("expected empty string on error, got %q", title)
 	}
@@ -144,11 +144,11 @@ func TestGetTaskTitle_BdError(t *testing.T) {
 
 func TestGetTaskTitle_InvalidJSON(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"show", "bd-bad", "--json"}, Stdout: "not valid json"},
+		{Dir: ".", Name: "bd", Args: []string{"show", "bd-bad", "--json"}, Stdout: "not valid json"},
 	})
 	mock.Install()
 
-	title := getTaskTitle("bd-bad")
+	title := getTaskTitle(".", "bd-bad")
 	if title != "" {
 		t.Errorf("expected empty string on invalid JSON, got %q", title)
 	}
@@ -156,12 +156,34 @@ func TestGetTaskTitle_InvalidJSON(t *testing.T) {
 
 func TestGetTaskTitle_EmptyArray(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"show", "bd-empty", "--json"}, Stdout: "[]"},
+		{Dir: ".", Name: "bd", Args: []string{"show", "bd-empty", "--json"}, Stdout: "[]"},
 	})
 	mock.Install()
 
-	title := getTaskTitle("bd-empty")
+	title := getTaskTitle(".", "bd-empty")
 	if title != "" {
 		t.Errorf("expected empty string on empty array, got %q", title)
+	}
+}
+
+func TestGetTaskTitle_UsesProvidedDir(t *testing.T) {
+	taskJSON := `[{"id": "bd-123", "title": "Dir Test"}]`
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: "/some/specific/path", Name: "bd", Args: []string{"show", "bd-123", "--json"}, Stdout: taskJSON},
+	})
+	mock.Install()
+
+	title := getTaskTitle("/some/specific/path", "bd-123")
+	if title != "Dir Test" {
+		t.Errorf("expected 'Dir Test', got %q", title)
+	}
+
+	// Verify the mock recorded the correct directory
+	calls := mock.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].Dir != "/some/specific/path" {
+		t.Errorf("expected dir '/some/specific/path', got %q", calls[0].Dir)
 	}
 }
