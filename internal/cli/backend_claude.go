@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync/atomic"
 	"syscall"
 )
@@ -37,14 +36,14 @@ var claudeInvoker = defaultClaudeInvoker
 
 // defaultClaudeInvoker is the real Claude invocation
 func defaultClaudeInvoker(workDir, prompt, agentName string) error {
-	cmd := exec.Command("claude", "--dangerously-skip-permissions")
+	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt)
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
 	cmd.Env = env
-	cmd.Stdin = io.MultiReader(strings.NewReader(prompt+"\n"), os.Stdin)
+	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
