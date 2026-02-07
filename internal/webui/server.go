@@ -338,7 +338,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		Handler:           handler,
 		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      0, // Disabled: HTTP/2 streams (SSE, WebSocket) are long-lived; h2c handles flow control
+		WriteTimeout:      30 * time.Second, // 30s default; streaming handlers (SSE, WebSocket) disable per-connection via ResponseController
 		IdleTimeout:       60 * time.Second,
 		BaseContext: func(_ net.Listener) context.Context {
 			return shutdownCtx

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"time"
 
 	"nhooyr.io/websocket"
 )
@@ -140,6 +141,13 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 				log.Printf("Terminal auth failed for session %q: %v", session, err)
 				return
 			}
+		}
+
+		// Disable write timeout for this long-lived WebSocket connection.
+		// Must be called before websocket.Accept which hijacks the connection.
+		rc := http.NewResponseController(w)
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			log.Printf("Terminal WS: failed to disable write deadline: %v", err)
 		}
 
 		// Accept WebSocket upgrade with origin validation.

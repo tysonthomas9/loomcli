@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"time"
 )
 
 // validAgentName matches alphanumeric characters, hyphens, and underscores.
@@ -194,6 +195,12 @@ func handleAgentLogStream() http.HandlerFunc {
 			return
 		}
 		defer streamer.Close()
+
+		// Disable write timeout for this long-lived SSE connection
+		rc := http.NewResponseController(w)
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			log.Printf("Agent log stream: failed to disable write deadline: %v", err)
+		}
 
 		// Stream logs (blocks until context cancelled)
 		if err := streamer.Stream(r.Context(), w, startLine); err != nil {
@@ -488,6 +495,12 @@ func handleTaskLogStream() http.HandlerFunc {
 			return
 		}
 		defer streamer.Close()
+
+		// Disable write timeout for this long-lived SSE connection
+		rc := http.NewResponseController(w)
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			log.Printf("Task log stream: failed to disable write deadline: %v", err)
+		}
 
 		// Stream logs (blocks until context cancelled)
 		if err := streamer.Stream(r.Context(), w, startLine); err != nil {

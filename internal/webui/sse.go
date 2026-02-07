@@ -264,6 +264,12 @@ func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEv
 			return
 		}
 
+		// Disable write timeout for this long-lived SSE connection
+		rc := http.NewResponseController(w)
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			log.Printf("SSE: failed to disable write deadline: %v", err)
+		}
+
 		// Parse Last-Event-ID header for reconnection catch-up
 		var lastSince int64
 		if lastEventID := r.Header.Get("Last-Event-ID"); lastEventID != "" {
