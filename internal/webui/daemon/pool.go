@@ -11,7 +11,8 @@ import (
 
 const (
 	// DefaultPoolSize is the default number of connections in the pool.
-	DefaultPoolSize = 5
+	// Set to 100 to support concurrent fleet worker requests.
+	DefaultPoolSize = 100
 
 	// DefaultPoolTimeout is the default timeout for acquiring a connection from the pool.
 	DefaultPoolTimeout = 10 * time.Second

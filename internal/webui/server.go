@@ -27,7 +27,7 @@ import (
 
 const (
 	defaultPort            = 8080
-	defaultPoolSize        = 5
+	defaultPoolSize        = 100
 	defaultShutdownTimeout = 5 * time.Second
 	defaultMaxPortAttempts = 10
 )
