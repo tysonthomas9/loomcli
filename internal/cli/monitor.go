@@ -216,8 +216,6 @@ func runMonitor(cmd *cobra.Command, args []string) {
 			fmt.Print(fullOutput)
 			fmt.Print("\033[J")     // Clear from cursor to end of screen
 			fmt.Print("\033[?25h")  // Show cursor
-
-			time.Sleep(time.Duration(monitorInterval) * time.Second)
 		}
 	} else {
 		// One-shot mode - show loading message on stderr
