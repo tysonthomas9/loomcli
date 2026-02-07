@@ -312,14 +312,16 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
 	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg)
 
-	// Wrap with middleware chain: security -> auth -> CORS -> mux
+	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
+	// Rate limiting is outermost to reject floods before spending CPU on other middleware.
 	// Auth sits between security headers and CORS so that:
 	// - CORS preflight OPTIONS pass through without auth
 	// - Security headers apply to all responses including 401s
 	corsMiddleware := NewCORSMiddleware(corsConfig)
 	authMiddleware := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
 	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{HSTSEnabled: config.HSTSEnabled})
-	handler := h2c.NewHandler(securityMiddleware(authMiddleware(corsMiddleware(mux))), &http2.Server{})
+	rl, rateLimitMiddleware := NewRateLimitMiddleware(DefaultRateLimitConfig())
+	handler := h2c.NewHandler(rateLimitMiddleware(securityMiddleware(authMiddleware(corsMiddleware(mux)))), &http2.Server{})
 
 	// Create a shutdown context that all request contexts will derive from.
 	// When cancelled, in-flight handlers' r.Context().Done() fires, causing
@@ -375,6 +377,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	log.Println("Server stopped")
 
 	// Stop components in reverse-initialization order now that no handlers are running.
+
+	// Stop rate limiter cleanup goroutine
+	rl.Stop()
 
 	// Stop terminal auth cleanup goroutine
 	if termAuth != nil {
