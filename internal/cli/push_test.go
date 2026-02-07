@@ -102,7 +102,7 @@ func TestPushBranch(t *testing.T) {
 		sourceBranch string
 		targetBranch string
 		outputStubs  []OutputCommandStub // for GitFetch, GitCheckout, GitPull, GitMergeOrigin, GitPush
-		commandStubs []CommandStub       // for IsCleanWorkingTree, HasCommitsBetween, GetConflictedFiles
+		commandStubs []CommandStub       // for HasCommitsBetween, GetConflictedFiles
 		claudeCalled bool                // whether claude should be invoked
 		claudeErr    error               // error from claude invocation
 	}{
@@ -121,7 +121,6 @@ func TestPushBranch(t *testing.T) {
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                     // getStashCount (before)
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                     // getStashCount (after, same = not stashed)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                                   // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 some commit\n"}, // HasCommitsBetween
 			},
 		},
@@ -139,7 +138,6 @@ func TestPushBranch(t *testing.T) {
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // getStashCount (before)
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // getStashCount (after)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: ""}, // no commits
 			},
 		},
@@ -162,9 +160,8 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"checkout", "main"}, Err: errors.New("checkout failed")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (after)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""}, // IsRefCheckedOutInWorktree
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (after)
 			},
 		},
 		{
@@ -178,9 +175,8 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"pull", "origin", "main"}, Err: errors.New("pull failed")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (after)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""}, // IsRefCheckedOutInWorktree
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (after)
 			},
 		},
 		{
@@ -198,7 +194,6 @@ func TestPushBranch(t *testing.T) {
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
 			},
@@ -218,7 +213,6 @@ func TestPushBranch(t *testing.T) {
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""}, // no conflict files
 			},
@@ -238,7 +232,6 @@ func TestPushBranch(t *testing.T) {
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 			},
 		},
@@ -256,7 +249,6 @@ func TestPushBranch(t *testing.T) {
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
 			},
@@ -333,11 +325,9 @@ func TestPushAllWorktrees(t *testing.T) {
 			commandStubs: []CommandStub{
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount before (alpha)
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount after (alpha)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree (alpha)
 				{Name: "git", Args: []string{"log", "main..origin/alpha-branch", "--oneline"}, Stdout: "abc commit\n"},
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount before (beta)
 				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount after (beta)
-				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree (beta)
 				{Name: "git", Args: []string{"log", "main..origin/beta-branch", "--oneline"}, Stdout: "def commit\n"},
 			},
 		},
@@ -449,15 +439,13 @@ func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		// getStashCount + IsRefCheckedOutInWorktree + HasCommitsBetweenRemote for repo-a
+		// getStashCount + HasCommitsBetweenRemote for repo-a
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
-		// getStashCount + IsRefCheckedOutInWorktree + HasCommitsBetweenRemote for repo-b
+		// getStashCount + HasCommitsBetweenRemote for repo-b
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
@@ -513,11 +501,9 @@ func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "develop..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "staging..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
@@ -560,7 +546,6 @@ func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "release..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -601,7 +586,6 @@ func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..upstream/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -637,7 +621,6 @@ func TestRunPush_LegacyMode(t *testing.T) {
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
@@ -685,7 +668,6 @@ func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
@@ -720,7 +702,6 @@ func TestPushBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before, 0)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, 1 = stashed)
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                  // IsRefCheckedOutInWorktree
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
@@ -755,7 +736,6 @@ func TestPushBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                  // IsRefCheckedOutInWorktree
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "dirty.go\n"}, // HasUnmergedFiles returns true
 	}
@@ -821,7 +801,6 @@ func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -891,7 +870,6 @@ func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file.go\n"}, // HasUnmergedFiles
 	}
@@ -927,9 +905,8 @@ func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (before)
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (after, same = not stashed)
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (after, same = not stashed)
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
@@ -1042,25 +1019,22 @@ func TestPushWorkspaceWorktrees_EmptyList(t *testing.T) {
 }
 
 func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {
-	// When IsRefCheckedOutInWorktree returns true, pushBranchInRepo should use
-	// the detached HEAD approach instead of the normal checkout flow.
-	worktreeListOutput := "worktree /home/user/project\nHEAD abc1234\nbranch refs/heads/main\n\n" +
-		"worktree /home/user/worktrees/falcon\nHEAD def5678\nbranch refs/heads/falcon\n\n"
-
+	// When checkout fails because the target branch is checked out in another
+	// worktree, pushBranchInRepo should fall back to the detached HEAD approach.
 	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},                // GitFetchRemote
-		{Args: []string{"stash"}, Err: nil},                         // GitStash (no-op)
-		{Args: nil, Err: nil},                                        // GitCheckoutDetached (origin/main)
-		{Args: nil, Err: nil},                                        // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil},                                        // GitMergeRemote
-		{Args: nil, Err: nil},                                        // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil},                                        // GitDeleteBranch (cleanup temp, deferred)
+		{Args: []string{"fetch", "origin"}, Err: nil},                                                             // GitFetchRemote
+		{Args: []string{"stash"}, Err: nil},                                                                       // GitStash (no-op)
+		{Args: []string{"checkout", "main"}, Err: errors.New("fatal: 'main' is already used by worktree at '/home/user/project'")}, // GitCheckout fails → fallback
+		{Args: nil, Err: nil},                                                                                      // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil},                                                                                      // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: nil},                                                                                      // GitMergeRemote
+		{Args: nil, Err: nil},                                                                                      // GitPushRefspec (temp:main)
+		{Args: nil, Err: nil},                                                                                      // GitDeleteBranch (cleanup temp, deferred)
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (after, same = not stashed)
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: worktreeListOutput},      // IsRefCheckedOutInWorktree -> true
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
 	}
 
@@ -1248,13 +1222,12 @@ func TestPushBranchInRepoDetached_CustomRemote(t *testing.T) {
 }
 
 func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
-	// When IsRefCheckedOutInWorktree returns true in legacy pushBranch,
-	// it should use pushBranchDetached instead of the normal checkout flow.
-	worktreeListOutput := "worktree /home/user/project\nHEAD abc1234\nbranch refs/heads/main\n\n"
-
+	// When checkout fails because the target branch is checked out in another
+	// worktree, pushBranch should fall back to pushBranchDetached.
 	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil}, // GitFetch
-		{Args: []string{"stash"}, Err: nil},           // GitStash (no-op)
+		{Args: []string{"fetch", "origin"}, Err: nil},                                                                             // GitFetch
+		{Args: []string{"stash"}, Err: nil},                                                                                       // GitStash (no-op)
+		{Args: []string{"checkout", "main"}, Err: errors.New("fatal: 'main' is already used by worktree at '/home/user/project'")}, // GitCheckout fails → fallback
 		// Detached flow:
 		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
@@ -1264,10 +1237,9 @@ func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                  // getStashCount (before)
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                  // getStashCount (after)
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: worktreeListOutput},                // IsRefCheckedOutInWorktree -> true for "main"
-		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},   // HasCommitsBetween
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                // getStashCount (after)
+		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"}, // HasCommitsBetween
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1389,6 +1361,82 @@ func TestPushBranchDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 	if !strings.Contains(capturedPrompt, "HEAD:main") {
 		t.Errorf("expected prompt to contain 'HEAD:main' push ref, but it did not")
 	}
+}
+
+func TestPushBranchInRepo_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
+	// When checkout fails with the alternate "already checked out" message
+	// (instead of "already used by worktree"), pushBranchInRepo should still
+	// fall back to the detached HEAD approach.
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},                                                                         // GitFetchRemote
+		{Args: []string{"stash"}, Err: nil},                                                                                   // GitStash (no-op)
+		{Args: []string{"checkout", "main"}, Err: errors.New("fatal: 'main' is already checked out at '/home/user/other'")},   // GitCheckout fails → fallback
+		{Args: nil, Err: nil},                                                                                                  // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil},                                                                                                  // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: nil},                                                                                                  // GitMergeRemote
+		{Args: nil, Err: nil},                                                                                                  // GitPushRefspec (temp:main)
+		{Args: nil, Err: nil},                                                                                                  // GitDeleteBranch (cleanup temp, deferred)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (after, same = not stashed)
+		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	err := pushBranchInRepo("/repo", "feature", "main", "")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPushBranch_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
+	// When checkout fails with the alternate "already checked out" message,
+	// pushBranch should fall back to pushBranchDetached.
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: nil},                                                                             // GitFetch
+		{Args: []string{"stash"}, Err: nil},                                                                                       // GitStash (no-op)
+		{Args: []string{"checkout", "main"}, Err: errors.New("fatal: 'main' is already checked out at '/home/user/other'")},       // GitCheckout fails → fallback
+		// Detached flow:
+		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
+		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
+		{Args: nil, Err: nil}, // GitMergeOrigin
+		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+	}
+
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                // getStashCount (after)
+		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"}, // HasCommitsBetween
+	}
+
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.Install()
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.Install()
+
+	origClaude := claudeInvoker
+	claudeInvoker = func(workDir, prompt, agentName string) error {
+		t.Error("unexpected claude invocation")
+		return nil
+	}
+	t.Cleanup(func() { claudeInvoker = origClaude })
+
+	// pushBranch doesn't return an error - it prints to stderr
+	pushBranch("feature/test", "main")
 }
 
 func TestPushCmd_WorkspaceModeArgsValidation(t *testing.T) {

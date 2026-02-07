@@ -467,27 +467,29 @@ func createSingleWorktree(worktreesDir, name string) bool {
 	}
 	worktreePath := filepath.Join(worktreesDir, name)
 
-	// Check if path already exists
-	if _, err := os.Stat(worktreePath); err == nil {
-		fmt.Printf("→ Worktree '%s' already exists, skipping\n", name)
-		return false
-	}
-
 	fmt.Printf("→ Creating worktree %s on branch %s...\n", name, name)
 
-	// git worktree add <path> -b <branch>
+	// Let git worktree add fail naturally if the path or branch already exists,
+	// avoiding a TOCTOU race between an os.Stat check and the git command.
 	result := execCommand(".", "git", "worktree", "add", worktreePath, "-b", name)
 	if result.Err != nil {
-		// Check if branch already exists
-		if strings.Contains(result.Stderr, "already exists") {
-			// Try without -b (use existing branch)
+		stderr := result.Stderr
+		if strings.Contains(stderr, "already exists") ||
+			strings.Contains(stderr, "already a worktree") {
+			// Branch or path already exists — try without -b (use existing branch)
 			result = execCommand(".", "git", "worktree", "add", worktreePath, name)
 			if result.Err != nil {
+				if strings.Contains(result.Stderr, "already exists") ||
+					strings.Contains(result.Stderr, "already a worktree") ||
+					strings.Contains(result.Stderr, "already checked out") {
+					fmt.Printf("→ Worktree '%s' already exists, skipping\n", name)
+					return false
+				}
 				fmt.Fprintf(os.Stderr, "  ✗ Failed to create worktree: %s\n", strings.TrimSpace(result.Stderr))
 				return false
 			}
 		} else {
-			fmt.Fprintf(os.Stderr, "  ✗ Failed to create worktree: %s\n", strings.TrimSpace(result.Stderr))
+			fmt.Fprintf(os.Stderr, "  ✗ Failed to create worktree: %s\n", strings.TrimSpace(stderr))
 			return false
 		}
 	}
