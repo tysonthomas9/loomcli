@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -476,7 +477,7 @@ func TestGitMerge(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
-				Args: []string{"merge", tc.branch, "-m", tc.message},
+				Args: []string{"merge", "-m", tc.message, "--", tc.branch},
 				Err:  tc.mockErr,
 			}})
 			mock.Install()
@@ -1330,7 +1331,7 @@ func TestGitDeleteBranch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := NewOutputCommandMock(t, []OutputCommandStub{{
 				Dir:  tc.dir,
-				Args: []string{"branch", tc.wantArg, tc.branch},
+				Args: []string{"branch", tc.wantArg, "--", tc.branch},
 				Err:  tc.mockErr,
 			}})
 			mock.Install()
@@ -1413,4 +1414,296 @@ func TestGitPushRefspec(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateGitRef(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid_main", "main", false},
+		{"valid_feature_branch", "feature/branch", false},
+		{"valid_version_tag", "v1.0", false},
+		{"valid_commit_hash", "abc123", false},
+		{"valid_empty", "", false},
+		{"invalid_flag", "-flag", true},
+		{"invalid_option", "--option", true},
+		{"invalid_dash_only", "-", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateGitRef(tc.input)
+
+			if tc.wantErr && err == nil {
+				t.Errorf("validateGitRef(%q): expected error, got nil", tc.input)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("validateGitRef(%q): unexpected error: %v", tc.input, err)
+			}
+			if tc.wantErr && err != nil && !strings.Contains(err.Error(), "must not start with '-'") {
+				t.Errorf("validateGitRef(%q): error %q does not mention dash prefix", tc.input, err.Error())
+			}
+		})
+	}
+}
+
+func TestGitRefInjectionRejected(t *testing.T) {
+	dir := "/repo"
+
+	t.Run("GitCheckout", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitCheckout(dir, "-flag")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPull", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPull(dir, "--upload-pack=evil")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitMerge", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitMerge(dir, "--strategy=evil", "msg")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPush", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPush(dir, "--receive-pack=evil")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPushForce", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPushForce(dir, "-flag")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitReset", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitReset(dir, "--flag")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitCheckoutDetached", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitCheckoutDetached(dir, "--flag")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitCreateBranchFromHead", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitCreateBranchFromHead(dir, "--orphan")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitDeleteBranch", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitDeleteBranch(dir, "--flag", false)
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitFetchRemote", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitFetchRemote(dir, "-evil")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitMergeRemote_bad_remote", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitMergeRemote(dir, "-evil", "main", "msg")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitMergeRemote_bad_branch", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitMergeRemote(dir, "", "-evil", "msg")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPushRemote_bad_remote", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPushRemote(dir, "-evil", "main")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPushRemote_bad_branch", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPushRemote(dir, "", "--evil")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPullRemote_bad_remote", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPullRemote(dir, "-evil", "main")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPullRemote_bad_branch", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPullRemote(dir, "", "--evil")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPushRefspec_bad_remote", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPushRefspec(dir, "-evil", "local", "remote")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPushRefspec_bad_localRef", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPushRefspec(dir, "", "-local", "remote")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitPushRefspec_bad_remoteRef", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitPushRefspec(dir, "", "local", "-remote")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("HasCommitsBetween_bad_target", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{})
+		mock.Install()
+
+		hasCommits, err := HasCommitsBetween(dir, "-target", "source")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if hasCommits {
+			t.Error("expected hasCommits to be false")
+		}
+	})
+
+	t.Run("HasCommitsBetween_bad_source", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{})
+		mock.Install()
+
+		hasCommits, err := HasCommitsBetween(dir, "target", "-source")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if hasCommits {
+			t.Error("expected hasCommits to be false")
+		}
+	})
+
+	t.Run("HasCommitsBetweenRemote_bad_remote", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{})
+		mock.Install()
+
+		hasCommits, err := HasCommitsBetweenRemote(dir, "-evil", "target", "source")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if hasCommits {
+			t.Error("expected hasCommits to be false")
+		}
+	})
+
+	t.Run("HasCommitsBetweenRemote_bad_target", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{})
+		mock.Install()
+
+		hasCommits, err := HasCommitsBetweenRemote(dir, "", "-target", "source")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if hasCommits {
+			t.Error("expected hasCommits to be false")
+		}
+	})
+
+	t.Run("HasCommitsBetweenRemote_bad_source", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{})
+		mock.Install()
+
+		hasCommits, err := HasCommitsBetweenRemote(dir, "", "target", "-source")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if hasCommits {
+			t.Error("expected hasCommits to be false")
+		}
+	})
 }

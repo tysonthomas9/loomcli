@@ -7,6 +7,16 @@ import (
 	"strings"
 )
 
+// validateGitRef rejects ref/branch/remote names starting with '-' to prevent
+// git argument injection. Empty strings are allowed (handled downstream by
+// resolveRemote or git itself).
+func validateGitRef(name string) error {
+	if strings.HasPrefix(name, "-") {
+		return fmt.Errorf("invalid git ref %q: must not start with '-'", name)
+	}
+	return nil
+}
+
 // RunGitCommand executes a git command in the specified directory
 func RunGitCommand(dir string, args ...string) (string, error) {
 	result := execCommand(dir, "git", args...)
@@ -43,20 +53,29 @@ func GitFetch(dir string) error {
 
 // GitCheckout checks out a branch
 func GitCheckout(dir, branch string) error {
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
 	fmt.Printf("Checking out %s...\n", branch)
 	return RunGitCommandWithOutput(dir, "checkout", branch)
 }
 
 // GitPull pulls from origin for the current branch
 func GitPull(dir, branch string) error {
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
 	fmt.Printf("Pulling from origin/%s...\n", branch)
 	return RunGitCommandWithOutput(dir, "pull", "origin", branch)
 }
 
 // GitMerge attempts to merge a branch
 func GitMerge(dir, branch, message string) error {
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
 	fmt.Printf("Merging %s...\n", branch)
-	return RunGitCommandWithOutput(dir, "merge", branch, "-m", message)
+	return RunGitCommandWithOutput(dir, "merge", "-m", message, "--", branch)
 }
 
 // GitMergeOrigin attempts to merge origin/branch
@@ -67,18 +86,27 @@ func GitMergeOrigin(dir, branch, message string) error {
 
 // GitPush pushes to origin
 func GitPush(dir, branch string) error {
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
 	fmt.Printf("Pushing to origin/%s...\n", branch)
 	return RunGitCommandWithOutput(dir, "push", "origin", branch)
 }
 
 // GitPushForce force pushes to origin
 func GitPushForce(dir, branch string) error {
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
 	fmt.Printf("Force pushing to origin/%s...\n", branch)
 	return RunGitCommandWithOutput(dir, "push", "origin", branch, "--force")
 }
 
 // GitReset performs a hard reset to a ref
 func GitReset(dir, ref string) error {
+	if err := validateGitRef(ref); err != nil {
+		return err
+	}
 	fmt.Printf("Resetting to %s...\n", ref)
 	return RunGitCommandWithOutput(dir, "reset", "--hard", ref)
 }
@@ -110,6 +138,12 @@ func GetConflictedFiles(dir string) ([]string, error) {
 
 // HasCommitsBetween checks if source has commits not in target
 func HasCommitsBetween(dir, target, source string) (bool, error) {
+	if err := validateGitRef(target); err != nil {
+		return false, err
+	}
+	if err := validateGitRef(source); err != nil {
+		return false, err
+	}
 	output, err := RunGitCommand(dir, "log", fmt.Sprintf("%s..origin/%s", target, source), "--oneline")
 	if err != nil {
 		// If the command fails, assume there might be commits
@@ -138,6 +172,9 @@ func resolveRemote(remote string) string {
 // GitFetchRemote fetches from the specified remote
 func GitFetchRemote(dir, remote string) error {
 	r := resolveRemote(remote)
+	if err := validateGitRef(r); err != nil {
+		return err
+	}
 	fmt.Printf("Fetching from %s...\n", r)
 	return RunGitCommandWithOutput(dir, "fetch", r)
 }
@@ -145,6 +182,12 @@ func GitFetchRemote(dir, remote string) error {
 // GitMergeRemote attempts to merge remote/branch
 func GitMergeRemote(dir, remote, branch, message string) error {
 	r := resolveRemote(remote)
+	if err := validateGitRef(r); err != nil {
+		return err
+	}
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
 	ref := r + "/" + branch
 	fmt.Printf("Merging %s...\n", ref)
 	return RunGitCommandWithOutput(dir, "merge", ref, "-m", message)
@@ -153,6 +196,12 @@ func GitMergeRemote(dir, remote, branch, message string) error {
 // GitPushRemote pushes to the specified remote
 func GitPushRemote(dir, remote, branch string) error {
 	r := resolveRemote(remote)
+	if err := validateGitRef(r); err != nil {
+		return err
+	}
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
 	fmt.Printf("Pushing to %s/%s...\n", r, branch)
 	return RunGitCommandWithOutput(dir, "push", r, branch)
 }
@@ -160,6 +209,12 @@ func GitPushRemote(dir, remote, branch string) error {
 // GitPullRemote pulls from the specified remote for the given branch
 func GitPullRemote(dir, remote, branch string) error {
 	r := resolveRemote(remote)
+	if err := validateGitRef(r); err != nil {
+		return err
+	}
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
 	fmt.Printf("Pulling from %s/%s...\n", r, branch)
 	return RunGitCommandWithOutput(dir, "pull", r, branch)
 }
@@ -167,6 +222,15 @@ func GitPullRemote(dir, remote, branch string) error {
 // HasCommitsBetweenRemote checks if source has commits not in target using a specific remote
 func HasCommitsBetweenRemote(dir, remote, target, source string) (bool, error) {
 	r := resolveRemote(remote)
+	if err := validateGitRef(r); err != nil {
+		return false, err
+	}
+	if err := validateGitRef(target); err != nil {
+		return false, err
+	}
+	if err := validateGitRef(source); err != nil {
+		return false, err
+	}
 	output, err := RunGitCommand(dir, "log", fmt.Sprintf("%s..%s/%s", target, r, source), "--oneline")
 	if err != nil {
 		return true, nil
@@ -203,28 +267,46 @@ func IsRefCheckedOutInWorktree(dir, branch string) (bool, string, error) {
 
 // GitCheckoutDetached checks out a ref in detached HEAD mode
 func GitCheckoutDetached(dir, ref string) error {
+	if err := validateGitRef(ref); err != nil {
+		return err
+	}
 	fmt.Printf("Checking out %s (detached)...\n", ref)
 	return RunGitCommandWithOutput(dir, "checkout", "--detach", ref)
 }
 
 // GitCreateBranchFromHead creates a new branch at the current HEAD and switches to it
 func GitCreateBranchFromHead(dir, name string) error {
+	if err := validateGitRef(name); err != nil {
+		return err
+	}
 	fmt.Printf("Creating branch %s...\n", name)
 	return RunGitCommandWithOutput(dir, "checkout", "-b", name)
 }
 
 // GitDeleteBranch deletes a local branch. Use force=true for -D (force delete).
 func GitDeleteBranch(dir, name string, force bool) error {
+	if err := validateGitRef(name); err != nil {
+		return err
+	}
 	flag := "-d"
 	if force {
 		flag = "-D"
 	}
-	return RunGitCommandWithOutput(dir, "branch", flag, name)
+	return RunGitCommandWithOutput(dir, "branch", flag, "--", name)
 }
 
 // GitPushRefspec pushes a local ref to a different remote ref using a refspec
 func GitPushRefspec(dir, remote, localRef, remoteRef string) error {
 	r := resolveRemote(remote)
+	if err := validateGitRef(r); err != nil {
+		return err
+	}
+	if err := validateGitRef(localRef); err != nil {
+		return err
+	}
+	if err := validateGitRef(remoteRef); err != nil {
+		return err
+	}
 	refspec := localRef + ":" + remoteRef
 	fmt.Printf("Pushing %s to %s/%s...\n", localRef, r, remoteRef)
 	return RunGitCommandWithOutput(dir, "push", r, refspec)
