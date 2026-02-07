@@ -48,6 +48,7 @@ type ServerConfig struct {
 	FleetAPIKey     string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
 	APIKey          string // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
 	AuthEnabled     bool   // Whether API authentication is enabled (default: true)
+	HSTSEnabled     bool   // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.
@@ -123,6 +124,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 	if corsConfig.Enabled {
 		log.Printf("CORS enabled for origins: %v", corsConfig.AllowedOrigins)
+	}
+	if config.HSTSEnabled {
+		log.Printf("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
 	}
 
 	// Find an available port (auto-fallback if requested port is in use)
@@ -314,7 +318,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// - Security headers apply to all responses including 401s
 	corsMiddleware := NewCORSMiddleware(corsConfig)
 	authMiddleware := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
-	securityMiddleware := NewSecurityHeadersMiddleware()
+	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{HSTSEnabled: config.HSTSEnabled})
 	handler := h2c.NewHandler(securityMiddleware(authMiddleware(corsMiddleware(mux))), &http2.Server{})
 
 	// Create a shutdown context that all request contexts will derive from.

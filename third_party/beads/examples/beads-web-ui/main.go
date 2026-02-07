@@ -205,7 +205,7 @@ func main() {
 
 	// Wrap with CORS middleware if enabled
 	corsMiddleware := NewCORSMiddleware(corsConfig)
-	securityMiddleware := NewSecurityHeadersMiddleware()
+	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{})
 	handler := h2c.NewHandler(securityMiddleware(corsMiddleware(mux)), &http2.Server{})
 
 	// Create a shutdown context that all request contexts will derive from.

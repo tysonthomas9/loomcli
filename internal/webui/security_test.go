@@ -7,7 +7,7 @@ import (
 )
 
 func TestSecurityHeaders_AllHeadersSet(t *testing.T) {
-	middleware := NewSecurityHeadersMiddleware()
+	middleware := NewSecurityHeadersMiddleware(SecurityConfig{})
 	handler := middleware(testHandler())
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -31,7 +31,7 @@ func TestSecurityHeaders_AllHeadersSet(t *testing.T) {
 }
 
 func TestSecurityHeaders_APIResponses(t *testing.T) {
-	middleware := NewSecurityHeadersMiddleware()
+	middleware := NewSecurityHeadersMiddleware(SecurityConfig{})
 	handler := middleware(testHandler())
 
 	methods := []string{http.MethodGet, http.MethodPost, http.MethodPatch}
@@ -59,7 +59,7 @@ func TestSecurityHeaders_WithCORSMiddleware(t *testing.T) {
 	}
 
 	corsMiddleware := NewCORSMiddleware(corsConfig)
-	securityMiddleware := NewSecurityHeadersMiddleware()
+	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{})
 	handler := securityMiddleware(corsMiddleware(testHandler()))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
@@ -89,7 +89,7 @@ func TestSecurityHeaders_PreservesHandlerResponse(t *testing.T) {
 		w.Write([]byte(`{"created": true}`))
 	})
 
-	middleware := NewSecurityHeadersMiddleware()
+	middleware := NewSecurityHeadersMiddleware(SecurityConfig{})
 	handler := middleware(customHandler)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/issues", nil)
@@ -119,7 +119,7 @@ func TestSecurityHeaders_ErrorResponses(t *testing.T) {
 		w.Write([]byte("not found"))
 	})
 
-	middleware := NewSecurityHeadersMiddleware()
+	middleware := NewSecurityHeadersMiddleware(SecurityConfig{})
 	handler := middleware(errorHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
@@ -137,5 +137,34 @@ func TestSecurityHeaders_ErrorResponses(t *testing.T) {
 	}
 	if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
 		t.Errorf("X-Frame-Options = %q, want %q", got, "DENY")
+	}
+}
+
+func TestSecurityHeaders_HSTSEnabled(t *testing.T) {
+	middleware := NewSecurityHeadersMiddleware(SecurityConfig{HSTSEnabled: true})
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	want := "max-age=63072000; includeSubDomains"
+	if got := w.Header().Get("Strict-Transport-Security"); got != want {
+		t.Errorf("Strict-Transport-Security = %q, want %q", got, want)
+	}
+}
+
+func TestSecurityHeaders_HSTSDisabledByDefault(t *testing.T) {
+	middleware := NewSecurityHeadersMiddleware(SecurityConfig{})
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if got := w.Header().Get("Strict-Transport-Security"); got != "" {
+		t.Errorf("Strict-Transport-Security = %q, want empty (HSTS should be disabled by default)", got)
 	}
 }

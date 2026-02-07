@@ -35,6 +35,7 @@ var (
 	serveAPIKey      string
 	serveFleetAPIKey string
 	serveNoAuth      bool
+	serveHSTS        bool
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
@@ -111,6 +112,7 @@ func init() {
 	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", defaultFleetAPIKey, "API key for fleet worker registration (required for fleet register endpoint)")
 
 	serveCmd.Flags().BoolVar(&serveNoAuth, "no-auth", false, "Disable WebUI API authentication (not recommended)")
+	serveCmd.Flags().BoolVar(&serveHSTS, "hsts", false, "Enable HSTS header (use when behind TLS-terminating proxy)")
 
 	rootCmd.AddCommand(serveCmd)
 }
@@ -206,6 +208,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				FleetAPIKey: serveFleetAPIKey,
 				APIKey:      serveAPIKey,
 				AuthEnabled: !serveNoAuth,
+				HSTSEnabled: serveHSTS,
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true

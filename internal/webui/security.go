@@ -2,10 +2,15 @@ package webui
 
 import "net/http"
 
+// SecurityConfig controls optional security headers.
+type SecurityConfig struct {
+	HSTSEnabled bool
+}
+
 // NewSecurityHeadersMiddleware creates a middleware that sets standard HTTP
 // security headers on all responses. These headers protect against common
 // web attacks (XSS, clickjacking, MIME sniffing, information leakage).
-func NewSecurityHeadersMiddleware() func(http.Handler) http.Handler {
+func NewSecurityHeadersMiddleware(cfg SecurityConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := w.Header()
@@ -15,6 +20,9 @@ func NewSecurityHeadersMiddleware() func(http.Handler) http.Handler {
 			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			h.Set("X-Frame-Options", "DENY")
 			h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+			if cfg.HSTSEnabled {
+				h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+			}
 
 			next.ServeHTTP(w, r)
 		})
