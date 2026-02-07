@@ -638,7 +638,7 @@ func TestSetupRoutes_TerminalEndpointNotRegisteredWithNilManager(t *testing.T) {
 // the terminal WebSocket endpoint IS registered when termManager is non-nil.
 func TestSetupRoutes_TerminalEndpointRegisteredWithManager(t *testing.T) {
 	// Create a terminal manager - skip if tmux not available
-	termMgr, err := NewTerminalManager("bash", "")
+	termMgr, err := NewTerminalManager("bash", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}

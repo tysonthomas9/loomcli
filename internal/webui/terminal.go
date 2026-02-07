@@ -16,6 +16,10 @@ import (
 // ErrTmuxNotFound is returned when tmux binary is not in PATH.
 var ErrTmuxNotFound = errors.New("tmux binary not found in PATH")
 
+// ErrMaxSessionsReached is returned when the maximum number of concurrent
+// terminal sessions has been reached.
+var ErrMaxSessionsReached = errors.New("maximum terminal sessions reached")
+
 // validSessionName matches alphanumeric characters, hyphens, and underscores.
 var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
@@ -54,6 +58,10 @@ func (s *TerminalSession) Close() error {
 	return firstErr
 }
 
+// defaultMaxTerminalSessions is the maximum number of concurrent terminal
+// connections when no explicit limit is configured.
+const defaultMaxTerminalSessions = 20
+
 // TerminalManager manages tmux session lifecycles.
 // Multiple WebSocket connections can attach to the same tmux session simultaneously,
 // each tracked by a unique connection ID.
@@ -65,6 +73,7 @@ type TerminalManager struct {
 	defaultCommand string // command to run in all terminal sessions
 	defaultCols    uint16
 	defaultRows    uint16
+	maxSessions    int // maximum concurrent connections (immutable after construction)
 	connCounter    atomic.Uint64
 }
 
@@ -72,10 +81,14 @@ type TerminalManager struct {
 // The defaultCommand parameter specifies what command to run in all terminal sessions.
 // The sessionPrefix is prepended to tmux session names (e.g., port number) to isolate
 // sessions when multiple server instances share the same tmux server.
-func NewTerminalManager(defaultCommand, sessionPrefix string) (*TerminalManager, error) {
+// maxSessions limits concurrent connections; 0 means use defaultMaxTerminalSessions.
+func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (*TerminalManager, error) {
 	tmuxPath, err := exec.LookPath("tmux")
 	if err != nil {
 		return nil, ErrTmuxNotFound
+	}
+	if maxSessions <= 0 {
+		maxSessions = defaultMaxTerminalSessions
 	}
 	return &TerminalManager{
 		sessions:       make(map[string]*TerminalSession),
@@ -84,6 +97,7 @@ func NewTerminalManager(defaultCommand, sessionPrefix string) (*TerminalManager,
 		defaultCommand: defaultCommand,
 		defaultCols:    80,
 		defaultRows:    24,
+		maxSessions:    maxSessions,
 	}, nil
 }
 
@@ -164,6 +178,11 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Enforce concurrent session limit.
+	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
+		return nil, ErrMaxSessionsReached
+	}
 
 	// Create tmux session if it doesn't exist.
 	if !m.tmuxHasSession(internalName) {
@@ -273,4 +292,16 @@ func (m *TerminalManager) Shutdown() error {
 	}
 
 	return nil
+}
+
+// SessionCount returns the number of active terminal connections.
+func (m *TerminalManager) SessionCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.sessions)
+}
+
+// MaxSessions returns the maximum allowed concurrent connections.
+func (m *TerminalManager) MaxSessions() int {
+	return m.maxSessions
 }

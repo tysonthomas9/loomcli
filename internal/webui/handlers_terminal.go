@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
@@ -142,6 +143,19 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 			}
 		}
 
+		// Pre-upgrade check: reject before WebSocket upgrade if at session limit.
+		if manager.SessionCount() >= manager.MaxSessions() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "maximum terminal sessions reached",
+			}); err != nil {
+				log.Printf("Failed to encode max sessions error response: %v", err)
+			}
+			return
+		}
+
 		// Accept WebSocket upgrade with origin validation.
 		// OriginPatterns checks the Origin header against allowed hosts.
 		// If no Origin header is present (non-browser clients), the connection is allowed.
@@ -165,7 +179,11 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 		// (frontend sends resize immediately after connect)
 		termSession, err := manager.Attach(session, defaultCmd, 80, 24)
 		if err != nil {
-			log.Printf("Failed to attach terminal session %q: %v", session, err)
+			if errors.Is(err, ErrMaxSessionsReached) {
+				log.Printf("Terminal session limit reached for %q", session)
+			} else {
+				log.Printf("Failed to attach terminal session %q: %v", session, err)
+			}
 			closeReason = err.Error()
 			return
 		}

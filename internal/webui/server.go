@@ -42,8 +42,9 @@ type ServerConfig struct {
 	CORSOrigins     []string
 	ShutdownTimeout time.Duration
 	MaxPortAttempts int
-	TerminalCmd     string
-	FleetRedis      *fleet.RedisConfig
+	TerminalCmd         string
+	MaxTerminalSessions int // Maximum concurrent terminal connections (0 = default 20)
+	FleetRedis          *fleet.RedisConfig
 	FleetJWTKey     []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
 	FleetAPIKey     string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
 	APIKey          string // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
@@ -204,7 +205,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Initialize terminal manager for WebSocket terminal sessions
 	var termMgr *TerminalManager
-	termMgr, err = NewTerminalManager(config.TerminalCmd, fmt.Sprintf("%d", actualPort))
+	termMgr, err = NewTerminalManager(config.TerminalCmd, fmt.Sprintf("%d", actualPort), config.MaxTerminalSessions)
 	if err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {
 			log.Printf("Warning: tmux not found, terminal feature disabled")
