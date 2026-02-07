@@ -7,10 +7,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // mockFleetClient implements fleetClaimClient for testing.
@@ -522,5 +525,439 @@ func TestFleetClaim_EmptyBodyClaimsFromReady(t *testing.T) {
 	}
 	if !readyCalled {
 		t.Error("Ready was not called for empty body request")
+	}
+}
+
+// =============================================================================
+// Fleet Registration Handler Tests
+// =============================================================================
+
+// mockWorkerRegistrar implements workerRegistrar for testing.
+type mockWorkerRegistrar struct {
+	registerFunc func(ctx context.Context, worker *fleet.Worker) error
+}
+
+func (m *mockWorkerRegistrar) RegisterWorker(ctx context.Context, worker *fleet.Worker) error {
+	if m.registerFunc != nil {
+		return m.registerFunc(ctx, worker)
+	}
+	return nil
+}
+
+// testTokenConfig returns a TokenConfig suitable for testing.
+func testTokenConfig() *TokenConfig {
+	return &TokenConfig{
+		SigningKey: []byte("test-secret-key-for-jwt-signing!"),
+		Expiry:    time.Hour,
+	}
+}
+
+func TestFleetRegister_Success(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "worker-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccessWithData(t, result, "token")
+
+	// Verify the token is non-empty
+	token, ok := result["token"].(string)
+	if !ok || token == "" {
+		t.Fatal("expected non-empty token in response")
+	}
+
+	// Verify the token is a valid JWT
+	claims, err := ValidateWorkerToken(token, tokenCfg.SigningKey)
+	if err != nil {
+		t.Fatalf("returned token is not valid: %v", err)
+	}
+	if claims.WorkerID != "worker-1" {
+		t.Errorf("token worker_id = %q, want %q", claims.WorkerID, "worker-1")
+	}
+}
+
+func TestFleetRegister_EmptyWorkerID(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+}
+
+func TestFleetRegister_MissingWorkerID(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	// Send a body without the worker_id field at all
+	body, _ := json.Marshal(map[string]interface{}{
+		"repos": []string{"repo-a"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+}
+
+func TestFleetRegister_WorkerIDTooLong(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	longID := strings.Repeat("x", 257) // exceeds maxWorkerIDLength (256)
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: longID,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+}
+
+func TestFleetRegister_DuplicateRegistration_Succeeds(t *testing.T) {
+	registerCount := 0
+	store := &mockWorkerRegistrar{
+		registerFunc: func(ctx context.Context, worker *fleet.Worker) error {
+			registerCount++
+			return nil
+		},
+	}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	// Register twice with the same worker_id
+	for i := 0; i < 2; i++ {
+		body, _ := json.Marshal(FleetRegisterRequest{
+			WorkerID: "worker-dup",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Errorf("attempt %d: status = %d, want %d", i+1, w.Code, http.StatusCreated)
+		}
+
+		result := assertJSONResponse(t, w)
+		token, ok := result["token"].(string)
+		if !ok || token == "" {
+			t.Fatalf("attempt %d: expected non-empty token", i+1)
+		}
+	}
+
+	if registerCount != 2 {
+		t.Errorf("RegisterWorker called %d times, want 2", registerCount)
+	}
+}
+
+func TestFleetRegister_StoreNil_Returns503(t *testing.T) {
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(nil, tokenCfg)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "worker-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+}
+
+func TestFleetRegister_TokenConfigNil_Returns503(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	handler := handleFleetRegisterWithStore(store, nil)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "worker-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+}
+
+func TestFleetRegister_StoreError_Returns500(t *testing.T) {
+	store := &mockWorkerRegistrar{
+		registerFunc: func(ctx context.Context, worker *fleet.Worker) error {
+			return errors.New("redis connection refused")
+		},
+	}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "worker-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+}
+
+func TestFleetRegister_InvalidJSON_Returns400(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader([]byte("{invalid json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+}
+
+func TestFleetRegister_BodyTooLarge_Returns413(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	// Create a body larger than 1MB (maxRequestBody)
+	largeBody := make([]byte, 1<<20+100)
+	// Make it valid-looking JSON start so MaxBytesReader triggers, not JSON parse
+	copy(largeBody, []byte(`{"worker_id":"`))
+	for i := 14; i < len(largeBody)-2; i++ {
+		largeBody[i] = 'x'
+	}
+	copy(largeBody[len(largeBody)-2:], []byte(`"}`))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(largeBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+}
+
+func TestFleetRegister_TokenContainsCorrectClaims(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "my-worker",
+		Repos:    []string{"repo-x", "repo-y"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	result := assertJSONResponse(t, w)
+	token, ok := result["token"].(string)
+	if !ok || token == "" {
+		t.Fatal("expected non-empty token in response")
+	}
+
+	claims, err := ValidateWorkerToken(token, tokenCfg.SigningKey)
+	if err != nil {
+		t.Fatalf("ValidateWorkerToken failed: %v", err)
+	}
+
+	if claims.WorkerID != "my-worker" {
+		t.Errorf("claims.WorkerID = %q, want %q", claims.WorkerID, "my-worker")
+	}
+	if len(claims.Repos) != 2 {
+		t.Fatalf("len(claims.Repos) = %d, want 2", len(claims.Repos))
+	}
+	if claims.Repos[0] != "repo-x" {
+		t.Errorf("claims.Repos[0] = %q, want %q", claims.Repos[0], "repo-x")
+	}
+	if claims.Repos[1] != "repo-y" {
+		t.Errorf("claims.Repos[1] = %q, want %q", claims.Repos[1], "repo-y")
+	}
+}
+
+func TestFleetRegister_WithRepos_TokenScopedToRepos(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	repos := []string{"org/repo-1", "org/repo-2", "org/repo-3"}
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "scoped-worker",
+		Repos:    repos,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	result := assertJSONResponse(t, w)
+	token := result["token"].(string)
+
+	claims, err := ValidateWorkerToken(token, tokenCfg.SigningKey)
+	if err != nil {
+		t.Fatalf("ValidateWorkerToken failed: %v", err)
+	}
+
+	if len(claims.Repos) != len(repos) {
+		t.Fatalf("len(claims.Repos) = %d, want %d", len(claims.Repos), len(repos))
+	}
+	for i, want := range repos {
+		if claims.Repos[i] != want {
+			t.Errorf("claims.Repos[%d] = %q, want %q", i, claims.Repos[i], want)
+		}
+	}
+}
+
+func TestFleetRegister_WithoutRepos_TokenHasNilRepos(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "no-repos-worker",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	result := assertJSONResponse(t, w)
+	token := result["token"].(string)
+
+	claims, err := ValidateWorkerToken(token, tokenCfg.SigningKey)
+	if err != nil {
+		t.Fatalf("ValidateWorkerToken failed: %v", err)
+	}
+
+	if claims.Repos != nil {
+		t.Errorf("claims.Repos = %v, want nil", claims.Repos)
+	}
+}
+
+func TestFleetRegister_StoreReceivesCorrectWorker(t *testing.T) {
+	var capturedWorker *fleet.Worker
+	store := &mockWorkerRegistrar{
+		registerFunc: func(ctx context.Context, worker *fleet.Worker) error {
+			capturedWorker = worker
+			return nil
+		},
+	}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "captured-worker",
+		Repos:    []string{"repo-a"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	if capturedWorker == nil {
+		t.Fatal("store.RegisterWorker was not called")
+	}
+	if capturedWorker.WorkerID != "captured-worker" {
+		t.Errorf("worker.WorkerID = %q, want %q", capturedWorker.WorkerID, "captured-worker")
+	}
+	if len(capturedWorker.Repos) != 1 || capturedWorker.Repos[0] != "repo-a" {
+		t.Errorf("worker.Repos = %v, want [repo-a]", capturedWorker.Repos)
+	}
+	if capturedWorker.RegisteredAt == 0 {
+		t.Error("worker.RegisteredAt should be non-zero")
 	}
 }

@@ -6,6 +6,7 @@ package webui
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
@@ -20,6 +21,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 const (
@@ -39,6 +41,7 @@ type ServerConfig struct {
 	ShutdownTimeout time.Duration
 	MaxPortAttempts int
 	TerminalCmd     string
+	FleetRedis      *fleet.RedisConfig
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.
@@ -200,9 +203,37 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Terminal manager initialized (default command: %s)", config.TerminalCmd)
 	}
 
+	// Initialize fleet store and JWT config for worker registration
+	var fleetStore *fleet.Store
+	var tokenCfg *TokenConfig
+	if config.FleetRedis != nil {
+		var err error
+		fleetStore, err = fleet.NewStore(*config.FleetRedis, nil)
+		if err != nil {
+			log.Printf("Warning: failed to initialize fleet store: %v", err)
+		} else {
+			// Generate random signing key for JWT (32 bytes for HS256)
+			jwtKey := make([]byte, 32)
+			if _, err := rand.Read(jwtKey); err != nil {
+				log.Printf("Warning: failed to generate JWT signing key: %v", err)
+				fleetStore.Close()
+				fleetStore = nil
+			} else {
+				tokenCfg = &TokenConfig{
+					SigningKey: jwtKey,
+					Expiry:    time.Hour,
+				}
+				log.Printf("Fleet store initialized (Redis: %s)", config.FleetRedis.Address)
+			}
+		}
+	}
+	if fleetStore != nil {
+		defer fleetStore.Close()
+	}
+
 	// Create HTTP server
 	mux := http.NewServeMux()
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, fleetStore, tokenCfg)
 
 	// Wrap with CORS middleware if enabled
 	corsMiddleware := NewCORSMiddleware(corsConfig)

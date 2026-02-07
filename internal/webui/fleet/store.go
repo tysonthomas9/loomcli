@@ -24,6 +24,9 @@ const (
 
 	// defaultWorkerClaimTTL is the TTL for cached worker claim responses (5 minutes).
 	defaultWorkerClaimTTL = 5 * time.Minute
+
+	// defaultWorkerRegistrationTTL is the TTL for worker registration keys (2 hours).
+	defaultWorkerRegistrationTTL = 2 * time.Hour
 )
 
 // Redis key builders.
@@ -33,6 +36,10 @@ func claimedTaskKey(taskID string) string {
 
 func workerClaimKey(workerID string) string {
 	return keyPrefix + "worker:claim:" + workerID
+}
+
+func workerRegistrationKey(workerID string) string {
+	return keyPrefix + "workers:" + workerID
 }
 
 // RedisConfig holds connection parameters for the Redis instance.
@@ -266,4 +273,56 @@ func (s *Store) GetWorkerClaim(ctx context.Context, workerID string) (*ClaimResp
 	}
 
 	return &claim, nil
+}
+
+// Worker represents a registered fleet worker.
+type Worker struct {
+	WorkerID     string   `json:"worker_id"`
+	Repos        []string `json:"repos,omitempty"`
+	RegisteredAt int64    `json:"registered_at"`
+}
+
+// RegisterWorker registers (or re-registers) a worker in Redis.
+// Re-registration is idempotent: it updates the timestamp and repos.
+func (s *Store) RegisterWorker(ctx context.Context, worker *Worker) error {
+	if err := validateID(worker.WorkerID, "workerID"); err != nil {
+		return err
+	}
+
+	data, err := json.Marshal(worker)
+	if err != nil {
+		return fmt.Errorf("marshal worker: %w", err)
+	}
+
+	key := workerRegistrationKey(worker.WorkerID)
+	if err := s.client.Set(ctx, key, data, defaultWorkerRegistrationTTL).Err(); err != nil {
+		return fmt.Errorf("register worker failed: %w", err)
+	}
+
+	s.logger.Debug("worker registered", "worker_id", worker.WorkerID)
+	return nil
+}
+
+// GetWorker retrieves a registered worker by ID.
+// Returns (nil, nil) if the worker is not registered.
+func (s *Store) GetWorker(ctx context.Context, workerID string) (*Worker, error) {
+	if err := validateID(workerID, "workerID"); err != nil {
+		return nil, err
+	}
+
+	key := workerRegistrationKey(workerID)
+	data, err := s.client.Get(ctx, key).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get worker failed: %w", err)
+	}
+
+	var worker Worker
+	if err := json.Unmarshal(data, &worker); err != nil {
+		return nil, fmt.Errorf("unmarshal worker: %w", err)
+	}
+
+	return &worker, nil
 }

@@ -10,14 +10,15 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // setupRoutes configures all HTTP routes for the server.
 // defaultTerminalCmd is the command to run in terminal sessions when not specified via query parameter.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string) {
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string, fleetStore *fleet.Store, tokenCfg *TokenConfig) {
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -45,7 +46,8 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	mux.HandleFunc("POST /api/issues/{id}/dependencies", handleAddDependency(pool))
 	mux.HandleFunc("DELETE /api/issues/{id}/dependencies/{depId}", handleRemoveDependency(pool))
 
-	// Fleet claim endpoint for atomic task acquisition by fleet workers
+	// Fleet endpoints for worker registration and task acquisition
+	mux.HandleFunc("POST /api/fleet/register", handleFleetRegister(fleetStore, tokenCfg))
 	mux.HandleFunc("POST /api/fleet/claim", handleFleetClaim(pool))
 
 	// Ready endpoint for issues ready to work on

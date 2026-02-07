@@ -13,7 +13,146 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
+
+// FleetRegisterRequest represents the JSON body for POST /api/fleet/register.
+type FleetRegisterRequest struct {
+	WorkerID string   `json:"worker_id"`
+	Repos    []string `json:"repos,omitempty"`
+}
+
+// FleetRegisterResponse wraps the registration result for JSON response.
+type FleetRegisterResponse struct {
+	Success bool   `json:"success"`
+	Token   string `json:"token,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// maxWorkerIDLength is the maximum length for a worker_id to prevent abuse.
+const maxWorkerIDLength = 256
+
+// workerRegistrar is an internal interface for testing worker registration.
+type workerRegistrar interface {
+	RegisterWorker(ctx context.Context, worker *fleet.Worker) error
+}
+
+// handleFleetRegister returns a handler that registers a fleet worker and issues a JWT.
+func handleFleetRegister(store *fleet.Store, tokenCfg *TokenConfig) http.HandlerFunc {
+	return handleFleetRegisterWithStore(store, tokenCfg)
+}
+
+// handleFleetRegisterWithStore is the internal implementation that accepts an interface for testing.
+func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check store availability
+		if store == nil || tokenCfg == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				Success: false,
+				Error:   "fleet API not available",
+			}); err != nil {
+				log.Printf("Failed to encode fleet register response: %v", err)
+			}
+			return
+		}
+
+		// Parse request body
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		var req FleetRegisterRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+					Success: false,
+					Error:   "request body too large (max 1MB)",
+				}); err != nil {
+					log.Printf("Failed to encode fleet register response: %v", err)
+				}
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				Success: false,
+				Error:   fmt.Sprintf("invalid request body: %v", err),
+			}); err != nil {
+				log.Printf("Failed to encode fleet register response: %v", err)
+			}
+			return
+		}
+
+		// Validate worker_id
+		if req.WorkerID == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				Success: false,
+				Error:   "worker_id is required",
+			}); err != nil {
+				log.Printf("Failed to encode fleet register response: %v", err)
+			}
+			return
+		}
+
+		if len(req.WorkerID) > maxWorkerIDLength {
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				Success: false,
+				Error:   fmt.Sprintf("worker_id exceeds maximum length of %d characters", maxWorkerIDLength),
+			}); err != nil {
+				log.Printf("Failed to encode fleet register response: %v", err)
+			}
+			return
+		}
+
+		// Register the worker
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		worker := &fleet.Worker{
+			WorkerID:     req.WorkerID,
+			Repos:        req.Repos,
+			RegisteredAt: time.Now().Unix(),
+		}
+
+		if err := store.RegisterWorker(ctx, worker); err != nil {
+			log.Printf("Failed to register worker %s: %v", req.WorkerID, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				Success: false,
+				Error:   "failed to register worker",
+			}); err != nil {
+				log.Printf("Failed to encode fleet register response: %v", err)
+			}
+			return
+		}
+
+		// Generate JWT token
+		token, err := GenerateWorkerToken(req.WorkerID, req.Repos, tokenCfg.SigningKey, tokenCfg.Expiry)
+		if err != nil {
+			log.Printf("Failed to generate token for worker %s: %v", req.WorkerID, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				Success: false,
+				Error:   "failed to generate token",
+			}); err != nil {
+				log.Printf("Failed to encode fleet register response: %v", err)
+			}
+			return
+		}
+
+		log.Printf("Worker registered: %s", req.WorkerID)
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			Success: true,
+			Token:   token,
+		}); err != nil {
+			log.Printf("Failed to encode fleet register response: %v", err)
+		}
+	}
+}
 
 // FleetClaimRequest represents the optional JSON body for POST /api/fleet/claim.
 type FleetClaimRequest struct {
