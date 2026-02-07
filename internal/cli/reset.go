@@ -39,7 +39,12 @@ Arguments:
 
 Flags:
   -a, --all      Reset all worktrees
-  -f, --force    Skip confirmation prompt and override lock protection
+  -f, --force    Skip confirmation prompt, override lock protection,
+                 and allow force-push to protected branches (main/master)
+
+Safety:
+  Force-pushing to main/master is blocked by default.
+  Use --force to override this protection.
 
 Examples:
   loom reset falcon                        # Reset falcon to integration branch
@@ -63,7 +68,7 @@ Examples:
 
 func init() {
 	resetCmd.Flags().BoolVarP(&resetAll, "all", "a", false, "Reset all worktrees")
-	resetCmd.Flags().BoolVarP(&resetForce, "force", "f", false, "Skip confirmation prompt and override lock protection")
+	resetCmd.Flags().BoolVarP(&resetForce, "force", "f", false, "Skip confirmation and allow force-push to protected branches (main/master)")
 	rootCmd.AddCommand(resetCmd)
 }
 
@@ -245,6 +250,16 @@ func resetWorktree(worktreeName, targetBranch string, askConfirm bool) bool {
 		return false
 	}
 
+	// Refuse to force-push protected branches unless --force was used
+	if isProtectedBranch(currentBranch) && !resetForce {
+		fmt.Fprintf(os.Stderr, "Error: refusing to force-push to protected branch '%s'.\n", currentBranch)
+		fmt.Fprintf(os.Stderr, "Use --force to override this protection.\n")
+		return false
+	}
+	if isProtectedBranch(currentBranch) && resetForce {
+		fmt.Fprintf(os.Stderr, "Warning: force-pushing to protected branch '%s'!\n", currentBranch)
+	}
+
 	// Force push
 	if err := GitPushForce(worktreePath, currentBranch); err != nil {
 		fmt.Fprintf(os.Stderr, "Error force pushing: %v\n", err)
@@ -254,6 +269,11 @@ func resetWorktree(worktreeName, targetBranch string, askConfirm bool) bool {
 	fmt.Printf("✓ Reset complete: %s is now at origin/%s\n", worktreeName, targetBranch)
 	fmt.Printf("  Branch: %s (force pushed)\n", currentBranch)
 	return true
+}
+
+// isProtectedBranch returns true if the branch is main or master.
+func isProtectedBranch(branch string) bool {
+	return branch == "main" || branch == "master"
 }
 
 func confirmAction(prompt string) bool {

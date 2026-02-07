@@ -1147,3 +1147,276 @@ func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
 		t.Error("expected resetWorktree to proceed with no lock")
 	}
 }
+
+// ============================================================================
+// isProtectedBranch Tests
+// ============================================================================
+
+func TestIsProtectedBranch(t *testing.T) {
+	tests := []struct {
+		branch string
+		want   bool
+	}{
+		{"main", true},
+		{"master", true},
+		{"feature-x", false},
+		{"main-feature", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("branch=%q", tt.branch), func(t *testing.T) {
+			got := isProtectedBranch(tt.branch)
+			if got != tt.want {
+				t.Errorf("isProtectedBranch(%q) = %v, want %v", tt.branch, got, tt.want)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// resetWorktree Protected Branch Tests
+// ============================================================================
+
+func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
+	// When current branch is "main" and resetForce is false, resetWorktree
+	// should return false and NOT call GitPushForce.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	resetForce = false
+	defer func() { resetForce = false }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+	})
+	mock.Install()
+
+	// No push step - should be blocked before GitPushForce
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
+		{Dir: wtPath, Args: []string{"clean", "-fd"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
+	})
+	outputMock.Install()
+
+	// Capture stderr
+	oldStderr := os.Stderr
+	rErr, wErr, _ := os.Pipe()
+	os.Stderr = wErr
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	result := resetWorktree("test-wt", "main", false)
+
+	wErr.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 2048)
+	n, _ := rErr.Read(buf)
+	stderr := string(buf[:n])
+
+	if result {
+		t.Error("expected resetWorktree to return false when force-pushing to protected branch 'main'")
+	}
+	if !strings.Contains(stderr, "refusing to force-push to protected branch 'main'") {
+		t.Errorf("expected stderr to contain refusing message, got: %q", stderr)
+	}
+}
+
+func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
+	// Same as above but with "master" as current branch.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	resetForce = false
+	defer func() { resetForce = false }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "master\n"},
+	})
+	mock.Install()
+
+	// No push step - should be blocked before GitPushForce
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
+		{Dir: wtPath, Args: []string{"clean", "-fd"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
+	})
+	outputMock.Install()
+
+	// Capture stderr
+	oldStderr := os.Stderr
+	rErr, wErr, _ := os.Pipe()
+	os.Stderr = wErr
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	result := resetWorktree("test-wt", "main", false)
+
+	wErr.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 2048)
+	n, _ := rErr.Read(buf)
+	stderr := string(buf[:n])
+
+	if result {
+		t.Error("expected resetWorktree to return false when force-pushing to protected branch 'master'")
+	}
+	if !strings.Contains(stderr, "refusing to force-push to protected branch 'master'") {
+		t.Errorf("expected stderr to contain refusing message, got: %q", stderr)
+	}
+}
+
+func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
+	// When current branch is "main" AND resetForce is true, force push
+	// should proceed with a warning.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	resetForce = true
+	defer func() { resetForce = false }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
+	})
+	mock.Install()
+
+	// Full command sequence including push (should proceed)
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
+		{Dir: wtPath, Args: []string{"clean", "-fd"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
+		{Dir: wtPath, Args: []string{"push", "origin", "main", "--force"}},
+	})
+	outputMock.Install()
+
+	// Capture stderr to verify warning
+	oldStderr := os.Stderr
+	rErr, wErr, _ := os.Pipe()
+	os.Stderr = wErr
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	result := resetWorktree("test-wt", "main", false)
+
+	wErr.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 2048)
+	n, _ := rErr.Read(buf)
+	stderr := string(buf[:n])
+
+	if !result {
+		t.Error("expected resetWorktree to return true when --force overrides protected branch guard")
+	}
+	if !strings.Contains(stderr, "force-pushing to protected branch 'main'") {
+		t.Errorf("expected warning about force-pushing to protected branch, got: %q", stderr)
+	}
+}
+
+func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
+	// A non-protected branch like "feature-x" should push without warnings
+	// or blocks when resetForce is false.
+	ResetBeadsDirCache()
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "test-wt")
+	createGitRepo(t, wtPath)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	resetForce = false
+	defer func() { resetForce = false }()
+
+	mock := NewCommandMock(t, []CommandStub{
+		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-x\n"},
+	})
+	mock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Dir: wtPath, Args: []string{"fetch", "origin"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
+		{Dir: wtPath, Args: []string{"clean", "-fd"}},
+		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
+		{Dir: wtPath, Args: []string{"push", "origin", "feature-x", "--force"}},
+	})
+	outputMock.Install()
+
+	// Capture stderr to verify no protected branch warning
+	oldStderr := os.Stderr
+	rErr, wErr, _ := os.Pipe()
+	os.Stderr = wErr
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	_, wOut, _ := os.Pipe()
+	os.Stdout = wOut
+
+	result := resetWorktree("test-wt", "main", false)
+
+	wErr.Close()
+	wOut.Close()
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 2048)
+	n, _ := rErr.Read(buf)
+	stderr := string(buf[:n])
+
+	if !result {
+		t.Error("expected resetWorktree to return true for non-protected branch")
+	}
+	if strings.Contains(stderr, "protected branch") {
+		t.Errorf("expected no protected branch warning for 'feature-x', got: %q", stderr)
+	}
+}
