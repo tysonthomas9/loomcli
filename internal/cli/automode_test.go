@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -2102,6 +2103,64 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 	// Verify session still exists (the new one)
 	if !tmuxSessionExists(sessionName) {
 		t.Error("New session should exist after replacing old one")
+	}
+}
+
+func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
+	// Skip if tmux is not available
+	if exec.Command("tmux", "-V").Run() != nil {
+		t.Skip("tmux not available")
+	}
+
+	// Create a temp dir whose name contains shell metacharacters
+	baseDir := t.TempDir()
+	metaDir := filepath.Join(baseDir, "test dir;echo pwned")
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("failed to create metachar dir: %v", err)
+	}
+
+	sessionName := fmt.Sprintf("loom-test-quote-%d", os.Getpid())
+	logFile := filepath.Join(baseDir, "test.log")
+
+	opts := AutoModeOptions{
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: metaDir,
+	}
+
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	err := startTmuxSession(sessionName, opts, logFile)
+	if err != nil {
+		t.Fatalf("startTmuxSession failed: %v", err)
+	}
+
+	// Verify session was created
+	if !tmuxSessionExists(sessionName) {
+		t.Fatal("Session was not created")
+	}
+
+	// Retrieve the command string that tmux used to start the pane
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output()
+	if err != nil {
+		t.Fatalf("failed to get pane start command: %v", err)
+	}
+	paneCmd := strings.TrimSpace(string(out))
+
+	// The worktree path must appear single-quoted in the command string,
+	// which proves shellQuote() was applied. Without quoting, the semicolon
+	// would split the command and "echo pwned" would execute separately.
+	quoted := shellQuote(metaDir)
+	if !strings.Contains(paneCmd, quoted) {
+		t.Errorf("pane command does not contain properly quoted path\nwant substring: %s\ngot command:    %s", quoted, paneCmd)
+	}
+
+	// Also verify the agent type is quoted
+	quotedAgent := shellQuote(opts.AgentType)
+	if !strings.Contains(paneCmd, quotedAgent) {
+		t.Errorf("pane command does not contain properly quoted agent type\nwant substring: %s\ngot command:    %s", quotedAgent, paneCmd)
 	}
 }
 

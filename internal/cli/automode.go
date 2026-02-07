@@ -662,11 +662,11 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 
 	// Build the loom command to run inside tmux
 	// TERM=dumb disables alternate screen buffer, enabling output streaming via capture-pane
-	loomCmd := fmt.Sprintf("TERM=dumb loom %s %s --daemon-mode", opts.AgentType, opts.WorktreePath)
+	loomCmd := fmt.Sprintf("TERM=dumb loom %s %s --daemon-mode", shellQuote(opts.AgentType), shellQuote(opts.WorktreePath))
 
 	// Propagate backend selection to subprocess
 	if resolved := GetBackendName(); resolved != "claude" {
-		loomCmd += fmt.Sprintf(" --backend %s", resolved)
+		loomCmd += fmt.Sprintf(" --backend %s", shellQuote(resolved))
 	}
 
 	// Create detached session with current terminal dimensions
