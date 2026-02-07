@@ -230,23 +230,38 @@ func GitPushRefspec(dir, remote, localRef, remoteRef string) error {
 	return RunGitCommandWithOutput(dir, "push", r, refspec)
 }
 
+// getStashCount returns the number of entries in the stash.
+func getStashCount(dir string) (int, error) {
+	output, err := RunGitCommand(dir, "stash", "list")
+	if err != nil {
+		return 0, err
+	}
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return 0, nil
+	}
+	return len(strings.Split(trimmed, "\n")), nil
+}
+
 // GitStash stashes local changes. Returns true if changes were actually stashed,
-// false if working tree was clean (nothing to stash).
+// false if nothing was stashed (e.g. only untracked files, or clean tree).
 func GitStash(dir string) (bool, error) {
-	// Check if there's anything to stash
-	clean, err := IsCleanWorkingTree(dir)
+	countBefore, err := getStashCount(dir)
 	if err != nil {
 		return false, err
-	}
-	if clean {
-		return false, nil
 	}
 
 	fmt.Println("Stashing local changes...")
 	if err := RunGitCommandWithOutput(dir, "stash"); err != nil {
 		return false, fmt.Errorf("failed to stash changes: %w", err)
 	}
-	return true, nil
+
+	countAfter, err := getStashCount(dir)
+	if err != nil {
+		return false, err
+	}
+
+	return countAfter > countBefore, nil
 }
 
 // GitStashPop pops the most recent stash entry

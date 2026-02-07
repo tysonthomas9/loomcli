@@ -112,13 +112,15 @@ func TestPushBranch(t *testing.T) {
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
 				{Args: []string{"fetch", "origin"}, Err: nil},                                                                                                             // GitFetch
+				{Args: []string{"stash"}, Err: nil},                                                                                                                       // GitStash (no-op)
 				{Args: []string{"checkout", "main"}, Err: nil},                                                                                                            // GitCheckout
 				{Args: []string{"pull", "origin", "main"}, Err: nil},                                                                                                      // GitPull
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil}, // GitMergeOrigin
 				{Args: []string{"push", "origin", "main"}, Err: nil},                                                                                                      // GitPush
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                             // IsCleanWorkingTree (clean, no stash)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                     // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                     // getStashCount (after, same = not stashed)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                                   // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 some commit\n"}, // HasCommitsBetween
 			},
@@ -129,12 +131,14 @@ func TestPushBranch(t *testing.T) {
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
 				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
 				// No merge or push since already up to date
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                          // IsCleanWorkingTree
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // getStashCount (after)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: ""}, // no commits
 			},
@@ -154,10 +158,12 @@ func TestPushBranch(t *testing.T) {
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
 				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: errors.New("checkout failed")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},           // IsCleanWorkingTree
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (after)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""}, // IsRefCheckedOutInWorktree
 			},
 		},
@@ -167,11 +173,13 @@ func TestPushBranch(t *testing.T) {
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
 				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: errors.New("pull failed")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},           // IsCleanWorkingTree
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (after)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""}, // IsRefCheckedOutInWorktree
 			},
 		},
@@ -181,13 +189,15 @@ func TestPushBranch(t *testing.T) {
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
 				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
 				// No push after conflicts
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
@@ -200,12 +210,14 @@ func TestPushBranch(t *testing.T) {
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
 				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("merge failed")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""}, // no conflict files
@@ -217,13 +229,15 @@ func TestPushBranch(t *testing.T) {
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
 				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 				{Args: []string{"push", "origin", "main"}, Err: errors.New("push rejected")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 			},
@@ -234,12 +248,14 @@ func TestPushBranch(t *testing.T) {
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
 				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
 				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
 				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
@@ -301,22 +317,26 @@ func TestPushAllWorktrees(t *testing.T) {
 			outputStubs: []OutputCommandStub{
 				// First worktree push: alpha-branch -> main
 				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
 				{Args: []string{"merge", "origin/alpha-branch", "-m", "Merge alpha-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 				{Args: []string{"push", "origin", "main"}, Err: nil},
 				// Second worktree push: beta-branch -> main
 				{Args: []string{"fetch", "origin"}, Err: nil},
+				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
 				{Args: []string{"merge", "origin/beta-branch", "-m", "Merge beta-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 				{Args: []string{"push", "origin", "main"}, Err: nil},
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree (alpha)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount before (alpha)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount after (alpha)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree (alpha)
 				{Name: "git", Args: []string{"log", "main..origin/alpha-branch", "--oneline"}, Stdout: "abc commit\n"},
-				{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                     // IsCleanWorkingTree (beta)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount before (beta)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount after (beta)
 				{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree (beta)
 				{Name: "git", Args: []string{"log", "main..origin/beta-branch", "--oneline"}, Stdout: "def commit\n"},
 			},
@@ -412,14 +432,16 @@ func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	}
 
 	outputStubs := []OutputCommandStub{
-		// repo-a: fetch, checkout, pull, merge, push
+		// repo-a: fetch, stash, checkout, pull, merge, push
 		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
 		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
-		// repo-b: fetch, checkout, pull, merge, push
+		// repo-b: fetch, stash, checkout, pull, merge, push
 		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
 		{Args: []string{"merge", "origin/feat-b", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
@@ -427,12 +449,14 @@ func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		// IsCleanWorkingTree + IsRefCheckedOutInWorktree + HasCommitsBetweenRemote for repo-a
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		// getStashCount + IsRefCheckedOutInWorktree + HasCommitsBetweenRemote for repo-a
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
-		// IsCleanWorkingTree + IsRefCheckedOutInWorktree + HasCommitsBetweenRemote for repo-b
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		// getStashCount + IsRefCheckedOutInWorktree + HasCommitsBetweenRemote for repo-b
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
@@ -472,12 +496,14 @@ func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	outputStubs := []OutputCommandStub{
 		// repo-a pushes into "develop"
 		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "develop"}, Err: nil},
 		{Args: []string{"pull", "origin", "develop"}, Err: nil},
 		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
 		{Args: []string{"push", "origin", "develop"}, Err: nil},
 		// repo-b pushes into "staging"
 		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "staging"}, Err: nil},
 		{Args: []string{"pull", "origin", "staging"}, Err: nil},
 		{Args: []string{"merge", "origin/feat-b", "-m", "Merge feat-b into staging\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
@@ -485,10 +511,12 @@ func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "develop..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "staging..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
@@ -522,6 +550,7 @@ func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 	// CLI target "release" overrides per-repo "develop"
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "release"}, Err: nil},
 		{Args: []string{"pull", "origin", "release"}, Err: nil},
 		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into release\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
@@ -529,7 +558,8 @@ func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "release..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
@@ -561,6 +591,7 @@ func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "upstream"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "upstream", "main"}, Err: nil},
 		{Args: []string{"merge", "upstream/feat-a", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
@@ -568,7 +599,8 @@ func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..upstream/feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
@@ -595,6 +627,7 @@ func TestRunPush_LegacyMode(t *testing.T) {
 
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
 		{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
@@ -602,7 +635,8 @@ func TestRunPush_LegacyMode(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
@@ -641,6 +675,7 @@ func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	// Only repo-b should be processed
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
+		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
 		{Args: []string{"merge", "origin/feat-b", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
@@ -648,7 +683,8 @@ func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
@@ -682,8 +718,9 @@ func TestPushBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M dirty.go\n"}, // IsCleanWorkingTree returns false (dirty)
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},     // IsRefCheckedOutInWorktree
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before, 0)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, 1 = stashed)
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                  // IsRefCheckedOutInWorktree
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
@@ -716,8 +753,9 @@ func TestPushBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M dirty.go\n"},
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                           // IsRefCheckedOutInWorktree
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},                  // IsRefCheckedOutInWorktree
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "dirty.go\n"}, // HasUnmergedFiles returns true
 	}
@@ -748,7 +786,8 @@ func TestPushBranch_StashFails_ReturnsEarly(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M dirty.go\n"}, // dirty working tree
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (before)
+		// No second stash list - git stash command fails before it
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -780,7 +819,8 @@ func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
@@ -811,7 +851,8 @@ func TestPushBranchInRepo_StashFails_ReturnsError(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (before)
+		// No second stash list - git stash command fails
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -848,7 +889,8 @@ func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file.go\n"}, // HasUnmergedFiles
@@ -874,10 +916,10 @@ func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 }
 
 func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
-	// Test that clean working tree skips stash entirely
+	// Test that clean working tree skips stash pop (stash count unchanged)
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},
-		// No stash or stash pop - clean working tree
+		{Args: []string{"stash"}, Err: nil}, // git stash runs but is no-op
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
 		{Args: []string{"merge", "origin/feature", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
@@ -885,7 +927,8 @@ func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""}, // clean
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                   // getStashCount (after, same = not stashed)
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: ""},
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
@@ -1006,6 +1049,7 @@ func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {
 
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil},                // GitFetchRemote
+		{Args: []string{"stash"}, Err: nil},                         // GitStash (no-op)
 		{Args: nil, Err: nil},                                        // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil},                                        // GitCreateBranchFromHead (temp branch)
 		{Args: nil, Err: nil},                                        // GitMergeRemote
@@ -1014,8 +1058,9 @@ func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                    // IsCleanWorkingTree (clean, no stash)
-		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: worktreeListOutput}, // IsRefCheckedOutInWorktree -> true
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (after, same = not stashed)
+		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: worktreeListOutput},      // IsRefCheckedOutInWorktree -> true
 		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
 	}
 
@@ -1209,6 +1254,7 @@ func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
 
 	outputStubs := []OutputCommandStub{
 		{Args: []string{"fetch", "origin"}, Err: nil}, // GitFetch
+		{Args: []string{"stash"}, Err: nil},           // GitStash (no-op)
 		// Detached flow:
 		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
@@ -1218,7 +1264,8 @@ func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},                                          // IsCleanWorkingTree
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                  // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                  // getStashCount (after)
 		{Name: "git", Args: []string{"worktree", "list", "--porcelain"}, Stdout: worktreeListOutput},                // IsRefCheckedOutInWorktree -> true for "main"
 		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},   // HasCommitsBetween
 	}

@@ -952,14 +952,15 @@ func TestHasCommitsBetweenRemote(t *testing.T) {
 }
 
 func TestGitStash_DirtyWorkingTree(t *testing.T) {
-	// When working tree is dirty, GitStash should call "git stash" and return true
+	// When tracked changes exist, git stash increases stash count → stashed=true
 	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"}, // IsCleanWorkingTree returns false
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // before: 0 entries
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // after: 1 entry
 	})
 	cmdMock.Install()
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"stash"}, Err: nil}, // GitStash calls RunGitCommandWithOutput
+		{Args: []string{"stash"}, Err: nil},
 	})
 	outputMock.Install()
 
@@ -973,14 +974,41 @@ func TestGitStash_DirtyWorkingTree(t *testing.T) {
 	}
 }
 
-func TestGitStash_CleanWorkingTree(t *testing.T) {
-	// When working tree is clean, GitStash should not call "git stash" and return false
+func TestGitStash_UntrackedFilesOnly(t *testing.T) {
+	// When only untracked files exist, git stash is a no-op → stash count unchanged → stashed=false
 	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""}, // IsCleanWorkingTree returns true
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // before: 0 entries
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // after: still 0 entries
 	})
 	cmdMock.Install()
 
-	// No output command mock needed - stash should not be called
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"stash"}, Err: nil}, // git stash runs but is a no-op
+	})
+	outputMock.Install()
+
+	stashed, err := GitStash("/repo")
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if stashed {
+		t.Error("expected stashed to be false when only untracked files exist")
+	}
+}
+
+func TestGitStash_NothingToStash(t *testing.T) {
+	// Clean working tree: git stash is a no-op, stash count stays 0
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // before: 0
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // after: 0
+	})
+	cmdMock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"stash"}, Err: nil},
+	})
+	outputMock.Install()
 
 	stashed, err := GitStash("/repo")
 
@@ -992,10 +1020,10 @@ func TestGitStash_CleanWorkingTree(t *testing.T) {
 	}
 }
 
-func TestGitStash_StatusCheckFails(t *testing.T) {
-	// When IsCleanWorkingTree fails, GitStash should return the error
+func TestGitStash_StashListFails(t *testing.T) {
+	// When initial stash list fails, GitStash should return the error
 	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Err: errors.New("not a git repository")},
+		{Name: "git", Args: []string{"stash", "list"}, Err: errors.New("not a git repository")},
 	})
 	cmdMock.Install()
 
@@ -1012,7 +1040,7 @@ func TestGitStash_StatusCheckFails(t *testing.T) {
 func TestGitStash_StashCommandFails(t *testing.T) {
 	// When git stash command fails, GitStash should return wrapped error
 	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // before: succeeds
 	})
 	cmdMock.Install()
 
@@ -1028,6 +1056,29 @@ func TestGitStash_StashCommandFails(t *testing.T) {
 	}
 	if stashed {
 		t.Error("expected stashed to be false when stash command fails")
+	}
+}
+
+func TestGitStash_SecondStashListFails(t *testing.T) {
+	// When the second stash list call fails after a successful stash, return error
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // before: 0
+		{Name: "git", Args: []string{"stash", "list"}, Err: errors.New("unexpected stash error")}, // after: fails
+	})
+	cmdMock.Install()
+
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"stash"}, Err: nil}, // stash succeeds
+	})
+	outputMock.Install()
+
+	stashed, err := GitStash("/repo")
+
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if stashed {
+		t.Error("expected stashed to be false when second stash list fails")
 	}
 }
 
