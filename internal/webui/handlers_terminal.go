@@ -53,7 +53,35 @@ func originHosts(origins []string) []string {
 // whose host portions are used as OriginPatterns for the WebSocket upgrade.
 // When nil or empty, only same-origin and non-browser (no Origin header)
 // connections are accepted.
-func handleTerminalWS(manager *TerminalManager, defaultCmd string, allowedOrigins []string) http.HandlerFunc {
+// handleTerminalToken returns a handler that generates a one-time terminal auth token
+// for the given session. The caller must already be authenticated via the API key
+// middleware.
+func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session := r.URL.Query().Get("session")
+		if session == "" || !validTerminalSession.MatchString(session) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid session"})
+			return
+		}
+
+		token, err := auth.GenerateToken(session)
+		if err != nil {
+			log.Printf("Failed to generate terminal token: %v", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(map[string]string{"token": token})
+	}
+}
+
+func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *terminalAuth, allowedOrigins []string) http.HandlerFunc {
 	// Compute origin host patterns once at construction time.
 	patterns := originHosts(allowedOrigins)
 
@@ -95,6 +123,23 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, allowedOrigin
 				log.Printf("Failed to encode terminal error response: %v", err)
 			}
 			return
+		}
+
+		// Validate one-time terminal token before WebSocket upgrade
+		if auth != nil {
+			token := r.URL.Query().Get("token")
+			if err := auth.ValidateToken(token, session); err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"error":   "terminal authentication failed",
+				}); encErr != nil {
+					log.Printf("Failed to encode terminal auth error response: %v", encErr)
+				}
+				log.Printf("Terminal auth failed for session %q: %v", session, err)
+				return
+			}
 		}
 
 		// Accept WebSocket upgrade with origin validation.

@@ -17,7 +17,7 @@ import (
 // setupRoutes configures all HTTP routes for the server.
 // defaultTerminalCmd is the command to run in terminal sessions.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool *daemon.ConnectionPool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string, allowedOrigins []string) {
+func setupRoutes(mux *http.ServeMux, pool *daemon.ConnectionPool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string, termAuth *terminalAuth, allowedOrigins []string) {
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -64,9 +64,12 @@ func setupRoutes(mux *http.ServeMux, pool *daemon.ConnectionPool, hub *SSEHub, g
 		mux.Handle("/api/loom/", loomProxy)
 	}
 
-	// Terminal WebSocket endpoint for real-time terminal relay
+	// Terminal token and WebSocket endpoints for authenticated terminal relay
 	if termManager != nil {
-		mux.HandleFunc("GET /api/terminal/ws", handleTerminalWS(termManager, defaultTerminalCmd, allowedOrigins))
+		if termAuth != nil {
+			mux.HandleFunc("GET /api/terminal/token", handleTerminalToken(termAuth))
+		}
+		mux.HandleFunc("GET /api/terminal/ws", handleTerminalWS(termManager, defaultTerminalCmd, termAuth, allowedOrigins))
 	}
 
 	// Log streaming endpoints

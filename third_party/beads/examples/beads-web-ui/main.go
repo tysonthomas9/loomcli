@@ -187,9 +187,21 @@ func main() {
 		log.Printf("Terminal manager initialized (default command: %s)", *terminalCmd)
 	}
 
+	// Initialize terminal auth for one-time WebSocket tokens
+	var termAuth *terminalAuth
+	if termMgr != nil {
+		var authErr error
+		termAuth, authErr = newTerminalAuth()
+		if authErr != nil {
+			log.Printf("Warning: failed to initialize terminal auth: %v", authErr)
+			log.Printf("Terminal feature disabled (cannot ensure authenticated access)")
+			termMgr = nil
+		}
+	}
+
 	// Create HTTP server
 	mux := http.NewServeMux()
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, *terminalCmd, corsConfig.AllowedOrigins)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, *terminalCmd, termAuth, corsConfig.AllowedOrigins)
 
 	// Wrap with CORS middleware if enabled
 	corsMiddleware := NewCORSMiddleware(corsConfig)
@@ -245,6 +257,11 @@ func main() {
 	log.Println("Server stopped")
 
 	// Stop components in reverse-initialization order now that no handlers are running.
+
+	// Stop terminal auth cleanup goroutine
+	if termAuth != nil {
+		termAuth.Stop()
+	}
 
 	// Stop terminal manager (kill tmux sessions and close PTYs)
 	if termMgr != nil {

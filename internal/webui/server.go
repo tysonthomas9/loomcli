@@ -212,6 +212,18 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Terminal manager initialized (default command: %s)", config.TerminalCmd)
 	}
 
+	// Initialize terminal auth for one-time WebSocket tokens
+	var termAuth *terminalAuth
+	if termMgr != nil {
+		var authErr error
+		termAuth, authErr = newTerminalAuth()
+		if authErr != nil {
+			log.Printf("Warning: failed to initialize terminal auth: %v", authErr)
+			log.Printf("Terminal feature disabled (cannot ensure authenticated access)")
+			termMgr = nil
+		}
+	}
+
 	// Initialize fleet store and JWT config for worker registration
 	var fleetStore *fleet.Store
 	var tokenCfg *TokenConfig
@@ -275,7 +287,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins)
 
 	// Wrap with middleware chain: security -> auth -> CORS -> mux
 	// Auth sits between security headers and CORS so that:
@@ -340,6 +352,11 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	log.Println("Server stopped")
 
 	// Stop components in reverse-initialization order now that no handlers are running.
+
+	// Stop terminal auth cleanup goroutine
+	if termAuth != nil {
+		termAuth.Stop()
+	}
 
 	// Stop terminal manager (kill tmux sessions and close PTYs)
 	if termMgr != nil {

@@ -8,7 +8,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-import { getAuthToken } from '@/api/client';
+import { get } from '@/api/client';
 
 import '@xterm/xterm/css/xterm.css';
 import styles from './TerminalPanel.module.css';
@@ -20,16 +20,29 @@ export interface TerminalPanelProps {
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
+const TERMINAL_SESSION = 'talk-to-lead';
+
+/**
+ * Fetch a one-time terminal auth token from the server.
+ * Returns null on failure — the WebSocket connection will be rejected by the server.
+ */
+async function fetchTerminalToken(): Promise<string | null> {
+  try {
+    const resp = await get<{ token: string }>(
+      `/api/terminal/token?session=${TERMINAL_SESSION}`
+    );
+    return resp.token;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Build the WebSocket URL for the terminal relay endpoint.
- * Includes a required session parameter for tmux session identification.
  */
-function buildWsUrl(): string {
+function buildWsUrl(token: string | null): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // Use a fixed session name for the Talk to Lead terminal
-  const session = 'talk-to-lead';
-  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${session}`;
-  const token = getAuthToken();
+  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${TERMINAL_SESSION}`;
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
   }
@@ -51,6 +64,7 @@ function encodeResize(cols: number, rows: number): ArrayBuffer {
 
 /**
  * Connect a Terminal instance to a WebSocket, returning a cleanup function.
+ * Fetches a one-time terminal token before establishing the connection.
  * Used for both initial connection and reconnection.
  */
 function connectWebSocket(
@@ -61,45 +75,70 @@ function connectWebSocket(
   setWasConnected: (v: boolean) => void
 ): () => void {
   setConnectionState('connecting');
-  const ws = new WebSocket(buildWsUrl());
-  wsRef.current = ws;
-  ws.binaryType = 'arraybuffer';
 
-  ws.onopen = () => {
-    setConnectionState('connected');
-    setWasConnected(true);
-    fitAddon.fit();
-    ws.send(encodeResize(terminal.cols, terminal.rows));
-  };
+  let cancelled = false;
 
-  ws.onmessage = (ev: MessageEvent) => {
-    if (typeof ev.data === 'string') {
-      terminal.write(ev.data);
-    } else if (ev.data instanceof ArrayBuffer) {
-      terminal.write(new Uint8Array(ev.data));
-    }
-  };
+  // Fetch one-time token, then open WebSocket
+  fetchTerminalToken().then((token) => {
+    if (cancelled) return;
 
-  ws.onclose = () => {
-    setConnectionState('disconnected');
-  };
+    const ws = new WebSocket(buildWsUrl(token));
+    wsRef.current = ws;
+    ws.binaryType = 'arraybuffer';
 
-  ws.onerror = () => {
-    setConnectionState('disconnected');
-  };
+    ws.onopen = () => {
+      setConnectionState('connected');
+      setWasConnected(true);
+      fitAddon.fit();
+      ws.send(encodeResize(terminal.cols, terminal.rows));
+    };
 
-  const onDataDisposable = terminal.onData((data: string) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data);
+    ws.onmessage = (ev: MessageEvent) => {
+      if (typeof ev.data === 'string') {
+        terminal.write(ev.data);
+      } else if (ev.data instanceof ArrayBuffer) {
+        terminal.write(new Uint8Array(ev.data));
+      }
+    };
+
+    ws.onclose = () => {
+      setConnectionState('disconnected');
+    };
+
+    ws.onerror = () => {
+      setConnectionState('disconnected');
+    };
+
+    const onDataDisposable = terminal.onData((data: string) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    });
+
+    // Store cleanup for the data listener so the outer cleanup can call it
+    wsCleanupInner = () => {
+      onDataDisposable.dispose();
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1000);
+      }
+      wsRef.current = null;
+    };
+  }).catch(() => {
+    if (!cancelled) {
+      setConnectionState('disconnected');
     }
   });
 
+  // Inner cleanup set by the async token fetch
+  let wsCleanupInner: (() => void) | null = null;
+
   return () => {
-    onDataDisposable.dispose();
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-      ws.close(1000);
+    cancelled = true;
+    if (wsCleanupInner) {
+      wsCleanupInner();
+    } else {
+      wsRef.current = null;
     }
-    wsRef.current = null;
   };
 }
 

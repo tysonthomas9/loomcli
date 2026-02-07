@@ -54,6 +54,7 @@ func TestNewAuthMiddleware_PublicRoutes(t *testing.T) {
 		{"health endpoint", http.MethodGet, "/health"},
 		{"api health endpoint", http.MethodGet, "/api/health"},
 		{"auth token endpoint", http.MethodGet, "/api/auth/token"},
+		{"terminal ws (own auth)", http.MethodGet, "/api/terminal/ws"},
 		{"frontend root", http.MethodGet, "/"},
 		{"frontend asset", http.MethodGet, "/assets/main.js"},
 		{"frontend SPA route", http.MethodGet, "/issues/123"},
@@ -95,7 +96,6 @@ func TestNewAuthMiddleware_RejectsProtectedRoutesWithoutAuth(t *testing.T) {
 		{"GET api issues", http.MethodGet, "/api/issues"},
 		{"POST api issues", http.MethodPost, "/api/issues"},
 		{"GET api stats", http.MethodGet, "/api/stats"},
-		{"GET api terminal ws", http.MethodGet, "/api/terminal/ws"},
 		{"PATCH api issue", http.MethodPatch, "/api/issues/123"},
 		{"DELETE api issue", http.MethodDelete, "/api/issues/123"},
 	}
@@ -185,7 +185,7 @@ func TestNewAuthMiddleware_AllowsCorrectBearerToken(t *testing.T) {
 
 // TestNewAuthMiddleware_AllowsCorrectTokenInQueryParam verifies that requests
 // with the correct token in the "token" query parameter are allowed (for
-// WebSocket and SSE connections).
+// SSE connections that can't set custom headers).
 func TestNewAuthMiddleware_AllowsCorrectTokenInQueryParam(t *testing.T) {
 	config := AuthConfig{
 		Enabled: true,
@@ -195,7 +195,7 @@ func TestNewAuthMiddleware_AllowsCorrectTokenInQueryParam(t *testing.T) {
 	middleware := NewAuthMiddleware(config)
 	handler := middleware(testHandler())
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?token=ws-api-key-67890", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/events?token=ws-api-key-67890", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -250,10 +250,12 @@ func TestIsPublicRoute(t *testing.T) {
 		{"GET /issues/123 (SPA route)", http.MethodGet, "/issues/123", true},
 		{"GET /favicon.ico", http.MethodGet, "/favicon.ico", true},
 
+		// Terminal WS is public (uses its own one-time token auth in the handler)
+		{"GET /api/terminal/ws", http.MethodGet, "/api/terminal/ws", true},
+
 		// Protected API routes (require auth)
 		{"GET /api/issues", http.MethodGet, "/api/issues", false},
 		{"GET /api/stats", http.MethodGet, "/api/stats", false},
-		{"GET /api/terminal/ws", http.MethodGet, "/api/terminal/ws", false},
 		{"GET /api/issues/123", http.MethodGet, "/api/issues/123", false},
 		{"GET /api/events", http.MethodGet, "/api/events", false},
 
@@ -701,7 +703,7 @@ func TestNewAuthMiddleware_QueryParamWithWrongKey(t *testing.T) {
 	middleware := NewAuthMiddleware(config)
 	handler := middleware(testHandler())
 
-	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?token=wrong-key", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/events?token=wrong-key", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
