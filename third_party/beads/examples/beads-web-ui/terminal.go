@@ -62,14 +62,14 @@ type TerminalManager struct {
 	mu             sync.RWMutex
 	tmuxPath       string
 	sessionPrefix  string // prepended to tmux session names for isolation between server instances
-	defaultCommand string // default command when client doesn't specify one
+	defaultCommand string // command to run in all terminal sessions
 	defaultCols    uint16
 	defaultRows    uint16
 	connCounter    atomic.Uint64
 }
 
 // NewTerminalManager creates a manager. Returns ErrTmuxNotFound if tmux is not installed.
-// The defaultCommand parameter specifies what command to run when a client doesn't specify one.
+// The defaultCommand parameter specifies what command to run in all terminal sessions.
 // The sessionPrefix is prepended to tmux session names (e.g., port number) to isolate
 // sessions when multiple server instances share the same tmux server.
 func NewTerminalManager(defaultCommand, sessionPrefix string) (*TerminalManager, error) {

@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -244,6 +246,73 @@ func TestHandleTerminalWS_WebSocketUpgrade(t *testing.T) {
 	defer conn.Close(websocket.StatusNormalClosure, "test complete")
 
 	t.Log("WebSocket connection established successfully")
+}
+
+// TestHandleTerminalWS_CommandParameterIgnored verifies that the "command" query
+// parameter is not honored by handleTerminalWS. After removing support for
+// client-supplied commands, the handler must always use the server-configured
+// defaultCmd regardless of what the client passes in the URL.
+func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
+	manager, err := NewTerminalManager("", "")
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	// Use "bash" as the known defaultCmd so we can verify it later.
+	defaultCmd := "bash"
+	handler := handleTerminalWS(manager, defaultCmd)
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	// Connect with an injected command parameter that should be ignored.
+	wsURL := "ws" + server.URL[4:] + "?session=cmd-inject-test&command=echo+INJECTED"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial WebSocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	// Give the tmux session a moment to start.
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify the tmux session exists.
+	listOut, err := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", "#{session_name}").CombinedOutput()
+	if err != nil {
+		t.Fatalf("tmux list-sessions failed: %v\n%s", err, listOut)
+	}
+	if !strings.Contains(string(listOut), "cmd-inject-test") {
+		t.Fatalf("tmux session 'cmd-inject-test' not found in output:\n%s", listOut)
+	}
+
+	// Check the pane's current command. If the injected command "echo" had been
+	// used, the pane would run "echo INJECTED" (pane_current_command = "echo").
+	// With the default "bash", the pane_current_command should be "bash".
+	paneCmd, err := exec.CommandContext(ctx, "tmux", "display-message", "-t", "cmd-inject-test", "-p", "#{pane_current_command}").CombinedOutput()
+	if err != nil {
+		t.Fatalf("tmux display-message failed: %v\n%s", err, paneCmd)
+	}
+
+	paneCmdStr := strings.TrimSpace(string(paneCmd))
+	t.Logf("pane_current_command = %q", paneCmdStr)
+
+	// The pane must NOT be running the injected command.
+	if paneCmdStr == "echo" {
+		t.Errorf("pane is running injected command 'echo'; the command query parameter was not ignored")
+	}
+
+	// The pane should be running the defaultCmd ("bash").
+	if paneCmdStr != defaultCmd {
+		t.Errorf("expected pane_current_command to be %q (defaultCmd), got %q", defaultCmd, paneCmdStr)
+	}
 }
 
 // TestResizeMessageFormat tests the resize message format constants and parsing.

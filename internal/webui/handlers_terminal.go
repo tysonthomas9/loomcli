@@ -26,8 +26,8 @@ var validTerminalSession = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // handleTerminalWS returns a WebSocket handler for terminal relay.
 // It upgrades HTTP connections to WebSocket, bridges them to tmux sessions
 // via the TerminalManager, and handles bidirectional binary data relay
-// plus an in-band resize protocol. If the command query parameter is not
-// specified, defaultCmd is used.
+// plus an in-band resize protocol. The server-configured defaultCmd is
+// always used as the terminal command.
 func handleTerminalWS(manager *TerminalManager, defaultCmd string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if manager is available
@@ -69,12 +69,6 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string) http.HandlerF
 			return
 		}
 
-		// Get command parameter, falling back to default if not specified
-		command := r.URL.Query().Get("command")
-		if command == "" {
-			command = defaultCmd
-		}
-
 		// Accept WebSocket upgrade
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			InsecureSkipVerify: true, // CORS handled at middleware level
@@ -93,7 +87,7 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string) http.HandlerF
 
 		// Attach to terminal session with default 80x24 size
 		// (frontend sends resize immediately after connect)
-		termSession, err := manager.Attach(session, command, 80, 24)
+		termSession, err := manager.Attach(session, defaultCmd, 80, 24)
 		if err != nil {
 			log.Printf("Failed to attach terminal session %q: %v", session, err)
 			closeReason = err.Error()

@@ -17,7 +17,7 @@ import (
 )
 
 // setupRoutes configures all HTTP routes for the server.
-// defaultTerminalCmd is the command to run in terminal sessions when not specified via query parameter.
+// defaultTerminalCmd is the command to run in terminal sessions.
 func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string, fleetStore *fleet.Store, tokenCfg *TokenConfig) {
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))

@@ -162,7 +162,6 @@ sudo dnf install tmux
 
 Query Parameters:
 - `session` (required): Session name, must match `[a-zA-Z0-9_-]+`
-- `command` (optional): Command to run in the tmux session. If omitted, tmux starts with the user's default shell.
 
 The endpoint:
 - Creates a tmux session if it does not exist
