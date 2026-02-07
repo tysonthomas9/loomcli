@@ -1,4 +1,4 @@
-export { ApiError, get, post, patch, del } from './client';
+export { ApiError, get, post, patch, del, initAuth, getAuthToken } from './client';
 export type { RequestOptions } from './client';
 
 // SSE client for real-time updates (recommended)

@@ -30,6 +30,8 @@ var (
 	serveNoWebUI     bool
 	serveNoDaemon    bool
 	serveRedisAddr   string
+	serveAPIKey      string
+	serveNoAuth      bool
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
@@ -92,6 +94,10 @@ func init() {
 
 	defaultRedisAddr := os.Getenv("LOOM_REDIS_ADDR")
 	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", defaultRedisAddr, "Redis address for fleet coordination (enables stale detector)")
+
+	defaultAPIKey := os.Getenv("LOOM_WEBUI_API_KEY")
+	serveCmd.Flags().StringVar(&serveAPIKey, "api-key", defaultAPIKey, "API key for WebUI authentication (auto-generated if empty)")
+	serveCmd.Flags().BoolVar(&serveNoAuth, "no-auth", false, "Disable WebUI API authentication (not recommended)")
 
 	rootCmd.AddCommand(serveCmd)
 }
@@ -169,12 +175,17 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Start webui server in goroutine (unless --no-webui)
 	webuiErr := make(chan error, 1)
 	if !serveNoWebUI {
+		if serveNoAuth {
+			log.Printf("WARNING: WebUI API authentication is disabled (--no-auth)")
+		}
 		go func() {
 			cfg := webui.ServerConfig{
-				Port:       serveWebUIPort,
-				SocketPath: serveWebUISocket,
-				FleetRedis: fleetRedisConfig,
+				Port:        serveWebUIPort,
+				SocketPath:  serveWebUISocket,
+				FleetRedis:  fleetRedisConfig,
 				FleetJWTKey: fleetJWTKey,
+				APIKey:      serveAPIKey,
+				AuthEnabled: !serveNoAuth,
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true

@@ -8,6 +8,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState, useCallback } from 'react';
 
+import { getAuthToken } from '@/api/client';
+
 import '@xterm/xterm/css/xterm.css';
 import styles from './TerminalPanel.module.css';
 
@@ -26,7 +28,12 @@ function buildWsUrl(): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   // Use a fixed session name for the Talk to Lead terminal
   const session = 'talk-to-lead';
-  return `${proto}//${window.location.host}/api/terminal/ws?session=${session}`;
+  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${session}`;
+  const token = getAuthToken();
+  if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+  return url;
 }
 
 /**

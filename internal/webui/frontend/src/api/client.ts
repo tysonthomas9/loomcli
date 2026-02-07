@@ -1,6 +1,9 @@
 const API_BASE_URL = '';
 const DEFAULT_TIMEOUT = 30000;
 
+// Auth token stored in memory (not localStorage) for XSS safety
+let authToken: string | null = null;
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -17,6 +20,33 @@ export type RequestOptions = {
   timeout?: number;
   signal?: AbortSignal;
 };
+
+/**
+ * Initialize authentication by fetching the API token from the bootstrap endpoint.
+ * This endpoint is same-origin only and returns the pre-shared API key.
+ * Must be called before any authenticated API requests.
+ */
+export async function initAuth(): Promise<void> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/token`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (response.ok) {
+      const data = (await response.json()) as { token: string };
+      authToken = data.token;
+    }
+    // If 404 or other error, auth is likely disabled — proceed without token
+  } catch {
+    // Auth endpoint not available — server may have auth disabled
+  }
+}
+
+/**
+ * Get the current auth token for use in WebSocket/SSE connections.
+ */
+export function getAuthToken(): string | null {
+  return authToken;
+}
 
 async function fetchApi<T>(
   method: string,
@@ -44,6 +74,11 @@ async function fetchApi<T>(
       Accept: 'application/json',
       ...options.headers,
     };
+
+    // Inject auth token if available
+    if (authToken && !headers['Authorization']) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
 
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';

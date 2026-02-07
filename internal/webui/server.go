@@ -43,6 +43,8 @@ type ServerConfig struct {
 	TerminalCmd     string
 	FleetRedis      *fleet.RedisConfig
 	FleetJWTKey     []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	APIKey          string // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
+	AuthEnabled     bool   // Whether API authentication is enabled (default: true)
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.
@@ -239,14 +241,42 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		defer fleetStore.Close()
 	}
 
+	// Load or generate API key for authentication
+	var apiKey string
+	if config.AuthEnabled {
+		if config.APIKey != "" {
+			apiKey = config.APIKey
+		} else {
+			keyPath := DefaultAPIKeyPath()
+			if keyPath != "" {
+				var err error
+				apiKey, err = LoadOrCreateAPIKey(keyPath)
+				if err != nil {
+					log.Printf("Warning: failed to load/create API key: %v", err)
+					log.Printf("Authentication will be disabled")
+					config.AuthEnabled = false
+				} else {
+					log.Printf("API key loaded from %s", keyPath)
+				}
+			} else {
+				log.Printf("Warning: cannot determine API key path, authentication disabled")
+				config.AuthEnabled = false
+			}
+		}
+	}
+
 	// Create HTTP server
 	mux := http.NewServeMux()
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, fleetStore, tokenCfg)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, fleetStore, tokenCfg, apiKey, config.AuthEnabled)
 
-	// Wrap with CORS middleware if enabled
+	// Wrap with middleware chain: security -> auth -> CORS -> mux
+	// Auth sits between security headers and CORS so that:
+	// - CORS preflight OPTIONS pass through without auth
+	// - Security headers apply to all responses including 401s
 	corsMiddleware := NewCORSMiddleware(corsConfig)
+	authMiddleware := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
 	securityMiddleware := NewSecurityHeadersMiddleware()
-	handler := h2c.NewHandler(securityMiddleware(corsMiddleware(mux)), &http2.Server{})
+	handler := h2c.NewHandler(securityMiddleware(authMiddleware(corsMiddleware(mux))), &http2.Server{})
 
 	// Create a shutdown context that all request contexts will derive from.
 	// When cancelled, in-flight handlers' r.Context().Done() fires, causing

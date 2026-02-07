@@ -3,6 +3,8 @@
  * Provides a simpler push model compared to WebSocket with built-in browser reconnection.
  */
 
+import { getAuthToken } from './client';
+
 // Connection states for real-time event streaming
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
@@ -248,8 +250,14 @@ export class BeadsSSEClient {
  */
 export function getSSEUrl(since?: number): string {
   const base = `${window.location.origin}/api/events`;
+  const params = new URLSearchParams();
   if (since !== undefined) {
-    return `${base}?since=${since}`;
+    params.set('since', String(since));
   }
-  return base;
+  const token = getAuthToken();
+  if (token) {
+    params.set('token', token);
+  }
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
 }

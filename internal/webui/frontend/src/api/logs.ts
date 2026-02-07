@@ -2,6 +2,8 @@
  * API functions for log streaming endpoints.
  */
 
+import { getAuthToken } from './client';
+
 /**
  * Response from GET /api/tasks/{id}/logs
  */
@@ -11,12 +13,28 @@ interface LogPhaseResponse {
 }
 
 /**
+ * Append auth token to a URL as a query parameter if available.
+ */
+function appendToken(url: string): string {
+  const token = getAuthToken();
+  if (!token) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
+}
+
+/**
  * Fetch available log phases for a task.
  * @param taskId The task ID (e.g., "beads-abc123")
  * @returns Array of available phases (e.g., ["planning", "implementation"])
  */
 export async function getTaskLogPhases(taskId: string): Promise<string[]> {
-  const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/logs`);
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/logs`, { headers });
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -36,7 +54,7 @@ export async function getTaskLogPhases(taskId: string): Promise<string[]> {
  * @returns The SSE endpoint URL
  */
 export function getAgentLogStreamUrl(agentName: string): string {
-  return `/api/agents/${encodeURIComponent(agentName)}/logs/stream`;
+  return appendToken(`/api/agents/${encodeURIComponent(agentName)}/logs/stream`);
 }
 
 /**
@@ -46,5 +64,5 @@ export function getAgentLogStreamUrl(agentName: string): string {
  * @returns The SSE endpoint URL
  */
 export function getTaskLogStreamUrl(taskId: string, phase: string): string {
-  return `/api/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}/stream`;
+  return appendToken(`/api/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}/stream`);
 }
