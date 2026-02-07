@@ -200,15 +200,16 @@ func runServe(cmd *cobra.Command, args []string) {
 		}
 		go func() {
 			cfg := webui.ServerConfig{
-				Port:        serveWebUIPort,
-				BindAddress: serveBindAddr,
-				SocketPath:  serveWebUISocket,
-				FleetRedis:  fleetRedisConfig,
-				FleetJWTKey: fleetJWTKey,
-				FleetAPIKey: serveFleetAPIKey,
-				APIKey:      serveAPIKey,
-				AuthEnabled: !serveNoAuth,
-				HSTSEnabled: serveHSTS,
+				Port:         serveWebUIPort,
+				BindAddress:  serveBindAddr,
+				SocketPath:   serveWebUISocket,
+				FleetEnabled: serveRedisAddr != "",
+				FleetRedis:   fleetRedisConfig,
+				FleetJWTKey:  fleetJWTKey,
+				FleetAPIKey:  serveFleetAPIKey,
+				APIKey:       serveAPIKey,
+				AuthEnabled:  !serveNoAuth,
+				HSTSEnabled:  serveHSTS,
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true

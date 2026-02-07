@@ -19,7 +19,7 @@ import (
 // setupRoutes configures all HTTP routes for the server.
 // defaultTerminalCmd is the command to run in terminal sessions.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig) {
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, fleetEnabled bool) {
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -53,19 +53,22 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	mux.HandleFunc("DELETE /api/issues/{id}/dependencies/{depId}", handleRemoveDependency(pool))
 
 	// Fleet endpoints for worker registration, task acquisition, and completion
-	mux.HandleFunc("POST /api/fleet/register", handleFleetRegister(fleetStore, tokenCfg, fleetRegCfg))
-	if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
-		fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
-		mux.Handle("POST /api/fleet/claim", fleetAuth(http.HandlerFunc(handleFleetClaim(pool))))
-	} else {
-		mux.HandleFunc("POST /api/fleet/claim", handleFleetClaim(pool))
-	}
-	mux.HandleFunc("POST /api/fleet/done/{id}", handleFleetDone(fleetStore))
-	if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
-		fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
-		mux.Handle("POST /api/fleet/heartbeat", fleetAuth(http.HandlerFunc(handleFleetHeartbeat(fleetStore))))
-	} else {
-		mux.HandleFunc("POST /api/fleet/heartbeat", handleFleetHeartbeat(fleetStore))
+	// Only registered when fleet coordination (Redis) is configured.
+	if fleetEnabled {
+		mux.HandleFunc("POST /api/fleet/register", handleFleetRegister(fleetStore, tokenCfg, fleetRegCfg))
+		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
+			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
+			mux.Handle("POST /api/fleet/claim", fleetAuth(http.HandlerFunc(handleFleetClaim(pool))))
+		} else {
+			mux.HandleFunc("POST /api/fleet/claim", handleFleetClaim(pool))
+		}
+		mux.HandleFunc("POST /api/fleet/done/{id}", handleFleetDone(fleetStore))
+		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
+			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
+			mux.Handle("POST /api/fleet/heartbeat", fleetAuth(http.HandlerFunc(handleFleetHeartbeat(fleetStore))))
+		} else {
+			mux.HandleFunc("POST /api/fleet/heartbeat", handleFleetHeartbeat(fleetStore))
+		}
 	}
 
 	// Ready endpoint for issues ready to work on

@@ -612,7 +612,7 @@ func TestHandleAPIHealth_NilPool(t *testing.T) {
 // the terminal WebSocket endpoint is NOT registered when termManager is nil.
 func TestSetupRoutes_TerminalEndpointNotRegisteredWithNilManager(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil) // nil termManager
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, false) // nil termManager
 
 	// Request to terminal endpoint should fall through to frontend handler
 	// (the SPA catch-all) since the route is not registered
@@ -648,7 +648,7 @@ func TestSetupRoutes_TerminalEndpointRegisteredWithManager(t *testing.T) {
 	defer termMgr.Shutdown()
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, termMgr, "", nil, nil, nil, "", false, nil, nil) // non-nil termManager
+	setupRoutes(mux, nil, nil, nil, termMgr, "", nil, nil, nil, "", false, nil, nil, false) // non-nil termManager
 
 	// Request to terminal endpoint should be handled by the terminal handler,
 	// not fall through to frontend. Without WebSocket upgrade headers,
@@ -710,7 +710,7 @@ func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
 // TestSetupRoutes_StatsEndpoint tests that stats endpoint is registered.
 func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, false)
 
 	// Test that stats endpoint is registered
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
@@ -739,7 +739,7 @@ func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 // catch-all frontend handler "/" which returns index.html (200 OK).
 func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, false)
 
 	// POST to GET-only endpoint falls through to frontend handler
 	req := httptest.NewRequest(http.MethodPost, "/api/stats", nil)
@@ -947,5 +947,63 @@ func TestHandleStats_DaemonError(t *testing.T) {
 
 	if resp.Error != "database connection failed" {
 		t.Errorf("Error = %q, want %q", resp.Error, "database connection failed")
+	}
+}
+
+// TestSetupRoutes_FleetEndpointsNotRegisteredWhenDisabled tests that
+// fleet endpoints are NOT registered when fleetEnabled is false.
+func TestSetupRoutes_FleetEndpointsNotRegisteredWhenDisabled(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, false) // fleetEnabled=false
+
+	// Request to fleet endpoint should fall through to frontend handler
+	// (the SPA catch-all) since the route is not registered
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// When fleetEnabled is false, the route is not registered, so the request
+	// falls through to the frontend handler "/" which returns 200 with index.html
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected /api/fleet/claim to fall through to frontend with status %d when fleetEnabled is false, got %d",
+			http.StatusOK, rr.Code)
+	}
+
+	// Verify it's serving HTML (the SPA index.html), not JSON
+	ct := rr.Header().Get("Content-Type")
+	if ct != "text/html; charset=utf-8" {
+		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	}
+}
+
+// TestSetupRoutes_FleetEndpointsRegisteredWhenEnabled tests that
+// fleet endpoints ARE registered when fleetEnabled is true.
+func TestSetupRoutes_FleetEndpointsRegisteredWhenEnabled(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, true) // fleetEnabled=true
+
+	// Request to fleet endpoint should be handled by the fleet handler,
+	// not fall through to frontend. With nil pool, the handler should
+	// return an error response, not HTML.
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// When fleetEnabled is true, the route IS registered.
+	// With nil pool, the handler should return a non-HTML error response.
+	// The key is it should NOT be 200 with HTML content (which would indicate
+	// the request fell through to the frontend handler).
+	if rr.Code == http.StatusOK {
+		ct := rr.Header().Get("Content-Type")
+		// If it's HTML, then the route wasn't registered properly
+		if ct == "text/html; charset=utf-8" {
+			t.Error("expected fleet route to be registered, but request fell through to frontend handler")
+		}
+	}
+
+	// Additional verification: the response should NOT be HTML
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Errorf("expected non-HTML response when fleet route is registered, got Content-Type %q", ct)
 	}
 }

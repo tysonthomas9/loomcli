@@ -43,6 +43,7 @@ type ServerConfig struct {
 	ShutdownTimeout time.Duration
 	MaxPortAttempts int
 	TerminalCmd     string
+	FleetEnabled    bool // Register fleet API routes (requires Redis coordination)
 	FleetRedis      *fleet.RedisConfig
 	FleetJWTKey     []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
 	FleetAPIKey     string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
@@ -127,6 +128,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 	if config.HSTSEnabled {
 		log.Printf("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
+	}
+	if config.FleetEnabled {
+		log.Printf("Fleet routes enabled")
 	}
 
 	// Find an available port (auto-fallback if requested port is in use)
@@ -310,7 +314,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, config.FleetEnabled)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.
