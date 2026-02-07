@@ -124,7 +124,7 @@ func TestCodexInvokeInteractive_EnvVars(t *testing.T) {
 	orig := codexInvoker
 	codexInvoker = func(workDir, prompt, agentName string) error {
 		// Simulate what defaultCodexInvoker does: build the env
-		env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
 			env = append(env, "BD_ACTOR="+agentName)
 		}
@@ -161,7 +161,7 @@ func TestCodexInvokeInteractive_NoAgentName(t *testing.T) {
 	var capturedEnv []string
 	orig := codexInvoker
 	codexInvoker = func(workDir, prompt, agentName string) error {
-		env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
 			env = append(env, "BD_ACTOR="+agentName)
 		}

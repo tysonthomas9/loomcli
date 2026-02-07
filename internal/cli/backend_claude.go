@@ -38,7 +38,7 @@ var claudeInvoker = defaultClaudeInvoker
 func defaultClaudeInvoker(workDir, prompt, agentName string) error {
 	cmd := exec.Command("claude", "--dangerously-skip-permissions")
 	cmd.Dir = workDir
-	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
@@ -67,7 +67,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
 		"--dangerously-skip-permissions")
 	cmd.Dir = workDir
-	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}

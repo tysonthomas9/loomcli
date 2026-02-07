@@ -32,7 +32,7 @@ var codexNonInteractiveInvoker = defaultCodexNonInteractiveInvoker
 func defaultCodexInvoker(workDir, prompt, agentName string) error {
 	cmd := exec.Command("codex", "--full-auto")
 	cmd.Dir = workDir
-	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
@@ -50,7 +50,7 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	cmd := exec.Command("codex", "exec", "--json")
 	cmd.Dir = workDir
-	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}

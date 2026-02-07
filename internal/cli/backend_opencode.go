@@ -32,7 +32,7 @@ var openCodeNonInteractiveInvoker = defaultOpenCodeNonInteractiveInvoker
 func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 	cmd := exec.Command("opencode", "run")
 	cmd.Dir = workDir
-	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
@@ -50,7 +50,7 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	cmd := exec.Command("opencode", "run", "--format", "json")
 	cmd.Dir = workDir
-	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
+	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}

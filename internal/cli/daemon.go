@@ -298,7 +298,7 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 	cmd.Dir = ap.worktreePath
 
 	// Set environment
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(FilteredEnv(),
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
 	)
