@@ -1471,3 +1471,225 @@ func TestFleetDone_ClearWorkerClaimFailure_BestEffort(t *testing.T) {
 		t.Errorf("worker_id = %v, want %q", result["worker_id"], "worker-1")
 	}
 }
+
+// =============================================================================
+// Fleet Heartbeat Handler Tests
+// =============================================================================
+
+// mockHeartbeatStore implements heartbeatStore for testing.
+type mockHeartbeatStore struct {
+	updateHeartbeatFunc func(ctx context.Context, workerID string) (time.Time, error)
+}
+
+func (m *mockHeartbeatStore) UpdateHeartbeat(ctx context.Context, workerID string) (time.Time, error) {
+	if m.updateHeartbeatFunc != nil {
+		return m.updateHeartbeatFunc(ctx, workerID)
+	}
+	return time.Time{}, errors.New("updateHeartbeatFunc not implemented")
+}
+
+func TestFleetHeartbeat_Success(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	store := &mockHeartbeatStore{
+		updateHeartbeatFunc: func(ctx context.Context, workerID string) (time.Time, error) {
+			if workerID != "worker-1" {
+				t.Errorf("UpdateHeartbeat called with workerID %q, want %q", workerID, "worker-1")
+			}
+			return now, nil
+		},
+	}
+	handler := handleFleetHeartbeatWithStore(store)
+
+	body, _ := json.Marshal(HeartbeatRequest{WorkerID: "worker-1"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/heartbeat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccessWithData(t, result, "last_heartbeat")
+
+	// Verify last_heartbeat is a valid RFC3339 timestamp
+	lastHB, ok := result["last_heartbeat"].(string)
+	if !ok || lastHB == "" {
+		t.Fatal("expected non-empty last_heartbeat in response")
+	}
+	parsed, err := time.Parse(time.RFC3339, lastHB)
+	if err != nil {
+		t.Fatalf("last_heartbeat is not valid RFC3339: %v", err)
+	}
+	if !parsed.Equal(now) {
+		t.Errorf("last_heartbeat = %v, want %v", parsed, now)
+	}
+}
+
+func TestFleetHeartbeat_WorkerNotFound(t *testing.T) {
+	store := &mockHeartbeatStore{
+		updateHeartbeatFunc: func(ctx context.Context, workerID string) (time.Time, error) {
+			return time.Time{}, fleet.ErrWorkerNotFound
+		},
+	}
+	handler := handleFleetHeartbeatWithStore(store)
+
+	body, _ := json.Marshal(HeartbeatRequest{WorkerID: "unknown-worker"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/heartbeat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "last_heartbeat")
+}
+
+func TestFleetHeartbeat_MissingWorkerID(t *testing.T) {
+	store := &mockHeartbeatStore{}
+	handler := handleFleetHeartbeatWithStore(store)
+
+	body, _ := json.Marshal(map[string]interface{}{})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/heartbeat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "last_heartbeat")
+}
+
+func TestFleetHeartbeat_EmptyWorkerID(t *testing.T) {
+	store := &mockHeartbeatStore{}
+	handler := handleFleetHeartbeatWithStore(store)
+
+	body, _ := json.Marshal(HeartbeatRequest{WorkerID: ""})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/heartbeat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "last_heartbeat")
+}
+
+func TestFleetHeartbeat_NilStore_Returns503(t *testing.T) {
+	handler := handleFleetHeartbeatWithStore(nil)
+
+	body, _ := json.Marshal(HeartbeatRequest{WorkerID: "worker-1"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/heartbeat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "last_heartbeat")
+}
+
+func TestFleetHeartbeat_InvalidJSON_Returns400(t *testing.T) {
+	store := &mockHeartbeatStore{}
+	handler := handleFleetHeartbeatWithStore(store)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/heartbeat", bytes.NewReader([]byte("{invalid json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "last_heartbeat")
+}
+
+func TestFleetHeartbeat_BodyTooLarge_Returns413(t *testing.T) {
+	store := &mockHeartbeatStore{}
+	handler := handleFleetHeartbeatWithStore(store)
+
+	// Create a body larger than 1MB (maxRequestBody)
+	largeBody := make([]byte, 1<<20+100)
+	copy(largeBody, []byte(`{"worker_id":"`))
+	for i := 14; i < len(largeBody)-2; i++ {
+		largeBody[i] = 'x'
+	}
+	copy(largeBody[len(largeBody)-2:], []byte(`"}`))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/heartbeat", bytes.NewReader(largeBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "last_heartbeat")
+}
+
+func TestFleetHeartbeat_WorkerIDTooLong(t *testing.T) {
+	store := &mockHeartbeatStore{}
+	handler := handleFleetHeartbeatWithStore(store)
+
+	longID := strings.Repeat("x", 257) // exceeds maxWorkerIDLength (256)
+	body, _ := json.Marshal(HeartbeatRequest{WorkerID: longID})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/heartbeat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "last_heartbeat")
+}
+
+func TestFleetHeartbeat_StoreError_Returns500(t *testing.T) {
+	store := &mockHeartbeatStore{
+		updateHeartbeatFunc: func(ctx context.Context, workerID string) (time.Time, error) {
+			return time.Time{}, errors.New("redis connection refused")
+		},
+	}
+	handler := handleFleetHeartbeatWithStore(store)
+
+	body, _ := json.Marshal(HeartbeatRequest{WorkerID: "worker-1"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/heartbeat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "last_heartbeat")
+}

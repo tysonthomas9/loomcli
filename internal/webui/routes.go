@@ -61,6 +61,12 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("POST /api/fleet/claim", handleFleetClaim(pool))
 	}
 	mux.HandleFunc("POST /api/fleet/done/{id}", handleFleetDone(fleetStore))
+	if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
+		fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
+		mux.Handle("POST /api/fleet/heartbeat", fleetAuth(http.HandlerFunc(handleFleetHeartbeat(fleetStore))))
+	} else {
+		mux.HandleFunc("POST /api/fleet/heartbeat", handleFleetHeartbeat(fleetStore))
+	}
 
 	// Ready endpoint for issues ready to work on
 	mux.HandleFunc("GET /api/ready", handleReady(pool))

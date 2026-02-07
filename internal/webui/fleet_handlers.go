@@ -649,3 +649,127 @@ func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID strin
 	}
 	return true
 }
+
+// HeartbeatRequest represents the POST body for the heartbeat endpoint.
+type HeartbeatRequest struct {
+	WorkerID string `json:"worker_id"`
+}
+
+// HeartbeatResponse wraps the heartbeat result for JSON response.
+type HeartbeatResponse struct {
+	Success       bool   `json:"success"`
+	LastHeartbeat string `json:"last_heartbeat,omitempty"` // RFC 3339 timestamp
+	Error         string `json:"error,omitempty"`
+}
+
+// heartbeatStore is an internal interface for testing heartbeat operations.
+type heartbeatStore interface {
+	UpdateHeartbeat(ctx context.Context, workerID string) (time.Time, error)
+}
+
+// handleFleetHeartbeat returns a handler that processes worker heartbeats.
+func handleFleetHeartbeat(store *fleet.Store) http.HandlerFunc {
+	return handleFleetHeartbeatWithStore(store)
+}
+
+// handleFleetHeartbeatWithStore is the internal implementation that accepts an interface for testing.
+func handleFleetHeartbeatWithStore(store heartbeatStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check store availability
+		if store == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+				Success: false,
+				Error:   "fleet store not initialized",
+			}); err != nil {
+				log.Printf("Failed to encode heartbeat response: %v", err)
+			}
+			return
+		}
+
+		// Parse request body
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		var req HeartbeatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+					Success: false,
+					Error:   "request body too large (max 1MB)",
+				}); err != nil {
+					log.Printf("Failed to encode heartbeat response: %v", err)
+				}
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+				Success: false,
+				Error:   fmt.Sprintf("invalid request body: %v", err),
+			}); err != nil {
+				log.Printf("Failed to encode heartbeat response: %v", err)
+			}
+			return
+		}
+
+		// Validate worker_id
+		if req.WorkerID == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+				Success: false,
+				Error:   "worker_id is required",
+			}); err != nil {
+				log.Printf("Failed to encode heartbeat response: %v", err)
+			}
+			return
+		}
+
+		if len(req.WorkerID) > maxWorkerIDLength {
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+				Success: false,
+				Error:   fmt.Sprintf("worker_id exceeds maximum length of %d characters", maxWorkerIDLength),
+			}); err != nil {
+				log.Printf("Failed to encode heartbeat response: %v", err)
+			}
+			return
+		}
+
+		// Update heartbeat with timeout
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		lastHeartbeat, err := store.UpdateHeartbeat(ctx, req.WorkerID)
+		if err != nil {
+			if errors.Is(err, fleet.ErrWorkerNotFound) {
+				w.WriteHeader(http.StatusNotFound)
+				if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+					Success: false,
+					Error:   "worker not found: " + req.WorkerID,
+				}); err != nil {
+					log.Printf("Failed to encode heartbeat response: %v", err)
+				}
+				return
+			}
+			log.Printf("Failed to update heartbeat for worker %s: %v", req.WorkerID, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+				Success: false,
+				Error:   "failed to update heartbeat",
+			}); err != nil {
+				log.Printf("Failed to encode heartbeat response: %v", err)
+			}
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+			Success:       true,
+			LastHeartbeat: lastHeartbeat.Format(time.RFC3339),
+		}); err != nil {
+			log.Printf("Failed to encode heartbeat response: %v", err)
+		}
+	}
+}

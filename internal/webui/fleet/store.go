@@ -7,6 +7,7 @@ package fleet
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -14,6 +15,9 @@ import (
 
 	"github.com/redis/go-redis/v9"
 )
+
+// ErrWorkerNotFound is returned when a worker is not registered.
+var ErrWorkerNotFound = errors.New("worker not found")
 
 const (
 	// keyPrefix namespaces all fleet Redis keys.
@@ -358,4 +362,28 @@ func (s *Store) GetWorker(ctx context.Context, workerID string) (*Worker, error)
 	}
 
 	return &worker, nil
+}
+
+// UpdateHeartbeat refreshes a worker's registration TTL.
+// Returns the timestamp of the heartbeat update and ErrWorkerNotFound if the worker
+// is not registered.
+func (s *Store) UpdateHeartbeat(ctx context.Context, workerID string) (time.Time, error) {
+	if err := validateID(workerID, "workerID"); err != nil {
+		return time.Time{}, err
+	}
+
+	key := workerRegistrationKey(workerID)
+
+	// Refresh the TTL atomically - only if the key exists
+	ok, err := s.client.Expire(ctx, key, defaultWorkerRegistrationTTL).Result()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("update heartbeat failed: %w", err)
+	}
+	if !ok {
+		return time.Time{}, ErrWorkerNotFound
+	}
+
+	now := time.Now().UTC()
+	s.logger.Debug("heartbeat updated", "worker_id", workerID)
+	return now, nil
 }

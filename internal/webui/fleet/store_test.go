@@ -494,3 +494,77 @@ func TestClose(t *testing.T) {
 		t.Fatalf("close failed: %v", err)
 	}
 }
+
+func TestUpdateHeartbeat_Success(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+
+	// Register a worker first
+	worker := &Worker{
+		WorkerID:     "hb-worker-1",
+		Repos:        []string{"repo-a"},
+		RegisteredAt: time.Now().Unix(),
+	}
+	if err := store.RegisterWorker(ctx, worker); err != nil {
+		t.Fatalf("RegisterWorker failed: %v", err)
+	}
+
+	// Call UpdateHeartbeat
+	before := time.Now().UTC()
+	lastHB, err := store.UpdateHeartbeat(ctx, "hb-worker-1")
+	if err != nil {
+		t.Fatalf("UpdateHeartbeat failed: %v", err)
+	}
+	after := time.Now().UTC()
+
+	// Verify returned time is reasonable (between before and after)
+	if lastHB.Before(before) || lastHB.After(after) {
+		t.Errorf("lastHeartbeat = %v, want between %v and %v", lastHB, before, after)
+	}
+}
+
+func TestUpdateHeartbeat_WorkerNotFound(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+
+	// Call UpdateHeartbeat for an unregistered worker
+	_, err := store.UpdateHeartbeat(ctx, "nonexistent-worker")
+	if err == nil {
+		t.Fatal("expected error for unregistered worker")
+	}
+	if err != ErrWorkerNotFound {
+		t.Errorf("error = %v, want %v", err, ErrWorkerNotFound)
+	}
+}
+
+func TestUpdateHeartbeat_RefreshesTTL(t *testing.T) {
+	store, mr := setupTest(t)
+	ctx := context.Background()
+
+	// Register a worker
+	worker := &Worker{
+		WorkerID:     "hb-worker-ttl",
+		Repos:        []string{"repo-b"},
+		RegisteredAt: time.Now().Unix(),
+	}
+	if err := store.RegisterWorker(ctx, worker); err != nil {
+		t.Fatalf("RegisterWorker failed: %v", err)
+	}
+
+	// Fast-forward time by 1 hour (half of the 2-hour registration TTL)
+	mr.FastForward(1 * time.Hour)
+
+	// Call UpdateHeartbeat to refresh the TTL
+	_, err := store.UpdateHeartbeat(ctx, "hb-worker-ttl")
+	if err != nil {
+		t.Fatalf("UpdateHeartbeat failed: %v", err)
+	}
+
+	// Verify TTL was refreshed back to the full defaultWorkerRegistrationTTL
+	ttl := mr.TTL(workerRegistrationKey("hb-worker-ttl"))
+	// After refresh, TTL should be close to defaultWorkerRegistrationTTL (2 hours)
+	// Allow some tolerance since miniredis FastForward is not exact for subsequent ops
+	if ttl < defaultWorkerRegistrationTTL-time.Minute {
+		t.Errorf("TTL = %v, want close to %v (at least %v)", ttl, defaultWorkerRegistrationTTL, defaultWorkerRegistrationTTL-time.Minute)
+	}
+}
