@@ -361,7 +361,7 @@ func writePIDFile(path string, pid int) error {
 	// Write to temp file first, then rename for atomicity
 	// Include PID in temp filename to avoid race conditions with concurrent daemons
 	tempFile := fmt.Sprintf("%s.%d.tmp", path, pid)
-	if err := os.WriteFile(tempFile, []byte(strconv.Itoa(pid)+"\n"), 0644); err != nil {
+	if err := os.WriteFile(tempFile, []byte(strconv.Itoa(pid)+"\n"), 0600); err != nil {
 		return err
 	}
 	if err := os.Rename(tempFile, path); err != nil {
@@ -413,7 +413,7 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 
 	// Atomic write via temp file (include PID to avoid race conditions)
 	tempFile := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+	if err := os.WriteFile(tempFile, data, 0600); err != nil {
 		return err
 	}
 	if err := os.Rename(tempFile, path); err != nil {
