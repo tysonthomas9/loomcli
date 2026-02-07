@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,6 +13,9 @@ import (
 	"github.com/steveyegge/beads/internal/debug"
 	"github.com/steveyegge/beads/internal/lockfile"
 )
+
+// maxClientMessageSize is the maximum size of a single RPC response the client will read (10 MB).
+const maxClientMessageSize int64 = 10 * 1024 * 1024
 
 // rpcDebugEnabled returns true if BD_DEBUG_RPC environment variable is set
 func rpcDebugEnabled() bool {
@@ -212,9 +216,13 @@ func (c *Client) ExecuteWithCwd(operation string, args interface{}, cwd string) 
 		return nil, fmt.Errorf("failed to flush: %w", err)
 	}
 
-	reader := bufio.NewReader(c.conn)
+	lr := &io.LimitedReader{R: c.conn, N: maxClientMessageSize}
+	reader := bufio.NewReader(lr)
 	respLine, err := reader.ReadBytes('\n')
 	if err != nil {
+		if lr.N <= 0 {
+			return nil, fmt.Errorf("response too large (exceeds %d bytes)", maxClientMessageSize)
+		}
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 

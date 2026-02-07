@@ -21,6 +21,14 @@ var ServerVersion = "0.0.0" // Placeholder; overridden by daemon startup
 
 const (
 	statusUnhealthy = "unhealthy"
+
+	// DefaultMaxMessageSize is the maximum size of a single RPC message (10 MB).
+	// This prevents memory exhaustion from unbounded ReadBytes('\n') calls.
+	DefaultMaxMessageSize int64 = 10 * 1024 * 1024
+
+	// minMaxMessageSize is the minimum allowed value for maxMessageSize (64 KB).
+	// Prevents misconfiguration from breaking normal operations.
+	minMaxMessageSize int64 = 64 * 1024
 )
 
 // Server represents the RPC server that runs in the daemon
@@ -45,6 +53,8 @@ type Server struct {
 	connSemaphore chan struct{}
 	// Request timeout
 	requestTimeout time.Duration
+	// Maximum RPC message size (prevents memory exhaustion DoS)
+	maxMessageSize int64
 	// Ready channel signals when server is listening
 	readyChan chan struct{}
 	// Auto-import single-flight guard
@@ -115,6 +125,14 @@ func NewServer(socketPath string, store storage.Storage, workspacePath string, d
 		}
 	}
 
+	maxMessageSize := DefaultMaxMessageSize
+	if env := os.Getenv("BEADS_DAEMON_MAX_MESSAGE_SIZE"); env != "" {
+		var size int64
+		if _, err := fmt.Sscanf(env, "%d", &size); err == nil && size >= minMaxMessageSize {
+			maxMessageSize = size
+		}
+	}
+
 	mutationBufferSize := 512 // default (increased from 100 for better burst handling)
 	if env := os.Getenv("BEADS_MUTATION_BUFFER"); env != "" {
 		var bufSize int
@@ -135,6 +153,7 @@ func NewServer(socketPath string, store storage.Storage, workspacePath string, d
 		maxConns:          maxConns,
 		connSemaphore:     make(chan struct{}, maxConns),
 		requestTimeout:    requestTimeout,
+		maxMessageSize:    maxMessageSize,
 		readyChan:         make(chan struct{}),
 		mutationChan:      make(chan MutationEvent, mutationBufferSize), // Configurable buffer
 		recentMutations:   make([]MutationEvent, 0, 100),

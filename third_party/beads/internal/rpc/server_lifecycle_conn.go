@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -198,10 +199,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}()
 
-	reader := bufio.NewReader(conn)
+	lr := &io.LimitedReader{R: conn, N: s.maxMessageSize}
+	reader := bufio.NewReader(lr)
 	writer := bufio.NewWriter(conn)
 
 	for {
+		// Reset the limit for each new message
+		lr.N = s.maxMessageSize
+
 		// Set read deadline for the next request
 		if err := conn.SetReadDeadline(time.Now().Add(s.requestTimeout)); err != nil {
 			return
@@ -209,6 +214,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
+			if lr.N <= 0 {
+				// Message exceeded size limit - send error response and close connection
+				resp := Response{
+					Success: false,
+					Error:   fmt.Sprintf("message too large (exceeds %d bytes)", s.maxMessageSize),
+				}
+				_ = s.writeResponse(writer, resp)
+			}
 			return
 		}
 
