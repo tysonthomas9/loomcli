@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,6 +25,7 @@ import (
 
 var (
 	servePort        int
+	serveBindAddr    string
 	serveCorsOrigin  string
 	serveWebUIPort   int
 	serveWebUISocket string
@@ -85,7 +87,13 @@ func init() {
 
 	defaultCors := os.Getenv("LOOM_CORS_ORIGIN")
 
+	defaultBind := os.Getenv("LOOM_BIND_ADDR")
+	if defaultBind == "" {
+		defaultBind = "127.0.0.1"
+	}
+
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", defaultPort, "Server port")
+	serveCmd.Flags().StringVar(&serveBindAddr, "bind", defaultBind, "Bind address (use 0.0.0.0 for all interfaces)")
 	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin (empty for all)")
 	serveCmd.Flags().IntVar(&serveWebUIPort, "webui-port", 8080, "Port for the web UI server")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
@@ -172,6 +180,11 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Printf("Using JWT signing key from LOOM_FLEET_JWT_KEY environment variable")
 	}
 
+	// Warn if binding to non-localhost address
+	if serveBindAddr != "127.0.0.1" && serveBindAddr != "::1" {
+		log.Printf("WARNING: Server bound to %s — exposed to network. Ensure this is intentional.", serveBindAddr)
+	}
+
 	// Start webui server in goroutine (unless --no-webui)
 	webuiErr := make(chan error, 1)
 	if !serveNoWebUI {
@@ -181,6 +194,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		go func() {
 			cfg := webui.ServerConfig{
 				Port:        serveWebUIPort,
+				BindAddress: serveBindAddr,
 				SocketPath:  serveWebUISocket,
 				FleetRedis:  fleetRedisConfig,
 				FleetJWTKey: fleetJWTKey,
@@ -246,7 +260,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	handler := corsMiddleware(serveCorsOrigin, mux)
 
 	server := &http.Server{
-		Addr:              fmt.Sprintf(":%d", servePort),
+		Addr:              net.JoinHostPort(serveBindAddr, strconv.Itoa(servePort)),
 		Handler:           handler,
 		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,

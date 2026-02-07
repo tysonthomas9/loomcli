@@ -12,7 +12,7 @@ func TestFindAvailablePort_FirstPortFree(t *testing.T) {
 	// Use a high port number to avoid conflicts with common services
 	startPort := 59100
 
-	listener, port, err := findAvailablePort(startPort, 5)
+	listener, port, err := findAvailablePort("127.0.0.1", startPort, 5)
 	if err != nil {
 		t.Fatalf("findAvailablePort(%d, 5) failed: %v", startPort, err)
 	}
@@ -30,7 +30,7 @@ func TestFindAvailablePort_FallbackToNextPort(t *testing.T) {
 	startPort := 59200
 
 	// Occupy the first port
-	addr := fmt.Sprintf(":%d", startPort)
+	addr := fmt.Sprintf("127.0.0.1:%d", startPort)
 	occupier, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Fatalf("failed to occupy port %d: %v", startPort, err)
@@ -38,7 +38,7 @@ func TestFindAvailablePort_FallbackToNextPort(t *testing.T) {
 	defer occupier.Close()
 
 	// Now findAvailablePort should return the next port
-	listener, port, err := findAvailablePort(startPort, 5)
+	listener, port, err := findAvailablePort("127.0.0.1", startPort, 5)
 	if err != nil {
 		t.Fatalf("findAvailablePort(%d, 5) failed: %v", startPort, err)
 	}
@@ -59,7 +59,7 @@ func TestFindAvailablePort_FallbackMultiplePorts(t *testing.T) {
 	// Occupy the first three ports
 	var occupiers []net.Listener
 	for i := 0; i < 3; i++ {
-		addr := fmt.Sprintf(":%d", startPort+i)
+		addr := fmt.Sprintf("127.0.0.1:%d", startPort+i)
 		occupier, err := net.Listen("tcp", addr)
 		if err != nil {
 			// Clean up already created listeners
@@ -77,7 +77,7 @@ func TestFindAvailablePort_FallbackMultiplePorts(t *testing.T) {
 	}()
 
 	// Now findAvailablePort should return the fourth port
-	listener, port, err := findAvailablePort(startPort, 5)
+	listener, port, err := findAvailablePort("127.0.0.1", startPort, 5)
 	if err != nil {
 		t.Fatalf("findAvailablePort(%d, 5) failed: %v", startPort, err)
 	}
@@ -99,7 +99,7 @@ func TestFindAvailablePort_AllPortsInUse(t *testing.T) {
 	// Occupy all ports in the range
 	var occupiers []net.Listener
 	for i := 0; i < maxAttempts; i++ {
-		addr := fmt.Sprintf(":%d", startPort+i)
+		addr := fmt.Sprintf("127.0.0.1:%d", startPort+i)
 		occupier, err := net.Listen("tcp", addr)
 		if err != nil {
 			// Clean up already created listeners
@@ -117,14 +117,14 @@ func TestFindAvailablePort_AllPortsInUse(t *testing.T) {
 	}()
 
 	// Now findAvailablePort should return an error
-	listener, port, err := findAvailablePort(startPort, maxAttempts)
+	listener, port, err := findAvailablePort("127.0.0.1", startPort, maxAttempts)
 	if err == nil {
 		listener.Close()
 		t.Errorf("findAvailablePort(%d, %d) = %d, want error (all ports occupied)", startPort, maxAttempts, port)
 	}
 
 	// Verify the error message mentions the port range
-	wantErrSubstr := fmt.Sprintf("no available port found in range %d-%d", startPort, startPort+maxAttempts-1)
+	wantErrSubstr := fmt.Sprintf("no available port found on 127.0.0.1 in range %d-%d", startPort, startPort+maxAttempts-1)
 	if err != nil && err.Error() != wantErrSubstr {
 		t.Errorf("findAvailablePort error = %q, want %q", err.Error(), wantErrSubstr)
 	}
@@ -136,7 +136,7 @@ func TestFindAvailablePort_SingleAttempt(t *testing.T) {
 	startPort := 59500
 
 	// Test 1: Port is free
-	listener, port, err := findAvailablePort(startPort, 1)
+	listener, port, err := findAvailablePort("127.0.0.1", startPort, 1)
 	if err != nil {
 		t.Fatalf("findAvailablePort(%d, 1) failed: %v", startPort, err)
 	}
@@ -147,13 +147,13 @@ func TestFindAvailablePort_SingleAttempt(t *testing.T) {
 	}
 
 	// Test 2: Port is occupied - should fail immediately
-	occupier, err := net.Listen("tcp", fmt.Sprintf(":%d", startPort))
+	occupier, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", startPort))
 	if err != nil {
 		t.Fatalf("failed to occupy port %d: %v", startPort, err)
 	}
 	defer occupier.Close()
 
-	listener, port, err = findAvailablePort(startPort, 1)
+	listener, port, err = findAvailablePort("127.0.0.1", startPort, 1)
 	if err == nil {
 		listener.Close()
 		t.Errorf("findAvailablePort(%d, 1) = %d, want error (port occupied with single attempt)", startPort, port)
@@ -165,7 +165,7 @@ func TestFindAvailablePort_ZeroAttempts(t *testing.T) {
 	startPort := 59600
 
 	// With zero attempts, should immediately return error
-	listener, port, err := findAvailablePort(startPort, 0)
+	listener, port, err := findAvailablePort("127.0.0.1", startPort, 0)
 	if err == nil {
 		listener.Close()
 		t.Errorf("findAvailablePort(%d, 0) = %d, want error (zero attempts)", startPort, port)
@@ -177,14 +177,14 @@ func TestFindAvailablePort_ZeroAttempts(t *testing.T) {
 func TestFindAvailablePort_ListenerIsUsable(t *testing.T) {
 	startPort := 59700
 
-	listener, port, err := findAvailablePort(startPort, 5)
+	listener, port, err := findAvailablePort("127.0.0.1", startPort, 5)
 	if err != nil {
 		t.Fatalf("findAvailablePort(%d, 5) failed: %v", startPort, err)
 	}
 	defer listener.Close()
 
 	// Verify the listener is holding the port by trying to bind again
-	addr := fmt.Sprintf(":%d", port)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	duplicate, err := net.Listen("tcp", addr)
 	if err == nil {
 		duplicate.Close()

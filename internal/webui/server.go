@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -34,6 +35,7 @@ const (
 // ServerConfig holds configuration for the web UI server.
 type ServerConfig struct {
 	Port            int
+	BindAddress     string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
 	SocketPath      string
 	PoolSize        int
 	CORSEnabled     bool
@@ -51,6 +53,7 @@ type ServerConfig struct {
 func DefaultConfig() ServerConfig {
 	return ServerConfig{
 		Port:            defaultPort,
+		BindAddress:     "127.0.0.1",
 		PoolSize:        defaultPoolSize,
 		ShutdownTimeout: defaultShutdownTimeout,
 		MaxPortAttempts: defaultMaxPortAttempts,
@@ -60,10 +63,10 @@ func DefaultConfig() ServerConfig {
 // findAvailablePort attempts to find an available port starting from startPort.
 // It tries up to maxAttempts consecutive ports and returns a listener on the first
 // available port. The caller is responsible for closing the listener.
-func findAvailablePort(startPort, maxAttempts int) (net.Listener, int, error) {
+func findAvailablePort(bindAddr string, startPort, maxAttempts int) (net.Listener, int, error) {
 	for i := 0; i < maxAttempts; i++ {
 		port := startPort + i
-		addr := fmt.Sprintf(":%d", port)
+		addr := net.JoinHostPort(bindAddr, strconv.Itoa(port))
 		listener, err := net.Listen("tcp", addr)
 		if err != nil {
 			continue
@@ -71,7 +74,7 @@ func findAvailablePort(startPort, maxAttempts int) (net.Listener, int, error) {
 		// Return the listener open to avoid race conditions
 		return listener, port, nil
 	}
-	return nil, 0, fmt.Errorf("no available port found in range %d-%d", startPort, startPort+maxAttempts-1)
+	return nil, 0, fmt.Errorf("no available port found on %s in range %d-%d", bindAddr, startPort, startPort+maxAttempts-1)
 }
 
 // StartServer starts the web UI server with the given configuration.
@@ -90,6 +93,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 	if config.MaxPortAttempts == 0 {
 		config.MaxPortAttempts = defaultMaxPortAttempts
+	}
+	if config.BindAddress == "" {
+		config.BindAddress = "127.0.0.1"
 	}
 
 	// Build CORS configuration
@@ -119,7 +125,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 
 	// Find an available port (auto-fallback if requested port is in use)
-	listener, actualPort, err := findAvailablePort(config.Port, config.MaxPortAttempts)
+	listener, actualPort, err := findAvailablePort(config.BindAddress, config.Port, config.MaxPortAttempts)
 	if err != nil {
 		return fmt.Errorf("could not find available port: %w", err)
 	}
@@ -285,7 +291,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	defer shutdownCancel()
 
 	server := &http.Server{
-		Addr:              fmt.Sprintf(":%d", actualPort),
+		Addr:              net.JoinHostPort(config.BindAddress, strconv.Itoa(actualPort)),
 		Handler:           handler,
 		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -299,7 +305,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// Start server in a goroutine using the pre-acquired listener
 	serverErr := make(chan error, 1)
 	go func() {
-		log.Printf("Listening on http://localhost:%d", actualPort)
+		log.Printf("Listening on http://%s:%d", config.BindAddress, actualPort)
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			serverErr <- fmt.Errorf("server error: %w", err)
 		}
