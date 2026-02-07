@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 )
 
@@ -909,17 +910,7 @@ func renderBoxSeparator() string {
 // displayWidth returns the terminal display width of a string
 // accounting for Unicode characters that may display as double width
 func displayWidth(s string) int {
-	width := 0
-	for _, r := range s {
-		// Common symbols that render as double width in most terminals
-		switch r {
-		case '●', '✓', '✗', '◐', '○', '↑', '↓', '⚠', '★', '▶', '◀':
-			width += 2
-		default:
-			width++
-		}
-	}
-	return width
+	return runewidth.StringWidth(s)
 }
 
 func renderBoxLine(content string) string {
