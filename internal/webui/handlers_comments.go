@@ -15,6 +15,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
+const maxCommentLength = 64 * 1024 // 64KB
+
 // CommentRequest represents the JSON body for creating a comment.
 type CommentRequest struct {
 	Text string `json:"text"`
@@ -112,6 +114,18 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 			if err := json.NewEncoder(w).Encode(CommentResponse{
 				Success: false,
 				Error:   "comment text is required",
+			}); err != nil {
+				log.Printf("Failed to encode comment response: %v", err)
+			}
+			return
+		}
+
+		// Validate text length
+		if len(text) > maxCommentLength {
+			w.WriteHeader(http.StatusBadRequest)
+			if err := json.NewEncoder(w).Encode(CommentResponse{
+				Success: false,
+				Error:   fmt.Sprintf("comment text too long (%d bytes, max %d)", len(text), maxCommentLength),
 			}); err != nil {
 				log.Printf("Failed to encode comment response: %v", err)
 			}

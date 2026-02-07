@@ -6628,6 +6628,71 @@ func TestHandleAddComment_ClientReturnedToPoolOnError(t *testing.T) {
 	}
 }
 
+// TestHandleAddComment_TextTooLong verifies 400 for comment text exceeding max length
+func TestHandleAddComment_TextTooLong(t *testing.T) {
+	pool := &mockCommentPool{
+		getFunc: func(ctx context.Context) (commentAdder, error) {
+			return &mockCommentClient{}, nil
+		},
+		putFunc: func(c commentAdder) {},
+	}
+
+	handler := handleAddCommentWithPool(pool)
+
+	// Text exceeding 64KB
+	longText := strings.Repeat("a", maxCommentLength+1)
+	body := `{"text":"` + longText + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/test-123/comments", strings.NewReader(body))
+	req.SetPathValue("id", "test-123")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	var resp CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Success {
+		t.Error("expected success=false")
+	}
+
+	if !strings.Contains(resp.Error, "too long") {
+		t.Errorf("error = %q, want it to contain %q", resp.Error, "too long")
+	}
+
+	// Text exactly at limit should be accepted (need a working pool for this)
+	exactText := strings.Repeat("b", maxCommentLength)
+	exactBody := `{"text":"` + exactText + `"}`
+
+	successPool := &mockCommentPool{
+		getFunc: func(ctx context.Context) (commentAdder, error) {
+			return &mockCommentClient{
+				addCommentFunc: func(args *rpc.CommentAddArgs) (*rpc.Response, error) {
+					commentJSON, _ := json.Marshal(map[string]string{"text": args.Text})
+					return &rpc.Response{Success: true, Data: commentJSON}, nil
+				},
+			}, nil
+		},
+		putFunc: func(c commentAdder) {},
+	}
+
+	handler2 := handleAddCommentWithPool(successPool)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/issues/test-123/comments", strings.NewReader(exactBody))
+	req2.SetPathValue("id", "test-123")
+	w2 := httptest.NewRecorder()
+
+	handler2.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusCreated {
+		t.Errorf("exact-limit status = %d, want %d", w2.Code, http.StatusCreated)
+	}
+}
+
 func TestParseBlockedParams_Priority(t *testing.T) {
 	tests := []struct {
 		name      string
