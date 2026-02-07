@@ -212,6 +212,10 @@ func (s *Store) TryClaim(ctx context.Context, taskID, workerID string) (bool, er
 	}
 
 	if status == 1 {
+		// Record claim time for timeout enforcement (best-effort)
+		if err := s.RecordClaimTime(ctx, taskID); err != nil {
+			s.logger.Warn("failed to record claim time", "task_id", taskID, "error", err)
+		}
 		s.logger.Debug("task claimed", "task_id", taskID, "worker_id", workerID)
 		return true, nil
 	}
@@ -254,6 +258,11 @@ func (s *Store) ReleaseClaim(ctx context.Context, taskID string) error {
 	err := s.client.Del(ctx, key).Err()
 	if err != nil {
 		return fmt.Errorf("release claim failed: %w", err)
+	}
+
+	// Clear claim time tracking (best-effort)
+	if err := s.ClearClaimTime(ctx, taskID); err != nil {
+		s.logger.Warn("failed to clear claim time", "task_id", taskID, "error", err)
 	}
 
 	s.logger.Debug("claim released", "task_id", taskID)

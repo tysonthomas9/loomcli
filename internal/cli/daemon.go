@@ -309,13 +309,13 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 		if !filepath.IsAbs(logDir) {
 			logDir = filepath.Join(d.projectDir, logDir)
 		}
-		if err := os.MkdirAll(logDir, 0755); err != nil {
+		if err := os.MkdirAll(logDir, 0700); err != nil {
 			log.Printf("[daemon] Agent %s: failed to create log directory: %v", ap.entry.Worktree, err)
 		} else {
 			// Sanitize worktree name to prevent path traversal in log filename
 			safeWorktree := filepath.Base(ap.entry.Worktree)
 			logFilePath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", ap.entry.Role, safeWorktree))
-			f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+			f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 			if err != nil {
 				log.Printf("[daemon] Agent %s: failed to open log file: %v", ap.entry.Worktree, err)
 			} else {

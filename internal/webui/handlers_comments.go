@@ -97,10 +97,11 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 		// Parse request body
 		var req CommentRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("Invalid request body in handleAddComment: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(CommentResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid request body: %v", err),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode comment response: %v", err)
 			}
@@ -142,10 +143,11 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
+			log.Printf("Pool error in handleAddComment: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(CommentResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "daemon not available",
 			}); err != nil {
 				log.Printf("Failed to encode comment response: %v", err)
 			}
@@ -167,10 +169,11 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 			if strings.Contains(errMsg, "not found") {
 				status = http.StatusNotFound
 			}
+			log.Printf("RPC error in handleAddComment: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(CommentResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode comment response: %v", err)
 			}

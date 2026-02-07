@@ -69,7 +69,7 @@ func TestHandleTerminalWS_NilManager(t *testing.T) {
 func TestHandleTerminalWS_MissingSessionWithManager(t *testing.T) {
 	// Create a real manager - this will fail if tmux is not installed,
 	// so we skip if that's the case
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -106,7 +106,7 @@ func TestHandleTerminalWS_MissingSessionWithManager(t *testing.T) {
 
 // TestHandleTerminalWS_InvalidSessionName tests invalid session name validation.
 func TestHandleTerminalWS_InvalidSessionName(t *testing.T) {
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -159,7 +159,7 @@ func TestHandleTerminalWS_InvalidSessionName(t *testing.T) {
 
 // TestHandleTerminalWS_ValidSessionNames tests that valid session names pass validation.
 func TestHandleTerminalWS_ValidSessionNames(t *testing.T) {
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -210,7 +210,7 @@ func TestHandleTerminalWS_ValidSessionNames(t *testing.T) {
 
 // TestHandleTerminalWS_WebSocketUpgrade tests that WebSocket upgrade succeeds with valid params.
 func TestHandleTerminalWS_WebSocketUpgrade(t *testing.T) {
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -253,7 +253,7 @@ func TestHandleTerminalWS_WebSocketUpgrade(t *testing.T) {
 // client-supplied commands, the handler must always use the server-configured
 // defaultCmd regardless of what the client passes in the URL.
 func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -452,6 +452,13 @@ func TestValidTerminalSessionRegex(t *testing.T) {
 				t.Errorf("validTerminalSession.MatchString(%q) = %v, want %v", tt.session, got, tt.valid)
 			}
 		})
+	}
+}
+
+// TestWSReadLimitConstant verifies the WebSocket read limit constant.
+func TestWSReadLimitConstant(t *testing.T) {
+	if wsReadLimit != 32768 {
+		t.Errorf("wsReadLimit = %d, want %d", wsReadLimit, 32768)
 	}
 }
 
@@ -796,7 +803,7 @@ func TestWsToPTY_ContextCancelled(t *testing.T) {
 		PTY:  w,
 	}
 
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -853,7 +860,7 @@ func TestWsToPTY_WebSocketReadError(t *testing.T) {
 		PTY:  w,
 	}
 
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -903,7 +910,7 @@ func TestPtyToWS_And_WsToPTY_Integration(t *testing.T) {
 		PTY:  ptyR, // testPtyToWS reads from ptyR
 	}
 
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -992,7 +999,7 @@ func TestWsToPTY_TextMessageForwardedToPTY(t *testing.T) {
 		PTY:  w, // wsToPTY writes to w; we read from r
 	}
 
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -1053,7 +1060,7 @@ func TestWsToPTY_BinaryDataForwardedToPTY(t *testing.T) {
 		PTY:  w,
 	}
 
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -1115,7 +1122,7 @@ func TestWsToPTY_ResizeNotForwardedToPTY(t *testing.T) {
 		PTY:  w,
 	}
 
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -1157,7 +1164,7 @@ func TestWsToPTY_ResizeNotForwardedToPTY(t *testing.T) {
 // Uses gorilla/websocket-style net.Conn for deadline control since nhooyr.io/websocket
 // closes connections on context cancellation.
 func TestTerminalWebSocket_E2E(t *testing.T) {
-	manager, err := NewTerminalManager("", "")
+	manager, err := NewTerminalManager("", "", 0)
 	if err == ErrTmuxNotFound {
 		t.Skip("tmux not installed, skipping test")
 	}
@@ -1368,6 +1375,59 @@ func TestOriginHosts(t *testing.T) {
 	}
 }
 
+// TestHandleTerminalWS_MaxSessionsReached verifies that the handler returns
+// HTTP 503 with a JSON error body when the terminal session limit is reached.
+func TestHandleTerminalWS_MaxSessionsReached(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 1)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+
+	name := "test-" + t.Name()
+	t.Cleanup(func() {
+		manager.Shutdown()
+		killTmuxSession(t, name)
+	})
+
+	// Fill the single slot by attaching directly.
+	_, err = manager.Attach(name, "", 80, 24)
+	if err != nil {
+		t.Fatalf("Attach() error: %v", err)
+	}
+
+	handler := handleTerminalWS(manager, "", nil, nil)
+
+	// Send a plain HTTP request — it should be rejected before WebSocket upgrade.
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=another", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != false {
+		t.Error("expected success to be false")
+	}
+
+	if resp["error"] != "maximum terminal sessions reached" {
+		t.Errorf("expected error 'maximum terminal sessions reached', got %q", resp["error"])
+	}
+
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+}
+
 // TestHandleTerminalWS_OriginValidation tests WebSocket origin validation
 // using OriginPatterns set by the allowedOrigins parameter.
 func TestHandleTerminalWS_OriginValidation(t *testing.T) {
@@ -1410,7 +1470,7 @@ func TestHandleTerminalWS_OriginValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager, err := NewTerminalManager("", "")
+			manager, err := NewTerminalManager("", "", 0)
 			if err == ErrTmuxNotFound {
 				t.Skip("tmux not installed, skipping test")
 			}

@@ -6,11 +6,13 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // TestHandleMetrics_NilHub tests that handleMetrics returns 503 when hub is nil.
 func TestHandleMetrics_NilHub(t *testing.T) {
-	handler := handleMetrics(nil)
+	handler := handleMetrics(nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -56,7 +58,7 @@ func TestHandleMetrics_NilHub(t *testing.T) {
 func TestHandleMetrics_ValidHub(t *testing.T) {
 	hub := NewSSEHub()
 
-	handler := handleMetrics(hub)
+	handler := handleMetrics(hub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -178,5 +180,81 @@ func TestGetUptime(t *testing.T) {
 	// Uptime should be at least 10ms since we slept that long
 	if uptime < 10*time.Millisecond {
 		t.Errorf("expected uptime >= 10ms, got %v", uptime)
+	}
+}
+
+// TestHandleMetrics_WithClaimMetrics tests that claim metrics appear in the
+// /api/metrics response when a ClaimMetrics instance is provided.
+func TestHandleMetrics_WithClaimMetrics(t *testing.T) {
+	hub := NewSSEHub()
+
+	claimMetrics := fleet.NewClaimMetrics()
+	// Record 3 successes, 2 collisions, 1 timeout.
+	for i := 0; i < 3; i++ {
+		claimMetrics.RecordClaim(fleet.ClaimResultSuccess)
+	}
+	for i := 0; i < 2; i++ {
+		claimMetrics.RecordClaim(fleet.ClaimResultCollision)
+	}
+	claimMetrics.RecordClaim(fleet.ClaimResultTimeout)
+
+	handler := handleMetrics(hub, nil, claimMetrics)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	// Verify Content-Type header.
+	contentType := rec.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %s", contentType)
+	}
+
+	// Parse response body.
+	var body map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+
+	// Verify success is true.
+	success, ok := body["success"].(bool)
+	if !ok {
+		t.Fatal("expected 'success' field to be a bool")
+	}
+	if !success {
+		t.Error("expected 'success' to be true")
+	}
+
+	// Verify data field exists.
+	data, ok := body["data"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'data' field to be an object")
+	}
+
+	// Verify claim metrics fields.
+	tests := []struct {
+		field    string
+		expected int64
+	}{
+		{"loom_fleet_claims_success", 3},
+		{"loom_fleet_claims_collision", 2},
+		{"loom_fleet_claims_timeout", 1},
+		{"loom_fleet_claims_total", 6},
+	}
+
+	for _, tc := range tests {
+		val, ok := data[tc.field].(float64)
+		if !ok {
+			t.Errorf("expected %q field to be a number", tc.field)
+			continue
+		}
+		if int64(val) != tc.expected {
+			t.Errorf("expected %s=%d, got %v", tc.field, tc.expected, val)
+		}
 	}
 }

@@ -42,9 +42,10 @@ type ServerConfig struct {
 	CORSOrigins     []string
 	ShutdownTimeout time.Duration
 	MaxPortAttempts int
-	TerminalCmd     string
-	FleetEnabled    bool // Register fleet API routes (requires Redis coordination)
-	FleetRedis      *fleet.RedisConfig
+	TerminalCmd         string
+	MaxTerminalSessions int  // Maximum concurrent terminal connections (0 = default 20)
+	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
+	FleetRedis          *fleet.RedisConfig
 	FleetJWTKey     []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
 	FleetAPIKey     string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
 	APIKey          string // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
@@ -208,7 +209,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Initialize terminal manager for WebSocket terminal sessions
 	var termMgr *TerminalManager
-	termMgr, err = NewTerminalManager(config.TerminalCmd, fmt.Sprintf("%d", actualPort))
+	termMgr, err = NewTerminalManager(config.TerminalCmd, fmt.Sprintf("%d", actualPort), config.MaxTerminalSessions)
 	if err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {
 			log.Printf("Warning: tmux not found, terminal feature disabled")
@@ -268,6 +269,20 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		defer fleetStore.Close()
 	}
 
+	// Initialize fleet timeout enforcer
+	var timeoutEnforcer *fleet.TimeoutEnforcer
+	if fleetStore != nil {
+		timeoutEnforcer = fleet.NewTimeoutEnforcer(fleetStore, fleet.DefaultTimeoutConfig(), nil)
+		timeoutEnforcer.Start()
+		log.Printf("Fleet timeout enforcer started (30min task timeout)")
+	}
+
+	// Initialize fleet claim metrics
+	var claimMetrics *fleet.ClaimMetrics
+	if fleetStore != nil {
+		claimMetrics = fleet.NewClaimMetrics()
+	}
+
 	// Build fleet registration config (API key + rate limiter)
 	var fleetRegCfg *FleetRegisterConfig
 	if config.FleetAPIKey != "" && fleetStore != nil {
@@ -314,7 +329,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, config.FleetEnabled)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.
@@ -381,6 +396,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	log.Println("Server stopped")
 
 	// Stop components in reverse-initialization order now that no handlers are running.
+
+	// Stop fleet timeout enforcer
+	if timeoutEnforcer != nil {
+		timeoutEnforcer.Stop()
+		log.Printf("Fleet timeout enforcer stopped")
+	}
 
 	// Stop rate limiter cleanup goroutine
 	rl.Stop()

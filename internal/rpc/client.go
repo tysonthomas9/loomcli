@@ -41,12 +41,13 @@ var ClientVersion = "0.0.0" // Placeholder; overridden at startup
 // However, the underlying connection (conn) is not safe for concurrent RPC calls -
 // use connection pooling for concurrent operations.
 type Client struct {
-	mu         sync.RWMutex // protects timeout, dbPath, actor; conn and socketPath are immutable after construction
+	mu         sync.RWMutex // protects timeout, dbPath, actor, authToken; conn and socketPath are immutable after construction
 	conn       net.Conn
 	socketPath string
 	timeout    time.Duration
 	dbPath     string // Expected database path for validation
 	actor      string // Actor for audit trail (who is performing operations)
+	authToken  string // Shared-secret authentication token
 }
 
 // TryConnect attempts to connect to the daemon socket
@@ -116,10 +117,15 @@ func TryConnectWithTimeout(socketPath string, dialTimeout time.Duration) (*Clien
 
 	rpcDebugLog("dial succeeded in %v", dialDuration)
 
+	// Load auth token from file next to socket (empty if not found = backward compat)
+	authToken := loadAuthToken(socketPath)
+	rpcDebugLog("auth token loaded: %v", authToken != "")
+
 	client := &Client{
 		conn:       conn,
 		socketPath: socketPath,
 		timeout:    30 * time.Second,
+		authToken:  authToken,
 	}
 
 	rpcDebugLog("performing health check")
@@ -178,6 +184,13 @@ func (c *Client) SetActor(actor string) {
 	c.actor = actor
 }
 
+// SetAuthToken sets the authentication token for RPC requests
+func (c *Client) SetAuthToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.authToken = token
+}
+
 // Execute sends an RPC request and waits for a response
 func (c *Client) Execute(operation string, args interface{}) (*Response, error) {
 	return c.ExecuteWithCwd(operation, args, "")
@@ -207,6 +220,7 @@ func (c *Client) executeWithTimeout(operation string, args interface{}, cwd stri
 	actor := c.actor
 	dbPath := c.dbPath
 	timeout := c.timeout
+	authToken := c.authToken
 	c.mu.RUnlock()
 
 	if timeoutOverride > 0 {
@@ -220,6 +234,7 @@ func (c *Client) executeWithTimeout(operation string, args interface{}, cwd stri
 		ClientVersion: ClientVersion,
 		Cwd:           cwd,
 		ExpectedDB:    dbPath,
+		AuthToken:     authToken,
 	}
 
 	reqJSON, err := json.Marshal(req)

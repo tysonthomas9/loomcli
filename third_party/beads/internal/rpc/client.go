@@ -42,6 +42,7 @@ type Client struct {
 	timeout    time.Duration
 	dbPath     string // Expected database path for validation
 	actor      string // Actor for audit trail (who is performing operations)
+	authToken  string // Shared-secret authentication token
 }
 
 // TryConnect attempts to connect to the daemon socket
@@ -111,10 +112,15 @@ func TryConnectWithTimeout(socketPath string, dialTimeout time.Duration) (*Clien
 
 	rpcDebugLog("dial succeeded in %v", dialDuration)
 
+	// Load auth token from file next to socket (empty if not found = backward compat)
+	authToken := loadAuthToken(socketPath)
+	rpcDebugLog("auth token loaded: %v", authToken != "")
+
 	client := &Client{
 		conn:       conn,
 		socketPath: socketPath,
 		timeout:    30 * time.Second,
+		authToken:  authToken,
 	}
 
 	rpcDebugLog("performing health check")
@@ -167,6 +173,11 @@ func (c *Client) SetActor(actor string) {
 	c.actor = actor
 }
 
+// SetAuthToken sets the authentication token for RPC requests
+func (c *Client) SetAuthToken(token string) {
+	c.authToken = token
+}
+
 // Execute sends an RPC request and waits for a response
 func (c *Client) Execute(operation string, args interface{}) (*Response, error) {
 	return c.ExecuteWithCwd(operation, args, "")
@@ -191,6 +202,7 @@ func (c *Client) ExecuteWithCwd(operation string, args interface{}, cwd string) 
 		ClientVersion: ClientVersion,
 		Cwd:           cwd,
 		ExpectedDB:    c.dbPath, // Send expected database path for validation
+		AuthToken:     c.authToken,
 	}
 
 	reqJSON, err := json.Marshal(req)
@@ -529,6 +541,17 @@ func (c *Client) GetGraphData(args *GetGraphDataArgs) (*GetGraphDataResponse, er
 	}
 
 	return &result, nil
+}
+
+// loadAuthToken reads the auth token from the token file next to the socket.
+// Returns empty string if the file doesn't exist or can't be read (backward compat with old server).
+func loadAuthToken(socketPath string) string {
+	path := tokenFilePath(socketPath)
+	token, err := readTokenFile(path)
+	if err != nil {
+		return ""
+	}
+	return token
 }
 
 // cleanupStaleDaemonArtifacts removes stale daemon.pid file when socket is missing and lock is free.

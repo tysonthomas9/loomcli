@@ -73,9 +73,7 @@ func TestConnectionLimits(t *testing.T) {
 		wg.Add(1)
 		go func(c net.Conn, _ int) {
 			defer wg.Done()
-			req := Request{
-				Operation: OpPing,
-			}
+			req := newTestRequest(t, socketPath, OpPing)
 			data, _ := json.Marshal(req)
 			c.Write(append(data, '\n'))
 
@@ -99,7 +97,7 @@ func TestConnectionLimits(t *testing.T) {
 	defer extraConn.Close()
 
 	// Send request on extra connection
-	req := Request{Operation: OpPing}
+	req := newTestRequest(t, socketPath, OpPing)
 	data, _ := json.Marshal(req)
 	extraConn.Write(append(data, '\n'))
 
@@ -126,7 +124,7 @@ func TestConnectionLimits(t *testing.T) {
 	newConn := dialTestConn(t, socketPath)
 	defer newConn.Close()
 
-	req = Request{Operation: OpPing}
+	req = newTestRequest(t, socketPath, OpPing)
 	data, _ = json.Marshal(req)
 	newConn.Write(append(data, '\n'))
 
@@ -230,7 +228,7 @@ func TestHealthResponseIncludesLimits(t *testing.T) {
 	conn := dialTestConn(t, socketPath)
 	defer conn.Close()
 
-	req := Request{Operation: OpHealth}
+	req := newTestRequest(t, socketPath, OpHealth)
 	data, _ := json.Marshal(req)
 	conn.Write(append(data, '\n'))
 
@@ -369,10 +367,8 @@ func TestServerRejectsOversizedMessage(t *testing.T) {
 
 	// Create a message larger than 64 KB
 	largePayload := strings.Repeat("x", 128*1024)
-	req := Request{
-		Operation: OpPing,
-		Args:      json.RawMessage(`"` + largePayload + `"`),
-	}
+	req := newTestRequest(t, socketPath, OpPing)
+	req.Args = json.RawMessage(`"` + largePayload + `"`)
 	data, _ := json.Marshal(req)
 	data = append(data, '\n')
 
@@ -431,7 +427,7 @@ func TestServerAcceptsNormalMessage(t *testing.T) {
 	defer conn.Close()
 
 	// Send a normal-sized ping request
-	req := Request{Operation: OpPing}
+	req := newTestRequest(t, socketPath, OpPing)
 	data, _ := json.Marshal(req)
 	conn.Write(append(data, '\n'))
 
@@ -451,7 +447,7 @@ func TestServerAcceptsNormalMessage(t *testing.T) {
 	}
 
 	// Send a second request to verify connection reuse works with limit reset
-	req2 := Request{Operation: OpPing}
+	req2 := newTestRequest(t, socketPath, OpPing)
 	data2, _ := json.Marshal(req2)
 	conn.Write(append(data2, '\n'))
 

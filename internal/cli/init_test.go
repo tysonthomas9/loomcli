@@ -287,12 +287,34 @@ func TestCreateSingleWorktree_BranchExists(t *testing.T) {
 func TestCreateSingleWorktree_AlreadyExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	wtPath := filepath.Join(tmpDir, "falcon")
-	os.MkdirAll(wtPath, 0755)
 
-	// No mock needed - should skip without running git
+	// Both git worktree add attempts fail with "already exists" / "already a worktree"
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"worktree", "add", wtPath, "-b", "falcon"}, Stderr: "fatal: 'falcon' already exists", Err: errors.New("exit 1")},
+		{Name: "git", Args: []string{"worktree", "add", wtPath, "falcon"}, Stderr: "fatal: '/path' is already a worktree", Err: errors.New("exit 1")},
+	})
+	mock.Install()
+
 	result := createSingleWorktree(tmpDir, "falcon")
 	if result {
-		t.Error("createSingleWorktree() should return false when path exists")
+		t.Error("createSingleWorktree() should return false when worktree already exists")
+	}
+}
+
+func TestCreateSingleWorktree_AlreadyCheckedOut(t *testing.T) {
+	tmpDir := t.TempDir()
+	wtPath := filepath.Join(tmpDir, "falcon")
+
+	// Both git worktree add attempts fail with "already checked out" (alternate git message)
+	mock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"worktree", "add", wtPath, "-b", "falcon"}, Stderr: "fatal: 'falcon' already exists", Err: errors.New("exit 1")},
+		{Name: "git", Args: []string{"worktree", "add", wtPath, "falcon"}, Stderr: "fatal: 'falcon' is already checked out at '/other/worktree'", Err: errors.New("exit 1")},
+	})
+	mock.Install()
+
+	result := createSingleWorktree(tmpDir, "falcon")
+	if result {
+		t.Error("createSingleWorktree() should return false when branch is already checked out")
 	}
 }
 

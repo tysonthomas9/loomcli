@@ -125,6 +125,15 @@ func (s *Server) handleRequest(req *Request, connCtx ...context.Context) Respons
 		s.metrics.RecordRequest(req.Operation, latency)
 	}()
 
+	// Validate auth token FIRST, before any other checks
+	if err := validateAuthToken(s.authToken, req); err != nil {
+		s.metrics.RecordError(req.Operation)
+		return Response{
+			Success: false,
+			Error:   err.Error(),
+		}
+	}
+
 	// Validate database binding (skip for health/metrics to allow diagnostics)
 	if req.Operation != OpHealth && req.Operation != OpMetrics {
 		if err := s.validateDatabaseBinding(req); err != nil {

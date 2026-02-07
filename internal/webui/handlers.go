@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -247,7 +248,8 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 				writeErrorResponse(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
 				return
 			}
-			writeErrorResponse(w, http.StatusInternalServerError, err.Error())
+			log.Printf("RPC error in handleGetIssue for %s: %v", issueID, err)
+			writeErrorResponse(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 
@@ -274,7 +276,11 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 		}
 
 		// Parse query parameters into ListArgs
-		args := parseListParams(r)
+		args, err := parseListParams(r)
+		if err != nil {
+			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
+			return
+		}
 
 		// Acquire connection with timeout
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -415,10 +421,11 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
+			log.Printf("Pool error in handleReady: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(ReadyResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "daemon not available",
 			}); err != nil {
 				log.Printf("Failed to encode ready response: %v", err)
 			}
@@ -429,10 +436,11 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 		// Execute Ready RPC call
 		resp, err := client.Ready(args)
 		if err != nil {
+			log.Printf("RPC error in handleReady: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(ReadyResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode ready response: %v", err)
 			}
@@ -619,10 +627,11 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
+			log.Printf("Pool error in handleBlocked: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(BlockedResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "daemon not available",
 			}); err != nil {
 				log.Printf("Failed to encode blocked response: %v", err)
 			}
@@ -633,10 +642,11 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 		// Execute Blocked RPC call
 		resp, err := client.Blocked(args)
 		if err != nil {
+			log.Printf("RPC error in handleBlocked: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(BlockedResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode blocked response: %v", err)
 			}
@@ -727,10 +737,11 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				httpStatus = http.StatusGatewayTimeout
 			}
+			log.Printf("Pool error in handleGraph: %v", err)
 			w.WriteHeader(httpStatus)
 			if err := json.NewEncoder(w).Encode(GraphResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "daemon not available",
 			}); err != nil {
 				log.Printf("Failed to encode graph response: %v", err)
 			}
@@ -755,10 +766,11 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 		// Single RPC call replaces List + N×Show
 		result, err := client.GetGraphData(graphArgs)
 		if err != nil {
+			log.Printf("RPC error in handleGraph: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(GraphResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode graph response: %v", err)
 			}
@@ -855,7 +867,7 @@ func parseGraphParams(r *http.Request) (status string, includeClosed bool) {
 }
 
 // parseListParams extracts ListArgs from HTTP query parameters.
-func parseListParams(r *http.Request) *rpc.ListArgs {
+func parseListParams(r *http.Request) (*rpc.ListArgs, error) {
 	query := r.URL.Query()
 	args := &rpc.ListArgs{}
 
@@ -906,18 +918,25 @@ func parseListParams(r *http.Request) *rpc.ListArgs {
 		args.NotesContains = v
 	}
 
-	// Date ranges
-	if v := query.Get("created_after"); v != "" {
-		args.CreatedAfter = v
+	// Date ranges (validated as RFC3339 or date-only)
+	dateParams := []struct {
+		param string
+		dest  *string
+	}{
+		{"created_after", &args.CreatedAfter},
+		{"created_before", &args.CreatedBefore},
+		{"updated_after", &args.UpdatedAfter},
+		{"updated_before", &args.UpdatedBefore},
 	}
-	if v := query.Get("created_before"); v != "" {
-		args.CreatedBefore = v
-	}
-	if v := query.Get("updated_after"); v != "" {
-		args.UpdatedAfter = v
-	}
-	if v := query.Get("updated_before"); v != "" {
-		args.UpdatedBefore = v
+	for _, dp := range dateParams {
+		if v := query.Get(dp.param); v != "" {
+			if _, err := time.Parse(time.RFC3339, v); err != nil {
+				if _, err2 := time.Parse("2006-01-02", v); err2 != nil {
+					return nil, fmt.Errorf("invalid %s: expected RFC3339 format (e.g., 2024-01-15T00:00:00Z) or date (2024-01-15)", dp.param)
+				}
+			}
+			*dp.dest = v
+		}
 	}
 
 	// Empty/null checks
@@ -937,7 +956,7 @@ func parseListParams(r *http.Request) *rpc.ListArgs {
 		args.Pinned = &pinned
 	}
 
-	return args
+	return args, nil
 }
 
 // parseReadyParams parses query parameters into rpc.ReadyArgs.
@@ -1135,10 +1154,11 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 				}
 				return
 			}
+			log.Printf("Invalid request body in handlePatchIssue: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid request body: %v", err),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode patch response: %v", err)
 			}
@@ -1155,10 +1175,11 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
+			log.Printf("Pool error in handlePatchIssue: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "daemon not available",
 			}); err != nil {
 				log.Printf("Failed to encode patch response: %v", err)
 			}
@@ -1197,10 +1218,11 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			if strings.Contains(errMsg, "not found") {
 				status = http.StatusNotFound
 			}
+			log.Printf("RPC error in handlePatchIssue for %s: %v", issueID, err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode patch response: %v", err)
 			}
@@ -1385,7 +1407,8 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 				writeIssuesError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)", "REQUEST_TOO_LARGE")
 				return
 			}
-			writeIssuesError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error(), "INVALID_JSON")
+			log.Printf("Invalid JSON body in handleCreateIssue: %v", err)
+			writeIssuesError(w, http.StatusBadRequest, "invalid request body", "INVALID_JSON")
 			return
 		}
 
@@ -1420,7 +1443,7 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 		resp, err := client.Create(createArgs)
 		if err != nil {
 			log.Printf("RPC error: %v", err)
-			writeIssuesError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error(), "RPC_ERROR")
+			writeIssuesError(w, http.StatusInternalServerError, "failed to create issue", "RPC_ERROR")
 			return
 		}
 
@@ -1472,7 +1495,8 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 					writeErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
 					return
 				}
-				writeErrorResponse(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+				log.Printf("Invalid request body in handleCloseIssue: %v", err)
+				writeErrorResponse(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
 		}
@@ -1520,7 +1544,8 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 				writeErrorResponse(w, http.StatusConflict, err.Error())
 				return
 			}
-			writeErrorResponse(w, http.StatusInternalServerError, err.Error())
+			log.Printf("RPC error in handleCloseIssue for %s: %v", issueID, err)
+			writeErrorResponse(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 
@@ -1637,10 +1662,11 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 				}
 				return
 			}
+			log.Printf("Invalid request body in handleAddDependency: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(DependencyResponse{
 				Success: false,
-				Error:   "invalid request body: " + err.Error(),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode add dependency response: %v", err)
 			}
@@ -1715,10 +1741,11 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 			} else if strings.Contains(err.Error(), "already exists") {
 				status = http.StatusConflict
 			}
+			log.Printf("RPC error in handleAddDependency: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(DependencyResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode add dependency response: %v", err)
 			}
@@ -1837,10 +1864,11 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 			if strings.Contains(err.Error(), "not found") {
 				status = http.StatusNotFound
 			}
+			log.Printf("RPC error in handleRemoveDependency: %v", err)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(DependencyResponse{
 				Success: false,
-				Error:   err.Error(),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode remove dependency response: %v", err)
 			}
@@ -1874,10 +1902,15 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 
 // SSEMetrics represents the runtime metrics for the SSE hub.
 type SSEMetrics struct {
-	ConnectedClients int     `json:"connected_clients"`
-	DroppedMutations int64   `json:"dropped_mutations"`
-	RetryQueueDepth  int     `json:"retry_queue_depth"`
-	UptimeSeconds    float64 `json:"uptime_seconds"`
+	ConnectedClients   int     `json:"connected_clients"`
+	DroppedMutations   int64   `json:"dropped_mutations"`
+	RetryQueueDepth    int     `json:"retry_queue_depth"`
+	UptimeSeconds      float64 `json:"uptime_seconds"`
+	FleetTimeoutsTotal int64   `json:"loom_fleet_timeouts_total,omitempty"`
+	FleetClaimsSuccess   int64 `json:"loom_fleet_claims_success,omitempty"`
+	FleetClaimsCollision int64 `json:"loom_fleet_claims_collision,omitempty"`
+	FleetClaimsTimeout   int64 `json:"loom_fleet_claims_timeout,omitempty"`
+	FleetClaimsTotal     int64 `json:"loom_fleet_claims_total,omitempty"`
 }
 
 // MetricsResponse wraps the SSE hub metrics for JSON response.
@@ -1888,7 +1921,7 @@ type MetricsResponse struct {
 }
 
 // handleMetrics returns a handler that exposes SSE hub runtime metrics.
-func handleMetrics(hub *SSEHub) http.HandlerFunc {
+func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if hub == nil {
@@ -1906,6 +1939,16 @@ func handleMetrics(hub *SSEHub) http.HandlerFunc {
 			DroppedMutations: hub.GetDroppedCount(),
 			RetryQueueDepth:  hub.GetRetryQueueDepth(),
 			UptimeSeconds:    hub.GetUptime().Seconds(),
+		}
+		if timeoutEnforcer != nil {
+			metrics.FleetTimeoutsTotal = timeoutEnforcer.GetTimeoutCount()
+		}
+		if claimMetrics != nil {
+			snap := claimMetrics.Snapshot()
+			metrics.FleetClaimsSuccess = snap.Success
+			metrics.FleetClaimsCollision = snap.Collision
+			metrics.FleetClaimsTimeout = snap.Timeout
+			metrics.FleetClaimsTotal = snap.Total
 		}
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(MetricsResponse{

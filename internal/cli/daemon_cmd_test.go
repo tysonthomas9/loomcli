@@ -226,10 +226,10 @@ func TestWritePIDFile_Permissions(t *testing.T) {
 		t.Fatalf("failed to stat PID file: %v", err)
 	}
 
-	// Should be readable by all (0644)
+	// Should be owner-only (0600)
 	perm := info.Mode().Perm()
-	if perm != 0644 {
-		t.Errorf("PID file permissions = %o, want 0644", perm)
+	if perm != 0600 {
+		t.Errorf("PID file permissions = %o, want 0600", perm)
 	}
 }
 

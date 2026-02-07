@@ -37,7 +37,7 @@ func tmuxSessionExists(name string) bool {
 // TestTerminalNewManagerTmuxNotFound verifies that NewTerminalManager returns
 // ErrTmuxNotFound when tmux is not in PATH, or succeeds when it is.
 func TestTerminalNewManagerTmuxNotFound(t *testing.T) {
-	_, err := NewTerminalManager("", "")
+	_, err := NewTerminalManager("", "", 0)
 	if hasTmux() {
 		if err != nil {
 			t.Fatalf("expected NewTerminalManager to succeed when tmux is installed, got: %v", err)
@@ -54,7 +54,7 @@ func TestTerminalNewManagerTmuxNotFound(t *testing.T) {
 func TestTerminalNewManagerSuccess(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "")
+	mgr, err := NewTerminalManager("", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestTerminalNewManagerSuccess(t *testing.T) {
 func TestTerminalAttach(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "")
+	mgr, err := NewTerminalManager("", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestTerminalAttach(t *testing.T) {
 func TestTerminalMultipleAttach(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "")
+	mgr, err := NewTerminalManager("", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestTerminalMultipleAttach(t *testing.T) {
 func TestTerminalResize(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "")
+	mgr, err := NewTerminalManager("", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestTerminalResize(t *testing.T) {
 func TestTerminalDetach(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "")
+	mgr, err := NewTerminalManager("", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestTerminalDetach(t *testing.T) {
 func TestTerminalDetachOneOfMany(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "")
+	mgr, err := NewTerminalManager("", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestTerminalDetachOneOfMany(t *testing.T) {
 func TestTerminalShutdown(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "")
+	mgr, err := NewTerminalManager("", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestTerminalShutdown(t *testing.T) {
 func TestTerminalResizeNonexistent(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "")
+	mgr, err := NewTerminalManager("", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestTerminalResizeNonexistent(t *testing.T) {
 func TestTerminalDetachNonexistent(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("", "")
+	mgr, err := NewTerminalManager("", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestTerminalDetachNonexistent(t *testing.T) {
 func TestTerminalDefaultCommand(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr, err := NewTerminalManager("bash", "")
+	mgr, err := NewTerminalManager("bash", "", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager() error: %v", err)
 	}
@@ -374,17 +374,132 @@ func TestTerminalDefaultCommand(t *testing.T) {
 	}
 }
 
+// TestTerminalMaxSessionsReached verifies that Attach returns ErrMaxSessionsReached
+// when the maximum number of concurrent sessions is reached, and that detaching
+// a session frees up a slot for a new one.
+func TestTerminalMaxSessionsReached(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 2)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	name1 := "test-" + t.Name() + "-1"
+	name2 := "test-" + t.Name() + "-2"
+	name3 := "test-" + t.Name() + "-3"
+	t.Cleanup(func() {
+		mgr.Shutdown()
+		killTmuxSession(t, name1)
+		killTmuxSession(t, name2)
+		killTmuxSession(t, name3)
+	})
+
+	// Fill both slots.
+	session1, err := mgr.Attach(name1, "", 80, 24)
+	if err != nil {
+		t.Fatalf("first Attach() error: %v", err)
+	}
+
+	_, err = mgr.Attach(name2, "", 80, 24)
+	if err != nil {
+		t.Fatalf("second Attach() error: %v", err)
+	}
+
+	// Third attach should fail with ErrMaxSessionsReached.
+	_, err = mgr.Attach(name3, "", 80, 24)
+	if !errors.Is(err, ErrMaxSessionsReached) {
+		t.Fatalf("expected ErrMaxSessionsReached, got: %v", err)
+	}
+
+	// Detach one session to free a slot.
+	if err := mgr.Detach(session1.ConnID); err != nil {
+		t.Fatalf("Detach() error: %v", err)
+	}
+
+	// Now the third attach should succeed.
+	_, err = mgr.Attach(name3, "", 80, 24)
+	if err != nil {
+		t.Fatalf("Attach after Detach should succeed, got: %v", err)
+	}
+}
+
+// TestTerminalSessionCount verifies that SessionCount accurately tracks the
+// number of active terminal connections as sessions are attached and detached.
+func TestTerminalSessionCount(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	name1 := "test-" + t.Name() + "-1"
+	name2 := "test-" + t.Name() + "-2"
+	t.Cleanup(func() {
+		mgr.Shutdown()
+		killTmuxSession(t, name1)
+		killTmuxSession(t, name2)
+	})
+
+	// Initially zero.
+	if got := mgr.SessionCount(); got != 0 {
+		t.Fatalf("expected SessionCount()==0, got %d", got)
+	}
+
+	// Attach first session.
+	session1, err := mgr.Attach(name1, "", 80, 24)
+	if err != nil {
+		t.Fatalf("first Attach() error: %v", err)
+	}
+	if got := mgr.SessionCount(); got != 1 {
+		t.Fatalf("expected SessionCount()==1, got %d", got)
+	}
+
+	// Attach second session (different name).
+	_, err = mgr.Attach(name2, "", 80, 24)
+	if err != nil {
+		t.Fatalf("second Attach() error: %v", err)
+	}
+	if got := mgr.SessionCount(); got != 2 {
+		t.Fatalf("expected SessionCount()==2, got %d", got)
+	}
+
+	// Detach first session.
+	if err := mgr.Detach(session1.ConnID); err != nil {
+		t.Fatalf("Detach() error: %v", err)
+	}
+	if got := mgr.SessionCount(); got != 1 {
+		t.Fatalf("expected SessionCount()==1 after Detach, got %d", got)
+	}
+}
+
+// TestTerminalMaxSessionsZeroUsesDefault verifies that creating a manager with
+// maxSessions=0 uses the default limit (defaultMaxTerminalSessions = 20).
+func TestTerminalMaxSessionsZeroUsesDefault(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	if got := mgr.MaxSessions(); got != defaultMaxTerminalSessions {
+		t.Errorf("expected MaxSessions()==%d, got %d", defaultMaxTerminalSessions, got)
+	}
+}
+
 // TestTerminalMultipleManagersWithPrefixes verifies that two managers with different
 // prefixes create isolated tmux sessions and shutdown of one doesn't affect the other.
 func TestTerminalMultipleManagersWithPrefixes(t *testing.T) {
 	skipIfNoTmux(t)
 
-	mgr1, err := NewTerminalManager("", "8080")
+	mgr1, err := NewTerminalManager("", "8080", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager(8080) error: %v", err)
 	}
 
-	mgr2, err := NewTerminalManager("", "8081")
+	mgr2, err := NewTerminalManager("", "8081", 0)
 	if err != nil {
 		t.Fatalf("NewTerminalManager(8081) error: %v", err)
 	}

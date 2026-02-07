@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -270,16 +271,18 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 		}()
 	}
 
-	// Check if target branch is checked out in another worktree
-	checkedOut, worktreePath, _ := IsRefCheckedOutInWorktree(repoPath, targetBranch)
-	if checkedOut {
-		fmt.Printf("⚠ Target branch %s is checked out at: %s\n", targetBranch, worktreePath)
-		fmt.Println("⚠ Using detached HEAD approach")
-		return pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote)
-	}
-
-	// Checkout target branch
+	// Checkout target branch — if it's checked out in another worktree, git
+	// will fail and we fall back to the detached HEAD approach. This avoids a
+	// TOCTOU race where the worktree state could change between a pre-check
+	// and the checkout.
 	if err := GitCheckout(repoPath, targetBranch); err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "already used by worktree") ||
+			strings.Contains(errStr, "already checked out") {
+			fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
+			fmt.Println("⚠ Using detached HEAD approach")
+			return pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote)
+		}
 		return fmt.Errorf("checking out %s: %v", targetBranch, err)
 	}
 
@@ -475,19 +478,19 @@ func pushBranch(sourceBranch, targetBranch string) {
 		}()
 	}
 
-	// Check if target branch is checked out in another worktree
-	checkedOut, worktreePath, _ := IsRefCheckedOutInWorktree(scriptDir, targetBranch)
-	if checkedOut {
-		fmt.Printf("⚠ Target branch %s is checked out at: %s\n", targetBranch, worktreePath)
-		fmt.Println("⚠ Using detached HEAD approach")
-		if err := pushBranchDetached(scriptDir, sourceBranch, targetBranch); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		return
-	}
-
-	// Checkout target branch
+	// Checkout target branch — if it's checked out in another worktree, git
+	// will fail and we fall back to the detached HEAD approach.
 	if err := GitCheckout(scriptDir, targetBranch); err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "already used by worktree") ||
+			strings.Contains(errStr, "already checked out") {
+			fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
+			fmt.Println("⚠ Using detached HEAD approach")
+			if err := pushBranchDetached(scriptDir, sourceBranch, targetBranch); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			}
+			return
+		}
 		fmt.Fprintf(os.Stderr, "Error checking out %s: %v\n", targetBranch, err)
 		return
 	}

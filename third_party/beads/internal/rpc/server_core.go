@@ -70,8 +70,10 @@ type Server struct {
 	subscribersMu sync.Mutex
 	subscribers   map[uint64]chan struct{} // subscriber ID -> notification channel
 	nextSubID     uint64
+	// Authentication
+	authToken string // Shared-secret token for client authentication
 	// Daemon configuration (set via SetConfig after creation)
-	autoCommit   bool
+	autoCommit bool
 	autoPush     bool
 	autoPull     bool
 	localMode    bool

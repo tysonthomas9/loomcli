@@ -57,7 +57,7 @@ func TestLockWatcher_ParsesLockFileJSONCorrectly(t *testing.T) {
 	}
 
 	// Create router
-	router, err := NewLogRouter("test-agent", tmpDir)
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
 	if err != nil {
 		t.Fatalf("NewLogRouter failed: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestLockWatcher_CallsRouterSetTaskWhenLockFileChanges(t *testing.T) {
 	lockPath := filepath.Join(tmpDir, ".agent.lock")
 
 	// Create router
-	router, err := NewLogRouter("test-agent", tmpDir)
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
 	if err != nil {
 		t.Fatalf("NewLogRouter failed: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestLockWatcher_InitialReadOnCreation(t *testing.T) {
 	}
 
 	// Create router
-	router, err := NewLogRouter("test-agent", tmpDir)
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
 	if err != nil {
 		t.Fatalf("NewLogRouter failed: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestLockWatcher_ClearsTaskWhenTaskIDEmpty(t *testing.T) {
 	}
 
 	// Create router
-	router, err := NewLogRouter("test-agent", tmpDir)
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
 	if err != nil {
 		t.Fatalf("NewLogRouter failed: %v", err)
 	}

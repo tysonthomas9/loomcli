@@ -133,10 +133,11 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 				}
 				return
 			}
+			log.Printf("Invalid request body in handleFleetRegister: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid request body: %v", err),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode fleet register response: %v", err)
 			}
@@ -287,10 +288,11 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 				}
 				return
 			}
+			log.Printf("Invalid request body in handleFleetDone: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid request body: %v", err),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode fleet done response: %v", err)
 			}
@@ -452,15 +454,15 @@ func (p *fleetClaimPoolAdapter) Put(client fleetClaimClient) {
 }
 
 // handleFleetClaim returns a handler that atomically claims a task for a fleet worker.
-func handleFleetClaim(pool daemon.Pool) http.HandlerFunc {
+func handleFleetClaim(pool daemon.Pool, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
 	if pool == nil {
-		return handleFleetClaimWithPool(nil)
+		return handleFleetClaimWithPool(nil, claimMetrics)
 	}
-	return handleFleetClaimWithPool(&fleetClaimPoolAdapter{pool: pool})
+	return handleFleetClaimWithPool(&fleetClaimPoolAdapter{pool: pool}, claimMetrics)
 }
 
 // handleFleetClaimWithPool is the internal implementation that accepts an interface for testing.
-func handleFleetClaimWithPool(pool fleetClaimPoolGetter) http.HandlerFunc {
+func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -492,10 +494,11 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter) http.HandlerFunc {
 					}
 					return
 				}
+				log.Printf("Invalid request body in handleFleetClaim: %v", err)
 				w.WriteHeader(http.StatusBadRequest)
 				if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 					Success: false,
-					Error:   fmt.Sprintf("invalid request body: %v", err),
+					Error:   "invalid request body",
 				}); err != nil {
 					log.Printf("Failed to encode fleet claim response: %v", err)
 				}
@@ -513,6 +516,7 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
+			recordClaim(claimMetrics, fleet.ClaimResultTimeout)
 			w.WriteHeader(status)
 			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 				Success: false,
@@ -526,7 +530,7 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter) http.HandlerFunc {
 
 		// If a specific issue ID was requested, claim it directly
 		if req.IssueID != "" {
-			claimSpecificIssue(w, client, req.IssueID)
+			claimSpecificIssue(w, client, req.IssueID, claimMetrics)
 			return
 		}
 
@@ -543,10 +547,11 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter) http.HandlerFunc {
 
 		resp, err := client.Ready(readyArgs)
 		if err != nil {
+			log.Printf("RPC error in handleFleetClaim (ready): %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 				Success: false,
-				Error:   fmt.Sprintf("rpc error: %v", err),
+				Error:   "internal server error",
 			}); err != nil {
 				log.Printf("Failed to encode fleet claim response: %v", err)
 			}
@@ -585,7 +590,7 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter) http.HandlerFunc {
 
 		// Try to claim each issue in order (already sorted by priority from Ready)
 		for _, issue := range issues {
-			claimed := tryClaimIssue(w, client, issue.ID)
+			claimed := tryClaimIssue(w, client, issue.ID, claimMetrics)
 			if claimed {
 				return
 			}
@@ -597,7 +602,7 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter) http.HandlerFunc {
 }
 
 // claimSpecificIssue attempts to claim a specific issue by ID and writes the response.
-func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID string) {
+func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID string, claimMetrics *fleet.ClaimMetrics) {
 	inProgress := "in_progress"
 	updateArgs := &rpc.UpdateArgs{
 		ID:     issueID,
@@ -611,10 +616,11 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 		if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound
 		}
+		log.Printf("RPC error in claimSpecificIssue for %s: %v", issueID, err)
 		w.WriteHeader(status)
 		if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 			Success: false,
-			Error:   err.Error(),
+			Error:   "internal server error",
 		}); err != nil {
 			log.Printf("Failed to encode fleet claim response: %v", err)
 		}
@@ -623,6 +629,7 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 
 	if !resp.Success {
 		if strings.Contains(resp.Error, "already claimed") {
+			recordClaim(claimMetrics, fleet.ClaimResultCollision)
 			w.WriteHeader(http.StatusConflict)
 			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 				Success: false,
@@ -655,6 +662,7 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 		return
 	}
 
+	recordClaim(claimMetrics, fleet.ClaimResultSuccess)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 		Success: true,
@@ -669,7 +677,7 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 
 // tryClaimIssue attempts to claim an issue and writes the response if successful.
 // Returns true if the claim succeeded and a response was written.
-func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID string) bool {
+func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID string, claimMetrics *fleet.ClaimMetrics) bool {
 	inProgress := "in_progress"
 	updateArgs := &rpc.UpdateArgs{
 		ID:     issueID,
@@ -686,6 +694,7 @@ func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID strin
 	if !resp.Success {
 		// "already claimed" is expected during contention - log at debug level
 		log.Printf("Fleet claim attempt failed for %s: %s", issueID, resp.Error)
+		recordClaim(claimMetrics, fleet.ClaimResultCollision)
 		return false
 	}
 
@@ -696,6 +705,7 @@ func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID strin
 		return false
 	}
 
+	recordClaim(claimMetrics, fleet.ClaimResultSuccess)
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(FleetClaimResponse{
 		Success: true,
@@ -707,6 +717,13 @@ func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID strin
 		log.Printf("Failed to encode fleet claim response: %v", err)
 	}
 	return true
+}
+
+// recordClaim safely records a claim result, handling nil metrics.
+func recordClaim(m *fleet.ClaimMetrics, result string) {
+	if m != nil {
+		m.RecordClaim(result)
+	}
 }
 
 // HeartbeatRequest represents the POST body for the heartbeat endpoint.
@@ -763,10 +780,11 @@ func handleFleetHeartbeatWithStore(store heartbeatStore) http.HandlerFunc {
 				}
 				return
 			}
+			log.Printf("Invalid request body in handleFleetHeartbeat: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid request body: %v", err),
+				Error:   "invalid request body",
 			}); err != nil {
 				log.Printf("Failed to encode heartbeat response: %v", err)
 			}

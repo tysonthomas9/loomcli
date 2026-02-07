@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,6 +25,8 @@ const (
 	logDebounceInterval = 50 * time.Millisecond
 	// logHeartbeatInterval is how often to send heartbeat comments for log streams.
 	logHeartbeatInterval = 30 * time.Second
+	// readChunkSize is the buffer size for seek-from-end chunk reads.
+	readChunkSize = 32 * 1024
 )
 
 // LogLinePayload represents a single log line for SSE.
@@ -98,7 +101,8 @@ func ReadLastNLines(filepath string, n int) ([]string, int64, error) {
 	return readLastNLinesFromFile(filepath, n, nil)
 }
 
-// readLastNLinesFromFile reads the last N lines. If secureDir is non-nil,
+// readLastNLinesFromFile reads the last N lines using seek-from-end to avoid
+// loading the entire file into memory. If secureDir is non-nil,
 // uses openLogFileSecure to prevent symlink attacks.
 func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string, int64, error) {
 	if n <= 0 {
@@ -120,11 +124,89 @@ func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string
 	}
 	defer file.Close()
 
-	// Read all lines (for small files this is fine)
-	var lines []string
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	fileSize := stat.Size()
+
+	// Empty file
+	if fileSize == 0 {
+		return nil, 1, nil
+	}
+
+	// Phase 1: Backward scan to find byte offset of last N lines
+	readOffset := int64(0)
+	newlineCount := 0
+	buf := make([]byte, readChunkSize)
+	pos := fileSize
+	firstChunk := true
+
+	for pos > 0 && newlineCount < n {
+		chunkSize := int64(readChunkSize)
+		if chunkSize > pos {
+			chunkSize = pos
+		}
+		pos -= chunkSize
+
+		nRead, err := file.ReadAt(buf[:chunkSize], pos)
+		if err != nil && err != io.EOF {
+			return nil, 0, err
+		}
+
+		// Scan backward through the chunk
+		for i := nRead - 1; i >= 0; i-- {
+			if buf[i] == '\n' {
+				// Skip trailing newline at end of file
+				if firstChunk && pos+int64(i) == fileSize-1 {
+					firstChunk = false
+					continue
+				}
+				firstChunk = false
+				newlineCount++
+				if newlineCount == n {
+					readOffset = pos + int64(i) + 1
+					break
+				}
+			} else {
+				firstChunk = false
+			}
+		}
+	}
+
+	// Phase 2: Count lines before readOffset to compute startLine
+	var startLine int64
+	if readOffset == 0 {
+		startLine = 1
+	} else {
+		linesBeforeOffset := int64(0)
+		countPos := int64(0)
+		for countPos < readOffset {
+			chunkSize := int64(readChunkSize)
+			if countPos+chunkSize > readOffset {
+				chunkSize = readOffset - countPos
+			}
+			nRead, err := file.ReadAt(buf[:chunkSize], countPos)
+			if err != nil && err != io.EOF {
+				return nil, 0, err
+			}
+			for i := 0; i < nRead; i++ {
+				if buf[i] == '\n' {
+					linesBeforeOffset++
+				}
+			}
+			countPos += int64(nRead)
+		}
+		startLine = linesBeforeOffset + 1
+	}
+
+	// Phase 3: Read last N lines from readOffset using Scanner
+	if _, err := file.Seek(readOffset, io.SeekStart); err != nil {
+		return nil, 0, err
+	}
 	scanner := bufio.NewScanner(file)
-	// Increase buffer size for long lines
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	var lines []string
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
@@ -132,14 +214,7 @@ func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string
 		return nil, 0, err
 	}
 
-	totalLines := int64(len(lines))
-	if totalLines <= int64(n) {
-		return lines, 1, nil
-	}
-
-	// Return last N lines
-	startLine := totalLines - int64(n) + 1
-	return lines[totalLines-int64(n):], startLine, nil
+	return lines, startLine, nil
 }
 
 // Stream starts SSE streaming to the ResponseWriter.

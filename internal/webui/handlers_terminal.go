@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
@@ -20,6 +21,7 @@ const (
 	resizeMsgLen        = 5
 	maxTerminalCols     = 500
 	maxTerminalRows     = 200
+	wsReadLimit         = 32768 // 32KB; explicit limit for defense-in-depth (matches nhooyr.io/websocket default)
 )
 
 // validTerminalSession matches alphanumeric characters, hyphens, and underscores.
@@ -143,6 +145,19 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 			}
 		}
 
+		// Pre-upgrade check: reject before WebSocket upgrade if at session limit.
+		if manager.SessionCount() >= manager.MaxSessions() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "maximum terminal sessions reached",
+			}); err != nil {
+				log.Printf("Failed to encode max sessions error response: %v", err)
+			}
+			return
+		}
+
 		// Disable write timeout for this long-lived WebSocket connection.
 		// Must be called before websocket.Accept which hijacks the connection.
 		rc := http.NewResponseController(w)
@@ -161,6 +176,7 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 			log.Printf("Failed to accept WebSocket: %v", err)
 			return
 		}
+		conn.SetReadLimit(wsReadLimit)
 
 		// Track close status for deferred cleanup
 		closeStatus := websocket.StatusInternalError
@@ -173,7 +189,11 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 		// (frontend sends resize immediately after connect)
 		termSession, err := manager.Attach(session, defaultCmd, 80, 24)
 		if err != nil {
-			log.Printf("Failed to attach terminal session %q: %v", session, err)
+			if errors.Is(err, ErrMaxSessionsReached) {
+				log.Printf("Terminal session limit reached for %q", session)
+			} else {
+				log.Printf("Failed to attach terminal session %q: %v", session, err)
+			}
 			closeReason = err.Error()
 			return
 		}

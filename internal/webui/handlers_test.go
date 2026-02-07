@@ -534,8 +534,8 @@ func TestHandleGetIssue_InternalError(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if response["error"] != "database connection failed" {
-		t.Errorf("error = %q, want %q", response["error"], "database connection failed")
+	if response["error"] != "internal server error" {
+		t.Errorf("error = %q, want %q", response["error"], "internal server error")
 	}
 }
 
@@ -849,7 +849,10 @@ func TestParseListParams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", tt.url, nil)
-			args := parseListParams(req)
+			args, err := parseListParams(req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			// Convert to testListArgs for comparison
 			testArgs := testListArgs{
 				Status:           args.Status,
@@ -2335,8 +2338,8 @@ func TestHandleCreateIssue_MalformedJSON(t *testing.T) {
 	if resp.Code != "INVALID_JSON" {
 		t.Errorf("code = %q, want %q", resp.Code, "INVALID_JSON")
 	}
-	if !containsSubstring(resp.Error, "invalid JSON body") {
-		t.Errorf("error = %q, expected to contain 'invalid JSON body'", resp.Error)
+	if !containsSubstring(resp.Error, "invalid request body") {
+		t.Errorf("error = %q, expected to contain 'invalid request body'", resp.Error)
 	}
 }
 
@@ -3218,8 +3221,8 @@ func TestHandlePatchIssue_NotFound(t *testing.T) {
 	if resp.Success {
 		t.Error("expected success=false")
 	}
-	if !strings.Contains(resp.Error, "not found") {
-		t.Errorf("error = %q, expected to contain %q", resp.Error, "not found")
+	if !strings.Contains(resp.Error, "internal server error") {
+		t.Errorf("error = %q, expected to contain %q", resp.Error, "internal server error")
 	}
 }
 
@@ -3301,8 +3304,8 @@ func TestHandlePatchIssue_InternalError(t *testing.T) {
 	if resp.Success {
 		t.Error("expected success=false")
 	}
-	if !strings.Contains(resp.Error, "database connection failed") {
-		t.Errorf("error = %q, expected to contain %q", resp.Error, "database connection failed")
+	if !strings.Contains(resp.Error, "internal server error") {
+		t.Errorf("error = %q, expected to contain %q", resp.Error, "internal server error")
 	}
 }
 
@@ -3883,8 +3886,8 @@ func TestHandlePatchIssue_PoolGetServiceUnavailable(t *testing.T) {
 	if resp.Success {
 		t.Error("expected success=false")
 	}
-	if resp.Error != "pool exhausted" {
-		t.Errorf("error = %q, want %q", resp.Error, "pool exhausted")
+	if resp.Error != "daemon not available" {
+		t.Errorf("error = %q, want %q", resp.Error, "daemon not available")
 	}
 }
 
@@ -4042,8 +4045,8 @@ func TestHandleCloseIssue_InvalidBody(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if !strings.HasPrefix(resp["error"], "invalid request body:") {
-		t.Errorf("error = %q, want prefix %q", resp["error"], "invalid request body:")
+	if resp["error"] != "invalid request body" {
+		t.Errorf("error = %q, want %q", resp["error"], "invalid request body")
 	}
 }
 
@@ -4625,8 +4628,8 @@ func TestHandleGraph_RPCError(t *testing.T) {
 	if resp.Success {
 		t.Error("Success = true, want false")
 	}
-	if !containsSubstring(resp.Error, "rpc error") {
-		t.Errorf("Error = %q, expected to contain 'rpc error'", resp.Error)
+	if !containsSubstring(resp.Error, "internal server error") {
+		t.Errorf("Error = %q, expected to contain 'internal server error'", resp.Error)
 	}
 }
 
@@ -4665,8 +4668,8 @@ func TestHandleGraph_DaemonError(t *testing.T) {
 	if resp.Success {
 		t.Error("Success = true, want false")
 	}
-	if !containsSubstring(resp.Error, "database locked") {
-		t.Errorf("Error = %q, want to contain %q", resp.Error, "database locked")
+	if !containsSubstring(resp.Error, "internal server error") {
+		t.Errorf("Error = %q, want to contain %q", resp.Error, "internal server error")
 	}
 }
 
@@ -5622,7 +5625,10 @@ func TestHandleRemoveDependency_NilPool(t *testing.T) {
 // TestParseListParams_StatusReview verifies that ?status=review parses correctly
 func TestParseListParams_StatusReview(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/issues?status=review", nil)
-	args := parseListParams(req)
+	args, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if args.Status != "review" {
 		t.Errorf("expected status=review, got %q", args.Status)
@@ -5632,10 +5638,154 @@ func TestParseListParams_StatusReview(t *testing.T) {
 // TestParseListParams_StatusBlocked verifies that ?status=blocked parses correctly
 func TestParseListParams_StatusBlocked(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/issues?status=blocked", nil)
-	args := parseListParams(req)
+	args, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if args.Status != "blocked" {
 		t.Errorf("expected status=blocked, got %q", args.Status)
+	}
+}
+
+// TestParseListParams_DateValidation verifies date parameter validation in parseListParams.
+func TestParseListParams_DateValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		url       string
+		wantErr   bool
+		errSubstr string
+		checkFunc func(t *testing.T, args *rpc.ListArgs)
+	}{
+		{
+			name:    "valid RFC3339 date",
+			url:     "/api/issues?created_after=2024-01-15T00:00:00Z",
+			wantErr: false,
+			checkFunc: func(t *testing.T, args *rpc.ListArgs) {
+				if args.CreatedAfter != "2024-01-15T00:00:00Z" {
+					t.Errorf("expected created_after=2024-01-15T00:00:00Z, got %q", args.CreatedAfter)
+				}
+			},
+		},
+		{
+			name:    "valid RFC3339 with timezone offset",
+			url:     "/api/issues?created_before=2024-01-15T10:30:00%2B05:30",
+			wantErr: false,
+			checkFunc: func(t *testing.T, args *rpc.ListArgs) {
+				if args.CreatedBefore != "2024-01-15T10:30:00+05:30" {
+					t.Errorf("expected created_before=2024-01-15T10:30:00+05:30, got %q", args.CreatedBefore)
+				}
+			},
+		},
+		{
+			name:    "valid date-only format",
+			url:     "/api/issues?updated_after=2024-01-15",
+			wantErr: false,
+			checkFunc: func(t *testing.T, args *rpc.ListArgs) {
+				if args.UpdatedAfter != "2024-01-15" {
+					t.Errorf("expected updated_after=2024-01-15, got %q", args.UpdatedAfter)
+				}
+			},
+		},
+		{
+			name:      "invalid date string yesterday",
+			url:       "/api/issues?created_after=yesterday",
+			wantErr:   true,
+			errSubstr: "created_after",
+		},
+		{
+			name:      "invalid date format with slashes",
+			url:       "/api/issues?updated_before=2024/01/15",
+			wantErr:   true,
+			errSubstr: "updated_before",
+		},
+		{
+			name:    "no date params returns no error and empty fields",
+			url:     "/api/issues?status=open",
+			wantErr: false,
+			checkFunc: func(t *testing.T, args *rpc.ListArgs) {
+				if args.CreatedAfter != "" {
+					t.Errorf("expected empty created_after, got %q", args.CreatedAfter)
+				}
+				if args.CreatedBefore != "" {
+					t.Errorf("expected empty created_before, got %q", args.CreatedBefore)
+				}
+				if args.UpdatedAfter != "" {
+					t.Errorf("expected empty updated_after, got %q", args.UpdatedAfter)
+				}
+				if args.UpdatedBefore != "" {
+					t.Errorf("expected empty updated_before, got %q", args.UpdatedBefore)
+				}
+			},
+		},
+		{
+			name:    "multiple valid dates all populated",
+			url:     "/api/issues?created_after=2024-01-01T00:00:00Z&created_before=2024-12-31&updated_after=2024-06-01T12:00:00Z&updated_before=2024-06-30",
+			wantErr: false,
+			checkFunc: func(t *testing.T, args *rpc.ListArgs) {
+				if args.CreatedAfter != "2024-01-01T00:00:00Z" {
+					t.Errorf("expected created_after=2024-01-01T00:00:00Z, got %q", args.CreatedAfter)
+				}
+				if args.CreatedBefore != "2024-12-31" {
+					t.Errorf("expected created_before=2024-12-31, got %q", args.CreatedBefore)
+				}
+				if args.UpdatedAfter != "2024-06-01T12:00:00Z" {
+					t.Errorf("expected updated_after=2024-06-01T12:00:00Z, got %q", args.UpdatedAfter)
+				}
+				if args.UpdatedBefore != "2024-06-30" {
+					t.Errorf("expected updated_before=2024-06-30, got %q", args.UpdatedBefore)
+				}
+			},
+		},
+		{
+			name:      "one valid and one invalid date returns error",
+			url:       "/api/issues?created_after=2024-01-15T00:00:00Z&created_before=not-a-date",
+			wantErr:   true,
+			errSubstr: "created_before",
+		},
+		{
+			name:      "error message contains parameter name for created_after",
+			url:       "/api/issues?created_after=bad",
+			wantErr:   true,
+			errSubstr: "created_after",
+		},
+		{
+			name:      "error message contains parameter name for updated_after",
+			url:       "/api/issues?updated_after=bad",
+			wantErr:   true,
+			errSubstr: "updated_after",
+		},
+		{
+			name:      "error message contains parameter name for updated_before",
+			url:       "/api/issues?updated_before=bad",
+			wantErr:   true,
+			errSubstr: "updated_before",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
+			args, err := parseListParams(req)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("parseListParams() expected error, got nil")
+					return
+				}
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("parseListParams() unexpected error: %v", err)
+			}
+			if tt.checkFunc != nil {
+				tt.checkFunc(t, args)
+			}
+		})
 	}
 }
 
@@ -5756,8 +5906,8 @@ func TestHandleBlocked_RPCError(t *testing.T) {
 		t.Error("Success = true, want false")
 	}
 
-	if !strings.Contains(resp.Error, "rpc error") {
-		t.Errorf("Error = %q, expected to contain 'rpc error'", resp.Error)
+	if !strings.Contains(resp.Error, "internal server error") {
+		t.Errorf("Error = %q, expected to contain 'internal server error'", resp.Error)
 	}
 }
 

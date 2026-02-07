@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -86,11 +87,16 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	}
 
 	// Monitor for shutdown signal
+	var exited atomic.Bool
 	done := make(chan struct{})
 	go func() {
 		select {
 		case <-shutdown:
-			_ = cmd.Process.Signal(syscall.SIGTERM)
+			// Only signal if process hasn't exited yet to avoid
+			// sending SIGTERM to a reused PID.
+			if !exited.Load() {
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+			}
 		case <-done:
 		}
 	}()
@@ -104,7 +110,8 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	}
 
 	runErr := cmd.Wait()
-	close(done)
+	exited.Store(true) // Mark exited before closing done channel
+	close(done)        // Signal goroutine to exit
 	r.Close()
 	return runErr
 }

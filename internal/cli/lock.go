@@ -133,7 +133,7 @@ func AcquireLock(worktreePath, command, agentName string) error {
 	}
 
 	// Atomic lock creation - O_EXCL fails if file exists
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		if os.IsExist(err) {
 			// Lock file exists - check if it's stale (process dead)
@@ -145,7 +145,7 @@ func AcquireLock(worktreePath, command, agentName string) error {
 				}
 				// Stale lock - remove and retry once
 				os.Remove(lockPath)
-				file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+				file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 				if err != nil {
 					return fmt.Errorf("failed to acquire lock after removing stale lock: %w", err)
 				}

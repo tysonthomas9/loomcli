@@ -5,10 +5,12 @@ package rpc
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 )
 
 // MaxUnixSocketPath is the maximum length for Unix socket paths.
@@ -47,10 +49,10 @@ func ShortSocketPath(workspacePath string) string {
 }
 
 // shortSocketDir returns a socket path in /tmp/beads-{hash}/.
-// The hash is 8 hex characters derived from SHA256 of the workspace path.
+// The hash is 16 hex characters derived from SHA256 of the workspace path.
 func shortSocketDir(canonicalPath string) string {
 	hash := sha256.Sum256([]byte(canonicalPath))
-	hashStr := hex.EncodeToString(hash[:4]) // 8 hex chars from 4 bytes
+	hashStr := hex.EncodeToString(hash[:8]) // 16 hex chars from 8 bytes
 
 	dir := filepath.Join(tmpDir, "beads-"+hashStr)
 	return filepath.Join(dir, "bd.sock")
@@ -66,14 +68,62 @@ const tmpDir = "/tmp"
 // EnsureSocketDir creates the socket directory if it doesn't exist.
 // Returns the socket path (unchanged) and any error.
 // This should be called by the daemon before listening.
+//
+// For /tmp/beads-* directories, this function validates that the directory
+// is not a symlink and is owned by the current user with mode 0700, to
+// prevent symlink attacks where an attacker pre-creates the directory.
 func EnsureSocketDir(socketPath string) (string, error) {
 	dir := filepath.Dir(socketPath)
 
-	// Only create if it's a /tmp/beads-* directory
-	// Don't create .beads directories - those should exist
-	if strings.HasPrefix(dir, filepath.Join(tmpDir, "beads-")) {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return "", err
+	// Only manage /tmp/beads-* directories
+	// .beads directories live inside the workspace and should already exist
+	if !strings.HasPrefix(dir, filepath.Join(tmpDir, "beads-")) {
+		return socketPath, nil
+	}
+
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("failed to stat socket directory %s: %w", dir, err)
+		}
+		// Directory doesn't exist — create it atomically
+		if mkErr := os.Mkdir(dir, 0700); mkErr != nil {
+			if !os.IsExist(mkErr) {
+				return "", fmt.Errorf("failed to create socket directory %s: %w", dir, mkErr)
+			}
+			// Another process created it between our Lstat and Mkdir — re-stat and validate
+			fi, err = os.Lstat(dir)
+			if err != nil {
+				return "", fmt.Errorf("failed to stat socket directory %s: %w", dir, err)
+			}
+			// Fall through to validation below
+		} else {
+			// We created it ourselves — safe to use
+			return socketPath, nil
+		}
+	}
+
+	// Directory exists — validate it's safe to use
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("socket directory %s is a symlink (possible symlink attack)", dir)
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("socket directory path %s is not a directory", dir)
+	}
+
+	// Verify ownership matches current user
+	stat, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", fmt.Errorf("failed to get ownership info for socket directory %s", dir)
+	}
+	if stat.Uid != uint32(os.Getuid()) {
+		return "", fmt.Errorf("socket directory %s is owned by uid %d, expected %d (possible attack)", dir, stat.Uid, os.Getuid())
+	}
+
+	// Ensure permissions are restrictive
+	if fi.Mode().Perm() != 0700 {
+		if err := os.Chmod(dir, 0700); err != nil {
+			return "", fmt.Errorf("failed to fix permissions on socket directory %s: %w", dir, err)
 		}
 	}
 
