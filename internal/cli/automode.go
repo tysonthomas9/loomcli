@@ -108,6 +108,19 @@ func interruptibleSleep(d time.Duration, shutdown <-chan struct{}) bool {
 	}
 }
 
+// hasOpenBlockers returns true if any dependency is a blocking relationship.
+// A blocking dependency indicates the task cannot start until the blocker is resolved.
+// The presence of a "blocks" dependency means the blocker hasn't been resolved yet
+// (resolved blockers have their dependencies removed from the database).
+func hasOpenBlockers(deps []Dependency) bool {
+	for _, dep := range deps {
+		if dep.Type == "blocks" {
+			return true
+		}
+	}
+	return false
+}
+
 // GetAvailablePlanningTasks returns tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
 func GetAvailablePlanningTasks() ([]BdIssue, error) {
@@ -129,6 +142,10 @@ func GetAvailablePlanningTasks() ([]BdIssue, error) {
 		}
 		// Skip epics - agents shouldn't work on epics directly
 		if issue.IssueType == "epic" {
+			continue
+		}
+		// Safety net: skip tasks with open blocking dependencies
+		if hasOpenBlockers(issue.Dependencies) {
 			continue
 		}
 		// Task needs planning if:
@@ -176,6 +193,10 @@ func GetAvailableImplementationTasks() ([]BdIssue, error) {
 		if issue.IssueType == "epic" {
 			continue
 		}
+		// Safety net: skip tasks with open blocking dependencies
+		if hasOpenBlockers(issue.Dependencies) {
+			continue
+		}
 		// Task ready for implementation if it HAS a design AND no revision label
 		hasRevisionLabel := slices.Contains(issue.Labels, "needs-revision")
 		if issue.Design != "" && !hasRevisionLabel {
@@ -216,6 +237,10 @@ func GetAnyAvailableTasks() ([]BdIssue, error) {
 			continue
 		}
 		if issue.IssueType == "epic" {
+			continue
+		}
+		// Safety net: skip tasks with open blocking dependencies
+		if hasOpenBlockers(issue.Dependencies) {
 			continue
 		}
 		candidates = append(candidates, issue)
