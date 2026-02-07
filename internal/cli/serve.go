@@ -31,8 +31,9 @@ var (
 	serveWebUISocket string
 	serveNoWebUI     bool
 	serveNoDaemon    bool
-	serveRedisAddr   string
-	serveAPIKey      string
+	serveRedisAddr     string
+	serveRedisPassword string
+	serveAPIKey        string
 	serveFleetAPIKey string
 	serveNoAuth      bool
 	serveHSTS        bool
@@ -69,6 +70,7 @@ ENDPOINTS
 ENVIRONMENT VARIABLES
   LOOM_SERVER_PORT    Server port (default: 8081)
   LOOM_CORS_ORIGIN    CORS allowed origin (default: * for all)
+  LOOM_REDIS_PASSWORD Redis password (avoids exposure in process list)
 
 EXAMPLES
   loom serve                          # Start on default port 8081
@@ -104,6 +106,9 @@ func init() {
 
 	defaultRedisAddr := os.Getenv("LOOM_REDIS_ADDR")
 	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", defaultRedisAddr, "Redis address for fleet coordination (enables stale detector)")
+
+	defaultRedisPassword := os.Getenv("LOOM_REDIS_PASSWORD")
+	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", defaultRedisPassword, "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
 
 	defaultAPIKey := os.Getenv("LOOM_WEBUI_API_KEY")
 	serveCmd.Flags().StringVar(&serveAPIKey, "api-key", defaultAPIKey, "API key for WebUI authentication (auto-generated if empty)")
@@ -222,7 +227,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Start stale detector if Redis is configured
 	var kvClient *kv.Client
 	if serveRedisAddr != "" {
-		kvClient = kv.NewClient(serveRedisAddr, "", 0)
+		kvClient = kv.NewClient(serveRedisAddr, serveRedisPassword, 0)
 		defer func() {
 			if err := kvClient.Close(); err != nil {
 				log.Printf("Error closing Redis client: %v", err)

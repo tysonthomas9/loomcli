@@ -1167,6 +1167,16 @@ func TestHandleAgents_LegacyMode_NoByWorkspace(t *testing.T) {
 	})
 }
 
+func TestServeFlags_RedisPassword(t *testing.T) {
+	f := serveCmd.Flags().Lookup("redis-password")
+	if f == nil {
+		t.Fatal("redis-password flag not registered on serveCmd")
+	}
+	if f.Value.Type() != "string" {
+		t.Errorf("redis-password type = %q, want %q", f.Value.Type(), "string")
+	}
+}
+
 func TestHandleMetrics_ContentType(t *testing.T) {
 	mockData := mockMonitorData()
 
