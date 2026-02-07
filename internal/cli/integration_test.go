@@ -196,36 +196,29 @@ func TestMultiWorktreeDiscovery(t *testing.T) {
 	}
 }
 
-// TestClaudeInvokerMocking tests that Claude invocation can be mocked
-func TestClaudeInvokerMocking(t *testing.T) {
-	// Track if Claude was invoked
-	invoked := false
-	capturedPrompt := ""
-	capturedAgentName := ""
+// TestAgentInvokerMocking tests that agent invocation can be mocked and that
+// arguments flow correctly through the backend dispatch to the invoker
+func TestAgentInvokerMocking(t *testing.T) {
+	recorder := SetupMockClaudeInvoker(t, nil)
 
-	origInvoker := claudeInvoker
-	claudeInvoker = func(workDir, prompt, agentName string) error {
-		invoked = true
-		capturedPrompt = prompt
-		capturedAgentName = agentName
-		return nil
-	}
-	t.Cleanup(func() { claudeInvoker = origInvoker })
-
-	// Call InvokeClaude
-	err := InvokeClaude("/tmp/test", "test prompt", "test-agent")
+	err := InvokeAgent("/tmp/test", "test prompt", "test-agent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !invoked {
-		t.Error("expected Claude invoker to be called")
+	if len(recorder.Invocations) != 1 {
+		t.Fatalf("expected 1 invocation, got %d", len(recorder.Invocations))
 	}
-	if capturedPrompt != "test prompt" {
-		t.Errorf("expected prompt 'test prompt', got %q", capturedPrompt)
+
+	inv := recorder.Invocations[0]
+	if inv.WorkDir != "/tmp/test" {
+		t.Errorf("expected workDir '/tmp/test', got %q", inv.WorkDir)
 	}
-	if capturedAgentName != "test-agent" {
-		t.Errorf("expected agentName 'test-agent', got %q", capturedAgentName)
+	if inv.Prompt != "test prompt" {
+		t.Errorf("expected prompt 'test prompt', got %q", inv.Prompt)
+	}
+	if inv.AgentName != "test-agent" {
+		t.Errorf("expected agentName 'test-agent', got %q", inv.AgentName)
 	}
 }
 
