@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -381,6 +382,76 @@ func TestDetectIntegrationBranch_DetectedFartherThanMain(t *testing.T) {
 	result := DetectIntegrationBranch(worktrees)
 	if result != "" {
 		t.Errorf("expected empty string when candidate is not closer than main, got %q", result)
+	}
+}
+
+func TestValidateWorktreeName(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		// Valid names
+		{"falcon", false},
+		{"nova", false},
+		{"my-agent", false},
+		{"agent_1", false},
+		{"sub/dir", false},
+		{".", false},
+
+		// Invalid names (path traversal)
+		{"..", true},
+		{"../secret", true},
+		{"../../etc", true},
+		{"foo/../../bar", true},
+		{"foo/../..", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateWorktreeName(tc.name)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateWorktreeName(%q) error = %v, wantErr %v", tc.name, err, tc.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "path traversal") {
+				t.Errorf("validateWorktreeName(%q) error = %v, want error containing 'path traversal'", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestResolveLegacyPathTraversal(t *testing.T) {
+	// Save and restore working directory
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	os.Chdir(tmpDir)
+
+	// Create worktrees directory and a target outside it
+	os.MkdirAll(filepath.Join(tmpDir, "worktrees", "falcon"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "secret"), 0755)
+
+	// Valid name should work
+	path, err := resolveLegacyPath("falcon")
+	if err != nil {
+		t.Fatalf("resolveLegacyPath(\"falcon\") failed: %v", err)
+	}
+	path, _ = filepath.EvalSymlinks(path)
+	expected := filepath.Join(tmpDir, "worktrees", "falcon")
+	if path != expected {
+		t.Errorf("resolveLegacyPath(\"falcon\") = %q, want %q", path, expected)
+	}
+
+	// Path traversal should be blocked
+	traversalNames := []string{"..", "../secret", "../../etc"}
+	for _, name := range traversalNames {
+		_, err := resolveLegacyPath(name)
+		if err == nil {
+			t.Errorf("resolveLegacyPath(%q) should have returned an error", name)
+		} else if !strings.Contains(err.Error(), "path traversal") {
+			t.Errorf("resolveLegacyPath(%q) error = %v, want error containing 'path traversal'", name, err)
+		}
 	}
 }
 

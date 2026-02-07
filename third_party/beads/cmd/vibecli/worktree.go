@@ -39,6 +39,16 @@ func GetScriptDir() (string, error) {
 	return cwd, nil
 }
 
+// validateWorktreeName checks that a worktree name does not contain path
+// traversal sequences. Returns an error if the name is unsafe.
+func validateWorktreeName(name string) error {
+	cleaned := filepath.Clean(name)
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("invalid worktree name %q: path traversal not allowed", name)
+	}
+	return nil
+}
+
 // ResolveWorktreePath converts a worktree name to its full path
 // Accepts:
 //   - A worktree name (e.g., "falcon") -> ./worktrees/falcon
@@ -57,13 +67,27 @@ func ResolveWorktreePath(name string) (string, error) {
 		return name, nil
 	}
 
+	// Validate name does not traverse outside worktrees directory
+	if err := validateWorktreeName(name); err != nil {
+		return "", err
+	}
+
 	// Relative name - resolve to worktrees directory
 	scriptDir, err := GetScriptDir()
 	if err != nil {
 		return "", err
 	}
 
-	worktreePath := filepath.Join(scriptDir, GetWorktreesDir(), name)
+	worktreesDir := filepath.Join(scriptDir, GetWorktreesDir())
+	worktreePath := filepath.Clean(filepath.Join(worktreesDir, name))
+
+	// Defense-in-depth: verify resolved path is within worktrees directory
+	absWorktreesDir := filepath.Clean(worktreesDir)
+	if !strings.HasPrefix(worktreePath, absWorktreesDir+string(filepath.Separator)) &&
+		worktreePath != absWorktreesDir {
+		return "", fmt.Errorf("invalid worktree name %q: resolved path escapes worktrees directory", name)
+	}
+
 	if _, err := os.Stat(worktreePath); err != nil {
 		return "", fmt.Errorf("worktree '%s' not found at %s", name, worktreePath)
 	}

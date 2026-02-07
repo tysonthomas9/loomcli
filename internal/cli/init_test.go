@@ -562,6 +562,20 @@ func TestCreateWorktrees_NonInteractive_NoneToCreate(t *testing.T) {
 	}
 }
 
+func TestCreateSingleWorktree_PathTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	traversalNames := []string{"..", "../../etc", "../secret"}
+	for _, name := range traversalNames {
+		t.Run(name, func(t *testing.T) {
+			result := createSingleWorktree(tmpDir, name)
+			if result {
+				t.Errorf("createSingleWorktree(%q, %q) should return false for path traversal", tmpDir, name)
+			}
+		})
+	}
+}
+
 // --- showSummary tests ---
 
 func TestShowSummary_MultipleNames(t *testing.T) {

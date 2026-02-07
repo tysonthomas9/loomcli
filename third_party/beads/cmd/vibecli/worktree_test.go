@@ -126,6 +126,63 @@ func TestResolveWorktreePathRelative(t *testing.T) {
 	}
 }
 
+func TestValidateWorktreeName(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{"falcon", false},
+		{"nova", false},
+		{"my-agent", false},
+		{".", false},
+		{"..", true},
+		{"../secret", true},
+		{"../../etc", true},
+		{"foo/../../bar", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateWorktreeName(tc.name)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateWorktreeName(%q) error = %v, wantErr %v", tc.name, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestResolveWorktreePathTraversal(t *testing.T) {
+	origDir, _ := os.Getwd()
+	defer os.Chdir(origDir)
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	os.Chdir(tmpDir)
+
+	// Create worktrees directory
+	os.MkdirAll(filepath.Join(tmpDir, "worktrees", "falcon"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "secret"), 0755)
+
+	// Valid name should work
+	path, err := ResolveWorktreePath("falcon")
+	if err != nil {
+		t.Fatalf("ResolveWorktreePath(\"falcon\") failed: %v", err)
+	}
+	path, _ = filepath.EvalSymlinks(path)
+	expected := filepath.Join(tmpDir, "worktrees", "falcon")
+	if path != expected {
+		t.Errorf("ResolveWorktreePath(\"falcon\") = %q, want %q", path, expected)
+	}
+
+	// Path traversal should be blocked
+	for _, name := range []string{"..", "../secret", "../../etc"} {
+		_, err := ResolveWorktreePath(name)
+		if err == nil {
+			t.Errorf("ResolveWorktreePath(%q) should have returned an error", name)
+		}
+	}
+}
+
 func TestGetScriptDir(t *testing.T) {
 	dir, err := GetScriptDir()
 	if err != nil {

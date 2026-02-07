@@ -461,6 +461,10 @@ func promptForWorktreeNames(existing []string) []string {
 
 // createSingleWorktree creates one worktree
 func createSingleWorktree(worktreesDir, name string) bool {
+	if err := validateWorktreeName(name); err != nil {
+		fmt.Fprintf(os.Stderr, "  ✗ %v\n", err)
+		return false
+	}
 	worktreePath := filepath.Join(worktreesDir, name)
 
 	// Check if path already exists
