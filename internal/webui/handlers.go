@@ -1891,6 +1891,10 @@ type SSEMetrics struct {
 	RetryQueueDepth    int     `json:"retry_queue_depth"`
 	UptimeSeconds      float64 `json:"uptime_seconds"`
 	FleetTimeoutsTotal int64   `json:"loom_fleet_timeouts_total,omitempty"`
+	FleetClaimsSuccess   int64 `json:"loom_fleet_claims_success,omitempty"`
+	FleetClaimsCollision int64 `json:"loom_fleet_claims_collision,omitempty"`
+	FleetClaimsTimeout   int64 `json:"loom_fleet_claims_timeout,omitempty"`
+	FleetClaimsTotal     int64 `json:"loom_fleet_claims_total,omitempty"`
 }
 
 // MetricsResponse wraps the SSE hub metrics for JSON response.
@@ -1901,7 +1905,7 @@ type MetricsResponse struct {
 }
 
 // handleMetrics returns a handler that exposes SSE hub runtime metrics.
-func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer) http.HandlerFunc {
+func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if hub == nil {
@@ -1922,6 +1926,13 @@ func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer) http.Han
 		}
 		if timeoutEnforcer != nil {
 			metrics.FleetTimeoutsTotal = timeoutEnforcer.GetTimeoutCount()
+		}
+		if claimMetrics != nil {
+			snap := claimMetrics.Snapshot()
+			metrics.FleetClaimsSuccess = snap.Success
+			metrics.FleetClaimsCollision = snap.Collision
+			metrics.FleetClaimsTimeout = snap.Timeout
+			metrics.FleetClaimsTotal = snap.Total
 		}
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(MetricsResponse{

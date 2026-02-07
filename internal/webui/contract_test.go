@@ -913,7 +913,7 @@ func TestContractEnvelope_Metrics(t *testing.T) {
 
 	t.Run("GET /api/metrics nil hub returns envelope error", func(t *testing.T) {
 		t.Parallel()
-		handler := handleMetrics(nil, nil)
+		handler := handleMetrics(nil, nil, nil)
 		req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
