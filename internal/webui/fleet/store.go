@@ -275,6 +275,22 @@ func (s *Store) GetWorkerClaim(ctx context.Context, workerID string) (*ClaimResp
 	return &claim, nil
 }
 
+// ClearWorkerClaim removes the cached claim response for a worker.
+// This is called after a worker completes its task to clean up state.
+func (s *Store) ClearWorkerClaim(ctx context.Context, workerID string) error {
+	if err := validateID(workerID, "workerID"); err != nil {
+		return err
+	}
+
+	key := workerClaimKey(workerID)
+	if err := s.client.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("clear worker claim failed: %w", err)
+	}
+
+	s.logger.Debug("worker claim cleared", "worker_id", workerID)
+	return nil
+}
+
 // Worker represents a registered fleet worker.
 type Worker struct {
 	WorkerID     string   `json:"worker_id"`

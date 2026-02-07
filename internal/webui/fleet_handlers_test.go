@@ -961,3 +961,513 @@ func TestFleetRegister_StoreReceivesCorrectWorker(t *testing.T) {
 		t.Error("worker.RegisteredAt should be non-zero")
 	}
 }
+
+// =============================================================================
+// Fleet Done Handler Tests
+// =============================================================================
+
+// mockFleetDoneStore implements fleetDoneStore for testing.
+type mockFleetDoneStore struct {
+	getWorkerFunc      func(ctx context.Context, workerID string) (*fleet.Worker, error)
+	getWorkerClaimFunc func(ctx context.Context, workerID string) (*fleet.ClaimResponse, error)
+	recordResultFunc   func(ctx context.Context, result *fleet.TaskResult) error
+	releaseClaimFunc   func(ctx context.Context, taskID string) error
+	clearClaimFunc     func(ctx context.Context, workerID string) error
+}
+
+func (m *mockFleetDoneStore) GetWorker(ctx context.Context, workerID string) (*fleet.Worker, error) {
+	if m.getWorkerFunc != nil {
+		return m.getWorkerFunc(ctx, workerID)
+	}
+	return nil, errors.New("getWorkerFunc not implemented")
+}
+
+func (m *mockFleetDoneStore) GetWorkerClaim(ctx context.Context, workerID string) (*fleet.ClaimResponse, error) {
+	if m.getWorkerClaimFunc != nil {
+		return m.getWorkerClaimFunc(ctx, workerID)
+	}
+	return nil, errors.New("getWorkerClaimFunc not implemented")
+}
+
+func (m *mockFleetDoneStore) RecordTaskResult(ctx context.Context, result *fleet.TaskResult) error {
+	if m.recordResultFunc != nil {
+		return m.recordResultFunc(ctx, result)
+	}
+	return errors.New("recordResultFunc not implemented")
+}
+
+func (m *mockFleetDoneStore) ReleaseClaim(ctx context.Context, taskID string) error {
+	if m.releaseClaimFunc != nil {
+		return m.releaseClaimFunc(ctx, taskID)
+	}
+	return errors.New("releaseClaimFunc not implemented")
+}
+
+func (m *mockFleetDoneStore) ClearWorkerClaim(ctx context.Context, workerID string) error {
+	if m.clearClaimFunc != nil {
+		return m.clearClaimFunc(ctx, workerID)
+	}
+	return errors.New("clearClaimFunc not implemented")
+}
+
+func TestFleetDone_StoreNil_Returns503(t *testing.T) {
+	handler := handleFleetDoneWithStore(nil)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "task_id")
+}
+
+func TestFleetDone_MissingWorkerID_Returns400(t *testing.T) {
+	store := &mockFleetDoneStore{}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers//done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// Do NOT set path value for "id" to simulate missing worker ID
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "task_id")
+}
+
+func TestFleetDone_InvalidJSON_Returns400(t *testing.T) {
+	store := &mockFleetDoneStore{}
+	handler := handleFleetDoneWithStore(store)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader([]byte("{invalid json")))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "task_id")
+}
+
+func TestFleetDone_BodyTooLarge_Returns413(t *testing.T) {
+	store := &mockFleetDoneStore{}
+	handler := handleFleetDoneWithStore(store)
+
+	// Create a body larger than 1MB (maxRequestBody)
+	largeBody := make([]byte, 1<<20+100)
+	copy(largeBody, []byte(`{"success":true,"`))
+	for i := 17; i < len(largeBody)-2; i++ {
+		largeBody[i] = 'x'
+	}
+	copy(largeBody[len(largeBody)-2:], []byte(`"}`))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(largeBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "task_id")
+}
+
+func TestFleetDone_WorkerNotFound(t *testing.T) {
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return nil, nil // worker not found
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/unknown-worker/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "unknown-worker")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "task_id")
+}
+
+func TestFleetDone_GetWorkerError_Returns500(t *testing.T) {
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return nil, errors.New("redis connection refused")
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "task_id")
+}
+
+func TestFleetDone_GetWorkerClaimError_Returns500(t *testing.T) {
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return &fleet.Worker{WorkerID: workerID, RegisteredAt: time.Now().Unix()}, nil
+		},
+		getWorkerClaimFunc: func(ctx context.Context, workerID string) (*fleet.ClaimResponse, error) {
+			return nil, errors.New("redis timeout")
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "task_id")
+}
+
+func TestFleetDone_NoClaim_IdempotentSuccess(t *testing.T) {
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return &fleet.Worker{WorkerID: workerID, RegisteredAt: time.Now().Unix()}, nil
+		},
+		getWorkerClaimFunc: func(ctx context.Context, workerID string) (*fleet.ClaimResponse, error) {
+			return nil, nil // no active claim
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccess(t, result)
+
+	// Verify worker_id is returned
+	workerID, ok := result["worker_id"].(string)
+	if !ok || workerID != "worker-1" {
+		t.Errorf("worker_id = %v, want %q", result["worker_id"], "worker-1")
+	}
+
+	// Verify task_id is absent (no claim was active)
+	if _, ok := result["task_id"]; ok {
+		t.Error("task_id should be absent when no claim was active")
+	}
+}
+
+func TestFleetDone_RecordTaskResultError_Returns500(t *testing.T) {
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return &fleet.Worker{WorkerID: workerID, RegisteredAt: time.Now().Unix()}, nil
+		},
+		getWorkerClaimFunc: func(ctx context.Context, workerID string) (*fleet.ClaimResponse, error) {
+			return &fleet.ClaimResponse{TaskID: "task-42", Success: true}, nil
+		},
+		recordResultFunc: func(ctx context.Context, result *fleet.TaskResult) error {
+			return errors.New("write failed")
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true, CommitSHA: "abc123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "task_id")
+}
+
+func TestFleetDone_ReleaseClaimError_Returns500(t *testing.T) {
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return &fleet.Worker{WorkerID: workerID, RegisteredAt: time.Now().Unix()}, nil
+		},
+		getWorkerClaimFunc: func(ctx context.Context, workerID string) (*fleet.ClaimResponse, error) {
+			return &fleet.ClaimResponse{TaskID: "task-42", Success: true}, nil
+		},
+		recordResultFunc: func(ctx context.Context, result *fleet.TaskResult) error {
+			return nil
+		},
+		releaseClaimFunc: func(ctx context.Context, taskID string) error {
+			return errors.New("redis connection lost")
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true, CommitSHA: "abc123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "task_id")
+}
+
+func TestFleetDone_SuccessfulCompletion(t *testing.T) {
+	var capturedResult *fleet.TaskResult
+	var capturedReleaseTaskID string
+	var capturedClearWorkerID string
+
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return &fleet.Worker{WorkerID: workerID, RegisteredAt: time.Now().Unix()}, nil
+		},
+		getWorkerClaimFunc: func(ctx context.Context, workerID string) (*fleet.ClaimResponse, error) {
+			return &fleet.ClaimResponse{TaskID: "task-42", Success: true}, nil
+		},
+		recordResultFunc: func(ctx context.Context, result *fleet.TaskResult) error {
+			capturedResult = result
+			return nil
+		},
+		releaseClaimFunc: func(ctx context.Context, taskID string) error {
+			capturedReleaseTaskID = taskID
+			return nil
+		},
+		clearClaimFunc: func(ctx context.Context, workerID string) error {
+			capturedClearWorkerID = workerID
+			return nil
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true, CommitSHA: "abc123def"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccessWithData(t, result, "task_id")
+
+	// Verify response fields
+	taskID, ok := result["task_id"].(string)
+	if !ok || taskID != "task-42" {
+		t.Errorf("task_id = %v, want %q", result["task_id"], "task-42")
+	}
+	workerID, ok := result["worker_id"].(string)
+	if !ok || workerID != "worker-1" {
+		t.Errorf("worker_id = %v, want %q", result["worker_id"], "worker-1")
+	}
+
+	// Verify RecordTaskResult was called with correct data
+	if capturedResult == nil {
+		t.Fatal("RecordTaskResult was not called")
+	}
+	if capturedResult.WorkerID != "worker-1" {
+		t.Errorf("result.WorkerID = %q, want %q", capturedResult.WorkerID, "worker-1")
+	}
+	if capturedResult.TaskID != "task-42" {
+		t.Errorf("result.TaskID = %q, want %q", capturedResult.TaskID, "task-42")
+	}
+	if !capturedResult.Success {
+		t.Error("result.Success = false, want true")
+	}
+	if capturedResult.CommitSHA != "abc123def" {
+		t.Errorf("result.CommitSHA = %q, want %q", capturedResult.CommitSHA, "abc123def")
+	}
+	if capturedResult.CompletedAt.IsZero() {
+		t.Error("result.CompletedAt should be non-zero")
+	}
+
+	// Verify ReleaseClaim was called with correct taskID
+	if capturedReleaseTaskID != "task-42" {
+		t.Errorf("ReleaseClaim taskID = %q, want %q", capturedReleaseTaskID, "task-42")
+	}
+
+	// Verify ClearWorkerClaim was called with correct workerID
+	if capturedClearWorkerID != "worker-1" {
+		t.Errorf("ClearWorkerClaim workerID = %q, want %q", capturedClearWorkerID, "worker-1")
+	}
+}
+
+func TestFleetDone_FailedTask_WithError(t *testing.T) {
+	var capturedResult *fleet.TaskResult
+
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return &fleet.Worker{WorkerID: workerID, RegisteredAt: time.Now().Unix()}, nil
+		},
+		getWorkerClaimFunc: func(ctx context.Context, workerID string) (*fleet.ClaimResponse, error) {
+			return &fleet.ClaimResponse{TaskID: "task-99", Success: true}, nil
+		},
+		recordResultFunc: func(ctx context.Context, result *fleet.TaskResult) error {
+			capturedResult = result
+			return nil
+		},
+		releaseClaimFunc: func(ctx context.Context, taskID string) error {
+			return nil
+		},
+		clearClaimFunc: func(ctx context.Context, workerID string) error {
+			return nil
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: false, Error: "build failed: exit code 1"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-2/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-2")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccessWithData(t, result, "task_id")
+
+	// Verify response fields
+	taskID, ok := result["task_id"].(string)
+	if !ok || taskID != "task-99" {
+		t.Errorf("task_id = %v, want %q", result["task_id"], "task-99")
+	}
+	workerID, ok := result["worker_id"].(string)
+	if !ok || workerID != "worker-2" {
+		t.Errorf("worker_id = %v, want %q", result["worker_id"], "worker-2")
+	}
+
+	// Verify RecordTaskResult captured failure details
+	if capturedResult == nil {
+		t.Fatal("RecordTaskResult was not called")
+	}
+	if capturedResult.Success {
+		t.Error("result.Success = true, want false")
+	}
+	if capturedResult.Error != "build failed: exit code 1" {
+		t.Errorf("result.Error = %q, want %q", capturedResult.Error, "build failed: exit code 1")
+	}
+	if capturedResult.CommitSHA != "" {
+		t.Errorf("result.CommitSHA = %q, want empty string", capturedResult.CommitSHA)
+	}
+}
+
+func TestFleetDone_ClearWorkerClaimFailure_BestEffort(t *testing.T) {
+	// ClearWorkerClaim failure should not affect the overall success of the operation.
+	clearClaimCalled := false
+
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return &fleet.Worker{WorkerID: workerID, RegisteredAt: time.Now().Unix()}, nil
+		},
+		getWorkerClaimFunc: func(ctx context.Context, workerID string) (*fleet.ClaimResponse, error) {
+			return &fleet.ClaimResponse{TaskID: "task-77", Success: true}, nil
+		},
+		recordResultFunc: func(ctx context.Context, result *fleet.TaskResult) error {
+			return nil
+		},
+		releaseClaimFunc: func(ctx context.Context, taskID string) error {
+			return nil
+		},
+		clearClaimFunc: func(ctx context.Context, workerID string) error {
+			clearClaimCalled = true
+			return errors.New("cache eviction failed")
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true, CommitSHA: "def456"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Should still return 200 OK even though ClearWorkerClaim failed
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccessWithData(t, result, "task_id")
+
+	if !clearClaimCalled {
+		t.Error("ClearWorkerClaim was not called")
+	}
+
+	// Verify the response still has correct data
+	taskID, ok := result["task_id"].(string)
+	if !ok || taskID != "task-77" {
+		t.Errorf("task_id = %v, want %q", result["task_id"], "task-77")
+	}
+	workerID, ok := result["worker_id"].(string)
+	if !ok || workerID != "worker-1" {
+		t.Errorf("worker_id = %v, want %q", result["worker_id"], "worker-1")
+	}
+}
