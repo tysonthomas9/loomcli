@@ -178,6 +178,11 @@ func runConfigAddRepo(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	if err := ValidateRemoteName(configAddRepoRemote); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
 	ws.Repos = append(ws.Repos, RepoConfig{
 		Name:          repoName,
 		Path:          configAddRepoPath,

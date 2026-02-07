@@ -30,6 +30,26 @@ type RepoConfig struct {
 	Remote        string `yaml:"remote,omitempty" json:"remote,omitempty"`        // Git remote name (defaults to "origin")
 }
 
+// ValidateRemoteName checks if a remote name is safe for use in git commands.
+// Empty is allowed (resolveRemote defaults it to "origin").
+func ValidateRemoteName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if len(name) > 255 {
+		return fmt.Errorf("remote name too long (max 255 characters)")
+	}
+	if name[0] == '-' {
+		return fmt.Errorf("remote name %q must not start with '-'", name)
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+			return fmt.Errorf("remote name %q contains invalid character %q; use only alphanumeric, hyphens, underscores, and dots", name, string(c))
+		}
+	}
+	return nil
+}
+
 // GetConfigDir returns the loom config directory path.
 // Respects LOOM_CONFIG_DIR env var, otherwise defaults to ~/.loom.
 func GetConfigDir() string {
@@ -64,6 +84,13 @@ func LoadConfig() (*LoomConfig, error) {
 	var cfg LoomConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)
+	}
+	for wsName, ws := range cfg.Workspaces {
+		for i, repo := range ws.Repos {
+			if err := ValidateRemoteName(repo.Remote); err != nil {
+				return nil, fmt.Errorf("invalid config %s: workspace %q repo %d (%q): %w", path, wsName, i, repo.Name, err)
+			}
+		}
 	}
 	return &cfg, nil
 }

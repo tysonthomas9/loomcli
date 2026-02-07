@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -168,6 +169,61 @@ func TestIsWorkspaceMode(t *testing.T) {
 	}
 	if IsWorkspaceMode() {
 		t.Error("IsWorkspaceMode() = true, want false (empty config)")
+	}
+}
+
+func TestValidateRemoteName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "empty", input: "", wantErr: false},
+		{name: "origin", input: "origin", wantErr: false},
+		{name: "upstream", input: "upstream", wantErr: false},
+		{name: "dot", input: "my.remote", wantErr: false},
+		{name: "underscore", input: "my_remote", wantErr: false},
+		{name: "hyphen", input: "my-remote", wantErr: false},
+		{name: "starts with dash", input: "-evil", wantErr: true},
+		{name: "flag injection", input: "--receive-pack=/evil", wantErr: true},
+		{name: "space", input: "my remote", wantErr: true},
+		{name: "slash", input: "my/remote", wantErr: true},
+		{name: "colon", input: "host:path", wantErr: true},
+		{name: "at sign", input: "user@host", wantErr: true},
+		{name: "too long", input: strings.Repeat("a", 256), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRemoteName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateRemoteName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_InvalidRemote(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	yamlData := `workspaces:
+  myproject:
+    path: /tmp/myproject
+    repos:
+      - name: backend
+        path: /tmp/myproject/backend
+        remote: "--receive-pack=/evil"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig()
+	if err == nil {
+		t.Fatalf("LoadConfig() error = nil, want error for invalid remote; cfg = %+v", cfg)
+	}
+	if cfg != nil {
+		t.Errorf("LoadConfig() cfg = %+v, want nil on error", cfg)
 	}
 }
 

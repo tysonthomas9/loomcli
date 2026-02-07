@@ -526,3 +526,40 @@ func TestConfigRemoveRepoNotFound(t *testing.T) {
 	}
 	// runConfigRemoveRepo would print "Repo not found" and exit
 }
+
+func TestConfigAddRepoInvalidRemote(t *testing.T) {
+	// Since runConfigAddRepo calls os.Exit on validation failure, test the
+	// validation logic directly rather than calling the command.
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "ws",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path:  "/tmp/ws",
+				Repos: []RepoConfig{},
+			},
+		},
+	}
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	// Simulate what runConfigAddRepo would do: load config, check workspace exists
+	loaded, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if _, ok := loaded.Workspaces["ws"]; !ok {
+		t.Fatal("workspace 'ws' not found")
+	}
+
+	// Set the flag value that runConfigAddRepo reads
+	configAddRepoRemote = "--evil"
+
+	// Validate the remote name — this is the check runConfigAddRepo performs
+	if err := ValidateRemoteName(configAddRepoRemote); err == nil {
+		t.Error("ValidateRemoteName(\"--evil\") = nil, want error")
+	}
+}
