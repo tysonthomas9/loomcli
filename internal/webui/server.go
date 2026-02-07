@@ -285,11 +285,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	defer shutdownCancel()
 
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", actualPort),
-		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 0, // Disabled: HTTP/2 streams (SSE, WebSocket) are long-lived; h2c handles flow control
-		IdleTimeout:  60 * time.Second,
+		Addr:              fmt.Sprintf(":%d", actualPort),
+		Handler:           handler,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      0, // Disabled: HTTP/2 streams (SSE, WebSocket) are long-lived; h2c handles flow control
+		IdleTimeout:       60 * time.Second,
 		BaseContext: func(_ net.Listener) context.Context {
 			return shutdownCtx
 		},

@@ -246,10 +246,11 @@ func runServe(cmd *cobra.Command, args []string) {
 	handler := corsMiddleware(serveCorsOrigin, mux)
 
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", servePort),
-		Handler:      handler,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Addr:              fmt.Sprintf(":%d", servePort),
+		Handler:           handler,
+		ReadTimeout:       10 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      10 * time.Second,
 	}
 
 	// Start API server
