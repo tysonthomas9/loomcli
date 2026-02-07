@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,9 +28,10 @@ func TestGetSignalFilePath(t *testing.T) {
 		t.Errorf("Signal file not in temp dir: got %s, expected prefix %s", path1, tempDir)
 	}
 
-	// Test that the path includes loom-signals directory
-	if !filepath.HasPrefix(path1, filepath.Join(tempDir, "loom-signals")) {
-		t.Errorf("Signal file not in loom-signals subdir: %s", path1)
+	// Test that the path includes loom-signals-{uid} directory
+	expectedDir := filepath.Join(tempDir, fmt.Sprintf("loom-signals-%d", os.Getuid()))
+	if !filepath.HasPrefix(path1, expectedDir) {
+		t.Errorf("Signal file not in loom-signals-{uid} subdir: got %s, expected prefix %s", path1, expectedDir)
 	}
 }
 
@@ -72,10 +74,10 @@ func TestSignalFileCreationAndDetection(t *testing.T) {
 
 	// Create the signal directory and file (simulating loom complete)
 	signalDir := filepath.Dir(signalFile)
-	if err := os.MkdirAll(signalDir, 0755); err != nil {
+	if err := os.MkdirAll(signalDir, 0700); err != nil {
 		t.Fatalf("Failed to create signal dir: %v", err)
 	}
-	if err := os.WriteFile(signalFile, []byte(worktreePath), 0644); err != nil {
+	if err := os.WriteFile(signalFile, []byte(worktreePath), 0600); err != nil {
 		t.Fatalf("Failed to write signal file: %v", err)
 	}
 
@@ -112,8 +114,8 @@ func TestSignalFileIsolation(t *testing.T) {
 
 	// Create signal for worktree1
 	signalDir := filepath.Dir(signal1)
-	os.MkdirAll(signalDir, 0755)
-	os.WriteFile(signal1, []byte(worktree1), 0644)
+	os.MkdirAll(signalDir, 0700)
+	os.WriteFile(signal1, []byte(worktree1), 0600)
 
 	// Verify worktree2's signal doesn't exist
 	if _, err := os.Stat(signal2); err == nil {
@@ -165,10 +167,10 @@ func TestGetSignalFilePath_UsesWorkspaceHash(t *testing.T) {
 }
 
 func TestGetSignalFilePath_MatchesExpectedFormat(t *testing.T) {
-	// Verify the full path structure: <tmpdir>/loom-signals/<hash>
+	// Verify the full path structure: <tmpdir>/loom-signals-{uid}/<hash>
 	worktreePath := "/some/worktree"
 	signalPath := GetSignalFilePath(worktreePath)
-	expectedDir := filepath.Join(os.TempDir(), "loom-signals")
+	expectedDir := filepath.Join(os.TempDir(), fmt.Sprintf("loom-signals-%d", os.Getuid()))
 	expectedPath := filepath.Join(expectedDir, workspaceHash(worktreePath))
 
 	if signalPath != expectedPath {

@@ -58,7 +58,7 @@ func runComplete(cmd *cobra.Command, args []string) {
 	signalFile := GetSignalFilePath(worktreePath)
 	signalDir := filepath.Dir(signalFile)
 
-	if err := os.MkdirAll(signalDir, 0755); err != nil {
+	if err := ensureSignalDir(signalDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating signal directory: %v\n", err)
 		os.Exit(1)
 	}
@@ -76,7 +76,7 @@ func runComplete(cmd *cobra.Command, args []string) {
 // The signal file is stored in a temporary directory to avoid being deleted
 // by git clean operations.
 func GetSignalFilePath(worktreePath string) string {
-	signalDir := filepath.Join(os.TempDir(), "loom-signals")
+	signalDir := filepath.Join(os.TempDir(), fmt.Sprintf("loom-signals-%d", os.Getuid()))
 	return filepath.Join(signalDir, workspaceHash(worktreePath))
 }
 

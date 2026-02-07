@@ -775,6 +775,11 @@ func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shut
 		case <-getTickChan():
 			// HIGHEST PRIORITY: Check for explicit completion signal
 			if _, err := os.Stat(signalFile); err == nil {
+				// Validate signal directory ownership before trusting the signal
+				if valErr := validateSignalDir(filepath.Dir(signalFile)); valErr != nil {
+					fmt.Fprintf(os.Stderr, "[auto] Warning: signal directory validation failed: %v\n", valErr)
+					continue // Don't remove — directory is untrusted
+				}
 				fmt.Println("[auto] Task completion signal received, waiting for output to settle...")
 				os.Remove(signalFile) // Claim the signal
 
