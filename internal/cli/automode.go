@@ -515,7 +515,7 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	}
 	logDir := filepath.Join(homeDir, ".loom", "logs")
 	agentLogDir := filepath.Join(logDir, "agents")
-	if err := os.MkdirAll(agentLogDir, 0755); err != nil {
+	if err := os.MkdirAll(agentLogDir, 0700); err != nil {
 		fmt.Printf("[auto] Warning: could not create log directory: %v\n", err)
 	}
 	logFile := filepath.Join(agentLogDir, fmt.Sprintf("%s.log", opts.AgentName))
@@ -690,7 +690,7 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	// logFile is ~/.loom/logs/agents/{agentName}.log, so logDir is two levels up
 	logDir := filepath.Dir(filepath.Dir(logFile))
 	lockPath := filepath.Join(ResolveLockDir(opts.WorktreePath), LockFileName)
-	routerCmd := fmt.Sprintf("loom-router --agent %s --base-dir %s --lock-path %s",
+	routerCmd := fmt.Sprintf("loom-router --agent %s --base-dir %s --lock-path %s --max-log-size 50",
 		shellQuote(opts.AgentName),
 		shellQuote(logDir),
 		shellQuote(lockPath))

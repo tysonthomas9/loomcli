@@ -265,6 +265,20 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		defer fleetStore.Close()
 	}
 
+	// Initialize fleet timeout enforcer
+	var timeoutEnforcer *fleet.TimeoutEnforcer
+	if fleetStore != nil {
+		timeoutEnforcer = fleet.NewTimeoutEnforcer(fleetStore, fleet.DefaultTimeoutConfig(), nil)
+		timeoutEnforcer.Start()
+		log.Printf("Fleet timeout enforcer started (30min task timeout)")
+	}
+
+	// Initialize fleet claim metrics
+	var claimMetrics *fleet.ClaimMetrics
+	if fleetStore != nil {
+		claimMetrics = fleet.NewClaimMetrics()
+	}
+
 	// Build fleet registration config (API key + rate limiter)
 	var fleetRegCfg *FleetRegisterConfig
 	if config.FleetAPIKey != "" && fleetStore != nil {
@@ -311,7 +325,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.
@@ -378,6 +392,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	log.Println("Server stopped")
 
 	// Stop components in reverse-initialization order now that no handlers are running.
+
+	// Stop fleet timeout enforcer
+	if timeoutEnforcer != nil {
+		timeoutEnforcer.Stop()
+		log.Printf("Fleet timeout enforcer stopped")
+	}
 
 	// Stop rate limiter cleanup goroutine
 	rl.Stop()

@@ -443,7 +443,7 @@ func TestLinesParameterParsing(t *testing.T) {
 	// Create a temp log file for testing
 	tmpDir := t.TempDir()
 	logDir := filepath.Join(tmpDir, "logs", "agents")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
 		t.Fatalf("failed to create log dir: %v", err)
 	}
 

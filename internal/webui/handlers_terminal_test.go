@@ -455,6 +455,13 @@ func TestValidTerminalSessionRegex(t *testing.T) {
 	}
 }
 
+// TestWSReadLimitConstant verifies the WebSocket read limit constant.
+func TestWSReadLimitConstant(t *testing.T) {
+	if wsReadLimit != 32768 {
+		t.Errorf("wsReadLimit = %d, want %d", wsReadLimit, 32768)
+	}
+}
+
 // TestTerminalReadBufSize tests the buffer size constant.
 func TestTerminalReadBufSize(t *testing.T) {
 	// Buffer should be reasonable size (4KB)

@@ -391,3 +391,152 @@ func TestIsProcessRunning(t *testing.T) {
 		}
 	})
 }
+
+func TestTryLockExclusive_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, "test.lock")
+
+	f, err := os.Create(lockPath)
+	if err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+	defer f.Close()
+
+	if err := TryLockExclusive(f); err != nil {
+		t.Fatalf("TryLockExclusive should succeed on a new file, got: %v", err)
+	}
+
+	// Clean up: release the lock
+	if err := FlockUnlock(f); err != nil {
+		t.Fatalf("FlockUnlock failed: %v", err)
+	}
+}
+
+func TestTryLockExclusive_AlreadyLocked(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, "test.lock")
+
+	if err := os.WriteFile(lockPath, []byte("lock"), 0644); err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+
+	// Open the first file descriptor and acquire the exclusive lock.
+	f1, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to open first fd: %v", err)
+	}
+	defer f1.Close()
+
+	if err := TryLockExclusive(f1); err != nil {
+		t.Fatalf("TryLockExclusive on first fd should succeed, got: %v", err)
+	}
+	defer FlockUnlock(f1)
+
+	// Open a second file descriptor and attempt to lock the same file.
+	f2, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to open second fd: %v", err)
+	}
+	defer f2.Close()
+
+	err = TryLockExclusive(f2)
+	if err == nil {
+		t.Fatal("TryLockExclusive on second fd should fail when lock is already held")
+	}
+	if err != ErrLocked {
+		t.Fatalf("expected ErrLocked, got: %v", err)
+	}
+}
+
+func TestTryLockExclusive_ReleasedAfterClose(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, "test.lock")
+
+	if err := os.WriteFile(lockPath, []byte("lock"), 0644); err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+
+	// Acquire lock on a file descriptor, then close it to release the lock.
+	func() {
+		f, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open lock file: %v", err)
+		}
+
+		if err := TryLockExclusive(f); err != nil {
+			f.Close()
+			t.Fatalf("TryLockExclusive should succeed, got: %v", err)
+		}
+
+		// Closing the file descriptor should release the flock.
+		f.Close()
+	}()
+
+	// Open a new file descriptor and verify the lock can be re-acquired.
+	f2, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to reopen lock file: %v", err)
+	}
+	defer f2.Close()
+
+	if err := TryLockExclusive(f2); err != nil {
+		t.Fatalf("TryLockExclusive should succeed after previous fd was closed, got: %v", err)
+	}
+
+	if err := FlockUnlock(f2); err != nil {
+		t.Fatalf("FlockUnlock failed: %v", err)
+	}
+}
+
+func TestErrLocked_IsExported(t *testing.T) {
+	t.Run("ErrLocked is not nil", func(t *testing.T) {
+		if ErrLocked == nil {
+			t.Fatal("ErrLocked should not be nil")
+		}
+	})
+
+	t.Run("ErrLocked matches errDaemonLocked", func(t *testing.T) {
+		// ErrLocked is set to errDaemonLocked; verify they are the same value.
+		if ErrLocked != errDaemonLocked {
+			t.Fatalf("ErrLocked (%v) should be identical to errDaemonLocked (%v)", ErrLocked, errDaemonLocked)
+		}
+	})
+
+	t.Run("ErrLocked has expected message", func(t *testing.T) {
+		expected := "daemon lock already held by another process"
+		if ErrLocked.Error() != expected {
+			t.Fatalf("ErrLocked.Error() = %q, want %q", ErrLocked.Error(), expected)
+		}
+	})
+
+	t.Run("TryLockExclusive returns ErrLocked on contention", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		lockPath := filepath.Join(tmpDir, "test.lock")
+
+		if err := os.WriteFile(lockPath, []byte("lock"), 0644); err != nil {
+			t.Fatalf("failed to create lock file: %v", err)
+		}
+
+		f1, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open first fd: %v", err)
+		}
+		defer f1.Close()
+
+		if err := TryLockExclusive(f1); err != nil {
+			t.Fatalf("first TryLockExclusive should succeed: %v", err)
+		}
+		defer FlockUnlock(f1)
+
+		f2, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open second fd: %v", err)
+		}
+		defer f2.Close()
+
+		lockErr := TryLockExclusive(f2)
+		if lockErr != ErrLocked {
+			t.Fatalf("expected TryLockExclusive to return ErrLocked, got: %v", lockErr)
+		}
+	})
+}

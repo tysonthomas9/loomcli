@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 // DaemonAgentStatus represents the status of a single supervised agent
@@ -117,30 +118,57 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
 	logDir := resolveDaemonPath(projectDir, config.Daemon.LogDir)
 	stateFilePath := filepath.Join(filepath.Dir(pidFilePath), "daemon-agents.json")
+	lockFilePath := filepath.Join(filepath.Dir(pidFilePath), "daemon.lock")
 
-	// 4. Check if daemon is already running
-	if existingPID, running := isLoomDaemonRunning(pidFilePath); running {
-		fmt.Fprintf(os.Stderr, "Error: daemon already running (PID %d)\n", existingPID)
-		os.Exit(1)
-	}
-
-	// 5. Dry-run mode: print config and exit
+	// 4. Dry-run mode: print config and exit (before acquiring lock)
 	if daemonDryRun {
 		printDryRunInfo(config, pidFilePath, logDir, stateFilePath)
 		return
 	}
 
-	// 6. Create directories
+	// 5. Create directories (needed for lock file and PID file)
 	if err := os.MkdirAll(filepath.Dir(pidFilePath), 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating PID directory: %v\n", err)
 		os.Exit(1)
 	}
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0700); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating log directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 7. Write PID file
+	// 6. Acquire exclusive lock to prevent concurrent daemon startup
+	lockFile, err := os.OpenFile(lockFilePath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: opening lock file: %v\n", err)
+		os.Exit(1)
+	}
+	if err := lockfile.TryLockExclusive(lockFile); err != nil {
+		lockFile.Close()
+		if err == lockfile.ErrLocked {
+			fmt.Fprintf(os.Stderr, "Error: daemon already running (lock held on %s)\n", lockFilePath)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Error: acquiring daemon lock: %v\n", err)
+		os.Exit(1)
+	}
+	// Lock is released when the file descriptor is closed (including on process crash)
+	defer lockFile.Close()
+	defer os.Remove(lockFilePath)
+
+	// Write daemon info into the lock file
+	lockInfo, _ := json.Marshal(lockfile.LockInfo{
+		PID:       os.Getpid(),
+		StartedAt: time.Now(),
+	})
+	_, _ = lockFile.Seek(0, 0)
+	_ = lockFile.Truncate(0)
+	_, _ = lockFile.Write(lockInfo)
+
+	// 7. Clean up any stale PID file from a previous daemon (we hold the lock,
+	// so no other daemon is running — any existing PID file is stale)
+	os.Remove(pidFilePath)
+
+	// 8. Write PID file
 	if err := writePIDFile(pidFilePath, os.Getpid()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: writing PID file: %v\n", err)
 		os.Exit(1)
@@ -148,17 +176,17 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	defer os.Remove(pidFilePath)
 	defer os.Remove(stateFilePath)
 
-	// 8. Setup signal handler
+	// 9. Setup signal handler
 	shutdown := SetupSignalHandler()
 
-	// 9. Create and start daemon (from daemon.go)
+	// 10. Create and start daemon (from daemon.go)
 	daemon, err := NewDaemon(config, projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 10. Print startup banner
+	// 11. Print startup banner
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 	fmt.Println("Loom Agent Supervisor")
 	fmt.Printf("PID: %d\n", os.Getpid())
@@ -176,11 +204,13 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
 
-	// 11. Start daemon
+	// 12. Start daemon
 	if err := daemon.Start(); err != nil {
 		// Clean up files before exiting (os.Exit doesn't run defers)
 		os.Remove(pidFilePath)
 		os.Remove(stateFilePath)
+		lockFile.Close()
+		os.Remove(lockFilePath)
 		fmt.Fprintf(os.Stderr, "Error: starting daemon: %v\n", err)
 		os.Exit(1)
 	}
@@ -203,7 +233,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		}
 	}()
 
-	// 12. Wait for shutdown signal
+	// 13. Wait for shutdown signal
 	<-shutdown
 	fmt.Println("\nShutting down...")
 	daemon.Stop()

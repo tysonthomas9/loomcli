@@ -12,6 +12,9 @@ import (
 
 var errDaemonLocked = errors.New("daemon lock already held by another process")
 
+// ErrLocked is returned by TryLockExclusive when the lock is already held.
+var ErrLocked = errDaemonLocked
+
 // flockExclusive acquires an exclusive non-blocking lock on the file using LockFileEx
 func flockExclusive(f *os.File) error {
 	// LOCKFILE_EXCLUSIVE_LOCK (2) | LOCKFILE_FAIL_IMMEDIATELY (1) = 3
@@ -35,6 +38,12 @@ func flockExclusive(f *os.File) error {
 	}
 
 	return err
+}
+
+// TryLockExclusive attempts to acquire an exclusive non-blocking lock on the file.
+// Returns ErrLocked if the lock is already held by another process.
+func TryLockExclusive(f *os.File) error {
+	return flockExclusive(f)
 }
 
 // FlockExclusiveBlocking acquires an exclusive blocking lock on the file.

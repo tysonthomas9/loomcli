@@ -3,6 +3,8 @@
 package rpc
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,6 +199,147 @@ func TestCleanupSocketDir(t *testing.T) {
 			t.Error(".beads directory should not be removed")
 		}
 	})
+}
+
+func TestShortSocketDir_HashLength(t *testing.T) {
+	t.Parallel()
+
+	// Verify the hash portion is 16 hex chars (8 bytes)
+	result := shortSocketDir("/some/canonical/path")
+
+	// Result should be /tmp/beads-{16 hex chars}/bd.sock
+	dir := filepath.Dir(result)
+	prefix := "/tmp/beads-"
+	if !strings.HasPrefix(dir, prefix) {
+		t.Fatalf("shortSocketDir() dir = %q, want prefix %q", dir, prefix)
+	}
+
+	hashPart := strings.TrimPrefix(dir, prefix)
+	if len(hashPart) != 16 {
+		t.Errorf("hash portion length = %d, want 16 (got %q)", len(hashPart), hashPart)
+	}
+
+	// Verify it's valid hex
+	if _, err := hex.DecodeString(hashPart); err != nil {
+		t.Errorf("hash portion %q is not valid hex: %v", hashPart, err)
+	}
+
+	// Verify it matches the first 8 bytes of SHA256
+	hash := sha256.Sum256([]byte("/some/canonical/path"))
+	expected := hex.EncodeToString(hash[:8])
+	if hashPart != expected {
+		t.Errorf("hash = %q, want %q", hashPart, expected)
+	}
+}
+
+func TestEnsureSocketDir_CreatesWithCorrectPermissions(t *testing.T) {
+	// Create a new /tmp/beads-* directory and verify it has mode 0700
+	dirName := "beads-test-perms-" + t.Name()
+	socketPath := filepath.Join("/tmp", dirName, "bd.sock")
+	t.Cleanup(func() { os.RemoveAll(filepath.Dir(socketPath)) })
+
+	result, err := EnsureSocketDir(socketPath)
+	if err != nil {
+		t.Fatalf("EnsureSocketDir() error: %v", err)
+	}
+	if result != socketPath {
+		t.Errorf("EnsureSocketDir() = %q, want %q", result, socketPath)
+	}
+
+	fi, err := os.Stat(filepath.Dir(socketPath))
+	if err != nil {
+		t.Fatalf("Stat() error: %v", err)
+	}
+	if fi.Mode().Perm() != 0700 {
+		t.Errorf("directory permissions = %o, want 0700", fi.Mode().Perm())
+	}
+}
+
+func TestEnsureSocketDir_RejectsSymlink(t *testing.T) {
+	// Create a symlink at /tmp/beads-* pointing elsewhere — EnsureSocketDir should reject it
+	target := t.TempDir()
+	dirName := "beads-test-symlink-" + t.Name()
+	symlinkPath := filepath.Join("/tmp", dirName)
+	t.Cleanup(func() { os.Remove(symlinkPath) })
+
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		t.Fatalf("Symlink() error: %v", err)
+	}
+
+	socketPath := filepath.Join(symlinkPath, "bd.sock")
+	_, err := EnsureSocketDir(socketPath)
+	if err == nil {
+		t.Fatal("EnsureSocketDir() should reject symlink directory, got nil error")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("error should mention symlink, got: %v", err)
+	}
+}
+
+func TestEnsureSocketDir_AcceptsExistingValidDir(t *testing.T) {
+	// Pre-create a valid directory with correct permissions
+	dirName := "beads-test-valid-" + t.Name()
+	dirPath := filepath.Join("/tmp", dirName)
+	t.Cleanup(func() { os.RemoveAll(dirPath) })
+
+	if err := os.Mkdir(dirPath, 0700); err != nil {
+		t.Fatalf("Mkdir() error: %v", err)
+	}
+
+	socketPath := filepath.Join(dirPath, "bd.sock")
+	result, err := EnsureSocketDir(socketPath)
+	if err != nil {
+		t.Fatalf("EnsureSocketDir() error: %v", err)
+	}
+	if result != socketPath {
+		t.Errorf("EnsureSocketDir() = %q, want %q", result, socketPath)
+	}
+}
+
+func TestEnsureSocketDir_FixesBadPermissions(t *testing.T) {
+	// Create a directory with wrong permissions (owned by current user)
+	dirName := "beads-test-badperms-" + t.Name()
+	dirPath := filepath.Join("/tmp", dirName)
+	t.Cleanup(func() { os.RemoveAll(dirPath) })
+
+	if err := os.Mkdir(dirPath, 0777); err != nil {
+		t.Fatalf("Mkdir() error: %v", err)
+	}
+
+	socketPath := filepath.Join(dirPath, "bd.sock")
+	_, err := EnsureSocketDir(socketPath)
+	if err != nil {
+		t.Fatalf("EnsureSocketDir() error: %v", err)
+	}
+
+	// Permissions should now be tightened to 0700
+	fi, err := os.Stat(dirPath)
+	if err != nil {
+		t.Fatalf("Stat() error: %v", err)
+	}
+	if fi.Mode().Perm() != 0700 {
+		t.Errorf("directory permissions = %o, want 0700 (should have been fixed)", fi.Mode().Perm())
+	}
+}
+
+func TestEnsureSocketDir_RejectsNonDirectory(t *testing.T) {
+	// Create a regular file where the directory should be
+	dirName := "beads-test-file-" + t.Name()
+	filePath := filepath.Join("/tmp", dirName)
+	t.Cleanup(func() { os.Remove(filePath) })
+
+	if err := os.WriteFile(filePath, []byte("not a dir"), 0700); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	socketPath := filepath.Join(filePath, "bd.sock")
+	_, err := EnsureSocketDir(socketPath)
+	if err == nil {
+		t.Fatal("EnsureSocketDir() should reject non-directory path, got nil error")
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("error should mention 'not a directory', got: %v", err)
+	}
 }
 
 func TestNormalizePathForComparison(t *testing.T) {

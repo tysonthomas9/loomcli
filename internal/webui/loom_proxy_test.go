@@ -1,8 +1,12 @@
 package webui
 
 import (
+	"context"
+	"net"
 	"os"
+	"strings"
 	"testing"
+	"time"
 )
 
 // setEnvCleanup sets environment variables and returns a cleanup function.
@@ -294,6 +298,99 @@ func TestNewLoomProxy_HTTPSAllowed(t *testing.T) {
 			}
 			if !tt.wantNil && proxy == nil {
 				t.Errorf("newLoomProxy() = nil, want non-nil for URL %q", tt.url)
+			}
+		})
+	}
+}
+
+func TestIsPrivateIP(t *testing.T) {
+	tests := []struct {
+		name string
+		ip   string
+		want bool
+	}{
+		{"10.0.0.1 private", "10.0.0.1", true},
+		{"10.255.255.255 private", "10.255.255.255", true},
+		{"172.16.0.1 private", "172.16.0.1", true},
+		{"172.31.255.255 private", "172.31.255.255", true},
+		{"172.15.0.1 not private", "172.15.0.1", false},
+		{"172.32.0.1 not private", "172.32.0.1", false},
+		{"192.168.1.1 private", "192.168.1.1", true},
+		{"192.168.0.0 private", "192.168.0.0", true},
+		{"169.254.1.1 link-local", "169.254.1.1", true},
+		{"8.8.8.8 public", "8.8.8.8", false},
+		{"1.1.1.1 public", "1.1.1.1", false},
+		{"127.0.0.1 loopback not private", "127.0.0.1", false},
+		{"::1 loopback not private", "::1", false},
+		{"fc00::1 IPv6 ULA", "fc00::1", true},
+		{"fd12::1 IPv6 ULA", "fd12::1", true},
+		{"fe80::1 IPv6 link-local", "fe80::1", true},
+		{"2001:db8::1 public IPv6", "2001:db8::1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			if ip == nil {
+				t.Fatalf("failed to parse IP %q", tt.ip)
+			}
+			got := isPrivateIP(ip)
+			if got != tt.want {
+				t.Errorf("isPrivateIP(%s) = %v, want %v", tt.ip, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSafeDialContext_AllowPrivate(t *testing.T) {
+	dialFn := safeDialContext(true)
+	if dialFn == nil {
+		t.Fatal("safeDialContext(true) returned nil, want non-nil DialContext function")
+	}
+}
+
+func TestSafeDialContext_BlocksPrivateIPs(t *testing.T) {
+	dialFn := safeDialContext(false)
+	if dialFn == nil {
+		t.Fatal("safeDialContext(false) returned nil, want non-nil DialContext function")
+	}
+
+	tests := []struct {
+		name        string
+		addr        string
+		wantBlocked bool
+	}{
+		{"10.0.0.1 blocked", "10.0.0.1:80", true},
+		{"192.168.1.1 blocked", "192.168.1.1:80", true},
+		{"172.16.0.1 blocked", "172.16.0.1:80", true},
+		{"localhost allowed", "localhost:80", false},
+		{"127.0.0.1 allowed", "127.0.0.1:80", false},
+		{"::1 allowed", net.JoinHostPort("::1", "80"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			_, err := dialFn(ctx, "tcp", tt.addr)
+			if tt.wantBlocked {
+				if err == nil {
+					t.Fatalf("expected error for %s, got nil", tt.addr)
+				}
+				errMsg := strings.ToLower(err.Error())
+				if !strings.Contains(errMsg, "blocked") && !strings.Contains(errMsg, "private") {
+					t.Errorf("expected error containing 'blocked' or 'private' for %s, got: %v", tt.addr, err)
+				}
+			} else {
+				if err == nil {
+					t.Logf("dial to %s succeeded (unexpected in test env, but not a test failure)", tt.addr)
+					return
+				}
+				errMsg := strings.ToLower(err.Error())
+				if strings.Contains(errMsg, "blocked") || strings.Contains(errMsg, "private") {
+					t.Errorf("did not expect 'blocked'/'private' error for %s, got: %v", tt.addr, err)
+				}
 			}
 		})
 	}

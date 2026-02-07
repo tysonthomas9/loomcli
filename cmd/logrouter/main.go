@@ -17,6 +17,7 @@ func main() {
 	agentName := flag.String("agent", "", "Agent name for naming the agent log file (required)")
 	baseDir := flag.String("base-dir", "", "Base directory for log files (default: ~/.loom/logs)")
 	lockPath := flag.String("lock-path", "", "Path to the .agent.lock file to watch for TaskID changes (required)")
+	maxLogSizeMB := flag.Int("max-log-size", 50, "Maximum log file size in MB before rotation (0 to disable)")
 	flag.Parse()
 
 	// Validate required flags
@@ -43,7 +44,7 @@ func main() {
 
 	// Create base directories
 	agentLogDir := filepath.Join(*baseDir, "agents")
-	if err := os.MkdirAll(agentLogDir, 0755); err != nil {
+	if err := os.MkdirAll(agentLogDir, 0700); err != nil {
 		fmt.Fprintf(os.Stderr, "error creating agent log directory: %v\n", err)
 		os.Exit(1)
 	}
@@ -60,8 +61,11 @@ func main() {
 		cancel()
 	}()
 
+	// Convert MB to bytes for the router
+	maxLogSizeBytes := int64(*maxLogSizeMB) * 1024 * 1024
+
 	// Create the router
-	router, err := NewLogRouter(*agentName, *baseDir)
+	router, err := NewLogRouter(*agentName, *baseDir, maxLogSizeBytes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating log router: %v\n", err)
 		os.Exit(1)

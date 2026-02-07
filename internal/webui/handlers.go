@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -275,7 +276,11 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 		}
 
 		// Parse query parameters into ListArgs
-		args := parseListParams(r)
+		args, err := parseListParams(r)
+		if err != nil {
+			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
+			return
+		}
 
 		// Acquire connection with timeout
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -862,7 +867,7 @@ func parseGraphParams(r *http.Request) (status string, includeClosed bool) {
 }
 
 // parseListParams extracts ListArgs from HTTP query parameters.
-func parseListParams(r *http.Request) *rpc.ListArgs {
+func parseListParams(r *http.Request) (*rpc.ListArgs, error) {
 	query := r.URL.Query()
 	args := &rpc.ListArgs{}
 
@@ -913,18 +918,25 @@ func parseListParams(r *http.Request) *rpc.ListArgs {
 		args.NotesContains = v
 	}
 
-	// Date ranges
-	if v := query.Get("created_after"); v != "" {
-		args.CreatedAfter = v
+	// Date ranges (validated as RFC3339 or date-only)
+	dateParams := []struct {
+		param string
+		dest  *string
+	}{
+		{"created_after", &args.CreatedAfter},
+		{"created_before", &args.CreatedBefore},
+		{"updated_after", &args.UpdatedAfter},
+		{"updated_before", &args.UpdatedBefore},
 	}
-	if v := query.Get("created_before"); v != "" {
-		args.CreatedBefore = v
-	}
-	if v := query.Get("updated_after"); v != "" {
-		args.UpdatedAfter = v
-	}
-	if v := query.Get("updated_before"); v != "" {
-		args.UpdatedBefore = v
+	for _, dp := range dateParams {
+		if v := query.Get(dp.param); v != "" {
+			if _, err := time.Parse(time.RFC3339, v); err != nil {
+				if _, err2 := time.Parse("2006-01-02", v); err2 != nil {
+					return nil, fmt.Errorf("invalid %s: expected RFC3339 format (e.g., 2024-01-15T00:00:00Z) or date (2024-01-15)", dp.param)
+				}
+			}
+			*dp.dest = v
+		}
 	}
 
 	// Empty/null checks
@@ -944,7 +956,7 @@ func parseListParams(r *http.Request) *rpc.ListArgs {
 		args.Pinned = &pinned
 	}
 
-	return args
+	return args, nil
 }
 
 // parseReadyParams parses query parameters into rpc.ReadyArgs.
@@ -1890,10 +1902,15 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 
 // SSEMetrics represents the runtime metrics for the SSE hub.
 type SSEMetrics struct {
-	ConnectedClients int     `json:"connected_clients"`
-	DroppedMutations int64   `json:"dropped_mutations"`
-	RetryQueueDepth  int     `json:"retry_queue_depth"`
-	UptimeSeconds    float64 `json:"uptime_seconds"`
+	ConnectedClients   int     `json:"connected_clients"`
+	DroppedMutations   int64   `json:"dropped_mutations"`
+	RetryQueueDepth    int     `json:"retry_queue_depth"`
+	UptimeSeconds      float64 `json:"uptime_seconds"`
+	FleetTimeoutsTotal int64   `json:"loom_fleet_timeouts_total,omitempty"`
+	FleetClaimsSuccess   int64 `json:"loom_fleet_claims_success,omitempty"`
+	FleetClaimsCollision int64 `json:"loom_fleet_claims_collision,omitempty"`
+	FleetClaimsTimeout   int64 `json:"loom_fleet_claims_timeout,omitempty"`
+	FleetClaimsTotal     int64 `json:"loom_fleet_claims_total,omitempty"`
 }
 
 // MetricsResponse wraps the SSE hub metrics for JSON response.
@@ -1904,7 +1921,7 @@ type MetricsResponse struct {
 }
 
 // handleMetrics returns a handler that exposes SSE hub runtime metrics.
-func handleMetrics(hub *SSEHub) http.HandlerFunc {
+func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if hub == nil {
@@ -1922,6 +1939,16 @@ func handleMetrics(hub *SSEHub) http.HandlerFunc {
 			DroppedMutations: hub.GetDroppedCount(),
 			RetryQueueDepth:  hub.GetRetryQueueDepth(),
 			UptimeSeconds:    hub.GetUptime().Seconds(),
+		}
+		if timeoutEnforcer != nil {
+			metrics.FleetTimeoutsTotal = timeoutEnforcer.GetTimeoutCount()
+		}
+		if claimMetrics != nil {
+			snap := claimMetrics.Snapshot()
+			metrics.FleetClaimsSuccess = snap.Success
+			metrics.FleetClaimsCollision = snap.Collision
+			metrics.FleetClaimsTimeout = snap.Timeout
+			metrics.FleetClaimsTotal = snap.Total
 		}
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(MetricsResponse{

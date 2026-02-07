@@ -87,7 +87,7 @@ func TestFleetClaim_SuccessSpecificIssue(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	body, _ := json.Marshal(FleetClaimRequest{IssueID: "test-123"})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewReader(body))
@@ -157,7 +157,7 @@ func TestFleetClaim_SuccessFromReady(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	w := httptest.NewRecorder()
@@ -192,7 +192,7 @@ func TestFleetClaim_NoWork(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	w := httptest.NewRecorder()
@@ -221,7 +221,7 @@ func TestFleetClaim_AlreadyClaimed(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	body, _ := json.Marshal(FleetClaimRequest{IssueID: "test-123"})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewReader(body))
@@ -239,7 +239,7 @@ func TestFleetClaim_AlreadyClaimed(t *testing.T) {
 }
 
 func TestFleetClaim_PoolUnavailable(t *testing.T) {
-	handler := handleFleetClaimWithPool(nil)
+	handler := handleFleetClaimWithPool(nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	w := httptest.NewRecorder()
@@ -262,7 +262,7 @@ func TestFleetClaim_Timeout(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	w := httptest.NewRecorder()
@@ -285,7 +285,7 @@ func TestFleetClaim_InvalidBody(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewReader([]byte("{invalid json")))
 	req.Header.Set("Content-Type", "application/json")
@@ -332,7 +332,7 @@ func TestFleetClaim_AllReadyTasksClaimed(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	w := httptest.NewRecorder()
@@ -390,7 +390,7 @@ func TestFleetClaim_SkipsClaimedGetsSecond(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	w := httptest.NewRecorder()
@@ -429,7 +429,7 @@ func TestFleetClaim_SpecificIssueNotFound(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	body, _ := json.Marshal(FleetClaimRequest{IssueID: "bad-id"})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewReader(body))
@@ -460,7 +460,7 @@ func TestFleetClaim_ReadyRPCError(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	w := httptest.NewRecorder()
@@ -515,7 +515,7 @@ func TestFleetClaim_EmptyBodyClaimsFromReady(t *testing.T) {
 		putFunc: func(c fleetClaimClient) {},
 	}
 
-	handler := handleFleetClaimWithPool(pool)
+	handler := handleFleetClaimWithPool(pool, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	w := httptest.NewRecorder()

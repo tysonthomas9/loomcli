@@ -124,7 +124,7 @@ func TestE2E_TmuxLogFileCreated(t *testing.T) {
 	sessionName := uniqueSessionName(t)
 
 	// Create log directory
-	os.MkdirAll(logDir, 0755)
+	os.MkdirAll(logDir, 0700)
 
 	// Create session that waits before outputting (so pipe-pane can be set up first)
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName,
@@ -189,9 +189,9 @@ func TestE2E_LogFileSkipsOldContent(t *testing.T) {
 	logFile := filepath.Join(logDir, "test-skip-old.log")
 
 	// Create log directory and pre-populate with "old" content
-	os.MkdirAll(logDir, 0755)
+	os.MkdirAll(logDir, 0700)
 	oldContent := "OLD_SESSION_LINE_1\nOLD_SESSION_LINE_2\nOLD_SESSION_LINE_3\n"
-	if err := os.WriteFile(logFile, []byte(oldContent), 0644); err != nil {
+	if err := os.WriteFile(logFile, []byte(oldContent), 0600); err != nil {
 		t.Fatalf("Failed to write old content: %v", err)
 	}
 
@@ -254,7 +254,7 @@ func TestE2E_SilenceDetectionAfterSignal(t *testing.T) {
 	signalFile := filepath.Join(tmpDir, ".loom", "task-complete")
 
 	// Create directories
-	os.MkdirAll(logDir, 0755)
+	os.MkdirAll(logDir, 0700)
 
 	sessionName := uniqueSessionName(t)
 
