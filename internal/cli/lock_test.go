@@ -943,3 +943,187 @@ func TestGetTaskStatus_ReviewStatus(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// Single-Task Mode Lock State Pattern Tests
+// ============================================================================
+
+// TestSingleTaskModeLockStatePattern simulates the single-task mode workflow
+// for command="plan": AcquireLock -> UpdateLockState(StateActive) -> verify.
+func TestSingleTaskModeLockStatePattern(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Step 1: AcquireLock (as plan.go does)
+	err := AcquireLock(tmpDir, "plan", "falcon")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Step 2: UpdateLockState to active (the new line added in plan.go)
+	err = UpdateLockState(tmpDir, StateActive)
+	if err != nil {
+		t.Fatalf("UpdateLockState failed: %v", err)
+	}
+
+	// Step 3: Verify lock state is StateActive via CheckLock
+	info, running, err := CheckLock(tmpDir)
+	if err != nil {
+		t.Fatalf("CheckLock failed: %v", err)
+	}
+	if !running {
+		t.Error("expected running process")
+	}
+	if info.State != StateActive {
+		t.Errorf("expected State %q, got %q", StateActive, info.State)
+	}
+
+	// Step 4: Verify other lock fields are preserved
+	if info.PID != os.Getpid() {
+		t.Errorf("expected PID %d, got %d", os.Getpid(), info.PID)
+	}
+	if info.Command != "plan" {
+		t.Errorf("expected Command 'plan', got %q", info.Command)
+	}
+	if info.AgentName != "falcon" {
+		t.Errorf("expected AgentName 'falcon', got %q", info.AgentName)
+	}
+
+	// Also verify via ReadLockFile
+	readInfo, err := ReadLockFile(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadLockFile failed: %v", err)
+	}
+	if readInfo.State != StateActive {
+		t.Errorf("ReadLockFile: expected State %q, got %q", StateActive, readInfo.State)
+	}
+	if readInfo.PID != os.Getpid() {
+		t.Errorf("ReadLockFile: expected PID %d, got %d", os.Getpid(), readInfo.PID)
+	}
+	if readInfo.Command != "plan" {
+		t.Errorf("ReadLockFile: expected Command 'plan', got %q", readInfo.Command)
+	}
+	if readInfo.AgentName != "falcon" {
+		t.Errorf("ReadLockFile: expected AgentName 'falcon', got %q", readInfo.AgentName)
+	}
+}
+
+// TestSingleTaskModeLockStatePattern_Task simulates the single-task mode workflow
+// for command="task": AcquireLock -> UpdateLockState(StateActive) -> verify.
+func TestSingleTaskModeLockStatePattern_Task(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Step 1: AcquireLock (as task.go does)
+	err := AcquireLock(tmpDir, "task", "nova")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Step 2: UpdateLockState to active (the new line added in task.go)
+	err = UpdateLockState(tmpDir, StateActive)
+	if err != nil {
+		t.Fatalf("UpdateLockState failed: %v", err)
+	}
+
+	// Step 3: Verify lock state is StateActive via CheckLock
+	info, running, err := CheckLock(tmpDir)
+	if err != nil {
+		t.Fatalf("CheckLock failed: %v", err)
+	}
+	if !running {
+		t.Error("expected running process")
+	}
+	if info.State != StateActive {
+		t.Errorf("expected State %q, got %q", StateActive, info.State)
+	}
+
+	// Step 4: Verify other lock fields are preserved
+	if info.PID != os.Getpid() {
+		t.Errorf("expected PID %d, got %d", os.Getpid(), info.PID)
+	}
+	if info.Command != "task" {
+		t.Errorf("expected Command 'task', got %q", info.Command)
+	}
+	if info.AgentName != "nova" {
+		t.Errorf("expected AgentName 'nova', got %q", info.AgentName)
+	}
+
+	// Also verify via ReadLockFile
+	readInfo, err := ReadLockFile(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadLockFile failed: %v", err)
+	}
+	if readInfo.State != StateActive {
+		t.Errorf("ReadLockFile: expected State %q, got %q", StateActive, readInfo.State)
+	}
+	if readInfo.PID != os.Getpid() {
+		t.Errorf("ReadLockFile: expected PID %d, got %d", os.Getpid(), readInfo.PID)
+	}
+	if readInfo.Command != "task" {
+		t.Errorf("ReadLockFile: expected Command 'task', got %q", readInfo.Command)
+	}
+	if readInfo.AgentName != "nova" {
+		t.Errorf("ReadLockFile: expected AgentName 'nova', got %q", readInfo.AgentName)
+	}
+}
+
+// TestSingleTaskModeLockStatePattern_Agent simulates the single-task mode workflow
+// for command="agent": AcquireLock -> UpdateLockState(StateActive) -> verify.
+func TestSingleTaskModeLockStatePattern_Agent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Step 1: AcquireLock (as agent_cmd.go does)
+	err := AcquireLock(tmpDir, "agent", "spark")
+	if err != nil {
+		t.Fatalf("AcquireLock failed: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	// Step 2: UpdateLockState to active (the new line added in agent_cmd.go)
+	err = UpdateLockState(tmpDir, StateActive)
+	if err != nil {
+		t.Fatalf("UpdateLockState failed: %v", err)
+	}
+
+	// Step 3: Verify lock state is StateActive via CheckLock
+	info, running, err := CheckLock(tmpDir)
+	if err != nil {
+		t.Fatalf("CheckLock failed: %v", err)
+	}
+	if !running {
+		t.Error("expected running process")
+	}
+	if info.State != StateActive {
+		t.Errorf("expected State %q, got %q", StateActive, info.State)
+	}
+
+	// Step 4: Verify other lock fields are preserved
+	if info.PID != os.Getpid() {
+		t.Errorf("expected PID %d, got %d", os.Getpid(), info.PID)
+	}
+	if info.Command != "agent" {
+		t.Errorf("expected Command 'agent', got %q", info.Command)
+	}
+	if info.AgentName != "spark" {
+		t.Errorf("expected AgentName 'spark', got %q", info.AgentName)
+	}
+
+	// Also verify via ReadLockFile
+	readInfo, err := ReadLockFile(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadLockFile failed: %v", err)
+	}
+	if readInfo.State != StateActive {
+		t.Errorf("ReadLockFile: expected State %q, got %q", StateActive, readInfo.State)
+	}
+	if readInfo.PID != os.Getpid() {
+		t.Errorf("ReadLockFile: expected PID %d, got %d", os.Getpid(), readInfo.PID)
+	}
+	if readInfo.Command != "agent" {
+		t.Errorf("ReadLockFile: expected Command 'agent', got %q", readInfo.Command)
+	}
+	if readInfo.AgentName != "spark" {
+		t.Errorf("ReadLockFile: expected AgentName 'spark', got %q", readInfo.AgentName)
+	}
+}

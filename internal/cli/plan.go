@@ -155,6 +155,10 @@ func runPlan(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
+	if err := UpdateLockState(worktreePath, StateActive); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
+	}
+
 	// Generate and run the planning prompt
 	workspace, _ := ResolveActiveWorkspace()
 	prompt := GeneratePlanningPrompt(agentName, workspace)

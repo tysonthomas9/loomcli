@@ -187,6 +187,10 @@ func runAgent(cmd *cobra.Command, args []string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
+	if err := UpdateLockState(worktreePath, StateActive); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
+	}
+
 	// Generate and run the custom prompt
 	workspace, _ := ResolveActiveWorkspace()
 	prompt := promptGen(agentName, workspace)
