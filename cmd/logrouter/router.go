@@ -7,10 +7,19 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 )
 
 const bufferSize = 64 * 1024 // 64KB buffer
+
+// validAgentName matches alphanumeric characters, hyphens, underscores, and dots.
+// Dots are needed for beads-style IDs (e.g., "loomcli-mp5.33").
+// The "." and ".." cases are rejected separately to prevent path traversal.
+var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+
+// validTaskID matches alphanumeric characters, hyphens, underscores, and dots.
+var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 // LogRouter handles routing log output to multiple destinations.
 type LogRouter struct {
@@ -28,6 +37,10 @@ type LogRouter struct {
 
 // NewLogRouter creates a new LogRouter that writes to the agent log file.
 func NewLogRouter(agentName, baseDir string) (*LogRouter, error) {
+	if !validAgentName.MatchString(agentName) || agentName == "." || agentName == ".." {
+		return nil, fmt.Errorf("invalid agent name: %q (must match %s)", agentName, validAgentName.String())
+	}
+
 	agentLogPath := filepath.Join(baseDir, "agents", agentName+".log")
 
 	// Open agent log file (append mode, create if not exists)
@@ -67,6 +80,11 @@ func (r *LogRouter) SetTask(taskID, phase string) error {
 		r.taskID = ""
 		r.phase = ""
 		return nil
+	}
+
+	// Validate taskID to prevent path traversal
+	if !validTaskID.MatchString(taskID) || taskID == "." || taskID == ".." {
+		return fmt.Errorf("invalid task ID: %q (must match %s)", taskID, validTaskID.String())
 	}
 
 	// Validate phase to prevent path traversal

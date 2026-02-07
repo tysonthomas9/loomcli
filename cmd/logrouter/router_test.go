@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -225,6 +226,101 @@ func TestClearTask_ClosesTaskLog(t *testing.T) {
 	}
 	if string(agentContent) != "before clearafter clear" {
 		t.Errorf("agent log content = %q, want %q", string(agentContent), "before clearafter clear")
+	}
+}
+
+func TestNewLogRouter_RejectsInvalidAgentName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create agents subdirectory
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		agentName string
+		wantErr   bool
+	}{
+		{"path traversal", "../../etc", true},
+		{"forward slash", "agent/name", true},
+		{"space", "agent name", true},
+		{"empty string", "", true},
+		{"single dot", ".", true},
+		{"double dot", "..", true},
+		{"valid hyphen", "valid-agent", false},
+		{"valid underscore", "agent_v2", false},
+		{"valid dot", "agent.v2", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router, err := NewLogRouter(tt.agentName, tmpDir)
+			if tt.wantErr {
+				if err == nil {
+					router.Close()
+					t.Errorf("NewLogRouter(%q) succeeded, want error", tt.agentName)
+				} else if !strings.Contains(err.Error(), "invalid agent name") {
+					t.Errorf("NewLogRouter(%q) error = %v, want 'invalid agent name'", tt.agentName, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("NewLogRouter(%q) failed: %v", tt.agentName, err)
+				} else {
+					router.Close()
+				}
+			}
+		})
+	}
+}
+
+func TestSetTask_RejectsInvalidTaskID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create agents subdirectory
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	tests := []struct {
+		name    string
+		taskID  string
+		wantErr bool
+	}{
+		{"path traversal", "../../etc", true},
+		{"forward slash", "task/id", true},
+		{"space", "task id", true},
+		{"single dot", ".", true},
+		{"double dot", "..", true},
+		{"valid hyphen", "valid-task-123", false},
+		{"valid dot", "loomcli-mp5.33", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := router.SetTask(tt.taskID, "planning")
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("SetTask(%q) succeeded, want error", tt.taskID)
+				} else if !strings.Contains(err.Error(), "invalid task ID") {
+					t.Errorf("SetTask(%q) error = %v, want 'invalid task ID'", tt.taskID, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("SetTask(%q) failed: %v", tt.taskID, err)
+				}
+				// Clear task for next iteration
+				router.ClearTask()
+			}
+		})
 	}
 }
 
