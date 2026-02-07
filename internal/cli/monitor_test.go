@@ -1734,6 +1734,14 @@ func TestRenderDashboardWithData(t *testing.T) {
 		t.Error("expected IN PROGRESS section")
 	}
 
+	// Check task summary line uses "Backlog" not "Blocked"
+	if !strings.Contains(output, "Backlog:") {
+		t.Error("expected 'Backlog:' label in task summary line")
+	}
+	if strings.Contains(output, "Blocked:") {
+		t.Error("task summary should use 'Backlog:' not 'Blocked:'")
+	}
+
 	// Check [Need Review] prefix stripped
 	if strings.Contains(output, "[Need Review] Review this") {
 		t.Error("[Need Review] prefix should be stripped from review task titles")
