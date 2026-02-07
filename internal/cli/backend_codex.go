@@ -14,6 +14,20 @@ type CodexBackend struct{}
 func (c *CodexBackend) Name() string { return "codex" }
 
 func (c *CodexBackend) InvokeInteractive(workDir, prompt, agentName string) error {
+	return codexInvoker(workDir, prompt, agentName)
+}
+
+func (c *CodexBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	return codexNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
+}
+
+// codexInvoker is the function used to invoke Codex interactively (mockable for tests)
+var codexInvoker = defaultCodexInvoker
+
+// codexNonInteractiveInvoker is the function used for non-interactive Codex invocation (mockable for tests)
+var codexNonInteractiveInvoker = defaultCodexNonInteractiveInvoker
+
+func defaultCodexInvoker(workDir, prompt, agentName string) error {
 	cmd := exec.Command("codex", "--full-auto", prompt)
 	cmd.Dir = workDir
 	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
@@ -31,7 +45,7 @@ func (c *CodexBackend) InvokeInteractive(workDir, prompt, agentName string) erro
 	return cmd.Run()
 }
 
-func (c *CodexBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	cmd := exec.Command("codex", "exec", "--json", prompt)
 	cmd.Dir = workDir
 	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)

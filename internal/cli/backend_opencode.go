@@ -14,6 +14,20 @@ type OpenCodeBackend struct{}
 func (o *OpenCodeBackend) Name() string { return "opencode" }
 
 func (o *OpenCodeBackend) InvokeInteractive(workDir, prompt, agentName string) error {
+	return openCodeInvoker(workDir, prompt, agentName)
+}
+
+func (o *OpenCodeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	return openCodeNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
+}
+
+// openCodeInvoker is the function used to invoke OpenCode interactively (mockable for tests)
+var openCodeInvoker = defaultOpenCodeInvoker
+
+// openCodeNonInteractiveInvoker is the function used for non-interactive OpenCode invocation (mockable for tests)
+var openCodeNonInteractiveInvoker = defaultOpenCodeNonInteractiveInvoker
+
+func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 	cmd := exec.Command("opencode", "run", prompt)
 	cmd.Dir = workDir
 	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
@@ -31,7 +45,7 @@ func (o *OpenCodeBackend) InvokeInteractive(workDir, prompt, agentName string) e
 	return cmd.Run()
 }
 
-func (o *OpenCodeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	cmd := exec.Command("opencode", "run", "--format", "json", prompt)
 	cmd.Dir = workDir
 	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
