@@ -56,6 +56,7 @@ func main() {
 	poolSize := flag.Int("pool-size", defaultPoolSize, "Connection pool size")
 	corsEnabled := flag.Bool("cors", false, "Enable CORS for development")
 	corsOrigin := flag.String("cors-origin", "", "CORS allowed origins (comma-separated, default: http://localhost:3000)")
+	corsRejectDisallowed := flag.Bool("cors-reject-disallowed", false, "Reject API requests from disallowed CORS origins (defense-in-depth)")
 	terminalCmd := flag.String("terminal-cmd", "loom lead", "Command to run in terminal sessions (env: BEADS_TERMINAL_CMD)")
 	flag.Parse()
 
@@ -76,13 +77,17 @@ func main() {
 	if envCorsOrigin := os.Getenv("BEADS_WEBUI_CORS_ORIGIN"); envCorsOrigin != "" {
 		*corsOrigin = envCorsOrigin
 	}
+	if os.Getenv("BEADS_WEBUI_CORS_REJECT_DISALLOWED") == "true" {
+		*corsRejectDisallowed = true
+	}
 	if envTermCmd := os.Getenv("BEADS_TERMINAL_CMD"); envTermCmd != "" {
 		*terminalCmd = envTermCmd
 	}
 
 	// Build CORS configuration
 	corsConfig := CORSConfig{
-		Enabled: *corsEnabled,
+		Enabled:          *corsEnabled,
+		RejectDisallowed: *corsRejectDisallowed,
 	}
 	if *corsEnabled {
 		if *corsOrigin != "" {

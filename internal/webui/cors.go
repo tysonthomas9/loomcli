@@ -8,8 +8,9 @@ import (
 
 // CORSConfig holds configuration for the CORS middleware.
 type CORSConfig struct {
-	Enabled        bool     // Whether CORS is enabled
-	AllowedOrigins []string // List of allowed origins (e.g., "http://localhost:3000")
+	Enabled          bool     // Whether CORS is enabled
+	AllowedOrigins   []string // List of allowed origins (e.g., "http://localhost:3000")
+	RejectDisallowed bool     // When true, reject non-preflight requests from disallowed origins on /api/ routes (always active in internal/webui)
 }
 
 // NewCORSMiddleware creates a middleware that adds CORS headers to responses.

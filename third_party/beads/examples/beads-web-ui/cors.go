@@ -2,13 +2,15 @@ package main
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
 // CORSConfig holds configuration for the CORS middleware.
 type CORSConfig struct {
-	Enabled        bool     // Whether CORS is enabled
-	AllowedOrigins []string // List of allowed origins (e.g., "http://localhost:3000")
+	Enabled          bool     // Whether CORS is enabled
+	AllowedOrigins   []string // List of allowed origins (e.g., "http://localhost:3000")
+	RejectDisallowed bool     // When true, reject non-preflight requests from disallowed origins on /api/ routes
 }
 
 // NewCORSMiddleware creates a middleware that adds CORS headers to responses.
@@ -57,14 +59,27 @@ func NewCORSMiddleware(config CORSConfig) func(http.Handler) http.Handler {
 			}
 
 			// For non-preflight requests, add CORS headers if origin is allowed
-			if origin != "" && origin != "null" {
-				normalizedOrigin := strings.TrimSuffix(origin, "/")
-				if allowedMap[normalizedOrigin] {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
-					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-					w.Header().Set("Access-Control-Allow-Credentials", "true")
-					w.Header().Set("Access-Control-Max-Age", "86400")
+			if origin != "" {
+				if origin == "null" {
+					if config.RejectDisallowed && strings.HasPrefix(r.URL.Path, "/api/") {
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
+				} else {
+					normalizedOrigin := strings.TrimSuffix(origin, "/")
+					if allowedMap[normalizedOrigin] {
+						w.Header().Set("Access-Control-Allow-Origin", origin)
+						w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+						w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+						w.Header().Set("Access-Control-Allow-Credentials", "true")
+						w.Header().Set("Access-Control-Max-Age", "86400")
+					} else if config.RejectDisallowed && strings.HasPrefix(r.URL.Path, "/api/") {
+						// Allow same-origin requests even if not in allowlist
+						if !isSameOrigin(normalizedOrigin, r.Host) {
+							w.WriteHeader(http.StatusForbidden)
+							return
+						}
+					}
 				}
 			}
 
@@ -72,4 +87,14 @@ func NewCORSMiddleware(config CORSConfig) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isSameOrigin checks whether the given origin URL's host matches the
+// request Host header, meaning the request is same-origin.
+func isSameOrigin(origin, requestHost string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return u.Host == requestHost
 }

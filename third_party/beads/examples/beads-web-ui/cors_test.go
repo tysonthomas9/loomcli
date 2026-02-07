@@ -415,3 +415,282 @@ func TestCORSMiddleware_CaseSensitiveOrigins(t *testing.T) {
 		t.Errorf("Access-Control-Allow-Origin should not be set for case-mismatched origin")
 	}
 }
+
+func TestCORSMiddleware_RejectDisallowed_APIRoute(t *testing.T) {
+	config := CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		RejectDisallowed: true,
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	req.Header.Set("Origin", "http://malicious-site.com")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Disallowed origin on /api/ route should be rejected with 403
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+
+	// No CORS headers should be set
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("Access-Control-Allow-Origin should not be set for rejected request")
+	}
+}
+
+func TestCORSMiddleware_RejectDisallowed_NonAPIRoute(t *testing.T) {
+	config := CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		RejectDisallowed: true,
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "http://malicious-site.com")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Disallowed origin on non-API route should pass through
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// No CORS headers for disallowed origin (but request is not rejected)
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("Access-Control-Allow-Origin should not be set for disallowed origin")
+	}
+}
+
+func TestCORSMiddleware_RejectDisallowed_StaticFiles(t *testing.T) {
+	config := CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		RejectDisallowed: true,
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Origin", "http://malicious-site.com")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Disallowed origin on static file route should pass through
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// No CORS headers for disallowed origin (but request is not rejected)
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("Access-Control-Allow-Origin should not be set for disallowed origin")
+	}
+}
+
+func TestCORSMiddleware_RejectDisallowed_AllowedOrigin(t *testing.T) {
+	config := CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		RejectDisallowed: true,
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Allowed origin should pass through with CORS headers
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// CORS headers should be set for allowed origin
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "http://localhost:3000")
+	}
+	if got := w.Header().Get("Access-Control-Allow-Methods"); got != "GET, POST, PATCH, PUT, DELETE, OPTIONS" {
+		t.Errorf("Access-Control-Allow-Methods = %q, want %q", got, "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+	}
+	if got := w.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Errorf("Access-Control-Allow-Credentials = %q, want %q", got, "true")
+	}
+}
+
+func TestCORSMiddleware_RejectDisallowed_NoOrigin(t *testing.T) {
+	config := CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		RejectDisallowed: true,
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	// No Origin header — simulates non-browser client (e.g., curl, server-to-server)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Non-browser clients without Origin header should always pass through
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// No CORS headers when no Origin is present
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("Access-Control-Allow-Origin should not be set when no Origin header is present")
+	}
+}
+
+func TestCORSMiddleware_RejectDisallowed_NullOrigin(t *testing.T) {
+	config := CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		RejectDisallowed: true,
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	req.Header.Set("Origin", "null")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// "null" origin on /api/ route should be rejected with 403
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+
+	// No CORS headers should be set
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("Access-Control-Allow-Origin should not be set for 'null' origin")
+	}
+}
+
+func TestCORSMiddleware_RejectDisallowed_Disabled(t *testing.T) {
+	config := CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		RejectDisallowed: false,
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	req.Header.Set("Origin", "http://malicious-site.com")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// With RejectDisallowed disabled, disallowed origin passes through (legacy behavior)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// No CORS headers for disallowed origin, but request is not rejected
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("Access-Control-Allow-Origin should not be set for disallowed origin")
+	}
+}
+
+func TestCORSMiddleware_RejectDisallowed_PreflightUnchanged(t *testing.T) {
+	config := CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		RejectDisallowed: true,
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/issues", nil)
+	req.Header.Set("Origin", "http://malicious-site.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Preflight from disallowed origin should still return 403
+	// (this behavior exists regardless of RejectDisallowed)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+
+	// No CORS headers for disallowed origin
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("Access-Control-Allow-Origin should not be set for disallowed origin preflight")
+	}
+
+	// Body should be empty for rejected preflight
+	if w.Body.Len() != 0 {
+		t.Errorf("rejected preflight response body should be empty, got %d bytes", w.Body.Len())
+	}
+}
+
+func TestCORSMiddleware_RejectDisallowed_SameOriginAllowed(t *testing.T) {
+	config := CORSConfig{
+		Enabled:          true,
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		RejectDisallowed: true,
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	// Same-origin request where browser sends Origin header (e.g., fetch() API)
+	// The origin matches r.Host, so it should pass through even though
+	// it's not in AllowedOrigins
+	req := httptest.NewRequest(http.MethodPost, "/api/issues", nil)
+	req.Header.Set("Origin", "http://example.com")
+	req.Host = "example.com"
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (same-origin should pass through)", w.Code, http.StatusOK)
+	}
+}
+
+func TestIsSameOrigin(t *testing.T) {
+	tests := []struct {
+		name        string
+		origin      string
+		requestHost string
+		want        bool
+	}{
+		{"matching host", "http://localhost:8080", "localhost:8080", true},
+		{"matching host no port", "http://example.com", "example.com", true},
+		{"different host", "http://evil.com", "localhost:8080", false},
+		{"different port", "http://localhost:3000", "localhost:8080", false},
+		{"invalid origin", "://invalid", "", false},
+		{"empty origin", "", "", true}, // url.Parse("") succeeds; irrelevant in practice since middleware checks origin != ""
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSameOrigin(tt.origin, tt.requestHost)
+			if got != tt.want {
+				t.Errorf("isSameOrigin(%q, %q) = %v, want %v", tt.origin, tt.requestHost, got, tt.want)
+			}
+		})
+	}
+}
