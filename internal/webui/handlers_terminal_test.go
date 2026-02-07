@@ -22,7 +22,7 @@ import (
 // TestHandleTerminalWS_NilManagerWithSession tests nil manager with session param returns 503.
 // The nil manager check happens before parameter validation.
 func TestHandleTerminalWS_NilManagerWithSession(t *testing.T) {
-	handler := handleTerminalWS(nil, "")
+	handler := handleTerminalWS(nil, "", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	w := httptest.NewRecorder()
@@ -36,7 +36,7 @@ func TestHandleTerminalWS_NilManagerWithSession(t *testing.T) {
 
 // TestHandleTerminalWS_NilManager tests that nil manager returns 503.
 func TestHandleTerminalWS_NilManager(t *testing.T) {
-	handler := handleTerminalWS(nil, "")
+	handler := handleTerminalWS(nil, "", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	w := httptest.NewRecorder()
@@ -78,7 +78,7 @@ func TestHandleTerminalWS_MissingSessionWithManager(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "")
+	handler := handleTerminalWS(manager, "", nil)
 
 	// Create request without session parameter
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws", nil)
@@ -115,7 +115,7 @@ func TestHandleTerminalWS_InvalidSessionName(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "")
+	handler := handleTerminalWS(manager, "", nil)
 
 	tests := []struct {
 		name    string
@@ -168,7 +168,7 @@ func TestHandleTerminalWS_ValidSessionNames(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "")
+	handler := handleTerminalWS(manager, "", nil)
 
 	tests := []struct {
 		name    string
@@ -219,7 +219,7 @@ func TestHandleTerminalWS_WebSocketUpgrade(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "")
+	handler := handleTerminalWS(manager, "", nil)
 
 	// Create a test server for WebSocket testing
 	server := httptest.NewServer(handler)
@@ -264,7 +264,7 @@ func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
 
 	// Use "bash" as the known defaultCmd so we can verify it later.
 	defaultCmd := "bash"
-	handler := handleTerminalWS(manager, defaultCmd)
+	handler := handleTerminalWS(manager, defaultCmd, nil)
 
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -1166,7 +1166,7 @@ func TestTerminalWebSocket_E2E(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "")
+	handler := handleTerminalWS(manager, "", nil)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -1292,4 +1292,181 @@ func (m *sequenceMockWS) Read(ctx context.Context) (websocket.MessageType, []byt
 	r := m.reads[m.idx]
 	m.idx++
 	return r.typ, r.data, r.err
+}
+
+// TestOriginHosts tests the originHosts helper that extracts host from origin URLs.
+func TestOriginHosts(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  []string
+		expect []string
+	}{
+		{
+			name:   "valid URL with port",
+			input:  []string{"http://localhost:3000"},
+			expect: []string{"localhost:3000"},
+		},
+		{
+			name:   "valid HTTPS URL without port",
+			input:  []string{"https://example.com"},
+			expect: []string{"example.com"},
+		},
+		{
+			name:   "valid URL with trailing slash",
+			input:  []string{"http://localhost:3000/"},
+			expect: []string{"localhost:3000"},
+		},
+		{
+			name:   "multiple valid URLs",
+			input:  []string{"http://localhost:3000", "https://example.com"},
+			expect: []string{"localhost:3000", "example.com"},
+		},
+		{
+			name:   "nil input",
+			input:  nil,
+			expect: nil,
+		},
+		{
+			name:   "empty slice",
+			input:  []string{},
+			expect: nil,
+		},
+		{
+			name:   "malformed URL skipped",
+			input:  []string{"http://localhost:3000", "not-a-url", "https://example.com"},
+			expect: []string{"localhost:3000", "example.com"},
+		},
+		{
+			name:   "all malformed",
+			input:  []string{"not-a-url", "also-bad"},
+			expect: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := originHosts(tt.input)
+
+			// Both nil means equal
+			if tt.expect == nil {
+				if got != nil {
+					t.Errorf("originHosts(%v) = %v, want nil", tt.input, got)
+				}
+				return
+			}
+
+			if len(got) != len(tt.expect) {
+				t.Fatalf("originHosts(%v) returned %d items %v, want %d items %v",
+					tt.input, len(got), got, len(tt.expect), tt.expect)
+			}
+			for i := range tt.expect {
+				if got[i] != tt.expect[i] {
+					t.Errorf("originHosts(%v)[%d] = %q, want %q", tt.input, i, got[i], tt.expect[i])
+				}
+			}
+		})
+	}
+}
+
+// TestHandleTerminalWS_OriginValidation tests WebSocket origin validation
+// using OriginPatterns set by the allowedOrigins parameter.
+func TestHandleTerminalWS_OriginValidation(t *testing.T) {
+	tests := []struct {
+		name           string
+		allowedOrigins []string
+		origin         string // Origin header to send; empty string means omit the header
+		setOrigin      bool   // whether to set the Origin header at all
+		expectReject   bool   // true if we expect 403 Forbidden
+	}{
+		{
+			name:           "allowed_origin",
+			allowedOrigins: []string{"http://localhost:3000"},
+			origin:         "http://localhost:3000",
+			setOrigin:      true,
+			expectReject:   false,
+		},
+		{
+			name:           "disallowed_origin",
+			allowedOrigins: []string{"http://localhost:3000"},
+			origin:         "http://evil.com",
+			setOrigin:      true,
+			expectReject:   true,
+		},
+		{
+			name:           "no_origin_header",
+			allowedOrigins: nil,
+			origin:         "",
+			setOrigin:      false,
+			expectReject:   false,
+		},
+		{
+			name:           "same_origin",
+			allowedOrigins: nil,
+			origin:         "", // will be set to match the server host
+			setOrigin:      true,
+			expectReject:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager, err := NewTerminalManager("", "")
+			if err == ErrTmuxNotFound {
+				t.Skip("tmux not installed, skipping test")
+			}
+			if err != nil {
+				t.Fatalf("failed to create terminal manager: %v", err)
+			}
+			defer manager.Shutdown()
+
+			handler := handleTerminalWS(manager, "", tt.allowedOrigins)
+			server := httptest.NewServer(handler)
+			defer server.Close()
+
+			wsURL := "ws" + server.URL[4:] + "?session=origin-test"
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			opts := &websocket.DialOptions{
+				HTTPHeader: http.Header{},
+			}
+
+			if tt.setOrigin {
+				origin := tt.origin
+				// For same_origin test, set Origin to match the server host.
+				if origin == "" {
+					origin = "http://" + server.Listener.Addr().String()
+				}
+				opts.HTTPHeader.Set("Origin", origin)
+			}
+
+			conn, resp, dialErr := websocket.Dial(ctx, wsURL, opts)
+
+			if tt.expectReject {
+				// The WebSocket upgrade should be rejected with 403.
+				if dialErr == nil {
+					conn.Close(websocket.StatusNormalClosure, "test done")
+					t.Fatal("expected dial to fail for disallowed origin, but it succeeded")
+				}
+				if resp != nil && resp.StatusCode != http.StatusForbidden {
+					t.Errorf("expected status 403 for disallowed origin, got %d", resp.StatusCode)
+				}
+				return
+			}
+
+			// For accepted origins, the WebSocket upgrade should succeed
+			// (or fail later due to tmux unavailability, not origin rejection).
+			if dialErr != nil {
+				if resp != nil && resp.StatusCode == http.StatusForbidden {
+					t.Fatalf("origin should have been accepted but got 403 Forbidden")
+				}
+				// Non-403 failure is acceptable (e.g. tmux session issue).
+				t.Logf("dial failed (non-origin reason): %v", dialErr)
+				return
+			}
+			defer conn.Close(websocket.StatusNormalClosure, "test done")
+			t.Log("WebSocket connection established successfully")
+		})
+	}
 }

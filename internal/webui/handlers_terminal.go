@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 
 	"nhooyr.io/websocket"
@@ -23,12 +24,39 @@ const (
 // validTerminalSession matches alphanumeric characters, hyphens, and underscores.
 var validTerminalSession = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+// originHosts extracts host (with port) from origin URLs for use as
+// nhooyr.io/websocket OriginPatterns. For example, "http://localhost:3000"
+// becomes "localhost:3000". Malformed URLs are logged and skipped.
+func originHosts(origins []string) []string {
+	if len(origins) == 0 {
+		return nil
+	}
+	hosts := make([]string, 0, len(origins))
+	for _, o := range origins {
+		u, err := url.Parse(o)
+		if err != nil || u.Host == "" {
+			log.Printf("Warning: skipping malformed origin %q: %v", o, err)
+			continue
+		}
+		hosts = append(hosts, u.Host)
+	}
+	return hosts
+}
+
 // handleTerminalWS returns a WebSocket handler for terminal relay.
 // It upgrades HTTP connections to WebSocket, bridges them to tmux sessions
 // via the TerminalManager, and handles bidirectional binary data relay
 // plus an in-band resize protocol. The server-configured defaultCmd is
 // always used as the terminal command.
-func handleTerminalWS(manager *TerminalManager, defaultCmd string) http.HandlerFunc {
+//
+// allowedOrigins is a list of full origin URLs (e.g. "http://localhost:3000")
+// whose host portions are used as OriginPatterns for the WebSocket upgrade.
+// When nil or empty, only same-origin and non-browser (no Origin header)
+// connections are accepted.
+func handleTerminalWS(manager *TerminalManager, defaultCmd string, allowedOrigins []string) http.HandlerFunc {
+	// Compute origin host patterns once at construction time.
+	patterns := originHosts(allowedOrigins)
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if manager is available
 		if manager == nil {
@@ -69,9 +97,12 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string) http.HandlerF
 			return
 		}
 
-		// Accept WebSocket upgrade
+		// Accept WebSocket upgrade with origin validation.
+		// OriginPatterns checks the Origin header against allowed hosts.
+		// If no Origin header is present (non-browser clients), the connection is allowed.
+		// If Origin matches the request Host (same-origin), the connection is allowed.
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			InsecureSkipVerify: true, // CORS handled at middleware level
+			OriginPatterns: patterns,
 		})
 		if err != nil {
 			log.Printf("Failed to accept WebSocket: %v", err)

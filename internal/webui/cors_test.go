@@ -91,19 +91,14 @@ func TestCORSMiddleware_DisallowedOrigin(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	// Request should still succeed, but without CORS headers
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	// Request from disallowed origin should be rejected with 403
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusForbidden)
 	}
 
 	// No CORS headers for disallowed origin
 	if w.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Errorf("Access-Control-Allow-Origin should not be set for disallowed origin")
-	}
-
-	// Vary header should still be set
-	if got := w.Header().Get("Vary"); got != "Origin" {
-		t.Errorf("Vary = %q, want %q", got, "Origin")
 	}
 }
 
@@ -147,11 +142,12 @@ func TestCORSMiddleware_NullOrigin(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	// 'null' origin should be actively rejected with 403
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusForbidden)
 	}
 
-	// 'null' origin should be rejected
+	// No CORS headers for 'null' origin
 	if w.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Errorf("Access-Control-Allow-Origin should not be set for 'null' origin")
 	}
@@ -413,5 +409,62 @@ func TestCORSMiddleware_CaseSensitiveOrigins(t *testing.T) {
 	// Should not match due to case difference
 	if w.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Errorf("Access-Control-Allow-Origin should not be set for case-mismatched origin")
+	}
+}
+
+func TestCORSMiddleware_SameOriginAllowedWhenNotInList(t *testing.T) {
+	config := CORSConfig{
+		Enabled:        true,
+		AllowedOrigins: []string{"http://localhost:3000"},
+	}
+
+	middleware := NewCORSMiddleware(config)
+	handler := middleware(testHandler())
+
+	// Same-origin POST request: Origin host matches the request Host.
+	// Browsers may send Origin on same-origin POST requests.
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/issues", nil)
+	req.Header.Set("Origin", "http://localhost:8080")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Same-origin request should pass through even though it's not in the allowed list
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (same-origin should be allowed)", w.Code, http.StatusOK)
+	}
+
+	// No CORS headers for same-origin (CORS headers are only for cross-origin)
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("Access-Control-Allow-Origin should not be set for same-origin request")
+	}
+
+	// Body from testHandler should be present
+	if w.Body.String() != "OK" {
+		t.Errorf("body = %q, want %q", w.Body.String(), "OK")
+	}
+}
+
+func TestIsSameOrigin(t *testing.T) {
+	tests := []struct {
+		name        string
+		origin      string
+		requestHost string
+		want        bool
+	}{
+		{"matching host and port", "http://localhost:8080", "localhost:8080", true},
+		{"matching host no port", "http://example.com", "example.com", true},
+		{"different host", "http://evil.com", "localhost:8080", false},
+		{"different port", "http://localhost:3000", "localhost:8080", false},
+		{"malformed origin", "://invalid", "localhost:8080", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSameOrigin(tt.origin, tt.requestHost)
+			if got != tt.want {
+				t.Errorf("isSameOrigin(%q, %q) = %v, want %v", tt.origin, tt.requestHost, got, tt.want)
+			}
+		})
 	}
 }

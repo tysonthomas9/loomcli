@@ -2,6 +2,7 @@ package webui
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -56,9 +57,20 @@ func NewCORSMiddleware(config CORSConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			// For non-preflight requests, add CORS headers if origin is allowed
-			if origin != "" && origin != "null" {
+			// For non-preflight requests: if Origin is present, it must be
+			// same-origin or in the allowed list. Requests without an Origin
+			// header (same-origin or non-browser) pass through.
+			if origin != "" {
+				if origin == "null" {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
 				normalizedOrigin := strings.TrimSuffix(origin, "/")
+				sameOrigin := isSameOrigin(normalizedOrigin, r.Host)
+				if !sameOrigin && !allowedMap[normalizedOrigin] {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
 				if allowedMap[normalizedOrigin] {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
 					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
@@ -68,8 +80,17 @@ func NewCORSMiddleware(config CORSConfig) func(http.Handler) http.Handler {
 				}
 			}
 
-			// Pass through to next handler
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isSameOrigin checks whether the given origin URL's host matches the
+// request Host header, meaning the request is same-origin.
+func isSameOrigin(origin, requestHost string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return u.Host == requestHost
 }
