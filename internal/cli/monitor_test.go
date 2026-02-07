@@ -36,25 +36,58 @@ func TestDisplayWidth(t *testing.T) {
 	}
 }
 
-func TestTruncateString(t *testing.T) {
-	// truncateString uses taskTitleMaxLen (45) as the max length
+func TestTruncateToWidth(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
+		maxWidth int
 		expected string
 	}{
-		{"short string no truncation", "hello", "hello"},
-		{"exact length", strings.Repeat("x", taskTitleMaxLen), strings.Repeat("x", taskTitleMaxLen)},
-		{"over max length", strings.Repeat("x", taskTitleMaxLen+10), strings.Repeat("x", taskTitleMaxLen-3) + "..."},
-		{"empty string", "", ""},
+		{"short string no truncation", "hello", 10, "hello"},
+		{"exact width", "hello", 5, "hello"},
+		{"over max width", "hello world", 8, "hello..."},
+		{"empty string", "", 10, ""},
+		{"width 3 truncates to ...", "hello", 3, "..."},
+		{"unicode preserved", "✓ ready ● done", 9, "✓ read..."},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := truncateString(tc.input)
+			got := truncateToWidth(tc.input, tc.maxWidth)
+			gotWidth := displayWidth(got)
+			if gotWidth > tc.maxWidth {
+				t.Errorf("truncateToWidth(%q, %d) display width = %d, exceeds max",
+					tc.input, tc.maxWidth, gotWidth)
+			}
 			if got != tc.expected {
-				t.Errorf("truncateString(%q) = %q, want %q",
-					tc.input, got, tc.expected)
+				t.Errorf("truncateToWidth(%q, %d) = %q, want %q",
+					tc.input, tc.maxWidth, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestPadRight(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		width    int
+		expected int // expected display width
+	}{
+		{"ascii padding", "hi", 10, 10},
+		{"already exact", "hello", 5, 5},
+		{"wider than target", "hello world", 5, 11},
+		{"unicode single-width", "✓", 5, 5},
+		{"unicode bullet", "●", 5, 5},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := padRight(tc.input, tc.width)
+			gotWidth := displayWidth(got)
+			if gotWidth != tc.expected {
+				t.Errorf("padRight(%q, %d) display width = %d, want %d (result: %q)",
+					tc.input, tc.width, gotWidth, tc.expected, got)
 			}
 		})
 	}
@@ -1796,6 +1829,75 @@ func TestRenderBoxLineEmptyContent(t *testing.T) {
 	// Empty content should get full padding
 	expectedLen := dashboardWidth + len("║") + len("║") + len("\n") - 2 // account for unicode chars
 	_ = expectedLen // just verify it doesn't panic
+}
+
+func TestRenderTaskLineAlignment(t *testing.T) {
+	tests := []struct {
+		name string
+		task TaskInfo
+	}{
+		{
+			name: "short_id",
+			task: TaskInfo{ID: "loomcli-r9x", Title: "Fix displayWidth unicode handling in monitor", Priority: 0},
+		},
+		{
+			name: "long_id_with_child",
+			task: TaskInfo{ID: "loomcli-mp5.43", Title: "Use process groups (setpgid) for daemon child process management", Priority: 3},
+		},
+		{
+			name: "very_long_title",
+			task: TaskInfo{ID: "loomcli-6yk.1", Title: "Remove build artifacts and dead files (logrouter binary, duplicate main.go, empty .test-skip)", Priority: 1},
+		},
+		{
+			name: "unicode_in_title",
+			task: TaskInfo{ID: "loomcli-abc", Title: "Fix ✓ and ● display width in monitor dashboard rendering", Priority: 2},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var sb strings.Builder
+			renderTaskLine(&sb, tc.task)
+			line := sb.String()
+
+			// Every rendered line should have display width = dashboardWidth (70) + newline
+			lineNoNewline := strings.TrimSuffix(line, "\n")
+			width := displayWidth(lineNoNewline)
+			if width != dashboardWidth {
+				t.Errorf("renderTaskLine display width = %d, want %d\nline: %s", width, dashboardWidth, lineNoNewline)
+			}
+
+			// Must start with "║ " and end with " ║"
+			if !strings.HasPrefix(line, "║ ") {
+				t.Errorf("expected line to start with '║ ', got: %s", line)
+			}
+			if !strings.HasSuffix(lineNoNewline, " ║") {
+				t.Errorf("expected line to end with ' ║', got: %s", lineNoNewline)
+			}
+		})
+	}
+}
+
+func TestRenderAgentLineAlignment(t *testing.T) {
+	agents := []AgentStatus{
+		{Name: "comet", Branch: "comet", Status: "● 1 changes"},
+		{Name: "spark", Branch: "spark", Status: "ready", Ahead: 2, Behind: 1},
+		{Name: "long-name-agent", Branch: "feature/long-branch", Status: "working: bd-123 (5m)"},
+	}
+
+	for _, agent := range agents {
+		t.Run(agent.Name, func(t *testing.T) {
+			var sb strings.Builder
+			renderAgentLine(&sb, agent, "  ")
+			line := sb.String()
+
+			lineNoNewline := strings.TrimSuffix(line, "\n")
+			width := displayWidth(lineNoNewline)
+			if width != dashboardWidth {
+				t.Errorf("renderAgentLine display width = %d, want %d\nline: %s", width, dashboardWidth, lineNoNewline)
+			}
+		})
+	}
 }
 
 func TestGetWorktreeGitSyncStatusError(t *testing.T) {

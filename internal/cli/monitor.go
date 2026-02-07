@@ -16,8 +16,7 @@ import (
 )
 
 const (
-	dashboardWidth   = 70 // Width of the monitor dashboard box
-	taskTitleMaxLen  = 45 // Maximum length for task titles in dashboard
+	dashboardWidth = 70 // Width of the monitor dashboard box
 )
 
 var (
@@ -682,11 +681,25 @@ func runBdCommand(args ...string) (string, error) {
 	return result.Stdout, nil
 }
 
-func truncateString(s string) string {
-	if len(s) <= taskTitleMaxLen {
+// truncateToWidth truncates s to fit within maxWidth display columns,
+// appending "..." if truncated. Uses display width (not byte length)
+// so multi-byte unicode characters are handled correctly.
+func truncateToWidth(s string, maxWidth int) string {
+	if runewidth.StringWidth(s) <= maxWidth {
 		return s
 	}
-	return s[:taskTitleMaxLen-3] + "..."
+	return runewidth.Truncate(s, maxWidth, "...")
+}
+
+// padRight pads s with spaces to exactly width display columns.
+// Unlike fmt.Sprintf("%-Ns"), this uses display width so multi-byte
+// unicode characters are handled correctly.
+func padRight(s string, width int) string {
+	sw := runewidth.StringWidth(s)
+	if sw >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-sw)
 }
 
 // Rendering functions
@@ -735,8 +748,7 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxLine(fmt.Sprintf("  NEEDS PLANNING (%d):", data.Tasks.NeedsPlanning)))
 	if len(data.NeedsPlanningTasks) > 0 {
 		for _, task := range data.NeedsPlanningTasks {
-			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(task.Title))
-			sb.WriteString(renderBoxLine(line))
+			renderTaskLine(&sb, task)
 		}
 	} else {
 		sb.WriteString(renderBoxLine("    (none)"))
@@ -748,9 +760,9 @@ func renderDashboard(data *MonitorData) string {
 	if len(data.ReviewTasks) > 0 {
 		for _, task := range data.ReviewTasks {
 			// Strip [Need Review] prefix from title for cleaner display
-			title := strings.TrimPrefix(task.Title, "[Need Review] ")
-			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(title))
-			sb.WriteString(renderBoxLine(line))
+			cleaned := task
+			cleaned.Title = strings.TrimPrefix(task.Title, "[Need Review] ")
+			renderTaskLine(&sb, cleaned)
 		}
 	} else {
 		sb.WriteString(renderBoxLine("    (none)"))
@@ -761,8 +773,7 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxLine(fmt.Sprintf("  READY TO IMPLEMENT (%d):", data.Tasks.ReadyToImplement)))
 	if len(data.ReadyToImplement) > 0 {
 		for _, task := range data.ReadyToImplement {
-			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(task.Title))
-			sb.WriteString(renderBoxLine(line))
+			renderTaskLine(&sb, task)
 		}
 	} else {
 		sb.WriteString(renderBoxLine("    (none)"))
@@ -773,8 +784,7 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxLine(fmt.Sprintf("  IN PROGRESS (%d):", data.Tasks.InProgress)))
 	if len(data.InProgressTasks) > 0 {
 		for _, task := range data.InProgressTasks {
-			line := fmt.Sprintf("    [P%d] %s: %s", task.Priority, task.ID, truncateString(task.Title))
-			sb.WriteString(renderBoxLine(line))
+			renderTaskLine(&sb, task)
 		}
 	} else {
 		sb.WriteString(renderBoxLine("    (none)"))
@@ -818,6 +828,13 @@ func renderDashboard(data *MonitorData) string {
 	return sb.String()
 }
 
+func renderTaskLine(sb *strings.Builder, task TaskInfo) {
+	prefix := fmt.Sprintf("    [P%d] %s: ", task.Priority, task.ID)
+	maxTitle := dashboardWidth - 4 - displayWidth(prefix) // content area (66) minus prefix
+	title := truncateToWidth(task.Title, maxTitle)
+	sb.WriteString(renderBoxLine(prefix + title))
+}
+
 func renderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 	statusIcon := "✓"
 	if strings.HasPrefix(agent.Status, "planning:") ||
@@ -848,13 +865,22 @@ func renderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 		syncIndicator += fmt.Sprintf("↓%d", agent.Behind)
 	}
 
-	// Format left part with fixed widths (14 chars for name to accommodate [D] prefix)
-	leftPart := fmt.Sprintf("%s%-14s %-18s %s %-24s", indent, displayName, agent.Branch, statusIcon, agent.Status)
-
-	// Right-align sync indicator (box content width is 66)
-	contentWidth := 66
-	leftWidth := displayWidth(leftPart)
+	// Calculate available width for status dynamically to ensure the line fits
+	contentWidth := dashboardWidth - 4 // 66
+	nameCol := padRight(truncateToWidth(displayName, 14), 14)
+	branchCol := padRight(truncateToWidth(agent.Branch, 18), 18)
 	syncWidth := displayWidth(syncIndicator)
+	fixedCols := displayWidth(indent) + 14 + 1 + 18 + 1 + 1 + 1 // indent + name + sp + branch + sp + icon + sp
+	maxStatusWidth := contentWidth - fixedCols - syncWidth
+	if maxStatusWidth < 0 {
+		maxStatusWidth = 0
+	}
+	status := truncateToWidth(agent.Status, maxStatusWidth)
+
+	leftPart := indent + nameCol + " " + branchCol + " " + statusIcon + " " + status
+
+	// Right-align sync indicator
+	leftWidth := displayWidth(leftPart)
 	padding := contentWidth - leftWidth - syncWidth
 	if padding < 0 {
 		padding = 0
