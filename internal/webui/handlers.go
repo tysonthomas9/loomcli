@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
@@ -1885,10 +1886,11 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 
 // SSEMetrics represents the runtime metrics for the SSE hub.
 type SSEMetrics struct {
-	ConnectedClients int     `json:"connected_clients"`
-	DroppedMutations int64   `json:"dropped_mutations"`
-	RetryQueueDepth  int     `json:"retry_queue_depth"`
-	UptimeSeconds    float64 `json:"uptime_seconds"`
+	ConnectedClients   int     `json:"connected_clients"`
+	DroppedMutations   int64   `json:"dropped_mutations"`
+	RetryQueueDepth    int     `json:"retry_queue_depth"`
+	UptimeSeconds      float64 `json:"uptime_seconds"`
+	FleetTimeoutsTotal int64   `json:"loom_fleet_timeouts_total,omitempty"`
 }
 
 // MetricsResponse wraps the SSE hub metrics for JSON response.
@@ -1899,7 +1901,7 @@ type MetricsResponse struct {
 }
 
 // handleMetrics returns a handler that exposes SSE hub runtime metrics.
-func handleMetrics(hub *SSEHub) http.HandlerFunc {
+func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if hub == nil {
@@ -1917,6 +1919,9 @@ func handleMetrics(hub *SSEHub) http.HandlerFunc {
 			DroppedMutations: hub.GetDroppedCount(),
 			RetryQueueDepth:  hub.GetRetryQueueDepth(),
 			UptimeSeconds:    hub.GetUptime().Seconds(),
+		}
+		if timeoutEnforcer != nil {
+			metrics.FleetTimeoutsTotal = timeoutEnforcer.GetTimeoutCount()
 		}
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(MetricsResponse{

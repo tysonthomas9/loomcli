@@ -10,7 +10,7 @@ import (
 
 // TestHandleMetrics_NilHub tests that handleMetrics returns 503 when hub is nil.
 func TestHandleMetrics_NilHub(t *testing.T) {
-	handler := handleMetrics(nil)
+	handler := handleMetrics(nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -56,7 +56,7 @@ func TestHandleMetrics_NilHub(t *testing.T) {
 func TestHandleMetrics_ValidHub(t *testing.T) {
 	hub := NewSSEHub()
 
-	handler := handleMetrics(hub)
+	handler := handleMetrics(hub, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/metrics", nil)
 	rec := httptest.NewRecorder()

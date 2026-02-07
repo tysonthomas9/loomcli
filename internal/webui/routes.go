@@ -19,7 +19,7 @@ import (
 // setupRoutes configures all HTTP routes for the server.
 // defaultTerminalCmd is the command to run in terminal sessions.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig) {
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, defaultTerminalCmd string, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer) {
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -35,7 +35,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	mux.HandleFunc("GET /api/stats", handleStats(pool))
 
 	// SSE hub metrics endpoint
-	mux.HandleFunc("GET /api/metrics", handleMetrics(hub))
+	mux.HandleFunc("GET /api/metrics", handleMetrics(hub, timeoutEnforcer))
 
 	// Daemon status endpoint - exposes daemon configuration (auto-commit, auto-push, etc.)
 	mux.HandleFunc("GET /api/daemon/status", handleDaemonStatus(pool))
