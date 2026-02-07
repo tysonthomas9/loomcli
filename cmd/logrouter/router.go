@@ -21,40 +21,43 @@ var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 // validTaskID matches alphanumeric characters, hyphens, underscores, and dots.
 var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
+const defaultMaxBackups = 2
+
 // LogRouter handles routing log output to multiple destinations.
 type LogRouter struct {
 	baseDir     string
 	agentName   string
+	maxLogSize  int64
 	agentWriter *bufio.Writer
-	agentFile   *os.File
+	agentRotator *rotatingWriter
 
-	mu         sync.Mutex
-	taskID     string
-	phase      string
-	taskWriter *bufio.Writer
-	taskFile   *os.File
+	mu           sync.Mutex
+	taskID       string
+	phase        string
+	taskWriter   *bufio.Writer
+	taskRotator  *rotatingWriter
 }
 
 // NewLogRouter creates a new LogRouter that writes to the agent log file.
-func NewLogRouter(agentName, baseDir string) (*LogRouter, error) {
+// maxLogSize is the maximum log file size in bytes before rotation (0 disables rotation).
+func NewLogRouter(agentName, baseDir string, maxLogSize int64) (*LogRouter, error) {
 	if !validAgentName.MatchString(agentName) || agentName == "." || agentName == ".." {
 		return nil, fmt.Errorf("invalid agent name: %q (must match %s)", agentName, validAgentName.String())
 	}
 
 	agentLogPath := filepath.Join(baseDir, "agents", agentName+".log")
 
-	// Open agent log file (append mode, create if not exists)
-	// #nosec G304 - controlled path from CLI flags
-	agentFile, err := os.OpenFile(agentLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	agentRotator, err := newRotatingWriter(agentLogPath, maxLogSize, defaultMaxBackups)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open agent log file: %w", err)
 	}
 
 	return &LogRouter{
-		baseDir:     baseDir,
-		agentName:   agentName,
-		agentWriter: bufio.NewWriterSize(agentFile, bufferSize),
-		agentFile:   agentFile,
+		baseDir:      baseDir,
+		agentName:    agentName,
+		maxLogSize:   maxLogSize,
+		agentWriter:  bufio.NewWriterSize(agentRotator, bufferSize),
+		agentRotator: agentRotator,
 	}, nil
 }
 
@@ -98,18 +101,17 @@ func (r *LogRouter) SetTask(taskID, phase string) error {
 		return fmt.Errorf("failed to create task log directory: %w", err)
 	}
 
-	// Open task log file
+	// Open task log file with rotation
 	taskLogPath := filepath.Join(taskLogDir, phase+".log")
-	// #nosec G304 - controlled path from CLI flags and lock file
-	taskFile, err := os.OpenFile(taskLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	taskRotator, err := newRotatingWriter(taskLogPath, r.maxLogSize, defaultMaxBackups)
 	if err != nil {
 		return fmt.Errorf("failed to open task log file: %w", err)
 	}
 
 	r.taskID = taskID
 	r.phase = phase
-	r.taskFile = taskFile
-	r.taskWriter = bufio.NewWriterSize(taskFile, bufferSize)
+	r.taskRotator = taskRotator
+	r.taskWriter = bufio.NewWriterSize(taskRotator, bufferSize)
 
 	return nil
 }
@@ -201,7 +203,7 @@ func (r *LogRouter) Close() error {
 	if err := r.agentWriter.Flush(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to flush agent log: %w", err))
 	}
-	if err := r.agentFile.Close(); err != nil {
+	if err := r.agentRotator.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to close agent log: %w", err))
 	}
 
@@ -222,12 +224,12 @@ func (r *LogRouter) closeTaskLogLocked() error {
 	if err := r.taskWriter.Flush(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to flush task log: %w", err))
 	}
-	if err := r.taskFile.Close(); err != nil {
+	if err := r.taskRotator.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to close task log: %w", err))
 	}
 
 	r.taskWriter = nil
-	r.taskFile = nil
+	r.taskRotator = nil
 
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing task log: %v", errs)
