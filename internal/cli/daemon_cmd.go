@@ -56,6 +56,7 @@ Configuration is read from loom.yaml in the current directory:
   daemon:
     pid_file: .loom/daemon.pid       # default
     log_dir: .loom/logs              # default
+    max_agents: 20                   # default; 0 = unlimited
     restart_policy:
       max_retries: 3                 # default
       backoff_initial: 2             # seconds, default
@@ -458,9 +459,20 @@ func printDryRunInfo(config *DaemonConfig, pidFile, logDir, stateFile string) {
 	} else {
 		fmt.Printf("  Backoff max: 300s (default)\n")
 	}
+	if config.Daemon.MaxAgents != nil {
+		fmt.Printf("  Max agents: %d\n", *config.Daemon.MaxAgents)
+	} else {
+		fmt.Printf("  Max agents: 20 (default)\n")
+	}
 	fmt.Println("")
 	fmt.Println("Agents to supervise:")
 	for _, a := range config.Agents {
 		fmt.Printf("  - %s (role: %s, auto: %v)\n", a.Worktree, a.Role, a.Auto)
 	}
+	fmt.Println("")
+	fmt.Println("Recommended systemd resource controls:")
+	fmt.Println("  LimitNOFILE=65536      # file descriptor limit")
+	fmt.Println("  MemoryMax=4G           # memory ceiling")
+	fmt.Println("  CPUQuota=200%          # CPU limit (200% = 2 cores)")
+	fmt.Println("  TasksMax=256           # max tasks (processes+threads)")
 }

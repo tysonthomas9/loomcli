@@ -15,6 +15,7 @@ type DaemonSettings struct {
 	PIDFile       string        `yaml:"pid_file,omitempty"`
 	LogDir        string        `yaml:"log_dir,omitempty"`
 	RestartPolicy RestartPolicy `yaml:"restart_policy,omitempty"`
+	MaxAgents     *int          `yaml:"max_agents,omitempty"`
 }
 
 // RestartPolicy defines how the daemon restarts failed agents.
@@ -108,6 +109,7 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 				BackoffInitial: intPtr(2),
 				BackoffMax:     intPtr(300),
 			},
+			MaxAgents: intPtr(20),
 		},
 		Roles: make(map[string]RoleConfig),
 	}
@@ -150,6 +152,14 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		}
 	}
 
+	// Validate max_agents
+	if dc.Daemon.MaxAgents != nil && *dc.Daemon.MaxAgents < 0 {
+		return nil, fmt.Errorf("max_agents must be non-negative, got %d", *dc.Daemon.MaxAgents)
+	}
+	if dc.Daemon.MaxAgents != nil && *dc.Daemon.MaxAgents > 0 && len(dc.Agents) > *dc.Daemon.MaxAgents {
+		return nil, fmt.Errorf("too many agents configured: %d exceeds max_agents limit of %d", len(dc.Agents), *dc.Daemon.MaxAgents)
+	}
+
 	return dc, nil
 }
 
@@ -169,6 +179,9 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	}
 	if src.RestartPolicy.BackoffMax != nil {
 		dst.RestartPolicy.BackoffMax = src.RestartPolicy.BackoffMax
+	}
+	if src.MaxAgents != nil {
+		dst.MaxAgents = src.MaxAgents
 	}
 }
 

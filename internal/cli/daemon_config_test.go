@@ -416,3 +416,198 @@ Task: {{.TaskID}}`
 		}
 	})
 }
+
+func TestMaxAgents(t *testing.T) {
+	t.Run("default max_agents is 20", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		projectDir := t.TempDir()
+
+		dc, err := LoadDaemonConfig(projectDir)
+		if err != nil {
+			t.Fatalf("LoadDaemonConfig() error = %v", err)
+		}
+		requireIntPtr(t, "MaxAgents", dc.Daemon.MaxAgents, 20)
+	})
+
+	t.Run("global config sets max_agents", func(t *testing.T) {
+		configDir := t.TempDir()
+		t.Setenv("LOOM_CONFIG_DIR", configDir)
+		globalYAML := `daemon:
+  max_agents: 10
+`
+		if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(globalYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		dc, err := LoadDaemonConfig(t.TempDir())
+		if err != nil {
+			t.Fatalf("LoadDaemonConfig() error = %v", err)
+		}
+		requireIntPtr(t, "MaxAgents", dc.Daemon.MaxAgents, 10)
+	})
+
+	t.Run("local config overrides global max_agents", func(t *testing.T) {
+		configDir := t.TempDir()
+		t.Setenv("LOOM_CONFIG_DIR", configDir)
+		globalYAML := `daemon:
+  max_agents: 10
+`
+		if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(globalYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		projectDir := t.TempDir()
+		localYAML := `daemon:
+  max_agents: 5
+`
+		if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		dc, err := LoadDaemonConfig(projectDir)
+		if err != nil {
+			t.Fatalf("LoadDaemonConfig() error = %v", err)
+		}
+		requireIntPtr(t, "MaxAgents", dc.Daemon.MaxAgents, 5)
+	})
+
+	t.Run("max_agents 0 means unlimited", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		projectDir := t.TempDir()
+		localYAML := `daemon:
+  max_agents: 0
+agents:
+  - worktree: a1
+    role: plan
+  - worktree: a2
+    role: plan
+  - worktree: a3
+    role: plan
+  - worktree: a4
+    role: plan
+  - worktree: a5
+    role: plan
+  - worktree: a6
+    role: plan
+  - worktree: a7
+    role: plan
+  - worktree: a8
+    role: plan
+  - worktree: a9
+    role: plan
+  - worktree: a10
+    role: plan
+  - worktree: a11
+    role: plan
+  - worktree: a12
+    role: plan
+  - worktree: a13
+    role: plan
+  - worktree: a14
+    role: plan
+  - worktree: a15
+    role: plan
+  - worktree: a16
+    role: plan
+  - worktree: a17
+    role: plan
+  - worktree: a18
+    role: plan
+  - worktree: a19
+    role: plan
+  - worktree: a20
+    role: plan
+  - worktree: a21
+    role: plan
+  - worktree: a22
+    role: plan
+  - worktree: a23
+    role: plan
+  - worktree: a24
+    role: plan
+  - worktree: a25
+    role: plan
+`
+		if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		dc, err := LoadDaemonConfig(projectDir)
+		if err != nil {
+			t.Fatalf("LoadDaemonConfig() error = %v, want nil (0 means unlimited)", err)
+		}
+		requireIntPtr(t, "MaxAgents", dc.Daemon.MaxAgents, 0)
+		if len(dc.Agents) != 25 {
+			t.Errorf("len(Agents) = %d, want 25", len(dc.Agents))
+		}
+	})
+
+	t.Run("exceeding max_agents returns error", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		projectDir := t.TempDir()
+		localYAML := `daemon:
+  max_agents: 2
+agents:
+  - worktree: a1
+    role: plan
+  - worktree: a2
+    role: plan
+  - worktree: a3
+    role: plan
+`
+		if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := LoadDaemonConfig(projectDir)
+		if err == nil {
+			t.Fatal("expected error for exceeding max_agents")
+		}
+		if !strings.Contains(err.Error(), "too many agents configured") {
+			t.Errorf("error = %q, want contains 'too many agents configured'", err.Error())
+		}
+	})
+
+	t.Run("exactly at max_agents passes", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		projectDir := t.TempDir()
+		localYAML := `daemon:
+  max_agents: 2
+agents:
+  - worktree: a1
+    role: plan
+  - worktree: a2
+    role: plan
+`
+		if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		dc, err := LoadDaemonConfig(projectDir)
+		if err != nil {
+			t.Fatalf("LoadDaemonConfig() error = %v, want nil", err)
+		}
+		if len(dc.Agents) != 2 {
+			t.Errorf("len(Agents) = %d, want 2", len(dc.Agents))
+		}
+	})
+
+	t.Run("negative max_agents returns error", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		projectDir := t.TempDir()
+		localYAML := `daemon:
+  max_agents: -1
+`
+		if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := LoadDaemonConfig(projectDir)
+		if err == nil {
+			t.Fatal("expected error for negative max_agents")
+		}
+		if !strings.Contains(err.Error(), "must be non-negative") {
+			t.Errorf("error = %q, want contains 'must be non-negative'", err.Error())
+		}
+	})
+}
