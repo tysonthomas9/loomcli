@@ -2784,3 +2784,177 @@ func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
 		t.Errorf("expected priority 2 count=1, got %d", counts[2])
 	}
 }
+
+func TestBdIssueUnmarshalDependencies(t *testing.T) {
+	tests := []struct {
+		name         string
+		jsonInput    string
+		wantDepsLen  int
+		wantIssueID  string
+		wantTitle    string
+		wantDep0     *Dependency // expected first dependency (nil if none)
+	}{
+		{
+			name:        "null dependencies field",
+			jsonInput:   `{"id":"T-1","title":"Task one","status":"open","dependencies":null}`,
+			wantDepsLen: 0,
+			wantIssueID: "T-1",
+			wantTitle:   "Task one",
+		},
+		{
+			name:        "missing dependencies field",
+			jsonInput:   `{"id":"T-2","title":"Task two","status":"open"}`,
+			wantDepsLen: 0,
+			wantIssueID: "T-2",
+			wantTitle:   "Task two",
+		},
+		{
+			name:        "empty dependencies array",
+			jsonInput:   `{"id":"T-3","title":"Task three","status":"open","dependencies":[]}`,
+			wantDepsLen: 0,
+			wantIssueID: "T-3",
+			wantTitle:   "Task three",
+		},
+		{
+			name: "single dependency",
+			jsonInput: `{"id":"T-4","title":"Task four","status":"open","dependencies":[
+				{"issue_id":"T-4","depends_on_id":"T-1","type":"blocks","created_at":"2025-01-01T00:00:00Z","created_by":"user1"}
+			]}`,
+			wantDepsLen: 1,
+			wantIssueID: "T-4",
+			wantTitle:   "Task four",
+			wantDep0: &Dependency{
+				IssueID:     "T-4",
+				DependsOnID: "T-1",
+				Type:        "blocks",
+				CreatedAt:   "2025-01-01T00:00:00Z",
+				CreatedBy:   "user1",
+			},
+		},
+		{
+			name: "multiple dependencies with different types",
+			jsonInput: `{"id":"T-5","title":"Task five","status":"open","dependencies":[
+				{"issue_id":"T-5","depends_on_id":"T-1","type":"parent-child","created_at":"2025-01-01T00:00:00Z","created_by":"user1"},
+				{"issue_id":"T-5","depends_on_id":"T-2","type":"blocks","created_at":"2025-01-02T00:00:00Z","created_by":"user2"}
+			]}`,
+			wantDepsLen: 2,
+			wantIssueID: "T-5",
+			wantTitle:   "Task five",
+			wantDep0: &Dependency{
+				IssueID:     "T-5",
+				DependsOnID: "T-1",
+				Type:        "parent-child",
+				CreatedAt:   "2025-01-01T00:00:00Z",
+				CreatedBy:   "user1",
+			},
+		},
+		{
+			name: "dependencies alongside other fields",
+			jsonInput: `{"id":"T-6","title":"Task six","status":"open","priority":2,"issue_type":"task","design":"some plan","assignee":"falcon","labels":["bug"],"dependencies":[
+				{"issue_id":"T-6","depends_on_id":"T-3","type":"blocks","created_at":"2025-03-01T00:00:00Z","created_by":"admin"}
+			]}`,
+			wantDepsLen: 1,
+			wantIssueID: "T-6",
+			wantTitle:   "Task six",
+			wantDep0: &Dependency{
+				IssueID:     "T-6",
+				DependsOnID: "T-3",
+				Type:        "blocks",
+				CreatedAt:   "2025-03-01T00:00:00Z",
+				CreatedBy:   "admin",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var issue BdIssue
+			err := json.Unmarshal([]byte(tc.jsonInput), &issue)
+			if err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+
+			if issue.ID != tc.wantIssueID {
+				t.Errorf("ID = %q, want %q", issue.ID, tc.wantIssueID)
+			}
+			if issue.Title != tc.wantTitle {
+				t.Errorf("Title = %q, want %q", issue.Title, tc.wantTitle)
+			}
+			if len(issue.Dependencies) != tc.wantDepsLen {
+				t.Fatalf("Dependencies len = %d, want %d", len(issue.Dependencies), tc.wantDepsLen)
+			}
+
+			if tc.wantDep0 != nil && len(issue.Dependencies) > 0 {
+				got := issue.Dependencies[0]
+				if got.IssueID != tc.wantDep0.IssueID {
+					t.Errorf("Dependencies[0].IssueID = %q, want %q", got.IssueID, tc.wantDep0.IssueID)
+				}
+				if got.DependsOnID != tc.wantDep0.DependsOnID {
+					t.Errorf("Dependencies[0].DependsOnID = %q, want %q", got.DependsOnID, tc.wantDep0.DependsOnID)
+				}
+				if got.Type != tc.wantDep0.Type {
+					t.Errorf("Dependencies[0].Type = %q, want %q", got.Type, tc.wantDep0.Type)
+				}
+				if got.CreatedAt != tc.wantDep0.CreatedAt {
+					t.Errorf("Dependencies[0].CreatedAt = %q, want %q", got.CreatedAt, tc.wantDep0.CreatedAt)
+				}
+				if got.CreatedBy != tc.wantDep0.CreatedBy {
+					t.Errorf("Dependencies[0].CreatedBy = %q, want %q", got.CreatedBy, tc.wantDep0.CreatedBy)
+				}
+			}
+		})
+	}
+}
+
+func TestBdIssueUnmarshalDependenciesRoundTrip(t *testing.T) {
+	// Verify that marshaling and unmarshaling a BdIssue with dependencies preserves data
+	original := BdIssue{
+		ID:        "T-10",
+		Title:     "Round trip test",
+		Status:    "open",
+		Priority:  1,
+		IssueType: "task",
+		Design:    "some design",
+		Assignee:  "falcon",
+		Labels:    []string{"feature"},
+		Dependencies: []Dependency{
+			{
+				IssueID:     "T-10",
+				DependsOnID: "T-5",
+				Type:        "parent-child",
+				CreatedAt:   "2025-06-01T12:00:00Z",
+				CreatedBy:   "admin",
+			},
+			{
+				IssueID:     "T-10",
+				DependsOnID: "T-7",
+				Type:        "blocks",
+				CreatedAt:   "2025-06-02T12:00:00Z",
+				CreatedBy:   "user2",
+			},
+		},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var decoded BdIssue
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if decoded.ID != original.ID {
+		t.Errorf("ID = %q, want %q", decoded.ID, original.ID)
+	}
+	if len(decoded.Dependencies) != len(original.Dependencies) {
+		t.Fatalf("Dependencies len = %d, want %d", len(decoded.Dependencies), len(original.Dependencies))
+	}
+	for i, want := range original.Dependencies {
+		got := decoded.Dependencies[i]
+		if got != want {
+			t.Errorf("Dependencies[%d] = %+v, want %+v", i, got, want)
+		}
+	}
+}

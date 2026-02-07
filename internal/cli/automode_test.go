@@ -74,6 +74,24 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 			}),
 			want: true,
 		},
+		{
+			name: "task with dependencies still needs planning",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task with deps", Status: "open", Design: "", Dependencies: []Dependency{
+					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
+				}},
+			}),
+			want: true,
+		},
+		{
+			name: "task with dependencies and design not needing planning",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task with deps and design", Status: "open", Design: "Approved plan", Dependencies: []Dependency{
+					{IssueID: "T-1", DependsOnID: "T-0", Type: "parent-child", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
+				}},
+			}),
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -161,6 +179,24 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 				{ID: "T-3", Title: "Ready to implement", Status: "open", Design: "Detailed plan"},
 			}),
 			want: true,
+		},
+		{
+			name: "task with dependencies and design ready for implementation",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Ready with deps", Status: "open", Design: "Implementation plan", Dependencies: []Dependency{
+					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
+				}},
+			}),
+			want: true,
+		},
+		{
+			name: "task with dependencies but no design not ready",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Not ready with deps", Status: "open", Design: "", Dependencies: []Dependency{
+					{IssueID: "T-1", DependsOnID: "T-0", Type: "parent-child", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
+				}},
+			}),
+			want: false,
 		},
 	}
 
