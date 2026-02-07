@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -34,14 +36,14 @@ var claudeInvoker = defaultClaudeInvoker
 
 // defaultClaudeInvoker is the real Claude invocation
 func defaultClaudeInvoker(workDir, prompt, agentName string) error {
-	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt)
+	cmd := exec.Command("claude", "--dangerously-skip-permissions")
 	cmd.Dir = workDir
 	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
 	cmd.Env = env
-	cmd.Stdin = os.Stdin
+	cmd.Stdin = io.MultiReader(strings.NewReader(prompt+"\n"), os.Stdin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -63,7 +65,7 @@ var claudeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown
 // defaultClaudeNonInteractiveInvoker is the real non-interactive Claude invocation
 func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
-		"--dangerously-skip-permissions", prompt)
+		"--dangerously-skip-permissions")
 	cmd.Dir = workDir
 	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
@@ -71,10 +73,15 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	}
 	cmd.Env = env
 
-	// Create a pipe and close write end to send EOF
+	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings
 	r, w, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("failed to create pipe: %w", err)
+	}
+	if _, err := io.WriteString(w, prompt); err != nil {
+		w.Close()
+		r.Close()
+		return fmt.Errorf("failed to write prompt to stdin: %w", err)
 	}
 	w.Close()
 	cmd.Stdin = r

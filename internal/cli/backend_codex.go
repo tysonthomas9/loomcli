@@ -3,8 +3,10 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 )
 
@@ -28,14 +30,14 @@ var codexInvoker = defaultCodexInvoker
 var codexNonInteractiveInvoker = defaultCodexNonInteractiveInvoker
 
 func defaultCodexInvoker(workDir, prompt, agentName string) error {
-	cmd := exec.Command("codex", "--full-auto", prompt)
+	cmd := exec.Command("codex", "--full-auto")
 	cmd.Dir = workDir
 	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
 	cmd.Env = env
-	cmd.Stdin = os.Stdin
+	cmd.Stdin = io.MultiReader(strings.NewReader(prompt+"\n"), os.Stdin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -46,7 +48,7 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
-	cmd := exec.Command("codex", "exec", "--json", prompt)
+	cmd := exec.Command("codex", "exec", "--json")
 	cmd.Dir = workDir
 	env := append(os.Environ(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
@@ -54,10 +56,15 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	}
 	cmd.Env = env
 
-	// Create a pipe and close write end to send EOF
+	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings
 	r, w, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("failed to create pipe: %w", err)
+	}
+	if _, err := io.WriteString(w, prompt); err != nil {
+		w.Close()
+		r.Close()
+		return fmt.Errorf("failed to write prompt to stdin: %w", err)
 	}
 	w.Close()
 	cmd.Stdin = r
