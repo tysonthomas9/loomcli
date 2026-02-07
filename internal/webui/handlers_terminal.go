@@ -19,6 +19,7 @@ const (
 	resizeMsgLen        = 5
 	maxTerminalCols     = 500
 	maxTerminalRows     = 200
+	wsReadLimit         = 32768 // 32KB; explicit limit for defense-in-depth (matches nhooyr.io/websocket default)
 )
 
 // validTerminalSession matches alphanumeric characters, hyphens, and underscores.
@@ -153,6 +154,7 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 			log.Printf("Failed to accept WebSocket: %v", err)
 			return
 		}
+		conn.SetReadLimit(wsReadLimit)
 
 		// Track close status for deferred cleanup
 		closeStatus := websocket.StatusInternalError
