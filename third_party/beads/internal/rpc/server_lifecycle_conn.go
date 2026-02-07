@@ -71,6 +71,17 @@ func (s *Server) Start(_ context.Context) error {
 			return fmt.Errorf("failed to accept connection: %w", err)
 		}
 
+		// Verify peer credentials — reject connections from different UIDs.
+		// If getPeerUID returns an error (unsupported platform/conn type), skip the check.
+		if peerUID, err := getPeerUID(conn); err == nil {
+			if peerUID != uint32(os.Getuid()) {
+				fmt.Fprintf(os.Stderr, "rejected connection: peer UID %d != server UID %d\n", peerUID, os.Getuid())
+				s.metrics.RecordRejectedConnection()
+				_ = conn.Close()
+				continue
+			}
+		}
+
 		// Try to acquire connection slot (non-blocking)
 		select {
 		case s.connSemaphore <- struct{}{}:
