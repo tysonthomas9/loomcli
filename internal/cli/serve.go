@@ -69,12 +69,14 @@ ENDPOINTS
 
 ENVIRONMENT VARIABLES
   LOOM_SERVER_PORT    Server port (default: 8081)
-  LOOM_CORS_ORIGIN    CORS allowed origin (default: * for all)
+  LOOM_BIND_ADDR      Bind address (default: 127.0.0.1)
+  LOOM_CORS_ORIGIN    CORS allowed origin (default: http://localhost:<webui-port>)
   LOOM_REDIS_PASSWORD Redis password (avoids exposure in process list)
 
 EXAMPLES
   loom serve                          # Start on default port 8081
   loom serve --port 9000              # Start on port 9000
+  loom serve --bind 0.0.0.0           # Listen on all interfaces
   loom serve --cors http://localhost:8080   # Allow specific origin`,
 	Args: cobra.NoArgs,
 	Run:  runServe,
@@ -98,7 +100,7 @@ func init() {
 
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", defaultPort, "Server port")
 	serveCmd.Flags().StringVar(&serveBindAddr, "bind", defaultBind, "Bind address (use 0.0.0.0 for all interfaces)")
-	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin (empty for all)")
+	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", defaultCors, "CORS allowed origin (default: http://localhost:<webui-port>)")
 	serveCmd.Flags().IntVar(&serveWebUIPort, "webui-port", 8080, "Port for the web UI server")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
 	serveCmd.Flags().BoolVar(&serveNoWebUI, "no-webui", false, "Disable the web UI server, run only the API")
@@ -290,7 +292,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		close(apiErr)
 	}()
 
-	log.Printf("Starting loom API server on port %d", servePort)
+	log.Printf("Starting loom API server on %s:%d", serveBindAddr, servePort)
 	if serveCorsOrigin != "" {
 		log.Printf("CORS enabled for origin: %s", serveCorsOrigin)
 	}
@@ -348,7 +350,7 @@ func corsMiddleware(corsOrigin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := corsOrigin
 		if origin == "" {
-			origin = "*"
+			origin = fmt.Sprintf("http://localhost:%d", serveWebUIPort)
 		}
 
 		w.Header().Set("Access-Control-Allow-Origin", origin)

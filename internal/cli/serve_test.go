@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,10 +129,10 @@ func TestCorsMiddleware(t *testing.T) {
 		handlerCalled  bool
 	}{
 		{
-			name:           "empty origin defaults to wildcard",
+			name:           "empty origin defaults to localhost webui port",
 			corsOrigin:     "",
 			requestMethod:  "GET",
-			wantOrigin:     "*",
+			wantOrigin:     fmt.Sprintf("http://localhost:%d", serveWebUIPort),
 			wantStatusCode: http.StatusOK,
 			handlerCalled:  true,
 		},
@@ -1165,6 +1166,19 @@ func TestHandleAgents_LegacyMode_NoByWorkspace(t *testing.T) {
 			t.Errorf("ByWorkspace = %v, want nil in legacy mode", resp.ByWorkspace)
 		}
 	})
+}
+
+func TestServeFlags_Bind(t *testing.T) {
+	f := serveCmd.Flags().Lookup("bind")
+	if f == nil {
+		t.Fatal("bind flag not registered on serveCmd")
+	}
+	if f.DefValue != "127.0.0.1" {
+		t.Errorf("bind DefValue = %q, want %q", f.DefValue, "127.0.0.1")
+	}
+	if f.Value.Type() != "string" {
+		t.Errorf("bind type = %q, want %q", f.Value.Type(), "string")
+	}
 }
 
 func TestServeFlags_RedisPassword(t *testing.T) {
