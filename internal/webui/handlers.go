@@ -274,7 +274,11 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 		}
 
 		// Parse query parameters into ListArgs
-		args := parseListParams(r)
+		args, err := parseListParams(r)
+		if err != nil {
+			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
+			return
+		}
 
 		// Acquire connection with timeout
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -855,7 +859,7 @@ func parseGraphParams(r *http.Request) (status string, includeClosed bool) {
 }
 
 // parseListParams extracts ListArgs from HTTP query parameters.
-func parseListParams(r *http.Request) *rpc.ListArgs {
+func parseListParams(r *http.Request) (*rpc.ListArgs, error) {
 	query := r.URL.Query()
 	args := &rpc.ListArgs{}
 
@@ -906,18 +910,25 @@ func parseListParams(r *http.Request) *rpc.ListArgs {
 		args.NotesContains = v
 	}
 
-	// Date ranges
-	if v := query.Get("created_after"); v != "" {
-		args.CreatedAfter = v
+	// Date ranges (validated as RFC3339 or date-only)
+	dateParams := []struct {
+		param string
+		dest  *string
+	}{
+		{"created_after", &args.CreatedAfter},
+		{"created_before", &args.CreatedBefore},
+		{"updated_after", &args.UpdatedAfter},
+		{"updated_before", &args.UpdatedBefore},
 	}
-	if v := query.Get("created_before"); v != "" {
-		args.CreatedBefore = v
-	}
-	if v := query.Get("updated_after"); v != "" {
-		args.UpdatedAfter = v
-	}
-	if v := query.Get("updated_before"); v != "" {
-		args.UpdatedBefore = v
+	for _, dp := range dateParams {
+		if v := query.Get(dp.param); v != "" {
+			if _, err := time.Parse(time.RFC3339, v); err != nil {
+				if _, err2 := time.Parse("2006-01-02", v); err2 != nil {
+					return nil, fmt.Errorf("invalid %s: expected RFC3339 format (e.g., 2024-01-15T00:00:00Z) or date (2024-01-15)", dp.param)
+				}
+			}
+			*dp.dest = v
+		}
 	}
 
 	// Empty/null checks
@@ -937,7 +948,7 @@ func parseListParams(r *http.Request) *rpc.ListArgs {
 		args.Pinned = &pinned
 	}
 
-	return args
+	return args, nil
 }
 
 // parseReadyParams parses query parameters into rpc.ReadyArgs.
