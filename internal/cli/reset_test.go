@@ -13,6 +13,30 @@ import (
 )
 
 // ============================================================================
+// Help Text Regression Tests
+// ============================================================================
+
+func TestResetCmd_HelpText_NoHardcodedBranch(t *testing.T) {
+	// Regression test: the Long help text should not contain hardcoded branch
+	// names as the default. The actual default comes from GetDefaultBranch()
+	// which dynamically detects the integration branch.
+	longText := strings.ToLower(resetCmd.Long)
+
+	forbidden := []string{
+		"default: feature/",
+		"default: main",
+		"default: master",
+		"default: develop",
+	}
+
+	for _, pattern := range forbidden {
+		if strings.Contains(longText, pattern) {
+			t.Errorf("reset command help text contains hardcoded branch name %q — use a dynamic description like 'integration branch' instead", pattern)
+		}
+	}
+}
+
+// ============================================================================
 // resetAllWorktrees Per-Repo Branch Tests
 // ============================================================================
 
