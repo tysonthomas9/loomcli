@@ -612,7 +612,7 @@ func TestHandleAPIHealth_NilPool(t *testing.T) {
 // the terminal WebSocket endpoint is NOT registered when termManager is nil.
 func TestSetupRoutes_TerminalEndpointNotRegisteredWithNilManager(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil) // nil termManager
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil) // nil termManager
 
 	// Request to terminal endpoint should fall through to frontend handler
 	// (the SPA catch-all) since the route is not registered
@@ -648,7 +648,7 @@ func TestSetupRoutes_TerminalEndpointRegisteredWithManager(t *testing.T) {
 	defer termMgr.Shutdown()
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, termMgr, "", nil, nil, nil, "", false, nil) // non-nil termManager
+	setupRoutes(mux, nil, nil, nil, termMgr, "", nil, nil, nil, "", false, nil, nil) // non-nil termManager
 
 	// Request to terminal endpoint should be handled by the terminal handler,
 	// not fall through to frontend. Without WebSocket upgrade headers,
@@ -710,7 +710,7 @@ func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
 // TestSetupRoutes_StatsEndpoint tests that stats endpoint is registered.
 func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil)
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil)
 
 	// Test that stats endpoint is registered
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
@@ -739,7 +739,7 @@ func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 // catch-all frontend handler "/" which returns index.html (200 OK).
 func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil)
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil)
 
 	// POST to GET-only endpoint falls through to frontend handler
 	req := httptest.NewRequest(http.MethodPost, "/api/stats", nil)

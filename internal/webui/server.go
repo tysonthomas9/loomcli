@@ -45,6 +45,7 @@ type ServerConfig struct {
 	TerminalCmd     string
 	FleetRedis      *fleet.RedisConfig
 	FleetJWTKey     []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey     string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
 	APIKey          string // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
 	AuthEnabled     bool   // Whether API authentication is enabled (default: true)
 }
@@ -259,6 +260,24 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		defer fleetStore.Close()
 	}
 
+	// Build fleet registration config (API key + rate limiter)
+	var fleetRegCfg *FleetRegisterConfig
+	if config.FleetAPIKey != "" && fleetStore != nil {
+		fleetRegCfg = &FleetRegisterConfig{
+			APIKey: config.FleetAPIKey,
+		}
+		// Create rate limiter using a separate Redis client
+		if config.FleetRedis != nil {
+			rlClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
+			fleetRegCfg.RateLimiter = NewFleetRateLimiter(rlClient, 10, time.Minute)
+			defer fleetRegCfg.RateLimiter.Close()
+		}
+		log.Printf("Fleet API key authentication enabled")
+	} else if fleetStore != nil && config.FleetAPIKey == "" {
+		log.Printf("Warning: fleet store configured but no fleet API key set (LOOM_FLEET_API_KEY)")
+		log.Printf("Fleet registration endpoint will return 503 until a fleet API key is configured")
+	}
+
 	// Load or generate API key for authentication
 	var apiKey string
 	if config.AuthEnabled {
@@ -287,7 +306,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg)
 
 	// Wrap with middleware chain: security -> auth -> CORS -> mux
 	// Auth sits between security headers and CORS so that:

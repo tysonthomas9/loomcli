@@ -78,6 +78,11 @@ func NewAuthMiddleware(config AuthConfig) func(http.Handler) http.Handler {
 // isPublicRoute returns true if the given method+path combination should be
 // accessible without authentication.
 func isPublicRoute(method, path string) bool {
+	// Fleet endpoints use their own authentication (API key for register, JWT for claim/heartbeat)
+	if strings.HasPrefix(path, "/api/fleet/") {
+		return true
+	}
+
 	if method != http.MethodGet {
 		return false
 	}

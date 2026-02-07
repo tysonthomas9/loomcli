@@ -2,10 +2,12 @@ package webui
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +17,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
+
+// FleetRegisterConfig holds configuration for fleet worker registration authentication.
+type FleetRegisterConfig struct {
+	APIKey      string             // Pre-shared API key for fleet registration
+	RateLimiter *FleetRateLimiter  // Optional rate limiter (nil = no rate limiting)
+}
 
 // FleetRegisterRequest represents the JSON body for POST /api/fleet/register.
 type FleetRegisterRequest struct {
@@ -38,12 +46,12 @@ type workerRegistrar interface {
 }
 
 // handleFleetRegister returns a handler that registers a fleet worker and issues a JWT.
-func handleFleetRegister(store *fleet.Store, tokenCfg *TokenConfig) http.HandlerFunc {
-	return handleFleetRegisterWithStore(store, tokenCfg)
+func handleFleetRegister(store *fleet.Store, tokenCfg *TokenConfig, regCfg *FleetRegisterConfig) http.HandlerFunc {
+	return handleFleetRegisterWithStore(store, tokenCfg, regCfg)
 }
 
 // handleFleetRegisterWithStore is the internal implementation that accepts an interface for testing.
-func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig) http.HandlerFunc {
+func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, regCfg *FleetRegisterConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -57,6 +65,57 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig) 
 				log.Printf("Failed to encode fleet register response: %v", err)
 			}
 			return
+		}
+
+		// Validate fleet API key
+		if regCfg == nil || regCfg.APIKey == "" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				Success: false,
+				Error:   "fleet authentication not configured",
+			}); err != nil {
+				log.Printf("Failed to encode fleet register response: %v", err)
+			}
+			return
+		}
+
+		apiKeyHeader := r.Header.Get("X-Fleet-API-Key")
+		if apiKeyHeader == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				Success: false,
+				Error:   "missing X-Fleet-API-Key header",
+			}); err != nil {
+				log.Printf("Failed to encode fleet register response: %v", err)
+			}
+			return
+		}
+
+		if subtle.ConstantTimeCompare([]byte(apiKeyHeader), []byte(regCfg.APIKey)) != 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				Success: false,
+				Error:   "invalid API key",
+			}); err != nil {
+				log.Printf("Failed to encode fleet register response: %v", err)
+			}
+			return
+		}
+
+		// Rate limit by client IP (if rate limiter is configured)
+		if regCfg.RateLimiter != nil {
+			clientIP := extractClientIP(r)
+			allowed, _ := regCfg.RateLimiter.Allow(r.Context(), clientIP)
+			if !allowed {
+				w.WriteHeader(http.StatusTooManyRequests)
+				if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+					Success: false,
+					Error:   "rate limit exceeded",
+				}); err != nil {
+					log.Printf("Failed to encode fleet register response: %v", err)
+				}
+				return
+			}
 		}
 
 		// Parse request body
@@ -772,4 +831,16 @@ func handleFleetHeartbeatWithStore(store heartbeatStore) http.HandlerFunc {
 			log.Printf("Failed to encode heartbeat response: %v", err)
 		}
 	}
+}
+
+// extractClientIP returns the client IP address from the request.
+// Uses RemoteAddr only — X-Forwarded-For is not trusted because clients
+// can spoof it to bypass rate limiting. If a reverse proxy is needed,
+// configure the proxy to set RemoteAddr (e.g., PROXY protocol).
+func extractClientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }

@@ -271,6 +271,13 @@ func TestIsPublicRoute(t *testing.T) {
 		{"POST /api/issues", http.MethodPost, "/api/issues", false},
 		{"PATCH /api/issues/123", http.MethodPatch, "/api/issues/123", false},
 		{"DELETE /api/issues/123", http.MethodDelete, "/api/issues/123", false},
+
+		// Fleet routes are public (they use their own auth: API key for register, JWT for claim/heartbeat)
+		{"POST /api/fleet/register", http.MethodPost, "/api/fleet/register", true},
+		{"POST /api/fleet/claim", http.MethodPost, "/api/fleet/claim", true},
+		{"POST /api/fleet/heartbeat", http.MethodPost, "/api/fleet/heartbeat", true},
+		{"POST /api/fleet/done/worker-1", http.MethodPost, "/api/fleet/done/worker-1", true},
+		{"GET /api/fleet/register", http.MethodGet, "/api/fleet/register", true},
 	}
 
 	for _, tt := range tests {

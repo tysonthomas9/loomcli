@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -552,16 +554,31 @@ func testTokenConfig() *TokenConfig {
 	}
 }
 
+// testFleetRegCfg returns a FleetRegisterConfig with a known API key for testing.
+const testFleetAPIKey = "test-fleet-api-key-secret"
+
+func testFleetRegCfg() *FleetRegisterConfig {
+	return &FleetRegisterConfig{
+		APIKey: testFleetAPIKey,
+	}
+}
+
+// setFleetAPIKeyHeader sets the X-Fleet-API-Key header with the test API key.
+func setFleetAPIKeyHeader(req *http.Request) {
+	req.Header.Set("X-Fleet-API-Key", testFleetAPIKey)
+}
+
 func TestFleetRegister_Success(t *testing.T) {
 	store := &mockWorkerRegistrar{}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	body, _ := json.Marshal(FleetRegisterRequest{
 		WorkerID: "worker-1",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -592,13 +609,14 @@ func TestFleetRegister_Success(t *testing.T) {
 func TestFleetRegister_EmptyWorkerID(t *testing.T) {
 	store := &mockWorkerRegistrar{}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	body, _ := json.Marshal(FleetRegisterRequest{
 		WorkerID: "",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -614,7 +632,7 @@ func TestFleetRegister_EmptyWorkerID(t *testing.T) {
 func TestFleetRegister_MissingWorkerID(t *testing.T) {
 	store := &mockWorkerRegistrar{}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	// Send a body without the worker_id field at all
 	body, _ := json.Marshal(map[string]interface{}{
@@ -622,6 +640,7 @@ func TestFleetRegister_MissingWorkerID(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -637,7 +656,7 @@ func TestFleetRegister_MissingWorkerID(t *testing.T) {
 func TestFleetRegister_WorkerIDTooLong(t *testing.T) {
 	store := &mockWorkerRegistrar{}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	longID := strings.Repeat("x", 257) // exceeds maxWorkerIDLength (256)
 	body, _ := json.Marshal(FleetRegisterRequest{
@@ -645,6 +664,7 @@ func TestFleetRegister_WorkerIDTooLong(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -666,7 +686,7 @@ func TestFleetRegister_DuplicateRegistration_Succeeds(t *testing.T) {
 		},
 	}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	// Register twice with the same worker_id
 	for i := 0; i < 2; i++ {
@@ -675,6 +695,7 @@ func TestFleetRegister_DuplicateRegistration_Succeeds(t *testing.T) {
 		})
 		req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
+		setFleetAPIKeyHeader(req)
 		w := httptest.NewRecorder()
 
 		handler.ServeHTTP(w, req)
@@ -697,13 +718,14 @@ func TestFleetRegister_DuplicateRegistration_Succeeds(t *testing.T) {
 
 func TestFleetRegister_StoreNil_Returns503(t *testing.T) {
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(nil, tokenCfg)
+	handler := handleFleetRegisterWithStore(nil, tokenCfg, testFleetRegCfg())
 
 	body, _ := json.Marshal(FleetRegisterRequest{
 		WorkerID: "worker-1",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -718,13 +740,14 @@ func TestFleetRegister_StoreNil_Returns503(t *testing.T) {
 
 func TestFleetRegister_TokenConfigNil_Returns503(t *testing.T) {
 	store := &mockWorkerRegistrar{}
-	handler := handleFleetRegisterWithStore(store, nil)
+	handler := handleFleetRegisterWithStore(store, nil, testFleetRegCfg())
 
 	body, _ := json.Marshal(FleetRegisterRequest{
 		WorkerID: "worker-1",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -744,13 +767,14 @@ func TestFleetRegister_StoreError_Returns500(t *testing.T) {
 		},
 	}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	body, _ := json.Marshal(FleetRegisterRequest{
 		WorkerID: "worker-1",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -766,10 +790,11 @@ func TestFleetRegister_StoreError_Returns500(t *testing.T) {
 func TestFleetRegister_InvalidJSON_Returns400(t *testing.T) {
 	store := &mockWorkerRegistrar{}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader([]byte("{invalid json")))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -785,7 +810,7 @@ func TestFleetRegister_InvalidJSON_Returns400(t *testing.T) {
 func TestFleetRegister_BodyTooLarge_Returns413(t *testing.T) {
 	store := &mockWorkerRegistrar{}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	// Create a body larger than 1MB (maxRequestBody)
 	largeBody := make([]byte, 1<<20+100)
@@ -798,6 +823,7 @@ func TestFleetRegister_BodyTooLarge_Returns413(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(largeBody))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -813,7 +839,7 @@ func TestFleetRegister_BodyTooLarge_Returns413(t *testing.T) {
 func TestFleetRegister_TokenContainsCorrectClaims(t *testing.T) {
 	store := &mockWorkerRegistrar{}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	body, _ := json.Marshal(FleetRegisterRequest{
 		WorkerID: "my-worker",
@@ -821,6 +847,7 @@ func TestFleetRegister_TokenContainsCorrectClaims(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -857,7 +884,7 @@ func TestFleetRegister_TokenContainsCorrectClaims(t *testing.T) {
 func TestFleetRegister_WithRepos_TokenScopedToRepos(t *testing.T) {
 	store := &mockWorkerRegistrar{}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	repos := []string{"org/repo-1", "org/repo-2", "org/repo-3"}
 	body, _ := json.Marshal(FleetRegisterRequest{
@@ -866,6 +893,7 @@ func TestFleetRegister_WithRepos_TokenScopedToRepos(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -895,13 +923,14 @@ func TestFleetRegister_WithRepos_TokenScopedToRepos(t *testing.T) {
 func TestFleetRegister_WithoutRepos_TokenHasNilRepos(t *testing.T) {
 	store := &mockWorkerRegistrar{}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	body, _ := json.Marshal(FleetRegisterRequest{
 		WorkerID: "no-repos-worker",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -932,7 +961,7 @@ func TestFleetRegister_StoreReceivesCorrectWorker(t *testing.T) {
 		},
 	}
 	tokenCfg := testTokenConfig()
-	handler := handleFleetRegisterWithStore(store, tokenCfg)
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
 
 	body, _ := json.Marshal(FleetRegisterRequest{
 		WorkerID: "captured-worker",
@@ -940,6 +969,7 @@ func TestFleetRegister_StoreReceivesCorrectWorker(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -960,6 +990,179 @@ func TestFleetRegister_StoreReceivesCorrectWorker(t *testing.T) {
 	if capturedWorker.RegisteredAt == 0 {
 		t.Error("worker.RegisteredAt should be non-zero")
 	}
+}
+
+// =============================================================================
+// Fleet Register API Key Authentication Tests
+// =============================================================================
+
+func TestFleetRegister_MissingAPIKey_Returns401(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "worker-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// No X-Fleet-API-Key header
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+	if errMsg, ok := result["error"].(string); ok {
+		if errMsg != "missing X-Fleet-API-Key header" {
+			t.Errorf("error = %q, want %q", errMsg, "missing X-Fleet-API-Key header")
+		}
+	}
+}
+
+func TestFleetRegister_WrongAPIKey_Returns401(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "worker-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Fleet-API-Key", "wrong-key")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+	if errMsg, ok := result["error"].(string); ok {
+		if errMsg != "invalid API key" {
+			t.Errorf("error = %q, want %q", errMsg, "invalid API key")
+		}
+	}
+}
+
+func TestFleetRegister_NilRegCfg_Returns503(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg, nil)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "worker-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Fleet-API-Key", testFleetAPIKey)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+	if errMsg, ok := result["error"].(string); ok {
+		if errMsg != "fleet authentication not configured" {
+			t.Errorf("error = %q, want %q", errMsg, "fleet authentication not configured")
+		}
+	}
+}
+
+func TestFleetRegister_EmptyAPIKeyConfig_Returns503(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg, &FleetRegisterConfig{APIKey: ""})
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "worker-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Fleet-API-Key", "some-key")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestFleetRegister_RateLimitExceeded_Returns429(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	regCfg := &FleetRegisterConfig{
+		APIKey:      testFleetAPIKey,
+		RateLimiter: NewFleetRateLimiter(client, 2, time.Minute),
+	}
+	handler := handleFleetRegisterWithStore(store, tokenCfg, regCfg)
+
+	// First two requests should succeed
+	for i := 0; i < 2; i++ {
+		body, _ := json.Marshal(FleetRegisterRequest{WorkerID: "worker-rl"})
+		req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		setFleetAPIKeyHeader(req)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("request %d: status = %d, want %d", i+1, w.Code, http.StatusCreated)
+		}
+	}
+
+	// Third request should be rate limited
+	body, _ := json.Marshal(FleetRegisterRequest{WorkerID: "worker-rl"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("rate limited request: status = %d, want %d", w.Code, http.StatusTooManyRequests)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "token")
+}
+
+func TestFleetRegister_CorrectAPIKey_Succeeds(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	handler := handleFleetRegisterWithStore(store, tokenCfg, testFleetRegCfg())
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "authed-worker",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccessWithData(t, result, "token")
 }
 
 // =============================================================================

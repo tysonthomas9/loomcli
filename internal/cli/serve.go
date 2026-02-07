@@ -33,6 +33,7 @@ var (
 	serveNoDaemon    bool
 	serveRedisAddr   string
 	serveAPIKey      string
+	serveFleetAPIKey string
 	serveNoAuth      bool
 
 	// collectDataFunc is the function used to collect monitor data.
@@ -105,6 +106,10 @@ func init() {
 
 	defaultAPIKey := os.Getenv("LOOM_WEBUI_API_KEY")
 	serveCmd.Flags().StringVar(&serveAPIKey, "api-key", defaultAPIKey, "API key for WebUI authentication (auto-generated if empty)")
+
+	defaultFleetAPIKey := os.Getenv("LOOM_FLEET_API_KEY")
+	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", defaultFleetAPIKey, "API key for fleet worker registration (required for fleet register endpoint)")
+
 	serveCmd.Flags().BoolVar(&serveNoAuth, "no-auth", false, "Disable WebUI API authentication (not recommended)")
 
 	rootCmd.AddCommand(serveCmd)
@@ -198,6 +203,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				SocketPath:  serveWebUISocket,
 				FleetRedis:  fleetRedisConfig,
 				FleetJWTKey: fleetJWTKey,
+				FleetAPIKey: serveFleetAPIKey,
 				APIKey:      serveAPIKey,
 				AuthEnabled: !serveNoAuth,
 			}
