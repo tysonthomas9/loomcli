@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync/atomic"
 	"syscall"
 )
@@ -31,14 +30,14 @@ var codexInvoker = defaultCodexInvoker
 var codexNonInteractiveInvoker = defaultCodexNonInteractiveInvoker
 
 func defaultCodexInvoker(workDir, prompt, agentName string) error {
-	cmd := exec.Command("codex", "--full-auto")
+	cmd := exec.Command("codex", "--full-auto", prompt)
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
 	cmd.Env = env
-	cmd.Stdin = io.MultiReader(strings.NewReader(prompt+"\n"), os.Stdin)
+	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

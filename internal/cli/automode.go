@@ -661,8 +661,13 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run()
 
 	// Build the loom command to run inside tmux
-	// TERM=dumb disables alternate screen buffer, enabling output streaming via capture-pane
-	loomCmd := fmt.Sprintf("TERM=dumb loom %s %s --daemon-mode", shellQuote(opts.AgentType), shellQuote(opts.WorktreePath))
+	// TERM=dumb disables alternate screen buffer for Claude, enabling output streaming via capture-pane.
+	// Other backends (codex, opencode) need a real TERM value to detect TTY properly.
+	termPrefix := "TERM=dumb "
+	if resolved := GetBackendName(); resolved != "claude" {
+		termPrefix = ""
+	}
+	loomCmd := fmt.Sprintf("%sloom %s %s --daemon-mode", termPrefix, shellQuote(opts.AgentType), shellQuote(opts.WorktreePath))
 
 	// Propagate backend selection to subprocess
 	if resolved := GetBackendName(); resolved != "claude" {

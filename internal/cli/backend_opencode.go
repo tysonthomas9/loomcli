@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync/atomic"
 	"syscall"
 )
@@ -31,14 +30,14 @@ var openCodeInvoker = defaultOpenCodeInvoker
 var openCodeNonInteractiveInvoker = defaultOpenCodeNonInteractiveInvoker
 
 func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
-	cmd := exec.Command("opencode", "run")
+	cmd := exec.Command("opencode", "--prompt", prompt)
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
 	cmd.Env = env
-	cmd.Stdin = io.MultiReader(strings.NewReader(prompt+"\n"), os.Stdin)
+	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
