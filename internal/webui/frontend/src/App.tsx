@@ -74,7 +74,7 @@ function App() {
     refetch,
     updateIssueStatus,
     retryConnection,
-  } = useIssues({ mode: activeView === 'graph' ? 'graph' : 'ready' });
+  } = useIssues({ mode: activeView === 'graph' ? 'graph' : activeView === 'kanban' ? 'kanban' : 'ready' });
 
   // Filter state with URL synchronization
   const [filters, filterActions] = useFilterState();
@@ -107,11 +107,25 @@ function App() {
 
   const { filteredIssues } = useIssueFilter(issues, filterOptions);
 
-  // Fetch blocked issues for display
-  const { data: blockedIssuesData } = useBlockedIssues();
+  // Only fetch blocked issues separately when NOT in kanban mode (kanban mode includes it inline)
+  const { data: blockedIssuesData } = useBlockedIssues({ enabled: activeView !== 'kanban' });
 
-  // Convert BlockedIssue[] to Map<string, BlockedInfo> for efficient lookup
+  // Derive blockedIssuesMap from enriched issue data (kanban mode) or separate fetch
   const blockedIssuesMap = useMemo(() => {
+    if (activeView === 'kanban') {
+      // In kanban mode, blocked info is already in the issue data
+      const map = new Map<string, BlockedInfo>();
+      for (const issue of issues) {
+        if (issue.is_blocked) {
+          map.set(issue.id, {
+            blockedByCount: issue.blocked_by_count ?? 0,
+            blockedBy: issue.blocked_by ?? [],
+          });
+        }
+      }
+      return map.size > 0 ? map : undefined;
+    }
+    // Fallback: use separately fetched blocked data
     if (!blockedIssuesData) return undefined;
     const map = new Map<string, BlockedInfo>();
     for (const issue of blockedIssuesData) {
@@ -121,7 +135,7 @@ function App() {
       });
     }
     return map;
-  }, [blockedIssuesData]);
+  }, [activeView, issues, blockedIssuesData]);
 
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);

@@ -31,6 +31,17 @@ type IssueWithParent struct {
 	ParentTitle *string `json:"parent_title,omitempty"` // Parent issue title for display
 }
 
+// KanbanIssue extends IssueWithParent with blocked dependency info.
+// Returned when include_blocked=true is passed to /api/issues.
+type KanbanIssue struct {
+	*types.IssueWithCounts
+	Parent         *string  `json:"parent,omitempty"`
+	ParentTitle    *string  `json:"parent_title,omitempty"`
+	IsBlocked      bool     `json:"is_blocked"`
+	BlockedByCount int      `json:"blocked_by_count"`
+	BlockedBy      []string `json:"blocked_by,omitempty"`
+}
+
 // IssuesResponse represents the response structure for the issues endpoint.
 type IssuesResponse struct {
 	Success bool            `json:"success"`
@@ -282,6 +293,13 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			return
 		}
 
+		// Parse kanban-specific parameters
+		kp, err := parseKanbanParams(r)
+		if err != nil {
+			writeIssuesError(w, http.StatusBadRequest, err.Error(), "INVALID_PARAMS")
+			return
+		}
+
 		// Acquire connection with timeout
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
@@ -323,9 +341,34 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			return
 		}
 
+		// Filter out excluded statuses (server-side, since ListArgs.Status only supports one value)
+		if len(kp.ExcludeStatus) > 0 {
+			excludeSet := make(map[types.Status]bool, len(kp.ExcludeStatus))
+			for _, s := range kp.ExcludeStatus {
+				excludeSet[types.Status(s)] = true
+			}
+			filtered := make([]*types.IssueWithCounts, 0, len(issuesWithCounts))
+			for _, iwc := range issuesWithCounts {
+				if !excludeSet[iwc.Issue.Status] {
+					filtered = append(filtered, iwc)
+				}
+			}
+			issuesWithCounts = filtered
+		}
+
 		// If no issues, return empty response
 		if len(issuesWithCounts) == 0 {
-			data, _ := json.Marshal([]*IssueWithParent{})
+			var data []byte
+			if kp.IncludeBlocked {
+				data, err = json.Marshal([]*KanbanIssue{})
+			} else {
+				data, err = json.Marshal([]*IssueWithParent{})
+			}
+			if err != nil {
+				log.Printf("Failed to marshal empty response: %v", err)
+				writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			if err := json.NewEncoder(w).Encode(IssuesResponse{
 				Success: true,
@@ -350,7 +393,59 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			parentResp = &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
 		}
 
-		// Build response with parent info
+		if kp.IncludeBlocked {
+			// Build blocked info map
+			blockedMap := make(map[string]*types.BlockedIssue)
+			blockedResp, blockedErr := client.Blocked(&rpc.BlockedArgs{})
+			if blockedErr != nil {
+				// Non-fatal: log and continue without blocked info
+				log.Printf("Failed to get blocked issues: %v", blockedErr)
+			} else if blockedResp.Success {
+				var blockedIssues []*types.BlockedIssue
+				if jsonErr := json.Unmarshal(blockedResp.Data, &blockedIssues); jsonErr != nil {
+					log.Printf("Failed to parse blocked issues: %v", jsonErr)
+				} else {
+					for _, bi := range blockedIssues {
+						blockedMap[bi.Issue.ID] = bi
+					}
+				}
+			}
+
+			// Build KanbanIssue response with blocked info merged
+			kanbanIssues := make([]*KanbanIssue, len(issuesWithCounts))
+			for i, iwc := range issuesWithCounts {
+				ki := &KanbanIssue{
+					IssueWithCounts: iwc,
+				}
+				if parentInfo, ok := parentResp.Parents[iwc.Issue.ID]; ok {
+					ki.Parent = &parentInfo.ParentID
+					ki.ParentTitle = &parentInfo.ParentTitle
+				}
+				if bi, ok := blockedMap[iwc.Issue.ID]; ok {
+					ki.IsBlocked = true
+					ki.BlockedByCount = bi.BlockedByCount
+					ki.BlockedBy = bi.BlockedBy
+				}
+				kanbanIssues[i] = ki
+			}
+
+			data, err := json.Marshal(kanbanIssues)
+			if err != nil {
+				log.Printf("Failed to marshal kanban issues: %v", err)
+				writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			if err := json.NewEncoder(w).Encode(IssuesResponse{
+				Success: true,
+				Data:    data,
+			}); err != nil {
+				log.Printf("Failed to encode issues response: %v", err)
+			}
+			return
+		}
+
+		// Standard path: Build response with parent info
 		issuesWithParent := make([]*IssueWithParent, len(issuesWithCounts))
 		for i, iwc := range issuesWithCounts {
 			iwp := &IssueWithParent{
@@ -363,7 +458,12 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			issuesWithParent[i] = iwp
 		}
 
-		data, _ := json.Marshal(issuesWithParent)
+		data, err := json.Marshal(issuesWithParent)
+		if err != nil {
+			log.Printf("Failed to marshal issues: %v", err)
+			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(IssuesResponse{
 			Success: true,
@@ -957,6 +1057,34 @@ func parseListParams(r *http.Request) (*rpc.ListArgs, error) {
 	}
 
 	return args, nil
+}
+
+// kanbanParams holds the additional query parameters for Kanban-enriched responses.
+type kanbanParams struct {
+	ExcludeStatus  []string // Statuses to exclude from results
+	IncludeBlocked bool     // Whether to include blocked dependency info
+}
+
+// MaxExcludeStatuses caps the number of exclude_status values to prevent abuse.
+const MaxExcludeStatuses = 1000
+
+func parseKanbanParams(r *http.Request) (*kanbanParams, error) {
+	params := &kanbanParams{}
+	q := r.URL.Query()
+
+	if v := q.Get("exclude_status"); v != "" {
+		statuses := splitAndTrim(v)
+		if len(statuses) > MaxExcludeStatuses {
+			return nil, fmt.Errorf("too many exclude_status values (max %d)", MaxExcludeStatuses)
+		}
+		params.ExcludeStatus = statuses
+	}
+
+	if v := q.Get("include_blocked"); v == "true" {
+		params.IncludeBlocked = true
+	}
+
+	return params, nil
 }
 
 // parseReadyParams parses query parameters into rpc.ReadyArgs.

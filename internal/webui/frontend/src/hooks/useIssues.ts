@@ -9,7 +9,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 import type { ConnectionState, GraphFilter } from '@/api';
-import { getReadyIssues, updateIssue as apiUpdateIssue, fetchGraphIssues } from '@/api';
+import { getReadyIssues, getKanbanIssues, updateIssue as apiUpdateIssue, fetchGraphIssues } from '@/api';
 import type { Issue, WorkFilter, Status } from '@/types';
 
 import { useMutationHandler } from './useMutationHandler';
@@ -26,8 +26,8 @@ const TOO_FAR_BEHIND_THRESHOLD = 3;
 export interface UseIssuesOptions {
   /** Initial filter for fetching issues (default: all ready issues) */
   filter?: WorkFilter;
-  /** Data source mode: 'ready' for ready issues, 'graph' for all issues with deps */
-  mode?: 'ready' | 'graph';
+  /** Data source mode: 'ready' for ready issues, 'graph' for all issues with deps, 'kanban' for enriched kanban view */
+  mode?: 'ready' | 'graph' | 'kanban';
   /** Filter options when mode is 'graph' */
   graphFilter?: GraphFilter;
   /** Auto-fetch on mount (default: true) */
@@ -174,7 +174,9 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
 
     try {
       let data: Issue[];
-      if (mode === 'graph') {
+      if (mode === 'kanban') {
+        data = await getKanbanIssues(filter);
+      } else if (mode === 'graph') {
         data = await fetchGraphIssues(graphFilter);
       } else {
         data = await getReadyIssues(filter);

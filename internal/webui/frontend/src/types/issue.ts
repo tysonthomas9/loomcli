@@ -122,6 +122,11 @@ export interface Issue {
   actor?: string;
   target?: string;
   payload?: string;
+
+  // Kanban-enriched fields (present when fetched with include_blocked=true)
+  is_blocked?: boolean;
+  blocked_by_count?: number;
+  blocked_by?: string[];
 }
 
 /**

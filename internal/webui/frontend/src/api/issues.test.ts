@@ -6,6 +6,7 @@ import { ApiError, get, post, patch } from './client';
 import {
   getIssue,
   getReadyIssues,
+  getKanbanIssues,
   getStats,
   createIssue,
   updateIssue,
@@ -368,6 +369,148 @@ describe('issues API', () => {
       expect(callArg).toContain('labels=bug%2Curgent');
       expect(callArg).toContain('sort=oldest');
       expect(callArg).toContain('assignee=dev1');
+    });
+  });
+
+  describe('getKanbanIssues', () => {
+    const mockIssues: Issue[] = [
+      {
+        id: 'issue-1',
+        title: 'Open Task',
+        issue_type: 'task',
+        priority: 'high',
+        status: 'open',
+        labels: [],
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
+      {
+        id: 'issue-2',
+        title: 'In Progress Bug',
+        issue_type: 'bug',
+        priority: 'medium',
+        status: 'in_progress',
+        labels: ['urgent'],
+        created_at: '2024-01-02T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z',
+      },
+    ];
+
+    it('calls get with default kanban params when no options', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockIssues });
+
+      await getKanbanIssues();
+
+      const callArg = mockGet.mock.calls[0][0] as string;
+      expect(callArg).toContain('/api/issues?');
+      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('include_blocked=true');
+    });
+
+    it('calls get with default kanban params when empty options', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockIssues });
+
+      await getKanbanIssues({});
+
+      const callArg = mockGet.mock.calls[0][0] as string;
+      expect(callArg).toContain('/api/issues?');
+      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('include_blocked=true');
+    });
+
+    it('merges WorkFilter options with kanban defaults', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockIssues });
+
+      await getKanbanIssues({ assignee: 'dev1', priority: 2 });
+
+      const callArg = mockGet.mock.calls[0][0] as string;
+      expect(callArg).toContain('/api/issues?');
+      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('include_blocked=true');
+      expect(callArg).toContain('assignee=dev1');
+      expect(callArg).toContain('priority=2');
+    });
+
+    it('renames sort_policy to sort in merged query', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockIssues });
+
+      await getKanbanIssues({ sort_policy: 'priority' });
+
+      const callArg = mockGet.mock.calls[0][0] as string;
+      expect(callArg).toContain('sort=priority');
+      expect(callArg).not.toContain('sort_policy');
+    });
+
+    it('unwraps successful response and returns Issue array', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockIssues });
+
+      const result = await getKanbanIssues();
+
+      expect(result).toEqual(mockIssues);
+    });
+
+    it('returns empty array when no issues', async () => {
+      mockGet.mockResolvedValue({ success: true, data: [] });
+
+      const result = await getKanbanIssues();
+
+      expect(result).toEqual([]);
+    });
+
+    it('throws ApiError on failure response', async () => {
+      mockGet.mockResolvedValue({ success: false, error: 'Database unavailable' });
+
+      await expect(getKanbanIssues()).rejects.toThrow(ApiError);
+    });
+
+    it('propagates ApiError from client', async () => {
+      const error = new ApiError(500, 'Internal Server Error');
+      mockGet.mockRejectedValue(error);
+
+      await expect(getKanbanIssues()).rejects.toThrow(ApiError);
+      await expect(getKanbanIssues()).rejects.toMatchObject({
+        status: 500,
+      });
+    });
+
+    it('handles filter with labels array', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockIssues });
+
+      await getKanbanIssues({
+        labels: ['bug', 'urgent'],
+        assignee: 'dev1',
+      });
+
+      const callArg = mockGet.mock.calls[0][0] as string;
+      expect(callArg).toContain('labels=bug%2Curgent');
+      expect(callArg).toContain('assignee=dev1');
+      // kanban defaults still present
+      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('include_blocked=true');
+    });
+
+    it('WorkFilter options can override kanban defaults via Object.assign', async () => {
+      // The implementation uses Object.assign(params, mapped) so WorkFilter
+      // values will override the kanban defaults if they share the same key.
+      // This test documents that behavior.
+      mockGet.mockResolvedValue({ success: true, data: mockIssues });
+
+      await getKanbanIssues({ status: 'open' });
+
+      const callArg = mockGet.mock.calls[0][0] as string;
+      expect(callArg).toContain('status=open');
+      // exclude_status and include_blocked are separate keys, so still present
+      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('include_blocked=true');
+    });
+
+    it('uses /api/issues endpoint (not /api/ready)', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockIssues });
+
+      await getKanbanIssues();
+
+      const callArg = mockGet.mock.calls[0][0] as string;
+      expect(callArg).toMatch(/^\/api\/issues\?/);
     });
   });
 
@@ -974,6 +1117,7 @@ describe('issues API', () => {
 
       await expect(getIssue('123')).rejects.toThrow(ApiError);
       await expect(getReadyIssues()).rejects.toThrow(ApiError);
+      await expect(getKanbanIssues()).rejects.toThrow(ApiError);
       await expect(getStats()).rejects.toThrow(ApiError);
       await expect(fetchGraphIssues()).rejects.toThrow(ApiError);
     });

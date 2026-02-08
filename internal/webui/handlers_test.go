@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 // mockClient implements issueGetter and issueUpdater for testing
@@ -7204,4 +7205,259 @@ func TestHandleAddDependency_RequestBodyTooLarge(t *testing.T) {
 	if !strings.Contains(response.Error, "request body too large") {
 		t.Errorf("Error = %q, expected to contain %q", response.Error, "request body too large")
 	}
+}
+
+// =============================================================================
+// Tests for parseKanbanParams
+// =============================================================================
+
+func TestParseKanbanParams(t *testing.T) {
+	tests := []struct {
+		name            string
+		url             string
+		wantErr         bool
+		wantErrContains string
+		wantExclude     []string
+		wantBlocked     bool
+	}{
+		{
+			name:        "empty query returns defaults",
+			url:         "/api/issues",
+			wantExclude: nil,
+			wantBlocked: false,
+		},
+		{
+			name:        "single exclude_status",
+			url:         "/api/issues?exclude_status=closed",
+			wantExclude: []string{"closed"},
+			wantBlocked: false,
+		},
+		{
+			name:        "multiple exclude_status comma-separated",
+			url:         "/api/issues?exclude_status=closed,tombstone",
+			wantExclude: []string{"closed", "tombstone"},
+			wantBlocked: false,
+		},
+		{
+			name:        "exclude_status with spaces trimmed",
+			url:         "/api/issues?exclude_status=closed%2C%20tombstone%20%2C%20deferred",
+			wantExclude: []string{"closed", "tombstone", "deferred"},
+			wantBlocked: false,
+		},
+		{
+			name:        "include_blocked=true",
+			url:         "/api/issues?include_blocked=true",
+			wantExclude: nil,
+			wantBlocked: true,
+		},
+		{
+			name:        "include_blocked=false",
+			url:         "/api/issues?include_blocked=false",
+			wantExclude: nil,
+			wantBlocked: false,
+		},
+		{
+			name:        "include_blocked absent defaults to false",
+			url:         "/api/issues",
+			wantExclude: nil,
+			wantBlocked: false,
+		},
+		{
+			name:        "include_blocked with non-true value defaults to false",
+			url:         "/api/issues?include_blocked=yes",
+			wantExclude: nil,
+			wantBlocked: false,
+		},
+		{
+			name:        "both exclude_status and include_blocked",
+			url:         "/api/issues?exclude_status=closed,tombstone&include_blocked=true",
+			wantExclude: []string{"closed", "tombstone"},
+			wantBlocked: true,
+		},
+		{
+			name:        "empty exclude_status value",
+			url:         "/api/issues?exclude_status=",
+			wantExclude: nil,
+			wantBlocked: false,
+		},
+		{
+			name:        "exclude_status with only commas (empty values filtered)",
+			url:         "/api/issues?exclude_status=%2C%2C",
+			wantExclude: nil,
+			wantBlocked: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.url, nil)
+			params, err := parseKanbanParams(req)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("parseKanbanParams() expected error, got nil")
+				} else if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Errorf("parseKanbanParams() error = %q, want containing %q", err.Error(), tt.wantErrContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("parseKanbanParams() unexpected error: %v", err)
+			}
+
+			// Check ExcludeStatus
+			if len(tt.wantExclude) == 0 && len(params.ExcludeStatus) == 0 {
+				// Both empty/nil - OK
+			} else if len(tt.wantExclude) != len(params.ExcludeStatus) {
+				t.Errorf("ExcludeStatus length = %d, want %d (got %v)", len(params.ExcludeStatus), len(tt.wantExclude), params.ExcludeStatus)
+			} else {
+				for i, want := range tt.wantExclude {
+					if params.ExcludeStatus[i] != want {
+						t.Errorf("ExcludeStatus[%d] = %q, want %q", i, params.ExcludeStatus[i], want)
+					}
+				}
+			}
+
+			// Check IncludeBlocked
+			if params.IncludeBlocked != tt.wantBlocked {
+				t.Errorf("IncludeBlocked = %v, want %v", params.IncludeBlocked, tt.wantBlocked)
+			}
+		})
+	}
+}
+
+func TestParseKanbanParams_ExceedsMaxExcludeStatuses(t *testing.T) {
+	// Build a URL with more than MaxExcludeStatuses values
+	values := make([]string, MaxExcludeStatuses+1)
+	for i := range values {
+		values[i] = "status" + strconv.Itoa(i)
+	}
+	rawURL := "/api/issues?exclude_status=" + url.QueryEscape(strings.Join(values, ","))
+
+	req := httptest.NewRequest("GET", rawURL, nil)
+	_, err := parseKanbanParams(req)
+
+	if err == nil {
+		t.Error("parseKanbanParams() expected error for exceeding MaxExcludeStatuses, got nil")
+	}
+	if !strings.Contains(err.Error(), "too many exclude_status") {
+		t.Errorf("parseKanbanParams() error = %q, want containing %q", err.Error(), "too many exclude_status")
+	}
+}
+
+func TestParseKanbanParams_ExactlyMaxExcludeStatuses(t *testing.T) {
+	// Build a URL with exactly MaxExcludeStatuses values (should succeed)
+	values := make([]string, MaxExcludeStatuses)
+	for i := range values {
+		values[i] = "status" + strconv.Itoa(i)
+	}
+	rawURL := "/api/issues?exclude_status=" + url.QueryEscape(strings.Join(values, ","))
+
+	req := httptest.NewRequest("GET", rawURL, nil)
+	params, err := parseKanbanParams(req)
+
+	if err != nil {
+		t.Fatalf("parseKanbanParams() unexpected error for exactly MaxExcludeStatuses: %v", err)
+	}
+	if len(params.ExcludeStatus) != MaxExcludeStatuses {
+		t.Errorf("ExcludeStatus length = %d, want %d", len(params.ExcludeStatus), MaxExcludeStatuses)
+	}
+}
+
+// =============================================================================
+// Tests for KanbanIssue JSON serialization
+// =============================================================================
+
+func TestKanbanIssueJSON(t *testing.T) {
+	t.Run("blocked issue includes all kanban fields", func(t *testing.T) {
+		parentID := "epic-1"
+		parentTitle := "Epic One"
+		ki := &KanbanIssue{
+			IssueWithCounts: &types.IssueWithCounts{
+				Issue: &types.Issue{
+					ID:     "task-1",
+					Title:  "Test Task",
+					Status: types.StatusOpen,
+				},
+				DependencyCount: 2,
+				DependentCount:  1,
+			},
+			Parent:         &parentID,
+			ParentTitle:    &parentTitle,
+			IsBlocked:      true,
+			BlockedByCount: 3,
+			BlockedBy:      []string{"dep-1", "dep-2", "dep-3"},
+		}
+
+		data, err := json.Marshal(ki)
+		if err != nil {
+			t.Fatalf("json.Marshal() error: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+
+		// Verify kanban-specific fields are present
+		if result["is_blocked"] != true {
+			t.Errorf("is_blocked = %v, want true", result["is_blocked"])
+		}
+		if result["blocked_by_count"] != float64(3) {
+			t.Errorf("blocked_by_count = %v, want 3", result["blocked_by_count"])
+		}
+		blockedBy, ok := result["blocked_by"].([]interface{})
+		if !ok {
+			t.Fatalf("blocked_by is %T, want []interface{}", result["blocked_by"])
+		}
+		if len(blockedBy) != 3 {
+			t.Errorf("len(blocked_by) = %d, want 3", len(blockedBy))
+		}
+		if result["parent"] != "epic-1" {
+			t.Errorf("parent = %v, want %q", result["parent"], "epic-1")
+		}
+		if result["parent_title"] != "Epic One" {
+			t.Errorf("parent_title = %v, want %q", result["parent_title"], "Epic One")
+		}
+	})
+
+	t.Run("unblocked issue has is_blocked=false and zero blocked_by_count", func(t *testing.T) {
+		ki := &KanbanIssue{
+			IssueWithCounts: &types.IssueWithCounts{
+				Issue: &types.Issue{
+					ID:     "task-2",
+					Title:  "Unblocked Task",
+					Status: types.StatusOpen,
+				},
+			},
+			IsBlocked:      false,
+			BlockedByCount: 0,
+		}
+
+		data, err := json.Marshal(ki)
+		if err != nil {
+			t.Fatalf("json.Marshal() error: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+
+		if result["is_blocked"] != false {
+			t.Errorf("is_blocked = %v, want false", result["is_blocked"])
+		}
+		if result["blocked_by_count"] != float64(0) {
+			t.Errorf("blocked_by_count = %v, want 0", result["blocked_by_count"])
+		}
+		// blocked_by should be omitted (omitempty)
+		if _, ok := result["blocked_by"]; ok {
+			t.Errorf("blocked_by should be omitted for unblocked issue")
+		}
+		// parent should be omitted (omitempty)
+		if _, ok := result["parent"]; ok {
+			t.Errorf("parent should be omitted when nil")
+		}
+	})
 }

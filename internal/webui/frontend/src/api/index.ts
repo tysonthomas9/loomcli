@@ -12,6 +12,7 @@ export type { ConnectionState, MutationType, MutationPayload } from './sse';
 export {
   getIssue,
   getReadyIssues,
+  getKanbanIssues,
   getStats,
   createIssue,
   updateIssue,

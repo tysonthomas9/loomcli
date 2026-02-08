@@ -161,6 +161,25 @@ export async function getBlockedIssues(options?: BlockedFilter): Promise<Blocked
   return unwrap(response);
 }
 
+/**
+ * Get issues for the Kanban board view.
+ * Excludes closed/tombstone issues and includes blocked dependency info.
+ * Returns issues enriched with is_blocked, blocked_by_count, blocked_by fields.
+ */
+export async function getKanbanIssues(options?: WorkFilter): Promise<Issue[]> {
+  const params: Record<string, unknown> = {
+    exclude_status: 'closed,tombstone',
+    include_blocked: 'true',
+  };
+  if (options) {
+    const mapped = mapWorkFilterToQueryParams(options);
+    Object.assign(params, mapped);
+  }
+  const query = buildQueryString(params);
+  const response = await get<ApiResult<Issue[]>>(`/api/issues${query}`);
+  return unwrap(response);
+}
+
 // ============= GRAPH OPERATIONS =============
 
 /**
