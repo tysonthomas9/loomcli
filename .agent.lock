@@ -1,10 +1,10 @@
 {
-  "pid": 75246,
+  "pid": 39644,
   "command": "task",
-  "started_at": "2026-02-07T18:32:08.902439-08:00",
+  "started_at": "2026-02-07T22:47:36.170652-08:00",
   "agent_name": "nova",
-  "task_id": "loomcli-kd1",
-  "task_title": "LIVE: Real-time SSE push test",
-  "task_started_at": "2026-02-07T18:32:38.435501-08:00",
+  "task_id": "loomcli-dit",
+  "task_title": "Auth token refresh fails silently",
+  "task_started_at": "2026-02-07T22:47:59.124382-08:00",
   "state": "active"
 }
