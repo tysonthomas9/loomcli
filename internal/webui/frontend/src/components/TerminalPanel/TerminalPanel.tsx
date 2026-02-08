@@ -9,6 +9,11 @@ import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState, useCallback } from 'react';
 
 import { get } from '@/api/client';
+import {
+  startAutoReconnect,
+  DEFAULT_RECONNECT_CONFIG,
+  type ReconnectState,
+} from '@/utils/reconnectBackoff';
 
 import '@xterm/xterm/css/xterm.css';
 import styles from './TerminalPanel.module.css';
@@ -72,7 +77,9 @@ function connectWebSocket(
   fitAddon: FitAddon,
   wsRef: React.MutableRefObject<WebSocket | null>,
   setConnectionState: (s: ConnectionState) => void,
-  setWasConnected: (v: boolean) => void
+  setWasConnected: (v: boolean) => void,
+  onConnected?: () => void,
+  onDisconnected?: () => void
 ): () => void {
   setConnectionState('connecting');
 
@@ -91,6 +98,7 @@ function connectWebSocket(
       setWasConnected(true);
       fitAddon.fit();
       ws.send(encodeResize(terminal.cols, terminal.rows));
+      onConnected?.();
     };
 
     ws.onmessage = (ev: MessageEvent) => {
@@ -103,6 +111,7 @@ function connectWebSocket(
 
     ws.onclose = () => {
       setConnectionState('disconnected');
+      onDisconnected?.();
     };
 
     ws.onerror = () => {
@@ -126,6 +135,7 @@ function connectWebSocket(
   }).catch(() => {
     if (!cancelled) {
       setConnectionState('disconnected');
+      onDisconnected?.();
     }
   });
 
@@ -142,16 +152,53 @@ function connectWebSocket(
   };
 }
 
+/**
+ * Format seconds remaining for the reconnect countdown.
+ */
+function formatCountdown(nextRetryAt: number): string {
+  const remaining = Math.max(0, Math.ceil((nextRetryAt - Date.now()) / 1000));
+  return `${remaining}s`;
+}
+
 export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Element {
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const wsCleanupRef = useRef<(() => void) | null>(null);
+  const reconnectCancelRef = useRef<(() => void) | null>(null);
   const panelRef = useRef<HTMLElement>(null);
 
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [wasConnected, setWasConnected] = useState(false);
+  const [reconnectState, setReconnectState] = useState<ReconnectState>({
+    attempt: 0,
+    nextRetryAt: null,
+    gaveUp: false,
+  });
+  const [countdown, setCountdown] = useState<string | null>(null);
+
+  // Countdown timer: update every second while waiting for next retry
+  useEffect(() => {
+    if (!reconnectState.nextRetryAt || reconnectState.gaveUp) {
+      setCountdown(null);
+      return;
+    }
+
+    setCountdown(formatCountdown(reconnectState.nextRetryAt));
+
+    const intervalId = setInterval(() => {
+      const remaining = reconnectState.nextRetryAt! - Date.now();
+      if (remaining <= 0) {
+        setCountdown(null);
+        clearInterval(intervalId);
+      } else {
+        setCountdown(formatCountdown(reconnectState.nextRetryAt!));
+      }
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [reconnectState.nextRetryAt, reconnectState.gaveUp]);
 
   // Terminal lifecycle: create on open, destroy on close
   useEffect(() => {
@@ -159,6 +206,9 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
 
     const container = termRef.current;
     if (!container) return;
+
+    // Guard against async callbacks (ws.onclose) firing after cleanup
+    let mounted = true;
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -189,16 +239,43 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
       fitAddon.fit();
     }, 350);
 
+    /**
+     * Initiate a WebSocket connection with auto-reconnect callbacks wired in.
+     */
+    function doConnect(): void {
+      wsCleanupRef.current?.();
+      const cleanup = connectWebSocket(
+        terminal,
+        fitAddon,
+        wsRef,
+        setConnectionState,
+        setWasConnected,
+        () => {
+          // onConnected: cancel auto-reconnect, reset state
+          reconnectCancelRef.current?.();
+          reconnectCancelRef.current = null;
+          setReconnectState({ attempt: 0, nextRetryAt: null, gaveUp: false });
+        },
+        () => {
+          // onDisconnected: start auto-reconnect if not already running
+          if (!mounted || reconnectCancelRef.current) return;
+          const cancel = startAutoReconnect(
+            () => {
+              if (!mounted) return true; // stop loop if unmounted
+              doConnect();
+              return false; // async — success handled by onConnected
+            },
+            setReconnectState
+          );
+          reconnectCancelRef.current = cancel;
+        }
+      );
+      wsCleanupRef.current = cleanup;
+    }
+
     // Connect WebSocket
     setWasConnected(false);
-    const cleanupWs = connectWebSocket(
-      terminal,
-      fitAddon,
-      wsRef,
-      setConnectionState,
-      setWasConnected
-    );
-    wsCleanupRef.current = cleanupWs;
+    doConnect();
 
     // ResizeObserver with debounce for ongoing resize
     let resizeTimer: ReturnType<typeof setTimeout>;
@@ -217,9 +294,14 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
     observer.observe(container);
 
     return () => {
+      mounted = false;
+
       clearTimeout(fitTimer);
       clearTimeout(resizeTimer);
       observer.disconnect();
+
+      reconnectCancelRef.current?.();
+      reconnectCancelRef.current = null;
 
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;
@@ -229,24 +311,47 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
       fitAddonRef.current = null;
 
       setConnectionState('disconnected');
+      setReconnectState({ attempt: 0, nextRetryAt: null, gaveUp: false });
     };
   }, [isOpen]);
 
-  // Reconnect handler: clean up old WS, create new one reusing existing terminal
+  // Reconnect handler: cancel auto-reconnect, reset state, connect fresh
   const handleReconnect = useCallback(() => {
     const terminal = terminalRef.current;
     const fitAddon = fitAddonRef.current;
     if (!terminal || !fitAddon) return;
 
-    // Clean up previous connection
-    wsCleanupRef.current?.();
+    // Cancel any in-progress auto-reconnect
+    reconnectCancelRef.current?.();
+    reconnectCancelRef.current = null;
+    setReconnectState({ attempt: 0, nextRetryAt: null, gaveUp: false });
 
+    // Clean up previous connection and create new one
+    wsCleanupRef.current?.();
     const cleanupWs = connectWebSocket(
       terminal,
       fitAddon,
       wsRef,
       setConnectionState,
-      setWasConnected
+      setWasConnected,
+      () => {
+        // onConnected: cancel auto-reconnect (if re-armed by a prior close)
+        reconnectCancelRef.current?.();
+        reconnectCancelRef.current = null;
+        setReconnectState({ attempt: 0, nextRetryAt: null, gaveUp: false });
+      },
+      () => {
+        // onDisconnected: start auto-reconnect
+        if (reconnectCancelRef.current) return;
+        const cancel = startAutoReconnect(
+          () => {
+            handleReconnect();
+            return false;
+          },
+          setReconnectState
+        );
+        reconnectCancelRef.current = cancel;
+      }
     );
     wsCleanupRef.current = cleanupWs;
   }, []);
@@ -281,6 +386,10 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
 
   const overlayClass = `${styles.overlay}${isOpen ? ` ${styles.open}` : ''}`;
 
+  // Determine reconnect overlay content
+  const showReconnectOverlay = connectionState === 'disconnected' && wasConnected;
+  const isAutoReconnecting = reconnectState.nextRetryAt !== null && !reconnectState.gaveUp;
+
   return (
     <div
       className={overlayClass}
@@ -314,9 +423,18 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
           </button>
         </header>
         <div className={styles.terminalContainer} ref={termRef} data-testid="terminal-container">
-          {connectionState === 'disconnected' && wasConnected && (
+          {showReconnectOverlay && (
             <div className={styles.reconnectOverlay} data-testid="terminal-reconnect-overlay">
-              <p>Connection lost</p>
+              {isAutoReconnecting ? (
+                <p className={styles.reconnectStatus} data-testid="terminal-reconnect-status">
+                  Reconnecting in {countdown ?? '...'} (attempt{' '}
+                  {reconnectState.attempt + 1}/{DEFAULT_RECONNECT_CONFIG.maxAttempts})
+                </p>
+              ) : reconnectState.gaveUp ? (
+                <p>Could not reconnect</p>
+              ) : (
+                <p>Connection lost</p>
+              )}
               <button
                 type="button"
                 className={styles.reconnectButton}
