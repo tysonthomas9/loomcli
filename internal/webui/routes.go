@@ -40,6 +40,10 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	// Daemon status endpoint - exposes daemon configuration (auto-commit, auto-push, etc.)
 	mux.HandleFunc("GET /api/daemon/status", handleDaemonStatus(pool))
 
+	// Backend configuration endpoints
+	mux.HandleFunc("GET /api/config/backend", handleGetBackendConfig(pool))
+	mux.HandleFunc("PATCH /api/config/backend", handlePatchBackendConfig(pool))
+
 	// Issue endpoints
 	mux.HandleFunc("GET /api/issues/{id}", handleGetIssue(pool))
 	mux.HandleFunc("GET /api/issues", handleListIssues(pool))
