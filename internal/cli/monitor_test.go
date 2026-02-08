@@ -1195,6 +1195,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
+
 		// Create worktree structure (relative to tmpDir)
 		wtDir := filepath.Join(tmpDir, "worktrees", "falcon")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
@@ -1240,6 +1246,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
+
 		wtDir := filepath.Join(tmpDir, "worktrees", "nova")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
@@ -1281,6 +1293,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		tmpDir := t.TempDir()
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
+
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
 
 		wtDir := filepath.Join(tmpDir, "worktrees", "spark")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
@@ -1327,6 +1345,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
+
 		wtDir := filepath.Join(tmpDir, "worktrees", "flux")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
@@ -1371,6 +1395,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		tmpDir := t.TempDir()
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
+
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
 
 		// Create two worktrees
 		for _, name := range []string{"falcon", "nova"} {
@@ -1426,6 +1456,12 @@ func TestCollectMonitorData(t *testing.T) {
 	tmpDir := t.TempDir()
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Reset cached resolver and beads dir so they use the new CWD
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
 
 	wtDir := filepath.Join(tmpDir, "worktrees", "test-agent")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
@@ -1510,6 +1546,12 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
+	// Reset cached resolver and beads dir so they use the new CWD
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
+
 	wtDir := filepath.Join(tmpDir, "worktrees", "test-agent")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
@@ -1569,6 +1611,12 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
+	// Reset cached resolver and beads dir so they use the new CWD
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
+
 	wtDir := filepath.Join(tmpDir, "worktrees", "solo")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
@@ -1610,6 +1658,12 @@ func TestRunMonitorOneShot(t *testing.T) {
 	tmpDir := t.TempDir()
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Reset cached resolver and beads dir so they use the new CWD
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
 
 	wtDir := filepath.Join(tmpDir, "worktrees", "oneshot")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
@@ -2008,6 +2062,12 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			tmpDir := t.TempDir()
 			os.Chdir(tmpDir)
 			t.Cleanup(func() { os.Chdir(origDir) })
+
+			// Reset cached resolver and beads dir so they use the new CWD
+			oldResolver := defaultResolver
+			defaultResolver = nil
+			t.Cleanup(func() { defaultResolver = oldResolver })
+			ResetBeadsDirCache()
 
 			wtDir := filepath.Join(tmpDir, "worktrees", "alpha")
 			if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
