@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test lint clean install help frontend sync-beads update-beads gate hooks
+.PHONY: all build test lint clean install help frontend sync-beads update-beads gate hooks dev dev-check
 
 # Default target
 all: build
@@ -72,6 +72,16 @@ hooks:
 	@chmod +x .git/hooks/pre-push
 	@echo "Pre-push hook installed (applies to all worktrees)"
 
+# Check dev dependencies
+dev-check:
+	@command -v air >/dev/null 2>&1 || { echo "Error: air not found. Install: go install github.com/air-verse/air@latest"; exit 1; }
+	@command -v node >/dev/null 2>&1 || { echo "Error: node not found. Install Node.js >= 20"; exit 1; }
+	@echo "All dev dependencies found."
+
+# Run dev environment (air + Vite hot-reload)
+dev: dev-check
+	@./scripts/dev.sh
+
 # Show help
 help:
 	@echo "Loomcli Makefile targets:"
@@ -84,5 +94,7 @@ help:
 	@echo "  make update-beads - Pull latest beads + sync"
 	@echo "  make gate         - Quality gate (build + vet + test)"
 	@echo "  make hooks        - Install git hooks (pre-push gate)"
+	@echo "  make dev          - Start dev environment (air + Vite hot-reload)"
+	@echo "  make dev-check    - Check dev dependencies (air, node)"
 	@echo "  make clean        - Remove build artifacts"
 	@echo "  make help         - Show this help message"

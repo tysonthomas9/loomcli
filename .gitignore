@@ -3,6 +3,7 @@
 loom
 loomcli
 logrouter
+tmp/
 
 # Frontend dependencies
 internal/webui/frontend/node_modules/
