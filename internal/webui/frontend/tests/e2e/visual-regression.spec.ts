@@ -39,6 +39,8 @@ const visualTestIssues = [
     priority: 0, // P0 - critical (red badge)
     issue_type: "task", // Changed from epic to task (epics are excluded from kanban)
     blocked_by: ["vis-1"],
+    is_blocked: true,
+    blocked_by_count: 1,
     created_at: "2026-01-23T10:00:00Z",
     updated_at: "2026-01-25T10:00:00Z",
   },
@@ -48,32 +50,29 @@ const visualTestIssues = [
 test.use({ viewport: { width: 1280, height: 720 } })
 
 /**
- * Helper to setup API mocks for visual tests
+ * Helper to setup API mocks for visual tests.
+ * The app uses /api/issues (kanban mode) not /api/ready, and
+ * loom endpoints are proxied via /api/loom/* not localhost:9000.
  */
 async function setupMocks(
   page: import("@playwright/test").Page,
   issues = visualTestIssues
 ) {
-  // Mock /api/ready endpoint
-  await page.route("**/api/ready", async (route) => {
+  // Mock auth token endpoint (required before any API call)
+  await page.route("**/api/auth/token", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ token: "test-token-visual" }),
+    })
+  })
+
+  // Mock /api/issues endpoint (kanban mode uses this with query params)
+  await page.route("**/api/issues?**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ success: true, data: issues }),
-    })
-  })
-
-  // Abort SSE connection to prevent networkidle timeout
-  await page.route("**/api/events", async (route) => {
-    await route.abort()
-  })
-
-  // Mock /api/stats endpoint
-  await page.route("**/api/stats", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: { open: 2, closed: 1, total: 4, completion: 25 } }),
     })
   })
 
@@ -83,6 +82,20 @@ async function setupMocks(
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ success: true, data: issues }),
+    })
+  })
+
+  // Abort SSE connection to prevent networkidle timeout
+  await page.route("**/api/events**", async (route) => {
+    await route.abort()
+  })
+
+  // Mock /api/stats endpoint
+  await page.route("**/api/stats", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: { open: 2, closed: 1, total: 4, completion: 25 } }),
     })
   })
 
@@ -101,8 +114,8 @@ async function setupMocks(
     })
   })
 
-  // Abort loom server requests to prevent timeout
-  await page.route("**/localhost:9000/**", async (route) => {
+  // Abort loom server requests (proxied via /api/loom/*)
+  await page.route("**/api/loom/**", async (route) => {
     await route.abort()
   })
 }
@@ -122,7 +135,7 @@ test.describe("Visual Regression - Kanban Board", () => {
     await setupMocks(page)
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -140,7 +153,7 @@ test.describe("Visual Regression - Kanban Board", () => {
     await setupMocks(page)
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -157,7 +170,7 @@ test.describe("Visual Regression - Kanban Board", () => {
     await setupMocks(page, [])
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -179,7 +192,7 @@ test.describe.skip("Visual Regression - Table View", () => {
     await setupMocks(page)
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -200,7 +213,7 @@ test.describe.skip("Visual Regression - Table View", () => {
     await setupMocks(page, [])
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -220,7 +233,7 @@ test.describe.skip("Visual Regression - Graph View", () => {
     await setupMocks(page)
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -248,7 +261,7 @@ test.describe.skip("Visual Regression - Graph View", () => {
     await setupMocks(page, [])
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -270,15 +283,32 @@ test.describe.skip("Visual Regression - Graph View", () => {
 
 test.describe("Visual Regression - Loading States", () => {
   test("skeleton loading state", async ({ page }) => {
+    // Mock auth token
+    await page.route("**/api/auth/token", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ token: "test-token-visual" }),
+      })
+    })
+
     // Delay API response long enough to capture skeleton state
     // Using 800ms delay - similar to existing skeleton.spec.ts tests
-    await page.route("**/api/ready", async (route) => {
+    await page.route("**/api/issues?**", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 800))
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({ success: true, data: visualTestIssues }),
       })
+    })
+
+    // Abort SSE and loom requests
+    await page.route("**/api/events**", async (route) => {
+      await route.abort()
+    })
+    await page.route("**/api/loom/**", async (route) => {
+      await route.abort()
     })
 
     // Navigate without waiting for full load to catch skeleton
@@ -298,8 +328,17 @@ test.describe("Visual Regression - Loading States", () => {
 
 test.describe("Visual Regression - Error States", () => {
   test("error display with retry button", async ({ page }) => {
+    // Mock auth token
+    await page.route("**/api/auth/token", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ token: "test-token-visual" }),
+      })
+    })
+
     // Mock API to return error
-    await page.route("**/api/ready", async (route) => {
+    await page.route("**/api/issues?**", async (route) => {
       await route.fulfill({
         status: 500,
         contentType: "application/json",
@@ -308,10 +347,10 @@ test.describe("Visual Regression - Error States", () => {
     })
 
     // Abort SSE and loom requests to prevent networkidle timeout
-    await page.route("**/api/events", async (route) => {
+    await page.route("**/api/events**", async (route) => {
       await route.abort()
     })
-    await page.route("**/localhost:9000/**", async (route) => {
+    await page.route("**/api/loom/**", async (route) => {
       await route.abort()
     })
 
@@ -333,7 +372,7 @@ test.describe.skip("Visual Regression - Filter Dropdowns", () => {
     await setupMocks(page)
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -352,7 +391,7 @@ test.describe.skip("Visual Regression - Filter Dropdowns", () => {
     await setupMocks(page)
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -373,7 +412,7 @@ test.describe("Visual Regression - Search", () => {
     await setupMocks(page)
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
@@ -394,7 +433,7 @@ test.describe("Visual Regression - Connection Status", () => {
     await setupMocks(page)
 
     await Promise.all([
-      page.waitForResponse((res) => res.url().includes("/api/ready")),
+      page.waitForResponse((res) => res.url().includes("/api/issues")),
       page.goto("/"),
     ])
 
