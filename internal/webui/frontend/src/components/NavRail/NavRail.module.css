@@ -64,6 +64,10 @@
   display: block;
 }
 
+.spacer {
+  flex: 1;
+}
+
 .tooltip {
   position: absolute;
   left: 44px;

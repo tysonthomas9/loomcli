@@ -56,6 +56,11 @@ const MonitorDashboard = lazy(() =>
   import('@/components/MonitorDashboard').then((m) => ({ default: m.MonitorDashboard }))
 );
 
+// Lazy load SettingsView (backend config settings)
+const SettingsView = lazy(() =>
+  import('@/components/SettingsView').then((m) => ({ default: m.SettingsView }))
+);
+
 // Lazy load TerminalPanel (xterm.js ~100KB)
 const TerminalPanel = lazy(() =>
   import('@/components/TerminalPanel').then((m) => ({ default: m.TerminalPanel }))
@@ -606,10 +611,9 @@ function App() {
         </Suspense>
       )}
       {activeView === 'settings' && (
-        <div style={{ padding: 'var(--space-6)', color: 'var(--color-text-secondary)' }}>
-          <h2 style={{ margin: 0, marginBottom: 'var(--space-2)', color: 'var(--color-text)', fontSize: '20px' }}>Settings</h2>
-          <p style={{ margin: 0 }}>Settings panel coming soon.</p>
-        </div>
+        <Suspense fallback={<LoadingSkeleton.Column />}>
+          <SettingsView />
+        </Suspense>
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <IssueDetailPanel

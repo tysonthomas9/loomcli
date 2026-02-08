@@ -13,7 +13,9 @@ export interface NavRailProps {
   className?: string;
 }
 
-const NAV_ITEMS: Array<{ id: ViewMode; label: string; icon: JSX.Element }> = [
+type NavItem = { id: ViewMode; label: string; icon: JSX.Element };
+
+const TOP_ITEMS: NavItem[] = [
   {
     id: 'kanban',
     label: 'Kanban',
@@ -62,6 +64,9 @@ const NAV_ITEMS: Array<{ id: ViewMode; label: string; icon: JSX.Element }> = [
       </svg>
     ),
   },
+];
+
+const BOTTOM_ITEMS: NavItem[] = [
   {
     id: 'settings',
     label: 'Settings',
@@ -84,26 +89,30 @@ const NAV_ITEMS: Array<{ id: ViewMode; label: string; icon: JSX.Element }> = [
 export function NavRail({ activeView, onChange, className }: NavRailProps): JSX.Element {
   const rootClassName = [styles.navRail, className].filter(Boolean).join(' ');
 
+  const renderButton = (item: NavItem) => {
+    const isActive = activeView === item.id;
+    return (
+      <button
+        key={item.id}
+        type="button"
+        className={styles.navButton}
+        data-active={isActive || undefined}
+        onClick={() => onChange(item.id)}
+        aria-label={item.label}
+      >
+        <span className={styles.icon}>{item.icon}</span>
+        <span className={styles.tooltip} role="tooltip">
+          {item.label}
+        </span>
+      </button>
+    );
+  };
+
   return (
     <nav className={rootClassName} aria-label="Primary">
-      {NAV_ITEMS.map((item) => {
-        const isActive = activeView === item.id;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            className={styles.navButton}
-            data-active={isActive || undefined}
-            onClick={() => onChange(item.id)}
-            aria-label={item.label}
-          >
-            <span className={styles.icon}>{item.icon}</span>
-            <span className={styles.tooltip} role="tooltip">
-              {item.label}
-            </span>
-          </button>
-        );
-      })}
+      {TOP_ITEMS.map(renderButton)}
+      <div className={styles.spacer} />
+      {BOTTOM_ITEMS.map(renderButton)}
     </nav>
   );
 }

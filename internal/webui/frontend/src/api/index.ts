@@ -33,5 +33,9 @@ export type {
 export { fetchAgents, checkLoomHealth, fetchStatus, fetchTasks } from './agents';
 export type { FetchStatusResult } from './agents';
 
+// Backend config API functions
+export { getBackendConfig, updateBackendConfig } from './config';
+export type { BackendConfigData, AgentBackendOverride, BackendConfigPatchRequest } from './config';
+
 // Log streaming API functions
 export { getTaskLogPhases, getAgentLogStreamUrl, getTaskLogStreamUrl } from './logs';

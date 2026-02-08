@@ -109,6 +109,9 @@ export type { UseStatsOptions, UseStatsResult } from './useStats';
 export { useRecentAssignees } from './useRecentAssignees';
 export type { UseRecentAssigneesReturn } from './useRecentAssignees';
 
+export { useBackendConfig } from './useBackendConfig';
+export type { UseBackendConfigReturn } from './useBackendConfig';
+
 export { useLogStream } from './useLogStream';
 export type {
   UseLogStreamOptions,
