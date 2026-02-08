@@ -6,6 +6,7 @@ logrouter
 
 # Frontend dependencies
 internal/webui/frontend/node_modules/
+internal/webui/frontend/dist/
 
 # Loom config (may contain credentials)
 .loom/

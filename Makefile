@@ -42,7 +42,7 @@ BEADS_BRANCH := feature/web-ui
 BEADS_PREFIX := third_party/beads
 
 # Build frontend (requires Node.js >= 20)
-# Run this after modifying frontend source; pre-built dist/ is committed for go build without Node.js
+# Run this after modifying frontend source; dist/ must exist for go:embed
 frontend:
 	@echo "Building frontend..."
 	cd $(FRONTEND_DIR) && npm install && npm run build
