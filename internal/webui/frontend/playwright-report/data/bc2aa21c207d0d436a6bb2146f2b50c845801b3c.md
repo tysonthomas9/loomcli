@@ -1,0 +1,71 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - link "Skip to main content" [ref=e4] [cursor=pointer]:
+    - /url: "#main-content"
+  - banner [ref=e5]:
+    - generic [ref=e6]:
+      - heading "Cortex" [level=1] [ref=e8]
+      - navigation "Main navigation" [ref=e9]:
+        - generic [ref=e10]:
+          - generic [ref=e12]:
+            - img
+            - searchbox "Search issues..." [ref=e13]
+          - generic [ref=e17]:
+            - generic [ref=e18]: Group by
+            - combobox "Group issues by" [ref=e19] [cursor=pointer]:
+              - option "All" [selected]
+              - option "Epic"
+              - option "Assignee"
+              - option "Priority"
+              - option "Type"
+              - option "Label"
+      - generic [ref=e21]:
+        - 'status "Connection status: Reconnecting (attempt 1)..." [ref=e22]'
+        - button "Open profile menu" [ref=e25] [cursor=pointer]:
+          - img [ref=e26]
+  - generic [ref=e28]:
+    - navigation "Primary" [ref=e29]:
+      - button "Kanban" [ref=e30] [cursor=pointer]:
+        - img [ref=e32]
+        - tooltip "Kanban"
+      - button "Monitor" [ref=e37] [cursor=pointer]:
+        - img [ref=e39]
+        - tooltip "Monitor"
+    - complementary [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]: Agents
+        - generic [ref=e44]: "0"
+      - generic [ref=e45]:
+        - generic [ref=e46]: No agents found
+        - generic [ref=e47]:
+          - button "v Work Queue" [ref=e48] [cursor=pointer]:
+            - generic [ref=e49]: v
+            - generic [ref=e50]: Work Queue
+          - generic [ref=e52]:
+            - button "Open 0" [disabled] [ref=e53]:
+              - generic [ref=e54]: Open
+              - generic [ref=e55]: "0"
+            - button "Blocked 0" [disabled] [ref=e56]:
+              - generic [ref=e57]: Blocked
+              - generic [ref=e58]: "0"
+            - button "In Progress 0" [disabled] [ref=e59]:
+              - generic [ref=e60]: In Progress
+              - generic [ref=e61]: "0"
+            - button "Needs Review 0" [disabled] [ref=e62]:
+              - generic [ref=e63]: Needs Review
+              - generic [ref=e64]: "0"
+            - button "Done count" [disabled] [ref=e65]:
+              - generic [ref=e66]: Done
+              - generic [ref=e67]: "0"
+        - generic [ref=e69]: Updated 11:18:07 PM
+    - main [ref=e70]:
+      - alert [ref=e71]:
+        - img [ref=e73]
+        - heading "Failed to load data" [level=3] [ref=e75]
+        - paragraph [ref=e76]: There was a problem fetching the data. Please try again.
+        - group [ref=e77]:
+          - generic "Technical details" [ref=e78] [cursor=pointer]
+        - button "Try again" [ref=e80] [cursor=pointer]
+```
