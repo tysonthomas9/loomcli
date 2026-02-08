@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -43,6 +44,18 @@ func TestReadLockInfo(t *testing.T) {
 		if result.Database != lockInfo.Database {
 			t.Errorf("Database mismatch: got %s, want %s", result.Database, lockInfo.Database)
 		}
+
+		if result.ParentPID != lockInfo.ParentPID {
+			t.Errorf("ParentPID mismatch: got %d, want %d", result.ParentPID, lockInfo.ParentPID)
+		}
+
+		if result.Version != lockInfo.Version {
+			t.Errorf("Version mismatch: got %s, want %s", result.Version, lockInfo.Version)
+		}
+
+		if result.StartedAt.IsZero() {
+			t.Error("StartedAt should not be zero")
+		}
 	})
 
 	t.Run("old format (plain PID)", func(t *testing.T) {
@@ -78,6 +91,61 @@ func TestReadLockInfo(t *testing.T) {
 		_, err := ReadLockInfo(tmpDir)
 		if err == nil {
 			t.Error("expected error for invalid format")
+		}
+	})
+
+	t.Run("old format with trailing whitespace", func(t *testing.T) {
+		lockPath := filepath.Join(tmpDir, "daemon.lock")
+		if err := os.WriteFile(lockPath, []byte("  54321  \n"), 0644); err != nil {
+			t.Fatalf("failed to write lock file: %v", err)
+		}
+
+		result, err := ReadLockInfo(tmpDir)
+		if err != nil {
+			t.Fatalf("ReadLockInfo failed: %v", err)
+		}
+
+		if result.PID != 54321 {
+			t.Errorf("PID mismatch: got %d, want 54321", result.PID)
+		}
+	})
+
+	t.Run("empty file", func(t *testing.T) {
+		lockPath := filepath.Join(tmpDir, "daemon.lock")
+		if err := os.WriteFile(lockPath, []byte(""), 0644); err != nil {
+			t.Fatalf("failed to write lock file: %v", err)
+		}
+
+		_, err := ReadLockInfo(tmpDir)
+		if err == nil {
+			t.Error("expected error for empty file")
+		}
+	})
+
+	t.Run("zero PID in JSON", func(t *testing.T) {
+		// Documents that ReadLockInfo does not validate PID > 0
+		// (finding from code review loomcli-6fl.3)
+		lockPath := filepath.Join(tmpDir, "daemon.lock")
+		lockInfo := &LockInfo{
+			PID:      0,
+			Database: "/path/to/db",
+			Version:  "1.0.0",
+		}
+		data, err := json.Marshal(lockInfo)
+		if err != nil {
+			t.Fatalf("failed to marshal lock info: %v", err)
+		}
+		if err := os.WriteFile(lockPath, data, 0644); err != nil {
+			t.Fatalf("failed to write lock file: %v", err)
+		}
+
+		result, err := ReadLockInfo(tmpDir)
+		if err != nil {
+			t.Fatalf("ReadLockInfo failed: %v", err)
+		}
+
+		if result.PID != 0 {
+			t.Errorf("PID mismatch: got %d, want 0", result.PID)
 		}
 	})
 }
@@ -141,6 +209,22 @@ func TestCheckPIDFile(t *testing.T) {
 			t.Errorf("expected pid=%d, got %d", currentPID, pid)
 		}
 	})
+
+	t.Run("PID file with extra whitespace", func(t *testing.T) {
+		pidFile := filepath.Join(tmpDir, "daemon.pid")
+		currentPID := os.Getpid()
+		if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("  %d  \n", currentPID)), 0644); err != nil {
+			t.Fatalf("failed to write PID file: %v", err)
+		}
+
+		running, pid := checkPIDFile(tmpDir)
+		if !running {
+			t.Error("expected running=true for current process with whitespace")
+		}
+		if pid != currentPID {
+			t.Errorf("expected pid=%d, got %d", currentPID, pid)
+		}
+	})
 }
 
 func TestTryDaemonLock(t *testing.T) {
@@ -166,7 +250,10 @@ func TestTryDaemonLock(t *testing.T) {
 			Version:   "1.0.0",
 			StartedAt: time.Now(),
 		}
-		data, _ := json.Marshal(lockInfo)
+		data, err := json.Marshal(lockInfo)
+		if err != nil {
+			t.Fatalf("failed to marshal lock info: %v", err)
+		}
 		if err := os.WriteFile(lockPath, data, 0644); err != nil {
 			t.Fatalf("failed to write lock file: %v", err)
 		}
@@ -187,7 +274,10 @@ func TestTryDaemonLock(t *testing.T) {
 			Version:   "1.0.0",
 			StartedAt: time.Now(),
 		}
-		data, _ := json.Marshal(lockInfo)
+		data, err := json.Marshal(lockInfo)
+		if err != nil {
+			t.Fatalf("failed to marshal lock info: %v", err)
+		}
 		if err := os.WriteFile(lockPath, data, 0644); err != nil {
 			t.Fatalf("failed to write lock file: %v", err)
 		}
@@ -292,6 +382,57 @@ func TestTryDaemonLock(t *testing.T) {
 			t.Errorf("expected pid=%d, got %d", currentPID, pid)
 		}
 	})
+
+	t.Run("no lock file with dead PID in PID file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		pidFile := filepath.Join(tmpDir, "daemon.pid")
+
+		if err := os.WriteFile(pidFile, []byte("999999999"), 0644); err != nil {
+			t.Fatalf("failed to write PID file: %v", err)
+		}
+
+		running, pid := TryDaemonLock(tmpDir)
+		if running {
+			t.Error("expected running=false when PID file has dead process")
+		}
+		if pid != 0 {
+			t.Errorf("expected pid=0, got %d", pid)
+		}
+	})
+
+	t.Run("no lock file with invalid PID file content", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		pidFile := filepath.Join(tmpDir, "daemon.pid")
+
+		if err := os.WriteFile(pidFile, []byte("not-a-pid"), 0644); err != nil {
+			t.Fatalf("failed to write PID file: %v", err)
+		}
+
+		running, pid := TryDaemonLock(tmpDir)
+		if running {
+			t.Error("expected running=false when PID file has invalid content")
+		}
+		if pid != 0 {
+			t.Errorf("expected pid=0, got %d", pid)
+		}
+	})
+
+	t.Run("empty lock file not locked", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		lockPath := filepath.Join(tmpDir, "daemon.lock")
+
+		if err := os.WriteFile(lockPath, []byte(""), 0644); err != nil {
+			t.Fatalf("failed to write lock file: %v", err)
+		}
+
+		running, pid := TryDaemonLock(tmpDir)
+		if running {
+			t.Error("expected running=false when lock file is empty and not locked")
+		}
+		if pid != 0 {
+			t.Errorf("expected pid=0, got %d", pid)
+		}
+	})
 }
 
 func TestFlockFunctions(t *testing.T) {
@@ -337,6 +478,24 @@ func TestFlockFunctions(t *testing.T) {
 		}
 
 		FlockUnlock(f)
+	})
+
+	t.Run("FlockUnlock without prior lock does not panic", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		lockPath := filepath.Join(tmpDir, "test.lock")
+
+		if err := os.WriteFile(lockPath, []byte("test"), 0644); err != nil {
+			t.Fatalf("failed to create lock file: %v", err)
+		}
+
+		f, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open lock file: %v", err)
+		}
+		defer f.Close()
+
+		// Should not panic or return a fatal error
+		_ = FlockUnlock(f)
 	})
 
 	t.Run("flockExclusive returns errDaemonLocked when already locked", func(t *testing.T) {
@@ -388,6 +547,24 @@ func TestIsProcessRunning(t *testing.T) {
 		ppid := os.Getppid()
 		if ppid > 0 && !isProcessRunning(ppid) {
 			t.Error("expected parent process to be running")
+		}
+	})
+
+	t.Run("very high PID is not running", func(t *testing.T) {
+		if isProcessRunning(999999999) {
+			t.Error("expected PID 999999999 to not be running")
+		}
+	})
+
+	t.Run("PID 0 is not running", func(t *testing.T) {
+		if isProcessRunning(0) {
+			t.Error("expected PID 0 to not be running")
+		}
+	})
+
+	t.Run("negative PID is not running", func(t *testing.T) {
+		if isProcessRunning(-1) {
+			t.Error("expected PID -1 to not be running")
 		}
 	})
 }
@@ -537,6 +714,95 @@ func TestErrLocked_IsExported(t *testing.T) {
 		lockErr := TryLockExclusive(f2)
 		if lockErr != ErrLocked {
 			t.Fatalf("expected TryLockExclusive to return ErrLocked, got: %v", lockErr)
+		}
+	})
+}
+
+func TestConcurrentLockAccess(t *testing.T) {
+	t.Run("goroutine holds flock while another calls TryDaemonLock", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		lockPath := filepath.Join(tmpDir, "daemon.lock")
+
+		currentPID := os.Getpid()
+		lockInfo := LockInfo{
+			PID:       currentPID,
+			Database:  "/path/to/db",
+			Version:   "1.0.0",
+			StartedAt: time.Now(),
+		}
+		data, err := json.Marshal(lockInfo)
+		if err != nil {
+			t.Fatalf("failed to marshal lock info: %v", err)
+		}
+		if err := os.WriteFile(lockPath, data, 0644); err != nil {
+			t.Fatalf("failed to write lock file: %v", err)
+		}
+
+		// Acquire lock in a goroutine, hold it while another goroutine probes
+		f, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open lock file: %v", err)
+		}
+		defer f.Close()
+
+		if err := FlockExclusiveBlocking(f); err != nil {
+			t.Fatalf("failed to acquire lock: %v", err)
+		}
+		defer FlockUnlock(f)
+
+		// Multiple concurrent probes should all see daemon as running
+		var wg sync.WaitGroup
+		const numProbes = 5
+		results := make([]bool, numProbes)
+		pids := make([]int, numProbes)
+
+		for i := 0; i < numProbes; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				results[idx], pids[idx] = TryDaemonLock(tmpDir)
+			}(i)
+		}
+
+		wg.Wait()
+
+		for i := 0; i < numProbes; i++ {
+			if !results[i] {
+				t.Errorf("probe %d: expected running=true, got false", i)
+			}
+			if pids[i] != currentPID {
+				t.Errorf("probe %d: expected pid=%d, got %d", i, currentPID, pids[i])
+			}
+		}
+	})
+
+	t.Run("concurrent TryDaemonLock with no lock held", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		lockPath := filepath.Join(tmpDir, "daemon.lock")
+
+		// Create lock file but don't hold the lock
+		if err := os.WriteFile(lockPath, []byte(`{"pid":12345}`), 0644); err != nil {
+			t.Fatalf("failed to write lock file: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		const numProbes = 5
+		results := make([]bool, numProbes)
+
+		for i := 0; i < numProbes; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				results[idx], _ = TryDaemonLock(tmpDir)
+			}(i)
+		}
+
+		wg.Wait()
+
+		for i := 0; i < numProbes; i++ {
+			if results[i] {
+				t.Errorf("probe %d: expected running=false when lock is not held", i)
+			}
 		}
 	})
 }
