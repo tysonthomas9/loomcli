@@ -8,7 +8,7 @@
 
 import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
-import { ReactFlowProvider } from '@xyflow/react';
+import { Position, ReactFlowProvider } from '@xyflow/react';
 import { describe, it, expect } from 'vitest';
 
 import type { Issue, IssueNodeData } from '@/types';
@@ -352,7 +352,7 @@ describe('IssueNode', () => {
   });
 
   describe('handles', () => {
-    it('renders target handle on left', () => {
+    it('renders target handle on left by default', () => {
       const props = createTestProps();
       const { container } = renderWithProvider(props);
 
@@ -360,11 +360,37 @@ describe('IssueNode', () => {
       expect(targetHandle).toBeInTheDocument();
     });
 
-    it('renders source handle on right', () => {
+    it('renders source handle on right by default', () => {
       const props = createTestProps();
       const { container } = renderWithProvider(props);
 
       const sourceHandle = container.querySelector('[data-handlepos="right"]');
+      expect(sourceHandle).toBeInTheDocument();
+    });
+
+    it('renders handles with provided sourcePosition/targetPosition', () => {
+      const props = createTestProps({
+        sourcePosition: Position.Bottom,
+        targetPosition: Position.Top,
+      } as Partial<IssueNodeProps>);
+      const { container } = renderWithProvider(props);
+
+      const targetHandle = container.querySelector('[data-handlepos="top"]');
+      const sourceHandle = container.querySelector('[data-handlepos="bottom"]');
+      expect(targetHandle).toBeInTheDocument();
+      expect(sourceHandle).toBeInTheDocument();
+    });
+
+    it('uses defaults when sourcePosition/targetPosition are undefined', () => {
+      const props = createTestProps({
+        sourcePosition: undefined,
+        targetPosition: undefined,
+      } as Partial<IssueNodeProps>);
+      const { container } = renderWithProvider(props);
+
+      const targetHandle = container.querySelector('[data-handlepos="left"]');
+      const sourceHandle = container.querySelector('[data-handlepos="right"]');
+      expect(targetHandle).toBeInTheDocument();
       expect(sourceHandle).toBeInTheDocument();
     });
   });

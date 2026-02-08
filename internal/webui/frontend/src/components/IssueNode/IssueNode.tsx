@@ -31,7 +31,7 @@ function getPriorityLevel(priority: number | undefined): 0 | 1 | 2 | 3 | 4 {
 /**
  * IssueNode renders an issue as a React Flow node in the dependency graph.
  */
-function IssueNodeComponent({ data, selected }: IssueNodeProps): JSX.Element {
+function IssueNodeComponent({ data, selected, sourcePosition, targetPosition }: IssueNodeProps): JSX.Element {
   const {
     title,
     priority,
@@ -60,7 +60,7 @@ function IssueNodeComponent({ data, selected }: IssueNodeProps): JSX.Element {
       aria-label={`Issue: ${displayTitle}`}
     >
       {/* Target handle for incoming dependencies */}
-      <Handle type="target" position={Position.Left} className={styles.handle} id="target" />
+      <Handle type="target" position={targetPosition ?? Position.Left} className={styles.handle} id="target" />
 
       {/* Blocked count badge - positioned at top-right corner */}
       {blockedCount > 0 && (
@@ -97,7 +97,7 @@ function IssueNodeComponent({ data, selected }: IssueNodeProps): JSX.Element {
       </footer>
 
       {/* Source handle for outgoing dependencies */}
-      <Handle type="source" position={Position.Right} className={styles.handle} id="source" />
+      <Handle type="source" position={sourcePosition ?? Position.Right} className={styles.handle} id="source" />
     </article>
   );
 }
@@ -119,7 +119,9 @@ function arePropsEqual(prev: IssueNodeProps, next: IssueNodeProps): boolean {
     prev.data.dependentCount === next.data.dependentCount &&
     prev.data.isReady === next.data.isReady &&
     prev.data.blockedCount === next.data.blockedCount &&
-    prev.data.isRootBlocker === next.data.isRootBlocker
+    prev.data.isRootBlocker === next.data.isRootBlocker &&
+    prev.sourcePosition === next.sourcePosition &&
+    prev.targetPosition === next.targetPosition
   );
 }
 
