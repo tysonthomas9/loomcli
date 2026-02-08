@@ -60,8 +60,6 @@ export function DraggableIssueCard({
   blockedBy,
   columnId,
   isBacklog,
-  onApprove,
-  onReject,
 }: DraggableIssueCardProps): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: issue.id,
@@ -79,8 +77,6 @@ export function DraggableIssueCard({
     ...(blockedBy !== undefined && { blockedBy }),
     ...(isBacklog !== undefined && { isBacklog }),
     ...(columnId !== undefined && { columnId }),
-    ...(onApprove !== undefined && { onApprove }),
-    ...(onReject !== undefined && { onReject }),
   };
 
   // In overlay mode, render without drag functionality

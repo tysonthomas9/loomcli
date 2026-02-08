@@ -100,54 +100,6 @@
   color: var(--color-text-muted);
 }
 
-/* Review action buttons (approve/reject) */
-.reviewActions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.approveButton,
-.rejectButton {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  transition:
-    background-color var(--transition-fast),
-    color var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.approveButton {
-  color: var(--color-success);
-}
-
-.approveButton:hover:not(:disabled) {
-  background-color: var(--color-success-bg);
-  border-color: var(--color-success);
-}
-
-.approveButton:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.rejectButton {
-  color: var(--color-danger);
-}
-
-.rejectButton:hover:not(:disabled) {
-  background-color: var(--color-danger-bg);
-  border-color: var(--color-danger);
-}
-
 /* Fullscreen toggle button */
 .fullscreenButton {
   margin-left: auto;

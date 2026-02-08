@@ -571,8 +571,6 @@ function App() {
           groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
           onDragEnd={handleDragEnd}
           onIssueClick={handleIssueClick}
-          onApprove={handleApprove}
-          onReject={handleReject}
           {...(blockedIssuesMap !== undefined && { blockedIssues: blockedIssuesMap })}
           {...(filters.showBlocked !== undefined && { showBlocked: filters.showBlocked })}
         />

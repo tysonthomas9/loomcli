@@ -531,12 +531,8 @@ function DefaultContent({
           isSavingStatus={isSavingStatus}
           showPriority={true}
           sticky={true}
-          isReviewItem={isReviewItem}
-          isApproving={isApproving}
           isFullscreen={isFullscreen ?? false}
           {...(onToggleFullscreen && { onToggleFullscreen })}
-          {...(onApprove && { onApprove: handleApprove })}
-          {...(onReject && { onReject: handleRejectClick })}
         />
 
         {/* Metadata Bar */}
@@ -588,7 +584,32 @@ function DefaultContent({
         </div>
       </div>
 
-      {/* Reject Comment Form (shown below header when rejecting) */}
+      {/* Review Action Bar (shown for review items when reject form is not open) */}
+      {isReviewItem && !showRejectForm && onApprove && onReject && (
+        <div className={styles.reviewActionBar} data-testid="review-action-bar">
+          <button
+            type="button"
+            className={styles.reviewApproveButton}
+            onClick={handleApprove}
+            disabled={isApproving}
+            aria-label="Approve"
+            data-testid="panel-approve-button"
+          >
+            {isApproving ? '...' : '\u2713'} Approve
+          </button>
+          <button
+            type="button"
+            className={styles.reviewRejectButton}
+            onClick={handleRejectClick}
+            aria-label="Reject"
+            data-testid="panel-reject-button"
+          >
+            {'\u2717'} Reject
+          </button>
+        </div>
+      )}
+
+      {/* Reject Comment Form (shown below action bar when rejecting) */}
       {showRejectForm && onReject && (
         <RejectCommentForm
           issueId={issue.id}

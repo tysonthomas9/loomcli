@@ -788,29 +788,11 @@ describe('IssueCard', () => {
     });
   });
 
-  describe('approve/reject actions', () => {
+  describe('review actions (panel-opening buttons)', () => {
     describe('button visibility', () => {
-      it('shows approve button when columnId is "review" and onApprove is provided', () => {
+      it('shows approve and reject buttons in review column when onClick is provided', () => {
         const issue = createTestIssue();
-        const onApprove = vi.fn();
-        render(<IssueCard issue={issue} columnId="review" onApprove={onApprove} />);
-
-        expect(screen.getByTestId('approve-button')).toBeInTheDocument();
-      });
-
-      it('shows reject button when columnId is "review" and onReject is provided', () => {
-        const issue = createTestIssue();
-        const onReject = vi.fn();
-        render(<IssueCard issue={issue} columnId="review" onReject={onReject} />);
-
-        expect(screen.getByTestId('reject-button')).toBeInTheDocument();
-      });
-
-      it('shows both buttons when both callbacks are provided', () => {
-        const issue = createTestIssue();
-        render(
-          <IssueCard issue={issue} columnId="review" onApprove={vi.fn()} onReject={vi.fn()} />
-        );
+        render(<IssueCard issue={issue} columnId="review" onClick={vi.fn()} />);
 
         expect(screen.getByTestId('approve-button')).toBeInTheDocument();
         expect(screen.getByTestId('reject-button')).toBeInTheDocument();
@@ -818,206 +800,57 @@ describe('IssueCard', () => {
 
       it('does not show buttons when columnId is not "review"', () => {
         const issue = createTestIssue();
-        render(
-          <IssueCard issue={issue} columnId="in_progress" onApprove={vi.fn()} onReject={vi.fn()} />
-        );
+        render(<IssueCard issue={issue} columnId="in_progress" onClick={vi.fn()} />);
 
         expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
         expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();
       });
 
-      it('does not show buttons when columnId is undefined', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} onApprove={vi.fn()} onReject={vi.fn()} />);
-
-        expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();
-      });
-
-      it('does not show buttons when callbacks are not provided', () => {
+      it('does not show buttons when onClick is not provided', () => {
         const issue = createTestIssue();
         render(<IssueCard issue={issue} columnId="review" />);
 
         expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
         expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();
       });
-
-      it('shows only approve button when only onApprove is provided', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" onApprove={vi.fn()} />);
-
-        expect(screen.getByTestId('approve-button')).toBeInTheDocument();
-        expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();
-      });
-
-      it('shows only reject button when only onReject is provided', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" onReject={vi.fn()} />);
-
-        expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
-        expect(screen.getByTestId('reject-button')).toBeInTheDocument();
-      });
     });
 
     describe('approve button', () => {
-      it('calls onApprove with issue when clicked', () => {
+      it('calls onClick with issue when approve is clicked', () => {
         const issue = createTestIssue({ id: 'approve-test-123' });
-        const onApprove = vi.fn();
-        render(<IssueCard issue={issue} columnId="review" onApprove={onApprove} />);
-
-        fireEvent.click(screen.getByTestId('approve-button'));
-
-        expect(onApprove).toHaveBeenCalledWith(issue);
-        expect(onApprove).toHaveBeenCalledTimes(1);
-      });
-
-      it('does not propagate click to parent', () => {
-        const issue = createTestIssue();
         const onClick = vi.fn();
-        const onApprove = vi.fn();
-        render(
-          <IssueCard issue={issue} columnId="review" onClick={onClick} onApprove={onApprove} />
-        );
+        render(<IssueCard issue={issue} columnId="review" onClick={onClick} />);
 
         fireEvent.click(screen.getByTestId('approve-button'));
 
-        expect(onApprove).toHaveBeenCalled();
-        expect(onClick).not.toHaveBeenCalled();
+        expect(onClick).toHaveBeenCalledWith(issue);
+        expect(onClick).toHaveBeenCalledTimes(1);
       });
 
       it('has accessible aria-label', () => {
         const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" onApprove={vi.fn()} />);
+        render(<IssueCard issue={issue} columnId="review" onClick={vi.fn()} />);
 
         expect(screen.getByLabelText('Approve')).toBeInTheDocument();
-      });
-
-      it('shows loading state after click', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" onApprove={vi.fn()} />);
-
-        fireEvent.click(screen.getByTestId('approve-button'));
-
-        expect(screen.getByTestId('approve-button')).toHaveTextContent('...');
-      });
-
-      it('disables button after click to prevent double submission', () => {
-        const issue = createTestIssue();
-        const onApprove = vi.fn();
-        render(<IssueCard issue={issue} columnId="review" onApprove={onApprove} />);
-
-        fireEvent.click(screen.getByTestId('approve-button'));
-        fireEvent.click(screen.getByTestId('approve-button'));
-
-        expect(onApprove).toHaveBeenCalledTimes(1);
       });
     });
 
     describe('reject button', () => {
-      it('shows reject comment form when clicked', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" onReject={vi.fn()} />);
-
-        fireEvent.click(screen.getByTestId('reject-button'));
-
-        expect(screen.getByTestId('reject-comment-form')).toBeInTheDocument();
-      });
-
-      it('hides action buttons when reject form is shown', () => {
-        const issue = createTestIssue();
-        render(
-          <IssueCard issue={issue} columnId="review" onApprove={vi.fn()} onReject={vi.fn()} />
-        );
-
-        fireEvent.click(screen.getByTestId('reject-button'));
-
-        expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();
-      });
-
-      it('does not propagate click to parent', () => {
+      it('calls onClick with issue when reject is clicked (opens panel)', () => {
         const issue = createTestIssue();
         const onClick = vi.fn();
-        render(<IssueCard issue={issue} columnId="review" onClick={onClick} onReject={vi.fn()} />);
+        render(<IssueCard issue={issue} columnId="review" onClick={onClick} />);
 
         fireEvent.click(screen.getByTestId('reject-button'));
 
-        expect(onClick).not.toHaveBeenCalled();
+        expect(onClick).toHaveBeenCalledWith(issue);
       });
 
       it('has accessible aria-label', () => {
         const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" onReject={vi.fn()} />);
+        render(<IssueCard issue={issue} columnId="review" onClick={vi.fn()} />);
 
         expect(screen.getByLabelText('Reject')).toBeInTheDocument();
-      });
-    });
-
-    describe('reject comment form interaction', () => {
-      it('calls onReject with issue and comment when form is submitted', () => {
-        const issue = createTestIssue({ id: 'reject-test-456' });
-        const onReject = vi.fn();
-        render(<IssueCard issue={issue} columnId="review" onReject={onReject} />);
-
-        // Show reject form
-        fireEvent.click(screen.getByTestId('reject-button'));
-
-        // Enter comment and submit
-        const textarea = screen.getByTestId('reject-textarea');
-        fireEvent.change(textarea, { target: { value: 'needs more work' } });
-        fireEvent.click(screen.getByTestId('reject-submit'));
-
-        expect(onReject).toHaveBeenCalledWith(issue, 'needs more work');
-        expect(onReject).toHaveBeenCalledTimes(1);
-      });
-
-      it('hides reject form and shows buttons when cancel is clicked', () => {
-        const issue = createTestIssue();
-        render(
-          <IssueCard issue={issue} columnId="review" onApprove={vi.fn()} onReject={vi.fn()} />
-        );
-
-        // Show reject form
-        fireEvent.click(screen.getByTestId('reject-button'));
-        expect(screen.getByTestId('reject-comment-form')).toBeInTheDocument();
-
-        // Click cancel
-        fireEvent.click(screen.getByTestId('reject-cancel'));
-
-        // Form should be hidden, buttons should be visible again
-        expect(screen.queryByTestId('reject-comment-form')).not.toBeInTheDocument();
-        expect(screen.getByTestId('approve-button')).toBeInTheDocument();
-        expect(screen.getByTestId('reject-button')).toBeInTheDocument();
-      });
-
-      it('passes issue ID to reject form for accessibility', () => {
-        const issue = createTestIssue({ id: 'issue-for-form' });
-        render(<IssueCard issue={issue} columnId="review" onReject={vi.fn()} />);
-
-        fireEvent.click(screen.getByTestId('reject-button'));
-
-        // Check that form has aria-label with issue ID
-        expect(
-          screen.getByLabelText('Rejection feedback for issue issue-for-form')
-        ).toBeInTheDocument();
-      });
-
-      it('prevents double submission when rejecting', () => {
-        const issue = createTestIssue();
-        const onReject = vi.fn();
-        render(<IssueCard issue={issue} columnId="review" onReject={onReject} />);
-
-        // Show reject form
-        fireEvent.click(screen.getByTestId('reject-button'));
-
-        // Enter comment and submit twice
-        const textarea = screen.getByTestId('reject-textarea');
-        fireEvent.change(textarea, { target: { value: 'feedback' } });
-        fireEvent.click(screen.getByTestId('reject-submit'));
-        fireEvent.click(screen.getByTestId('reject-submit'));
-
-        // onReject should only be called once due to isRejecting state
-        expect(onReject).toHaveBeenCalledTimes(1);
       });
     });
 
@@ -1026,9 +859,7 @@ describe('IssueCard', () => {
         'does not show action buttons for columnId="%s"',
         (columnId) => {
           const issue = createTestIssue();
-          render(
-            <IssueCard issue={issue} columnId={columnId} onApprove={vi.fn()} onReject={vi.fn()} />
-          );
+          render(<IssueCard issue={issue} columnId={columnId} onClick={vi.fn()} />);
 
           expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
           expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();

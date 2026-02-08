@@ -39,10 +39,6 @@ export interface SwimLaneProps {
   showBlocked?: boolean;
   /** Additional CSS class */
   className?: string;
-  /** Callback when approve button is clicked on a card in review column */
-  onApprove?: (issue: Issue) => void | Promise<void>;
-  /** Callback when reject is submitted with comment on a card in review column */
-  onReject?: (issue: Issue, comment: string) => void | Promise<void>;
 }
 
 /**
@@ -61,8 +57,6 @@ export function SwimLane({
   blockedIssues,
   showBlocked = true,
   className,
-  onApprove,
-  onReject,
 }: SwimLaneProps): JSX.Element {
   // Filter issues based on blocked visibility
   const filteredIssues = useMemo(() => {
@@ -171,8 +165,6 @@ export function SwimLane({
                       blockedBy: blockedInfo.blockedBy,
                     }),
                     ...(isMutedColumn && { isBacklog: true }),
-                    ...(onApprove !== undefined && { onApprove }),
-                    ...(onReject !== undefined && { onReject }),
                   };
                   return <DraggableIssueCard key={issue.id} {...cardProps} />;
                 })

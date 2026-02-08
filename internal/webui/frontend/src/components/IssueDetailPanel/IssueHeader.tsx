@@ -46,14 +46,6 @@ export interface IssueHeaderProps {
   sticky?: boolean;
   /** Additional CSS class name */
   className?: string;
-  /** Whether this issue is a review item (shows approve/reject buttons) */
-  isReviewItem?: boolean;
-  /** Callback when approve button is clicked */
-  onApprove?: () => void;
-  /** Callback when reject button is clicked */
-  onReject?: () => void;
-  /** Whether approve action is in progress */
-  isApproving?: boolean;
   /** Whether the panel is in fullscreen mode */
   isFullscreen?: boolean;
   /** Callback to toggle fullscreen mode */
@@ -88,10 +80,6 @@ export function IssueHeader({
   onPriorityClick,
   sticky,
   className,
-  isReviewItem,
-  onApprove,
-  onReject,
-  isApproving,
   isFullscreen,
   onToggleFullscreen,
 }: IssueHeaderProps): JSX.Element {
@@ -136,33 +124,6 @@ export function IssueHeader({
           >
             {priorityInfo.short}
           </button>
-        )}
-        {isReviewItem && (onApprove || onReject) && (
-          <div className={styles.reviewActions} data-testid="header-review-actions">
-            {onApprove && (
-              <button
-                type="button"
-                className={styles.approveButton}
-                onClick={onApprove}
-                disabled={isApproving}
-                aria-label="Approve"
-                data-testid="header-approve-button"
-              >
-                {isApproving ? '...' : '\u2713'}
-              </button>
-            )}
-            {onReject && (
-              <button
-                type="button"
-                className={styles.rejectButton}
-                onClick={onReject}
-                aria-label="Reject"
-                data-testid="header-reject-button"
-              >
-                {'\u2717'}
-              </button>
-            )}
-          </div>
         )}
         {onToggleFullscreen && (
           <button

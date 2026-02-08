@@ -1,10 +1,8 @@
 /**
  * IssueCard component for Kanban board.
  * Displays a single issue as a card with title, ID, priority badge, and optional blocked indicator.
- * When in the Review column, shows Approve/Reject action buttons.
+ * When in the Review column, shows Approve/Reject buttons that open the detail panel.
  */
-
-import { useState, useCallback } from 'react';
 
 import { getAvatarColor, getStatusDotColor, getStatusLabel } from '@/components/AgentCard';
 import { BlockedBadge } from '@/components/BlockedBadge';
@@ -17,7 +15,6 @@ import type { ReviewType } from '@/utils/reviewType';
 
 import { AgentRow } from './AgentRow';
 import styles from './IssueCard.module.css';
-import { RejectCommentForm } from './RejectCommentForm';
 
 /**
  * Review badge configuration by type.
@@ -47,10 +44,6 @@ export interface IssueCardProps {
   isBacklog?: boolean;
   /** Column ID this card is displayed in (for conditional rendering) */
   columnId?: string;
-  /** Callback when approve button is clicked (only shown in review column). Returns Promise for error handling. */
-  onApprove?: (issue: Issue) => void | Promise<void>;
-  /** Callback when reject is submitted with comment (only shown in review column). Returns Promise for error handling. */
-  onReject?: (issue: Issue, comment: string) => void | Promise<void>;
 }
 
 /**
@@ -66,7 +59,7 @@ function getPriorityLevel(priority: number | undefined): 0 | 1 | 2 | 3 | 4 {
 /**
  * IssueCard displays a single issue in the Kanban board.
  * Shows title, ID, priority badge, and optional blocked indicator.
- * When in the Review column, shows Approve/Reject action buttons.
+ * When in the Review column, shows Approve/Reject buttons that open the detail panel.
  */
 export function IssueCard({
   issue,
@@ -76,14 +69,7 @@ export function IssueCard({
   blockedBy,
   isBacklog = false,
   columnId,
-  onApprove,
-  onReject,
 }: IssueCardProps): JSX.Element {
-  const [showRejectForm, setShowRejectForm] = useState(false);
-  const [isApproving, setIsApproving] = useState(false);
-  const [isRejecting, setIsRejecting] = useState(false);
-  const [rejectError, setRejectError] = useState<string | null>(null);
-
   const { getAgentByName } = useAgentContext();
 
   const priority = getPriorityLevel(issue.priority);
@@ -97,9 +83,8 @@ export function IssueCard({
   const assignedAgent = issue.assignee ? getAgentByName(issue.assignee) : undefined;
   const agentParsedStatus = assignedAgent ? parseLoomStatus(assignedAgent.status) : null;
 
-  // Show action buttons only in review column with callbacks provided
-  const showReviewActions =
-    columnId === 'review' && (onApprove !== undefined || onReject !== undefined);
+  // Show review action buttons in review column (they open the detail panel)
+  const showReviewActions = columnId === 'review' && onClick !== undefined;
 
   const rootClassName = className ? `${styles.issueCard} ${className}` : styles.issueCard;
 
@@ -116,54 +101,12 @@ export function IssueCard({
     }
   };
 
-  const handleApproveClick = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (!onApprove || isApproving) return;
-      setIsApproving(true);
-      try {
-        // Call onApprove - if it returns a promise, await it for error handling
-        await onApprove(issue);
-        // On success, card will move/re-render due to status change
-      } catch {
-        // On error, reset approving state so user can retry
-        setIsApproving(false);
-      }
-    },
-    [onApprove, issue, isApproving]
-  );
-
-  const handleRejectClick = useCallback((e: React.MouseEvent) => {
+  const handleReviewButtonClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setShowRejectForm(true);
-    setRejectError(null);
-  }, []);
-
-  const handleRejectCancel = useCallback(() => {
-    // Don't allow cancel while submitting
-    if (isRejecting) return;
-    setShowRejectForm(false);
-    setRejectError(null);
-  }, [isRejecting]);
-
-  const handleRejectSubmit = useCallback(
-    async (comment: string) => {
-      if (!onReject || isRejecting) return;
-      setIsRejecting(true);
-      setRejectError(null);
-      try {
-        // Call onReject - if it returns a promise, await it for error handling
-        await onReject(issue, comment);
-        // On success, card will move/re-render due to status change
-      } catch (err) {
-        // On error, reset rejecting state and show error so user can retry
-        setIsRejecting(false);
-        const message = err instanceof Error ? err.message : 'Failed to reject';
-        setRejectError(message);
-      }
-    },
-    [onReject, issue, isRejecting]
-  );
+    if (onClick) {
+      onClick(issue);
+    }
+  };
 
   return (
     <article
@@ -222,41 +165,27 @@ export function IssueCard({
           }
         />
       )}
-      {showReviewActions && !showRejectForm && (
+      {showReviewActions && (
         <div className={styles.reviewActions}>
-          {onApprove && (
-            <button
-              type="button"
-              className={styles.approveButton}
-              onClick={handleApproveClick}
-              disabled={isApproving}
-              aria-label="Approve"
-              data-testid="approve-button"
-            >
-              {isApproving ? '...' : '✓'} Approve
-            </button>
-          )}
-          {onReject && (
-            <button
-              type="button"
-              className={styles.rejectButton}
-              onClick={handleRejectClick}
-              aria-label="Reject"
-              data-testid="reject-button"
-            >
-              ✗ Reject
-            </button>
-          )}
+          <button
+            type="button"
+            className={styles.approveButton}
+            onClick={handleReviewButtonClick}
+            aria-label="Approve"
+            data-testid="approve-button"
+          >
+            ✓ Approve
+          </button>
+          <button
+            type="button"
+            className={styles.rejectButton}
+            onClick={handleReviewButtonClick}
+            aria-label="Reject"
+            data-testid="reject-button"
+          >
+            ✗ Reject
+          </button>
         </div>
-      )}
-      {showRejectForm && onReject && (
-        <RejectCommentForm
-          issueId={issue.id}
-          onSubmit={handleRejectSubmit}
-          onCancel={handleRejectCancel}
-          isSubmitting={isRejecting}
-          error={rejectError}
-        />
       )}
     </article>
   );

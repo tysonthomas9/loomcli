@@ -6,7 +6,7 @@
  * Unit tests for IssueDetailPanel component.
  */
 
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach as _beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
 
@@ -700,6 +700,204 @@ describe('IssueDetailPanel', () => {
       const designSection = screen.getByTestId('design-section');
       // Check that markdown was rendered (heading becomes h1)
       expect(within(designSection).getByRole('heading', { level: 1 })).toHaveTextContent('Heading');
+    });
+  });
+
+  describe('ReviewActionBar', () => {
+    it('renders ReviewActionBar for review items', () => {
+      const mockIssue = createTestIssueDetails({
+        title: '[Need Review] Some task',
+      });
+      const onApprove = vi.fn();
+      const onReject = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      );
+      expect(screen.getByTestId('review-action-bar')).toBeInTheDocument();
+      expect(screen.getByTestId('panel-approve-button')).toBeInTheDocument();
+      expect(screen.getByTestId('panel-reject-button')).toBeInTheDocument();
+    });
+
+    it('does NOT render ReviewActionBar for non-review items', () => {
+      const mockIssue = createTestIssueDetails({
+        title: 'Regular task without review',
+      });
+      const onApprove = vi.fn();
+      const onReject = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      );
+      expect(screen.queryByTestId('review-action-bar')).not.toBeInTheDocument();
+    });
+
+    it('does NOT render ReviewActionBar when onApprove is not provided', () => {
+      const mockIssue = createTestIssueDetails({
+        title: '[Need Review] Some task',
+      });
+      const onReject = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onReject={onReject}
+        />
+      );
+      expect(screen.queryByTestId('review-action-bar')).not.toBeInTheDocument();
+    });
+
+    it('does NOT render ReviewActionBar when onReject is not provided', () => {
+      const mockIssue = createTestIssueDetails({
+        title: '[Need Review] Some task',
+      });
+      const onApprove = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+        />
+      );
+      expect(screen.queryByTestId('review-action-bar')).not.toBeInTheDocument();
+    });
+
+    it('clicking Approve button calls onApprove', async () => {
+      const mockIssue = createTestIssueDetails({
+        title: '[Need Review] Some task',
+      });
+      const onApprove = vi.fn().mockResolvedValue(undefined);
+      const onReject = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      );
+      fireEvent.click(screen.getByTestId('panel-approve-button'));
+      await waitFor(() => {
+        expect(onApprove).toHaveBeenCalledTimes(1);
+        expect(onApprove).toHaveBeenCalledWith(mockIssue);
+      });
+    });
+
+    it('clicking Reject button shows the reject comment form', () => {
+      const mockIssue = createTestIssueDetails({
+        title: '[Need Review] Some task',
+      });
+      const onApprove = vi.fn();
+      const onReject = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      );
+      fireEvent.click(screen.getByTestId('panel-reject-button'));
+      expect(screen.getByTestId('reject-comment-form')).toBeInTheDocument();
+    });
+
+    it('ReviewActionBar hides when reject form is shown', () => {
+      const mockIssue = createTestIssueDetails({
+        title: '[Need Review] Some task',
+      });
+      const onApprove = vi.fn();
+      const onReject = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      );
+      // Initially the action bar is visible
+      expect(screen.getByTestId('review-action-bar')).toBeInTheDocument();
+
+      // Click reject to show form
+      fireEvent.click(screen.getByTestId('panel-reject-button'));
+
+      // Action bar should be hidden, form should be visible
+      expect(screen.queryByTestId('review-action-bar')).not.toBeInTheDocument();
+      expect(screen.getByTestId('reject-comment-form')).toBeInTheDocument();
+    });
+
+    it('reject form submit calls onReject with comment', async () => {
+      const mockIssue = createTestIssueDetails({
+        title: '[Need Review] Some task',
+      });
+      const onApprove = vi.fn();
+      const onReject = vi.fn().mockResolvedValue(undefined);
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      );
+      // Click reject to show form
+      fireEvent.click(screen.getByTestId('panel-reject-button'));
+
+      // Type a comment in the textarea
+      const textarea = screen.getByTestId('reject-textarea');
+      fireEvent.change(textarea, { target: { value: 'Needs more work' } });
+
+      // Submit the form
+      fireEvent.click(screen.getByTestId('reject-submit'));
+
+      await waitFor(() => {
+        expect(onReject).toHaveBeenCalledTimes(1);
+        expect(onReject).toHaveBeenCalledWith(mockIssue, 'Needs more work');
+      });
+    });
+
+    it('reject form cancel shows ReviewActionBar again', () => {
+      const mockIssue = createTestIssueDetails({
+        title: '[Need Review] Some task',
+      });
+      const onApprove = vi.fn();
+      const onReject = vi.fn();
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      );
+      // Click reject to show form
+      fireEvent.click(screen.getByTestId('panel-reject-button'));
+      expect(screen.queryByTestId('review-action-bar')).not.toBeInTheDocument();
+      expect(screen.getByTestId('reject-comment-form')).toBeInTheDocument();
+
+      // Click cancel
+      fireEvent.click(screen.getByTestId('reject-cancel'));
+
+      // Action bar should be back, form should be gone
+      expect(screen.getByTestId('review-action-bar')).toBeInTheDocument();
+      expect(screen.queryByTestId('reject-comment-form')).not.toBeInTheDocument();
     });
   });
 });
