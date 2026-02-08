@@ -222,6 +222,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				Port:           serveWebUIPort,
 				BindAddress:    serveBindAddr,
 				SocketPath:     serveWebUISocket,
+				LoomServerURL:  fmt.Sprintf("http://localhost:%d", servePort),
 				FleetEnabled:   serveRedisAddr != "",
 				FleetRedis:     fleetRedisConfig,
 				FleetJWTKey:    fleetJWTKey,

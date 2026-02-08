@@ -69,13 +69,19 @@ func safeDialContext(allowPrivate bool) func(ctx context.Context, network, addr 
 	}
 }
 
-const defaultLoomServerURL = "http://localhost:9000"
+const defaultLoomServerURL = "http://localhost:8081"
 
 // newLoomProxy returns a reverse proxy for the loom API or nil if misconfigured.
-func newLoomProxy() http.Handler {
+// defaultURL, if non-empty, overrides the compiled-in default when LOOM_SERVER_URL
+// is not set. This lets 'loom serve' pass the actual API port.
+func newLoomProxy(defaultURL string) http.Handler {
 	loomURL := strings.TrimSpace(os.Getenv("LOOM_SERVER_URL"))
 	if loomURL == "" {
-		loomURL = defaultLoomServerURL
+		if defaultURL != "" {
+			loomURL = defaultURL
+		} else {
+			loomURL = defaultLoomServerURL
+		}
 	}
 
 	target, err := url.Parse(loomURL)
