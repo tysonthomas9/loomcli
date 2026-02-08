@@ -102,6 +102,14 @@ describe('useViewState', () => {
       expect(view).toBe('monitor');
     });
 
+    it('parses settings view from URL', () => {
+      mockWindowLocation('?view=settings');
+      const { result } = renderHook(() => useViewState());
+
+      const [view] = result.current;
+      expect(view).toBe('settings');
+    });
+
     it('defaults to kanban for invalid view (?view=invalid returns "kanban")', () => {
       mockWindowLocation('?view=invalid');
       const { result } = renderHook(() => useViewState());
@@ -388,6 +396,12 @@ describe('parseViewFromUrl', () => {
     expect(result).toBe('monitor');
   });
 
+  it('parses settings view', () => {
+    mockWindowLocation('?view=settings');
+    const result = parseViewFromUrl();
+    expect(result).toBe('settings');
+  });
+
   it('returns DEFAULT_VIEW for invalid view', () => {
     mockWindowLocation('?view=invalid');
     const result = parseViewFromUrl();
@@ -428,6 +442,10 @@ describe('isValidViewMode', () => {
 
   it('returns true for monitor', () => {
     expect(isValidViewMode('monitor')).toBe(true);
+  });
+
+  it('returns true for settings', () => {
+    expect(isValidViewMode('settings')).toBe(true);
   });
 
   it('returns false for invalid string', () => {

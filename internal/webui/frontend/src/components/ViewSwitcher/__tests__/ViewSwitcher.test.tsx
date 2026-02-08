@@ -23,6 +23,13 @@ describe('ViewSwitcher', () => {
       expect(screen.getByTestId('view-tab-monitor')).toBeInTheDocument();
     });
 
+    it('does not render a settings tab (settings is not a switcher view)', () => {
+      render(<ViewSwitcher activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.queryByTestId('view-tab-settings')).not.toBeInTheDocument();
+      expect(screen.queryByText('Settings')).not.toBeInTheDocument();
+    });
+
     it('renders with correct labels', () => {
       render(<ViewSwitcher activeView="kanban" onChange={() => {}} />);
 

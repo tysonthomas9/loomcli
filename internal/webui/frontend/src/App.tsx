@@ -593,6 +593,12 @@ function App() {
           />
         </Suspense>
       )}
+      {activeView === 'settings' && (
+        <div style={{ padding: 'var(--space-6)', color: 'var(--color-text-secondary)' }}>
+          <h2 style={{ margin: 0, marginBottom: 'var(--space-2)', color: 'var(--color-text)', fontSize: '20px' }}>Settings</h2>
+          <p style={{ margin: 0 }}>Settings panel coming soon.</p>
+        </div>
+      )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <IssueDetailPanel
         isOpen={isPanelOpen}
