@@ -7,6 +7,8 @@ logrouter
 # Frontend dependencies
 internal/webui/frontend/node_modules/
 internal/webui/frontend/dist/
+internal/webui/frontend/playwright-report/
+internal/webui/frontend/test-results/
 
 # Loom config (may contain credentials)
 .loom/
