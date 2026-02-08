@@ -113,6 +113,10 @@ loom plan <worktree> --auto   OR   loom task <worktree> --auto
 - Max tasks limit reached (`--max-tasks`)
 - Idle timeout exceeded (`--idle-timeout`)
 
+## API Reference
+
+See [API Reference](docs/api.md) for the WebUI HTTP API.
+
 ## Environment Variables
 
 - `LOOM_DEFAULT_BRANCH` - Default integration branch (default: main)
