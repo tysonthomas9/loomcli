@@ -125,7 +125,6 @@ function App() {
 
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
-  const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Timeout refs for panel close animations (prevents race conditions)
   const issuePanelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -169,7 +168,6 @@ function App() {
 
   // Terminal panel state
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
   // Assignee prompt state for Ready → In Progress drag
   const { recentAssignees, addRecentAssignee } = useRecentAssignees();
@@ -189,18 +187,6 @@ function App() {
       clearTimeoutRef(agentPanelTimeoutRef);
     };
   }, [clearTimeoutRef]);
-
-  // Close profile menu on outside click
-  useEffect(() => {
-    if (!isProfileMenuOpen) return;
-    const handleClickOutside = (event: MouseEvent) => {
-      if (!profileMenuRef.current?.contains(event.target as Node)) {
-        setIsProfileMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isProfileMenuOpen]);
 
   const handleDragEnd = useCallback(
     async (issueId: string, newStatus: Status, oldStatus: Status) => {
@@ -463,14 +449,6 @@ function App() {
     [fetchIssue, clearTimeoutRef]
   );
 
-  const toggleProfileMenu = useCallback(() => {
-    setIsProfileMenuOpen((prev) => !prev);
-  }, []);
-
-  const closeProfileMenu = useCallback(() => {
-    setIsProfileMenuOpen(false);
-  }, []);
-
   const headerNavigation = (
     <div className={styles.headerControls}>
       <div className={styles.searchWrapper}>
@@ -504,37 +482,6 @@ function App() {
         showRetryButton={false}
         compact
       />
-      <div className={styles.profileMenu} ref={profileMenuRef}>
-        <button
-          type="button"
-          className={styles.profileButton}
-          onClick={toggleProfileMenu}
-          aria-haspopup="true"
-          aria-expanded={isProfileMenuOpen}
-          aria-label="Open profile menu"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-        {isProfileMenuOpen && (
-          <div className={styles.profileDropdown} role="menu">
-            <button type="button" className={styles.profileItem} onClick={closeProfileMenu}>
-              Settings
-            </button>
-            <button type="button" className={styles.profileItem} onClick={closeProfileMenu}>
-              Logout
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   );
 
