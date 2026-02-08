@@ -2500,14 +2500,14 @@ func TestLoadDaemonManagedAgents_ValidFile(t *testing.T) {
 	if len(result) != 3 {
 		t.Errorf("len(result) = %d, want 3", len(result))
 	}
-	if !result["falcon"] {
-		t.Error("result[falcon] = false, want true")
+	if !result["falcon"].Managed {
+		t.Error("result[falcon].Managed = false, want true")
 	}
-	if !result["nova"] {
-		t.Error("result[nova] = false, want true")
+	if !result["nova"].Managed {
+		t.Error("result[nova].Managed = false, want true")
 	}
-	if !result["spark"] {
-		t.Error("result[spark] = false, want true")
+	if !result["spark"].Managed {
+		t.Error("result[spark].Managed = false, want true")
 	}
 }
 
@@ -2614,17 +2614,53 @@ func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
 	if len(result) != 2 {
 		t.Errorf("len(result) = %d, want 2 (should skip empty worktree name)", len(result))
 	}
-	if !result["falcon"] {
-		t.Error("result[falcon] = false, want true")
+	if !result["falcon"].Managed {
+		t.Error("result[falcon].Managed = false, want true")
 	}
-	if !result["nova"] {
-		t.Error("result[nova] = false, want true")
+	if !result["nova"].Managed {
+		t.Error("result[nova].Managed = false, want true")
 	}
-	if result[""] {
-		t.Error("result[\"\"] = true, want false (empty worktree name should be skipped)")
+	if result[""].Managed {
+		t.Error("result[\"\"].Managed = true, want false (empty worktree name should be skipped)")
 	}
 }
 
+
+func TestLoadDaemonManagedAgents_WithRole(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	state := DaemonAgentState{
+		PID: os.Getpid(),
+		Agents: []DaemonAgentStateEntry{
+			{Worktree: "falcon", Status: "running", Role: "task"},
+			{Worktree: "nova", Status: "idle", Role: "plan"},
+			{Worktree: "spark", Status: "running"}, // no role
+		},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("failed to marshal state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+		t.Fatalf("failed to write daemon-agents.json: %v", err)
+	}
+
+	result := loadDaemonManagedAgents()
+	if result == nil {
+		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
+	}
+
+	if result["falcon"].Role != "task" {
+		t.Errorf("result[falcon].Role = %q, want %q", result["falcon"].Role, "task")
+	}
+	if result["nova"].Role != "plan" {
+		t.Errorf("result[nova].Role = %q, want %q", result["nova"].Role, "plan")
+	}
+	if result["spark"].Role != "" {
+		t.Errorf("result[spark].Role = %q, want empty string", result["spark"].Role)
+	}
+}
 func TestRenderAgentLine_WithDaemonMarker(t *testing.T) {
 	agent := AgentStatus{
 		Name:          "falcon",

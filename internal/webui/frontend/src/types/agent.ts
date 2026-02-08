@@ -83,6 +83,8 @@ export interface LoomAgentStatus {
   ahead: number;
   /** Commits behind integration branch */
   behind: number;
+  /** Role from daemon config (e.g., "plan", "task") */
+  role?: string;
 }
 
 /**

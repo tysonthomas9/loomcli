@@ -83,20 +83,6 @@ export function getStatusDotColor(type: ParsedLoomStatus['type']): string {
   }
 }
 
-const ROLE_MAP: Record<string, string> = {
-  cobalt: 'Developer',
-  dev1: 'Developer',
-  ember: 'QA',
-  falcon: 'Developer',
-  nova: 'Architecture',
-  zephyr: 'Developer',
-};
-
-function getRoleLabel(name: string): string {
-  const key = name.toLowerCase();
-  return ROLE_MAP[key] ?? 'Developer';
-}
-
 /**
  * Build the status label text for the right-hand meta column.
  */
@@ -135,7 +121,9 @@ export function AgentCard({ agent, taskTitle, className, onClick }: AgentCardPro
   const isError = parsed.type === 'error';
   const initial = agent.name.charAt(0) || '?';
   const textColor = shouldUseWhiteText(avatarColor) ? '#fff' : '#1f2937';
-  const roleLabel = getRoleLabel(agent.name);
+  const roleLabel = agent.role
+    ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
+    : 'Agent';
 
   const rootClassName = [styles.card, className].filter(Boolean).join(' ');
 

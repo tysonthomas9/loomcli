@@ -80,6 +80,7 @@ type AgentStatus struct {
 	Status        string `json:"status"`                    // "ready", "3 changes", "running (plan, 5m ago)"
 	Ahead         int    `json:"ahead"`                     // commits ahead of integration branch
 	Behind        int    `json:"behind"`                    // commits behind integration branch
+	Role          string `json:"role,omitempty"`            // role from daemon config (e.g., "plan", "task")
 	Workspace     string `json:"workspace"`                 // workspace name (empty in legacy mode)
 	DaemonManaged bool   `json:"daemon_managed,omitempty"`  // true if under daemon supervision
 }
@@ -161,13 +162,20 @@ type DaemonAgentState struct {
 type DaemonAgentStateEntry struct {
 	Worktree string `json:"worktree"`
 	Status   string `json:"status"`
+	Role     string `json:"role"`
 }
 
-// loadDaemonManagedAgents reads the daemon state file and returns a set of
-// worktree names that are under daemon supervision.
+// DaemonAgentInfo carries daemon supervision metadata for a worktree.
+type DaemonAgentInfo struct {
+	Managed bool
+	Role    string
+}
+
+// loadDaemonManagedAgents reads the daemon state file and returns metadata
+// for worktrees under daemon supervision, including their role.
 // Returns nil if the file doesn't exist, can't be parsed, or daemon isn't running.
 // The state file is expected at ~/.loom/daemon-agents.json (global location).
-func loadDaemonManagedAgents() map[string]bool {
+func loadDaemonManagedAgents() map[string]DaemonAgentInfo {
 	daemonStatePath := filepath.Join(GetConfigDir(), "daemon-agents.json")
 	data, err := os.ReadFile(daemonStatePath)
 	if err != nil {
@@ -184,10 +192,13 @@ func loadDaemonManagedAgents() map[string]bool {
 		return nil // Invalid PID or daemon died, don't show stale [D] markers
 	}
 
-	result := make(map[string]bool)
+	result := make(map[string]DaemonAgentInfo)
 	for _, agent := range state.Agents {
 		if agent.Worktree != "" {
-			result[agent.Worktree] = true
+			result[agent.Worktree] = DaemonAgentInfo{
+				Managed: true,
+				Role:    agent.Role,
+			}
 		}
 	}
 	return result
@@ -312,11 +323,13 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 	defaultBranch := GetDefaultBranchForWorktrees(worktrees)
 
 	for _, wt := range worktrees {
+		daemonInfo := daemonManaged[wt.Name]
 		agent := AgentStatus{
 			Name:          wt.Name,
 			Branch:        wt.Branch,
 			Workspace:     wt.Workspace,
-			DaemonManaged: daemonManaged[wt.Name],
+			Role:          daemonInfo.Role,
+			DaemonManaged: daemonInfo.Managed,
 		}
 
 		// Check for running agent (lock status)
