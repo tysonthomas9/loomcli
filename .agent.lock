@@ -1,10 +1,10 @@
 {
-  "pid": 64704,
+  "pid": 63816,
   "command": "task",
-  "started_at": "2026-02-07T23:15:23.3192-08:00",
+  "started_at": "2026-02-07T23:49:52.306871-08:00",
   "agent_name": "nova",
-  "task_id": "loomcli-1gm",
-  "task_title": "Create Playwright config for loomcli frontend",
-  "task_started_at": "2026-02-07T23:15:47.251566-08:00",
+  "task_id": "loomcli-vw0",
+  "task_title": "Make build/install depend on frontend build",
+  "task_started_at": "2026-02-07T23:50:14.771988-08:00",
   "state": "active"
 }
