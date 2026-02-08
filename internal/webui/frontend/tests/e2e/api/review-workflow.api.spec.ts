@@ -8,7 +8,7 @@
  * - Plan review: Title prefixed with '[Need Review]'
  * - Code review: Status set to 'review'
  * - Approve plan: Remove prefix, set status to 'open' (ready)
- * - Approve code: Set status to 'closed' (done)
+ * - Approve code: Set status to 'open' (ready)
  * - Reject: Add comment with feedback, set status appropriately
  */
 
@@ -103,7 +103,7 @@ test.describe('Review Workflow', () => {
   })
 
   test.describe('Code Review (Status-Based)', () => {
-    test('approve code: review → closed', async ({ api }) => {
+    test('approve code: review → open', async ({ api }) => {
       // Create issue in review status
       const created = await api.createIssue({
         title: `Code Approve Test ${generateTestId()}`,
@@ -119,12 +119,12 @@ test.describe('Review Workflow', () => {
       let details = await api.getIssue(created.id)
       expect(details.status).toBe('review')
 
-      // Approve: close the issue
-      await api.closeIssue(created.id)
+      // Approve: move to open (ready for implementation)
+      await api.updateIssue(created.id, { status: 'open' })
 
-      // Verify closed
+      // Verify open
       details = await api.getIssue(created.id)
-      expect(details.status).toBe('closed')
+      expect(details.status).toBe('open')
     })
   })
 

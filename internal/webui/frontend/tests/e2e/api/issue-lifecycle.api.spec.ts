@@ -188,7 +188,7 @@ test.describe('Issue Lifecycle', () => {
       expect(getResponse.status).toBe('review')
     })
 
-    test('transition: review -> closed (approve)', async ({ api }) => {
+    test('transition: review -> closed (via close endpoint)', async ({ api }) => {
       // Create and move through workflow to review
       const created = await api.createIssue({
         title: `Approve Test ${generateTestId()}`,

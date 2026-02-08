@@ -277,8 +277,8 @@ function App() {
           const newTitle = issue.title.replace(/\[Need Review\]\s*/g, '').trim();
           await updateIssue(issue.id, { title: newTitle, status: 'open' });
         } else if (isReviewStatus) {
-          // Code review: Move to closed (Done)
-          await updateIssue(issue.id, { status: 'closed' });
+          // Status review: Move to open (Ready for implementation)
+          await updateIssue(issue.id, { status: 'open' });
         } else if (isBlockedWithNotes) {
           // Needs help: Move to in_progress (unblock)
           await updateIssue(issue.id, { status: 'in_progress' });
