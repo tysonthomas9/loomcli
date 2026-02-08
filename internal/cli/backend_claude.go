@@ -34,8 +34,9 @@ var debugStreamParsing = os.Getenv("LOOM_DEBUG_STREAM") != ""
 // claudeInvoker is the function used to invoke Claude (mockable for tests)
 var claudeInvoker = defaultClaudeInvoker
 
-// defaultClaudeInvoker is the real Claude invocation
-func defaultClaudeInvoker(workDir, prompt, agentName string) error {
+// buildClaudeInteractiveCmd constructs the exec.Cmd for interactive Claude invocation.
+// Extracted for testability — callers can inspect the returned cmd without execution.
+func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt)
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
@@ -46,6 +47,12 @@ func defaultClaudeInvoker(workDir, prompt, agentName string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	return cmd
+}
+
+// defaultClaudeInvoker is the real Claude invocation
+func defaultClaudeInvoker(workDir, prompt, agentName string) error {
+	cmd := buildClaudeInteractiveCmd(workDir, prompt, agentName)
 
 	fmt.Println("Launching Claude agent...")
 	fmt.Println("")

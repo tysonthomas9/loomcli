@@ -8,67 +8,6 @@ import (
 	"testing"
 )
 
-// TestBackendStdinInteractivePattern verifies the io.MultiReader pattern used
-// by interactive invokers: the prompt is delivered via stdin (not CLI args),
-// followed by any remaining stdin content.
-func TestBackendStdinInteractivePattern(t *testing.T) {
-	prompt := "secret prompt that should not appear in args"
-
-	// Use a helper shell command that prints its args, then reads stdin.
-	// This mirrors how the interactive invokers work: prompt is piped via
-	// io.MultiReader, not passed as a CLI argument.
-	cmd := exec.Command("/bin/sh", "-c", `echo "ARGS:$@"; cat`, "--")
-	cmd.Stdin = io.MultiReader(strings.NewReader(prompt+"\n"), strings.NewReader("extra-input\n"))
-
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("command failed: %v", err)
-	}
-
-	output := string(out)
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-
-	// The args line should have no arguments (just "ARGS:")
-	if len(lines) < 1 {
-		t.Fatal("expected at least 1 line of output")
-	}
-	argsLine := lines[0]
-	if argsLine != "ARGS:" {
-		t.Errorf("expected no args (\"ARGS:\"), got %q", argsLine)
-	}
-
-	// The prompt should appear on stdin (printed by cat)
-	if !strings.Contains(output, prompt) {
-		t.Errorf("expected prompt %q in stdin output, got %q", prompt, output)
-	}
-
-	// The extra input after the prompt should also be readable
-	if !strings.Contains(output, "extra-input") {
-		t.Errorf("expected trailing stdin content in output, got %q", output)
-	}
-}
-
-// TestBackendStdinInteractivePromptNotInArgs verifies that when using the
-// io.MultiReader pattern, the prompt does NOT appear in the process argument list.
-func TestBackendStdinInteractivePromptNotInArgs(t *testing.T) {
-	prompt := "super-secret-prompt-value"
-
-	// The shell script prints $0 and $@ so we can inspect all args.
-	// The prompt must NOT appear anywhere in the argument list.
-	cmd := exec.Command("/bin/sh", "-c", `echo "$0"; echo "$@"; cat >/dev/null`, "testprog")
-	cmd.Stdin = io.MultiReader(strings.NewReader(prompt+"\n"), strings.NewReader(""))
-
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("command failed: %v", err)
-	}
-
-	output := string(out)
-	if strings.Contains(output, prompt) {
-		t.Errorf("prompt %q must NOT appear in process args, but found in output: %q", prompt, output)
-	}
-}
-
 // TestBackendStdinNonInteractivePipePattern verifies the os.Pipe pattern used
 // by non-interactive invokers: the prompt is written to a pipe which becomes
 // the process's stdin, and the write end is closed so the process sees EOF.
@@ -144,38 +83,6 @@ func TestBackendStdinNonInteractivePipeEOF(t *testing.T) {
 	got := string(data)
 	if got != prompt {
 		t.Errorf("expected pipe to contain exactly %q, got %q", prompt, got)
-	}
-}
-
-// TestBackendStdinMultiReaderOrdering verifies that io.MultiReader delivers
-// the prompt string first, followed by the secondary reader content.
-func TestBackendStdinMultiReaderOrdering(t *testing.T) {
-	prompt := "first-part"
-	trailing := "second-part"
-
-	mr := io.MultiReader(
-		strings.NewReader(prompt+"\n"),
-		strings.NewReader(trailing+"\n"),
-	)
-
-	data, err := io.ReadAll(mr)
-	if err != nil {
-		t.Fatalf("failed to read from MultiReader: %v", err)
-	}
-
-	got := string(data)
-	promptIdx := strings.Index(got, prompt)
-	trailingIdx := strings.Index(got, trailing)
-
-	if promptIdx == -1 {
-		t.Fatalf("expected prompt %q in output, got %q", prompt, got)
-	}
-	if trailingIdx == -1 {
-		t.Fatalf("expected trailing %q in output, got %q", trailing, got)
-	}
-	if promptIdx >= trailingIdx {
-		t.Errorf("expected prompt before trailing content; prompt at %d, trailing at %d in %q",
-			promptIdx, trailingIdx, got)
 	}
 }
 

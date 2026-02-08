@@ -29,7 +29,9 @@ var codexInvoker = defaultCodexInvoker
 // codexNonInteractiveInvoker is the function used for non-interactive Codex invocation (mockable for tests)
 var codexNonInteractiveInvoker = defaultCodexNonInteractiveInvoker
 
-func defaultCodexInvoker(workDir, prompt, agentName string) error {
+// buildCodexInteractiveCmd constructs the exec.Cmd for interactive Codex invocation.
+// Extracted for testability — callers can inspect the returned cmd without execution.
+func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	cmd := exec.Command("codex", "--full-auto", prompt)
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
@@ -40,6 +42,11 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	return cmd
+}
+
+func defaultCodexInvoker(workDir, prompt, agentName string) error {
+	cmd := buildCodexInteractiveCmd(workDir, prompt, agentName)
 
 	fmt.Println("Launching Codex agent...")
 	fmt.Println("")

@@ -29,7 +29,9 @@ var openCodeInvoker = defaultOpenCodeInvoker
 // openCodeNonInteractiveInvoker is the function used for non-interactive OpenCode invocation (mockable for tests)
 var openCodeNonInteractiveInvoker = defaultOpenCodeNonInteractiveInvoker
 
-func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
+// buildOpenCodeInteractiveCmd constructs the exec.Cmd for interactive OpenCode invocation.
+// Extracted for testability — callers can inspect the returned cmd without execution.
+func buildOpenCodeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	cmd := exec.Command("opencode", "--prompt", prompt)
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
@@ -40,6 +42,11 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	return cmd
+}
+
+func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
+	cmd := buildOpenCodeInteractiveCmd(workDir, prompt, agentName)
 
 	fmt.Println("Launching OpenCode agent...")
 	fmt.Println("")
