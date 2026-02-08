@@ -3,8 +3,11 @@ package webui
 import (
 	"embed"
 	"io/fs"
+	"log"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -84,4 +87,63 @@ func shouldCache(urlPath string) bool {
 		return true
 	}
 	return false
+}
+
+// devFrontendHandler returns an http.Handler that serves frontend assets from
+// a directory on disk instead of the embedded filesystem. This enables
+// development without recompiling the Go binary. It preserves SPA routing
+// by serving index.html for paths that don't match existing files.
+func devFrontendHandler(dir string) http.Handler {
+	if dir == "" {
+		dir = "internal/webui/frontend/dist"
+	}
+
+	// Resolve to absolute path for path traversal validation
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		log.Printf("Warning: failed to resolve dev frontend directory: %v", err)
+		absDir = dir
+	}
+
+	// Warn if the directory doesn't exist at startup
+	if _, err := os.Stat(absDir); err != nil {
+		log.Printf("Warning: dev frontend directory not found: %s (run 'npm run build' first)", absDir)
+	}
+
+	fileServer := http.FileServer(http.Dir(absDir))
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		urlPath := path.Clean(r.URL.Path)
+		if urlPath == "/" {
+			urlPath = "/index.html"
+		}
+
+		if strings.Contains(urlPath, "..") || !strings.HasPrefix(urlPath, "/") {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+
+		// Check if file exists on disk
+		filePath := filepath.Join(absDir, strings.TrimPrefix(urlPath, "/"))
+
+		// Defense-in-depth: verify resolved path stays within the serving directory
+		absFilePath, err := filepath.Abs(filePath)
+		if err != nil || !strings.HasPrefix(absFilePath, absDir) {
+			http.Error(w, "Invalid path", http.StatusBadRequest)
+			return
+		}
+
+		_, err = os.Stat(filePath)
+		if err != nil {
+			// File doesn't exist - serve index.html for SPA routing
+			r.URL.Path = "/"
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// File exists - serve it (no long caching in dev mode)
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		fileServer.ServeHTTP(w, r)
+	})
 }

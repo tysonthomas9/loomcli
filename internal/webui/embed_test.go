@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -316,7 +318,7 @@ func TestHandleHealth(t *testing.T) {
 
 func TestSetupRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false) // nil pool, hub, getMutationsSince, termManager for basic routing tests
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "") // nil pool, hub, getMutationsSince, termManager for basic routing tests
 
 	tests := []struct {
 		name       string
@@ -360,7 +362,7 @@ func TestSetupRoutes(t *testing.T) {
 
 func TestHealthEndpointJSON(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false) // nil pool, hub, getMutationsSince, termManager for basic health tests
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "") // nil pool, hub, getMutationsSince, termManager for basic health tests
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -380,6 +382,271 @@ func TestHealthEndpointJSON(t *testing.T) {
 	}
 	if status != "ok" {
 		t.Errorf("status = %v, want %q", status, "ok")
+	}
+}
+
+func TestDevFrontendHandler_ServesFilesFromDisk(t *testing.T) {
+	// Create a temp directory with test files
+	dir := t.TempDir()
+
+	indexContent := "<!DOCTYPE html><html><body>Hello Dev</body></html>"
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(indexContent), 0644); err != nil {
+		t.Fatalf("failed to write index.html: %v", err)
+	}
+
+	assetsDir := filepath.Join(dir, "assets")
+	if err := os.MkdirAll(assetsDir, 0755); err != nil {
+		t.Fatalf("failed to create assets dir: %v", err)
+	}
+
+	jsContent := "console.log('hello');"
+	if err := os.WriteFile(filepath.Join(assetsDir, "app.js"), []byte(jsContent), 0644); err != nil {
+		t.Fatalf("failed to write app.js: %v", err)
+	}
+
+	handler := devFrontendHandler(dir)
+
+	tests := []struct {
+		name             string
+		path             string
+		wantStatus       int
+		wantBodyContains string
+	}{
+		{
+			name:             "root path serves index.html",
+			path:             "/",
+			wantStatus:       http.StatusOK,
+			wantBodyContains: "Hello Dev",
+		},
+		{
+			name:             "asset file is served from disk",
+			path:             "/assets/app.js",
+			wantStatus:       http.StatusOK,
+			wantBodyContains: "console.log",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
+			}
+
+			body := w.Body.String()
+			if !strings.Contains(body, tt.wantBodyContains) {
+				t.Errorf("body does not contain %q, got: %s", tt.wantBodyContains, body[:min(100, len(body))])
+			}
+		})
+	}
+}
+
+func TestDevFrontendHandler_SPAFallback(t *testing.T) {
+	dir := t.TempDir()
+
+	indexContent := "<!DOCTYPE html><html><body>SPA Index</body></html>"
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(indexContent), 0644); err != nil {
+		t.Fatalf("failed to write index.html: %v", err)
+	}
+
+	handler := devFrontendHandler(dir)
+
+	spaRoutes := []string{
+		"/dashboard",
+		"/settings",
+		"/issues/123/details",
+		"/some/deep/nested/route",
+	}
+
+	for _, route := range spaRoutes {
+		t.Run("SPA route: "+route, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, route, nil)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+			}
+
+			body := w.Body.String()
+			if !strings.Contains(body, "SPA Index") {
+				t.Errorf("expected index.html content for SPA route %s, got: %s", route, body[:min(100, len(body))])
+			}
+		})
+	}
+}
+
+func TestDevFrontendHandler_NoCacheHeaders(t *testing.T) {
+	dir := t.TempDir()
+
+	indexContent := "<!DOCTYPE html><html><body>No Cache</body></html>"
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(indexContent), 0644); err != nil {
+		t.Fatalf("failed to write index.html: %v", err)
+	}
+
+	assetsDir := filepath.Join(dir, "assets")
+	if err := os.MkdirAll(assetsDir, 0755); err != nil {
+		t.Fatalf("failed to create assets dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(assetsDir, "style.css"), []byte("body{}"), 0644); err != nil {
+		t.Fatalf("failed to write style.css: %v", err)
+	}
+
+	handler := devFrontendHandler(dir)
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "index.html has no-cache", path: "/"},
+		{name: "asset has no-cache", path: "/assets/style.css"},
+		{name: "SPA fallback has no-cache", path: "/nonexistent"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			gotCacheControl := w.Header().Get("Cache-Control")
+			wantCacheControl := "no-cache, no-store, must-revalidate"
+			if gotCacheControl != wantCacheControl {
+				t.Errorf("Cache-Control = %q, want %q", gotCacheControl, wantCacheControl)
+			}
+		})
+	}
+}
+
+func TestDevFrontendHandler_PathTraversal(t *testing.T) {
+	dir := t.TempDir()
+
+	indexContent := "<!DOCTYPE html><html><body>Index</body></html>"
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(indexContent), 0644); err != nil {
+		t.Fatalf("failed to write index.html: %v", err)
+	}
+
+	handler := devFrontendHandler(dir)
+
+	t.Run("encoded traversal returns 400", func(t *testing.T) {
+		// path.Clean preserves the encoded %2f so ".." remains visible
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.URL.Path = "/..%2fetc/passwd"
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("raw traversal is normalized by path.Clean", func(t *testing.T) {
+		// path.Clean("/../../etc/passwd") => "/etc/passwd" so ".." is removed.
+		// The file won't exist on disk, so SPA fallback serves index.html.
+		// This verifies path.Clean provides the first layer of defense.
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.URL.Path = "/../../etc/passwd"
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected SPA fallback (200) for cleaned traversal path, got %d", w.Code)
+		}
+
+		body := w.Body.String()
+		if !strings.Contains(body, "Index") {
+			t.Errorf("expected index.html content for SPA fallback, got: %s", body[:min(100, len(body))])
+		}
+	})
+}
+
+func TestDevFrontendHandler_DefaultDir(t *testing.T) {
+	handler := devFrontendHandler("")
+
+	// Request a path - since the default directory likely doesn't exist
+	// in the test environment, we verify the handler still functions
+	// (serves SPA fallback or appropriate error)
+	req := httptest.NewRequest(http.MethodGet, "/test-path", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// The handler should respond (not panic) even if the directory doesn't exist.
+	// The default dir is "internal/webui/frontend/dist" which may or may not exist.
+	// We just verify the handler was created and responds.
+	if w.Code == 0 {
+		t.Error("expected a response code, got 0")
+	}
+}
+
+func TestSetupRoutes_DevMode(t *testing.T) {
+	// Create a temp directory with test files for dev mode
+	dir := t.TempDir()
+
+	indexContent := "<!DOCTYPE html><html><body>Dev Mode Frontend</body></html>"
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(indexContent), 0644); err != nil {
+		t.Fatalf("failed to write index.html: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, true, dir)
+
+	tests := []struct {
+		name             string
+		method           string
+		path             string
+		wantStatus       int
+		wantBodyContains string
+	}{
+		{
+			name:             "health endpoint responds in dev mode",
+			method:           http.MethodGet,
+			path:             "/health",
+			wantStatus:       http.StatusOK,
+			wantBodyContains: "",
+		},
+		{
+			name:             "root path serves dev frontend",
+			method:           http.MethodGet,
+			path:             "/",
+			wantStatus:       http.StatusOK,
+			wantBodyContains: "Dev Mode Frontend",
+		},
+		{
+			name:             "SPA route serves dev frontend",
+			method:           http.MethodGet,
+			path:             "/dashboard",
+			wantStatus:       http.StatusOK,
+			wantBodyContains: "Dev Mode Frontend",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			mux.ServeHTTP(w, req)
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
+			}
+
+			if tt.wantBodyContains != "" {
+				body := w.Body.String()
+				if !strings.Contains(body, tt.wantBodyContains) {
+					t.Errorf("body does not contain %q, got: %s", tt.wantBodyContains, body[:min(100, len(body))])
+				}
+			}
+		})
 	}
 }
 
