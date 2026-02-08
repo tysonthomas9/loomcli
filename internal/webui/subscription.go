@@ -23,6 +23,10 @@ const (
 
 	// fallbackPollInterval is used when wait_for_mutations is not available.
 	fallbackPollInterval = 100 * time.Millisecond
+
+	// externalPollInterval is the interval for polling external DB changes
+	// (writes made by CLI tools that bypass the daemon RPC mutation tracking).
+	externalPollInterval = 3 * time.Second
 )
 
 // DaemonSubscriber manages the subscription to daemon mutations and
@@ -35,6 +39,11 @@ type DaemonSubscriber struct {
 	lastSince   int64
 	mu          sync.RWMutex
 	useFallback bool // true if wait_for_mutations is not supported
+
+	// External change detection fields
+	lastKnownCount   int64
+	lastPollTime     time.Time
+	countInitialized bool
 }
 
 // NewDaemonSubscriber creates a new daemon subscriber.
@@ -48,8 +57,9 @@ func NewDaemonSubscriber(pool daemon.Pool, hub *SSEHub) *DaemonSubscriber {
 
 // Start begins the subscription loop in a goroutine.
 func (s *DaemonSubscriber) Start() {
-	s.wg.Add(1)
+	s.wg.Add(2)
 	go s.subscriptionLoop()
+	go s.externalChangeLoop()
 	log.Printf("Daemon subscription started")
 }
 
@@ -254,6 +264,106 @@ func (s *DaemonSubscriber) processMutationResponse(resp *rpc.Response) {
 	}
 
 	log.Printf("Broadcast %d mutations to %d SSE clients", len(mutations), s.hub.ClientCount())
+}
+
+// externalChangeLoop periodically polls the database for changes made outside
+// the daemon RPC mutation tracking (e.g., by the bd CLI writing directly to SQLite).
+func (s *DaemonSubscriber) externalChangeLoop() {
+	defer s.wg.Done()
+
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-time.After(externalPollInterval):
+		}
+
+		if s.pool == nil {
+			continue
+		}
+
+		s.pollDBChanges()
+	}
+}
+
+// pollDBChanges checks the database for external changes by comparing issue counts
+// and checking for recently updated issues via the Count RPC.
+func (s *DaemonSubscriber) pollDBChanges() {
+	ctx, cancel := context.WithTimeout(context.Background(), subscriptionAcquireTimeout)
+	defer cancel()
+
+	client, err := s.pool.Get(ctx)
+	if err != nil {
+		return
+	}
+	defer s.pool.Put(client)
+
+	// Get total issue count
+	resp, err := client.Count(&rpc.CountArgs{})
+	if err != nil {
+		log.Printf("External poll: count error: %v", err)
+		return
+	}
+	if !resp.Success {
+		return
+	}
+
+	var totalCount int64
+	if err := json.Unmarshal(resp.Data, &totalCount); err != nil {
+		log.Printf("External poll: parse count error: %v", err)
+		return
+	}
+
+	now := time.Now()
+
+	// First poll: initialize state without broadcasting
+	s.mu.Lock()
+	if !s.countInitialized {
+		s.lastKnownCount = totalCount
+		s.lastPollTime = now
+		s.countInitialized = true
+		s.mu.Unlock()
+		return
+	}
+
+	changeDetected := false
+
+	// Check if total count changed (issue created or deleted externally)
+	if totalCount != s.lastKnownCount {
+		changeDetected = true
+	}
+
+	lastPollTime := s.lastPollTime
+	s.mu.Unlock()
+
+	// Check for in-place updates (count same but issues modified)
+	if !changeDetected {
+		updatedAfter := lastPollTime.UTC().Format(time.RFC3339)
+		updatedResp, err := client.Count(&rpc.CountArgs{UpdatedAfter: updatedAfter})
+		if err == nil && updatedResp.Success {
+			var updatedCount int64
+			if err := json.Unmarshal(updatedResp.Data, &updatedCount); err == nil && updatedCount > 0 {
+				changeDetected = true
+			}
+		}
+	}
+
+	if changeDetected {
+		s.hub.Broadcast(&MutationPayload{
+			Type:      rpc.MutationRefresh,
+			IssueID:   "",
+			Timestamp: now.UTC().Format(time.RFC3339),
+		})
+		s.mu.Lock()
+		s.lastKnownCount = totalCount
+		s.lastPollTime = now
+		s.mu.Unlock()
+		log.Printf("External DB change detected, broadcast refresh to %d SSE clients", s.hub.ClientCount())
+	} else {
+		s.mu.Lock()
+		s.lastPollTime = now
+		s.mu.Unlock()
+	}
 }
 
 // waitWithDone waits for the specified duration or until done is signaled.

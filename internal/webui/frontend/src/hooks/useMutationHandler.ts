@@ -14,6 +14,7 @@ import {
   MutationDelete,
   MutationStatus,
   MutationBonded,
+  MutationRefresh,
 } from '../types/mutation';
 
 /**
@@ -39,6 +40,9 @@ export interface UseMutationHandlerOptions {
 
   /** Callback when mutation cannot be applied (missing issue) */
   onMutationSkipped?: (mutation: MutationPayload, reason: string) => void;
+
+  /** Callback when a refresh event is received (external DB change detected) */
+  onRefreshRequired?: () => void;
 }
 
 /**
@@ -167,7 +171,7 @@ function applyBondedToIssue(issue: Issue, mutation: MutationPayload): Issue {
  * ```
  */
 export function useMutationHandler(options: UseMutationHandlerOptions): UseMutationHandlerReturn {
-  const { issues, setIssues, onIssueCreated, onIssueUpdated, onIssueDeleted, onMutationSkipped } =
+  const { issues, setIssues, onIssueCreated, onIssueUpdated, onIssueDeleted, onMutationSkipped, onRefreshRequired } =
     options;
 
   // Track mutation stats
@@ -182,6 +186,7 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
   const onIssueUpdatedRef = useRef(onIssueUpdated);
   const onIssueDeletedRef = useRef(onIssueDeleted);
   const onMutationSkippedRef = useRef(onMutationSkipped);
+  const onRefreshRequiredRef = useRef(onRefreshRequired);
 
   // Update refs when callbacks change (following useSSE pattern)
   useEffect(() => {
@@ -200,6 +205,10 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
     onMutationSkippedRef.current = onMutationSkipped;
   }, [onMutationSkipped]);
 
+  useEffect(() => {
+    onRefreshRequiredRef.current = onRefreshRequired;
+  }, [onRefreshRequired]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -216,6 +225,14 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
       if (!mountedRef.current) return;
 
       const { issue_id, type } = mutation;
+
+      // Handle refresh mutation (external DB change detected)
+      if (type === MutationRefresh) {
+        onRefreshRequiredRef.current?.();
+        setMutationCount((c) => c + 1);
+        setLastMutationAt(mutation.timestamp);
+        return;
+      }
 
       // Handle create mutation
       if (type === MutationCreate) {

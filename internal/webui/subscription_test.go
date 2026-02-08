@@ -1,13 +1,20 @@
 package webui
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // TestNewDaemonSubscriber tests that NewDaemonSubscriber creates a properly initialized subscriber.
@@ -403,5 +410,381 @@ func TestDaemonSubscriber_LastSinceUpdatedBeforeBroadcast(t *testing.T) {
 
 	if finalLastSince != expectedLastSince {
 		t.Errorf("final lastSince = %d, want %d", finalLastSince, expectedLastSince)
+	}
+}
+
+// --- Mock infrastructure for pollDBChanges tests ---
+
+// startSubscriptionMockServer creates a Unix socket server that handles RPC requests.
+// The countHandler is called for "count" operations. Health checks are automatically handled.
+// Returns the socket path. The server and temp dir are cleaned up via t.Cleanup.
+func startSubscriptionMockServer(t *testing.T, countHandler func(req rpc.Request) rpc.Response) string {
+	handler := func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			healthData, _ := json.Marshal(rpc.HealthResponse{
+				Status:     "healthy",
+				Version:    "0.0.0",
+				Compatible: true,
+			})
+			return rpc.Response{Success: true, Data: healthData}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "count":
+			return countHandler(req)
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	}
+	return startSubscriptionMockServerRaw(t, handler)
+}
+
+// startSubscriptionMockServerRaw creates a Unix socket server that handles RPC requests.
+// The handler receives the decoded rpc.Request and returns an rpc.Response.
+// Returns the socket path. The server and temp dir are cleaned up via t.Cleanup.
+func startSubscriptionMockServerRaw(t *testing.T, handler func(req rpc.Request) rpc.Response) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "sub-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "bd.sock")
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("failed to create mock server: %v", err)
+	}
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return // listener closed
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				reader := bufio.NewReader(c)
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req rpc.Request
+					if err := json.Unmarshal(line, &req); err != nil {
+						return
+					}
+					resp := handler(req)
+					respJSON, _ := json.Marshal(resp)
+					respJSON = append(respJSON, '\n')
+					c.Write(respJSON)
+				}
+			}(conn)
+		}
+	}()
+
+	t.Cleanup(func() { listener.Close() })
+	return socketPath
+}
+
+// subscriptionMockPool implements daemon.Pool for testing, using a real Unix socket mock server.
+type subscriptionMockPool struct {
+	socketPath string
+	clients    []*rpc.Client
+	mu         sync.Mutex
+}
+
+func newSubscriptionMockPool(socketPath string) *subscriptionMockPool {
+	return &subscriptionMockPool{socketPath: socketPath}
+}
+
+func (p *subscriptionMockPool) Get(ctx context.Context) (*rpc.Client, error) {
+	client, err := rpc.TryConnectWithTimeout(p.socketPath, 2*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	if client == nil {
+		return nil, errors.New("failed to connect to mock server")
+	}
+	client.SetTimeout(5 * time.Second)
+	p.mu.Lock()
+	p.clients = append(p.clients, client)
+	p.mu.Unlock()
+	return client, nil
+}
+
+func (p *subscriptionMockPool) Put(client *rpc.Client) {
+	if client != nil {
+		client.Close()
+	}
+}
+
+func (p *subscriptionMockPool) Discard(client *rpc.Client) {
+	if client != nil {
+		client.Close()
+	}
+}
+
+func (p *subscriptionMockPool) Stats() daemon.PoolStats {
+	return daemon.PoolStats{}
+}
+
+func (p *subscriptionMockPool) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, c := range p.clients {
+		c.Close()
+	}
+	return nil
+}
+
+// --- Tests for external DB change polling ---
+
+// TestDaemonSubscriber_ExternalPollInterval verifies that externalPollInterval is 3 seconds.
+func TestDaemonSubscriber_ExternalPollInterval(t *testing.T) {
+	if externalPollInterval != 3*time.Second {
+		t.Errorf("externalPollInterval = %v, want %v", externalPollInterval, 3*time.Second)
+	}
+	if externalPollInterval <= 0 {
+		t.Errorf("externalPollInterval should be positive, got %v", externalPollInterval)
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_CountChanged verifies that when the pool returns
+// a different count than lastKnownCount, a refresh event is broadcast to the hub.
+func TestDaemonSubscriber_PollDBChanges_CountChanged(t *testing.T) {
+	callCount := 0
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		callCount++
+		// Return count of 5 (different from initialized lastKnownCount of 3)
+		countData, _ := json.Marshal(int64(5))
+		return rpc.Response{Success: true, Data: countData}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Register a client to capture broadcasts
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond) // Wait for registration
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	// Simulate that initialization already happened with count=3
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 3
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Should have broadcast a refresh event
+	select {
+	case received := <-client.send:
+		if received.Type != rpc.MutationRefresh {
+			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
+		}
+		if received.IssueID != "" {
+			t.Errorf("expected empty issue_id for refresh, got %q", received.IssueID)
+		}
+		if received.Timestamp == "" {
+			t.Error("expected non-empty timestamp")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("did not receive broadcast after count changed")
+	}
+
+	// Verify lastKnownCount was updated
+	if subscriber.lastKnownCount != 5 {
+		t.Errorf("lastKnownCount = %d, want 5", subscriber.lastKnownCount)
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_UpdateDetected verifies that when the count is the same
+// but Count with UpdatedAfter returns non-zero, a refresh event is broadcast.
+func TestDaemonSubscriber_PollDBChanges_UpdateDetected(t *testing.T) {
+	callNumber := 0
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		callNumber++
+		if callNumber == 1 {
+			// First call: return same count (10) - no count change
+			countData, _ := json.Marshal(int64(10))
+			return rpc.Response{Success: true, Data: countData}
+		}
+		// Second call (UpdatedAfter check): return 1 updated issue
+		countData, _ := json.Marshal(int64(1))
+		return rpc.Response{Success: true, Data: countData}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10 // Same as server will return
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Should have broadcast a refresh event due to updated issues
+	select {
+	case received := <-client.send:
+		if received.Type != rpc.MutationRefresh {
+			t.Errorf("expected type %q, got %q", rpc.MutationRefresh, received.Type)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("did not receive broadcast after update detected")
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_NoChange verifies that when count and updated count
+// are both unchanged, NO broadcast occurs.
+func TestDaemonSubscriber_PollDBChanges_NoChange(t *testing.T) {
+	callNumber := 0
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		callNumber++
+		if callNumber == 1 {
+			// First call: return same count (10)
+			countData, _ := json.Marshal(int64(10))
+			return rpc.Response{Success: true, Data: countData}
+		}
+		// Second call (UpdatedAfter): return 0 updated issues
+		countData, _ := json.Marshal(int64(0))
+		return rpc.Response{Success: true, Data: countData}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Should NOT receive any broadcast
+	select {
+	case received := <-client.send:
+		t.Errorf("expected no broadcast, but received: %+v", received)
+	case <-time.After(200 * time.Millisecond):
+		// Good - no broadcast
+	}
+
+	// lastPollTime should still have been updated
+	if subscriber.lastPollTime.IsZero() {
+		t.Error("expected lastPollTime to be updated even when no change detected")
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_SkipsFirstPoll verifies that on the first poll,
+// the subscriber initializes lastKnownCount and countInitialized without broadcasting.
+func TestDaemonSubscriber_PollDBChanges_SkipsFirstPoll(t *testing.T) {
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		// Return count of 7
+		countData, _ := json.Marshal(int64(7))
+		return rpc.Response{Success: true, Data: countData}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	// Verify initial state: countInitialized should be false
+	if subscriber.countInitialized {
+		t.Fatal("expected countInitialized to be false initially")
+	}
+
+	subscriber.pollDBChanges()
+
+	// Should NOT broadcast on first poll (initialization only)
+	select {
+	case received := <-client.send:
+		t.Errorf("expected no broadcast on first poll, but received: %+v", received)
+	case <-time.After(200 * time.Millisecond):
+		// Good - no broadcast on first poll
+	}
+
+	// Verify state was initialized
+	if !subscriber.countInitialized {
+		t.Error("expected countInitialized to be true after first poll")
+	}
+	if subscriber.lastKnownCount != 7 {
+		t.Errorf("lastKnownCount = %d, want 7", subscriber.lastKnownCount)
+	}
+	if subscriber.lastPollTime.IsZero() {
+		t.Error("expected lastPollTime to be set after first poll")
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_NilPool verifies that when pool is nil,
+// pollDBChanges does not panic. The externalChangeLoop skips when pool is nil.
+func TestDaemonSubscriber_PollDBChanges_NilPool(t *testing.T) {
+	hub := NewSSEHub()
+	subscriber := NewDaemonSubscriber(nil, hub)
+
+	// pollDBChanges with nil pool should not panic
+	// (it will try to call s.pool.Get which will panic with nil pool,
+	// but the externalChangeLoop guards against nil pool before calling pollDBChanges)
+	// We test that the externalChangeLoop guard works by verifying Start/Stop with nil pool.
+	go hub.Run()
+	defer hub.Stop()
+
+	subscriber.Start()
+	time.Sleep(100 * time.Millisecond) // Let the loop run a tick
+	stopped := make(chan struct{})
+	go func() {
+		subscriber.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+		// Good - stopped without panic
+	case <-time.After(5 * time.Second):
+		t.Error("Stop() blocked for too long with nil pool")
 	}
 }

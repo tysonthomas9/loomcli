@@ -21,6 +21,7 @@ export const MutationStatus: MutationType = 'status';
 export const MutationBonded: MutationType = 'bonded';
 export const MutationSquashed: MutationType = 'squashed';
 export const MutationBurned: MutationType = 'burned';
+export const MutationRefresh: MutationType = 'refresh';
 
 /**
  * Application-level mutation event.
@@ -104,4 +105,12 @@ export function isSquashedMutation(event: MutationEvent): boolean {
  */
 export function isBurnedMutation(event: MutationEvent): boolean {
   return event.mutation.type === MutationBurned;
+}
+
+/**
+ * Type guard to check if a mutation event is a refresh mutation.
+ * Refresh mutations indicate external DB changes requiring a full re-fetch.
+ */
+export function isRefreshMutation(event: MutationEvent): boolean {
+  return event.mutation.type === MutationRefresh;
 }

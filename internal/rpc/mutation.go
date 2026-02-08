@@ -13,6 +13,7 @@ const (
 	MutationSquashed = "squashed" // Wisp squashed to digest
 	MutationBurned   = "burned"   // Wisp discarded without digest
 	MutationStatus   = "status"   // Status change (in_progress, completed, failed)
+	MutationRefresh  = "refresh"  // External DB change detected, clients should re-fetch
 )
 
 // MutationEvent represents a database mutation for event-driven sync

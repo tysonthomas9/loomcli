@@ -17,7 +17,8 @@ export type MutationType =
   | 'status'
   | 'bonded'
   | 'squashed'
-  | 'burned';
+  | 'burned'
+  | 'refresh';
 
 // Server → Client: Mutation payload
 export interface MutationPayload {

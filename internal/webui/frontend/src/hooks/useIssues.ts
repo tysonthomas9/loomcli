@@ -122,10 +122,14 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
   const fetchingRef = useRef(false);
   const deletedDuringFetchRef = useRef<Set<string>>(new Set());
 
+  // Ref for refetch callback (needed because refetch is defined after useMutationHandler)
+  const refetchRef = useRef<() => void>(() => {});
+
   // Mutation handler setup
   const { handleMutation, mutationCount } = useMutationHandler({
     issues: issuesMap,
     setIssues: setIssuesMap,
+    onRefreshRequired: () => refetchRef.current(),
     onIssueDeleted: (issueId) => {
       // Track deletions during fetch to prevent re-adding from stale API response
       if (fetchingRef.current) {
@@ -234,6 +238,9 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       deletedDuringFetchRef.current.clear();
     }
   }, [filter, mode, graphFilter]);
+
+  // Keep refetchRef in sync with the latest refetch callback
+  refetchRef.current = refetch;
 
   // Auto-fetch on mount
   useEffect(() => {

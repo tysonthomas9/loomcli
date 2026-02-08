@@ -1554,4 +1554,167 @@ describe('useMutationHandler', () => {
       expect(typeof mockSetIssues.mock.calls[0][0]).toBe('function');
     });
   });
+
+  describe('handleMutation - refresh type', () => {
+    it('calls onRefreshRequired callback when refresh mutation is received', () => {
+      const onRefreshRequired = vi.fn();
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+          onRefreshRequired,
+        })
+      );
+
+      const mutation = createMutationPayload({
+        type: 'refresh',
+        issue_id: '',
+        timestamp: '2025-01-23T12:00:00Z',
+      });
+
+      act(() => {
+        result.current.handleMutation(mutation);
+      });
+
+      expect(onRefreshRequired).toHaveBeenCalledTimes(1);
+    });
+
+    it('increments mutationCount for refresh mutation', () => {
+      const onRefreshRequired = vi.fn();
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+          onRefreshRequired,
+        })
+      );
+
+      expect(result.current.mutationCount).toBe(0);
+
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'refresh',
+            issue_id: '',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+      });
+
+      expect(result.current.mutationCount).toBe(1);
+    });
+
+    it('updates lastMutationAt for refresh mutation', () => {
+      const onRefreshRequired = vi.fn();
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+          onRefreshRequired,
+        })
+      );
+
+      expect(result.current.lastMutationAt).toBeNull();
+
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'refresh',
+            issue_id: '',
+            timestamp: '2025-01-23T15:30:00Z',
+          })
+        );
+      });
+
+      expect(result.current.lastMutationAt).toBe('2025-01-23T15:30:00Z');
+    });
+
+    it('does not call setIssues for refresh mutation', () => {
+      const onRefreshRequired = vi.fn();
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+          onRefreshRequired,
+        })
+      );
+
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'refresh',
+            issue_id: '',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+      });
+
+      // Refresh should not modify the issues map directly
+      expect(mockSetIssues).not.toHaveBeenCalled();
+    });
+
+    it('does not throw when onRefreshRequired callback is not provided', () => {
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+          // No onRefreshRequired callback
+        })
+      );
+
+      expect(() => {
+        act(() => {
+          result.current.handleMutation(
+            createMutationPayload({
+              type: 'refresh',
+              issue_id: '',
+              timestamp: '2025-01-23T12:00:00Z',
+            })
+          );
+        });
+      }).not.toThrow();
+
+      // Should still increment mutation count
+      expect(result.current.mutationCount).toBe(1);
+    });
+
+    it('increments mutationCount cumulatively with other mutation types', () => {
+      const onRefreshRequired = vi.fn();
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+          onRefreshRequired,
+        })
+      );
+
+      // First: a create mutation
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'create',
+            issue_id: 'issue-1',
+            title: 'Test Issue',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+      });
+
+      expect(result.current.mutationCount).toBe(1);
+
+      // Second: a refresh mutation
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'refresh',
+            issue_id: '',
+            timestamp: '2025-01-23T12:01:00Z',
+          })
+        );
+      });
+
+      expect(result.current.mutationCount).toBe(2);
+      expect(onRefreshRequired).toHaveBeenCalledTimes(1);
+    });
+  });
 });
