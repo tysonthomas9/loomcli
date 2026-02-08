@@ -1,10 +1,10 @@
 {
-  "pid": 63816,
+  "pid": 28927,
   "command": "task",
-  "started_at": "2026-02-07T23:49:52.306871-08:00",
+  "started_at": "2026-02-08T00:11:16.179032-08:00",
   "agent_name": "nova",
-  "task_id": "loomcli-vw0",
-  "task_title": "Make build/install depend on frontend build",
-  "task_started_at": "2026-02-07T23:50:14.771988-08:00",
+  "task_id": "loomcli-659",
+  "task_title": "Replace monitor icon with settings in NavRail",
+  "task_started_at": "2026-02-08T00:11:44.693403-08:00",
   "state": "active"
 }
