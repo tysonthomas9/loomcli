@@ -126,8 +126,8 @@ function ProjectHealthPanelComponent({
         </div>
         <div className={styles.countsGrid}>
           <div className={styles.countItem}>
-            <span className={styles.countValue}>{stats.open}</span>
-            <span className={styles.countLabel}>Open</span>
+            <span className={styles.countValue}>{stats.remaining}</span>
+            <span className={styles.countLabel}>Remaining</span>
           </div>
           <div className={styles.countItem}>
             <span className={styles.countValue}>{stats.closed}</span>

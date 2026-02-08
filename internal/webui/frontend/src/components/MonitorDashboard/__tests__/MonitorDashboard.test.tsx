@@ -16,7 +16,7 @@ let mockBlockedIssuesData: unknown[] = [];
 
 vi.mock('@/hooks', () => ({
   useAgents: () => ({
-    stats: { open: 10, closed: 5, total: 15, completion: 33.3 },
+    stats: { open: 10, closed: 5, total: 15, completion: 33.3, remaining: 10, in_progress: 0, review: 0, blocked: 0 },
     agents: [],
     tasks: { needs_planning: 0, ready_to_implement: 0, in_progress: 0, need_review: 0, blocked: 0 },
     taskLists: {

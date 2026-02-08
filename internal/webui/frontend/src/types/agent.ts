@@ -158,6 +158,10 @@ export interface LoomStats {
   closed: number;
   total: number;
   completion: number;
+  remaining: number;
+  in_progress: number;
+  review: number;
+  blocked: number;
 }
 
 /**

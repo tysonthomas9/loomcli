@@ -473,7 +473,7 @@ describe('API field consistency', () => {
         },
         agent_tasks: null,
         sync: { db_synced: true, db_last_sync: '2024-01-15T12:00:00Z' },
-        stats: { open: 7, closed: 0, total: 7, completion: 0 },
+        stats: { open: 7, closed: 0, total: 7, completion: 0, remaining: 7, in_progress: 0, review: 0, blocked: 0 },
         timestamp: '2024-01-15T12:30:00Z',
       }),
     });

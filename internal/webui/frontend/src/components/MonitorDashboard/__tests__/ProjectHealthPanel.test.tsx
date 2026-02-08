@@ -23,6 +23,10 @@ function createStats(overrides: Partial<LoomStats> = {}): LoomStats {
     closed: 5,
     total: 15,
     completion: 33.3,
+    remaining: 10,
+    in_progress: 0,
+    review: 0,
+    blocked: 0,
     ...overrides,
   };
 }
@@ -116,17 +120,17 @@ describe('ProjectHealthPanel', () => {
   });
 
   describe('issue counts', () => {
-    it('renders open issue count', () => {
+    it('renders remaining issue count', () => {
       render(
         <ProjectHealthPanel
-          stats={createStats({ open: 25 })}
+          stats={createStats({ remaining: 25 })}
           blockedIssues={[]}
           isLoading={false}
         />
       );
 
       expect(screen.getByText('25')).toBeInTheDocument();
-      expect(screen.getByText('Open')).toBeInTheDocument();
+      expect(screen.getByText('Remaining')).toBeInTheDocument();
     });
 
     it('renders closed issue count', () => {
@@ -158,7 +162,7 @@ describe('ProjectHealthPanel', () => {
     it('displays all issue counts correctly', () => {
       render(
         <ProjectHealthPanel
-          stats={createStats({ open: 8, closed: 4, total: 12 })}
+          stats={createStats({ remaining: 8, closed: 4, total: 12 })}
           blockedIssues={[]}
           isLoading={false}
         />
@@ -371,7 +375,7 @@ describe('ProjectHealthPanel', () => {
     it('still shows stats while loading', () => {
       render(
         <ProjectHealthPanel
-          stats={createStats({ open: 15, closed: 5, total: 20, completion: 25 })}
+          stats={createStats({ remaining: 15, closed: 5, total: 20, completion: 25 })}
           blockedIssues={null}
           isLoading={true}
         />
@@ -419,7 +423,7 @@ describe('ProjectHealthPanel', () => {
     it('handles zero issues correctly', () => {
       render(
         <ProjectHealthPanel
-          stats={createStats({ open: 0, closed: 0, total: 0, completion: 0 })}
+          stats={createStats({ remaining: 0, closed: 0, total: 0, completion: 0 })}
           blockedIssues={[]}
           isLoading={false}
         />
@@ -427,7 +431,7 @@ describe('ProjectHealthPanel', () => {
 
       // Should show 0 for all counts
       const zeros = screen.getAllByText('0');
-      expect(zeros.length).toBeGreaterThanOrEqual(3); // open, closed, total
+      expect(zeros.length).toBeGreaterThanOrEqual(3); // remaining, closed, total
       expect(screen.getByText('0%')).toBeInTheDocument();
     });
 
@@ -486,7 +490,7 @@ describe('ProjectHealthPanel', () => {
     it('handles large numbers correctly', () => {
       render(
         <ProjectHealthPanel
-          stats={createStats({ open: 9999, closed: 8888, total: 18887 })}
+          stats={createStats({ remaining: 9999, closed: 8888, total: 18887 })}
           blockedIssues={[]}
           isLoading={false}
         />

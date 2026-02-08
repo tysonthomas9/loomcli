@@ -282,7 +282,7 @@ export function AgentsSidebar({
             {isConnected && stats.total > 0 && (
               <div className={styles.statsRow}>
                 <span className={styles.statItem}>
-                  <span className={styles.statValue}>{stats.open}</span> open
+                  <span className={styles.statValue}>{stats.remaining}</span> remaining
                 </span>
                 <span className={styles.statSeparator}>·</span>
                 <span className={styles.statItem}>

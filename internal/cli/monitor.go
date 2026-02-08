@@ -118,6 +118,10 @@ type MonitorStats struct {
 	Closed     int     `json:"closed"`
 	Total      int     `json:"total"`
 	Completion float64 `json:"completion"`
+	Remaining  int     `json:"remaining"`
+	InProgress int     `json:"in_progress"`
+	Review     int     `json:"review"`
+	Blocked    int     `json:"blocked"`
 }
 
 // Dependency represents a dependency relationship from bd ready --json
@@ -145,9 +149,14 @@ type BdIssue struct {
 // BdStats represents output from bd stats --json
 type BdStats struct {
 	Summary struct {
-		TotalIssues  int `json:"total_issues"`
-		OpenIssues   int `json:"open_issues"`
-		ClosedIssues int `json:"closed_issues"`
+		TotalIssues      int `json:"total_issues"`
+		OpenIssues       int `json:"open_issues"`
+		ClosedIssues     int `json:"closed_issues"`
+		InProgressIssues int `json:"in_progress_issues"`
+		BlockedIssues    int `json:"blocked_issues"`
+		DeferredIssues   int `json:"deferred_issues"`
+		TombstoneIssues  int `json:"tombstone_issues"`
+		PinnedIssues     int `json:"pinned_issues"`
 	} `json:"summary"`
 }
 
@@ -629,8 +638,24 @@ func collectStatistics() MonitorStats {
 			stats.Open = bdStats.Summary.OpenIssues
 			stats.Closed = bdStats.Summary.ClosedIssues
 			stats.Total = bdStats.Summary.TotalIssues
+			stats.InProgress = bdStats.Summary.InProgressIssues
+			stats.Blocked = bdStats.Summary.BlockedIssues
 			if stats.Total > 0 {
 				stats.Completion = float64(stats.Closed) / float64(stats.Total) * 100
+			}
+
+			// Remaining = total - closed - tombstone
+			stats.Remaining = stats.Total - stats.Closed - bdStats.Summary.TombstoneIssues
+			if stats.Remaining < 0 {
+				stats.Remaining = 0
+			}
+
+			// Review = total - open - inProgress - closed - blocked - deferred - tombstone - pinned
+			stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
+				stats.Blocked - bdStats.Summary.DeferredIssues -
+				bdStats.Summary.TombstoneIssues - bdStats.Summary.PinnedIssues
+			if stats.Review < 0 {
+				stats.Review = 0
 			}
 		}
 	}
@@ -831,8 +856,8 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxSeparator())
 	sb.WriteString(renderBoxLine(" STATS"))
 	sb.WriteString(renderBoxSeparator())
-	statsLine := fmt.Sprintf("  Open: %-4d  Closed: %-4d  Total: %-4d  Completion: %.0f%%",
-		data.Stats.Open, data.Stats.Closed, data.Stats.Total, data.Stats.Completion)
+	statsLine := fmt.Sprintf("  Remaining: %-4d  Closed: %-4d  Total: %-4d  Done: %.0f%%",
+		data.Stats.Remaining, data.Stats.Closed, data.Stats.Total, data.Stats.Completion)
 	sb.WriteString(renderBoxLine(statsLine))
 
 	// Footer
