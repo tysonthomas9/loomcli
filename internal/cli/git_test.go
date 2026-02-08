@@ -233,7 +233,7 @@ func TestHasCommitsBetween(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
-				Args:   []string{"log", tc.target + "..origin/" + tc.source, "--oneline"},
+				Args:   []string{"log", tc.target + ".." + tc.source, "--oneline"},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
@@ -406,10 +406,11 @@ func TestGitCheckout(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mock := NewOutputCommandMock(t, []OutputCommandStub{{
-				Dir:  tc.dir,
-				Args: []string{"checkout", tc.branch},
-				Err:  tc.mockErr,
+			mock := NewCommandMock(t, []CommandStub{{
+				Name:   "git",
+				Dir:    tc.dir,
+				Args:   []string{"checkout", tc.branch},
+				Err:    tc.mockErr,
 			}})
 			mock.Install()
 
