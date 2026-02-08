@@ -80,6 +80,7 @@ type AgentStatus struct {
 	Status        string `json:"status"`                    // "ready", "3 changes", "running (plan, 5m ago)"
 	Ahead         int    `json:"ahead"`                     // commits ahead of integration branch
 	Behind        int    `json:"behind"`                    // commits behind integration branch
+	Role          string `json:"role,omitempty"`            // role from daemon config (e.g., "plan", "task")
 	Workspace     string `json:"workspace"`                 // workspace name (empty in legacy mode)
 	DaemonManaged bool   `json:"daemon_managed,omitempty"`  // true if under daemon supervision
 }
@@ -117,6 +118,10 @@ type MonitorStats struct {
 	Closed     int     `json:"closed"`
 	Total      int     `json:"total"`
 	Completion float64 `json:"completion"`
+	Remaining  int     `json:"remaining"`
+	InProgress int     `json:"in_progress"`
+	Review     int     `json:"review"`
+	Blocked    int     `json:"blocked"`
 }
 
 // Dependency represents a dependency relationship from bd ready --json
@@ -144,9 +149,14 @@ type BdIssue struct {
 // BdStats represents output from bd stats --json
 type BdStats struct {
 	Summary struct {
-		TotalIssues  int `json:"total_issues"`
-		OpenIssues   int `json:"open_issues"`
-		ClosedIssues int `json:"closed_issues"`
+		TotalIssues      int `json:"total_issues"`
+		OpenIssues       int `json:"open_issues"`
+		ClosedIssues     int `json:"closed_issues"`
+		InProgressIssues int `json:"in_progress_issues"`
+		BlockedIssues    int `json:"blocked_issues"`
+		DeferredIssues   int `json:"deferred_issues"`
+		TombstoneIssues  int `json:"tombstone_issues"`
+		PinnedIssues     int `json:"pinned_issues"`
 	} `json:"summary"`
 }
 
@@ -161,13 +171,20 @@ type DaemonAgentState struct {
 type DaemonAgentStateEntry struct {
 	Worktree string `json:"worktree"`
 	Status   string `json:"status"`
+	Role     string `json:"role"`
 }
 
-// loadDaemonManagedAgents reads the daemon state file and returns a set of
-// worktree names that are under daemon supervision.
+// DaemonAgentInfo carries daemon supervision metadata for a worktree.
+type DaemonAgentInfo struct {
+	Managed bool
+	Role    string
+}
+
+// loadDaemonManagedAgents reads the daemon state file and returns metadata
+// for worktrees under daemon supervision, including their role.
 // Returns nil if the file doesn't exist, can't be parsed, or daemon isn't running.
 // The state file is expected at ~/.loom/daemon-agents.json (global location).
-func loadDaemonManagedAgents() map[string]bool {
+func loadDaemonManagedAgents() map[string]DaemonAgentInfo {
 	daemonStatePath := filepath.Join(GetConfigDir(), "daemon-agents.json")
 	data, err := os.ReadFile(daemonStatePath)
 	if err != nil {
@@ -184,10 +201,13 @@ func loadDaemonManagedAgents() map[string]bool {
 		return nil // Invalid PID or daemon died, don't show stale [D] markers
 	}
 
-	result := make(map[string]bool)
+	result := make(map[string]DaemonAgentInfo)
 	for _, agent := range state.Agents {
 		if agent.Worktree != "" {
-			result[agent.Worktree] = true
+			result[agent.Worktree] = DaemonAgentInfo{
+				Managed: true,
+				Role:    agent.Role,
+			}
 		}
 	}
 	return result
@@ -312,11 +332,13 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 	defaultBranch := GetDefaultBranchForWorktrees(worktrees)
 
 	for _, wt := range worktrees {
+		daemonInfo := daemonManaged[wt.Name]
 		agent := AgentStatus{
 			Name:          wt.Name,
 			Branch:        wt.Branch,
 			Workspace:     wt.Workspace,
-			DaemonManaged: daemonManaged[wt.Name],
+			Role:          daemonInfo.Role,
+			DaemonManaged: daemonInfo.Managed,
 		}
 
 		// Check for running agent (lock status)
@@ -616,8 +638,24 @@ func collectStatistics() MonitorStats {
 			stats.Open = bdStats.Summary.OpenIssues
 			stats.Closed = bdStats.Summary.ClosedIssues
 			stats.Total = bdStats.Summary.TotalIssues
+			stats.InProgress = bdStats.Summary.InProgressIssues
+			stats.Blocked = bdStats.Summary.BlockedIssues
 			if stats.Total > 0 {
 				stats.Completion = float64(stats.Closed) / float64(stats.Total) * 100
+			}
+
+			// Remaining = total - closed - tombstone
+			stats.Remaining = stats.Total - stats.Closed - bdStats.Summary.TombstoneIssues
+			if stats.Remaining < 0 {
+				stats.Remaining = 0
+			}
+
+			// Review = total - open - inProgress - closed - blocked - deferred - tombstone - pinned
+			stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
+				stats.Blocked - bdStats.Summary.DeferredIssues -
+				bdStats.Summary.TombstoneIssues - bdStats.Summary.PinnedIssues
+			if stats.Review < 0 {
+				stats.Review = 0
 			}
 		}
 	}
@@ -818,8 +856,8 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxSeparator())
 	sb.WriteString(renderBoxLine(" STATS"))
 	sb.WriteString(renderBoxSeparator())
-	statsLine := fmt.Sprintf("  Open: %-4d  Closed: %-4d  Total: %-4d  Completion: %.0f%%",
-		data.Stats.Open, data.Stats.Closed, data.Stats.Total, data.Stats.Completion)
+	statsLine := fmt.Sprintf("  Remaining: %-4d  Closed: %-4d  Total: %-4d  Done: %.0f%%",
+		data.Stats.Remaining, data.Stats.Closed, data.Stats.Total, data.Stats.Completion)
 	sb.WriteString(renderBoxLine(statsLine))
 
 	// Footer

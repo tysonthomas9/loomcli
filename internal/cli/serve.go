@@ -37,6 +37,8 @@ var (
 	serveFleetAPIKey string
 	serveNoAuth      bool
 	serveHSTS        bool
+	serveDev         bool
+	serveDevFrontDir string
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
@@ -73,11 +75,19 @@ ENVIRONMENT VARIABLES
   LOOM_CORS_ORIGIN    CORS allowed origin (default: http://localhost:<webui-port>)
   LOOM_REDIS_PASSWORD Redis password (avoids exposure in process list)
 
+DEVELOPMENT MODE
+  Use --dev to serve the frontend from disk instead of the embedded filesystem.
+  This allows iterating on the frontend without recompiling the Go binary.
+  CORS is automatically enabled for the Vite dev server origin.
+  WARNING: Dev mode is for local development only. Do not use in production.
+
 EXAMPLES
   loom serve                          # Start on default port 8081
   loom serve --port 9000              # Start on port 9000
   loom serve --bind 0.0.0.0           # Listen on all interfaces
-  loom serve --cors http://localhost:8080   # Allow specific origin`,
+  loom serve --cors http://localhost:8080   # Allow specific origin
+  loom serve --dev                    # Dev mode: serve frontend from disk
+  loom serve --dev --dev-frontend-dir ./my-frontend/dist  # Custom frontend dir`,
 	Args: cobra.NoArgs,
 	Run:  runServe,
 }
@@ -120,6 +130,8 @@ func init() {
 
 	serveCmd.Flags().BoolVar(&serveNoAuth, "no-auth", false, "Disable WebUI API authentication (not recommended)")
 	serveCmd.Flags().BoolVar(&serveHSTS, "hsts", false, "Enable HSTS header (use when behind TLS-terminating proxy)")
+	serveCmd.Flags().BoolVar(&serveDev, "dev", false, "Development mode: serve frontend from disk, enable CORS for Vite dev server")
+	serveCmd.Flags().StringVar(&serveDevFrontDir, "dev-frontend-dir", "", "Frontend directory to serve in dev mode (default: internal/webui/frontend/dist)")
 
 	rootCmd.AddCommand(serveCmd)
 }
@@ -207,24 +219,37 @@ func runServe(cmd *cobra.Command, args []string) {
 		}
 		go func() {
 			cfg := webui.ServerConfig{
-				Port:         serveWebUIPort,
-				BindAddress:  serveBindAddr,
-				SocketPath:   serveWebUISocket,
-				FleetEnabled: serveRedisAddr != "",
-				FleetRedis:   fleetRedisConfig,
-				FleetJWTKey:  fleetJWTKey,
-				FleetAPIKey:  serveFleetAPIKey,
-				APIKey:       serveAPIKey,
-				AuthEnabled:  !serveNoAuth,
-				HSTSEnabled:  serveHSTS,
+				Port:           serveWebUIPort,
+				BindAddress:    serveBindAddr,
+				SocketPath:     serveWebUISocket,
+				LoomServerURL:  fmt.Sprintf("http://localhost:%d", servePort),
+				FleetEnabled:   serveRedisAddr != "",
+				FleetRedis:     fleetRedisConfig,
+				FleetJWTKey:    fleetJWTKey,
+				FleetAPIKey:    serveFleetAPIKey,
+				APIKey:         serveAPIKey,
+				AuthEnabled:    !serveNoAuth,
+				HSTSEnabled:    serveHSTS,
+				DevMode:        serveDev,
+				DevFrontendDir: serveDevFrontDir,
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true
 				cfg.CORSOrigins = []string{serveCorsOrigin}
+			} else if serveDev {
+				cfg.CORSEnabled = true
+				// Uses default origin (http://localhost:3000) in server.go
 			}
 			webuiErr <- webui.StartServer(ctx, cfg)
 		}()
 		log.Printf("Web UI server starting on port %d", serveWebUIPort)
+		if serveDev {
+			dir := serveDevFrontDir
+			if dir == "" {
+				dir = "internal/webui/frontend/dist"
+			}
+			log.Printf("Development mode enabled: serving frontend from %s", dir)
+		}
 	}
 
 	// Start stale detector if Redis is configured

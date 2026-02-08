@@ -99,6 +99,28 @@ describe('AgentCard', () => {
     });
   });
 
+
+  describe('role label', () => {
+    it('shows capitalized role when agent has role', () => {
+      render(<AgentCard agent={makeAgent({ role: 'plan' })} />);
+      expect(screen.getByText('Plan')).toBeInTheDocument();
+    });
+
+    it('shows "Task" for task role', () => {
+      render(<AgentCard agent={makeAgent({ role: 'task' })} />);
+      expect(screen.getByText('Task')).toBeInTheDocument();
+    });
+
+    it('shows "Agent" fallback when role is undefined', () => {
+      render(<AgentCard agent={makeAgent()} />);
+      expect(screen.getByText('Agent')).toBeInTheDocument();
+    });
+
+    it('shows "Agent" fallback when role is empty string', () => {
+      render(<AgentCard agent={makeAgent({ role: '' })} />);
+      expect(screen.getByText('Agent')).toBeInTheDocument();
+    });
+  });
   describe('status line', () => {
     it('shows "Ready" for ready status', () => {
       render(<AgentCard agent={makeAgent({ status: 'ready', branch: 'main' })} />);

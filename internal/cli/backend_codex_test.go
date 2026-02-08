@@ -224,3 +224,45 @@ func TestCodexBackendInvokeNonInteractive(t *testing.T) {
 		t.Error("expected shutdown channel to be passed, got nil")
 	}
 }
+
+func TestCodexBackend_DispatchViaNonInteractive(t *testing.T) {
+	// Tests the full dispatch chain: InvokeAgentNonInteractive → CodexBackend.InvokeNonInteractive → codexNonInteractiveInvoker
+	resetBackendState(t)
+	RegisterBackend(&CodexBackend{})
+	if err := SetBackend("codex"); err != nil {
+		t.Fatalf("SetBackend('codex') failed: %v", err)
+	}
+
+	// Mock the codex invoker to capture arguments
+	oldCodex := codexNonInteractiveInvoker
+	t.Cleanup(func() { codexNonInteractiveInvoker = oldCodex })
+
+	var gotWorkDir, gotPrompt, gotAgentName string
+	var gotShutdown <-chan struct{}
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		gotWorkDir = workDir
+		gotPrompt = prompt
+		gotAgentName = agentName
+		gotShutdown = shutdown
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	err := InvokeAgentNonInteractive("/dispatch/test", "codex dispatch prompt", "dispatch-agent", shutdown)
+	if err != nil {
+		t.Fatalf("InvokeAgentNonInteractive() unexpected error: %v", err)
+	}
+
+	if gotWorkDir != "/dispatch/test" {
+		t.Errorf("workDir = %q, want %q", gotWorkDir, "/dispatch/test")
+	}
+	if gotPrompt != "codex dispatch prompt" {
+		t.Errorf("prompt = %q, want %q", gotPrompt, "codex dispatch prompt")
+	}
+	if gotAgentName != "dispatch-agent" {
+		t.Errorf("agentName = %q, want %q", gotAgentName, "dispatch-agent")
+	}
+	if gotShutdown == nil {
+		t.Error("expected shutdown channel to be passed, got nil")
+	}
+}

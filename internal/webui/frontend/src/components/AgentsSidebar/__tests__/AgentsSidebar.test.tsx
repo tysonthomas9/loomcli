@@ -27,7 +27,7 @@ vi.mock('@/hooks', () => ({
     },
     agentTasks: {},
     sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-    stats: { open: 0, closed: 0, total: 0, completion: 0 },
+    stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
     isLoading: false,
     isConnected: true,
     lastUpdated: new Date(),

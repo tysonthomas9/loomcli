@@ -10,7 +10,7 @@ import styles from './ViewSwitcher.module.css';
 /**
  * Available view modes.
  */
-export type ViewMode = 'kanban' | 'table' | 'graph' | 'monitor';
+export type ViewMode = 'kanban' | 'table' | 'graph' | 'monitor' | 'settings';
 
 /**
  * Default view when none is specified.

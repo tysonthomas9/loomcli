@@ -50,7 +50,7 @@ func TestNewLoomProxy_DefaultBehavior_LocalhostOnly(t *testing.T) {
 			})
 			defer cleanup()
 
-			proxy := newLoomProxy()
+			proxy := newLoomProxy("")
 			if tt.wantNil && proxy != nil {
 				t.Errorf("newLoomProxy() = non-nil, want nil for URL %q", tt.url)
 			}
@@ -82,7 +82,7 @@ func TestNewLoomProxy_SingleAllowedHost(t *testing.T) {
 			})
 			defer cleanup()
 
-			proxy := newLoomProxy()
+			proxy := newLoomProxy("")
 			if tt.wantNil && proxy != nil {
 				t.Errorf("newLoomProxy() = non-nil, want nil for URL %q", tt.url)
 			}
@@ -117,7 +117,7 @@ func TestNewLoomProxy_MultipleAllowedHosts(t *testing.T) {
 			})
 			defer cleanup()
 
-			proxy := newLoomProxy()
+			proxy := newLoomProxy("")
 			if tt.wantNil && proxy != nil {
 				t.Errorf("newLoomProxy() = non-nil, want nil for URL %q", tt.url)
 			}
@@ -149,7 +149,7 @@ func TestNewLoomProxy_AllowedHostsWithWhitespace(t *testing.T) {
 			})
 			defer cleanup()
 
-			proxy := newLoomProxy()
+			proxy := newLoomProxy("")
 			if tt.wantNil && proxy != nil {
 				t.Errorf("newLoomProxy() = non-nil, want nil")
 			}
@@ -182,7 +182,7 @@ func TestNewLoomProxy_LocalhostVariantsAlwaysAllowed(t *testing.T) {
 			})
 			defer cleanup()
 
-			proxy := newLoomProxy()
+			proxy := newLoomProxy("")
 			if proxy == nil {
 				t.Errorf("newLoomProxy() = nil, want non-nil for URL %q (localhost should always be allowed)", tt.url)
 			}
@@ -211,7 +211,7 @@ func TestNewLoomProxy_DisallowedHostsRejected(t *testing.T) {
 			})
 			defer cleanup()
 
-			proxy := newLoomProxy()
+			proxy := newLoomProxy("")
 			if proxy != nil {
 				t.Errorf("newLoomProxy() = non-nil, want nil for URL %q with allowed hosts %q", tt.url, tt.allowedHosts)
 			}
@@ -238,7 +238,7 @@ func TestNewLoomProxy_InvalidURLRejected(t *testing.T) {
 
 			// Empty/whitespace URLs should fall back to default (localhost:9000)
 			// which should be allowed
-			proxy := newLoomProxy()
+			proxy := newLoomProxy("")
 			if proxy == nil {
 				t.Errorf("newLoomProxy() = nil, want non-nil for empty URL (should use default localhost)")
 			}
@@ -264,7 +264,7 @@ func TestNewLoomProxy_InvalidSchemeRejected(t *testing.T) {
 			})
 			defer cleanup()
 
-			proxy := newLoomProxy()
+			proxy := newLoomProxy("")
 			if proxy != nil {
 				t.Errorf("newLoomProxy() = non-nil, want nil for URL %q (invalid scheme)", tt.url)
 			}
@@ -292,7 +292,7 @@ func TestNewLoomProxy_HTTPSAllowed(t *testing.T) {
 			})
 			defer cleanup()
 
-			proxy := newLoomProxy()
+			proxy := newLoomProxy("")
 			if tt.wantNil && proxy != nil {
 				t.Errorf("newLoomProxy() = non-nil, want nil for URL %q", tt.url)
 			}
@@ -394,4 +394,49 @@ func TestSafeDialContext_BlocksPrivateIPs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewLoomProxy_DefaultURLParameter(t *testing.T) {
+	t.Run("defaultURL used when env unset", func(t *testing.T) {
+		cleanup := setEnvCleanup(map[string]string{
+			"LOOM_SERVER_URL":          "",
+			"LOOM_PROXY_ALLOWED_HOSTS": "",
+		})
+		defer cleanup()
+
+		proxy := newLoomProxy("http://localhost:9999")
+		if proxy == nil {
+			t.Error("newLoomProxy(\"http://localhost:9999\") = nil, want non-nil")
+		}
+	})
+
+	t.Run("env var takes precedence over defaultURL", func(t *testing.T) {
+		cleanup := setEnvCleanup(map[string]string{
+			"LOOM_SERVER_URL":          "http://example.com:9000",
+			"LOOM_PROXY_ALLOWED_HOSTS": "",
+		})
+		defer cleanup()
+
+		// example.com is not in allowed hosts, so if env var takes precedence,
+		// the proxy should be nil (rejected). If defaultURL were used instead,
+		// it would be non-nil.
+		proxy := newLoomProxy("http://localhost:8081")
+		if proxy != nil {
+			t.Error("expected nil when LOOM_SERVER_URL points to disallowed host, got non-nil")
+		}
+	})
+
+	t.Run("constant fallback when both empty", func(t *testing.T) {
+		cleanup := setEnvCleanup(map[string]string{
+			"LOOM_SERVER_URL":          "",
+			"LOOM_PROXY_ALLOWED_HOSTS": "",
+		})
+		defer cleanup()
+
+		// Empty defaultURL should fall back to constant (http://localhost:8081)
+		proxy := newLoomProxy("")
+		if proxy == nil {
+			t.Error("newLoomProxy(\"\") = nil, want non-nil (should fall back to default constant)")
+		}
+	})
 }

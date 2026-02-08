@@ -110,6 +110,10 @@ const DEFAULT_STATS: LoomStats = {
   closed: 0,
   total: 0,
   completion: 0,
+  remaining: 0,
+  in_progress: 0,
+  review: 0,
+  blocked: 0,
 };
 
 const DEFAULT_TASK_LISTS: LoomTaskLists = {

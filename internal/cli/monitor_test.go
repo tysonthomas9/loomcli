@@ -753,13 +753,17 @@ func TestRunBdCommand(t *testing.T) {
 
 func TestCollectStatistics(t *testing.T) {
 	tests := []struct {
-		name       string
-		bdOutput   string
-		bdErr      error
-		wantOpen   int
-		wantClosed int
-		wantTotal  int
-		wantCompl  float64
+		name           string
+		bdOutput       string
+		bdErr          error
+		wantOpen       int
+		wantClosed     int
+		wantTotal      int
+		wantCompl      float64
+		wantRemaining  int
+		wantInProgress int
+		wantReview     int
+		wantBlocked    int
 	}{
 		{
 			name:       "normal case with valid JSON",
@@ -768,6 +772,12 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed: 7,
 			wantTotal:  10,
 			wantCompl:  70.0,
+			// Remaining = 10 - 7 - 0 (tombstone) = 3
+			wantRemaining: 3,
+			// Review = 10 - 3 - 0 - 7 - 0 - 0 - 0 - 0 = 0
+			wantReview:     0,
+			wantInProgress: 0,
+			wantBlocked:    0,
 		},
 		{
 			name:       "empty stats (no issues)",
@@ -776,6 +786,10 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed: 0,
 			wantTotal:  0,
 			wantCompl:  0,
+			wantRemaining:  0,
+			wantInProgress: 0,
+			wantReview:     0,
+			wantBlocked:    0,
 		},
 		{
 			name:       "command failure returns zero values",
@@ -784,6 +798,10 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed: 0,
 			wantTotal:  0,
 			wantCompl:  0,
+			wantRemaining:  0,
+			wantInProgress: 0,
+			wantReview:     0,
+			wantBlocked:    0,
 		},
 		{
 			name:       "invalid JSON returns zero values",
@@ -792,6 +810,10 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed: 0,
 			wantTotal:  0,
 			wantCompl:  0,
+			wantRemaining:  0,
+			wantInProgress: 0,
+			wantReview:     0,
+			wantBlocked:    0,
 		},
 		{
 			name:       "all closed (100% completion)",
@@ -800,6 +822,72 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed: 5,
 			wantTotal:  5,
 			wantCompl:  100.0,
+			// Remaining = 5 - 5 - 0 = 0
+			wantRemaining:  0,
+			wantInProgress: 0,
+			wantReview:     0,
+			wantBlocked:    0,
+		},
+		{
+			name: "all bd stats fields populated",
+			// total=20, open=10, in_progress=2, closed=5, blocked=1, deferred=0, tombstone=0, pinned=0
+			bdOutput: `{"summary":{"total_issues":20,"open_issues":10,"in_progress_issues":2,"closed_issues":5,"blocked_issues":1,"deferred_issues":0,"tombstone_issues":0,"pinned_issues":0}}`,
+			wantOpen:   10,
+			wantClosed: 5,
+			wantTotal:  20,
+			wantCompl:  25.0,
+			// Remaining = 20 - 5 - 0 (tombstone) = 15
+			wantRemaining: 15,
+			wantInProgress: 2,
+			wantBlocked:    1,
+			// Review = 20 - 10 - 2 - 5 - 1 - 0 - 0 - 0 = 2
+			wantReview: 2,
+		},
+		{
+			name: "negative review clamped to zero",
+			// total=10, open=5, in_progress=3, closed=3, blocked=2, deferred=0, tombstone=0, pinned=0
+			// Review = 10 - 5 - 3 - 3 - 2 - 0 - 0 - 0 = -3 -> clamped to 0
+			bdOutput: `{"summary":{"total_issues":10,"open_issues":5,"in_progress_issues":3,"closed_issues":3,"blocked_issues":2,"deferred_issues":0,"tombstone_issues":0,"pinned_issues":0}}`,
+			wantOpen:   5,
+			wantClosed: 3,
+			wantTotal:  10,
+			wantCompl:  30.0,
+			// Remaining = 10 - 3 - 0 = 7
+			wantRemaining:  7,
+			wantInProgress: 3,
+			wantBlocked:    2,
+			wantReview:     0, // clamped
+		},
+		{
+			name: "negative remaining clamped to zero",
+			// total=5, open=0, closed=6, tombstone=1 (closed+tombstone > total)
+			// Remaining = 5 - 6 - 1 = -2 -> clamped to 0
+			bdOutput: `{"summary":{"total_issues":5,"open_issues":0,"in_progress_issues":0,"closed_issues":6,"blocked_issues":0,"deferred_issues":0,"tombstone_issues":1,"pinned_issues":0}}`,
+			wantOpen:   0,
+			wantClosed: 6,
+			wantTotal:  5,
+			wantCompl:  120.0, // 6/5 * 100
+			// Remaining = 5 - 6 - 1 = -2 -> clamped to 0
+			wantRemaining:  0,
+			wantInProgress: 0,
+			wantBlocked:    0,
+			// Review = 5 - 0 - 0 - 6 - 0 - 0 - 1 - 0 = -2 -> clamped to 0
+			wantReview: 0,
+		},
+		{
+			name: "review computed with deferred and pinned",
+			// total=30, open=10, in_progress=3, closed=8, blocked=2, deferred=2, tombstone=1, pinned=1
+			// Review = 30 - 10 - 3 - 8 - 2 - 2 - 1 - 1 = 3
+			bdOutput: `{"summary":{"total_issues":30,"open_issues":10,"in_progress_issues":3,"closed_issues":8,"blocked_issues":2,"deferred_issues":2,"tombstone_issues":1,"pinned_issues":1}}`,
+			wantOpen:   10,
+			wantClosed: 8,
+			wantTotal:  30,
+			wantCompl:  float64(8) / float64(30) * 100,
+			// Remaining = 30 - 8 - 1 = 21
+			wantRemaining:  21,
+			wantInProgress: 3,
+			wantBlocked:    2,
+			wantReview:     3,
 		},
 	}
 
@@ -825,6 +913,18 @@ func TestCollectStatistics(t *testing.T) {
 			}
 			if stats.Completion != tt.wantCompl {
 				t.Errorf("Completion = %.1f, want %.1f", stats.Completion, tt.wantCompl)
+			}
+			if stats.Remaining != tt.wantRemaining {
+				t.Errorf("Remaining = %d, want %d", stats.Remaining, tt.wantRemaining)
+			}
+			if stats.InProgress != tt.wantInProgress {
+				t.Errorf("InProgress = %d, want %d", stats.InProgress, tt.wantInProgress)
+			}
+			if stats.Review != tt.wantReview {
+				t.Errorf("Review = %d, want %d", stats.Review, tt.wantReview)
+			}
+			if stats.Blocked != tt.wantBlocked {
+				t.Errorf("Blocked = %d, want %d", stats.Blocked, tt.wantBlocked)
 			}
 		})
 	}
@@ -1195,6 +1295,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
+
 		// Create worktree structure (relative to tmpDir)
 		wtDir := filepath.Join(tmpDir, "worktrees", "falcon")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
@@ -1240,6 +1346,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
+
 		wtDir := filepath.Join(tmpDir, "worktrees", "nova")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
@@ -1281,6 +1393,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		tmpDir := t.TempDir()
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
+
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
 
 		wtDir := filepath.Join(tmpDir, "worktrees", "spark")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
@@ -1327,6 +1445,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
 
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
+
 		wtDir := filepath.Join(tmpDir, "worktrees", "flux")
 		if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 			t.Fatal(err)
@@ -1371,6 +1495,12 @@ func TestCollectAgentStatus(t *testing.T) {
 		tmpDir := t.TempDir()
 		os.Chdir(tmpDir)
 		t.Cleanup(func() { os.Chdir(origDir) })
+
+		// Reset cached resolver and beads dir so they use the new CWD
+		oldResolver := defaultResolver
+		defaultResolver = nil
+		t.Cleanup(func() { defaultResolver = oldResolver })
+		ResetBeadsDirCache()
 
 		// Create two worktrees
 		for _, name := range []string{"falcon", "nova"} {
@@ -1426,6 +1556,12 @@ func TestCollectMonitorData(t *testing.T) {
 	tmpDir := t.TempDir()
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Reset cached resolver and beads dir so they use the new CWD
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
 
 	wtDir := filepath.Join(tmpDir, "worktrees", "test-agent")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
@@ -1510,6 +1646,12 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
+	// Reset cached resolver and beads dir so they use the new CWD
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
+
 	wtDir := filepath.Join(tmpDir, "worktrees", "test-agent")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
@@ -1569,6 +1711,12 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
+	// Reset cached resolver and beads dir so they use the new CWD
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
+
 	wtDir := filepath.Join(tmpDir, "worktrees", "solo")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
 		t.Fatal(err)
@@ -1610,6 +1758,12 @@ func TestRunMonitorOneShot(t *testing.T) {
 	tmpDir := t.TempDir()
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Reset cached resolver and beads dir so they use the new CWD
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
 
 	wtDir := filepath.Join(tmpDir, "worktrees", "oneshot")
 	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
@@ -1734,6 +1888,10 @@ func TestRenderDashboardWithData(t *testing.T) {
 			Closed:     10,
 			Total:      15,
 			Completion: 66.7,
+			Remaining:  5,
+			InProgress: 2,
+			Review:     1,
+			Blocked:    1,
 		},
 	}
 
@@ -1794,7 +1952,13 @@ func TestRenderDashboardWithData(t *testing.T) {
 		t.Error("expected 'need pull' in git sync")
 	}
 
-	// Check stats
+	// Check stats section uses "Remaining" and "Done" labels (not "Open" and "Completion")
+	if !strings.Contains(output, "Remaining:") {
+		t.Error("expected 'Remaining:' label in stats line")
+	}
+	if !strings.Contains(output, "Done:") {
+		t.Error("expected 'Done:' label in stats line (completion percentage)")
+	}
 	if !strings.Contains(output, "67%") {
 		t.Error("expected completion percentage")
 	}
@@ -2008,6 +2172,12 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			tmpDir := t.TempDir()
 			os.Chdir(tmpDir)
 			t.Cleanup(func() { os.Chdir(origDir) })
+
+			// Reset cached resolver and beads dir so they use the new CWD
+			oldResolver := defaultResolver
+			defaultResolver = nil
+			t.Cleanup(func() { defaultResolver = oldResolver })
+			ResetBeadsDirCache()
 
 			wtDir := filepath.Join(tmpDir, "worktrees", "alpha")
 			if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
@@ -2500,14 +2670,14 @@ func TestLoadDaemonManagedAgents_ValidFile(t *testing.T) {
 	if len(result) != 3 {
 		t.Errorf("len(result) = %d, want 3", len(result))
 	}
-	if !result["falcon"] {
-		t.Error("result[falcon] = false, want true")
+	if !result["falcon"].Managed {
+		t.Error("result[falcon].Managed = false, want true")
 	}
-	if !result["nova"] {
-		t.Error("result[nova] = false, want true")
+	if !result["nova"].Managed {
+		t.Error("result[nova].Managed = false, want true")
 	}
-	if !result["spark"] {
-		t.Error("result[spark] = false, want true")
+	if !result["spark"].Managed {
+		t.Error("result[spark].Managed = false, want true")
 	}
 }
 
@@ -2614,17 +2784,53 @@ func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
 	if len(result) != 2 {
 		t.Errorf("len(result) = %d, want 2 (should skip empty worktree name)", len(result))
 	}
-	if !result["falcon"] {
-		t.Error("result[falcon] = false, want true")
+	if !result["falcon"].Managed {
+		t.Error("result[falcon].Managed = false, want true")
 	}
-	if !result["nova"] {
-		t.Error("result[nova] = false, want true")
+	if !result["nova"].Managed {
+		t.Error("result[nova].Managed = false, want true")
 	}
-	if result[""] {
-		t.Error("result[\"\"] = true, want false (empty worktree name should be skipped)")
+	if result[""].Managed {
+		t.Error("result[\"\"].Managed = true, want false (empty worktree name should be skipped)")
 	}
 }
 
+
+func TestLoadDaemonManagedAgents_WithRole(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	state := DaemonAgentState{
+		PID: os.Getpid(),
+		Agents: []DaemonAgentStateEntry{
+			{Worktree: "falcon", Status: "running", Role: "task"},
+			{Worktree: "nova", Status: "idle", Role: "plan"},
+			{Worktree: "spark", Status: "running"}, // no role
+		},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("failed to marshal state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+		t.Fatalf("failed to write daemon-agents.json: %v", err)
+	}
+
+	result := loadDaemonManagedAgents()
+	if result == nil {
+		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
+	}
+
+	if result["falcon"].Role != "task" {
+		t.Errorf("result[falcon].Role = %q, want %q", result["falcon"].Role, "task")
+	}
+	if result["nova"].Role != "plan" {
+		t.Errorf("result[nova].Role = %q, want %q", result["nova"].Role, "plan")
+	}
+	if result["spark"].Role != "" {
+		t.Errorf("result[spark].Role = %q, want empty string", result["spark"].Role)
+	}
+}
 func TestRenderAgentLine_WithDaemonMarker(t *testing.T) {
 	agent := AgentStatus{
 		Name:          "falcon",
