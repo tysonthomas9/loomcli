@@ -3010,3 +3010,440 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 }
 
+func TestRunAutoModeLoop_CodexPlanAgentType(t *testing.T) {
+	// Mirrors TestRunAutoModeLoop_PlanAgentType but with codex backend.
+	// Verifies that when codex is the active backend, RunAutoModeLoop dispatches
+	// to codexNonInteractiveInvoker instead of claudeNonInteractiveInvoker.
+	resetBackendState(t)
+	RegisterBackend(&CodexBackend{})
+	if err := SetBackend("codex"); err != nil {
+		t.Fatalf("SetBackend('codex') failed: %v", err)
+	}
+
+	// Save and restore codex invoker
+	oldCodex := codexNonInteractiveInvoker
+	t.Cleanup(func() { codexNonInteractiveInvoker = oldCodex })
+
+	// Track that claude was NOT called
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() { claudeNonInteractiveInvoker = oldClaude })
+	claudeCalled := false
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeCalled = true
+		return nil
+	}
+
+	// Mock codex invoker to capture args
+	var receivedPrompt, receivedWorkDir, receivedAgentName string
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		receivedWorkDir = workDir
+		receivedPrompt = prompt
+		receivedAgentName = agentName
+		UpdateLockTask(workDir, "mock-codex-plan-1", "Mock Codex Plan Task")
+		return nil
+	}
+
+	// Mock execCommand for bd ready (return task needing planning)
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Needs planning", Status: "open", Design: ""},
+			}),
+		}
+	}
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     1,
+		IdleTimeout:  0,
+		AgentType:    "plan",
+		AgentName:    "codex-planner",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	if claudeCalled {
+		t.Error("Claude invoker should NOT be called when codex is active")
+	}
+	if receivedPrompt == "" {
+		t.Error("Codex invoker should have been called")
+	}
+	// Verify planning prompt was generated
+	expectedPrompt := GeneratePlanningPrompt("codex-planner", nil)
+	if receivedPrompt != expectedPrompt {
+		t.Errorf("Codex did not receive planning prompt")
+	}
+	if receivedWorkDir != tmpDir {
+		t.Errorf("Codex received workDir %q, want %q", receivedWorkDir, tmpDir)
+	}
+	if receivedAgentName != "codex-planner" {
+		t.Errorf("Codex received agentName %q, want %q", receivedAgentName, "codex-planner")
+	}
+}
+
+func TestRunAutoModeLoop_CodexMaxTasks(t *testing.T) {
+	// Mirrors TestRunAutoModeLoop_MaxTasksLimit but with codex backend.
+	resetBackendState(t)
+	RegisterBackend(&CodexBackend{})
+	if err := SetBackend("codex"); err != nil {
+		t.Fatalf("SetBackend('codex') failed: %v", err)
+	}
+
+	oldCodex := codexNonInteractiveInvoker
+	t.Cleanup(func() { codexNonInteractiveInvoker = oldCodex })
+
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() { claudeNonInteractiveInvoker = oldClaude })
+	claudeCalled := false
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeCalled = true
+		return nil
+	}
+
+	codexInvocations := 0
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		codexInvocations++
+		UpdateLockTask(workDir, fmt.Sprintf("mock-codex-%d", codexInvocations), "Mock Codex Task")
+		return nil
+	}
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     3,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "codex-worker",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit after max tasks")
+	}
+
+	if codexInvocations != 3 {
+		t.Errorf("Codex was invoked %d times, want 3", codexInvocations)
+	}
+	if claudeCalled {
+		t.Error("Claude invoker should NOT be called when codex is active")
+	}
+}
+
+func TestRunAutoModeLoop_CodexConsecutiveErrors(t *testing.T) {
+	// Mirrors TestRunAutoModeLoop_ConsecutiveErrors but with codex backend.
+	resetBackendState(t)
+	RegisterBackend(&CodexBackend{})
+	if err := SetBackend("codex"); err != nil {
+		t.Fatalf("SetBackend('codex') failed: %v", err)
+	}
+
+	oldCodex := codexNonInteractiveInvoker
+	t.Cleanup(func() { codexNonInteractiveInvoker = oldCodex })
+
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() { claudeNonInteractiveInvoker = oldClaude })
+	claudeCalled := false
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeCalled = true
+		return nil
+	}
+
+	errorCount := 0
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		errorCount++
+		return fmt.Errorf("codex simulated error %d", errorCount)
+	}
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "codex-worker",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit after consecutive errors")
+	}
+
+	if errorCount != 3 {
+		t.Errorf("Expected 3 consecutive codex errors, got %d", errorCount)
+	}
+	if claudeCalled {
+		t.Error("Claude invoker should NOT be called when codex is active")
+	}
+}
+
+func TestRunAutoModeLoop_CodexErrorRecovery(t *testing.T) {
+	// Mirrors TestRunAutoModeLoop_ErrorRecovery but with codex backend.
+	// Pattern: error, error, success (with task claim), error, error, error → exits after 6.
+	resetBackendState(t)
+	RegisterBackend(&CodexBackend{})
+	if err := SetBackend("codex"); err != nil {
+		t.Fatalf("SetBackend('codex') failed: %v", err)
+	}
+
+	oldCodex := codexNonInteractiveInvoker
+	t.Cleanup(func() { codexNonInteractiveInvoker = oldCodex })
+
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() { claudeNonInteractiveInvoker = oldClaude })
+	claudeCalled := false
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeCalled = true
+		return nil
+	}
+
+	callNum := 0
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		callNum++
+		if callNum == 3 {
+			UpdateLockTask(workDir, "mock-codex-recovery", "Mock Codex Recovery Task")
+			return nil // Success resets error counter
+		}
+		return fmt.Errorf("codex error %d", callNum)
+	}
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "codex-worker",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Should exit after 6 calls (2 errors, 1 success, 3 consecutive errors)
+	if callNum != 6 {
+		t.Errorf("Expected 6 codex invocations, got %d", callNum)
+	}
+	if claudeCalled {
+		t.Error("Claude invoker should NOT be called when codex is active")
+	}
+}
+
+func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available, skipping")
+	}
+
+	resetBackendState(t)
+	RegisterBackend(&CodexBackend{})
+	if err := SetBackend("codex"); err != nil {
+		t.Fatalf("SetBackend('codex') failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	sessionName := fmt.Sprintf("loom-test-codex-%d", os.Getpid())
+	// Clean up tmux session after test
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	opts := AutoModeOptions{
+		AgentType:    "plan",
+		AgentName:    "codex-test",
+		WorktreePath: tmpDir,
+	}
+
+	// Set remain-on-exit globally so the pane stays alive even when the loom
+	// command exits (loom doesn't exist in test env, so the command fails quickly).
+	// Save and restore the original setting.
+	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
+	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
+	t.Cleanup(func() {
+		val := strings.TrimSpace(string(origRemain))
+		if val == "" || val == "off" {
+			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
+		} else {
+			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
+		}
+	})
+
+	err := startTmuxSession(sessionName, opts, logFile)
+	if err != nil {
+		t.Fatalf("startTmuxSession failed: %v", err)
+	}
+
+	// Give tmux a moment to set up
+	time.Sleep(300 * time.Millisecond)
+
+	// Capture the tmux pane start command
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output()
+	if err != nil {
+		t.Fatalf("failed to get tmux pane start command: %v", err)
+	}
+	paneCmd := strings.TrimSpace(string(out))
+
+	// Command should NOT contain "TERM=dumb" for codex
+	if strings.Contains(paneCmd, "TERM=dumb") {
+		t.Errorf("Codex backend should NOT have TERM=dumb prefix, got: %s", paneCmd)
+	}
+	// Command should contain --backend 'codex' (or --backend codex)
+	if !strings.Contains(paneCmd, "--backend") || !strings.Contains(paneCmd, "codex") {
+		t.Errorf("Codex backend should have --backend codex flag, got: %s", paneCmd)
+	}
+	// Command should contain --daemon-mode
+	if !strings.Contains(paneCmd, "--daemon-mode") {
+		t.Errorf("Command should contain --daemon-mode, got: %s", paneCmd)
+	}
+}
+
+func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available, skipping")
+	}
+
+	resetBackendState(t)
+	RegisterBackend(&ClaudeBackend{})
+	if err := SetBackend("claude"); err != nil {
+		t.Fatalf("SetBackend('claude') failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	sessionName := fmt.Sprintf("loom-test-claude-%d", os.Getpid())
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	opts := AutoModeOptions{
+		AgentType:    "plan",
+		AgentName:    "claude-test",
+		WorktreePath: tmpDir,
+	}
+
+	// Set remain-on-exit globally so the pane stays alive
+	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
+	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
+	t.Cleanup(func() {
+		val := strings.TrimSpace(string(origRemain))
+		if val == "" || val == "off" {
+			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
+		} else {
+			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
+		}
+	})
+
+	err := startTmuxSession(sessionName, opts, logFile)
+	if err != nil {
+		t.Fatalf("startTmuxSession failed: %v", err)
+	}
+
+	// Give tmux a moment to set up
+	time.Sleep(300 * time.Millisecond)
+
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output()
+	if err != nil {
+		t.Fatalf("failed to get tmux pane start command: %v", err)
+	}
+	paneCmd := strings.TrimSpace(string(out))
+
+	// Command SHOULD contain "TERM=dumb" for claude
+	if !strings.Contains(paneCmd, "TERM=dumb") {
+		t.Errorf("Claude backend should have TERM=dumb prefix, got: %s", paneCmd)
+	}
+	// Command should NOT contain --backend flag (claude is default)
+	if strings.Contains(paneCmd, "--backend") {
+		t.Errorf("Claude backend should NOT have --backend flag, got: %s", paneCmd)
+	}
+	// Command should contain --daemon-mode
+	if !strings.Contains(paneCmd, "--daemon-mode") {
+		t.Errorf("Command should contain --daemon-mode, got: %s", paneCmd)
+	}
+}
+
