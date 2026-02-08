@@ -77,6 +77,7 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
     if (ok) {
       setSelectedBackend(null);
       showToast('Backend updated successfully', { type: 'success' });
+      window.dispatchEvent(new CustomEvent('terminal-backend-changed'));
     } else {
       showToast('Failed to update backend', { type: 'error' });
     }

@@ -8,7 +8,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-import { get } from '@/api/client';
+import { get, post } from '@/api/client';
 import {
   startAutoReconnect,
   DEFAULT_RECONNECT_CONFIG,
@@ -355,6 +355,28 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
     );
     wsCleanupRef.current = cleanupWs;
   }, []);
+
+  // Listen for backend changes from SettingsView and restart terminal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handler = async () => {
+      setConnectionState('connecting');
+      try {
+        const tokenResp = await get<{ token: string }>(
+          `/api/terminal/token?session=${TERMINAL_SESSION}`
+        );
+        const token = tokenResp?.token ?? '';
+        await post(`/api/terminal/restart?session=${TERMINAL_SESSION}&token=${encodeURIComponent(token)}`, {});
+      } catch {
+        // Restart may fail if daemon unavailable; proceed with reconnect anyway
+      }
+      handleReconnect();
+    };
+
+    window.addEventListener('terminal-backend-changed', handler);
+    return () => window.removeEventListener('terminal-backend-changed', handler);
+  }, [isOpen, handleReconnect]);
 
   // Body scroll lock
   useEffect(() => {

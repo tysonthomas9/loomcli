@@ -489,6 +489,64 @@ func TestTerminalMaxSessionsZeroUsesDefault(t *testing.T) {
 	}
 }
 
+// TestSetDefaultCommand verifies that SetDefaultCommand updates the manager's
+// default command and DefaultCommand returns it.
+func TestSetDefaultCommand(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("initial-cmd", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	if got := mgr.DefaultCommand(); got != "initial-cmd" {
+		t.Errorf("expected DefaultCommand()=%q before set, got %q", "initial-cmd", got)
+	}
+
+	mgr.SetDefaultCommand("new-cmd")
+
+	if got := mgr.DefaultCommand(); got != "new-cmd" {
+		t.Errorf("expected DefaultCommand()=%q after set, got %q", "new-cmd", got)
+	}
+
+	// Verify setting to empty string works
+	mgr.SetDefaultCommand("")
+	if got := mgr.DefaultCommand(); got != "" {
+		t.Errorf("expected DefaultCommand()=%q after set empty, got %q", "", got)
+	}
+}
+
+// TestDefaultCommand_Initial verifies that DefaultCommand returns the value
+// passed to NewTerminalManager.
+func TestDefaultCommand_Initial(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("claude", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	if got := mgr.DefaultCommand(); got != "claude" {
+		t.Errorf("expected DefaultCommand()=%q, got %q", "claude", got)
+	}
+}
+
+// TestKillSessionByName_NoSuchSession verifies that KillSessionByName returns
+// nil (no error) when the named session does not exist.
+func TestKillSessionByName_NoSuchSession(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	err = mgr.KillSessionByName("nonexistent-session")
+	if err != nil {
+		t.Errorf("expected KillSessionByName to return nil for nonexistent session, got: %v", err)
+	}
+}
+
 // TestTerminalMultipleManagersWithPrefixes verifies that two managers with different
 // prefixes create isolated tmux sessions and shutdown of one doesn't affect the other.
 func TestTerminalMultipleManagersWithPrefixes(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -1425,6 +1426,200 @@ func TestHandleTerminalWS_MaxSessionsReached(t *testing.T) {
 
 	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+}
+
+// TestHandleTerminalRestart_Success tests that the restart handler reads the
+// backend from loom.yaml, updates the manager's default command, and returns
+// the backend name in the response.
+func TestHandleTerminalRestart_Success(t *testing.T) {
+	manager, err := NewTerminalManager("claude", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: codex\n"), 0644)
+
+	pool := newMockConfigPool(dir)
+	handler := handleTerminalRestartWithPool(manager, pool, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != true {
+		t.Errorf("expected success to be true, got %v", resp["success"])
+	}
+	if resp["backend"] != "codex" {
+		t.Errorf("expected backend %q, got %q", "codex", resp["backend"])
+	}
+
+	// Verify manager's default command was updated
+	if got := manager.DefaultCommand(); got != "codex" {
+		t.Errorf("expected manager default command to be %q, got %q", "codex", got)
+	}
+}
+
+// TestHandleTerminalRestart_DefaultBackend tests that when loom.yaml has no
+// backend field, the handler defaults to "claude".
+func TestHandleTerminalRestart_DefaultBackend(t *testing.T) {
+	manager, err := NewTerminalManager("old-cmd", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	dir := t.TempDir()
+	// No loom.yaml — loadProjectFile returns empty projectFile with Backend=""
+
+	pool := newMockConfigPool(dir)
+	handler := handleTerminalRestartWithPool(manager, pool, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=test-session", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != true {
+		t.Errorf("expected success to be true, got %v", resp["success"])
+	}
+	if resp["backend"] != "claude" {
+		t.Errorf("expected backend %q, got %q", "claude", resp["backend"])
+	}
+
+	// Verify manager's default command was updated to claude
+	if got := manager.DefaultCommand(); got != "claude" {
+		t.Errorf("expected manager default command to be %q, got %q", "claude", got)
+	}
+}
+
+// TestHandleTerminalRestart_InvalidSession tests that an invalid session name
+// (containing special characters) returns 400.
+func TestHandleTerminalRestart_InvalidSession(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	handler := handleTerminalRestartWithPool(manager, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=bad%2Fsession", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != false {
+		t.Error("expected success to be false")
+	}
+	if resp["error"] != "invalid session name" {
+		t.Errorf("expected error %q, got %q", "invalid session name", resp["error"])
+	}
+}
+
+// TestHandleTerminalRestart_MissingSession tests that a request without a
+// session query parameter returns 400.
+func TestHandleTerminalRestart_MissingSession(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	handler := handleTerminalRestartWithPool(manager, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != false {
+		t.Error("expected success to be false")
+	}
+	if resp["error"] != "missing session parameter" {
+		t.Errorf("expected error %q, got %q", "missing session parameter", resp["error"])
+	}
+}
+
+// TestHandleTerminalRestart_MethodNotAllowed tests that a GET request to the
+// restart endpoint returns 405.
+func TestHandleTerminalRestart_MethodNotAllowed(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	handler := handleTerminalRestartWithPool(manager, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/restart?session=test-session", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != false {
+		t.Error("expected success to be false")
+	}
+	if resp["error"] != "method not allowed" {
+		t.Errorf("expected error %q, got %q", "method not allowed", resp["error"])
 	}
 }
 

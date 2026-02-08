@@ -5,12 +5,14 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"nhooyr.io/websocket"
 )
 
@@ -81,6 +83,92 @@ func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		json.NewEncoder(w).Encode(map[string]string{"token": token})
+	}
+}
+
+// handleTerminalRestart returns a handler that restarts the terminal session
+// with the current backend from loom.yaml. It reads the backend from the project
+// config, updates the TerminalManager's default command, kills the existing tmux
+// session, and returns the new backend name.
+func handleTerminalRestart(manager *TerminalManager, pool daemon.Pool, auth *terminalAuth) http.HandlerFunc {
+	var configPool configConnectionGetter
+	if pool != nil {
+		configPool = &configPoolAdapter{pool: pool}
+	}
+	return handleTerminalRestartWithPool(manager, configPool, auth)
+}
+
+// handleTerminalRestartWithPool is the internal testable implementation.
+func handleTerminalRestartWithPool(manager *TerminalManager, configPool configConnectionGetter, auth *terminalAuth) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "method not allowed"})
+			return
+		}
+
+		// Validate session parameter
+		session := r.URL.Query().Get("session")
+		if session == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "missing session parameter"})
+			return
+		}
+		if !validTerminalSession.MatchString(session) {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "invalid session name"})
+			return
+		}
+
+		// Validate terminal token
+		if auth != nil {
+			token := r.URL.Query().Get("token")
+			if err := auth.ValidateToken(token, session); err != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "terminal authentication failed"})
+				return
+			}
+		}
+
+		if manager == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "terminal manager not initialized"})
+			return
+		}
+
+		// Read current backend from loom.yaml via daemon
+		backend := manager.DefaultCommand() // fallback to current
+		if configPool != nil {
+			wsPath, err := getWorkspacePath(configPool, r.Context())
+			if err == nil {
+				pf, err := loadProjectFile(wsPath)
+				if err == nil {
+					b := pf.Backend
+					if b == "" {
+						b = "claude"
+					}
+					if !isValidBackend(b) {
+						w.WriteHeader(http.StatusBadRequest)
+						json.NewEncoder(w).Encode(map[string]interface{}{
+							"success": false,
+							"error":   fmt.Sprintf("invalid backend %q; valid: claude, codex, opencode", b),
+						})
+						return
+					}
+					backend = b
+				}
+			}
+		}
+
+		// Kill existing session first, then update command. This ordering ensures
+		// racing Attach calls either get killed or use the new backend.
+		manager.KillSessionByName(session)
+		manager.SetDefaultCommand(backend)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "backend": backend})
 	}
 }
 

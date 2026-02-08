@@ -100,6 +100,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 			mux.HandleFunc("GET /api/terminal/token", handleTerminalToken(termAuth))
 		}
 		mux.HandleFunc("GET /api/terminal/ws", handleTerminalWS(termManager, defaultTerminalCmd, termAuth, allowedOrigins))
+		mux.HandleFunc("POST /api/terminal/restart", handleTerminalRestart(termManager, pool, termAuth))
 	}
 
 	// Log streaming endpoints

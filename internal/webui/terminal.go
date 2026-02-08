@@ -294,6 +294,50 @@ func (m *TerminalManager) Shutdown() error {
 	return nil
 }
 
+// SetDefaultCommand updates the command used for new terminal sessions.
+func (m *TerminalManager) SetDefaultCommand(cmd string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.defaultCommand = cmd
+}
+
+// DefaultCommand returns the current default command for new sessions.
+func (m *TerminalManager) DefaultCommand() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.defaultCommand
+}
+
+// KillSessionByName closes all connections to the named session and kills the tmux session.
+// Returns nil if the session doesn't exist.
+func (m *TerminalManager) KillSessionByName(name string) error {
+	internalName := m.tmuxName(name)
+
+	// Collect connections matching this session name under write lock.
+	m.mu.Lock()
+	var toClose []*TerminalSession
+	for connID, session := range m.sessions {
+		if session.Name == internalName {
+			toClose = append(toClose, session)
+			delete(m.sessions, connID)
+		}
+	}
+	m.mu.Unlock()
+
+	// Close collected sessions outside the lock.
+	for _, session := range toClose {
+		if err := session.Close(); err != nil {
+			log.Printf("Warning: error closing connection for session %q: %v", internalName, err)
+		}
+	}
+
+	// Kill the tmux session. Ignore errors (session may not exist).
+	cmd := exec.Command(m.tmuxPath, "kill-session", "-t", internalName)
+	_ = cmd.Run()
+
+	return nil
+}
+
 // SessionCount returns the number of active terminal connections.
 func (m *TerminalManager) SessionCount() int {
 	m.mu.RLock()
