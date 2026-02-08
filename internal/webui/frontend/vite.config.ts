@@ -42,11 +42,11 @@ export default defineConfig(({ mode }) => ({
     // Proxy API calls to Go backend during development
     proxy: {
       "/api": {
-        target: "http://localhost:8081",
+        target: "http://localhost:8080",
         changeOrigin: true,
       },
       "/health": {
-        target: "http://localhost:8081",
+        target: "http://localhost:8080",
         changeOrigin: true,
       },
     },
