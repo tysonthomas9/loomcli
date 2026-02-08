@@ -1816,3 +1816,90 @@ func TestIssueDetailsJSONStructure(t *testing.T) {
 		}
 	})
 }
+
+func TestIssueType_IsBuiltIn(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		issueType IssueType
+		want     bool
+	}{
+		{"bug", TypeBug, true},
+		{"feature", TypeFeature, true},
+		{"task", TypeTask, true},
+		{"epic", TypeEpic, true},
+		{"chore", TypeChore, true},
+		{"custom type", IssueType("molecule"), false},
+		{"empty", IssueType(""), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.issueType.IsBuiltIn()
+			if got != tt.want {
+				t.Errorf("IssueType(%q).IsBuiltIn() = %v, want %v", tt.issueType, got, tt.want)
+			}
+			// IsBuiltIn should always match IsValid
+			if got != tt.issueType.IsValid() {
+				t.Errorf("IsBuiltIn() != IsValid() for %q", tt.issueType)
+			}
+		})
+	}
+}
+
+func TestIssueType_Normalize(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input IssueType
+		want  IssueType
+	}{
+		{"enhancement to feature", IssueType("enhancement"), TypeFeature},
+		{"feat to feature", IssueType("feat"), TypeFeature},
+		{"Enhancement case-insensitive", IssueType("Enhancement"), TypeFeature},
+		{"FEAT case-insensitive", IssueType("FEAT"), TypeFeature},
+		{"bug unchanged", TypeBug, TypeBug},
+		{"task unchanged", TypeTask, TypeTask},
+		{"feature unchanged", TypeFeature, TypeFeature},
+		{"epic unchanged", TypeEpic, TypeEpic},
+		{"chore unchanged", TypeChore, TypeChore},
+		{"custom type unchanged", IssueType("molecule"), IssueType("molecule")},
+		{"empty unchanged", IssueType(""), IssueType("")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.input.Normalize()
+			if got != tt.want {
+				t.Errorf("IssueType(%q).Normalize() = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkType_IsValid(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		wt   WorkType
+		want bool
+	}{
+		{"mutex", WorkTypeMutex, true},
+		{"open_competition", WorkTypeOpenCompetition, true},
+		{"empty (defaults to mutex)", WorkType(""), true},
+		{"invalid", WorkType("invalid"), false},
+		{"random string", WorkType("collaborative"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.wt.IsValid()
+			if got != tt.want {
+				t.Errorf("WorkType(%q).IsValid() = %v, want %v", tt.wt, got, tt.want)
+			}
+		})
+	}
+}

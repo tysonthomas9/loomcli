@@ -199,6 +199,37 @@ func TestCleanupSocketDir(t *testing.T) {
 			t.Error(".beads directory should not be removed")
 		}
 	})
+
+	t.Run("tmp beads directory cleanup", func(t *testing.T) {
+		// Create a /tmp/beads-* directory to test the removal path
+		dirName := "beads-test-cleanup"
+		dirPath := filepath.Join("/tmp", dirName)
+		t.Cleanup(func() { os.RemoveAll(dirPath) })
+
+		if err := os.Mkdir(dirPath, 0700); err != nil {
+			t.Fatalf("Mkdir() error: %v", err)
+		}
+
+		socketPath := filepath.Join(dirPath, "bd.sock")
+		if err := os.WriteFile(socketPath, []byte{}, 0644); err != nil {
+			t.Fatalf("WriteFile() error: %v", err)
+		}
+
+		err := CleanupSocketDir(socketPath)
+		if err != nil {
+			t.Errorf("CleanupSocketDir() error: %v", err)
+		}
+
+		// Socket file should be removed
+		if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+			t.Error("Socket file should be removed")
+		}
+
+		// Directory should also be removed for /tmp/beads-* paths
+		if _, err := os.Stat(dirPath); !os.IsNotExist(err) {
+			t.Error("/tmp/beads-* directory should be removed after cleanup")
+		}
+	})
 }
 
 func TestShortSocketDir_HashLength(t *testing.T) {

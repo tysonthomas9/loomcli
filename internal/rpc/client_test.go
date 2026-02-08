@@ -1,9 +1,66 @@
 package rpc
 
 import (
+	"bufio"
+	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+// startMockServer creates a Unix socket server that accepts one connection,
+// reads a JSON request, and sends a JSON response. Returns the socket path and
+// a cleanup function. The handler receives the decoded Request and should return
+// a Response to send back.
+//
+// Uses /tmp with a short random name because macOS $TMPDIR paths are too long
+// for Unix sockets (104-byte limit).
+func startMockServer(t *testing.T, handler func(req Request) Response) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "rpc-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "bd.sock")
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("failed to create mock server: %v", err)
+	}
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return // listener closed
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				reader := bufio.NewReader(c)
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req Request
+					if err := json.Unmarshal(line, &req); err != nil {
+						return
+					}
+					resp := handler(req)
+					respJSON, _ := json.Marshal(resp)
+					respJSON = append(respJSON, '\n')
+					c.Write(respJSON)
+				}
+			}(conn)
+		}
+	}()
+
+	t.Cleanup(func() { listener.Close() })
+	return socketPath
+}
 
 func TestClient_SetTimeout(t *testing.T) {
 	t.Parallel()
@@ -466,6 +523,1232 @@ func TestClient_SettersStressTest(t *testing.T) {
 	if len(actor) == 0 {
 		t.Error("actor should have been set by at least one SetActor call")
 	}
+}
+
+func TestTryConnectWithTimeout_HealthyServer(t *testing.T) {
+	t.Parallel()
+
+	// Start a mock server that responds to health checks
+	dir, err := os.MkdirTemp("/tmp", "rpc-conn-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	socketPath := filepath.Join(dir, "bd.sock")
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				reader := bufio.NewReader(c)
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req Request
+					if err := json.Unmarshal(line, &req); err != nil {
+						return
+					}
+					var resp Response
+					if req.Operation == OpHealth {
+						data, _ := json.Marshal(HealthResponse{
+							Status:     "healthy",
+							Version:    "1.0.0",
+							Compatible: true,
+							Uptime:     10,
+						})
+						resp = Response{Success: true, Data: data}
+					} else {
+						resp = Response{Success: true}
+					}
+					respJSON, _ := json.Marshal(resp)
+					respJSON = append(respJSON, '\n')
+					c.Write(respJSON)
+				}
+			}(conn)
+		}
+	}()
+
+	client, err := TryConnectWithTimeout(socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("TryConnectWithTimeout() error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("TryConnectWithTimeout() returned nil client for healthy server")
+	}
+	defer client.Close()
+}
+
+func TestTryConnectWithTimeout_UnhealthyServer(t *testing.T) {
+	t.Parallel()
+
+	dir, err := os.MkdirTemp("/tmp", "rpc-unhealthy-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	socketPath := filepath.Join(dir, "bd.sock")
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				reader := bufio.NewReader(c)
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req Request
+					json.Unmarshal(line, &req)
+
+					data, _ := json.Marshal(HealthResponse{
+						Status: "unhealthy",
+						Error:  "database locked",
+					})
+					resp := Response{Success: true, Data: data}
+					respJSON, _ := json.Marshal(resp)
+					respJSON = append(respJSON, '\n')
+					c.Write(respJSON)
+				}
+			}(conn)
+		}
+	}()
+
+	client, err := TryConnectWithTimeout(socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("TryConnectWithTimeout() error: %v", err)
+	}
+	if client != nil {
+		client.Close()
+		t.Error("TryConnectWithTimeout() should return nil for unhealthy server")
+	}
+}
+
+func TestTryConnectWithTimeout_NegativeTimeout(t *testing.T) {
+	t.Parallel()
+
+	// Negative timeout should use default 200ms
+	client, err := TryConnectWithTimeout("/nonexistent/path/bd.sock", -1)
+	if err != nil {
+		t.Errorf("TryConnectWithTimeout() error: %v", err)
+	}
+	if client != nil {
+		client.Close()
+		t.Error("should return nil for non-existent socket")
+	}
+}
+
+func TestClient_SetAuthToken(t *testing.T) {
+	t.Parallel()
+
+	client := &Client{}
+	client.SetAuthToken("test-token-abc")
+
+	client.mu.RLock()
+	token := client.authToken
+	client.mu.RUnlock()
+
+	if token != "test-token-abc" {
+		t.Errorf("authToken = %q, want %q", token, "test-token-abc")
+	}
+}
+
+func TestClient_Execute_Success(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		if req.Operation != OpPing {
+			t.Errorf("unexpected operation: %q", req.Operation)
+		}
+		data, _ := json.Marshal(PingResponse{Message: "pong", Version: "1.0.0"})
+		return Response{Success: true, Data: data}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{
+		conn:       conn,
+		socketPath: socketPath,
+		timeout:    5 * time.Second,
+	}
+	defer client.Close()
+
+	resp, err := client.Execute(OpPing, nil)
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	if !resp.Success {
+		t.Error("Execute() response should be successful")
+	}
+}
+
+func TestClient_Execute_ErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		return Response{Success: false, Error: "not found"}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{
+		conn:       conn,
+		socketPath: socketPath,
+		timeout:    5 * time.Second,
+	}
+	defer client.Close()
+
+	resp, err := client.Execute(OpShow, &ShowArgs{ID: "bd-nonexistent"})
+	if err == nil {
+		t.Fatal("Execute() should return error for failed response")
+	}
+	if resp == nil {
+		t.Fatal("Execute() should return response even on failure")
+	}
+	if resp.Error != "not found" {
+		t.Errorf("resp.Error = %q, want %q", resp.Error, "not found")
+	}
+}
+
+func TestClient_Execute_SetsRequestFields(t *testing.T) {
+	t.Parallel()
+
+	var capturedReq Request
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedReq = req
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{
+		conn:       conn,
+		socketPath: socketPath,
+		timeout:    5 * time.Second,
+		actor:      "test-actor",
+		dbPath:     "/test/db.sqlite",
+		authToken:  "secret-123",
+	}
+	defer client.Close()
+
+	_, err = client.Execute(OpCreate, &CreateArgs{Title: "Test", IssueType: "task"})
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+
+	if capturedReq.Operation != OpCreate {
+		t.Errorf("Operation = %q, want %q", capturedReq.Operation, OpCreate)
+	}
+	if capturedReq.Actor != "test-actor" {
+		t.Errorf("Actor = %q, want %q", capturedReq.Actor, "test-actor")
+	}
+	if capturedReq.ExpectedDB != "/test/db.sqlite" {
+		t.Errorf("ExpectedDB = %q, want %q", capturedReq.ExpectedDB, "/test/db.sqlite")
+	}
+	if capturedReq.AuthToken != "secret-123" {
+		t.Errorf("AuthToken = %q, want %q", capturedReq.AuthToken, "secret-123")
+	}
+	if capturedReq.ClientVersion != ClientVersion {
+		t.Errorf("ClientVersion = %q, want %q", capturedReq.ClientVersion, ClientVersion)
+	}
+}
+
+func TestClient_ExecuteWithCwd(t *testing.T) {
+	t.Parallel()
+
+	var capturedReq Request
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedReq = req
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{
+		conn:       conn,
+		socketPath: socketPath,
+		timeout:    5 * time.Second,
+	}
+	defer client.Close()
+
+	_, err = client.ExecuteWithCwd(OpList, &ListArgs{}, "/custom/cwd")
+	if err != nil {
+		t.Fatalf("ExecuteWithCwd() error: %v", err)
+	}
+
+	if capturedReq.Cwd != "/custom/cwd" {
+		t.Errorf("Cwd = %q, want %q", capturedReq.Cwd, "/custom/cwd")
+	}
+}
+
+func TestClient_Ping(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		if req.Operation != OpPing {
+			t.Errorf("unexpected operation: %q", req.Operation)
+		}
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	if err := client.Ping(); err != nil {
+		t.Errorf("Ping() error: %v", err)
+	}
+}
+
+func TestClient_Status(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		data, _ := json.Marshal(StatusResponse{
+			Version:       "2.0.0",
+			WorkspacePath: "/home/user/project",
+			PID:           12345,
+			UptimeSeconds: 300,
+		})
+		return Response{Success: true, Data: data}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	status, err := client.Status()
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	if status.Version != "2.0.0" {
+		t.Errorf("Version = %q, want %q", status.Version, "2.0.0")
+	}
+	if status.PID != 12345 {
+		t.Errorf("PID = %d, want 12345", status.PID)
+	}
+}
+
+func TestClient_Health(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		data, _ := json.Marshal(HealthResponse{
+			Status:     "healthy",
+			Version:    "2.0.0",
+			Compatible: true,
+			Uptime:     600,
+		})
+		return Response{Success: true, Data: data}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	health, err := client.Health()
+	if err != nil {
+		t.Fatalf("Health() error: %v", err)
+	}
+	if health.Status != "healthy" {
+		t.Errorf("Status = %q, want %q", health.Status, "healthy")
+	}
+}
+
+func TestClient_Shutdown(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		if req.Operation != OpShutdown {
+			t.Errorf("unexpected operation: %q", req.Operation)
+		}
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	if err := client.Shutdown(); err != nil {
+		t.Errorf("Shutdown() error: %v", err)
+	}
+}
+
+func TestClient_Metrics(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		data, _ := json.Marshal(MetricsSnapshot{
+			UptimeSeconds: 120,
+			TotalConns:    50,
+		})
+		return Response{Success: true, Data: data}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	metrics, err := client.Metrics()
+	if err != nil {
+		t.Fatalf("Metrics() error: %v", err)
+	}
+	if metrics.TotalConns != 50 {
+		t.Errorf("TotalConns = %d, want 50", metrics.TotalConns)
+	}
+}
+
+func TestClient_Create(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		data, _ := json.Marshal(map[string]string{"id": "bd-new"})
+		return Response{Success: true, Data: data}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	resp, err := client.Create(&CreateArgs{Title: "Test Issue", IssueType: "task"})
+	if err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+	if !resp.Success {
+		t.Error("Create() should succeed")
+	}
+	if capturedOp != OpCreate {
+		t.Errorf("operation = %q, want %q", capturedOp, OpCreate)
+	}
+}
+
+func TestClient_Update(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	title := "Updated"
+	_, err = client.Update(&UpdateArgs{ID: "bd-1", Title: &title})
+	if err != nil {
+		t.Fatalf("Update() error: %v", err)
+	}
+	if capturedOp != OpUpdate {
+		t.Errorf("operation = %q, want %q", capturedOp, OpUpdate)
+	}
+}
+
+func TestClient_CloseIssue(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	_, err = client.CloseIssue(&CloseArgs{ID: "bd-1", Reason: "done"})
+	if err != nil {
+		t.Fatalf("CloseIssue() error: %v", err)
+	}
+	if capturedOp != OpClose {
+		t.Errorf("operation = %q, want %q", capturedOp, OpClose)
+	}
+}
+
+func TestClient_Delete(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	_, err = client.Delete(&DeleteArgs{IDs: []string{"bd-1", "bd-2"}, Force: true})
+	if err != nil {
+		t.Fatalf("Delete() error: %v", err)
+	}
+	if capturedOp != OpDelete {
+		t.Errorf("operation = %q, want %q", capturedOp, OpDelete)
+	}
+}
+
+func TestClient_List(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true, Data: json.RawMessage(`[]`)}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	_, err = client.List(&ListArgs{Status: "open"})
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	if capturedOp != OpList {
+		t.Errorf("operation = %q, want %q", capturedOp, OpList)
+	}
+}
+
+func TestClient_Show(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true, Data: json.RawMessage(`{}`)}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	_, err = client.Show(&ShowArgs{ID: "bd-1"})
+	if err != nil {
+		t.Fatalf("Show() error: %v", err)
+	}
+	if capturedOp != OpShow {
+		t.Errorf("operation = %q, want %q", capturedOp, OpShow)
+	}
+}
+
+func TestClient_Ready(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true, Data: json.RawMessage(`[]`)}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	_, err = client.Ready(&ReadyArgs{})
+	if err != nil {
+		t.Fatalf("Ready() error: %v", err)
+	}
+	if capturedOp != OpReady {
+		t.Errorf("operation = %q, want %q", capturedOp, OpReady)
+	}
+}
+
+func TestClient_Stats(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true, Data: json.RawMessage(`{}`)}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	_, err = client.Stats()
+	if err != nil {
+		t.Fatalf("Stats() error: %v", err)
+	}
+	if capturedOp != OpStats {
+		t.Errorf("operation = %q, want %q", capturedOp, OpStats)
+	}
+}
+
+func TestClient_Batch(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	_, err = client.Batch(&BatchArgs{
+		Operations: []BatchOperation{
+			{Operation: OpCreate, Args: json.RawMessage(`{"title":"test"}`)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Batch() error: %v", err)
+	}
+	if capturedOp != OpBatch {
+		t.Errorf("operation = %q, want %q", capturedOp, OpBatch)
+	}
+}
+
+func TestClient_GetWorkerStatus(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		data, _ := json.Marshal(GetWorkerStatusResponse{})
+		return Response{Success: true, Data: data}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	_, err = client.GetWorkerStatus(&GetWorkerStatusArgs{})
+	if err != nil {
+		t.Fatalf("GetWorkerStatus() error: %v", err)
+	}
+}
+
+func TestClient_GetConfig(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		data, _ := json.Marshal(GetConfigResponse{Value: "test-value"})
+		return Response{Success: true, Data: data}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	config, err := client.GetConfig(&GetConfigArgs{Key: "test.key"})
+	if err != nil {
+		t.Fatalf("GetConfig() error: %v", err)
+	}
+	if config.Value != "test-value" {
+		t.Errorf("Value = %q, want %q", config.Value, "test-value")
+	}
+}
+
+func TestClient_GateCreate(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	socketPath := startMockServer(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	defer client.Close()
+
+	_, err = client.GateCreate(&GateCreateArgs{Title: "Wait for PR"})
+	if err != nil {
+		t.Fatalf("GateCreate() error: %v", err)
+	}
+	if capturedOp != OpGateCreate {
+		t.Errorf("operation = %q, want %q", capturedOp, OpGateCreate)
+	}
+}
+
+func TestClient_Close_WithConn(t *testing.T) {
+	t.Parallel()
+
+	socketPath := startMockServer(t, func(req Request) Response {
+		return Response{Success: true}
+	})
+
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	client := &Client{conn: conn, socketPath: socketPath}
+
+	err = client.Close()
+	if err != nil {
+		t.Errorf("Close() error: %v", err)
+	}
+
+	// Second close should fail (connection already closed)
+	err = client.Close()
+	if err == nil {
+		t.Log("Note: double close may or may not error depending on implementation")
+	}
+}
+
+// newMockClient creates a client connected to a mock server for testing.
+func newMockClient(t *testing.T, handler func(req Request) Response) *Client {
+	t.Helper()
+	socketPath := startMockServer(t, handler)
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	client := &Client{conn: conn, socketPath: socketPath, timeout: 5 * time.Second}
+	t.Cleanup(func() { client.Close() })
+	return client
+}
+
+// TestClient_RemainingWrappers tests all remaining simple wrapper methods
+// that just delegate to Execute with the correct operation constant.
+func TestClient_RemainingWrappers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		op     string
+		invoke func(c *Client) error
+	}{
+		{"Count", OpCount, func(c *Client) error { _, err := c.Count(&CountArgs{}); return err }},
+		{"ResolveID", OpResolveID, func(c *Client) error { _, err := c.ResolveID(&ResolveIDArgs{ID: "bd"}); return err }},
+		{"Blocked", OpBlocked, func(c *Client) error { _, err := c.Blocked(&BlockedArgs{}); return err }},
+		{"Stale", OpStale, func(c *Client) error { _, err := c.Stale(&StaleArgs{}); return err }},
+		{"GetMutations", OpGetMutations, func(c *Client) error { _, err := c.GetMutations(&GetMutationsArgs{}); return err }},
+		{"AddDependency", OpDepAdd, func(c *Client) error { _, err := c.AddDependency(&DepAddArgs{}); return err }},
+		{"RemoveDependency", OpDepRemove, func(c *Client) error { _, err := c.RemoveDependency(&DepRemoveArgs{}); return err }},
+		{"AddLabel", OpLabelAdd, func(c *Client) error { _, err := c.AddLabel(&LabelAddArgs{}); return err }},
+		{"RemoveLabel", OpLabelRemove, func(c *Client) error { _, err := c.RemoveLabel(&LabelRemoveArgs{}); return err }},
+		{"ListComments", OpCommentList, func(c *Client) error { _, err := c.ListComments(&CommentListArgs{}); return err }},
+		{"AddComment", OpCommentAdd, func(c *Client) error { _, err := c.AddComment(&CommentAddArgs{}); return err }},
+		{"Export", OpExport, func(c *Client) error { _, err := c.Export(&ExportArgs{}); return err }},
+		{"EpicStatus", OpEpicStatus, func(c *Client) error { _, err := c.EpicStatus(&EpicStatusArgs{}); return err }},
+		{"GateList", OpGateList, func(c *Client) error { _, err := c.GateList(&GateListArgs{}); return err }},
+		{"GateShow", OpGateShow, func(c *Client) error { _, err := c.GateShow(&GateShowArgs{ID: "g-1"}); return err }},
+		{"GateClose", OpGateClose, func(c *Client) error { _, err := c.GateClose(&GateCloseArgs{ID: "g-1"}); return err }},
+		{"GateWait", OpGateWait, func(c *Client) error { _, err := c.GateWait(&GateWaitArgs{ID: "g-1"}); return err }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var capturedOp string
+			client := newMockClient(t, func(req Request) Response {
+				capturedOp = req.Operation
+				return Response{Success: true, Data: json.RawMessage(`{}`)}
+			})
+
+			if err := tt.invoke(client); err != nil {
+				t.Fatalf("%s() error: %v", tt.name, err)
+			}
+			if capturedOp != tt.op {
+				t.Errorf("operation = %q, want %q", capturedOp, tt.op)
+			}
+		})
+	}
+}
+
+func TestClient_MolStale(t *testing.T) {
+	t.Parallel()
+
+	client := newMockClient(t, func(req Request) Response {
+		data, _ := json.Marshal(MolStaleResponse{})
+		return Response{Success: true, Data: data}
+	})
+
+	result, err := client.MolStale(&MolStaleArgs{})
+	if err != nil {
+		t.Fatalf("MolStale() error: %v", err)
+	}
+	if result == nil {
+		t.Error("MolStale() returned nil result")
+	}
+}
+
+func TestClient_GetParentIDs(t *testing.T) {
+	t.Parallel()
+
+	client := newMockClient(t, func(req Request) Response {
+		data, _ := json.Marshal(GetParentIDsResponse{})
+		return Response{Success: true, Data: data}
+	})
+
+	result, err := client.GetParentIDs(&GetParentIDsArgs{IssueIDs: []string{"bd-1"}})
+	if err != nil {
+		t.Fatalf("GetParentIDs() error: %v", err)
+	}
+	if result == nil {
+		t.Error("GetParentIDs() returned nil result")
+	}
+}
+
+func TestClient_GetGraphData(t *testing.T) {
+	t.Parallel()
+
+	client := newMockClient(t, func(req Request) Response {
+		data, _ := json.Marshal(GetGraphDataResponse{})
+		return Response{Success: true, Data: data}
+	})
+
+	result, err := client.GetGraphData(&GetGraphDataArgs{})
+	if err != nil {
+		t.Fatalf("GetGraphData() error: %v", err)
+	}
+	if result == nil {
+		t.Error("GetGraphData() returned nil result")
+	}
+}
+
+func TestClient_WaitForMutations(t *testing.T) {
+	t.Parallel()
+
+	var capturedOp string
+	client := newMockClient(t, func(req Request) Response {
+		capturedOp = req.Operation
+		return Response{Success: true, Data: json.RawMessage(`{}`)}
+	})
+
+	_, err := client.WaitForMutations(&WaitForMutationsArgs{Timeout: 100})
+	if err != nil {
+		t.Fatalf("WaitForMutations() error: %v", err)
+	}
+	if capturedOp != OpWaitForMutations {
+		t.Errorf("operation = %q, want %q", capturedOp, OpWaitForMutations)
+	}
+}
+
+func TestClient_WaitForMutations_DefaultTimeout(t *testing.T) {
+	t.Parallel()
+
+	client := newMockClient(t, func(req Request) Response {
+		return Response{Success: true, Data: json.RawMessage(`{}`)}
+	})
+
+	// Timeout = 0 should use 30s default + 5s buffer
+	_, err := client.WaitForMutations(&WaitForMutationsArgs{Timeout: 0})
+	if err != nil {
+		t.Fatalf("WaitForMutations() error: %v", err)
+	}
+}
+
+func TestCleanupStaleDaemonArtifacts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("removes stale pid file", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		pidFile := filepath.Join(dir, "daemon.pid")
+
+		if err := os.WriteFile(pidFile, []byte("12345"), 0644); err != nil {
+			t.Fatalf("WriteFile() error: %v", err)
+		}
+
+		cleanupStaleDaemonArtifacts(dir)
+
+		if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+			t.Error("daemon.pid should be removed")
+		}
+	})
+
+	t.Run("no pid file is noop", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+
+		// Should not panic or error
+		cleanupStaleDaemonArtifacts(dir)
+	})
+}
+
+// TestClient_UnmarshalErrorPaths tests the json.Unmarshal error paths
+// in methods that deserialize response data into typed structs.
+func TestClient_UnmarshalErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	// Mock server returns success with invalid JSON data
+	invalidDataHandler := func(req Request) Response {
+		return Response{Success: true, Data: json.RawMessage(`{invalid json`)}
+	}
+
+	t.Run("Status unmarshal error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, invalidDataHandler)
+		_, err := client.Status()
+		if err == nil {
+			t.Error("Status() should fail with invalid JSON data")
+		}
+	})
+
+	t.Run("Health unmarshal error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, invalidDataHandler)
+		_, err := client.Health()
+		if err == nil {
+			t.Error("Health() should fail with invalid JSON data")
+		}
+	})
+
+	t.Run("Metrics unmarshal error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, invalidDataHandler)
+		_, err := client.Metrics()
+		if err == nil {
+			t.Error("Metrics() should fail with invalid JSON data")
+		}
+	})
+
+	t.Run("GetWorkerStatus unmarshal error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, invalidDataHandler)
+		_, err := client.GetWorkerStatus(&GetWorkerStatusArgs{})
+		if err == nil {
+			t.Error("GetWorkerStatus() should fail with invalid JSON data")
+		}
+	})
+
+	t.Run("GetConfig unmarshal error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, invalidDataHandler)
+		_, err := client.GetConfig(&GetConfigArgs{Key: "test"})
+		if err == nil {
+			t.Error("GetConfig() should fail with invalid JSON data")
+		}
+	})
+
+	t.Run("MolStale unmarshal error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, invalidDataHandler)
+		_, err := client.MolStale(&MolStaleArgs{})
+		if err == nil {
+			t.Error("MolStale() should fail with invalid JSON data")
+		}
+	})
+
+	t.Run("GetParentIDs unmarshal error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, invalidDataHandler)
+		_, err := client.GetParentIDs(&GetParentIDsArgs{IssueIDs: []string{"bd-1"}})
+		if err == nil {
+			t.Error("GetParentIDs() should fail with invalid JSON data")
+		}
+	})
+
+	t.Run("GetGraphData unmarshal error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, invalidDataHandler)
+		_, err := client.GetGraphData(&GetGraphDataArgs{})
+		if err == nil {
+			t.Error("GetGraphData() should fail with invalid JSON data")
+		}
+	})
+}
+
+// TestClient_Ping_ErrorResponse tests the Ping error path
+// where the response is successful but has error content.
+func TestClient_Ping_ErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	client := newMockClient(t, func(req Request) Response {
+		return Response{Success: false, Error: "ping failed: unhealthy"}
+	})
+
+	err := client.Ping()
+	if err == nil {
+		t.Error("Ping() should fail with error response")
+	}
+}
+
+func TestListenAndDialRPC(t *testing.T) {
+	t.Parallel()
+
+	dir, err := os.MkdirTemp("/tmp", "rpc-transport-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	socketPath := filepath.Join(dir, "test.sock")
+
+	// Test listenRPC
+	listener, err := listenRPC(socketPath)
+	if err != nil {
+		t.Fatalf("listenRPC() error: %v", err)
+	}
+	defer listener.Close()
+
+	// Verify socket file was created
+	if !endpointExists(socketPath) {
+		t.Error("socket file should exist after listenRPC")
+	}
+
+	// Test dialRPC
+	go func() {
+		conn, _ := listener.Accept()
+		if conn != nil {
+			conn.Close()
+		}
+	}()
+
+	conn, err := dialRPC(socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("dialRPC() error: %v", err)
+	}
+	conn.Close()
+}
+
+func TestEndpointExists(t *testing.T) {
+	t.Parallel()
+
+	t.Run("exists", func(t *testing.T) {
+		t.Parallel()
+		f, _ := os.CreateTemp("", "ep-test-*")
+		defer os.Remove(f.Name())
+		f.Close()
+
+		if !endpointExists(f.Name()) {
+			t.Error("should return true for existing file")
+		}
+	})
+
+	t.Run("not exists", func(t *testing.T) {
+		t.Parallel()
+		if endpointExists("/nonexistent/path/file") {
+			t.Error("should return false for non-existing path")
+		}
+	})
+}
+
+func TestRpcDebugEnabled(t *testing.T) {
+	// Cannot run parallel due to env var mutation
+	t.Run("disabled by default", func(t *testing.T) {
+		t.Setenv("BD_DEBUG_RPC", "")
+		if rpcDebugEnabled() {
+			t.Error("should be disabled when BD_DEBUG_RPC is empty")
+		}
+	})
+
+	t.Run("enabled with 1", func(t *testing.T) {
+		t.Setenv("BD_DEBUG_RPC", "1")
+		if !rpcDebugEnabled() {
+			t.Error("should be enabled when BD_DEBUG_RPC=1")
+		}
+	})
+
+	t.Run("enabled with true", func(t *testing.T) {
+		t.Setenv("BD_DEBUG_RPC", "true")
+		if !rpcDebugEnabled() {
+			t.Error("should be enabled when BD_DEBUG_RPC=true")
+		}
+	})
+
+	t.Run("disabled with other values", func(t *testing.T) {
+		t.Setenv("BD_DEBUG_RPC", "yes")
+		if rpcDebugEnabled() {
+			t.Error("should be disabled with BD_DEBUG_RPC=yes")
+		}
+	})
+}
+
+func TestRpcDebugLog(t *testing.T) {
+	// Test that rpcDebugLog doesn't panic when enabled
+	t.Setenv("BD_DEBUG_RPC", "1")
+	rpcDebugLog("test message: %s %d", "hello", 42)
+
+	// And when disabled
+	t.Setenv("BD_DEBUG_RPC", "")
+	rpcDebugLog("should not print: %s", "ignored")
+}
+
+// TestClient_ExecuteErrorPaths tests error paths in methods that call Execute
+// and check for Execute-level errors (before response unmarshaling).
+func TestClient_ExecuteErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	// Server always returns an error response
+	errorHandler := func(req Request) Response {
+		return Response{Success: false, Error: "operation failed: server error"}
+	}
+
+	t.Run("Status execute error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, errorHandler)
+		_, err := client.Status()
+		if err == nil {
+			t.Error("Status() should fail")
+		}
+	})
+
+	t.Run("Health execute error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, errorHandler)
+		_, err := client.Health()
+		if err == nil {
+			t.Error("Health() should fail")
+		}
+	})
+
+	t.Run("Metrics execute error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, errorHandler)
+		_, err := client.Metrics()
+		if err == nil {
+			t.Error("Metrics() should fail")
+		}
+	})
+
+	t.Run("GetWorkerStatus execute error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, errorHandler)
+		_, err := client.GetWorkerStatus(&GetWorkerStatusArgs{})
+		if err == nil {
+			t.Error("GetWorkerStatus() should fail")
+		}
+	})
+
+	t.Run("GetConfig execute error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, errorHandler)
+		_, err := client.GetConfig(&GetConfigArgs{Key: "test"})
+		if err == nil {
+			t.Error("GetConfig() should fail")
+		}
+	})
+
+	t.Run("MolStale execute error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, errorHandler)
+		_, err := client.MolStale(&MolStaleArgs{})
+		if err == nil {
+			t.Error("MolStale() should fail")
+		}
+	})
+
+	t.Run("GetParentIDs execute error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, errorHandler)
+		_, err := client.GetParentIDs(&GetParentIDsArgs{IssueIDs: []string{"bd-1"}})
+		if err == nil {
+			t.Error("GetParentIDs() should fail")
+		}
+	})
+
+	t.Run("GetGraphData execute error", func(t *testing.T) {
+		t.Parallel()
+		client := newMockClient(t, errorHandler)
+		_, err := client.GetGraphData(&GetGraphDataArgs{})
+		if err == nil {
+			t.Error("GetGraphData() should fail")
+		}
+	})
 }
 
 // TestClient_ConcurrentMixedOperations simulates a realistic scenario where

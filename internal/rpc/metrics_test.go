@@ -354,6 +354,27 @@ func TestMetrics_SuccessCountNeverNegative(t *testing.T) {
 	}
 }
 
+func TestMinInt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		a, b, want int
+	}{
+		{1, 2, 1},
+		{2, 1, 1},
+		{5, 5, 5},
+		{0, 0, 0},
+		{-1, 0, -1},
+	}
+
+	for _, tt := range tests {
+		got := minInt(tt.a, tt.b)
+		if got != tt.want {
+			t.Errorf("minInt(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
 func TestCalculateLatencyStats(t *testing.T) {
 	t.Parallel()
 
