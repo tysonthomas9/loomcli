@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import '@/styles/index.css';
-import { initAuth } from '@/api';
+import { initAuth, getAuthState } from '@/api';
 import App from '@/App';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ToastProvider, AgentProvider } from '@/hooks';
@@ -37,8 +37,16 @@ function getComponent() {
 // Initialize auth before rendering to ensure token is available for API calls.
 // App renders even if auth fails (server may have auth disabled).
 initAuth()
-  .catch(() => {
-    // Auth not available — proceed without token
+  .then(() => {
+    const state = getAuthState();
+    if (state === 'failed') {
+      console.error('[Auth] Failed to initialize authentication — API calls will fail');
+    } else if (state === 'disabled') {
+      console.info('[Auth] Authentication disabled by server');
+    }
+  })
+  .catch((error) => {
+    console.error('[Auth] Unexpected error during initialization:', error);
   })
   .finally(() => {
     createRoot(rootElement).render(

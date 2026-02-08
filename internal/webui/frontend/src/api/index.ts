@@ -1,5 +1,5 @@
-export { ApiError, get, post, patch, del, initAuth, getAuthToken } from './client';
-export type { RequestOptions } from './client';
+export { ApiError, get, post, patch, del, initAuth, getAuthToken, getAuthState, onAuthStateChange } from './client';
+export type { RequestOptions, AuthState } from './client';
 
 // SSE client for real-time updates (recommended)
 export { BeadsSSEClient, getSSEUrl } from './sse';

@@ -4,6 +4,15 @@ const DEFAULT_TIMEOUT = 30000;
 // Auth token stored in memory (not localStorage) for XSS safety
 let authToken: string | null = null;
 
+// Auth state tracking
+export type AuthState = 'initializing' | 'authenticated' | 'disabled' | 'failed';
+let authState: AuthState = 'initializing';
+type AuthStateListener = { callback: (state: AuthState) => void; active: boolean };
+let authStateListeners: AuthStateListener[] = [];
+
+// Promise deduplication for concurrent re-auth attempts
+let pendingAuthPromise: Promise<void> | null = null;
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -21,24 +30,120 @@ export type RequestOptions = {
   signal?: AbortSignal;
 };
 
+function setAuthState(state: AuthState): void {
+  if (authState !== state) {
+    authState = state;
+    for (const listener of authStateListeners) {
+      if (listener.active) {
+        listener.callback(state);
+      }
+    }
+  }
+}
+
+/**
+ * Get the current auth state.
+ */
+export function getAuthState(): AuthState {
+  return authState;
+}
+
+/**
+ * Register a callback for auth state changes.
+ * Returns an unsubscribe function.
+ */
+export function onAuthStateChange(callback: (state: AuthState) => void): () => void {
+  const listener: AuthStateListener = { callback, active: true };
+  authStateListeners.push(listener);
+  return () => {
+    listener.active = false;
+  };
+}
+
+/** Whether a fetch error or HTTP status is transient (worth retrying). */
+function isTransientFailure(error: unknown, status?: number): boolean {
+  // Network errors are transient
+  if (error instanceof TypeError) return true;
+  // 5xx server errors are transient
+  if (status !== undefined && status >= 500) return true;
+  return false;
+}
+
 /**
  * Initialize authentication by fetching the API token from the bootstrap endpoint.
  * This endpoint is same-origin only and returns the pre-shared API key.
  * Must be called before any authenticated API requests.
+ *
+ * Retries up to maxRetries times with exponential backoff for transient failures.
  */
-export async function initAuth(): Promise<void> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/auth/token`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (response.ok) {
-      const data = (await response.json()) as { token: string };
-      authToken = data.token;
-    }
-    // If 404 or other error, auth is likely disabled — proceed without token
-  } catch {
-    // Auth endpoint not available — server may have auth disabled
+export async function initAuth(
+  options: { maxRetries?: number } = {}
+): Promise<void> {
+  const maxRetries = options.maxRetries ?? 3;
+
+  // Deduplicate concurrent initAuth calls
+  if (pendingAuthPromise) {
+    return pendingAuthPromise;
   }
+
+  pendingAuthPromise = (async () => {
+    try {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/auth/token`, {
+            headers: { Accept: 'application/json' },
+          });
+
+          if (response.ok) {
+            const data = (await response.json()) as { token: string };
+            authToken = data.token;
+            setAuthState('authenticated');
+            return;
+          }
+
+          // 404 means auth is disabled on the server
+          if (response.status === 404) {
+            setAuthState('disabled');
+            return;
+          }
+
+          // Non-retryable client errors (403, etc.) - stop immediately
+          if (response.status >= 400 && response.status < 500) {
+            setAuthState('disabled');
+            return;
+          }
+
+          // Server error (5xx) - retry if we have attempts left
+          if (isTransientFailure(null, response.status) && attempt < maxRetries) {
+            const delay = 500 * Math.pow(2, attempt); // 500ms, 1s, 2s
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+
+          // Exhausted retries on server error
+          console.error(`[Auth] Token acquisition failed after ${attempt + 1} attempts`);
+          setAuthState('failed');
+          return;
+        } catch (error) {
+          // Network error - retry if we have attempts left
+          if (isTransientFailure(error) && attempt < maxRetries) {
+            const delay = 500 * Math.pow(2, attempt);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+
+          // Exhausted retries on network error
+          console.error(`[Auth] Token acquisition failed after ${attempt + 1} attempts`);
+          setAuthState('failed');
+          return;
+        }
+      }
+    } finally {
+      pendingAuthPromise = null;
+    }
+  })();
+
+  return pendingAuthPromise;
 }
 
 /**
@@ -52,7 +157,8 @@ async function fetchApi<T>(
   method: string,
   path: string,
   body?: unknown,
-  options: RequestOptions = {}
+  options: RequestOptions = {},
+  _retried = false
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = options.timeout ?? DEFAULT_TIMEOUT;
@@ -96,6 +202,15 @@ async function fetchApi<T>(
     clearTimeoutCleanup();
 
     if (!response.ok) {
+      // 401 interceptor: try re-acquiring token and retrying once
+      if (response.status === 401 && authToken !== null && !_retried) {
+        authToken = null;
+        await initAuth({ maxRetries: 0 });
+        if (authToken !== null) {
+          return fetchApi<T>(method, path, body, options, true);
+        }
+      }
+
       let errorBody: unknown;
       const responseText = await response.text();
       try {
