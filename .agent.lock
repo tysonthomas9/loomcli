@@ -1,10 +1,10 @@
 {
-  "pid": 82258,
+  "pid": 75246,
   "command": "task",
-  "started_at": "2026-02-07T18:13:47.716448-08:00",
+  "started_at": "2026-02-07T18:32:08.902439-08:00",
   "agent_name": "nova",
-  "task_id": "loomcli-5d0",
-  "task_title": "Copy e2e test infrastructure files",
-  "task_started_at": "2026-02-07T18:14:15.325372-08:00",
+  "task_id": "loomcli-kd1",
+  "task_title": "LIVE: Real-time SSE push test",
+  "task_started_at": "2026-02-07T18:32:38.435501-08:00",
   "state": "active"
 }
