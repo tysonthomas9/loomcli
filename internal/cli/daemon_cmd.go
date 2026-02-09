@@ -21,6 +21,7 @@ type DaemonAgentStatus struct {
 	PID          int       `json:"pid"`
 	Status       string    `json:"status"` // "running", "starting", "stopped", "failed"
 	TaskID       string    `json:"task_id,omitempty"`
+	EpicID       string    `json:"epic_id,omitempty"`
 	RestartCount int       `json:"restart_count"`
 	LastStart    time.Time `json:"last_start,omitempty"`
 	LastExit     time.Time `json:"last_exit,omitempty"`
@@ -430,6 +431,7 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 			Role:         ap.Role,
 			PID:          ap.PID,
 			Status:       computeAgentStatus(ap),
+			EpicID:       ap.AssignedEpicID,
 			RestartCount: ap.RestartCount,
 			LastStart:    ap.LastStart,
 			LastExit:     ap.LastExit,

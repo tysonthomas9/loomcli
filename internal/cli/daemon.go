@@ -21,25 +21,27 @@ type AgentProcess struct {
 	pid     int       // PID of current subprocess (0 when not running)
 	logFile *os.File  // log file handle for subprocess output (nil if not logging)
 
-	restartCount int       // consecutive restart attempts
-	lastStart    time.Time // when subprocess was last spawned
-	lastExit     time.Time // when subprocess last exited
-	lastExitCode int       // exit code from last run
+	restartCount    int       // consecutive restart attempts
+	lastStart       time.Time // when subprocess was last spawned
+	lastExit        time.Time // when subprocess last exited
+	lastExitCode    int       // exit code from last run
+	assignedEpicID  string    // epic this agent is currently assigned to (empty = non-epic mode)
 
-	mu sync.Mutex // protects cmd, pid, logFile, restart tracking
+	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID
 }
 
 // SupervisedAgentStatus is a snapshot of a supervised agent's state for external inspection.
 // This type is safe to copy and does not contain a mutex.
 type SupervisedAgentStatus struct {
-	Worktree     string
-	Role         string
-	WorktreePath string
-	PID          int
-	RestartCount int
-	LastStart    time.Time
-	LastExit     time.Time
-	LastExitCode int
+	Worktree       string
+	Role           string
+	WorktreePath   string
+	PID            int
+	RestartCount   int
+	LastStart      time.Time
+	LastExit       time.Time
+	LastExitCode   int
+	AssignedEpicID string
 }
 
 // Daemon coordinates multiple supervised agents.
@@ -53,6 +55,8 @@ type Daemon struct {
 	shutdown     chan struct{}  // closed to signal shutdown
 	shutdownOnce sync.Once      // protects shutdown channel from double-close
 	wg           sync.WaitGroup // tracks superviseAgent goroutines
+
+	epicAssigner *EpicAssigner // manages epic-to-worktree assignments
 }
 
 // builtInRoles defines the built-in role names that use loom <role> command.
@@ -71,9 +75,10 @@ func NewDaemon(config *DaemonConfig, projectDir string) (*Daemon, error) {
 	}
 
 	d := &Daemon{
-		config:     config,
-		projectDir: projectDir,
-		agents:     make([]*AgentProcess, 0, len(config.Agents)),
+		config:       config,
+		projectDir:   projectDir,
+		agents:       make([]*AgentProcess, 0, len(config.Agents)),
+		epicAssigner: NewEpicAssigner(),
 	}
 
 	for i, entry := range config.Agents {
@@ -172,6 +177,7 @@ func (d *Daemon) Stop() {
 
 // superviseAgent is the main loop for a single agent (runs in goroutine).
 func (d *Daemon) superviseAgent(ap *AgentProcess) {
+	defer d.epicAssigner.ReleaseWorktree(ap.entry.Worktree)
 	log.Printf("[daemon] Starting supervisor for agent %s (role: %s)", ap.entry.Worktree, ap.entry.Role)
 
 	for {
@@ -188,6 +194,16 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			log.Printf("[daemon] Agent %s: pre-flight recovery failed: %v", ap.entry.Worktree, err)
 			// Continue with caution - spawn may still work
 		}
+
+		// 1.5. Assign epic to worktree (if available)
+		epicID, err := d.epicAssigner.AssignWorktree(ap.entry.Worktree)
+		if err != nil {
+			log.Printf("[daemon] Agent %s: epic assignment failed (falling back to non-epic mode): %v", ap.entry.Worktree, err)
+			epicID = ""
+		}
+		ap.mu.Lock()
+		ap.assignedEpicID = epicID
+		ap.mu.Unlock()
 
 		// 2. Spawn subprocess
 		if err := d.spawnAgent(ap); err != nil {
@@ -281,6 +297,9 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 		if agentBackend != "" {
 			args = append(args, "--backend", agentBackend)
 		}
+		if ap.assignedEpicID != "" {
+			args = append(args, "--parent", ap.assignedEpicID)
+		}
 		cmd = exec.Command("loom", args...)
 	} else {
 		// Custom role: loom agent <worktree> --prompt <path> --task-filter <filter> --auto --daemon-mode
@@ -290,6 +309,9 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 		}
 		if agentBackend != "" {
 			args = append(args, "--backend", agentBackend)
+		}
+		if ap.assignedEpicID != "" {
+			args = append(args, "--parent", ap.assignedEpicID)
 		}
 		cmd = exec.Command("loom", args...)
 	}
@@ -555,14 +577,15 @@ func (d *Daemon) Agents() []SupervisedAgentStatus {
 	for i, ap := range d.agents {
 		ap.mu.Lock()
 		result[i] = SupervisedAgentStatus{
-			Worktree:     ap.entry.Worktree,
-			Role:         ap.entry.Role,
-			WorktreePath: ap.worktreePath,
-			PID:          ap.pid,
-			RestartCount: ap.restartCount,
-			LastStart:    ap.lastStart,
-			LastExit:     ap.lastExit,
-			LastExitCode: ap.lastExitCode,
+			Worktree:       ap.entry.Worktree,
+			Role:           ap.entry.Role,
+			WorktreePath:   ap.worktreePath,
+			PID:            ap.pid,
+			RestartCount:   ap.restartCount,
+			LastStart:      ap.lastStart,
+			LastExit:       ap.lastExit,
+			LastExitCode:   ap.lastExitCode,
+			AssignedEpicID: ap.assignedEpicID,
 		}
 		ap.mu.Unlock()
 	}
