@@ -67,7 +67,7 @@ export function AgentsSidebar({
   // Track which category drawer is open
   const [selectedCategory, setSelectedCategory] = useState<TaskCategory | null>(null);
 
-  const { agents, tasks, taskLists, agentTasks, sync, stats, isLoading, isConnected, lastUpdated } =
+  const { agents, tasks, taskLists, agentTasks, sync, stats, isLoading, isConnected, wasEverConnected, lastUpdated } =
     useAgentContext();
 
   // Persist collapsed state
@@ -176,7 +176,7 @@ export function AgentsSidebar({
             </div>
           )}
 
-          {isLoading && agents.length === 0 && (
+          {isLoading && agents.length === 0 && !wasEverConnected && (
             <div className={styles.loading}>Loading agents...</div>
           )}
 

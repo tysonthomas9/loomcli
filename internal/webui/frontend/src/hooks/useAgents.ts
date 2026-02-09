@@ -167,6 +167,9 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
   // Track if a fetch is in progress to prevent overlapping requests
   const fetchInProgressRef = useRef<boolean>(false);
 
+  // Track fetch start time for watchdog
+  const fetchStartTimeRef = useRef<number>(0);
+
   // Track if the component is mounted for cleanup
   const mountedRef = useRef<boolean>(true);
 
@@ -210,6 +213,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
     }
 
     fetchInProgressRef.current = true;
+    fetchStartTimeRef.current = Date.now();
     setIsLoading(true);
     clearRetryTimers();
 
@@ -372,13 +376,30 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
     // Initial fetch
     void fetchData();
 
-    // Setup polling
+    // Setup polling with watchdog
     let intervalId: ReturnType<typeof setInterval> | null = null;
     if (pollInterval > 0) {
       intervalId = setInterval(() => {
+        // Watchdog: if previous fetch has been running for >20s (past the 15s timeout),
+        // force-reset the lock to unblock polling
+        const fetchAge = Date.now() - fetchStartTimeRef.current;
+        if (fetchInProgressRef.current && fetchAge > 20000) {
+          console.warn('Loom fetch watchdog: force-resetting stale fetch lock');
+          fetchInProgressRef.current = false;
+        }
         void fetchData();
       }, pollInterval);
     }
+
+    // Visibility change handler: refetch immediately when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Force-reset in case previous fetch was orphaned during background
+        fetchInProgressRef.current = false;
+        void fetchData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Cleanup
     return () => {
@@ -386,6 +407,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
       if (intervalId) {
         clearInterval(intervalId);
       }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       // Clear retry timers on unmount
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);

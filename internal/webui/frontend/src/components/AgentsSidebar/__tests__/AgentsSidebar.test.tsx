@@ -8,35 +8,46 @@
  */
 
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import '@testing-library/jest-dom';
 import { AgentsSidebar } from '../AgentsSidebar';
 
+// Default mock return value for useAgentContext
+const defaultContextValue = {
+  agents: [],
+  tasks: { needs_planning: 0, ready_to_implement: 0, in_progress: 0, need_review: 0, blocked: 0 },
+  taskLists: {
+    needsPlanning: [],
+    readyToImplement: [],
+    needsReview: [],
+    inProgress: [],
+    blocked: [],
+  },
+  agentTasks: {},
+  sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+  stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+  isLoading: false,
+  isConnected: true,
+  wasEverConnected: true,
+  lastUpdated: new Date(),
+};
+
+// Mutable override object that tests can modify
+let contextOverrides: Record<string, unknown> = {};
+
 // Mock the hooks to prevent API calls in tests
 vi.mock('@/hooks', () => ({
   useAgentContext: () => ({
-    agents: [],
-    tasks: { needs_planning: 0, ready_to_implement: 0, in_progress: 0, need_review: 0, blocked: 0 },
-    taskLists: {
-      needsPlanning: [],
-      readyToImplement: [],
-      needsReview: [],
-      inProgress: [],
-      blocked: [],
-    },
-    agentTasks: {},
-    sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-    stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
-    isLoading: false,
-    isConnected: true,
-    lastUpdated: new Date(),
+    ...defaultContextValue,
+    ...contextOverrides,
   }),
 }));
 
 describe('AgentsSidebar', () => {
   beforeEach(() => {
     localStorage.clear();
+    contextOverrides = {};
   });
 
   describe('viewSwitcher slot', () => {
@@ -95,6 +106,47 @@ describe('AgentsSidebar', () => {
       const expandButton = screen.getByRole('button', { name: /expand agents sidebar/i });
       fireEvent.click(expandButton);
       expect(screen.getByTestId('custom-switcher')).toBeInTheDocument();
+    });
+  });
+
+  describe('loading state with wasEverConnected', () => {
+    it('does not show "Loading agents..." when wasEverConnected is true even if isLoading and agents is empty', () => {
+      contextOverrides = {
+        isLoading: true,
+        agents: [],
+        isConnected: false,
+        wasEverConnected: true,
+      };
+
+      render(<AgentsSidebar />);
+
+      expect(screen.queryByText('Loading agents...')).not.toBeInTheDocument();
+    });
+
+    it('shows "Loading agents..." when isLoading, agents empty, and wasEverConnected is false', () => {
+      contextOverrides = {
+        isLoading: true,
+        agents: [],
+        isConnected: false,
+        wasEverConnected: false,
+      };
+
+      render(<AgentsSidebar />);
+
+      expect(screen.getByText('Loading agents...')).toBeInTheDocument();
+    });
+
+    it('does not show "Loading agents..." when agents are present regardless of wasEverConnected', () => {
+      contextOverrides = {
+        isLoading: true,
+        agents: [{ name: 'nova', branch: 'main', status: 'ready', ahead: 0, behind: 0 }],
+        isConnected: true,
+        wasEverConnected: true,
+      };
+
+      render(<AgentsSidebar />);
+
+      expect(screen.queryByText('Loading agents...')).not.toBeInTheDocument();
     });
   });
 });
