@@ -610,4 +610,154 @@ describe('SwimLaneBoard', () => {
       expect(screen.getByTestId('swim-lane-board')).toBeInTheDocument();
     });
   });
+
+  describe('epic visibility in swim lanes vs flat kanban', () => {
+    it('shows epic issues in swim lane columns when groupBy is not none', () => {
+      const issues = [
+        createMockIssue({
+          id: 'epic-1',
+          title: 'Epic Issue',
+          issue_type: 'epic',
+          assignee: 'alice',
+          status: 'open',
+        }),
+        createMockIssue({
+          id: 'task-1',
+          title: 'Task Issue',
+          issue_type: 'task',
+          assignee: 'alice',
+          status: 'open',
+        }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="assignee" />);
+
+      // Both epic and task should be visible in swim lane mode
+      expect(screen.getByText('Epic Issue')).toBeInTheDocument();
+      expect(screen.getByText('Task Issue')).toBeInTheDocument();
+    });
+
+    it('shows epic issues with different statuses in swim lane columns', () => {
+      const issues = [
+        createMockIssue({
+          id: 'epic-open',
+          title: 'Epic Open',
+          issue_type: 'epic',
+          assignee: 'alice',
+          status: 'open',
+        }),
+        createMockIssue({
+          id: 'epic-in-progress',
+          title: 'Epic In Progress',
+          issue_type: 'epic',
+          assignee: 'alice',
+          status: 'in_progress',
+        }),
+        createMockIssue({
+          id: 'epic-closed',
+          title: 'Epic Closed',
+          issue_type: 'epic',
+          assignee: 'alice',
+          status: 'closed',
+        }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="assignee" />);
+
+      expect(screen.getByText('Epic Open')).toBeInTheDocument();
+      expect(screen.getByText('Epic In Progress')).toBeInTheDocument();
+      expect(screen.getByText('Epic Closed')).toBeInTheDocument();
+    });
+
+    it('filters epic issues from flat kanban when groupBy=none (uses DEFAULT_COLUMNS)', () => {
+      const issues = [
+        createMockIssue({
+          id: 'epic-1',
+          title: 'Epic Issue',
+          issue_type: 'epic',
+          status: 'open',
+        }),
+        createMockIssue({
+          id: 'task-1',
+          title: 'Task Issue',
+          issue_type: 'task',
+          status: 'open',
+        }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="none" />);
+
+      // Epic should NOT be visible in flat kanban mode (DEFAULT_COLUMNS filters epics)
+      expect(screen.queryByText('Epic Issue')).not.toBeInTheDocument();
+      // Task should still be visible
+      expect(screen.getByText('Task Issue')).toBeInTheDocument();
+    });
+
+    it('still shows closed epics in flat kanban when groupBy=none (Done column allows all types)', () => {
+      const issues = [
+        createMockIssue({
+          id: 'epic-closed',
+          title: 'Closed Epic',
+          issue_type: 'epic',
+          status: 'closed',
+        }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="none" />);
+
+      // Closed epics should be visible in Done column even in flat kanban mode
+      expect(screen.getByText('Closed Epic')).toBeInTheDocument();
+    });
+
+    it('uses custom columns when provided, ignoring includeEpics logic', () => {
+      // When custom columns are provided, they take priority over createColumns logic
+      const customColumns = [
+        {
+          id: 'all',
+          label: 'All Issues',
+          filter: () => true,
+          targetStatus: 'open' as Status,
+        },
+      ];
+
+      const issues = [
+        createMockIssue({
+          id: 'epic-1',
+          title: 'Epic Issue',
+          issue_type: 'epic',
+          assignee: 'alice',
+          status: 'open',
+        }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="assignee" columns={customColumns} />);
+
+      // Custom columns should be used, showing the epic
+      expect(screen.getByText('Epic Issue')).toBeInTheDocument();
+    });
+
+    it('uses legacy statuses when provided, ignoring includeEpics logic', () => {
+      // When statuses prop is provided, statusesToColumns is used instead
+      const issues = [
+        createMockIssue({
+          id: 'epic-1',
+          title: 'Epic Issue',
+          issue_type: 'epic',
+          assignee: 'alice',
+          status: 'open',
+        }),
+      ];
+
+      render(
+        <SwimLaneBoard
+          issues={issues}
+          groupBy="assignee"
+          statuses={defaultStatuses}
+        />
+      );
+
+      // Legacy statuses columns don't filter epics, so it should be visible
+      expect(screen.getByText('Epic Issue')).toBeInTheDocument();
+    });
+  });
 });
