@@ -35,11 +35,12 @@ type IssueWithParent struct {
 // Returned when include_blocked=true is passed to /api/issues.
 type KanbanIssue struct {
 	*types.IssueWithCounts
-	Parent         *string  `json:"parent,omitempty"`
-	ParentTitle    *string  `json:"parent_title,omitempty"`
-	IsBlocked      bool     `json:"is_blocked"`
-	BlockedByCount int      `json:"blocked_by_count"`
-	BlockedBy      []string `json:"blocked_by,omitempty"`
+	Parent           *string           `json:"parent,omitempty"`
+	ParentTitle      *string           `json:"parent_title,omitempty"`
+	IsBlocked        bool              `json:"is_blocked"`
+	BlockedByCount   int               `json:"blocked_by_count"`
+	BlockedBy        []string          `json:"blocked_by,omitempty"`
+	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`
 }
 
 // IssuesResponse represents the response structure for the issues endpoint.
@@ -425,6 +426,7 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 					ki.IsBlocked = true
 					ki.BlockedByCount = bi.BlockedByCount
 					ki.BlockedBy = bi.BlockedBy
+					ki.BlockedByDetails = bi.BlockedByDetails
 				}
 				kanbanIssues[i] = ki
 			}

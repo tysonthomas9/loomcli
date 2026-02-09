@@ -7,7 +7,7 @@
 import { getAvatarColor, getStatusDotColor, getStatusLabel } from '@/components/AgentCard';
 import { BlockedBadge } from '@/components/BlockedBadge';
 import { useAgentContext } from '@/hooks';
-import type { Issue } from '@/types';
+import type { BlockerRef, Issue } from '@/types';
 import { parseLoomStatus } from '@/types';
 import { formatIssueId } from '@/utils/formatIssueId';
 import { getReviewType } from '@/utils/reviewType';
@@ -40,6 +40,8 @@ export interface IssueCardProps {
   blockedByCount?: number;
   /** IDs of blocking issues (optional) */
   blockedBy?: string[];
+  /** Details of blocking issues with titles (optional) */
+  blockedByDetails?: BlockerRef[];
   /** Whether this card is in the Backlog column (dimmed appearance) */
   isBacklog?: boolean;
   /** Column ID this card is displayed in (for conditional rendering) */
@@ -67,6 +69,7 @@ export function IssueCard({
   className,
   blockedByCount,
   blockedBy,
+  blockedByDetails,
   isBacklog = false,
   columnId,
 }: IssueCardProps): JSX.Element {
@@ -138,6 +141,7 @@ export function IssueCard({
           <BlockedBadge
             count={blockedByCount ?? 0}
             {...(blockedBy !== undefined && { issueIds: blockedBy })}
+            {...(blockedByDetails !== undefined && { issueDetails: blockedByDetails })}
           />
         )}
         {issue.status === 'deferred' && (

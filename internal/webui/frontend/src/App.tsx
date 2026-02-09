@@ -125,6 +125,9 @@ function App() {
           map.set(issue.id, {
             blockedByCount: issue.blocked_by_count ?? 0,
             blockedBy: issue.blocked_by ?? [],
+            ...(issue.blocked_by_details !== undefined && {
+              blockedByDetails: issue.blocked_by_details,
+            }),
           });
         }
       }

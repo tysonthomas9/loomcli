@@ -58,7 +58,7 @@
   box-shadow: var(--shadow-lg);
   z-index: var(--z-dropdown);
   min-width: 160px;
-  max-width: 240px;
+  max-width: 320px;
   white-space: normal;
   font-weight: var(--font-weight-normal);
 }
@@ -92,6 +92,9 @@
   font-size: var(--font-size-xs);
   padding: var(--space-1) 0;
   color: var(--color-text-inverse);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tooltipItem::before {

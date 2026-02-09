@@ -10,7 +10,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
-import type { Issue } from '@/types';
+import type { BlockerRef, Issue } from '@/types';
 
 import { IssueCard } from '../IssueCard';
 import styles from '../IssueCard.module.css';
@@ -486,6 +486,31 @@ describe('IssueCard', () => {
       const badge = screen.getByLabelText('Blocked by 5 issues');
       fireEvent.mouseEnter(badge);
       expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+
+    it('passes blockedByDetails to BlockedBadge and shows "id: title" format', () => {
+      const issue = createTestIssue();
+      const blockers = ['BLOCK-1', 'BLOCK-2'];
+      const details: BlockerRef[] = [
+        { id: 'BLOCK-1', title: 'Fix auth service', priority: 1 },
+        { id: 'BLOCK-2', title: 'Database migration', priority: 2 },
+      ];
+      render(
+        <IssueCard
+          issue={issue}
+          blockedByCount={2}
+          blockedBy={blockers}
+          blockedByDetails={details}
+        />
+      );
+
+      // Hover to show tooltip
+      const badge = screen.getByLabelText('Blocked by 2 issues');
+      fireEvent.mouseEnter(badge);
+
+      // Should show "id: title" format from issueDetails, not plain IDs
+      expect(screen.getByText('BLOCK-1: Fix auth service')).toBeInTheDocument();
+      expect(screen.getByText('BLOCK-2: Database migration')).toBeInTheDocument();
     });
   });
 

@@ -127,6 +127,7 @@ export interface Issue {
   is_blocked?: boolean;
   blocked_by_count?: number;
   blocked_by?: string[];
+  blocked_by_details?: BlockerRef[];
 }
 
 /**

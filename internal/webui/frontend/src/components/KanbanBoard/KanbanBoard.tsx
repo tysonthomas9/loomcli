@@ -25,7 +25,7 @@ import { EmptyColumn } from '@/components/EmptyColumn';
 import { StatusColumn } from '@/components/StatusColumn';
 import { formatStatusLabel } from '@/components/StatusColumn/utils';
 import type { FilterState } from '@/hooks/useFilterState';
-import type { Issue, Status } from '@/types';
+import type { BlockerRef, Issue, Status } from '@/types';
 
 import { DEFAULT_COLUMNS } from './columnConfigs';
 import styles from './KanbanBoard.module.css';
@@ -37,6 +37,7 @@ import type { KanbanColumnConfig } from './types';
 export interface BlockedInfo {
   blockedByCount: number;
   blockedBy: string[];
+  blockedByDetails?: BlockerRef[];
 }
 
 /**
@@ -291,6 +292,9 @@ export function KanbanBoard({
                       {...(blockedInfo !== undefined && {
                         blockedByCount: blockedInfo.blockedByCount,
                         blockedBy: blockedInfo.blockedBy,
+                        ...(blockedInfo.blockedByDetails !== undefined && {
+                          blockedByDetails: blockedInfo.blockedByDetails,
+                        }),
                       })}
                       {...(isMutedColumn && { isBacklog: true })}
                     />
@@ -313,6 +317,9 @@ export function KanbanBoard({
                 {...(blockedInfo !== undefined && {
                   blockedByCount: blockedInfo.blockedByCount,
                   blockedBy: blockedInfo.blockedBy,
+                  ...(blockedInfo.blockedByDetails !== undefined && {
+                    blockedByDetails: blockedInfo.blockedByDetails,
+                  }),
                 })}
                 {...(isMutedCard && { isBacklog: true })}
               />

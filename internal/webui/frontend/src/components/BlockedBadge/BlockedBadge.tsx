@@ -8,6 +8,8 @@
 
 import { useState, useCallback, memo } from 'react';
 
+import type { BlockerRef } from '@/types';
+
 import styles from './BlockedBadge.module.css';
 
 /**
@@ -18,6 +20,8 @@ export interface BlockedBadgeProps {
   count: number;
   /** IDs of related issues (for tooltip) */
   issueIds?: string[];
+  /** Detailed blocker info with titles (preferred over issueIds when available) */
+  issueDetails?: BlockerRef[];
   /** Variant determines the semantic: "blockedBy" (default) or "blocks" */
   variant?: 'blockedBy' | 'blocks';
   /** Optional click handler */
@@ -27,16 +31,36 @@ export interface BlockedBadgeProps {
 }
 
 /**
- * Format issue IDs for tooltip display.
+ * Truncate a string to maxLen chars with ellipsis.
+ */
+function truncate(str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str;
+  return str.slice(0, maxLen) + '...';
+}
+
+/**
+ * Format issue details for tooltip display.
+ * Shows "id: title" when details are available, otherwise just IDs.
  * Shows first 5, then "and N more..." if there are more.
  */
-function formatIssueList(issueIds: string[]): string[] {
+function formatIssueList(issueIds: string[], issueDetails?: BlockerRef[]): string[] {
   const maxDisplay = 5;
-  if (issueIds.length <= maxDisplay) {
-    return issueIds;
+
+  // Build display strings: prefer details with titles when available
+  let items: string[];
+  if (issueDetails && issueDetails.length > 0) {
+    items = issueDetails.map((d) =>
+      d.title ? `${d.id}: ${truncate(d.title, 45)}` : d.id
+    );
+  } else {
+    items = issueIds;
   }
-  const displayed = issueIds.slice(0, maxDisplay);
-  const remaining = issueIds.length - maxDisplay;
+
+  if (items.length <= maxDisplay) {
+    return items;
+  }
+  const displayed = items.slice(0, maxDisplay);
+  const remaining = items.length - maxDisplay;
   return [...displayed, `and ${remaining} more...`];
 }
 
@@ -48,6 +72,7 @@ function formatIssueList(issueIds: string[]): string[] {
 function BlockedBadgeComponent({
   count,
   issueIds = [],
+  issueDetails,
   variant = 'blockedBy',
   onClick,
   className,
@@ -80,7 +105,7 @@ function BlockedBadgeComponent({
 
   const rootClassName = className ? `${styles.blockedBadge} ${className}` : styles.blockedBadge;
 
-  const issueList = formatIssueList(issueIds);
+  const issueList = formatIssueList(issueIds, issueDetails);
   const isBlockedBy = variant === 'blockedBy';
   const ariaLabel = isBlockedBy
     ? `Blocked by ${count} issue${count === 1 ? '' : 's'}`

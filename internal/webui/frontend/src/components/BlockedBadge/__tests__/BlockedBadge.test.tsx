@@ -10,6 +10,8 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 
+import type { BlockerRef } from '@/types';
+
 import { BlockedBadge } from '../BlockedBadge';
 
 describe('BlockedBadge', () => {
@@ -381,6 +383,113 @@ describe('BlockedBadge', () => {
       const badge = screen.getByLabelText('Blocks 2 issues');
       fireEvent.mouseEnter(badge);
       expect(screen.getByText('Blocks:')).toBeInTheDocument();
+    });
+  });
+
+  describe('issueDetails prop', () => {
+    it('shows "id: title" format in tooltip when issueDetails is provided', () => {
+      const details: BlockerRef[] = [
+        { id: 'ISSUE-1', title: 'Fix login bug', priority: 1 },
+        { id: 'ISSUE-2', title: 'Update dependencies', priority: 2 },
+      ];
+      render(
+        <BlockedBadge
+          count={2}
+          issueIds={['ISSUE-1', 'ISSUE-2']}
+          issueDetails={details}
+        />
+      );
+
+      const badge = screen.getByLabelText('Blocked by 2 issues');
+      fireEvent.mouseEnter(badge);
+
+      expect(screen.getByText('ISSUE-1: Fix login bug')).toBeInTheDocument();
+      expect(screen.getByText('ISSUE-2: Update dependencies')).toBeInTheDocument();
+    });
+
+    it('truncates titles longer than 45 characters with ellipsis', () => {
+      const longTitle = 'This is a very long issue title that exceeds the forty-five character limit';
+      expect(longTitle.length).toBeGreaterThan(45);
+
+      const details: BlockerRef[] = [
+        { id: 'ISSUE-1', title: longTitle, priority: 1 },
+      ];
+      render(
+        <BlockedBadge count={1} issueIds={['ISSUE-1']} issueDetails={details} />
+      );
+
+      const badge = screen.getByLabelText('Blocked by 1 issue');
+      fireEvent.mouseEnter(badge);
+
+      const truncated = longTitle.slice(0, 45) + '...';
+      expect(screen.getByText(`ISSUE-1: ${truncated}`)).toBeInTheDocument();
+      // Full title should not appear
+      expect(screen.queryByText(`ISSUE-1: ${longTitle}`)).not.toBeInTheDocument();
+    });
+
+    it('falls back to showing just the ID when issueDetails has an empty title', () => {
+      const details: BlockerRef[] = [
+        { id: 'ISSUE-1', title: '', priority: 1 },
+      ];
+      render(
+        <BlockedBadge count={1} issueIds={['ISSUE-1']} issueDetails={details} />
+      );
+
+      const badge = screen.getByLabelText('Blocked by 1 issue');
+      fireEvent.mouseEnter(badge);
+
+      // Should show just the ID, not "ISSUE-1: "
+      expect(screen.getByText('ISSUE-1')).toBeInTheDocument();
+      expect(screen.queryByText('ISSUE-1:')).not.toBeInTheDocument();
+    });
+
+    it('shows IDs only when issueDetails is not provided (backward compatibility)', () => {
+      render(
+        <BlockedBadge
+          count={2}
+          issueIds={['blocker-abc', 'blocker-def']}
+        />
+      );
+
+      const badge = screen.getByLabelText('Blocked by 2 issues');
+      fireEvent.mouseEnter(badge);
+
+      // Should show raw IDs without any title formatting
+      expect(screen.getByText('blocker-abc')).toBeInTheDocument();
+      expect(screen.getByText('blocker-def')).toBeInTheDocument();
+    });
+
+    it('shows first 5 items with "and N more..." when issueDetails has >5 items', () => {
+      const details: BlockerRef[] = Array.from({ length: 8 }, (_, i) => ({
+        id: `ISSUE-${i + 1}`,
+        title: `Task number ${i + 1}`,
+        priority: 2,
+      }));
+      const issueIds = details.map((d) => d.id);
+
+      render(
+        <BlockedBadge
+          count={8}
+          issueIds={issueIds}
+          issueDetails={details}
+        />
+      );
+
+      const badge = screen.getByLabelText('Blocked by 8 issues');
+      fireEvent.mouseEnter(badge);
+
+      // First 5 should be shown with "id: title" format
+      for (let i = 1; i <= 5; i++) {
+        expect(screen.getByText(`ISSUE-${i}: Task number ${i}`)).toBeInTheDocument();
+      }
+
+      // Items 6-8 should not be shown individually
+      expect(screen.queryByText(/ISSUE-6/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/ISSUE-7/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/ISSUE-8/)).not.toBeInTheDocument();
+
+      // "and N more..." should be shown
+      expect(screen.getByText('and 3 more...')).toBeInTheDocument();
     });
   });
 });
