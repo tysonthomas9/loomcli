@@ -31,4 +31,6 @@ export interface KanbanColumnConfig {
   allowedDropTargets?: string[];
   /** Visual style variant */
   style?: 'normal' | 'muted' | 'highlighted';
+  /** Maximum items to show by default before requiring "Show all" */
+  defaultLimit?: number;
 }

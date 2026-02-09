@@ -152,3 +152,86 @@ func TestIsRetryable_WithCircuitOpen(t *testing.T) {
 		})
 	}
 }
+
+func TestProtectedPool_Put(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
+		ShouldTrip: DaemonShouldTrip,
+	})
+	pp := NewProtectedPool(pool, breaker)
+
+	ctx := context.Background()
+	client, err := pp.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	pp.Put(client)
+
+	stats := pp.Stats()
+	if stats.Available != 1 {
+		t.Errorf("stats.Available = %v after Put, want 1", stats.Available)
+	}
+}
+
+func TestProtectedPool_Discard(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
+		ShouldTrip: DaemonShouldTrip,
+	})
+	pp := NewProtectedPool(pool, breaker)
+
+	ctx := context.Background()
+	client, err := pp.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	pp.Discard(client)
+
+	stats := pp.Stats()
+	if stats.Active != 0 {
+		t.Errorf("stats.Active = %v after Discard, want 0", stats.Active)
+	}
+	if stats.Created != 0 {
+		t.Errorf("stats.Created = %v after Discard, want 0", stats.Created)
+	}
+}
+
+func TestProtectedPool_Close(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
+		ShouldTrip: DaemonShouldTrip,
+	})
+	pp := NewProtectedPool(pool, breaker)
+
+	err = pp.Close()
+	if err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+
+	// Get should fail after close
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err = pp.Get(ctx)
+	if err == nil {
+		t.Error("expected error from Get after Close")
+	}
+}

@@ -129,7 +129,7 @@
     background-color 0.15s ease,
     border-color 0.15s ease;
   border: 1px solid transparent;
-  overflow-y: auto;
+  overflow-y: var(--column-content-overflow, auto);
   scrollbar-gutter: stable;
   /* Smooth momentum scrolling on iOS */
   -webkit-overflow-scrolling: touch;
@@ -155,6 +155,27 @@
 
 .content::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);
+}
+
+.footer {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+}
+
+.footer button {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.footer button:hover {
+  color: var(--color-text);
+  text-decoration: underline;
 }
 
 /* Drop target visual feedback when dragging over */
