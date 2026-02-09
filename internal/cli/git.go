@@ -352,6 +352,46 @@ func GitStashPop(dir string) error {
 	return RunGitCommandWithOutput(dir, "stash", "pop")
 }
 
+// BranchExistsLocally checks if a branch exists as a local ref.
+func BranchExistsLocally(dir, branch string) (bool, error) {
+	if err := validateGitRef(branch); err != nil {
+		return false, err
+	}
+	_, err := RunGitCommand(dir, "rev-parse", "--verify", "refs/heads/"+branch)
+	if err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// RemoteBranchExists checks if a branch exists on the specified remote.
+func RemoteBranchExists(dir, remote, branch string) (bool, error) {
+	r := resolveRemote(remote)
+	if err := validateGitRef(r); err != nil {
+		return false, err
+	}
+	if err := validateGitRef(branch); err != nil {
+		return false, err
+	}
+	_, err := RunGitCommand(dir, "rev-parse", "--verify", "refs/remotes/"+r+"/"+branch)
+	if err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// GitCheckoutNewFromRef creates a new local branch at the given starting point.
+func GitCheckoutNewFromRef(dir, branch, startPoint string) error {
+	if err := validateGitRef(branch); err != nil {
+		return err
+	}
+	if err := validateGitRef(startPoint); err != nil {
+		return err
+	}
+	fmt.Printf("Creating branch %s from %s...\n", branch, startPoint)
+	return RunGitCommandWithOutput(dir, "checkout", "-b", branch, startPoint)
+}
+
 // HasUnmergedFiles checks if there are unmerged files in the working tree
 func HasUnmergedFiles(dir string) (bool, error) {
 	files, err := GetConflictedFiles(dir)

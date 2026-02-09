@@ -205,7 +205,21 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		ap.assignedEpicID = epicID
 		ap.mu.Unlock()
 
-		// 2. Spawn subprocess
+		// 2. Ensure correct branch for epic assignment
+		targetBranch := ap.entry.Worktree // default: agent-name branch
+		if epicID != "" {
+			targetBranch = epicBranchName(epicID)
+		}
+		log.Printf("[daemon] Agent %s: ensuring branch %s", ap.entry.Worktree, targetBranch)
+		if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, "origin/main"); err != nil {
+			log.Printf("[daemon] Agent %s: branch setup failed: %v", ap.entry.Worktree, err)
+			if !d.handleRestartAfterError(ap) {
+				return
+			}
+			continue
+		}
+
+		// 3. Spawn subprocess
 		if err := d.spawnAgent(ap); err != nil {
 			log.Printf("[daemon] Agent %s: spawn failed: %v", ap.entry.Worktree, err)
 			if !d.handleRestartAfterError(ap) {
@@ -214,17 +228,17 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			continue
 		}
 
-		// 3. Wait for exit
+		// 4. Wait for exit
 		exitCode := d.waitForAgent(ap)
 		log.Printf("[daemon] Agent %s: exited with code %d", ap.entry.Worktree, exitCode)
 
-		// 4. Post-mortem recovery
+		// 5. Post-mortem recovery
 		if err := d.recoverAgent(ap); err != nil {
 			log.Printf("[daemon] Agent %s: post-mortem recovery failed: %v", ap.entry.Worktree, err)
 			// Non-fatal, continue with restart logic
 		}
 
-		// 5. Check shutdown after subprocess exit
+		// 6. Check shutdown after subprocess exit
 		select {
 		case <-d.shutdown:
 			log.Printf("[daemon] Agent %s: shutdown signal received after exit", ap.entry.Worktree)
@@ -232,13 +246,13 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		default:
 		}
 
-		// 6. Restart decision
+		// 7. Restart decision
 		if !d.shouldRestart(ap) {
 			log.Printf("[daemon] Agent %s: max restarts exceeded, stopping supervisor", ap.entry.Worktree)
 			return
 		}
 
-		// 7. Backoff sleep (interruptible)
+		// 8. Backoff sleep (interruptible)
 		backoff := d.computeBackoff(ap)
 		log.Printf("[daemon] Agent %s: waiting %v before restart (attempt %d)", ap.entry.Worktree, backoff, ap.restartCount)
 

@@ -1416,6 +1416,157 @@ func TestGitPushRefspec(t *testing.T) {
 	}
 }
 
+func TestBranchExistsLocally(t *testing.T) {
+	tests := []struct {
+		name       string
+		branch     string
+		mockOutput string
+		mockErr    error
+		wantExists bool
+		wantErr    bool
+	}{
+		{
+			name:       "branch exists",
+			branch:     "main",
+			mockOutput: "abc123\n",
+			wantExists: true,
+		},
+		{
+			name:       "branch does not exist",
+			branch:     "nonexistent",
+			mockErr:    errors.New("fatal: Needed a single revision"),
+			wantExists: false,
+		},
+		{
+			name:       "feature branch exists",
+			branch:     "feature/new-thing",
+			mockOutput: "def456\n",
+			wantExists: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewCommandMock(t, []CommandStub{{
+				Name:   "git",
+				Args:   []string{"rev-parse", "--verify", "refs/heads/" + tc.branch},
+				Stdout: tc.mockOutput,
+				Err:    tc.mockErr,
+			}})
+			mock.Install()
+
+			exists, err := BranchExistsLocally("/repo", tc.branch)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if exists != tc.wantExists {
+				t.Errorf("exists = %v, want %v", exists, tc.wantExists)
+			}
+		})
+	}
+}
+
+func TestRemoteBranchExists(t *testing.T) {
+	tests := []struct {
+		name       string
+		remote     string
+		branch     string
+		wantRemote string
+		mockOutput string
+		mockErr    error
+		wantExists bool
+		wantErr    bool
+	}{
+		{
+			name:       "remote branch exists with empty remote",
+			remote:     "",
+			branch:     "main",
+			wantRemote: "origin",
+			mockOutput: "abc123\n",
+			wantExists: true,
+		},
+		{
+			name:       "remote branch does not exist",
+			remote:     "",
+			branch:     "nonexistent",
+			wantRemote: "origin",
+			mockErr:    errors.New("fatal: Needed a single revision"),
+			wantExists: false,
+		},
+		{
+			name:       "custom remote branch exists",
+			remote:     "upstream",
+			branch:     "develop",
+			wantRemote: "upstream",
+			mockOutput: "def456\n",
+			wantExists: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewCommandMock(t, []CommandStub{{
+				Name:   "git",
+				Args:   []string{"rev-parse", "--verify", "refs/remotes/" + tc.wantRemote + "/" + tc.branch},
+				Stdout: tc.mockOutput,
+				Err:    tc.mockErr,
+			}})
+			mock.Install()
+
+			exists, err := RemoteBranchExists("/repo", tc.remote, tc.branch)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if exists != tc.wantExists {
+				t.Errorf("exists = %v, want %v", exists, tc.wantExists)
+			}
+		})
+	}
+}
+
+func TestGitCheckoutNewFromRef(t *testing.T) {
+	tests := []struct {
+		name       string
+		dir        string
+		branch     string
+		startPoint string
+		mockErr    error
+		wantErr    bool
+	}{
+		{"success", "/repo", "feature/new", "origin/main", nil, false},
+		{"branch already exists", "/repo", "existing", "origin/main", errors.New("already exists"), true},
+		{"invalid start point", "/repo", "feature/new", "bad-ref", errors.New("not a valid ref"), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewOutputCommandMock(t, []OutputCommandStub{{
+				Dir:  tc.dir,
+				Args: []string{"checkout", "-b", tc.branch, tc.startPoint},
+				Err:  tc.mockErr,
+			}})
+			mock.Install()
+
+			err := GitCheckoutNewFromRef(tc.dir, tc.branch, tc.startPoint)
+
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateGitRef(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1704,6 +1855,65 @@ func TestGitRefInjectionRejected(t *testing.T) {
 		}
 		if hasCommits {
 			t.Error("expected hasCommits to be false")
+		}
+	})
+
+	t.Run("BranchExistsLocally_bad_branch", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{})
+		mock.Install()
+
+		exists, err := BranchExistsLocally(dir, "--flag")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if exists {
+			t.Error("expected exists to be false")
+		}
+	})
+
+	t.Run("RemoteBranchExists_bad_remote", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{})
+		mock.Install()
+
+		exists, err := RemoteBranchExists(dir, "-evil", "main")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if exists {
+			t.Error("expected exists to be false")
+		}
+	})
+
+	t.Run("RemoteBranchExists_bad_branch", func(t *testing.T) {
+		mock := NewCommandMock(t, []CommandStub{})
+		mock.Install()
+
+		exists, err := RemoteBranchExists(dir, "", "--evil")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if exists {
+			t.Error("expected exists to be false")
+		}
+	})
+
+	t.Run("GitCheckoutNewFromRef_bad_branch", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitCheckoutNewFromRef(dir, "--orphan", "origin/main")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("GitCheckoutNewFromRef_bad_startPoint", func(t *testing.T) {
+		mock := NewOutputCommandMock(t, []OutputCommandStub{})
+		mock.Install()
+
+		err := GitCheckoutNewFromRef(dir, "feature", "--evil")
+		if err == nil {
+			t.Error("expected error, got nil")
 		}
 	})
 }
