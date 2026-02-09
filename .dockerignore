@@ -1,0 +1,5 @@
+.git/
+worktrees/
+.beads/
+node_modules/
+*.log
