@@ -91,6 +91,7 @@ export type {
   LoomTaskInfo,
   LoomTaskSummary,
   LoomSyncInfo,
+  WorktreeSyncDetail,
   LoomStats,
   LoomStatusResponse,
   LoomAgentTasks,

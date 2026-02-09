@@ -8,12 +8,19 @@ import type { ReactNode } from 'react';
 import { useState, useCallback, useEffect } from 'react';
 
 import { useAgentContext } from '@/hooks';
-import type { LoomTaskInfo } from '@/types';
+import type { LoomTaskInfo, WorktreeSyncDetail } from '@/types';
 
 import { AgentCard } from '../AgentCard';
 import { TaskDrawer } from '../TaskDrawer';
 import type { TaskCategory } from '../TaskDrawer';
 import styles from './AgentsSidebar.module.css';
+
+function buildSyncTooltip(details: WorktreeSyncDetail[] | undefined, direction: string): string {
+  if (!details || details.length === 0) return '';
+  return details
+    .map(d => `${d.name}: ${d.count} commit${d.count !== 1 ? 's' : ''} ${direction}`)
+    .join('\n');
+}
 
 /**
  * Props for the AgentsSidebar component.
@@ -301,13 +308,23 @@ export function AgentsSidebar({
             {isConnected && hasSyncWarning && (
               <div className={styles.syncStatus}>
                 {sync.git_needs_push > 0 && (
-                  <span className={styles.syncWarning}>{sync.git_needs_push} need push</span>
+                  <span
+                    className={styles.syncWarning}
+                    title={buildSyncTooltip(sync.git_push_details, 'ahead')}
+                  >
+                    {sync.git_needs_push} unpushed
+                  </span>
                 )}
                 {sync.git_needs_push > 0 && sync.git_needs_pull > 0 && (
                   <span className={styles.syncSeparator}>·</span>
                 )}
                 {sync.git_needs_pull > 0 && (
-                  <span className={styles.syncWarning}>{sync.git_needs_pull} need pull</span>
+                  <span
+                    className={styles.syncWarning}
+                    title={buildSyncTooltip(sync.git_pull_details, 'behind')}
+                  >
+                    {sync.git_needs_pull} unpulled
+                  </span>
                 )}
                 {(sync.git_needs_push > 0 || sync.git_needs_pull > 0) && !sync.db_synced && (
                   <span className={styles.syncSeparator}>·</span>

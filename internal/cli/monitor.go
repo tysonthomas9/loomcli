@@ -118,13 +118,21 @@ type TaskSummary struct {
 }
 
 
+// WorktreeSyncDetail holds per-worktree sync detail (commits ahead or behind).
+type WorktreeSyncDetail struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
 // SyncInfo holds sync status information
 type SyncInfo struct {
-	DBSynced     bool   `json:"db_synced"`
-	DBLastSync   string `json:"db_last_sync"`
-	DBError      string `json:"db_error,omitempty"`
-	GitNeedsPush int    `json:"git_needs_push"`
-	GitNeedsPull int    `json:"git_needs_pull"`
+	DBSynced       bool                 `json:"db_synced"`
+	DBLastSync     string               `json:"db_last_sync"`
+	DBError        string               `json:"db_error,omitempty"`
+	GitNeedsPush   int                  `json:"git_needs_push"`
+	GitNeedsPull   int                  `json:"git_needs_pull"`
+	GitPushDetails []WorktreeSyncDetail `json:"git_push_details,omitempty"`
+	GitPullDetails []WorktreeSyncDetail `json:"git_pull_details,omitempty"`
 }
 
 // MonitorStats holds overall statistics
@@ -739,9 +747,17 @@ func completeSyncStatus(info SyncInfo, agents []AgentStatus) SyncInfo {
 	for _, agent := range agents {
 		if agent.Ahead > 0 {
 			info.GitNeedsPush++
+			info.GitPushDetails = append(info.GitPushDetails, WorktreeSyncDetail{
+				Name:  agent.Name,
+				Count: agent.Ahead,
+			})
 		}
 		if agent.Behind > 0 {
 			info.GitNeedsPull++
+			info.GitPullDetails = append(info.GitPullDetails, WorktreeSyncDetail{
+				Name:  agent.Name,
+				Count: agent.Behind,
+			})
 		}
 	}
 	return info

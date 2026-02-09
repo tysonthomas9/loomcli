@@ -161,6 +161,14 @@ export interface LoomTaskSummary {
 }
 
 /**
+ * Per-worktree sync detail (commits ahead or behind).
+ */
+export interface WorktreeSyncDetail {
+  name: string;
+  count: number;
+}
+
+/**
  * Sync status from loom server.
  */
 export interface LoomSyncInfo {
@@ -169,6 +177,8 @@ export interface LoomSyncInfo {
   db_error?: string;
   git_needs_push: number;
   git_needs_pull: number;
+  git_push_details?: WorktreeSyncDetail[];
+  git_pull_details?: WorktreeSyncDetail[];
 }
 
 /**
