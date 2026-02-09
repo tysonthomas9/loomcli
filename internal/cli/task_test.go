@@ -287,7 +287,7 @@ func TestHasAvailableImplementationTasks_Success(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailableImplementationTasks()
+	available, err := HasAvailableImplementationTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestHasAvailableImplementationTasks_SkipsTasksWithoutDesign(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailableImplementationTasks()
+	available, err := HasAvailableImplementationTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestHasAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailableImplementationTasks()
+	available, err := HasAvailableImplementationTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestHasAvailableImplementationTasks_BdError(t *testing.T) {
 	})
 	mock.Install()
 
-	_, err := HasAvailableImplementationTasks()
+	_, err := HasAvailableImplementationTasks("")
 	if err == nil {
 		t.Error("expected error when bd command fails")
 	}
@@ -353,7 +353,7 @@ func TestGetAvailableImplementationTasks_Success(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailableImplementationTasks()
+	tasks, err := GetAvailableImplementationTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestGetAvailableImplementationTasks_ReturnsEmpty(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailableImplementationTasks()
+	tasks, err := GetAvailableImplementationTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestGetAvailableImplementationTasks_SkipsNeedsRevision(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailableImplementationTasks()
+	tasks, err := GetAvailableImplementationTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestGetAvailableImplementationTasks_BdError(t *testing.T) {
 	})
 	mock.Install()
 
-	_, err := GetAvailableImplementationTasks()
+	_, err := GetAvailableImplementationTasks("")
 	if err == nil {
 		t.Error("expected error when bd command fails")
 	}

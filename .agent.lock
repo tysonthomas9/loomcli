@@ -1,10 +1,10 @@
 {
-  "pid": 9654,
+  "pid": 94186,
   "command": "task",
-  "started_at": "2026-02-09T00:17:59.682386-08:00",
+  "started_at": "2026-02-09T11:20:01.005551-08:00",
   "agent_name": "falcon",
-  "task_id": "loomcli-6fl.9",
-  "task_title": "Add race detection to CI and fix remaining races",
-  "task_started_at": "2026-02-09T00:18:47.922849-08:00",
+  "task_id": "loomcli-mzr.3",
+  "task_title": "Wire --parent-id filter through automode task discovery",
+  "task_started_at": "2026-02-09T11:20:32.23851-08:00",
   "state": "active"
 }

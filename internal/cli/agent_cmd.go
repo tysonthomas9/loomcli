@@ -15,6 +15,7 @@ var (
 	agentInterval    int
 	agentMaxTasks    int
 	agentIdleTimeout int
+	agentParentID    string
 )
 
 var agentCmd = &cobra.Command{
@@ -64,6 +65,7 @@ func init() {
 	agentCmd.Flags().IntVarP(&agentInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	agentCmd.Flags().IntVarP(&agentMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	agentCmd.Flags().IntVarP(&agentIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
+	agentCmd.Flags().StringVar(&agentParentID, "parent", "", "Filter tasks to descendants of this epic ID")
 	rootCmd.AddCommand(agentCmd)
 }
 
@@ -83,7 +85,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 	}
 
 	// Validate and map task filter
-	taskCheckFn, err := mapTaskFilter(agentTaskFilter)
+	taskCheckFn, err := mapTaskFilter(agentTaskFilter, agentParentID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -136,6 +138,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 			AgentType:       "agent",
 			AgentName:       agentName,
 			WorktreePath:    worktreePath,
+			ParentID:        agentParentID,
 			CustomPromptGen: promptGen,
 			CustomTaskCheck: taskCheckFn,
 		}, shutdown)
@@ -160,6 +163,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 			AgentType:       "agent",
 			AgentName:       agentName,
 			WorktreePath:    worktreePath,
+			ParentID:        agentParentID,
 			CustomPromptGen: promptGen,
 			CustomTaskCheck: taskCheckFn,
 		}, shutdown)
@@ -201,14 +205,15 @@ func runAgent(cmd *cobra.Command, args []string) {
 }
 
 // mapTaskFilter converts a filter string to the corresponding HasAvailable* function.
-func mapTaskFilter(filter string) (func() (bool, error), error) {
+// The parentID is captured in the returned closure to scope task discovery.
+func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
 	switch filter {
 	case "needs_design":
-		return HasAvailablePlanningTasks, nil
+		return func() (bool, error) { return HasAvailablePlanningTasks(parentID) }, nil
 	case "has_design":
-		return HasAvailableImplementationTasks, nil
+		return func() (bool, error) { return HasAvailableImplementationTasks(parentID) }, nil
 	case "any", "":
-		return HasAnyAvailableTasks, nil
+		return func() (bool, error) { return HasAnyAvailableTasks(parentID) }, nil
 	default:
 		return nil, fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, or any)", filter)
 	}

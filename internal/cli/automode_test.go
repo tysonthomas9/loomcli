@@ -114,7 +114,7 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := HasAvailablePlanningTasks()
+			got, err := HasAvailablePlanningTasks("")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("HasAvailablePlanningTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -229,7 +229,7 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := HasAvailableImplementationTasks()
+			got, err := HasAvailableImplementationTasks("")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("HasAvailableImplementationTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2267,7 +2267,7 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := HasAnyAvailableTasks()
+			got, err := HasAnyAvailableTasks("")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("HasAnyAvailableTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2686,7 +2686,7 @@ func TestGetAvailablePlanningTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := GetAvailablePlanningTasks()
+			got, err := GetAvailablePlanningTasks("")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAvailablePlanningTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2806,7 +2806,7 @@ func TestGetAvailableImplementationTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := GetAvailableImplementationTasks()
+			got, err := GetAvailableImplementationTasks("")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAvailableImplementationTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2927,7 +2927,7 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := GetAnyAvailableTasks()
+			got, err := GetAnyAvailableTasks("")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAnyAvailableTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2967,7 +2967,7 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// HasAvailablePlanningTasks should return true (T-1 has no design)
-	hasPlan, err := HasAvailablePlanningTasks()
+	hasPlan, err := HasAvailablePlanningTasks("")
 	if err != nil {
 		t.Fatalf("HasAvailablePlanningTasks() error = %v", err)
 	}
@@ -2976,7 +2976,7 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// HasAvailableImplementationTasks should return true (T-2 has design)
-	hasImpl, err := HasAvailableImplementationTasks()
+	hasImpl, err := HasAvailableImplementationTasks("")
 	if err != nil {
 		t.Fatalf("HasAvailableImplementationTasks() error = %v", err)
 	}
@@ -2985,7 +2985,7 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// HasAnyAvailableTasks should return true (both T-1 and T-2 are open)
-	hasAny, err := HasAnyAvailableTasks()
+	hasAny, err := HasAnyAvailableTasks("")
 	if err != nil {
 		t.Fatalf("HasAnyAvailableTasks() error = %v", err)
 	}
@@ -2994,17 +2994,17 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// Verify Get* returns correct counts
-	planTasks, _ := GetAvailablePlanningTasks()
+	planTasks, _ := GetAvailablePlanningTasks("")
 	if len(planTasks) != 1 || planTasks[0].ID != "T-1" {
 		t.Errorf("GetAvailablePlanningTasks() = %v, want [T-1]", planTasks)
 	}
 
-	implTasks, _ := GetAvailableImplementationTasks()
+	implTasks, _ := GetAvailableImplementationTasks("")
 	if len(implTasks) != 1 || implTasks[0].ID != "T-2" {
 		t.Errorf("GetAvailableImplementationTasks() = %v, want [T-2]", implTasks)
 	}
 
-	anyTasks, _ := GetAnyAvailableTasks()
+	anyTasks, _ := GetAnyAvailableTasks("")
 	if len(anyTasks) != 2 {
 		t.Errorf("GetAnyAvailableTasks() returned %d tasks, want 2", len(anyTasks))
 	}
@@ -3444,6 +3444,453 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 	// Command should contain --daemon-mode
 	if !strings.Contains(paneCmd, "--daemon-mode") {
 		t.Errorf("Command should contain --daemon-mode, got: %s", paneCmd)
+	}
+}
+
+// TestGetAvailablePlanningTasks_WithParentID verifies that when a non-empty parentID
+// is provided, the --parent flag is included in the bd ready command.
+func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
+	tests := []struct {
+		name     string
+		parentID string
+		wantArgs []string
+	}{
+		{
+			name:     "with parent ID includes --parent flag",
+			parentID: "T-123",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "T-123"},
+		},
+		{
+			name:     "empty parent ID excludes --parent flag",
+			parentID: "",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore execCommand
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			var capturedArgs []string
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				// Capture the full command args (name is first arg in slice)
+				capturedArgs = append([]string{name}, args...)
+				return CommandResult{
+					Stdout: mustJSON([]BdIssue{
+						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
+					}),
+				}
+			}
+
+			_, err := GetAvailablePlanningTasks(tt.parentID)
+			if err != nil {
+				t.Fatalf("GetAvailablePlanningTasks(%q) unexpected error: %v", tt.parentID, err)
+			}
+
+			// Verify the args match expected
+			if len(capturedArgs) != len(tt.wantArgs) {
+				t.Errorf("GetAvailablePlanningTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
+					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
+				return
+			}
+
+			for i, arg := range tt.wantArgs {
+				if capturedArgs[i] != arg {
+					t.Errorf("GetAvailablePlanningTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
+						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
+				}
+			}
+		})
+	}
+}
+
+// TestGetAvailableImplementationTasks_WithParentID verifies that when a non-empty parentID
+// is provided, the --parent flag is included in the bd ready command.
+func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
+	tests := []struct {
+		name     string
+		parentID string
+		wantArgs []string
+	}{
+		{
+			name:     "with parent ID includes --parent flag",
+			parentID: "EPIC-456",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-456"},
+		},
+		{
+			name:     "empty parent ID excludes --parent flag",
+			parentID: "",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore execCommand
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			var capturedArgs []string
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				// Capture the full command args (name is first arg in slice)
+				capturedArgs = append([]string{name}, args...)
+				return CommandResult{
+					Stdout: mustJSON([]BdIssue{
+						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
+					}),
+				}
+			}
+
+			_, err := GetAvailableImplementationTasks(tt.parentID)
+			if err != nil {
+				t.Fatalf("GetAvailableImplementationTasks(%q) unexpected error: %v", tt.parentID, err)
+			}
+
+			// Verify the args match expected
+			if len(capturedArgs) != len(tt.wantArgs) {
+				t.Errorf("GetAvailableImplementationTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
+					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
+				return
+			}
+
+			for i, arg := range tt.wantArgs {
+				if capturedArgs[i] != arg {
+					t.Errorf("GetAvailableImplementationTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
+						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
+				}
+			}
+		})
+	}
+}
+
+// TestGetAnyAvailableTasks_WithParentID verifies that when a non-empty parentID
+// is provided, the --parent flag is included in the bd ready command.
+func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
+	tests := []struct {
+		name     string
+		parentID string
+		wantArgs []string
+	}{
+		{
+			name:     "with parent ID includes --parent flag",
+			parentID: "EPIC-789",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-789"},
+		},
+		{
+			name:     "empty parent ID excludes --parent flag",
+			parentID: "",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore execCommand
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			var capturedArgs []string
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				// Capture the full command args (name is first arg in slice)
+				capturedArgs = append([]string{name}, args...)
+				return CommandResult{
+					Stdout: mustJSON([]BdIssue{
+						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},
+					}),
+				}
+			}
+
+			_, err := GetAnyAvailableTasks(tt.parentID)
+			if err != nil {
+				t.Fatalf("GetAnyAvailableTasks(%q) unexpected error: %v", tt.parentID, err)
+			}
+
+			// Verify the args match expected
+			if len(capturedArgs) != len(tt.wantArgs) {
+				t.Errorf("GetAnyAvailableTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
+					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
+				return
+			}
+
+			for i, arg := range tt.wantArgs {
+				if capturedArgs[i] != arg {
+					t.Errorf("GetAnyAvailableTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
+						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
+				}
+			}
+		})
+	}
+}
+
+// TestHasAvailablePlanningTasks_WithParentID verifies that HasAvailablePlanningTasks
+// properly passes the parentID through to GetAvailablePlanningTasks.
+func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
+	tests := []struct {
+		name     string
+		parentID string
+		wantArgs []string
+	}{
+		{
+			name:     "with parent ID includes --parent flag",
+			parentID: "EPIC-100",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-100"},
+		},
+		{
+			name:     "empty parent ID excludes --parent flag",
+			parentID: "",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore execCommand
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			var capturedArgs []string
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				capturedArgs = append([]string{name}, args...)
+				return CommandResult{
+					Stdout: mustJSON([]BdIssue{
+						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
+					}),
+				}
+			}
+
+			got, err := HasAvailablePlanningTasks(tt.parentID)
+			if err != nil {
+				t.Fatalf("HasAvailablePlanningTasks(%q) unexpected error: %v", tt.parentID, err)
+			}
+
+			if !got {
+				t.Errorf("HasAvailablePlanningTasks(%q) = false, want true", tt.parentID)
+			}
+
+			// Verify the args match expected
+			if len(capturedArgs) != len(tt.wantArgs) {
+				t.Errorf("HasAvailablePlanningTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
+					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
+				return
+			}
+
+			for i, arg := range tt.wantArgs {
+				if capturedArgs[i] != arg {
+					t.Errorf("HasAvailablePlanningTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
+						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
+				}
+			}
+		})
+	}
+}
+
+// TestHasAvailableImplementationTasks_WithParentID verifies that HasAvailableImplementationTasks
+// properly passes the parentID through to GetAvailableImplementationTasks.
+func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
+	tests := []struct {
+		name     string
+		parentID string
+		wantArgs []string
+	}{
+		{
+			name:     "with parent ID includes --parent flag",
+			parentID: "EPIC-200",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-200"},
+		},
+		{
+			name:     "empty parent ID excludes --parent flag",
+			parentID: "",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore execCommand
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			var capturedArgs []string
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				capturedArgs = append([]string{name}, args...)
+				return CommandResult{
+					Stdout: mustJSON([]BdIssue{
+						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
+					}),
+				}
+			}
+
+			got, err := HasAvailableImplementationTasks(tt.parentID)
+			if err != nil {
+				t.Fatalf("HasAvailableImplementationTasks(%q) unexpected error: %v", tt.parentID, err)
+			}
+
+			if !got {
+				t.Errorf("HasAvailableImplementationTasks(%q) = false, want true", tt.parentID)
+			}
+
+			// Verify the args match expected
+			if len(capturedArgs) != len(tt.wantArgs) {
+				t.Errorf("HasAvailableImplementationTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
+					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
+				return
+			}
+
+			for i, arg := range tt.wantArgs {
+				if capturedArgs[i] != arg {
+					t.Errorf("HasAvailableImplementationTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
+						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
+				}
+			}
+		})
+	}
+}
+
+// TestHasAnyAvailableTasks_WithParentID verifies that HasAnyAvailableTasks
+// properly passes the parentID through to GetAnyAvailableTasks.
+func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
+	tests := []struct {
+		name     string
+		parentID string
+		wantArgs []string
+	}{
+		{
+			name:     "with parent ID includes --parent flag",
+			parentID: "EPIC-300",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-300"},
+		},
+		{
+			name:     "empty parent ID excludes --parent flag",
+			parentID: "",
+			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore execCommand
+			oldExec := execCommand
+			defer func() { execCommand = oldExec }()
+
+			var capturedArgs []string
+			execCommand = func(dir, name string, args ...string) CommandResult {
+				capturedArgs = append([]string{name}, args...)
+				return CommandResult{
+					Stdout: mustJSON([]BdIssue{
+						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},
+					}),
+				}
+			}
+
+			got, err := HasAnyAvailableTasks(tt.parentID)
+			if err != nil {
+				t.Fatalf("HasAnyAvailableTasks(%q) unexpected error: %v", tt.parentID, err)
+			}
+
+			if !got {
+				t.Errorf("HasAnyAvailableTasks(%q) = false, want true", tt.parentID)
+			}
+
+			// Verify the args match expected
+			if len(capturedArgs) != len(tt.wantArgs) {
+				t.Errorf("HasAnyAvailableTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
+					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
+				return
+			}
+
+			for i, arg := range tt.wantArgs {
+				if capturedArgs[i] != arg {
+					t.Errorf("HasAnyAvailableTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
+						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
+				}
+			}
+		})
+	}
+}
+
+// TestStartTmuxSession_WithParentID verifies that when ParentID is set in AutoModeOptions,
+// the --parent flag is included in the loom command passed to tmux.
+func TestStartTmuxSession_WithParentID(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available, skipping")
+	}
+
+	tests := []struct {
+		name           string
+		parentID       string
+		wantParentFlag bool
+	}{
+		{
+			name:           "with parent ID includes --parent flag",
+			parentID:       "EPIC-999",
+			wantParentFlag: true,
+		},
+		{
+			name:           "empty parent ID excludes --parent flag",
+			parentID:       "",
+			wantParentFlag: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			logFile := filepath.Join(tmpDir, "test.log")
+
+			sessionName := fmt.Sprintf("loom-test-parent-%d-%d", os.Getpid(), time.Now().UnixNano())
+			// Clean up tmux session after test
+			t.Cleanup(func() {
+				exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+			})
+
+			opts := AutoModeOptions{
+				AgentType:    "plan",
+				AgentName:    "test-agent",
+				WorktreePath: tmpDir,
+				ParentID:     tt.parentID,
+			}
+
+			// Set remain-on-exit globally so the pane stays alive
+			origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
+			exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
+			t.Cleanup(func() {
+				val := strings.TrimSpace(string(origRemain))
+				if val == "" || val == "off" {
+					exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
+				} else {
+					exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
+				}
+			})
+
+			err := startTmuxSession(sessionName, opts, logFile)
+			if err != nil {
+				t.Fatalf("startTmuxSession failed: %v", err)
+			}
+
+			// Give tmux a moment to set up
+			time.Sleep(300 * time.Millisecond)
+
+			out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output()
+			if err != nil {
+				t.Fatalf("failed to get tmux pane start command: %v", err)
+			}
+			paneCmd := strings.TrimSpace(string(out))
+
+			if tt.wantParentFlag {
+				// The parentID may be shell-quoted, so check for either format
+				expectedFlag1 := fmt.Sprintf("--parent %s", tt.parentID)
+				expectedFlag2 := fmt.Sprintf("--parent '%s'", tt.parentID)
+				if !strings.Contains(paneCmd, expectedFlag1) && !strings.Contains(paneCmd, expectedFlag2) {
+					t.Errorf("Expected command to contain --parent flag with %q, got: %s", tt.parentID, paneCmd)
+				}
+			} else {
+				if strings.Contains(paneCmd, "--parent") {
+					t.Errorf("Expected command NOT to contain --parent flag, got: %s", paneCmd)
+				}
+			}
+		})
 	}
 }
 

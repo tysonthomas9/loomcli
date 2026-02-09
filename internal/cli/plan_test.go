@@ -246,7 +246,7 @@ func TestHasAvailablePlanningTasks_Success(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailablePlanningTasks()
+	available, err := HasAvailablePlanningTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestHasAvailablePlanningTasks_SkipsTasksWithDesign(t *testing.T) {
 	})
 	mock.Install()
 
-	available, err := HasAvailablePlanningTasks()
+	available, err := HasAvailablePlanningTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestHasAvailablePlanningTasks_BdError(t *testing.T) {
 	})
 	mock.Install()
 
-	_, err := HasAvailablePlanningTasks()
+	_, err := HasAvailablePlanningTasks("")
 	if err == nil {
 		t.Error("expected error when bd command fails")
 	}
@@ -295,7 +295,7 @@ func TestGetAvailablePlanningTasks_Success(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailablePlanningTasks()
+	tasks, err := GetAvailablePlanningTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestGetAvailablePlanningTasks_ReturnsEmpty(t *testing.T) {
 	})
 	mock.Install()
 
-	tasks, err := GetAvailablePlanningTasks()
+	tasks, err := GetAvailablePlanningTasks("")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestGetAvailablePlanningTasks_BdError(t *testing.T) {
 	})
 	mock.Install()
 
-	_, err := GetAvailablePlanningTasks()
+	_, err := GetAvailablePlanningTasks("")
 	if err == nil {
 		t.Error("expected error when bd command fails")
 	}

@@ -13,6 +13,7 @@ var (
 	planInterval    int
 	planMaxTasks    int
 	planIdleTimeout int
+	planParentID    string
 )
 
 var planCmd = &cobra.Command{
@@ -57,6 +58,7 @@ func init() {
 	planCmd.Flags().IntVarP(&planInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	planCmd.Flags().IntVarP(&planMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	planCmd.Flags().IntVarP(&planIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
+	planCmd.Flags().StringVar(&planParentID, "parent", "", "Filter tasks to descendants of this epic ID")
 	rootCmd.AddCommand(planCmd)
 }
 
@@ -110,6 +112,7 @@ func runPlan(cmd *cobra.Command, args []string) {
 			AgentType:    "plan",
 			AgentName:    agentName,
 			WorktreePath: worktreePath,
+			ParentID:     planParentID,
 		}, shutdown)
 		return
 	}
@@ -132,13 +135,14 @@ func runPlan(cmd *cobra.Command, args []string) {
 			AgentType:    "plan",
 			AgentName:    agentName,
 			WorktreePath: worktreePath,
+			ParentID:     planParentID,
 		}, shutdown)
 		return
 	}
 
 	// SINGLE TASK MODE (original behavior)
 	// Check if there are tasks available for planning
-	available, err := HasAvailablePlanningTasks()
+	available, err := HasAvailablePlanningTasks(planParentID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
 		os.Exit(1)

@@ -25,6 +25,7 @@ type AutoModeOptions struct {
 	AgentType   string // "plan" or "task"
 	AgentName   string
 	WorktreePath string
+	ParentID     string // Epic ID to scope task discovery to (empty = all tasks)
 	CustomPromptGen func(string, *WorkspaceConfig) string // Custom prompt generator (overrides AgentType selection)
 	CustomTaskCheck func() (bool, error)                   // Custom task availability check (overrides AgentType selection)
 }
@@ -123,8 +124,13 @@ func hasOpenBlockers(deps []Dependency) bool {
 
 // GetAvailablePlanningTasks returns tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
-func GetAvailablePlanningTasks() ([]BdIssue, error) {
-	result := execCommand(GetBeadsDir(), "bd", "ready", "--json", "--limit", "100")
+// When parentID is non-empty, only tasks under that epic are returned.
+func GetAvailablePlanningTasks(parentID string) ([]BdIssue, error) {
+	args := []string{"bd", "ready", "--json", "--limit", "100"}
+	if parentID != "" {
+		args = append(args, "--parent", parentID)
+	}
+	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
 	if result.Err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
@@ -162,8 +168,8 @@ func GetAvailablePlanningTasks() ([]BdIssue, error) {
 
 // HasAvailablePlanningTasks checks if there are tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
-func HasAvailablePlanningTasks() (bool, error) {
-	tasks, err := GetAvailablePlanningTasks()
+func HasAvailablePlanningTasks(parentID string) (bool, error) {
+	tasks, err := GetAvailablePlanningTasks(parentID)
 	if err != nil {
 		return false, err
 	}
@@ -172,8 +178,13 @@ func HasAvailablePlanningTasks() (bool, error) {
 
 // GetAvailableImplementationTasks returns tasks ready for implementation
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
-func GetAvailableImplementationTasks() ([]BdIssue, error) {
-	result := execCommand(GetBeadsDir(), "bd", "ready", "--json", "--limit", "100")
+// When parentID is non-empty, only tasks under that epic are returned.
+func GetAvailableImplementationTasks(parentID string) ([]BdIssue, error) {
+	args := []string{"bd", "ready", "--json", "--limit", "100"}
+	if parentID != "" {
+		args = append(args, "--parent", parentID)
+	}
+	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
 	if result.Err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
@@ -209,8 +220,8 @@ func GetAvailableImplementationTasks() ([]BdIssue, error) {
 
 // HasAvailableImplementationTasks checks if there are tasks ready for implementation
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
-func HasAvailableImplementationTasks() (bool, error) {
-	tasks, err := GetAvailableImplementationTasks()
+func HasAvailableImplementationTasks(parentID string) (bool, error) {
+	tasks, err := GetAvailableImplementationTasks(parentID)
 	if err != nil {
 		return false, err
 	}
@@ -219,8 +230,13 @@ func HasAvailableImplementationTasks() (bool, error) {
 
 // GetAnyAvailableTasks returns any ready tasks regardless of design status.
 // Used by custom roles with task_filter=any.
-func GetAnyAvailableTasks() ([]BdIssue, error) {
-	result := execCommand(GetBeadsDir(), "bd", "ready", "--json", "--limit", "100")
+// When parentID is non-empty, only tasks under that epic are returned.
+func GetAnyAvailableTasks(parentID string) ([]BdIssue, error) {
+	args := []string{"bd", "ready", "--json", "--limit", "100"}
+	if parentID != "" {
+		args = append(args, "--parent", parentID)
+	}
+	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
 	if result.Err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
@@ -251,8 +267,8 @@ func GetAnyAvailableTasks() ([]BdIssue, error) {
 
 // HasAnyAvailableTasks checks if there are any ready tasks regardless of design status.
 // Used by custom roles with task_filter=any.
-func HasAnyAvailableTasks() (bool, error) {
-	tasks, err := GetAnyAvailableTasks()
+func HasAnyAvailableTasks(parentID string) (bool, error) {
+	tasks, err := GetAnyAvailableTasks(parentID)
 	if err != nil {
 		return false, err
 	}
@@ -285,10 +301,10 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		hasAvailableTasks = opts.CustomTaskCheck
 		generatePrompt = opts.CustomPromptGen
 	} else if opts.AgentType == "plan" {
-		hasAvailableTasks = HasAvailablePlanningTasks
+		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID) }
 		generatePrompt = GeneratePlanningPrompt
 	} else {
-		hasAvailableTasks = HasAvailableImplementationTasks
+		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
 		generatePrompt = GenerateTaskPrompt
 	}
 
@@ -527,9 +543,9 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	if opts.CustomTaskCheck != nil {
 		hasAvailableTasks = opts.CustomTaskCheck
 	} else if opts.AgentType == "plan" {
-		hasAvailableTasks = HasAvailablePlanningTasks
+		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID) }
 	} else {
-		hasAvailableTasks = HasAvailableImplementationTasks
+		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
 	}
 
 	// Print header
@@ -672,6 +688,11 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	// Propagate backend selection to subprocess
 	if resolved := GetBackendName(); resolved != "claude" {
 		loomCmd += fmt.Sprintf(" --backend %s", shellQuote(resolved))
+	}
+
+	// Propagate parent ID filter to subprocess
+	if opts.ParentID != "" {
+		loomCmd += fmt.Sprintf(" --parent %s", shellQuote(opts.ParentID))
 	}
 
 	// Create detached session with current terminal dimensions

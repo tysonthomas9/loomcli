@@ -736,7 +736,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: LoadFixture(t, "bd_ready_planning.json")})
 		mock.Install()
 
-		hasTasks, err := HasAvailablePlanningTasks()
+		hasTasks, err := HasAvailablePlanningTasks("")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -751,7 +751,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: LoadFixture(t, "bd_ready_implementation.json")})
 		mock.Install()
 
-		hasTasks, err := HasAvailableImplementationTasks()
+		hasTasks, err := HasAvailableImplementationTasks("")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -819,7 +819,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: needsRevisionJSON})
 		mock.Install()
 
-		hasTasks, err := HasAvailablePlanningTasks()
+		hasTasks, err := HasAvailablePlanningTasks("")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -837,7 +837,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: epicJSON})
 		mock.Install()
 
-		hasTasks, err := HasAvailableImplementationTasks()
+		hasTasks, err := HasAvailableImplementationTasks("")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
