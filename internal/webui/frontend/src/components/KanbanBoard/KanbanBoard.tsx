@@ -255,13 +255,8 @@ export function KanbanBoard({
           // Determine column type for special columns
           const isBacklogColumn = col.id === 'backlog';
           const isBlockedColumn = col.id === 'blocked';
-          const isReviewColumn = col.id === 'review';
           const isMutedColumn = isBacklogColumn || isBlockedColumn;
-          const columnType = isBacklogColumn
-            ? ('backlog' as const)
-            : isReviewColumn
-              ? ('review' as const)
-              : undefined;
+          const columnType = isBacklogColumn ? ('backlog' as const) : undefined;
 
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const statusColumnProps = {

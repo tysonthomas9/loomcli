@@ -16,7 +16,7 @@ import { formatStatusLabel } from './utils';
  * Column type for visual variants (different from status value).
  * Allows same status to have different visual treatments.
  */
-export type ColumnType = 'ready' | 'backlog' | 'review' | 'default';
+export type ColumnType = 'ready' | 'backlog' | 'default';
 
 /**
  * Props for the StatusColumn component.
