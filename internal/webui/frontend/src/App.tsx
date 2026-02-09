@@ -270,55 +270,6 @@ function App() {
     }
   }, [pendingDragData, updateIssueStatus, showToast]);
 
-  // Handle approve button click on review cards
-  const handleApprove = useCallback(
-    async (issue: Issue) => {
-      try {
-        const reviewType = getReviewType(issue);
-
-        if (reviewType === 'code') {
-          // Code review: Close the issue (PR was reviewed and approved)
-          await closeIssue(issue.id, 'PR approved after code review');
-        } else if (reviewType === 'plan') {
-          // Plan review: Move to open (ready for implementation)
-          await updateIssue(issue.id, { status: 'open' });
-        } else if (reviewType === 'help') {
-          // Needs help: Move to in_progress (unblock)
-          await updateIssue(issue.id, { status: 'in_progress' });
-        }
-      } catch (err) {
-        if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : 'Failed to approve';
-        showToast(message, { type: 'error' });
-      }
-    },
-    [showToast]
-  );
-
-  // Handle reject button submission on review cards
-  const handleReject = useCallback(
-    async (issue: Issue, comment: string) => {
-      try {
-        const reviewType = getReviewType(issue);
-
-        // Add feedback comment
-        const prefix = reviewType === 'code' ? 'CODE REVIEW' : 'FEEDBACK';
-        await addComment(issue.id, `${prefix}: ${comment}`);
-
-        // Add needs-revision label and set status to open
-        await updateIssue(issue.id, {
-          status: 'open',
-          add_labels: ['needs-revision'],
-        });
-      } catch (err) {
-        if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : 'Failed to reject';
-        showToast(message, { type: 'error' });
-      }
-    },
-    [showToast]
-  );
-
   // Handle search clear to sync both local and filter state
   const handleSearchClear = useCallback(() => {
     setSearchValue('');
@@ -370,6 +321,63 @@ function App() {
       setSelectedIssueId(null);
     }, 300); // Match CSS transition duration
   }, [clearIssue]);
+
+  // Handle approve button click on review cards
+  const handleApprove = useCallback(
+    async (issue: Issue) => {
+      try {
+        const reviewType = getReviewType(issue);
+
+        if (reviewType === 'code') {
+          // Code review: Close the issue (PR was reviewed and approved)
+          await closeIssue(issue.id, 'PR approved after code review');
+          await refetch();
+        } else if (reviewType === 'plan') {
+          // Plan review: Move to open (ready for implementation)
+          await updateIssueStatus(issue.id, 'open');
+        } else if (reviewType === 'help') {
+          // Needs help: Move to in_progress (unblock)
+          await updateIssueStatus(issue.id, 'in_progress');
+        }
+
+        // Close the detail panel and clean up after successful approve
+        handlePanelClose();
+      } catch (err) {
+        if (!mountedRef.current) return;
+        const message = err instanceof Error ? err.message : 'Failed to approve';
+        showToast(message, { type: 'error' });
+      }
+    },
+    [updateIssueStatus, refetch, handlePanelClose, showToast]
+  );
+
+  // Handle reject button submission on review cards
+  const handleReject = useCallback(
+    async (issue: Issue, comment: string) => {
+      try {
+        const reviewType = getReviewType(issue);
+
+        // Add feedback comment
+        const prefix = reviewType === 'code' ? 'CODE REVIEW' : 'FEEDBACK';
+        await addComment(issue.id, `${prefix}: ${comment}`);
+
+        // Add needs-revision label and set status to open
+        await updateIssue(issue.id, {
+          status: 'open',
+          add_labels: ['needs-revision'],
+        });
+
+        // Refetch to reflect label/status changes and close panel
+        await refetch();
+        handlePanelClose();
+      } catch (err) {
+        if (!mountedRef.current) return;
+        const message = err instanceof Error ? err.message : 'Failed to reject';
+        showToast(message, { type: 'error' });
+      }
+    },
+    [refetch, handlePanelClose, showToast]
+  );
 
   // Handle agent click from AgentsSidebar or MonitorDashboard
   const handleAgentClick = useCallback(
