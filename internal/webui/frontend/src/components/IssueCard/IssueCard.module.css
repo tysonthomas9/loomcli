@@ -273,6 +273,26 @@
   color: var(--color-text);
 }
 
+/* PR link for code reviews */
+.prLink {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: background-color var(--transition-fast);
+}
+
+.prLink:hover {
+  background-color: var(--color-primary-bg);
+  text-decoration: underline;
+}
+
 /* =================================
  * Review action buttons (Approve/Reject)
  * Only shown for cards in Review column

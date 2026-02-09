@@ -8,7 +8,8 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 
-import { updateIssue, addComment } from '@/api';
+import { updateIssue, addComment, closeIssue } from '@/api';
+import { getReviewType } from '@/utils/reviewType';
 import {
   AppLayout,
   SwimLaneBoard,
@@ -273,18 +274,15 @@ function App() {
   const handleApprove = useCallback(
     async (issue: Issue) => {
       try {
-        const hasNeedReview = issue.title?.includes('[Need Review]') ?? false;
-        const isReviewStatus = issue.status === 'review';
-        const isBlockedWithNotes = issue.status === 'blocked' && !!issue.notes;
+        const reviewType = getReviewType(issue);
 
-        if (hasNeedReview) {
-          // Plan review: Remove [Need Review] prefix and set to open (Ready column)
-          const newTitle = issue.title.replace(/\[Need Review\]\s*/g, '').trim();
-          await updateIssue(issue.id, { title: newTitle, status: 'open' });
-        } else if (isReviewStatus) {
-          // Status review: Move to open (Ready for implementation)
+        if (reviewType === 'code') {
+          // Code review: Close the issue (PR was reviewed and approved)
+          await closeIssue(issue.id, 'PR approved after code review');
+        } else if (reviewType === 'plan') {
+          // Plan review: Move to open (ready for implementation)
           await updateIssue(issue.id, { status: 'open' });
-        } else if (isBlockedWithNotes) {
+        } else if (reviewType === 'help') {
           // Needs help: Move to in_progress (unblock)
           await updateIssue(issue.id, { status: 'in_progress' });
         }
@@ -301,17 +299,17 @@ function App() {
   const handleReject = useCallback(
     async (issue: Issue, comment: string) => {
       try {
-        // First add the comment
-        await addComment(issue.id, comment);
+        const reviewType = getReviewType(issue);
 
-        // Then update status and remove [Need Review] prefix if present
-        const hasNeedReview = issue.title?.includes('[Need Review]') ?? false;
-        if (hasNeedReview) {
-          const newTitle = issue.title.replace(/\[Need Review\]\s*/g, '').trim();
-          await updateIssue(issue.id, { title: newTitle, status: 'open' });
-        } else {
-          await updateIssue(issue.id, { status: 'open' });
-        }
+        // Add feedback comment
+        const prefix = reviewType === 'code' ? 'CODE REVIEW' : 'FEEDBACK';
+        await addComment(issue.id, `${prefix}: ${comment}`);
+
+        // Add needs-revision label and set status to open
+        await updateIssue(issue.id, {
+          status: 'open',
+          add_labels: ['needs-revision'],
+        });
       } catch (err) {
         if (!mountedRef.current) return;
         const message = err instanceof Error ? err.message : 'Failed to reject';

@@ -121,6 +121,28 @@ func hasOpenBlockers(deps []Dependency) bool {
 	return false
 }
 
+// HasOpenPR checks if the given worktree's branch has an open pull request.
+// Returns true if there's an open PR, meaning no new task should be started.
+func HasOpenPR(worktreePath string) (bool, error) {
+	branch, err := GetCurrentBranch(worktreePath)
+	if err != nil {
+		return false, fmt.Errorf("failed to get current branch: %w", err)
+	}
+	if branch == "" || branch == "main" || branch == "master" {
+		return false, nil
+	}
+
+	result := execCommand(worktreePath, "gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number", "--limit", "1")
+	if result.Err != nil {
+		// gh not installed or no remote — not an error, just skip the check
+		return false, nil
+	}
+
+	output := strings.TrimSpace(result.Stdout)
+	// Empty array means no open PRs
+	return output != "" && output != "[]", nil
+}
+
 // GetAvailablePlanningTasks returns tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
 func GetAvailablePlanningTasks() ([]BdIssue, error) {
@@ -362,6 +384,17 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			continue
 		}
 
+		// Check for open PR on this branch — skip work if PR is pending review
+		if hasOpenPR, prErr := HasOpenPR(opts.WorktreePath); prErr == nil && hasOpenPR {
+			fmt.Printf("[auto] Branch has an open PR pending review, waiting %ds...\n", opts.Interval)
+			if interruptibleSleep(time.Duration(opts.Interval)*time.Second, shutdown) {
+				state.ShouldExit = true
+				state.ExitReason = "shutdown signal received"
+				break
+			}
+			continue
+		}
+
 		// Reset idle timer when we find tasks
 		state.IdleStartTime = time.Now()
 
@@ -587,6 +620,17 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 				return
 			}
 			fmt.Printf("[auto] No tasks available, waiting %ds...\n", opts.Interval)
+			if interruptibleSleep(time.Duration(opts.Interval)*time.Second, shutdown) {
+				cleanupTmuxSession(sessionName)
+				printTmuxSummary(taskCount)
+				return
+			}
+			continue
+		}
+
+		// Check for open PR on this branch — skip work if PR is pending review
+		if hasOpenPR, prErr := HasOpenPR(opts.WorktreePath); prErr == nil && hasOpenPR {
+			fmt.Printf("[auto] Branch has an open PR pending review, waiting %ds...\n", opts.Interval)
 			if interruptibleSleep(time.Duration(opts.Interval)*time.Second, shutdown) {
 				cleanupTmuxSession(sessionName)
 				printTmuxSummary(taskCount)

@@ -706,7 +706,8 @@ describe('IssueDetailPanel', () => {
   describe('ReviewActionBar', () => {
     it('renders ReviewActionBar for review items', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn();
@@ -727,6 +728,7 @@ describe('IssueDetailPanel', () => {
     it('does NOT render ReviewActionBar for non-review items', () => {
       const mockIssue = createTestIssueDetails({
         title: 'Regular task without review',
+        status: 'open',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn();
@@ -744,7 +746,8 @@ describe('IssueDetailPanel', () => {
 
     it('does NOT render ReviewActionBar when onApprove is not provided', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onReject = vi.fn();
       render(
@@ -760,7 +763,8 @@ describe('IssueDetailPanel', () => {
 
     it('does NOT render ReviewActionBar when onReject is not provided', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       render(
@@ -776,7 +780,8 @@ describe('IssueDetailPanel', () => {
 
     it('clicking Approve button calls onApprove', async () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn().mockResolvedValue(undefined);
       const onReject = vi.fn();
@@ -798,7 +803,8 @@ describe('IssueDetailPanel', () => {
 
     it('clicking Reject button shows the reject comment form', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn();
@@ -817,7 +823,8 @@ describe('IssueDetailPanel', () => {
 
     it('ReviewActionBar hides when reject form is shown', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn();
@@ -843,7 +850,8 @@ describe('IssueDetailPanel', () => {
 
     it('reject form submit calls onReject with comment', async () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn().mockResolvedValue(undefined);
@@ -874,7 +882,8 @@ describe('IssueDetailPanel', () => {
 
     it('reject form cancel shows ReviewActionBar again', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn();

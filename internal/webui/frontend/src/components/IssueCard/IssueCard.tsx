@@ -134,6 +134,19 @@ export function IssueCard({
             {REVIEW_BADGE_CONFIG[reviewType].label}
           </span>
         )}
+        {reviewType === 'code' && issue.external_ref && (
+          <a
+            href={issue.external_ref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.prLink}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="View pull request"
+            data-testid="pr-link"
+          >
+            View PR &rarr;
+          </a>
+        )}
         {isBlocked && (
           <BlockedBadge
             count={blockedByCount ?? 0}
