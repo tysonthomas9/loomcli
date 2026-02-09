@@ -25,7 +25,7 @@ import { EmptyColumn } from '@/components/EmptyColumn';
 import { StatusColumn } from '@/components/StatusColumn';
 import { formatStatusLabel } from '@/components/StatusColumn/utils';
 import type { FilterState } from '@/hooks/useFilterState';
-import type { Issue, Status } from '@/types';
+import type { BlockerRef, Issue, Status } from '@/types';
 
 import { DEFAULT_COLUMNS } from './columnConfigs';
 import styles from './KanbanBoard.module.css';
@@ -37,6 +37,7 @@ import type { KanbanColumnConfig } from './types';
 export interface BlockedInfo {
   blockedByCount: number;
   blockedBy: string[];
+  blockedByDetails?: BlockerRef[];
 }
 
 /**
@@ -255,13 +256,8 @@ export function KanbanBoard({
           // Determine column type for special columns
           const isBacklogColumn = col.id === 'backlog';
           const isBlockedColumn = col.id === 'blocked';
-          const isReviewColumn = col.id === 'review';
           const isMutedColumn = isBacklogColumn || isBlockedColumn;
-          const columnType = isBacklogColumn
-            ? ('backlog' as const)
-            : isReviewColumn
-              ? ('review' as const)
-              : undefined;
+          const columnType = isBacklogColumn ? ('backlog' as const) : undefined;
 
           // Apply display limit for columns with defaultLimit
           const isExpanded = expandedColumns.has(col.id);
@@ -330,6 +326,9 @@ export function KanbanBoard({
                       {...(blockedInfo !== undefined && {
                         blockedByCount: blockedInfo.blockedByCount,
                         blockedBy: blockedInfo.blockedBy,
+                        ...(blockedInfo.blockedByDetails !== undefined && {
+                          blockedByDetails: blockedInfo.blockedByDetails,
+                        }),
                       })}
                       {...(isMutedColumn && { isBacklog: true })}
                     />
@@ -352,6 +351,9 @@ export function KanbanBoard({
                 {...(blockedInfo !== undefined && {
                   blockedByCount: blockedInfo.blockedByCount,
                   blockedBy: blockedInfo.blockedBy,
+                  ...(blockedInfo.blockedByDetails !== undefined && {
+                    blockedByDetails: blockedInfo.blockedByDetails,
+                  }),
                 })}
                 {...(isMutedCard && { isBacklog: true })}
               />

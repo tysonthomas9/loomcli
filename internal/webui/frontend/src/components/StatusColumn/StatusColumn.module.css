@@ -204,27 +204,3 @@
   background-color: #e5e5e5;
 }
 
-/* =================================
- * Review column styling (needs attention)
- * ================================= */
-
-@keyframes reviewPulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.8;
-  }
-}
-
-.statusColumn[data-column-type='review'] {
-  background-color: var(--color-warning-bg);
-  animation: reviewPulse 2s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .statusColumn[data-column-type='review'] {
-    animation: none;
-  }
-}

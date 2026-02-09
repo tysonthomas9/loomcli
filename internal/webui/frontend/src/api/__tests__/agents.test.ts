@@ -13,11 +13,72 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import type { LoomTaskLists } from '@/types';
 
-import { fetchStatus, fetchTasks, type FetchStatusResult } from '../agents';
+import { fetchAgents, fetchStatus, fetchTasks, type FetchStatusResult } from '../agents';
 
 // Mock fetch for testing
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
+
+describe('fetchAgents', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns agents array on successful response', async () => {
+    const agents = [
+      { name: 'nova', branch: 'feature-x', status: 'ready', ahead: 0, behind: 0 },
+      { name: 'ember', branch: 'main', status: 'working:bd-123', ahead: 1, behind: 0 },
+    ];
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ agents }),
+    });
+
+    const result = await fetchAgents();
+
+    expect(result).toEqual(agents);
+    expect(result).toHaveLength(2);
+    expect(result[0].name).toBe('nova');
+  });
+
+  it('returns empty array when API returns null agents', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ agents: null }),
+    });
+
+    const result = await fetchAgents();
+
+    expect(result).toEqual([]);
+  });
+
+  it('throws error on network failure (does not return empty array)', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+    await expect(fetchAgents()).rejects.toThrow('Network error');
+  });
+
+  it('throws error on non-OK HTTP response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+    });
+
+    await expect(fetchAgents()).rejects.toThrow('Loom agents: 503 Service Unavailable');
+  });
+
+  it('throws error on server error (500)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+    });
+
+    await expect(fetchAgents()).rejects.toThrow('Loom agents: 500 Internal Server Error');
+  });
+});
 
 describe('fetchStatus', () => {
   beforeEach(() => {

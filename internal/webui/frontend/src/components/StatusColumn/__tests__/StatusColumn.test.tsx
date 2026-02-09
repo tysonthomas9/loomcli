@@ -164,7 +164,7 @@ describe('StatusColumn', () => {
     });
 
     it('renders with data-column-type for each column type', () => {
-      const columnTypes = ['ready', 'backlog', 'review', 'default'] as const;
+      const columnTypes = ['ready', 'backlog', 'default'] as const;
 
       columnTypes.forEach((columnType) => {
         const { container, unmount } = render(
@@ -186,32 +186,6 @@ describe('StatusColumn', () => {
       expect(section?.getAttribute('data-column-type')).toBeNull();
     });
 
-    it('review column has data-column-type="review" attribute set', () => {
-      const { container } = render(<StatusColumn status="open" count={1} columnType="review" />);
-
-      const section = container.querySelector('section');
-      expect(section).toHaveAttribute('data-column-type', 'review');
-    });
-
-    it('review column applies correct CSS module class for background styling', () => {
-      const { container } = render(<StatusColumn status="open" count={1} columnType="review" />);
-
-      const section = container.querySelector('section');
-
-      // Verify the section element exists and has the CSS Module class applied
-      // (CSS Modules hash the class names, so we check that a class is applied)
-      expect(section).toBeInTheDocument();
-      expect(section?.className).toBeTruthy();
-
-      // Verify the computed style reflects the warning background color
-      const computedStyle = window.getComputedStyle(section!);
-      const backgroundColor = computedStyle.backgroundColor;
-
-      // The background-color should be set (not empty or undefined)
-      // CSS Module will apply the .statusColumn[data-column-type='review'] rule
-      // which sets background-color: var(--color-warning-bg)
-      expect(backgroundColor).toBeTruthy();
-    });
   });
 
   describe('headerIcon prop', () => {
@@ -293,11 +267,11 @@ describe('StatusColumn', () => {
     });
 
     it('data-has-items attribute is on section element with other data attributes', () => {
-      const { container } = render(<StatusColumn status="review" count={3} columnType="review" />);
+      const { container } = render(<StatusColumn status="review" count={3} columnType="backlog" />);
 
       const section = container.querySelector('section');
       expect(section).toHaveAttribute('data-status', 'review');
-      expect(section).toHaveAttribute('data-column-type', 'review');
+      expect(section).toHaveAttribute('data-column-type', 'backlog');
       expect(section).toHaveAttribute('data-has-items', 'true');
     });
   });

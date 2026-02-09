@@ -163,6 +163,9 @@ export function SwimLane({
                     ...(blockedInfo !== undefined && {
                       blockedByCount: blockedInfo.blockedByCount,
                       blockedBy: blockedInfo.blockedBy,
+                      ...(blockedInfo.blockedByDetails !== undefined && {
+                        blockedByDetails: blockedInfo.blockedByDetails,
+                      }),
                     }),
                     ...(isMutedColumn && { isBacklog: true }),
                   };

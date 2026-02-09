@@ -58,6 +58,7 @@ export function DraggableIssueCard({
   isOverlay = false,
   blockedByCount,
   blockedBy,
+  blockedByDetails,
   columnId,
   isBacklog,
 }: DraggableIssueCardProps): JSX.Element {
@@ -75,6 +76,7 @@ export function DraggableIssueCard({
     ...(className !== undefined && { className }),
     ...(blockedByCount !== undefined && { blockedByCount }),
     ...(blockedBy !== undefined && { blockedBy }),
+    ...(blockedByDetails !== undefined && { blockedByDetails }),
     ...(isBacklog !== undefined && { isBacklog }),
     ...(columnId !== undefined && { columnId }),
   };

@@ -344,7 +344,6 @@ test.describe("Review Column Features", () => {
     await navigateToKanban(page)
 
     const reviewColumn = page.locator('section[data-status="review"]')
-    await expect(reviewColumn).toHaveAttribute("data-column-type", "review")
     await expect(reviewColumn).toHaveAttribute("data-has-items", "true")
   })
 

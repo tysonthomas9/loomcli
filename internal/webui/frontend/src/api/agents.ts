@@ -39,32 +39,22 @@ async function fetchWithTimeout(
 
 /**
  * Fetch agents from the loom server.
- * Returns an empty array if the server is unavailable.
+ * Throws on network errors or non-OK responses so callers can handle connection state.
  */
 export async function fetchAgents(): Promise<LoomAgentStatus[]> {
-  try {
-    const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/agents`, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+  const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/agents`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
 
-    if (!response.ok) {
-      console.warn(`Loom server returned ${response.status}: ${response.statusText}`);
-      return [];
-    }
-
-    const data: LoomAgentsResponse = await response.json();
-    return data.agents ?? [];
-  } catch (error) {
-    // Loom server not available - this is expected when not running agents
-    console.warn(
-      'Loom server not available:',
-      error instanceof Error ? error.message : 'Unknown error'
-    );
-    return [];
+  if (!response.ok) {
+    throw new Error(`Loom agents: ${response.status} ${response.statusText}`);
   }
+
+  const data: LoomAgentsResponse = await response.json();
+  return data.agents ?? [];
 }
 
 /**
