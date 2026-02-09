@@ -1,10 +1,10 @@
 {
-  "pid": 85808,
+  "pid": 9654,
   "command": "task",
-  "started_at": "2026-02-08T22:35:21.229741-08:00",
+  "started_at": "2026-02-09T00:17:59.682386-08:00",
   "agent_name": "falcon",
-  "task_id": "loomcli-dwl",
-  "task_title": "Increase test coverage for internal/webui package (currently 66.7%)",
-  "task_started_at": "2026-02-08T22:36:11.488442-08:00",
+  "task_id": "loomcli-6fl.9",
+  "task_title": "Add race detection to CI and fix remaining races",
+  "task_started_at": "2026-02-09T00:18:47.922849-08:00",
   "state": "active"
 }
