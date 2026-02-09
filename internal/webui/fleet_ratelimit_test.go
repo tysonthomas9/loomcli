@@ -131,3 +131,30 @@ func TestFleetRateLimiter_RedisUnavailable_FailOpen(t *testing.T) {
 		t.Error("expected fail-open (allowed) when Redis is unavailable")
 	}
 }
+
+// TestFleetRateLimiter_Close tests that Close closes the underlying Redis client.
+func TestFleetRateLimiter_Close(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	rl := NewFleetRateLimiter(client, 5, time.Minute)
+
+	// Close should succeed
+	if err := rl.Close(); err != nil {
+		t.Errorf("Close() returned error: %v", err)
+	}
+
+	// After close, Allow should fail (Redis client is closed)
+	_, err := rl.Allow(context.Background(), "after-close")
+	if err == nil {
+		t.Error("expected error after Close(), got nil")
+	}
+}
+
+// TestFleetRateLimiter_Close_NilClient tests that Close with nil client returns nil.
+func TestFleetRateLimiter_Close_NilClient(t *testing.T) {
+	rl := &FleetRateLimiter{client: nil, limit: 5, window: time.Minute}
+	if err := rl.Close(); err != nil {
+		t.Errorf("Close() with nil client returned error: %v", err)
+	}
+}
