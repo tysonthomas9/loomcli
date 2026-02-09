@@ -95,6 +95,7 @@ export function KanbanBoard({
 }: KanbanBoardProps): JSX.Element {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
+  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
 
   // Resolve columns: props.columns > props.statuses (legacy) > DEFAULT_COLUMNS
   const columns = useMemo(() => {
@@ -243,7 +244,7 @@ export function KanbanBoard({
     >
       <div className={rootClassName}>
         {columns.map((col) => {
-          const colIssues = issuesByColumn.get(col.id) ?? [];
+          const allColIssues = issuesByColumn.get(col.id) ?? [];
           const columnClassName =
             col.style === 'muted'
               ? styles.mutedColumn
@@ -262,17 +263,55 @@ export function KanbanBoard({
               ? ('review' as const)
               : undefined;
 
+          // Apply display limit for columns with defaultLimit
+          const isExpanded = expandedColumns.has(col.id);
+          const hasLimit = col.defaultLimit !== undefined && col.defaultLimit > 0;
+          const isTruncated = hasLimit && !isExpanded && allColIssues.length > col.defaultLimit!;
+          const colIssues = isTruncated
+            ? allColIssues
+                .slice()
+                .sort((a, b) => {
+                  const timeB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+                  const timeA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+                  return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+                })
+                .slice(0, col.defaultLimit!)
+            : allColIssues;
+
+          // Footer action for truncated columns
+          const footerAction = hasLimit && allColIssues.length > col.defaultLimit! ? (
+            <button
+              type="button"
+              onClick={() => {
+                setExpandedColumns((prev) => {
+                  const next = new Set(prev);
+                  if (isExpanded) {
+                    next.delete(col.id);
+                  } else {
+                    next.add(col.id);
+                  }
+                  return next;
+                });
+              }}
+            >
+              {isExpanded
+                ? 'Show recent'
+                : `Show all ${allColIssues.length}`}
+            </button>
+          ) : undefined;
+
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const statusColumnProps = {
             status: col.id,
             statusLabel: col.label,
-            count: colIssues.length,
+            count: allColIssues.length,
             ...(col.headerIcon !== undefined && { headerIcon: col.headerIcon }),
             ...(col.droppableDisabled !== undefined && {
               droppableDisabled: col.droppableDisabled,
             }),
             ...(columnClassName !== undefined && { className: columnClassName }),
             ...(columnType !== undefined && { columnType }),
+            ...(footerAction !== undefined && { footerAction }),
           };
 
           return (

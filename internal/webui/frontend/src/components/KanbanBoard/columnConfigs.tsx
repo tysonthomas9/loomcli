@@ -98,5 +98,6 @@ export const DEFAULT_COLUMNS: KanbanColumnConfig[] = [
     targetStatus: 'closed',
     allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
     style: 'normal',
+    defaultLimit: 10,
   },
 ];

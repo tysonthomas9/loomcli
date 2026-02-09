@@ -403,7 +403,7 @@ describe('issues API', () => {
 
       const callArg = mockGet.mock.calls[0][0] as string;
       expect(callArg).toContain('/api/issues?');
-      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('exclude_status=tombstone');
       expect(callArg).toContain('include_blocked=true');
     });
 
@@ -414,7 +414,7 @@ describe('issues API', () => {
 
       const callArg = mockGet.mock.calls[0][0] as string;
       expect(callArg).toContain('/api/issues?');
-      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('exclude_status=tombstone');
       expect(callArg).toContain('include_blocked=true');
     });
 
@@ -425,7 +425,7 @@ describe('issues API', () => {
 
       const callArg = mockGet.mock.calls[0][0] as string;
       expect(callArg).toContain('/api/issues?');
-      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('exclude_status=tombstone');
       expect(callArg).toContain('include_blocked=true');
       expect(callArg).toContain('assignee=dev1');
       expect(callArg).toContain('priority=2');
@@ -485,7 +485,7 @@ describe('issues API', () => {
       expect(callArg).toContain('labels=bug%2Curgent');
       expect(callArg).toContain('assignee=dev1');
       // kanban defaults still present
-      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('exclude_status=tombstone');
       expect(callArg).toContain('include_blocked=true');
     });
 
@@ -500,7 +500,7 @@ describe('issues API', () => {
       const callArg = mockGet.mock.calls[0][0] as string;
       expect(callArg).toContain('status=open');
       // exclude_status and include_blocked are separate keys, so still present
-      expect(callArg).toContain('exclude_status=closed%2Ctombstone');
+      expect(callArg).toContain('exclude_status=tombstone');
       expect(callArg).toContain('include_blocked=true');
     });
 

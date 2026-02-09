@@ -316,6 +316,15 @@ describe('columnConfigs', () => {
   });
 
   // ---------------------------------------------------------------
+  // Done column defaultLimit
+  // ---------------------------------------------------------------
+  describe('Done column defaultLimit', () => {
+    it('has defaultLimit of 10', () => {
+      expect(getColumn('done').defaultLimit).toBe(10);
+    });
+  });
+
+  // ---------------------------------------------------------------
   // Blocked column identity
   // ---------------------------------------------------------------
   describe('Blocked column identity', () => {

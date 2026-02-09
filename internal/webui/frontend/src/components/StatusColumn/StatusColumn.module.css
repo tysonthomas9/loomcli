@@ -157,6 +157,27 @@
   background: var(--color-text-muted);
 }
 
+.footer {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+}
+
+.footer button {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.footer button:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
 /* Drop target visual feedback when dragging over */
 .contentDropOver {
   background-color: var(--accent-bg);

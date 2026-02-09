@@ -38,6 +38,8 @@ export interface StatusColumnProps {
   columnType?: ColumnType;
   /** Icon to display in header */
   headerIcon?: ReactNode;
+  /** Optional footer action (e.g., "Show all 63 closed") */
+  footerAction?: ReactNode;
 }
 
 /**
@@ -54,6 +56,7 @@ export function StatusColumn({
   droppableDisabled = false,
   columnType,
   headerIcon,
+  footerAction,
 }: StatusColumnProps): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({
     id: status,
@@ -103,6 +106,7 @@ export function StatusColumn({
       >
         {children}
       </div>
+      {footerAction && <footer className={styles.footer}>{footerAction}</footer>}
     </section>
   );
 }
