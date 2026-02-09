@@ -308,11 +308,14 @@ func (s *DaemonSubscriber) pollDBChanges() {
 		return
 	}
 
-	var totalCount int64
-	if err := json.Unmarshal(resp.Data, &totalCount); err != nil {
+	var countResult struct {
+		Count int64 `json:"count"`
+	}
+	if err := json.Unmarshal(resp.Data, &countResult); err != nil {
 		log.Printf("External poll: parse count error: %v", err)
 		return
 	}
+	totalCount := countResult.Count
 
 	now := time.Now()
 
