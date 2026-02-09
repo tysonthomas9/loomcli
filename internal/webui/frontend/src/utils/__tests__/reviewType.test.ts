@@ -12,34 +12,48 @@ import { getReviewType } from '../reviewType';
 
 describe('getReviewType', () => {
   describe('plan review', () => {
-    it('returns "plan" when title contains [Need Review]', () => {
-      const result = getReviewType({ title: '[Need Review] My feature plan' });
+    it('returns "plan" when status is review with no external_ref', () => {
+      const result = getReviewType({ title: 'Design auth flow', status: 'review' });
 
       expect(result).toBe('plan');
     });
 
-    it('returns "plan" when [Need Review] is in the middle of title', () => {
-      const result = getReviewType({ title: 'Feature [Need Review] for approval' });
+    it('returns "plan" when status is review with non-PR external_ref', () => {
+      const result = getReviewType({ title: 'Task', status: 'review', external_ref: 'JIRA-123' });
 
       expect(result).toBe('plan');
     });
 
-    it('returns "plan" when [Need Review] is at the end of title', () => {
-      const result = getReviewType({ title: 'My feature plan [Need Review]' });
+    it('returns "plan" when status is review with null external_ref', () => {
+      const result = getReviewType({ title: 'Task', status: 'review', external_ref: null });
+
+      expect(result).toBe('plan');
+    });
+
+    it('returns "plan" when status is review with empty string external_ref', () => {
+      const result = getReviewType({ title: 'Task', status: 'review', external_ref: '' });
 
       expect(result).toBe('plan');
     });
   });
 
   describe('code review', () => {
-    it('returns "code" when status is "review"', () => {
-      const result = getReviewType({ title: 'Implement feature X', status: 'review' });
+    it('returns "code" when status is review with PR URL in external_ref', () => {
+      const result = getReviewType({
+        title: 'Implement feature X',
+        status: 'review',
+        external_ref: 'https://github.com/owner/repo/pull/42',
+      });
 
       expect(result).toBe('code');
     });
 
-    it('returns "code" when status is "review" and title has no [Need Review]', () => {
-      const result = getReviewType({ title: 'Regular code task', status: 'review' });
+    it('returns "code" when external_ref contains /pulls/ path', () => {
+      const result = getReviewType({
+        title: 'Task',
+        status: 'review',
+        external_ref: 'https://github.com/owner/repo/pulls/123',
+      });
 
       expect(result).toBe('code');
     });
@@ -103,7 +117,18 @@ describe('getReviewType', () => {
   });
 
   describe('priority rules', () => {
-    it('plan takes priority over code review status', () => {
+    it('code takes priority when external_ref has PR URL even with notes', () => {
+      const result = getReviewType({
+        title: 'Task',
+        status: 'review',
+        notes: 'Some notes',
+        external_ref: 'https://github.com/owner/repo/pull/1',
+      });
+
+      expect(result).toBe('code');
+    });
+
+    it('plan review when status is review without PR URL regardless of title', () => {
       const result = getReviewType({
         title: '[Need Review] Code review request',
         status: 'review',
@@ -111,25 +136,9 @@ describe('getReviewType', () => {
 
       expect(result).toBe('plan');
     });
-
-    it('plan takes priority over blocked+notes', () => {
-      const result = getReviewType({
-        title: '[Need Review] Blocked item',
-        status: 'blocked',
-        notes: 'Some notes',
-      });
-
-      expect(result).toBe('plan');
-    });
   });
 
   describe('edge cases', () => {
-    it('[Need Review] detection is case sensitive', () => {
-      const result = getReviewType({ title: '[need review] lowercase' });
-
-      expect(result).toBeNull();
-    });
-
     it('handles undefined title gracefully', () => {
       // @ts-expect-error Testing undefined title
       const result = getReviewType({ title: undefined });
@@ -137,10 +146,16 @@ describe('getReviewType', () => {
       expect(result).toBeNull();
     });
 
-    it('handles title with only [Need Review]', () => {
-      const result = getReviewType({ title: '[Need Review]' });
+    it('returns "plan" for review status even with [Need Review] in title (title no longer matters)', () => {
+      const result = getReviewType({ title: '[Need Review]', status: 'review' });
 
       expect(result).toBe('plan');
+    });
+
+    it('does not detect review from title alone (no status)', () => {
+      const result = getReviewType({ title: '[Need Review] My feature plan' });
+
+      expect(result).toBeNull();
     });
   });
 });

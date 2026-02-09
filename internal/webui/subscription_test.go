@@ -760,6 +760,388 @@ func TestDaemonSubscriber_PollDBChanges_SkipsFirstPoll(t *testing.T) {
 	}
 }
 
+// --- Tests for GetMutationsSince with mock server ---
+
+// TestDaemonSubscriber_GetMutationsSince_Success tests successful mutation retrieval.
+func TestDaemonSubscriber_GetMutationsSince_Success(t *testing.T) {
+	ts := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+	mutations := []rpc.MutationEvent{
+		{Type: "create", IssueID: "bd-1", Timestamp: ts},
+		{Type: "update", IssueID: "bd-2", Timestamp: ts.Add(time.Second)},
+	}
+	mutData, _ := json.Marshal(mutations)
+
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "get_mutations":
+			return rpc.Response{Success: true, Data: mutData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	subscriber := NewDaemonSubscriber(pool, hub)
+
+	result := subscriber.GetMutationsSince(0)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 mutations, got %d", len(result))
+	}
+	if result[0].IssueID != "bd-1" {
+		t.Errorf("mutation[0].IssueID = %q, want %q", result[0].IssueID, "bd-1")
+	}
+	if result[1].IssueID != "bd-2" {
+		t.Errorf("mutation[1].IssueID = %q, want %q", result[1].IssueID, "bd-2")
+	}
+}
+
+// TestDaemonSubscriber_GetMutationsSince_RPCFailure tests GetMutationsSince when RPC returns failure.
+func TestDaemonSubscriber_GetMutationsSince_RPCFailure(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "get_mutations":
+			return rpc.Response{Success: false, Error: "database locked"}
+		default:
+			return rpc.Response{Success: false, Error: "unknown"}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	subscriber := NewDaemonSubscriber(pool, hub)
+
+	result := subscriber.GetMutationsSince(0)
+	if result != nil {
+		t.Errorf("expected nil for RPC failure, got %v", result)
+	}
+}
+
+// TestDaemonSubscriber_GetMutationsSince_InvalidJSON tests GetMutationsSince with invalid JSON data.
+func TestDaemonSubscriber_GetMutationsSince_InvalidJSON(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "get_mutations":
+			return rpc.Response{Success: true, Data: []byte(`not valid json`)}
+		default:
+			return rpc.Response{Success: false, Error: "unknown"}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	subscriber := NewDaemonSubscriber(pool, hub)
+
+	result := subscriber.GetMutationsSince(0)
+	if result != nil {
+		t.Errorf("expected nil for invalid JSON, got %v", result)
+	}
+}
+
+// TestDaemonSubscriber_GetMutationsSince_EmptyMutations tests GetMutationsSince with empty result.
+func TestDaemonSubscriber_GetMutationsSince_EmptyMutations(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "get_mutations":
+			data, _ := json.Marshal([]rpc.MutationEvent{})
+			return rpc.Response{Success: true, Data: data}
+		default:
+			return rpc.Response{Success: false, Error: "unknown"}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	subscriber := NewDaemonSubscriber(pool, hub)
+
+	result := subscriber.GetMutationsSince(0)
+	if len(result) != 0 {
+		t.Errorf("expected 0 mutations, got %d", len(result))
+	}
+}
+
+// --- Tests for waitForMutations ---
+
+// TestDaemonSubscriber_WaitForMutations_UnknownOperation tests that waitForMutations
+// switches to fallback polling when daemon returns "unknown operation" error.
+func TestDaemonSubscriber_WaitForMutations_UnknownOperation(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "wait_for_mutations":
+			return rpc.Response{Success: false, Error: "unknown operation: wait_for_mutations"}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	subscriber := NewDaemonSubscriber(pool, hub)
+
+	// Verify useFallback is false initially
+	subscriber.mu.RLock()
+	if subscriber.useFallback {
+		t.Fatal("expected useFallback to be false initially")
+	}
+	subscriber.mu.RUnlock()
+
+	subscriber.waitForMutations()
+
+	// After receiving "unknown operation" error, useFallback should be true
+	subscriber.mu.RLock()
+	useFallback := subscriber.useFallback
+	subscriber.mu.RUnlock()
+
+	if !useFallback {
+		t.Error("expected useFallback to be true after unknown operation error")
+	}
+}
+
+// TestDaemonSubscriber_WaitForMutations_RPCFailure tests waitForMutations with non-success response.
+func TestDaemonSubscriber_WaitForMutations_RPCFailure(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "wait_for_mutations":
+			return rpc.Response{Success: false, Error: "internal error"}
+		default:
+			return rpc.Response{Success: false, Error: "unknown"}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	subscriber := NewDaemonSubscriber(pool, hub)
+
+	// This should not panic or block indefinitely
+	done := make(chan struct{})
+	go func() {
+		subscriber.waitForMutations()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good
+	case <-time.After(10 * time.Second):
+		t.Error("waitForMutations blocked too long on RPC failure")
+	}
+
+	// useFallback should still be false (not an unknown operation error)
+	subscriber.mu.RLock()
+	if subscriber.useFallback {
+		t.Error("useFallback should remain false for non-unknown-operation errors")
+	}
+	subscriber.mu.RUnlock()
+}
+
+// TestDaemonSubscriber_WaitForMutations_Success tests waitForMutations successfully
+// receiving mutations and broadcasting them.
+func TestDaemonSubscriber_WaitForMutations_Success(t *testing.T) {
+	ts := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+	mutations := []rpc.MutationEvent{
+		{Type: "create", IssueID: "bd-wait-1", Timestamp: ts},
+	}
+	mutData, _ := json.Marshal(mutations)
+
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "wait_for_mutations":
+			return rpc.Response{Success: true, Data: mutData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown"}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.waitForMutations()
+
+	// Should have broadcast the mutation
+	select {
+	case received := <-client.send:
+		if received.IssueID != "bd-wait-1" {
+			t.Errorf("issue_id = %q, want %q", received.IssueID, "bd-wait-1")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("did not receive broadcast from waitForMutations")
+	}
+
+	// Verify lastSince was updated
+	subscriber.mu.RLock()
+	if subscriber.lastSince == 0 {
+		t.Error("expected lastSince to be updated after successful waitForMutations")
+	}
+	subscriber.mu.RUnlock()
+}
+
+// --- Tests for pollMutations ---
+
+// TestDaemonSubscriber_PollMutations_Success tests pollMutations with a successful response.
+func TestDaemonSubscriber_PollMutations_Success(t *testing.T) {
+	ts := time.Date(2025, 6, 15, 14, 0, 0, 0, time.UTC)
+	mutations := []rpc.MutationEvent{
+		{Type: "update", IssueID: "bd-poll-1", Timestamp: ts},
+	}
+	mutData, _ := json.Marshal(mutations)
+
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "get_mutations":
+			return rpc.Response{Success: true, Data: mutData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown"}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.useFallback = true // Enable fallback mode
+
+	done := make(chan struct{})
+	go func() {
+		subscriber.pollMutations()
+		close(done)
+	}()
+
+	// Should receive the broadcast
+	select {
+	case received := <-client.send:
+		if received.IssueID != "bd-poll-1" {
+			t.Errorf("issue_id = %q, want %q", received.IssueID, "bd-poll-1")
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("did not receive broadcast from pollMutations")
+	}
+
+	// Wait for pollMutations to complete (includes fallbackPollInterval wait)
+	select {
+	case <-done:
+		// Good
+	case <-time.After(5 * time.Second):
+		t.Error("pollMutations blocked too long")
+	}
+}
+
+// TestDaemonSubscriber_PollMutations_RPCFailure tests pollMutations when get_mutations returns failure.
+func TestDaemonSubscriber_PollMutations_RPCFailure(t *testing.T) {
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "get_mutations":
+			return rpc.Response{Success: false, Error: "database error"}
+		default:
+			return rpc.Response{Success: false, Error: "unknown"}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.useFallback = true
+
+	done := make(chan struct{})
+	go func() {
+		subscriber.pollMutations()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - completed without blocking
+	case <-time.After(10 * time.Second):
+		t.Error("pollMutations blocked too long on RPC failure")
+	}
+}
+
 // TestDaemonSubscriber_PollDBChanges_NilPool verifies that when pool is nil,
 // pollDBChanges does not panic. The externalChangeLoop skips when pool is nil.
 func TestDaemonSubscriber_PollDBChanges_NilPool(t *testing.T) {

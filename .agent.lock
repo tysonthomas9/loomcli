@@ -1,10 +1,10 @@
 {
-  "pid": 42959,
+  "pid": 9654,
   "command": "task",
-  "started_at": "2026-02-08T09:37:23.196384-08:00",
-  "agent_name": "nova",
-  "task_id": "loomcli-4em",
-  "task_title": "Investigate flaky monitor test",
-  "task_started_at": "2026-02-08T09:38:24.213342-08:00",
+  "started_at": "2026-02-09T00:17:59.682386-08:00",
+  "agent_name": "falcon",
+  "task_id": "loomcli-6fl.9",
+  "task_title": "Add race detection to CI and fix remaining races",
+  "task_started_at": "2026-02-09T00:18:47.922849-08:00",
   "state": "active"
 }

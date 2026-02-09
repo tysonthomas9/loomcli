@@ -273,6 +273,21 @@
   color: var(--color-text);
 }
 
+/* PR link for code review cards */
+.prLink {
+  font-size: var(--font-size-xs);
+  color: var(--color-primary);
+  text-decoration: none;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.prLink:hover {
+  background-color: var(--color-primary-bg);
+  text-decoration: underline;
+}
+
 /* =================================
  * Open status badge styling
  * Shown on cards in the Open column

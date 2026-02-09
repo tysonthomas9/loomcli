@@ -1,19 +1,24 @@
 package webui
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // mockClient implements issueGetter and issueUpdater for testing
@@ -7460,4 +7465,892 @@ func TestKanbanIssueJSON(t *testing.T) {
 			t.Errorf("parent should be omitted when nil")
 		}
 	})
+}
+
+// --- Pool adapter tests ---
+
+// TestPoolAdapterPut_CorrectType tests that Put with *rpc.Client type delegates to pool.Put.
+// We verify this indirectly by checking no panic occurs.
+func TestPoolAdapterPut_WrongType(t *testing.T) {
+	// Verifies that each pool adapter's Put method does not panic when given
+	// a client that satisfies the interface but is NOT *rpc.Client.
+	// The Put methods have a type guard (client.(*rpc.Client)) that should
+	// silently skip the pool.Put call when the assertion fails.
+	mockC := &mockClient{}
+
+	// readyPoolAdapter
+	t.Run("readyPoolAdapter", func(t *testing.T) {
+		adapter := &readyPoolAdapter{pool: nil}
+		mockReady := &mockReadyClient{}
+		// Put with wrong type should be no-op, not panic
+		adapter.Put(mockReady) // mockReadyClient implements readyClient but is not *rpc.Client
+	})
+
+	// poolAdapter
+	t.Run("poolAdapter", func(t *testing.T) {
+		adapter := &poolAdapter{pool: nil}
+		adapter.Put(mockC) // mockClient implements issueGetter but is not *rpc.Client
+	})
+
+	// patchPoolAdapter
+	t.Run("patchPoolAdapter", func(t *testing.T) {
+		adapter := &patchPoolAdapter{pool: nil}
+		adapter.Put(mockC) // mockClient implements issueUpdater but is not *rpc.Client
+	})
+
+	// closePoolAdapter
+	t.Run("closePoolAdapter", func(t *testing.T) {
+		adapter := &closePoolAdapter{pool: nil}
+		adapter.Put(&mockCloseClient{}) // not *rpc.Client
+	})
+
+	// graphPoolAdapter
+	t.Run("graphPoolAdapter", func(t *testing.T) {
+		adapter := &graphPoolAdapter{pool: nil}
+		adapter.Put(&mockGraphClient{}) // not *rpc.Client
+	})
+
+	// blockedPoolAdapter
+	t.Run("blockedPoolAdapter", func(t *testing.T) {
+		adapter := &blockedPoolAdapter{pool: nil}
+		adapter.Put(&mockBlockedClient{}) // not *rpc.Client
+	})
+
+	// createPoolAdapter
+	t.Run("createPoolAdapter", func(t *testing.T) {
+		adapter := &createPoolAdapter{pool: nil}
+		adapter.Put(&mockCreateClient{}) // not *rpc.Client
+	})
+
+	// dependencyPoolAdapter
+	t.Run("dependencyPoolAdapter", func(t *testing.T) {
+		adapter := &dependencyPoolAdapter{pool: nil}
+		adapter.Put(&mockDependencyClient{}) // not *rpc.Client
+	})
+}
+
+// --- handleReadyWithPool tests ---
+
+// mockReadyClient implements readyClient for testing.
+type mockReadyClient struct {
+	readyFunc        func(args *rpc.ReadyArgs) (*rpc.Response, error)
+	getParentIDsFunc func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error)
+}
+
+func (m *mockReadyClient) Ready(args *rpc.ReadyArgs) (*rpc.Response, error) {
+	if m.readyFunc != nil {
+		return m.readyFunc(args)
+	}
+	return nil, errors.New("readyFunc not implemented")
+}
+
+func (m *mockReadyClient) GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error) {
+	if m.getParentIDsFunc != nil {
+		return m.getParentIDsFunc(args)
+	}
+	return nil, errors.New("getParentIDsFunc not implemented")
+}
+
+// mockReadyPool implements readyConnectionGetter for testing.
+type mockReadyPool struct {
+	getFunc func(ctx context.Context) (readyClient, error)
+	putFunc func(client readyClient)
+}
+
+func (m *mockReadyPool) Get(ctx context.Context) (readyClient, error) {
+	if m.getFunc != nil {
+		return m.getFunc(ctx)
+	}
+	return nil, errors.New("getFunc not implemented")
+}
+
+func (m *mockReadyPool) Put(client readyClient) {
+	if m.putFunc != nil {
+		m.putFunc(client)
+	}
+}
+
+func TestHandleReadyWithPool_NilPool(t *testing.T) {
+	handler := handleReadyWithPool(nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
+	}
+
+	var resp ReadyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected Success to be false")
+	}
+	if resp.Error != "connection pool not initialized" {
+		t.Errorf("error = %q, want %q", resp.Error, "connection pool not initialized")
+	}
+}
+
+func TestHandleReadyWithPool_PoolGetError(t *testing.T) {
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return nil, errors.New("pool exhausted")
+		},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleReadyWithPool_PoolGetTimeout(t *testing.T) {
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return nil, context.DeadlineExceeded
+		},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusGatewayTimeout {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusGatewayTimeout)
+	}
+}
+
+func TestHandleReadyWithPool_RPCError(t *testing.T) {
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return nil, errors.New("connection reset")
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return client, nil
+		},
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleReadyWithPool_DaemonError(t *testing.T) {
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: false,
+				Error:   "database error",
+			}, nil
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return client, nil
+		},
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleReadyWithPool_EmptyIssues(t *testing.T) {
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			data, _ := json.Marshal([]*types.Issue{})
+			return &rpc.Response{
+				Success: true,
+				Data:    data,
+			}, nil
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return client, nil
+		},
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp ReadyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected Success to be true")
+	}
+	if len(resp.Data) != 0 {
+		t.Errorf("expected empty data, got %d items", len(resp.Data))
+	}
+}
+
+func TestHandleReadyWithPool_SuccessWithParentInfo(t *testing.T) {
+	issues := []*types.Issue{
+		{ID: "issue-1", Title: "Test Issue 1"},
+		{ID: "issue-2", Title: "Test Issue 2"},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    issuesJSON,
+			}, nil
+		},
+		getParentIDsFunc: func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error) {
+			parentID := "epic-1"
+			parentTitle := "Parent Epic"
+			return &rpc.GetParentIDsResponse{
+				Parents: map[string]*rpc.ParentInfo{
+					"issue-1": {ParentID: parentID, ParentTitle: parentTitle},
+				},
+			}, nil
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return client, nil
+		},
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp ReadyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected Success to be true")
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(resp.Data))
+	}
+	// issue-1 should have parent info
+	if resp.Data[0].Parent == nil || *resp.Data[0].Parent != "epic-1" {
+		t.Errorf("expected issue-1 parent to be 'epic-1', got %v", resp.Data[0].Parent)
+	}
+	if resp.Data[0].ParentTitle == nil || *resp.Data[0].ParentTitle != "Parent Epic" {
+		t.Errorf("expected issue-1 parent title to be 'Parent Epic', got %v", resp.Data[0].ParentTitle)
+	}
+	// issue-2 should have no parent
+	if resp.Data[1].Parent != nil {
+		t.Errorf("expected issue-2 parent to be nil, got %v", resp.Data[1].Parent)
+	}
+}
+
+func TestHandleReadyWithPool_ParentIDsError(t *testing.T) {
+	issues := []*types.Issue{
+		{ID: "issue-1", Title: "Test"},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    issuesJSON,
+			}, nil
+		},
+		getParentIDsFunc: func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error) {
+			return nil, errors.New("parent lookup failed")
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return client, nil
+		},
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	// Should still succeed (parent lookup is non-fatal)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp ReadyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected Success to be true")
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Data))
+	}
+	// No parent info should be set
+	if resp.Data[0].Parent != nil {
+		t.Errorf("expected nil parent when lookup fails, got %v", resp.Data[0].Parent)
+	}
+}
+
+func TestHandleReadyWithPool_InvalidReadyParams(t *testing.T) {
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return &mockReadyClient{}, nil
+		},
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+
+	// Test invalid sort policy
+	req := httptest.NewRequest(http.MethodGet, "/api/ready?sort=invalid_sort", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d for invalid sort", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleReadyWithPool_QueryParams(t *testing.T) {
+	var capturedArgs *rpc.ReadyArgs
+
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			capturedArgs = args
+			data, _ := json.Marshal([]*types.Issue{})
+			return &rpc.Response{
+				Success: true,
+				Data:    data,
+			}, nil
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return client, nil
+		},
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready?assignee=alice&type=task&priority=1&sort=priority", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	if capturedArgs == nil {
+		t.Fatal("readyFunc was not called")
+	}
+	if capturedArgs.Assignee != "alice" {
+		t.Errorf("assignee = %q, want %q", capturedArgs.Assignee, "alice")
+	}
+	if capturedArgs.Type != "task" {
+		t.Errorf("type = %q, want %q", capturedArgs.Type, "task")
+	}
+	if capturedArgs.Priority == nil || *capturedArgs.Priority != 1 {
+		t.Errorf("priority = %v, want 1", capturedArgs.Priority)
+	}
+	if capturedArgs.SortPolicy != "priority" {
+		t.Errorf("sort = %q, want %q", capturedArgs.SortPolicy, "priority")
+	}
+}
+
+func TestHandleReadyWithPool_MalformedResponseData(t *testing.T) {
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    []byte(`not valid json`),
+			}, nil
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return client, nil
+		},
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+}
+
+// --- handleListIssues tests with mock server ---
+
+// startHandlersMockServer creates a Unix socket mock server for handler tests.
+func startHandlersMockServer(t *testing.T, handler func(req rpc.Request) rpc.Response) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "handler-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "bd.sock")
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("failed to create mock server: %v", err)
+	}
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				reader := bufio.NewReader(c)
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req rpc.Request
+					if err := json.Unmarshal(line, &req); err != nil {
+						return
+					}
+					resp := handler(req)
+					respJSON, _ := json.Marshal(resp)
+					respJSON = append(respJSON, '\n')
+					c.Write(respJSON)
+				}
+			}(conn)
+		}
+	}()
+
+	t.Cleanup(func() { listener.Close() })
+	return socketPath
+}
+
+func newHandlersMockPool(t *testing.T, socketPath string) daemon.Pool {
+	t.Helper()
+	pool, err := daemon.NewConnectionPool(socketPath, 2)
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+	pool.SetDialTimeout(2 * time.Second)
+	pool.SetPoolTimeout(2 * time.Second)
+	t.Cleanup(func() { pool.Close() })
+	return pool
+}
+
+func defaultHealthPingHandler(req rpc.Request) (rpc.Response, bool) {
+	switch req.Operation {
+	case "health":
+		hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+		return rpc.Response{Success: true, Data: hd}, true
+	case "ping":
+		return rpc.Response{Success: true}, true
+	}
+	return rpc.Response{}, false
+}
+
+// TestHandleListIssues_Success tests the standard list path with parent enrichment.
+func TestHandleListIssues_Success(t *testing.T) {
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{ID: "issue-1", Title: "Test 1", Status: types.StatusOpen}},
+		{Issue: &types.Issue{ID: "issue-2", Title: "Test 2", Status: types.StatusOpen}},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			return rpc.Response{Success: true, Data: issuesJSON}
+		case "get_parent_ids":
+			parents := map[string]*rpc.ParentInfo{
+				"issue-1": {ParentID: "epic-1", ParentTitle: "Epic One"},
+			}
+			resp := rpc.GetParentIDsResponse{Parents: parents}
+			data, _ := json.Marshal(resp)
+			return rpc.Response{Success: true, Data: data}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true, got false (error: %s)", resp.Error)
+	}
+
+	var items []*IssueWithParent
+	if err := json.Unmarshal(resp.Data, &items); err != nil {
+		t.Fatalf("failed to parse items: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].Parent == nil || *items[0].Parent != "epic-1" {
+		t.Errorf("expected issue-1 parent=epic-1, got %v", items[0].Parent)
+	}
+	if items[1].Parent != nil {
+		t.Errorf("expected issue-2 parent=nil, got %v", items[1].Parent)
+	}
+}
+
+// TestHandleListIssues_EmptyResult tests list returning no issues.
+func TestHandleListIssues_EmptyResult(t *testing.T) {
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			data, _ := json.Marshal([]*types.IssueWithCounts{})
+			return rpc.Response{Success: true, Data: data}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true for empty list")
+	}
+}
+
+// TestHandleListIssues_RPCError tests list when the daemon returns failure.
+func TestHandleListIssues_RPCError(t *testing.T) {
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			return rpc.Response{Success: false, Error: "database locked"}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected Success=false")
+	}
+	// The RPC client wraps daemon errors as client errors, so the handler
+	// sees them as RPC_ERROR
+	if resp.Code != "RPC_ERROR" {
+		t.Errorf("expected code=RPC_ERROR, got %q", resp.Code)
+	}
+}
+
+// TestHandleListIssues_MalformedData tests list with invalid JSON in response data.
+func TestHandleListIssues_MalformedData(t *testing.T) {
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			return rpc.Response{Success: true, Data: []byte(`not valid json`)}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected Success=false")
+	}
+	// The RPC client tries to unmarshal the response, which fails for invalid JSON,
+	// and returns an error before the handler can parse it. The handler sees RPC_ERROR.
+	if resp.Code != "RPC_ERROR" {
+		t.Errorf("expected code=RPC_ERROR, got %q", resp.Code)
+	}
+}
+
+// TestHandleListIssues_KanbanMode tests list with include_blocked=true (kanban mode).
+func TestHandleListIssues_KanbanMode(t *testing.T) {
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{ID: "issue-1", Title: "Blocked Issue", Status: types.StatusOpen}},
+		{Issue: &types.Issue{ID: "issue-2", Title: "Free Issue", Status: types.StatusOpen}},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	blockedIssues := []*types.BlockedIssue{
+		{
+			Issue:          types.Issue{ID: "issue-1"},
+			BlockedByCount: 2,
+			BlockedBy:      []string{"dep-1", "dep-2"},
+		},
+	}
+	blockedJSON, _ := json.Marshal(blockedIssues)
+
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			return rpc.Response{Success: true, Data: issuesJSON}
+		case "get_parent_ids":
+			resp := rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}
+			data, _ := json.Marshal(resp)
+			return rpc.Response{Success: true, Data: data}
+		case "blocked":
+			return rpc.Response{Success: true, Data: blockedJSON}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?include_blocked=true", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true, got false (error: %s)", resp.Error)
+	}
+
+	var kanbanItems []*KanbanIssue
+	if err := json.Unmarshal(resp.Data, &kanbanItems); err != nil {
+		t.Fatalf("failed to parse kanban items: %v", err)
+	}
+	if len(kanbanItems) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(kanbanItems))
+	}
+	if !kanbanItems[0].IsBlocked {
+		t.Error("expected issue-1 to be blocked")
+	}
+	if kanbanItems[0].BlockedByCount != 2 {
+		t.Errorf("expected BlockedByCount=2, got %d", kanbanItems[0].BlockedByCount)
+	}
+	if kanbanItems[1].IsBlocked {
+		t.Error("expected issue-2 to not be blocked")
+	}
+}
+
+// TestHandleListIssues_ExcludeStatus tests list with exclude_status filter.
+func TestHandleListIssues_ExcludeStatus(t *testing.T) {
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{ID: "issue-1", Title: "Open", Status: types.StatusOpen}},
+		{Issue: &types.Issue{ID: "issue-2", Title: "Closed", Status: types.StatusClosed}},
+		{Issue: &types.Issue{ID: "issue-3", Title: "In Progress", Status: types.StatusInProgress}},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			return rpc.Response{Success: true, Data: issuesJSON}
+		case "get_parent_ids":
+			resp := rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}
+			data, _ := json.Marshal(resp)
+			return rpc.Response{Success: true, Data: data}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?exclude_status=closed", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	var items []*IssueWithParent
+	if err := json.Unmarshal(resp.Data, &items); err != nil {
+		t.Fatalf("failed to parse items: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items (excluded closed), got %d", len(items))
+	}
+	for _, item := range items {
+		if item.Issue.Status == types.StatusClosed {
+			t.Error("closed issue should have been filtered out")
+		}
+	}
+}
+
+// TestHandleListIssues_ParentLookupError tests that parent lookup failure is non-fatal.
+func TestHandleListIssues_ParentLookupError(t *testing.T) {
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{ID: "issue-1", Title: "Test", Status: types.StatusOpen}},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			return rpc.Response{Success: true, Data: issuesJSON}
+		case "get_parent_ids":
+			return rpc.Response{Success: false, Error: "parent lookup failed"}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (parent error is non-fatal)", rr.Code, http.StatusOK)
+	}
+}
+
+// TestHandleListIssues_PoolGetError tests pool connection error.
+func TestHandleListIssues_PoolGetError(t *testing.T) {
+	pool, err := daemon.NewConnectionPool("/nonexistent/list-test.sock", 1)
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+	defer pool.Close()
+	pool.SetDialTimeout(10 * time.Millisecond)
+	pool.SetPoolTimeout(20 * time.Millisecond)
+
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable && rr.Code != http.StatusGatewayTimeout {
+		t.Errorf("status = %d, want %d or %d", rr.Code, http.StatusServiceUnavailable, http.StatusGatewayTimeout)
+	}
 }

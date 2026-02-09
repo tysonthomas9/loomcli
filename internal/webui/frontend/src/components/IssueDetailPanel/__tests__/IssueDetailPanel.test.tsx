@@ -706,7 +706,8 @@ describe('IssueDetailPanel', () => {
   describe('ReviewActionBar', () => {
     it('renders ReviewActionBar for review items', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn();
@@ -744,7 +745,8 @@ describe('IssueDetailPanel', () => {
 
     it('does NOT render ReviewActionBar when onApprove is not provided', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onReject = vi.fn();
       render(
@@ -760,7 +762,8 @@ describe('IssueDetailPanel', () => {
 
     it('does NOT render ReviewActionBar when onReject is not provided', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       render(
@@ -776,7 +779,8 @@ describe('IssueDetailPanel', () => {
 
     it('clicking Approve button calls onApprove', async () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn().mockResolvedValue(undefined);
       const onReject = vi.fn();
@@ -798,7 +802,8 @@ describe('IssueDetailPanel', () => {
 
     it('clicking Reject button shows the reject comment form', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn();
@@ -817,7 +822,8 @@ describe('IssueDetailPanel', () => {
 
     it('ReviewActionBar hides when reject form is shown', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn();
@@ -843,7 +849,8 @@ describe('IssueDetailPanel', () => {
 
     it('reject form submit calls onReject with comment', async () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn().mockResolvedValue(undefined);
@@ -874,7 +881,8 @@ describe('IssueDetailPanel', () => {
 
     it('reject form cancel shows ReviewActionBar again', () => {
       const mockIssue = createTestIssueDetails({
-        title: '[Need Review] Some task',
+        title: 'Some task',
+        status: 'review',
       });
       const onApprove = vi.fn();
       const onReject = vi.fn();
@@ -898,6 +906,207 @@ describe('IssueDetailPanel', () => {
       // Action bar should be back, form should be gone
       expect(screen.getByTestId('review-action-bar')).toBeInTheDocument();
       expect(screen.queryByTestId('reject-comment-form')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Planning tab with design markdown', () => {
+    it('shows tab bar for task-type issues when phases are available', async () => {
+      mockGetTaskLogPhases.mockResolvedValue(['planning']);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'task',
+        design: '# My Design\n\nSome design content',
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Wait for phases to load and tab bar to appear
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Details' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Planning' })).toBeInTheDocument();
+      });
+    });
+
+    it('does not show tab bar for non-task issue types', async () => {
+      mockGetTaskLogPhases.mockResolvedValue([]);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'bug',
+        design: 'Some design content',
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Give time for any async operations to settle
+      await waitFor(() => {
+        expect(screen.queryByRole('tab', { name: 'Planning' })).not.toBeInTheDocument();
+      });
+    });
+
+    it('shows MarkdownRenderer on Planning tab when design exists', async () => {
+      mockGetTaskLogPhases.mockResolvedValue(['planning']);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'task',
+        design: '# Design Heading\n\nDesign paragraph content',
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Wait for Planning tab to appear, then click it
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Planning' })).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('tab', { name: 'Planning' }));
+
+      // Should render markdown content (MarkdownRenderer uses data-testid="markdown-content")
+      expect(screen.getByTestId('markdown-content')).toBeInTheDocument();
+      // Heading from design markdown should be rendered as h1
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Design Heading');
+      // LogViewer should NOT be present
+      expect(screen.queryByTestId('log-viewer')).not.toBeInTheDocument();
+    });
+
+    it('shows LogViewer on Planning tab when design is absent', async () => {
+      mockGetTaskLogPhases.mockResolvedValue(['planning']);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'task',
+        design: undefined,
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Wait for Planning tab to appear, then click it
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Planning' })).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('tab', { name: 'Planning' }));
+
+      // Should render LogViewer (not MarkdownRenderer)
+      expect(screen.getByTestId('log-viewer')).toBeInTheDocument();
+      expect(screen.queryByTestId('markdown-content')).not.toBeInTheDocument();
+    });
+
+    it('shows LogViewer on Implementation tab', async () => {
+      mockGetTaskLogPhases.mockResolvedValue(['planning', 'implementation']);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'task',
+        design: '# Some design',
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Wait for Implementation tab to appear, then click it
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Implementation' })).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('tab', { name: 'Implementation' }));
+
+      // Should render LogViewer for implementation
+      expect(screen.getByTestId('log-viewer')).toBeInTheDocument();
+      expect(screen.queryByTestId('markdown-content')).not.toBeInTheDocument();
+    });
+
+    it('defaults to Details tab and shows detail content', async () => {
+      mockGetTaskLogPhases.mockResolvedValue(['planning']);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'task',
+        description: 'Test issue description',
+        design: '# Design content',
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Wait for tab bar to render
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Details' })).toBeInTheDocument();
+      });
+
+      // Details tab should be selected by default
+      const detailsTab = screen.getByRole('tab', { name: 'Details' });
+      expect(detailsTab).toHaveAttribute('aria-selected', 'true');
+
+      // Should NOT show LogViewer or markdown-content on details tab
+      // (design section on details tab uses a collapsible section, not top-level markdown-content)
+      expect(screen.queryByTestId('log-viewer')).not.toBeInTheDocument();
+    });
+
+    it('switches back from Planning to Details tab correctly', async () => {
+      mockGetTaskLogPhases.mockResolvedValue(['planning']);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'task',
+        description: 'My description',
+        design: '# My Design',
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Wait for tabs
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Planning' })).toBeInTheDocument();
+      });
+
+      // Switch to Planning tab
+      fireEvent.click(screen.getByRole('tab', { name: 'Planning' }));
+      expect(screen.getByTestId('markdown-content')).toBeInTheDocument();
+
+      // Switch back to Details tab
+      fireEvent.click(screen.getByRole('tab', { name: 'Details' }));
+
+      // LogViewer and top-level markdown should not be present
+      expect(screen.queryByTestId('log-viewer')).not.toBeInTheDocument();
+      // The design section should reappear in the collapsible details view
+      expect(screen.getByTestId('design-section')).toBeInTheDocument();
+    });
+
+    it('renders design markdown content with list items on Planning tab', async () => {
+      mockGetTaskLogPhases.mockResolvedValue(['planning']);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'task',
+        design: '## Overview\n\n- Step 1\n- Step 2\n- Step 3',
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Switch to Planning tab
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Planning' })).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('tab', { name: 'Planning' }));
+
+      // Markdown should render the heading and list within the markdown-content area
+      const markdownContent = screen.getByTestId('markdown-content');
+      expect(within(markdownContent).getByRole('heading', { level: 2 })).toHaveTextContent('Overview');
+      expect(within(markdownContent).getByText('Step 1')).toBeInTheDocument();
+      expect(within(markdownContent).getByText('Step 2')).toBeInTheDocument();
+      expect(within(markdownContent).getByText('Step 3')).toBeInTheDocument();
+    });
+
+    it('does not show Planning tab when phases do not include planning', async () => {
+      mockGetTaskLogPhases.mockResolvedValue(['implementation']);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'task',
+        design: '# Some design',
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Wait for tab bar to appear
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Details' })).toBeInTheDocument();
+      });
+
+      // Planning tab should not be rendered
+      expect(screen.queryByRole('tab', { name: 'Planning' })).not.toBeInTheDocument();
+      // But Implementation tab should be there
+      expect(screen.getByRole('tab', { name: 'Implementation' })).toBeInTheDocument();
+    });
+
+    it('shows empty design content on Planning tab when design is empty string', async () => {
+      mockGetTaskLogPhases.mockResolvedValue(['planning']);
+      const mockIssue = createTestIssueDetails({
+        issue_type: 'task',
+        design: '',
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+
+      // Wait for Planning tab
+      await waitFor(() => {
+        expect(screen.getByRole('tab', { name: 'Planning' })).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('tab', { name: 'Planning' }));
+
+      // Empty string is falsy, so it should fall back to LogViewer
+      expect(screen.getByTestId('log-viewer')).toBeInTheDocument();
+      expect(screen.queryByTestId('markdown-content')).not.toBeInTheDocument();
     });
   });
 });

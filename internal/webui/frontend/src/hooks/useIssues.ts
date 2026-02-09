@@ -196,6 +196,13 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
 
         // Start with API data (authoritative for which issues should exist)
         for (const issue of data) {
+          // Skip issues with empty IDs (defensive: backend should always provide IDs)
+          if (!issue.id) {
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('[useIssues] Skipping API issue with empty id:', issue.title);
+            }
+            continue;
+          }
           // Skip if deleted during fetch window by SSE mutation
           if (deletedDuringFetch.has(issue.id)) {
             continue;

@@ -234,6 +234,14 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
         return;
       }
 
+      // Guard against mutations with empty issue_id (defensive: prevents 'unknown' cards)
+      if (!issue_id) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[useMutationHandler] Skipping mutation with empty issue_id:', mutation);
+        }
+        return;
+      }
+
       // Handle create mutation
       if (type === MutationCreate) {
         // If issue already exists, treat as update (handles duplicate/replayed events)

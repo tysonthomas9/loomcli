@@ -25,8 +25,13 @@ const { mockCloseIssue, mockUpdateIssue, mockAddComment } = vi.hoisted(() => ({
 }));
 
 // Create hoisted mocks that can be shared across mock definitions
-const { mockUseIssues, mockUseIssueDetail, mockUseToast, mockUseAgents, mockUseAgentContext } =
-  vi.hoisted(() => ({
+const {
+  mockUseIssues,
+  mockUseIssueDetail,
+  mockUseToast,
+  mockUseAgents,
+  mockUseAgentContext,
+} = vi.hoisted(() => ({
     mockUseIssues: vi.fn(),
     mockUseIssueDetail: vi.fn(),
     mockUseToast: vi.fn(() => ({
@@ -354,6 +359,9 @@ describe('App', () => {
     mockUseViewState.mockReturnValue(['kanban', mockSetActiveView]);
     // Set up default useIssueDetail mock
     mockUseIssueDetail.mockReturnValue(createMockUseIssueDetailReturn());
+    // Set up default API mocks (resolve by default so existing tests aren't affected)
+    mockUpdateIssue.mockResolvedValue({});
+    mockAddComment.mockResolvedValue({});
   });
 
   describe('loading state', () => {

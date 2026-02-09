@@ -1,17 +1,21 @@
 package webui
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // TestHandleStats_NilPool verifies that handleStats returns 503 when pool is nil.
@@ -1005,5 +1009,404 @@ func TestSetupRoutes_FleetEndpointsRegisteredWhenEnabled(t *testing.T) {
 	ct := rr.Header().Get("Content-Type")
 	if ct == "text/html; charset=utf-8" {
 		t.Errorf("expected non-HTML response when fleet route is registered, got Content-Type %q", ct)
+	}
+}
+
+// --- handleDaemonStatus tests ---
+
+// TestHandleDaemonStatus_NilPool tests handleDaemonStatus with nil pool returns 503.
+func TestHandleDaemonStatus_NilPool(t *testing.T) {
+	handler := handleDaemonStatus(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/daemon/status", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
+	}
+
+	var resp DaemonStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp.Success {
+		t.Error("expected Success to be false")
+	}
+
+	if resp.Error != "connection pool not initialized" {
+		t.Errorf("error = %q, want %q", resp.Error, "connection pool not initialized")
+	}
+
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
+}
+
+// TestHandleDaemonStatus_PoolGetError tests handleDaemonStatus when pool.Get fails.
+func TestHandleDaemonStatus_PoolGetError(t *testing.T) {
+	pool, err := daemon.NewConnectionPool("/nonexistent/daemon-status-test.sock", 1)
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+	defer pool.Close()
+
+	pool.SetDialTimeout(10 * time.Millisecond)
+	pool.SetPoolTimeout(20 * time.Millisecond)
+
+	handler := handleDaemonStatus(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/daemon/status", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	// Should be 503 or 504
+	if rr.Code != http.StatusServiceUnavailable && rr.Code != http.StatusGatewayTimeout {
+		t.Errorf("status = %d, want %d or %d", rr.Code, http.StatusServiceUnavailable, http.StatusGatewayTimeout)
+	}
+
+	var resp DaemonStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp.Success {
+		t.Error("expected Success to be false")
+	}
+
+	if resp.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestHandleDaemonStatus_ContextTimeout tests handleDaemonStatus with very short context timeout.
+func TestHandleDaemonStatus_ContextTimeout(t *testing.T) {
+	pool, err := daemon.NewConnectionPool("/nonexistent/daemon-status-timeout.sock", 1)
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+	defer pool.Close()
+
+	pool.SetDialTimeout(5 * time.Second)
+	pool.SetPoolTimeout(5 * time.Second)
+
+	handler := handleDaemonStatus(pool)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/daemon/status", nil).WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusGatewayTimeout && rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d or %d", rr.Code, http.StatusGatewayTimeout, http.StatusServiceUnavailable)
+	}
+}
+
+// TestDaemonStatusResponse_Serialization tests DaemonStatusResponse JSON serialization.
+func TestDaemonStatusResponse_Serialization(t *testing.T) {
+	resp := DaemonStatusResponse{
+		Success: true,
+		Data: &rpc.StatusResponse{
+			Version:       "1.0.0",
+			WorkspacePath: "/path/to/workspace",
+			AutoCommit:    true,
+			AutoPush:      false,
+			LocalMode:     false,
+			SyncInterval:  "5s",
+		},
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var parsed DaemonStatusResponse
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if !parsed.Success {
+		t.Error("expected Success to be true")
+	}
+
+	if parsed.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+
+	if parsed.Data.Version != "1.0.0" {
+		t.Errorf("Version = %q, want %q", parsed.Data.Version, "1.0.0")
+	}
+
+	if !parsed.Data.AutoCommit {
+		t.Error("expected AutoCommit to be true")
+	}
+
+	if parsed.Data.SyncInterval != "5s" {
+		t.Errorf("SyncInterval = %q, want %q", parsed.Data.SyncInterval, "5s")
+	}
+}
+
+// TestDaemonStatusResponse_ErrorSerialization tests error DaemonStatusResponse serialization.
+func TestDaemonStatusResponse_ErrorSerialization(t *testing.T) {
+	resp := DaemonStatusResponse{
+		Success: false,
+		Error:   "connection failed",
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var parsed DaemonStatusResponse
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if parsed.Success {
+		t.Error("expected Success to be false")
+	}
+
+	if parsed.Data != nil {
+		t.Error("expected Data to be nil for error response")
+	}
+
+	if parsed.Error != "connection failed" {
+		t.Errorf("Error = %q, want %q", parsed.Error, "connection failed")
+	}
+}
+
+// --- Mock server infrastructure for routes tests ---
+
+func startRoutesMockServer(t *testing.T, handler func(req rpc.Request) rpc.Response) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "routes-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "bd.sock")
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("failed to create mock server: %v", err)
+	}
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				reader := bufio.NewReader(c)
+				for {
+					line, err := reader.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req rpc.Request
+					if err := json.Unmarshal(line, &req); err != nil {
+						return
+					}
+					resp := handler(req)
+					respJSON, _ := json.Marshal(resp)
+					respJSON = append(respJSON, '\n')
+					c.Write(respJSON)
+				}
+			}(conn)
+		}
+	}()
+
+	t.Cleanup(func() { listener.Close() })
+	return socketPath
+}
+
+func newRoutesMockPool(t *testing.T, socketPath string) daemon.Pool {
+	t.Helper()
+	pool, err := daemon.NewConnectionPool(socketPath, 2)
+	if err != nil {
+		t.Fatalf("failed to create pool: %v", err)
+	}
+	pool.SetDialTimeout(2 * time.Second)
+	pool.SetPoolTimeout(2 * time.Second)
+	t.Cleanup(func() { pool.Close() })
+	return pool
+}
+
+// TestHandleDaemonStatus_Success tests the full success path of handleDaemonStatus.
+func TestHandleDaemonStatus_Success(t *testing.T) {
+	statusResp := &rpc.StatusResponse{
+		Version:       "1.2.3",
+		WorkspacePath: "/tmp/workspace",
+		DatabasePath:  "/tmp/workspace/.beads/db.sqlite",
+		SocketPath:    "/tmp/workspace/.beads/bd.sock",
+		PID:           12345,
+		UptimeSeconds: 3600.5,
+		AutoCommit:    true,
+		AutoPush:      false,
+		AutoPull:      true,
+		LocalMode:     false,
+		SyncInterval:  "5s",
+	}
+	statusData, _ := json.Marshal(statusResp)
+
+	socketPath := startRoutesMockServer(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "1.2.3", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "status":
+			return rpc.Response{Success: true, Data: statusData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newRoutesMockPool(t, socketPath)
+	handler := handleDaemonStatus(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/daemon/status", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp DaemonStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Errorf("expected Success=true, got false (error: %s)", resp.Error)
+	}
+
+	if resp.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+
+	if resp.Data.Version != "1.2.3" {
+		t.Errorf("Version = %q, want %q", resp.Data.Version, "1.2.3")
+	}
+	if !resp.Data.AutoCommit {
+		t.Error("expected AutoCommit=true")
+	}
+	if resp.Data.AutoPush {
+		t.Error("expected AutoPush=false")
+	}
+	if !resp.Data.AutoPull {
+		t.Error("expected AutoPull=true")
+	}
+	if resp.Data.SyncInterval != "5s" {
+		t.Errorf("SyncInterval = %q, want %q", resp.Data.SyncInterval, "5s")
+	}
+}
+
+// TestHandleStats_SuccessWithMockServer tests the full stats success path with mock server.
+func TestHandleStats_SuccessWithMockServer(t *testing.T) {
+	stats := types.Statistics{
+		TotalIssues:      42,
+		OpenIssues:       20,
+		InProgressIssues: 10,
+		ClosedIssues:     12,
+		ReadyIssues:      8,
+	}
+	statsData, _ := json.Marshal(stats)
+
+	socketPath := startRoutesMockServer(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "stats":
+			return rpc.Response{Success: true, Data: statsData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newRoutesMockPool(t, socketPath)
+	handler := handleStats(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp StatsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Errorf("expected Success=true, got false (error: %s)", resp.Error)
+	}
+
+	if resp.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+
+	if resp.Data.TotalIssues != 42 {
+		t.Errorf("TotalIssues = %d, want 42", resp.Data.TotalIssues)
+	}
+}
+
+// TestHandleAPIHealth_SuccessWithMockServer tests the full API health success path.
+func TestHandleAPIHealth_SuccessWithMockServer(t *testing.T) {
+	socketPath := startRoutesMockServer(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "1.0.0", Compatible: true, Uptime: 3600})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newRoutesMockPool(t, socketPath)
+	handler := handleAPIHealth(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp HealthStatus
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp.Status != "ok" {
+		t.Errorf("Status = %q, want %q", resp.Status, "ok")
+	}
+
+	if !resp.Daemon.Connected {
+		t.Error("expected Daemon.Connected=true")
+	}
+
+	if resp.Daemon.Version != "1.0.0" {
+		t.Errorf("Daemon.Version = %q, want %q", resp.Daemon.Version, "1.0.0")
 	}
 }

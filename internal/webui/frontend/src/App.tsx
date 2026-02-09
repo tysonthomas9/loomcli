@@ -382,6 +382,7 @@ function App() {
     [refetch, handlePanelClose, showToast]
   );
 
+
   // Handle agent click from AgentsSidebar or MonitorDashboard
   const handleAgentClick = useCallback(
     (agentName: string) => {

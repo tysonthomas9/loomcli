@@ -2,6 +2,7 @@ package kv
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -82,5 +83,66 @@ func TestReconciler_EmptyTasks(t *testing.T) {
 	results = r.ResetOrphanedTasks(ctx, []OrphanedTask{})
 	if len(results) != 0 {
 		t.Errorf("expected 0 results for empty tasks, got %d", len(results))
+	}
+}
+
+func TestReconciler_ResetTask_EmptyTaskID(t *testing.T) {
+	r := NewReconciler("")
+	ctx := context.Background()
+
+	tasks := []OrphanedTask{
+		{TaskID: "", TaskTitle: "Empty ID task", WorkerID: "worker-1"},
+	}
+
+	results := r.ResetOrphanedTasks(ctx, tasks)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Success {
+		t.Error("expected failure for empty task ID")
+	}
+	if results[0].Error == nil {
+		t.Error("expected non-nil error")
+	}
+	if !strings.Contains(results[0].Error.Error(), "empty") {
+		t.Errorf("expected error to contain 'empty', got: %s", results[0].Error)
+	}
+}
+
+func TestReconciler_ResetTask_InvalidCharacters(t *testing.T) {
+	r := NewReconciler("")
+	ctx := context.Background()
+
+	invalidIDs := []string{
+		"task;drop",
+		"task\nid",
+		"task\rid",
+		"task\tid",
+		"task`id",
+		"task$id",
+		"task|id",
+		"task&id",
+	}
+
+	for _, id := range invalidIDs {
+		t.Run("id_"+id, func(t *testing.T) {
+			tasks := []OrphanedTask{
+				{TaskID: id, TaskTitle: "Bad ID", WorkerID: "worker-1"},
+			}
+
+			results := r.ResetOrphanedTasks(ctx, tasks)
+			if len(results) != 1 {
+				t.Fatalf("expected 1 result, got %d", len(results))
+			}
+			if results[0].Success {
+				t.Errorf("expected failure for task ID %q", id)
+			}
+			if results[0].Error == nil {
+				t.Errorf("expected non-nil error for task ID %q", id)
+			}
+			if !strings.Contains(results[0].Error.Error(), "invalid characters") {
+				t.Errorf("expected 'invalid characters' error for %q, got: %s", id, results[0].Error)
+			}
+		})
 	}
 }
