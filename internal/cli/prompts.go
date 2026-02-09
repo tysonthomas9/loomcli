@@ -267,32 +267,12 @@ This ensures the task is properly tracked as blocked, not orphaned in error stat
   make gate
 - If it fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
+- Run 'bd close <id> --reason "Completed with tests and code review"'
+- Run 'bd sync'
 - Stage and commit: git add -A && git commit -m "<brief description> (<task-id>)
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 - Push: git push origin HEAD
-- Create a PR for code review:
-` + "```bash" + `
-PR_URL=$(gh pr create --base main --head "$(git branch --show-current)" \
-  --title "<brief description> (<task-id>)" \
-  --body "## Task
-<task-id>: <task-title>
-
-## Changes
-<summary of changes>
-
-## Testing
-- Quality gate passed
-- Unit tests written and passing
-- Code review passed (internal agent review)" 2>&1 | tail -1)
-echo "PR created: $PR_URL"
-` + "```" + `
-- Store the PR URL and set status to review:
-` + "```bash" + `
-bd update <id> --external-ref "$PR_URL" --status review --assignee=""
-` + "```" + `
-- NOTE: Do NOT run 'bd close' — the task stays open in review status for human code review
-- Run 'bd sync'
 - Signal completion: loom complete
 
 ### CRITICAL: STOP
@@ -523,32 +503,12 @@ This ensures the task is properly tracked as blocked, not orphaned in error stat
   make gate
 - If it fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
+- Run 'bd close <id> --reason "Completed with tests and code review"'
+- Run 'bd sync'
 - Stage and commit: git add -A && git commit -m "<brief description> (<task-id>)
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 - Push: git push origin HEAD
-- Create a PR for code review:
-` + "```bash" + `
-PR_URL=$(gh pr create --base main --head "$(git branch --show-current)" \
-  --title "<brief description> (<task-id>)" \
-  --body "## Task
-<task-id>: <task-title>
-
-## Changes
-<summary of changes>
-
-## Testing
-- Quality gate passed
-- Unit tests written and passing
-- Code review passed (internal agent review)" 2>&1 | tail -1)
-echo "PR created: $PR_URL"
-` + "```" + `
-- Store the PR URL and set status to review:
-` + "```bash" + `
-bd update <id> --external-ref "$PR_URL" --status review --assignee=""
-` + "```" + `
-- NOTE: Do NOT run 'bd close' — the task stays open in review status for human code review
-- Run 'bd sync'
 - Signal completion: loom complete
 
 ### CRITICAL: STOP

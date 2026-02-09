@@ -1397,11 +1397,7 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Mock bd ready to always return tasks
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
@@ -1645,11 +1641,7 @@ func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Always return tasks
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
@@ -1706,11 +1698,7 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Return a task WITHOUT design (needs planning)
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Needs planning", Status: "open", Design: ""},
@@ -1768,11 +1756,7 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Return a task WITH design (ready for implementation)
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Ready to implement", Status: "open", Design: "Design here"},
@@ -1830,11 +1814,7 @@ func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
@@ -1959,11 +1939,7 @@ func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupLockFile(t, tmpDir)
 
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
@@ -2493,11 +2469,7 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Return a task WITH design (ready for implementation via default task check)
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Ready to implement", Status: "open", Design: "Design here"},
@@ -2567,11 +2539,7 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 	setupLockFile(t, tmpDir)
 
 	// Return tasks (needed for default HasAvailableImplementationTasks fallback)
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
@@ -3076,13 +3044,9 @@ func TestRunAutoModeLoop_CodexPlanAgentType(t *testing.T) {
 	}
 
 	// Mock execCommand for bd ready (return task needing planning)
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Needs planning", Status: "open", Design: ""},
@@ -3163,11 +3127,7 @@ func TestRunAutoModeLoop_CodexMaxTasks(t *testing.T) {
 
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
@@ -3236,11 +3196,7 @@ func TestRunAutoModeLoop_CodexConsecutiveErrors(t *testing.T) {
 
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
@@ -3314,11 +3270,7 @@ func TestRunAutoModeLoop_CodexErrorRecovery(t *testing.T) {
 
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })
-	// Handle git/gh commands separately to avoid interfering with HasOpenPR check
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		if name == "git" || name == "gh" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},

@@ -314,8 +314,6 @@ export interface UpdateIssueRequest {
   status?: Status;
   assignee?: string;
   labels?: string[];
-  add_labels?: string[];
-  remove_labels?: string[];
   issue_type?: IssueType;
 }
 

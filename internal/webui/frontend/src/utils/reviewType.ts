@@ -16,39 +16,25 @@ interface ReviewCheckable {
   title: string;
   status?: string;
   notes?: string;
-  external_ref?: string | null;
 }
 
 /**
- * Check if a string is a GitHub PR URL.
- */
-function isPRUrl(ref?: string | null): boolean {
-  if (!ref) return false;
-  return ref.includes('/pull/') || ref.includes('/pulls/');
-}
-
-/**
- * Get the review type for an issue based on status, external_ref, and notes.
+ * Get the review type for an issue based on title patterns, status, and notes.
  * Returns null if the issue doesn't need review.
- *
- * Detection logic:
- * - Code review: status=review AND external_ref is a PR URL
- * - Plan review: status=review AND no PR URL in external_ref
- * - Needs help: status=blocked AND has notes
  */
 export function getReviewType(issue: ReviewCheckable): ReviewType | null {
+  const hasNeedReview = issue.title?.includes('[Need Review]') ?? false;
   const isReviewStatus = issue.status === 'review';
   const isBlockedWithNotes = issue.status === 'blocked' && !!issue.notes;
-  const hasExternalPR = isPRUrl(issue.external_ref);
 
-  // Code review: status=review AND external_ref is a PR URL
-  if (isReviewStatus && hasExternalPR) {
-    return 'code';
+  // Plan review: Title contains [Need Review]
+  if (hasNeedReview) {
+    return 'plan';
   }
 
-  // Plan review: status=review AND no PR URL
-  if (isReviewStatus) {
-    return 'plan';
+  // Code review: Status is review AND no [Need Review] in title
+  if (isReviewStatus && !hasNeedReview) {
+    return 'code';
   }
 
   // Needs help: Blocked with notes

@@ -1,10 +1,10 @@
 {
-  "pid": 79389,
+  "pid": 42959,
   "command": "task",
-  "started_at": "2026-02-08T15:16:11.421821-08:00",
+  "started_at": "2026-02-08T09:37:23.196384-08:00",
   "agent_name": "nova",
-  "task_id": "loomcli-djk",
-  "task_title": "Spike: Agent PR creation flow after code completion",
-  "task_started_at": "2026-02-08T15:17:08.976328-08:00",
+  "task_id": "loomcli-4em",
+  "task_title": "Investigate flaky monitor test",
+  "task_started_at": "2026-02-08T09:38:24.213342-08:00",
   "state": "active"
 }

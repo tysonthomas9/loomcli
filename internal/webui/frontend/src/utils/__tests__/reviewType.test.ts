@@ -12,60 +12,34 @@ import { getReviewType } from '../reviewType';
 
 describe('getReviewType', () => {
   describe('plan review', () => {
-    it('returns "plan" when status is "review" and no PR URL in external_ref', () => {
-      const result = getReviewType({ title: 'My feature plan', status: 'review' });
+    it('returns "plan" when title contains [Need Review]', () => {
+      const result = getReviewType({ title: '[Need Review] My feature plan' });
 
       expect(result).toBe('plan');
     });
 
-    it('returns "plan" when status is "review" and external_ref is null', () => {
-      const result = getReviewType({
-        title: 'Feature plan',
-        status: 'review',
-        external_ref: null,
-      });
+    it('returns "plan" when [Need Review] is in the middle of title', () => {
+      const result = getReviewType({ title: 'Feature [Need Review] for approval' });
 
       expect(result).toBe('plan');
     });
 
-    it('returns "plan" when status is "review" and external_ref is empty string', () => {
-      const result = getReviewType({
-        title: 'Feature plan',
-        status: 'review',
-        external_ref: '',
-      });
-
-      expect(result).toBe('plan');
-    });
-
-    it('returns "plan" when status is "review" and external_ref is not a PR URL', () => {
-      const result = getReviewType({
-        title: 'Feature plan',
-        status: 'review',
-        external_ref: 'https://github.com/org/repo/issues/42',
-      });
+    it('returns "plan" when [Need Review] is at the end of title', () => {
+      const result = getReviewType({ title: 'My feature plan [Need Review]' });
 
       expect(result).toBe('plan');
     });
   });
 
   describe('code review', () => {
-    it('returns "code" when status is "review" and external_ref is a PR URL', () => {
-      const result = getReviewType({
-        title: 'Implement feature X',
-        status: 'review',
-        external_ref: 'https://github.com/org/repo/pull/42',
-      });
+    it('returns "code" when status is "review"', () => {
+      const result = getReviewType({ title: 'Implement feature X', status: 'review' });
 
       expect(result).toBe('code');
     });
 
-    it('returns "code" when external_ref contains /pulls/ path', () => {
-      const result = getReviewType({
-        title: 'Code review task',
-        status: 'review',
-        external_ref: 'https://github.com/org/repo/pulls/42',
-      });
+    it('returns "code" when status is "review" and title has no [Need Review]', () => {
+      const result = getReviewType({ title: 'Regular code task', status: 'review' });
 
       expect(result).toBe('code');
     });
@@ -129,20 +103,19 @@ describe('getReviewType', () => {
   });
 
   describe('priority rules', () => {
-    it('code review takes priority over plan when PR URL present', () => {
+    it('plan takes priority over code review status', () => {
       const result = getReviewType({
-        title: 'Task with PR',
+        title: '[Need Review] Code review request',
         status: 'review',
-        external_ref: 'https://github.com/org/repo/pull/42',
       });
 
-      expect(result).toBe('code');
+      expect(result).toBe('plan');
     });
 
-    it('review status takes priority over blocked+notes', () => {
+    it('plan takes priority over blocked+notes', () => {
       const result = getReviewType({
-        title: 'Review item',
-        status: 'review',
+        title: '[Need Review] Blocked item',
+        status: 'blocked',
         notes: 'Some notes',
       });
 
@@ -151,31 +124,23 @@ describe('getReviewType', () => {
   });
 
   describe('edge cases', () => {
-    it('handles undefined title gracefully', () => {
-      // @ts-expect-error Testing undefined title
-      const result = getReviewType({ title: undefined, status: 'review' });
-
-      expect(result).toBe('plan');
-    });
-
-    it('handles external_ref with /pull/ in different positions', () => {
-      const result = getReviewType({
-        title: 'Task',
-        status: 'review',
-        external_ref: 'https://github.example.com/pull/123',
-      });
-
-      expect(result).toBe('code');
-    });
-
-    it('returns null for blocked without notes even with PR URL', () => {
-      const result = getReviewType({
-        title: 'Blocked task',
-        status: 'blocked',
-        external_ref: 'https://github.com/org/repo/pull/42',
-      });
+    it('[Need Review] detection is case sensitive', () => {
+      const result = getReviewType({ title: '[need review] lowercase' });
 
       expect(result).toBeNull();
+    });
+
+    it('handles undefined title gracefully', () => {
+      // @ts-expect-error Testing undefined title
+      const result = getReviewType({ title: undefined });
+
+      expect(result).toBeNull();
+    });
+
+    it('handles title with only [Need Review]', () => {
+      const result = getReviewType({ title: '[Need Review]' });
+
+      expect(result).toBe('plan');
     });
   });
 });

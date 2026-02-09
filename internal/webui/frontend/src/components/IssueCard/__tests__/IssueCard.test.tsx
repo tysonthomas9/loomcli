@@ -572,19 +572,18 @@ describe('IssueCard', () => {
 
   describe('review type badge', () => {
     describe('getReviewType logic', () => {
-      it('returns plan when status is review and no PR URL', () => {
-        const issue = createTestIssue({ title: 'My feature plan', status: 'review' });
+      it('returns plan when title contains [Need Review]', () => {
+        const issue = createTestIssue({ title: '[Need Review] My feature plan' });
         render(<IssueCard issue={issue} />);
 
         expect(screen.getByText('Plan')).toBeInTheDocument();
         expect(screen.getByLabelText('Plan review')).toBeInTheDocument();
       });
 
-      it('returns code when status is review AND external_ref is a PR URL', () => {
+      it('returns code when status is review AND title does not contain [Need Review]', () => {
         const issue = createTestIssue({
           title: 'Implement feature X',
           status: 'review',
-          external_ref: 'https://github.com/org/repo/pull/42',
         });
         render(<IssueCard issue={issue} />);
 
@@ -626,41 +625,42 @@ describe('IssueCard', () => {
         expect(screen.queryByText('Help')).not.toBeInTheDocument();
       });
 
-      it('code review takes priority over plan when PR URL is present', () => {
+      it('prioritizes plan over code when title has [Need Review] and status is review', () => {
         const issue = createTestIssue({
-          title: 'Code review with PR',
+          title: '[Need Review] Code review request',
           status: 'review',
-          external_ref: 'https://github.com/org/repo/pull/42',
         });
         render(<IssueCard issue={issue} />);
 
-        expect(screen.getByText('Code')).toBeInTheDocument();
-        expect(screen.queryByText('Plan')).not.toBeInTheDocument();
+        // Plan takes priority over Code when [Need Review] is in title
+        expect(screen.getByText('Plan')).toBeInTheDocument();
+        expect(screen.queryByText('Code')).not.toBeInTheDocument();
       });
     });
 
     describe('badge rendering', () => {
-      it('shows Plan badge with icon for plan reviews', () => {
-        const issue = createTestIssue({ title: 'Design proposal', status: 'review' });
+      it('shows Plan badge with icon for issues with [Need Review] in title', () => {
+        const issue = createTestIssue({ title: '[Need Review] Design proposal' });
         render(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText('Plan review');
         expect(badge).toBeInTheDocument();
         expect(badge).toHaveTextContent('Plan');
+        // Check icon is rendered
         expect(screen.getByText('📝')).toBeInTheDocument();
       });
 
-      it('shows Code badge with icon for code reviews', () => {
+      it('shows Code badge with icon for issues with review status', () => {
         const issue = createTestIssue({
           title: 'Feature implementation',
           status: 'review',
-          external_ref: 'https://github.com/org/repo/pull/42',
         });
         render(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText('Code review');
         expect(badge).toBeInTheDocument();
         expect(badge).toHaveTextContent('Code');
+        // Check icon is rendered
         expect(screen.getByText('🔍')).toBeInTheDocument();
       });
 
@@ -675,6 +675,7 @@ describe('IssueCard', () => {
         const badge = screen.getByLabelText('Help review');
         expect(badge).toBeInTheDocument();
         expect(badge).toHaveTextContent('Help');
+        // Check icon is rendered
         expect(screen.getByText('❓')).toBeInTheDocument();
       });
 
@@ -691,7 +692,7 @@ describe('IssueCard', () => {
       });
 
       it('badge icon has aria-hidden attribute', () => {
-        const issue = createTestIssue({ title: 'Feature', status: 'review' });
+        const issue = createTestIssue({ title: '[Need Review] Feature' });
         render(<IssueCard issue={issue} />);
 
         const icon = screen.getByText('📝');
@@ -699,7 +700,7 @@ describe('IssueCard', () => {
       });
 
       it('applies reviewPlan class to Plan badge', () => {
-        const issue = createTestIssue({ title: 'Plan item', status: 'review' });
+        const issue = createTestIssue({ title: '[Need Review] Plan item' });
         render(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText('Plan review');
@@ -710,7 +711,6 @@ describe('IssueCard', () => {
         const issue = createTestIssue({
           title: 'Code item',
           status: 'review',
-          external_ref: 'https://github.com/org/repo/pull/42',
         });
         render(<IssueCard issue={issue} />);
 
@@ -728,31 +728,6 @@ describe('IssueCard', () => {
 
         const badge = screen.getByLabelText('Help review');
         expect(badge.className).toMatch(/reviewHelp/);
-      });
-
-      it('shows PR link for code reviews', () => {
-        const prUrl = 'https://github.com/org/repo/pull/42';
-        const issue = createTestIssue({
-          title: 'Code item',
-          status: 'review',
-          external_ref: prUrl,
-        });
-        render(<IssueCard issue={issue} />);
-
-        const prLink = screen.getByTestId('pr-link');
-        expect(prLink).toBeInTheDocument();
-        expect(prLink).toHaveAttribute('href', prUrl);
-        expect(prLink).toHaveAttribute('target', '_blank');
-      });
-
-      it('does not show PR link for plan reviews', () => {
-        const issue = createTestIssue({
-          title: 'Plan item',
-          status: 'review',
-        });
-        render(<IssueCard issue={issue} />);
-
-        expect(screen.queryByTestId('pr-link')).not.toBeInTheDocument();
       });
     });
 
@@ -778,16 +753,19 @@ describe('IssueCard', () => {
         expect(screen.queryByText('Help')).not.toBeInTheDocument();
       });
 
-      it('non-PR external_ref does not trigger code review', () => {
-        const issue = createTestIssue({
-          title: 'Plan with external ref',
-          status: 'review',
-          external_ref: 'https://github.com/org/repo/issues/42',
-        });
+      it('[Need Review] detection is case sensitive', () => {
+        const issue = createTestIssue({ title: '[need review] lowercase' });
+        render(<IssueCard issue={issue} />);
+
+        // Should not match because case is different
+        expect(screen.queryByText('Plan')).not.toBeInTheDocument();
+      });
+
+      it('[Need Review] can be anywhere in title', () => {
+        const issue = createTestIssue({ title: 'My feature [Need Review] for approval' });
         render(<IssueCard issue={issue} />);
 
         expect(screen.getByText('Plan')).toBeInTheDocument();
-        expect(screen.queryByText('Code')).not.toBeInTheDocument();
       });
     });
   });
