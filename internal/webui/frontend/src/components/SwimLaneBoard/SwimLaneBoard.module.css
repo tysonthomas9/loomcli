@@ -13,11 +13,6 @@
   min-height: 0;
 }
 
-/* Ensure lanes don't shrink below their content */
-.swimLaneBoard > * {
-  flex-shrink: 0;
-}
-
 /**
  * Toolbar for Expand All / Collapse All controls.
  */

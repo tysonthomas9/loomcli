@@ -129,7 +129,7 @@
     background-color 0.15s ease,
     border-color 0.15s ease;
   border: 1px solid transparent;
-  overflow-y: auto;
+  overflow-y: var(--column-content-overflow, auto);
   scrollbar-gutter: stable;
   /* Smooth momentum scrolling on iOS */
   -webkit-overflow-scrolling: touch;
