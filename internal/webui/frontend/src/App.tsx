@@ -285,16 +285,11 @@ function App() {
   const handleApprove = useCallback(
     async (issue: Issue) => {
       try {
-        const hasNeedReview = issue.title?.includes('[Need Review]') ?? false;
         const isReviewStatus = issue.status === 'review';
         const isBlockedWithNotes = issue.status === 'blocked' && !!issue.notes;
 
-        if (hasNeedReview) {
-          // Plan review: Remove [Need Review] prefix and set to open (Ready column)
-          const newTitle = issue.title.replace(/\[Need Review\]\s*/g, '').trim();
-          await updateIssue(issue.id, { title: newTitle, status: 'open' });
-        } else if (isReviewStatus) {
-          // Status review: Move to open (Ready for implementation)
+        if (isReviewStatus) {
+          // Plan or code review: Move to open (Ready for implementation)
           await updateIssue(issue.id, { status: 'open' });
         } else if (isBlockedWithNotes) {
           // Needs help: Move to in_progress (unblock)
@@ -319,14 +314,8 @@ function App() {
         // First add the comment
         await addComment(issue.id, comment);
 
-        // Then update status and remove [Need Review] prefix if present
-        const hasNeedReview = issue.title?.includes('[Need Review]') ?? false;
-        if (hasNeedReview) {
-          const newTitle = issue.title.replace(/\[Need Review\]\s*/g, '').trim();
-          await updateIssue(issue.id, { title: newTitle, status: 'open' });
-        } else {
-          await updateIssue(issue.id, { status: 'open' });
-        }
+        // Then update status back to open
+        await updateIssue(issue.id, { status: 'open' });
 
         // Close detail panel after successful reject
         handlePanelClose();

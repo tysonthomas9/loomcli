@@ -2858,7 +2858,7 @@ describe('App', () => {
   });
 
   describe('handleApprove and handleReject close panel on success', () => {
-    it('closes panel after successful approve on [Need Review] issue', async () => {
+    it('closes panel after successful approve on plan review issue', async () => {
       const fetchIssue = vi.fn();
       const clearIssue = vi.fn();
       const showToast = vi.fn();
@@ -2871,12 +2871,12 @@ describe('App', () => {
         dismissAll: vi.fn(),
       });
 
-      // Create a [Need Review] issue (plan review type)
+      // Create a status=review issue (plan review type — no PR external_ref)
       const reviewIssue: Issue = {
         id: 'review-1',
-        title: '[Need Review] Plan for feature X',
+        title: 'Plan for feature X',
         priority: 2,
-        status: 'open',
+        status: 'review' as Status,
         issue_type: 'task',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
@@ -2902,7 +2902,7 @@ describe('App', () => {
       const { container } = render(<App />);
 
       // Click on the issue to open the panel
-      const issueCard = screen.getByRole('button', { name: /Issue: \[Need Review\] Plan for feature X/ });
+      const issueCard = screen.getByRole('button', { name: /Issue: Plan for feature X/ });
       fireEvent.click(issueCard);
 
       // Panel should be open
@@ -2918,9 +2918,8 @@ describe('App', () => {
         expect(panel).toHaveAttribute('data-state', 'closed');
       });
 
-      // updateIssue should have been called with title without [Need Review] and status 'open'
+      // updateIssue should have been called with status 'open'
       expect(mockUpdateIssue).toHaveBeenCalledWith('review-1', {
-        title: 'Plan for feature X',
         status: 'open',
       });
 
@@ -3004,12 +3003,12 @@ describe('App', () => {
         dismissAll: vi.fn(),
       });
 
-      // Create a [Need Review] issue for rejection
+      // Create a status=review issue for rejection (plan review — no PR external_ref)
       const reviewIssue: Issue = {
         id: 'review-3',
-        title: '[Need Review] Plan for feature Z',
+        title: 'Plan for feature Z',
         priority: 2,
-        status: 'open',
+        status: 'review' as Status,
         issue_type: 'task',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
@@ -3034,7 +3033,7 @@ describe('App', () => {
       const { container } = render(<App />);
 
       // Click on the issue to open the panel
-      const issueCard = screen.getByRole('button', { name: /Issue: \[Need Review\] Plan for feature Z/ });
+      const issueCard = screen.getByRole('button', { name: /Issue: Plan for feature Z/ });
       fireEvent.click(issueCard);
 
       // Panel should be open
@@ -3061,9 +3060,8 @@ describe('App', () => {
       // addComment should have been called with the rejection comment
       expect(mockAddComment).toHaveBeenCalledWith('review-3', 'Needs more work');
 
-      // updateIssue should have been called with cleaned title and status 'open'
+      // updateIssue should have been called with status 'open'
       expect(mockUpdateIssue).toHaveBeenCalledWith('review-3', {
-        title: 'Plan for feature Z',
         status: 'open',
       });
 
@@ -3083,12 +3081,12 @@ describe('App', () => {
         dismissAll: vi.fn(),
       });
 
-      // Create a [Need Review] issue
+      // Create a status=review issue
       const reviewIssue: Issue = {
         id: 'review-4',
-        title: '[Need Review] Plan for feature W',
+        title: 'Plan for feature W',
         priority: 2,
-        status: 'open',
+        status: 'review' as Status,
         issue_type: 'task',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
@@ -3113,7 +3111,7 @@ describe('App', () => {
       const { container } = render(<App />);
 
       // Click on the issue to open the panel
-      const issueCard = screen.getByRole('button', { name: /Issue: \[Need Review\] Plan for feature W/ });
+      const issueCard = screen.getByRole('button', { name: /Issue: Plan for feature W/ });
       fireEvent.click(issueCard);
 
       // Panel should be open
