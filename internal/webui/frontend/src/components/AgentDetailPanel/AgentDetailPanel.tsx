@@ -363,6 +363,62 @@ export function AgentDetailPanel({
                       </span>
                     )}
                   </div>
+                  {agent.commits && agent.commits.length > 0 && (
+                    <div className={styles.commitList}>
+                      {agent.commits.map((commit) => (
+                        <div key={commit.hash} className={styles.commitItem}>
+                          {commit.url ? (
+                            <a
+                              href={commit.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={styles.commitHashLink}
+                            >
+                              {commit.hash}
+                            </a>
+                          ) : (
+                            <span className={styles.commitHash}>{commit.hash}</span>
+                          )}
+                          <span className={styles.commitMessage}>{commit.message}</span>
+                        </div>
+                      ))}
+                      {agent.ahead > 10 && (
+                        <span className={styles.emptyState}>
+                          +{agent.ahead - 10} more commits
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Changes Section */}
+                <div className={styles.section}>
+                  <h3 className={styles.sectionTitle}>Changes</h3>
+                  {agent.changes && agent.changes.length > 0 ? (
+                    <div className={styles.changesList}>
+                      {agent.changes.map((change) => (
+                        <div key={change.path} className={styles.changeItem}>
+                          <span
+                            className={styles.changeStatus}
+                            data-status={change.status}
+                          >
+                            {change.status === 'M'
+                              ? 'M'
+                              : change.status === 'A'
+                                ? '+'
+                                : change.status === 'D'
+                                  ? '-'
+                                  : change.status === '??'
+                                    ? '?'
+                                    : change.status}
+                          </span>
+                          <span className={styles.changePath}>{change.path}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className={styles.emptyState}>Clean working tree</span>
+                  )}
                 </div>
 
                 {/* Agent Info Section */}

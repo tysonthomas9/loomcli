@@ -224,7 +224,7 @@
 .logsContainer {
   flex: 1;
   min-height: 0;
-  padding: 16px;
+  padding: 16px 20px;
   overflow: hidden;
 }
 
@@ -356,6 +356,103 @@
 .commitBadge[data-type='synced'] {
   background-color: var(--color-bg-subtle);
   color: var(--color-text-muted);
+}
+
+/* ============= Commit List ============= */
+
+.commitList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.commitItem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.commitHash {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.commitHashLink {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  color: var(--color-primary);
+  flex-shrink: 0;
+  text-decoration: none;
+}
+
+.commitHashLink:hover {
+  text-decoration: underline;
+}
+
+.commitMessage {
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ============= File Changes ============= */
+
+.changesList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.changeItem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.changeStatus {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.changeStatus[data-status='M'] {
+  color: var(--color-warning, #eab308);
+}
+
+.changeStatus[data-status='A'] {
+  color: var(--color-success, #22c55e);
+}
+
+.changeStatus[data-status='D'] {
+  color: var(--color-danger, #ef4444);
+}
+
+.changeStatus[data-status='??'] {
+  color: var(--color-text-muted);
+}
+
+.changePath {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 /* ============= Agent Info ============= */

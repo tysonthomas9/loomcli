@@ -73,16 +73,31 @@ type MonitorData struct {
 	Stats              MonitorStats
 }
 
+// CommitDetail represents a single commit with hash, message, and optional GitHub URL.
+type CommitDetail struct {
+	Hash    string `json:"hash"`
+	Message string `json:"message"`
+	URL     string `json:"url,omitempty"` // GitHub commit URL if remote available
+}
+
+// FileChange represents a single file change from git status.
+type FileChange struct {
+	Status string `json:"status"` // "M", "A", "D", "??", "R"
+	Path   string `json:"path"`
+}
+
 // AgentStatus represents a single agent/worktree status
 type AgentStatus struct {
-	Name          string `json:"name"`
-	Branch        string `json:"branch"`
-	Status        string `json:"status"`                    // "ready", "3 changes", "running (plan, 5m ago)"
-	Ahead         int    `json:"ahead"`                     // commits ahead of integration branch
-	Behind        int    `json:"behind"`                    // commits behind integration branch
-	Role          string `json:"role,omitempty"`            // role from daemon config (e.g., "plan", "task")
-	Workspace     string `json:"workspace"`                 // workspace name (empty in legacy mode)
-	DaemonManaged bool   `json:"daemon_managed,omitempty"`  // true if under daemon supervision
+	Name          string         `json:"name"`
+	Branch        string         `json:"branch"`
+	Status        string         `json:"status"`                    // "ready", "3 changes", "running (plan, 5m ago)"
+	Ahead         int            `json:"ahead"`                     // commits ahead of integration branch
+	Behind        int            `json:"behind"`                    // commits behind integration branch
+	Role          string         `json:"role,omitempty"`            // role from daemon config (e.g., "plan", "task")
+	Workspace     string         `json:"workspace"`                 // workspace name (empty in legacy mode)
+	DaemonManaged bool           `json:"daemon_managed,omitempty"`  // true if under daemon supervision
+	Commits       []CommitDetail `json:"commits,omitempty"`         // recent commits ahead of integration branch
+	Changes       []FileChange   `json:"changes,omitempty"`         // uncommitted file changes
 }
 
 // TaskInfo represents a task with basic info
@@ -316,6 +331,103 @@ func CollectAgentStatusOnly() []AgentStatus {
 	return agents
 }
 
+// getGitHubRemoteURL returns the GitHub HTTPS URL for the origin remote.
+// Returns empty string if not a GitHub remote or on error.
+func getGitHubRemoteURL(path string) string {
+	output, err := RunGitCommand(path, "remote", "get-url", "origin")
+	if err != nil {
+		return ""
+	}
+	url := strings.TrimSpace(output)
+
+	// Convert SSH URL: git@github.com:user/repo.git -> https://github.com/user/repo
+	if strings.HasPrefix(url, "git@github.com:") {
+		url = strings.TrimPrefix(url, "git@github.com:")
+		url = strings.TrimSuffix(url, ".git")
+		return "https://github.com/" + url
+	}
+
+	// Handle HTTPS URL: https://github.com/user/repo.git -> https://github.com/user/repo
+	if strings.Contains(url, "github.com") {
+		url = strings.TrimSuffix(url, ".git")
+		return url
+	}
+
+	return ""
+}
+
+// getWorktreeCommitDetails returns the recent commits ahead of the integration branch.
+func getWorktreeCommitDetails(path, defaultBranch string, limit int, githubURL string) []CommitDetail {
+	branch := monitorBranch
+	if branch == "" {
+		branch = defaultBranch
+	}
+
+	output, err := RunGitCommand(path, "log",
+		fmt.Sprintf("origin/%s..HEAD", branch),
+		fmt.Sprintf("--format=%%h|%%s"),
+		"-n", strconv.Itoa(limit))
+	if err != nil {
+		return nil
+	}
+
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return nil
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	commits := make([]CommitDetail, 0, len(lines))
+	for _, line := range lines {
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		commit := CommitDetail{
+			Hash:    parts[0],
+			Message: parts[1],
+		}
+		if githubURL != "" {
+			commit.URL = githubURL + "/commit/" + parts[0]
+		}
+		commits = append(commits, commit)
+	}
+	return commits
+}
+
+// getWorktreeFileChanges returns uncommitted file changes from git status.
+func getWorktreeFileChanges(path string) []FileChange {
+	output, err := RunGitCommand(path, "status", "--porcelain")
+	if err != nil {
+		return nil
+	}
+
+	// Only trim trailing whitespace — leading spaces are significant in porcelain format
+	trimmed := strings.TrimRight(output, " \t\n\r")
+	if trimmed == "" {
+		return nil
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	changes := make([]FileChange, 0, len(lines))
+	for i, line := range lines {
+		if i >= 20 { // Limit to 20 files
+			break
+		}
+		if len(line) < 4 {
+			continue
+		}
+		// Porcelain format: XY filename (first 2 chars are status, then space, then path)
+		status := strings.TrimSpace(line[:2])
+		filePath := line[3:]
+		changes = append(changes, FileChange{
+			Status: status,
+			Path:   filePath,
+		})
+	}
+	return changes
+}
+
 func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[string][]string) {
 	worktrees, err := DiscoverWorktrees()
 	if err != nil {
@@ -330,6 +442,12 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 
 	// Compute default branch once per tick using already-discovered worktrees
 	defaultBranch := GetDefaultBranchForWorktrees(worktrees)
+
+	// Get GitHub remote URL once (all worktrees share the same remote)
+	githubURL := ""
+	if len(worktrees) > 0 {
+		githubURL = getGitHubRemoteURL(worktrees[0].Path)
+	}
 
 	for _, wt := range worktrees {
 		daemonInfo := daemonManaged[wt.Name]
@@ -401,6 +519,14 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 
 		// Check ahead/behind integration branch
 		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, defaultBranch)
+
+		// Populate commit details when ahead > 0
+		if agent.Ahead > 0 {
+			agent.Commits = getWorktreeCommitDetails(wt.Path, defaultBranch, 10, githubURL)
+		}
+
+		// Populate file changes (returns nil for clean trees)
+		agent.Changes = getWorktreeFileChanges(wt.Path)
 
 		agents = append(agents, agent)
 	}
