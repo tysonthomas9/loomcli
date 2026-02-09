@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -284,4 +285,260 @@ func TestPoolStats_Fields(t *testing.T) {
 	if stats.Closed {
 		t.Error("Closed = true, want false")
 	}
+}
+
+func TestNewConnectionPoolAutoDiscover_EmptyPath(t *testing.T) {
+	_, err := NewConnectionPoolAutoDiscover("", 5)
+	if !errors.Is(err, ErrInvalidSocketPath) {
+		t.Errorf("expected ErrInvalidSocketPath, got %v", err)
+	}
+}
+
+func TestNewConnectionPoolAutoDiscover_NoDaemon(t *testing.T) {
+	dir := t.TempDir()
+	pool, err := NewConnectionPoolAutoDiscover(dir, 5)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if pool == nil {
+		t.Fatal("expected non-nil pool")
+	}
+	defer pool.Close()
+
+	if pool.SocketPath() == "" {
+		t.Error("expected non-empty socket path")
+	}
+}
+
+func TestConnectionPool_DiscardNil(t *testing.T) {
+	pool, err := NewConnectionPool("/tmp/test.sock", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	// Discard nil should be safe (no panic)
+	pool.Discard(nil)
+
+	stats := pool.Stats()
+	if stats.Active != 0 {
+		t.Errorf("stats.Active = %v after Discard(nil), want 0", stats.Active)
+	}
+}
+
+func TestConnectionPool_Get_PoolExhausted(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	pool.SetPoolTimeout(50 * time.Millisecond)
+
+	// Get the single connection
+	ctx := context.Background()
+	client, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("first Get() error = %v", err)
+	}
+	if client == nil {
+		t.Fatal("first Get() returned nil client")
+	}
+
+	// Second Get should exhaust the pool
+	ctx2, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err = pool.Get(ctx2)
+	if err == nil {
+		t.Fatal("expected error from second Get on exhausted pool")
+	}
+
+	pool.Discard(client)
+}
+
+func TestConnectionPool_Get_CreatesConnection(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	ctx := context.Background()
+	client, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if client == nil {
+		t.Fatal("Get() returned nil client")
+	}
+
+	stats := pool.Stats()
+	if stats.Created != 1 {
+		t.Errorf("stats.Created = %v, want 1", stats.Created)
+	}
+	if stats.Active != 1 {
+		t.Errorf("stats.Active = %v, want 1", stats.Active)
+	}
+
+	pool.Discard(client)
+}
+
+func TestConnectionPool_Put_ReturnsToPool(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	ctx := context.Background()
+	client, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	pool.Put(client)
+
+	stats := pool.Stats()
+	if stats.Available != 1 {
+		t.Errorf("stats.Available = %v after Put, want 1", stats.Available)
+	}
+	if stats.Active != 0 {
+		t.Errorf("stats.Active = %v after Put, want 0", stats.Active)
+	}
+}
+
+func TestConnectionPool_Put_ClosedPool(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	client, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	// Close pool, then Put - should close the connection instead of returning to pool
+	pool.Close()
+	pool.Put(client) // Should not panic
+}
+
+func TestConnectionPool_Discard_Connection(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	ctx := context.Background()
+	client, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	pool.Discard(client)
+
+	stats := pool.Stats()
+	if stats.Active != 0 {
+		t.Errorf("stats.Active = %v after Discard, want 0", stats.Active)
+	}
+	if stats.Created != 0 {
+		t.Errorf("stats.Created = %v after Discard, want 0", stats.Created)
+	}
+}
+
+func TestConnectionPool_GetPutGet_Reuse(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	ctx := context.Background()
+
+	// Get first connection
+	client1, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("first Get() error = %v", err)
+	}
+
+	// Put it back
+	pool.Put(client1)
+
+	// Get again - should reuse the pooled connection (validates validateConnection)
+	client2, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("second Get() error = %v", err)
+	}
+
+	// The reused client should be the same pointer
+	if client2 != client1 {
+		t.Error("expected second Get to reuse the pooled connection")
+	}
+
+	pool.Discard(client2)
+}
+
+func TestConnectionPool_Close_WithPooledConnections(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	// Get and Put back a connection to have it in the pool
+	client, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	pool.Put(client)
+
+	stats := pool.Stats()
+	if stats.Available != 1 {
+		t.Fatalf("expected 1 available connection, got %d", stats.Available)
+	}
+
+	// Close should drain all pooled connections
+	err = pool.Close()
+	if err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+
+	stats = pool.Stats()
+	if !stats.Closed {
+		t.Error("expected pool to be closed")
+	}
+}
+
+func TestConnectionPool_ConcurrentGetPut(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	pool, err := NewConnectionPool(socketPath, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx := context.Background()
+			client, err := pool.Get(ctx)
+			if err != nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+			pool.Put(client)
+		}()
+	}
+	wg.Wait()
 }

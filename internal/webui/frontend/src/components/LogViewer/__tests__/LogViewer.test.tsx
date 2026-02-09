@@ -385,13 +385,13 @@ describe('LogViewer', () => {
   });
 
   describe('Edge cases', () => {
-    it('handles empty line content', () => {
+    it('filters out empty line content', () => {
       const lines = [createLogLine({ line: '', lineNumber: 1 })];
 
       render(<LogViewer lines={lines} connectionState="connected" />);
 
-      // Should still render the line number
-      expect(screen.getByText('1')).toBeInTheDocument();
+      // Empty lines are filtered out by ANSI stripping, showing empty state
+      expect(screen.getByText(/No logs available yet/i)).toBeInTheDocument();
     });
 
     it('handles lines with special characters', () => {

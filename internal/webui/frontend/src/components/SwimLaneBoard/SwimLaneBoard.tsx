@@ -21,7 +21,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { DraggableIssueCard } from '@/components/DraggableIssueCard';
 import type { BlockedInfo } from '@/components/KanbanBoard';
 import { KanbanBoard } from '@/components/KanbanBoard';
-import { DEFAULT_COLUMNS } from '@/components/KanbanBoard/columnConfigs';
+import { DEFAULT_COLUMNS, createColumns } from '@/components/KanbanBoard/columnConfigs';
 import type { KanbanColumnConfig } from '@/components/KanbanBoard/types';
 import { formatStatusLabel } from '@/components/StatusColumn/utils';
 import { SwimLane } from '@/components/SwimLane';
@@ -141,12 +141,14 @@ export function SwimLaneBoard({
   sortLanesBy = 'title',
   defaultCollapsed = false,
 }: SwimLaneBoardProps): JSX.Element {
-  // Resolve columns: props.columns > props.statuses (legacy) > DEFAULT_COLUMNS
+  // Resolve columns: props.columns > props.statuses (legacy) > default
+  // In swim lane mode (groupBy !== 'none'), include epics in columns so they appear in lanes
   const columns = useMemo(() => {
     if (propColumns) return propColumns;
     if (statuses) return statusesToColumns(statuses);
+    if (groupBy !== 'none') return createColumns({ includeEpics: true });
     return DEFAULT_COLUMNS;
-  }, [propColumns, statuses]);
+  }, [propColumns, statuses, groupBy]);
 
   // When groupBy='none', delegate to KanbanBoard
   if (groupBy === 'none') {

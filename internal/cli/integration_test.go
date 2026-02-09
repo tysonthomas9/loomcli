@@ -124,6 +124,7 @@ func TestMonitorDataCollection(t *testing.T) {
 	mock.AddStub("git", []string{"status", "--porcelain"}, CommandResult{Stdout: ""})
 	mock.AddStub("git", []string{"rev-list"}, CommandResult{Stdout: "0\t0"})
 	mock.AddStub("git", []string{"rev-parse"}, CommandResult{Stdout: "main"})
+	mock.AddStub("git", []string{"remote", "get-url"}, CommandResult{Stdout: "https://github.com/user/repo.git"})
 
 	mock.Install()
 
@@ -423,6 +424,7 @@ func TestMultiAgentConflictDetection(t *testing.T) {
 	mock.AddStub("git", []string{"status", "--porcelain"}, CommandResult{Stdout: ""})
 	mock.AddStub("git", []string{"rev-list"}, CommandResult{Stdout: "0\t0"})
 	mock.AddStub("git", []string{"rev-parse"}, CommandResult{Stdout: "main"})
+	mock.AddStub("git", []string{"remote", "get-url"}, CommandResult{Stdout: "https://github.com/user/repo.git"})
 	mock.Install()
 
 	data := collectMonitorData(100)
@@ -486,6 +488,7 @@ func TestNoConflictForDifferentTasks(t *testing.T) {
 	mock.AddStub("git", []string{"status", "--porcelain"}, CommandResult{Stdout: ""})
 	mock.AddStub("git", []string{"rev-list"}, CommandResult{Stdout: "0\t0"})
 	mock.AddStub("git", []string{"rev-parse"}, CommandResult{Stdout: "main"})
+	mock.AddStub("git", []string{"remote", "get-url"}, CommandResult{Stdout: "https://github.com/user/repo.git"})
 	mock.Install()
 
 	data := collectMonitorData(100)
@@ -641,6 +644,7 @@ func TestMonitorAgentStatusVariants(t *testing.T) {
 			}
 			mock.AddStub("git", []string{"rev-list"}, CommandResult{Stdout: "0\t0"})
 			mock.AddStub("git", []string{"rev-parse"}, CommandResult{Stdout: "main"})
+			mock.AddStub("git", []string{"remote", "get-url"}, CommandResult{Stdout: "https://github.com/user/repo.git"})
 			mock.Install()
 
 			data := collectMonitorData(100)

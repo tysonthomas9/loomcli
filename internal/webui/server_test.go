@@ -290,6 +290,35 @@ func TestStartServer_WriteTimeout(t *testing.T) {
 	}
 }
 
+// TestDefaultConfig tests that DefaultConfig returns sensible defaults.
+func TestDefaultConfig(t *testing.T) {
+	config := DefaultConfig()
+
+	if config.Port != 8080 {
+		t.Errorf("Port = %d, want 8080", config.Port)
+	}
+	if config.BindAddress != "127.0.0.1" {
+		t.Errorf("BindAddress = %q, want %q", config.BindAddress, "127.0.0.1")
+	}
+	if config.PoolSize != 100 {
+		t.Errorf("PoolSize = %d, want 100", config.PoolSize)
+	}
+	if config.ShutdownTimeout != 5*time.Second {
+		t.Errorf("ShutdownTimeout = %v, want %v", config.ShutdownTimeout, 5*time.Second)
+	}
+	if config.MaxPortAttempts != 10 {
+		t.Errorf("MaxPortAttempts = %d, want 10", config.MaxPortAttempts)
+	}
+	// Auth should be disabled by default
+	if config.AuthEnabled {
+		t.Error("AuthEnabled should be false by default")
+	}
+	// Socket path should be empty by default
+	if config.SocketPath != "" {
+		t.Errorf("SocketPath = %q, want empty", config.SocketPath)
+	}
+}
+
 // TestStartServer_WriteTimeout_NonStreamingEndpoint verifies that a non-streaming
 // endpoint (stats) works correctly under the 30s WriteTimeout. This tests the
 // opposite concern from streaming handlers: non-streaming handlers must complete

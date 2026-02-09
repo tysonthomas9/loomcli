@@ -6,7 +6,7 @@
  * Unit tests for formatIssueId utility.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import { formatIssueId } from '../formatIssueId';
 
@@ -33,5 +33,21 @@ describe('formatIssueId', () => {
 
   it('returns last 7 characters for very long ID', () => {
     expect(formatIssueId('some-very-long-issue-id-12345')).toBe('d-12345');
+  });
+
+  it('warns in development for empty ID', () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    formatIssueId('');
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('empty issue ID')
+    );
+
+    warnSpy.mockRestore();
+    process.env.NODE_ENV = originalEnv;
   });
 });

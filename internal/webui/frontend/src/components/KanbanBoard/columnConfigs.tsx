@@ -35,68 +35,76 @@ const ClockIcon = (
  */
 const needsReviewByTitle = (title: string): boolean => title.includes('[Need Review]');
 
-export const DEFAULT_COLUMNS: KanbanColumnConfig[] = [
-  {
-    id: 'backlog',
-    label: 'Backlog',
-    filter: (issue) =>
-      issue.issue_type !== 'epic' &&
-      issue.status === 'deferred' &&
-      !needsReviewByTitle(issue.title),
-    droppableDisabled: true, // Cannot drop TO backlog (auto-calculated)
-    allowedDropTargets: ['done'], // Can only drag FROM backlog to Done
-    style: 'muted',
-  },
-  {
-    id: 'ready',
-    label: 'Open',
-    headerIcon: ClockIcon,
-    filter: (issue, blockedInfo) =>
-      issue.issue_type !== 'epic' &&
-      (issue.status === 'open' || issue.status === undefined) &&
-      (!blockedInfo || blockedInfo.blockedByCount === 0) &&
-      !needsReviewByTitle(issue.title),
-    targetStatus: 'open',
-    allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
-    style: 'normal',
-  },
-  {
-    id: 'blocked',
-    label: 'Blocked',
-    filter: (issue, blockedInfo) =>
-      issue.issue_type !== 'epic' &&
-      (((issue.status === 'open' || issue.status === undefined) &&
-        !!blockedInfo &&
-        blockedInfo.blockedByCount > 0) ||
-        issue.status === 'blocked') &&
-      !needsReviewByTitle(issue.title),
-    droppableDisabled: true, // Cannot drop TO blocked (auto-calculated)
-    allowedDropTargets: ['done'], // Can only drag FROM blocked to Done
-    style: 'muted',
-  },
-  {
-    id: 'in_progress',
-    label: 'In Progress',
-    filter: (issue) => issue.issue_type !== 'epic' && issue.status === 'in_progress',
-    targetStatus: 'in_progress',
-    allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
-    style: 'normal',
-  },
-  {
-    id: 'review',
-    label: 'Needs Review',
-    filter: (issue) =>
-      issue.issue_type !== 'epic' && (issue.status === 'review' || needsReviewByTitle(issue.title)),
-    targetStatus: 'review',
-    allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
-    style: 'normal',
-  },
-  {
-    id: 'done',
-    label: 'Done',
-    filter: (issue) => issue.status === 'closed',
-    targetStatus: 'closed',
-    allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
-    style: 'normal',
-  },
-];
+export function createColumns(options?: { includeEpics?: boolean }): KanbanColumnConfig[] {
+  const includeEpics = options?.includeEpics === true;
+  return [
+    {
+      id: 'backlog',
+      label: 'Backlog',
+      filter: (issue) =>
+        (includeEpics || issue.issue_type !== 'epic') &&
+        issue.status === 'deferred' &&
+        !needsReviewByTitle(issue.title),
+      droppableDisabled: true, // Cannot drop TO backlog (auto-calculated)
+      allowedDropTargets: ['done'], // Can only drag FROM backlog to Done
+      style: 'muted',
+    },
+    {
+      id: 'ready',
+      label: 'Open',
+      headerIcon: ClockIcon,
+      filter: (issue, blockedInfo) =>
+        (includeEpics || issue.issue_type !== 'epic') &&
+        (issue.status === 'open' || issue.status === undefined) &&
+        (!blockedInfo || blockedInfo.blockedByCount === 0) &&
+        !needsReviewByTitle(issue.title),
+      targetStatus: 'open',
+      allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
+      style: 'normal',
+    },
+    {
+      id: 'blocked',
+      label: 'Blocked',
+      filter: (issue, blockedInfo) =>
+        (includeEpics || issue.issue_type !== 'epic') &&
+        (((issue.status === 'open' || issue.status === undefined) &&
+          !!blockedInfo &&
+          blockedInfo.blockedByCount > 0) ||
+          issue.status === 'blocked') &&
+        !needsReviewByTitle(issue.title),
+      droppableDisabled: true, // Cannot drop TO blocked (auto-calculated)
+      allowedDropTargets: ['done'], // Can only drag FROM blocked to Done
+      style: 'muted',
+    },
+    {
+      id: 'in_progress',
+      label: 'In Progress',
+      filter: (issue) =>
+        (includeEpics || issue.issue_type !== 'epic') && issue.status === 'in_progress',
+      targetStatus: 'in_progress',
+      allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
+      style: 'normal',
+    },
+    {
+      id: 'review',
+      label: 'Needs Review',
+      filter: (issue) =>
+        (includeEpics || issue.issue_type !== 'epic') &&
+        (issue.status === 'review' || needsReviewByTitle(issue.title)),
+      targetStatus: 'review',
+      allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
+      style: 'normal',
+    },
+    {
+      id: 'done',
+      label: 'Done',
+      filter: (issue) => issue.status === 'closed',
+      targetStatus: 'closed',
+      allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
+      style: 'normal',
+      defaultLimit: 10,
+    },
+  ];
+}
+
+export const DEFAULT_COLUMNS: KanbanColumnConfig[] = createColumns();

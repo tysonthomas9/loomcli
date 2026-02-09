@@ -591,3 +591,205 @@ func TestGenerateServerID(t *testing.T) {
 		t.Errorf("expected at least 2 colons in server ID %q", id)
 	}
 }
+
+func TestDefaultStaleDetectorConfig_Defaults(t *testing.T) {
+	cfg := DefaultStaleDetectorConfig()
+
+	if cfg.CheckInterval != 15*time.Second {
+		t.Errorf("expected CheckInterval=15s, got %v", cfg.CheckInterval)
+	}
+	if cfg.StaleThreshold != 5*time.Minute {
+		t.Errorf("expected StaleThreshold=5m, got %v", cfg.StaleThreshold)
+	}
+	if cfg.LeaderTTL != 30*time.Second {
+		t.Errorf("expected LeaderTTL=30s, got %v", cfg.LeaderTTL)
+	}
+	if cfg.LeaderKey != DefaultLeaderKey {
+		t.Errorf("expected LeaderKey=%s, got %s", DefaultLeaderKey, cfg.LeaderKey)
+	}
+}
+
+func TestDefaultStaleDetectorConfig_EnvOverrides(t *testing.T) {
+	t.Setenv("LOOM_STALE_CHECK_INTERVAL", "30s")
+	t.Setenv("LOOM_STALE_THRESHOLD", "10m")
+	t.Setenv("LOOM_STALE_LEADER_TTL", "1m")
+
+	cfg := DefaultStaleDetectorConfig()
+
+	if cfg.CheckInterval != 30*time.Second {
+		t.Errorf("expected CheckInterval=30s, got %v", cfg.CheckInterval)
+	}
+	if cfg.StaleThreshold != 10*time.Minute {
+		t.Errorf("expected StaleThreshold=10m, got %v", cfg.StaleThreshold)
+	}
+	if cfg.LeaderTTL != 1*time.Minute {
+		t.Errorf("expected LeaderTTL=1m, got %v", cfg.LeaderTTL)
+	}
+}
+
+func TestDefaultStaleDetectorConfig_InvalidEnv(t *testing.T) {
+	t.Setenv("LOOM_STALE_CHECK_INTERVAL", "not-a-duration")
+	t.Setenv("LOOM_STALE_THRESHOLD", "invalid")
+	t.Setenv("LOOM_STALE_LEADER_TTL", "garbage")
+
+	cfg := DefaultStaleDetectorConfig()
+
+	// Should fall back to defaults when env vars are invalid
+	if cfg.CheckInterval != 15*time.Second {
+		t.Errorf("expected default CheckInterval=15s, got %v", cfg.CheckInterval)
+	}
+	if cfg.StaleThreshold != 5*time.Minute {
+		t.Errorf("expected default StaleThreshold=5m, got %v", cfg.StaleThreshold)
+	}
+	if cfg.LeaderTTL != 30*time.Second {
+		t.Errorf("expected default LeaderTTL=30s, got %v", cfg.LeaderTTL)
+	}
+}
+
+func TestStaleDetector_RunCycle_NoStaleWorkers(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	cfg := StaleDetectorConfig{
+		CheckInterval:  50 * time.Millisecond,
+		StaleThreshold: 5 * time.Minute,
+		LeaderTTL:      30 * time.Second,
+		LeaderKey:      DefaultLeaderKey,
+	}
+	sd := NewStaleDetector(client, cfg, "server-1", nil)
+
+	// Only fresh workers
+	freshTime := float64(time.Now().UnixMilli())
+	mr.ZAdd(activeWorkersKey(), freshTime, "worker-1")
+
+	// Run a cycle - should acquire leadership, find 0 stale, renew
+	sd.runCycle(ctx)
+
+	status := sd.Status()
+	if !status.IsLeader {
+		t.Error("expected IsLeader=true after running cycle")
+	}
+	if status.StaleWorkersFound != 0 {
+		t.Errorf("expected StaleWorkersFound=0, got %d", status.StaleWorkersFound)
+	}
+}
+
+func TestStaleDetector_RunCycle_WithReconciler(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	cfg := StaleDetectorConfig{
+		CheckInterval:  50 * time.Millisecond,
+		StaleThreshold: 5 * time.Minute,
+		LeaderTTL:      30 * time.Second,
+		LeaderKey:      DefaultLeaderKey,
+	}
+
+	// Use /usr/bin/true as a stub binary that exits successfully
+	reconciler := NewReconciler("/usr/bin/true")
+	sd := NewStaleDetector(client, cfg, "server-1", reconciler)
+
+	// Seed a stale worker with a task
+	staleTime := float64(time.Now().Add(-10 * time.Minute).UnixMilli())
+	mr.ZAdd(activeWorkersKey(), staleTime, "stale-worker")
+	mr.HSet(workerStateKey("stale-worker"), "task_id", "task-orphan", "task_title", "Orphaned task", "state", "working")
+	mr.Set(taskOwnerKey("task-orphan"), "stale-worker")
+
+	sd.runCycle(ctx)
+
+	status := sd.Status()
+	if status.StaleWorkersFound != 1 {
+		t.Errorf("expected StaleWorkersFound=1, got %d", status.StaleWorkersFound)
+	}
+	// The reconciler runs /usr/bin/true which succeeds
+	if status.TasksReconciled != 1 {
+		t.Errorf("expected TasksReconciled=1, got %d", status.TasksReconciled)
+	}
+}
+
+func TestStaleDetector_CleanupWorker_NoTask(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	cfg := StaleDetectorConfig{
+		LeaderKey: DefaultLeaderKey,
+	}
+	sd := NewStaleDetector(client, cfg, "server-1", nil)
+
+	// Idle worker that went stale (no task)
+	mr.ZAdd(activeWorkersKey(), float64(time.Now().UnixMilli()), "idle-worker")
+	mr.HSet(workerStateKey("idle-worker"), "state", "idle")
+
+	sw := StaleWorker{
+		WorkerID: "idle-worker",
+		TaskID:   "", // no task
+	}
+
+	err := sd.cleanupWorker(ctx, sw)
+	if err != nil {
+		t.Fatalf("cleanup failed: %v", err)
+	}
+
+	// Worker state should be deleted
+	if mr.Exists(workerStateKey("idle-worker")) {
+		t.Error("idle worker state should be deleted")
+	}
+
+	// Worker should be removed from ZSET
+	members, _ := mr.ZMembers(activeWorkersKey())
+	for _, m := range members {
+		if m == "idle-worker" {
+			t.Error("idle-worker should be removed from active workers ZSET")
+		}
+	}
+}
+
+func TestStaleDetector_ReleaseLeadership_NotLeader(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	cfg := StaleDetectorConfig{
+		LeaderTTL: 30 * time.Second,
+		LeaderKey: DefaultLeaderKey,
+	}
+
+	sd := NewStaleDetector(client, cfg, "server-1", nil)
+
+	// Don't acquire leadership, just call release - should be a no-op
+	sd.releaseLeadership(ctx)
+
+	// Key should not exist
+	if mr.Exists(DefaultLeaderKey) {
+		t.Error("leader key should not exist")
+	}
+}
+
+func TestStaleDetector_ReleaseLeadership_DifferentOwner(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	cfg := StaleDetectorConfig{
+		LeaderTTL: 30 * time.Second,
+		LeaderKey: DefaultLeaderKey,
+	}
+
+	// server-1 acquires leadership
+	sd1 := NewStaleDetector(client, cfg, "server-1", nil)
+	acquired, _ := sd1.tryAcquireLeadership(ctx)
+	if !acquired {
+		t.Fatal("expected server-1 to acquire leadership")
+	}
+
+	// server-2 tries to release — should be a no-op since it doesn't own the key
+	sd2 := NewStaleDetector(client, cfg, "server-2", nil)
+	sd2.releaseLeadership(ctx)
+
+	// Key should still exist and be owned by server-1
+	val, err := mr.Get(DefaultLeaderKey)
+	if err != nil {
+		t.Fatalf("leader key should still exist: %v", err)
+	}
+	if val != "server-1" {
+		t.Errorf("expected leader to be server-1, got %s", val)
+	}
+}

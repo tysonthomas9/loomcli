@@ -70,6 +70,23 @@ export type LoomConnectionState =
   | 'reconnecting'; // Actively trying to reconnect
 
 /**
+ * Commit detail from the loom server.
+ */
+export interface LoomCommitDetail {
+  hash: string;
+  message: string;
+  url?: string;
+}
+
+/**
+ * File change from git status.
+ */
+export interface LoomFileChange {
+  status: string; // "M", "A", "D", "??", "R"
+  path: string;
+}
+
+/**
  * Agent status from the loom server.
  */
 export interface LoomAgentStatus {
@@ -85,6 +102,10 @@ export interface LoomAgentStatus {
   behind: number;
   /** Role from daemon config (e.g., "plan", "task") */
   role?: string;
+  /** Recent commits ahead of integration branch */
+  commits?: LoomCommitDetail[];
+  /** Uncommitted file changes */
+  changes?: LoomFileChange[];
 }
 
 /**
@@ -140,6 +161,14 @@ export interface LoomTaskSummary {
 }
 
 /**
+ * Per-worktree sync detail (commits ahead or behind).
+ */
+export interface WorktreeSyncDetail {
+  name: string;
+  count: number;
+}
+
+/**
  * Sync status from loom server.
  */
 export interface LoomSyncInfo {
@@ -148,6 +177,8 @@ export interface LoomSyncInfo {
   db_error?: string;
   git_needs_push: number;
   git_needs_pull: number;
+  git_push_details?: WorktreeSyncDetail[];
+  git_pull_details?: WorktreeSyncDetail[];
 }
 
 /**

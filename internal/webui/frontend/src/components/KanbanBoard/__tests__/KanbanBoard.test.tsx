@@ -1083,6 +1083,97 @@ describe('KanbanBoard', () => {
     });
   });
 
+  describe('Done column display limiting', () => {
+    /**
+     * Create N closed issues with staggered updated_at dates.
+     * Issue 0 is the most recently updated, issue N-1 the oldest.
+     */
+    function createClosedIssues(count: number): Issue[] {
+      return Array.from({ length: count }, (_, i) =>
+        createMockIssue({
+          id: `closed-${i}`,
+          title: `Closed Issue ${i}`,
+          status: 'closed',
+          updated_at: new Date(2024, 0, count - i).toISOString(),
+        })
+      );
+    }
+
+    it('shows closed issues in the Done column', () => {
+      const issues = [
+        createMockIssue({ id: 'closed-1', title: 'Closed Task A', status: 'closed' }),
+        createMockIssue({ id: 'closed-2', title: 'Closed Task B', status: 'closed' }),
+      ];
+
+      render(<KanbanBoard issues={issues} />);
+
+      const doneColumn = screen.getByRole('region', { name: 'Done issues' });
+      expect(within(doneColumn).getByText('Closed Task A')).toBeInTheDocument();
+      expect(within(doneColumn).getByText('Closed Task B')).toBeInTheDocument();
+    });
+
+    it('limits display to 10 items by default when more than 10 closed issues exist', () => {
+      const issues = createClosedIssues(15);
+
+      render(<KanbanBoard issues={issues} />);
+
+      const doneColumn = screen.getByRole('region', { name: 'Done issues' });
+      const articles = within(doneColumn).getAllByRole('article');
+      expect(articles).toHaveLength(10);
+    });
+
+    it('shows "Show all" button when Done column has more than 10 items', () => {
+      const issues = createClosedIssues(15);
+
+      render(<KanbanBoard issues={issues} />);
+
+      expect(screen.getByRole('button', { name: 'Show all 15' })).toBeInTheDocument();
+    });
+
+    it('clicking "Show all" displays all closed issues', () => {
+      const issues = createClosedIssues(15);
+
+      render(<KanbanBoard issues={issues} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show all 15' }));
+
+      const doneColumn = screen.getByRole('region', { name: 'Done issues' });
+      const articles = within(doneColumn).getAllByRole('article');
+      expect(articles).toHaveLength(15);
+    });
+
+    it('after clicking "Show all", button text changes to "Show recent"', () => {
+      const issues = createClosedIssues(15);
+
+      render(<KanbanBoard issues={issues} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Show all 15' }));
+
+      expect(screen.getByRole('button', { name: 'Show recent' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
+    });
+
+    it('shows all items when 10 or fewer closed issues (no "Show all" button)', () => {
+      const issues = createClosedIssues(8);
+
+      render(<KanbanBoard issues={issues} />);
+
+      const doneColumn = screen.getByRole('region', { name: 'Done issues' });
+      const articles = within(doneColumn).getAllByRole('article');
+      expect(articles).toHaveLength(8);
+      expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
+    });
+
+    it('Done column count header shows total count, not truncated count', () => {
+      const issues = createClosedIssues(15);
+
+      render(<KanbanBoard issues={issues} />);
+
+      const doneColumn = screen.getByRole('region', { name: 'Done issues' });
+      expect(within(doneColumn).getByLabelText('15 issues')).toBeInTheDocument();
+    });
+  });
+
   describe('blockedIssues prop passed to cards', () => {
     it('passes blockedInfo to DraggableIssueCard for blocked issues', () => {
       const issues = [

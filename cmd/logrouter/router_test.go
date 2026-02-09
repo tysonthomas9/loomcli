@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -655,5 +656,632 @@ func TestClose_FlushesAllBuffers(t *testing.T) {
 	}
 	if string(taskContent) != "test data for flushing" {
 		t.Errorf("task log content = %q, want %q", string(taskContent), "test data for flushing")
+	}
+}
+
+func TestRouteStdin_RoutesDataToAgentLog(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Replace os.Stdin with a pipe
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin }()
+
+	// Write data and close the write end to signal EOF
+	testData := "hello from stdin"
+	go func() {
+		w.Write([]byte(testData))
+		w.Close()
+	}()
+
+	// RouteStdin should return nil on EOF
+	if err := router.RouteStdin(context.Background()); err != nil {
+		t.Fatalf("RouteStdin returned error: %v", err)
+	}
+
+	// Flush and verify agent log content
+	if err := router.Flush(); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+
+	agentLogPath := filepath.Join(tmpDir, "agents", "test-agent.log")
+	content, err := os.ReadFile(agentLogPath)
+	if err != nil {
+		t.Fatalf("failed to read agent log: %v", err)
+	}
+	if string(content) != testData {
+		t.Errorf("agent log content = %q, want %q", string(content), testData)
+	}
+}
+
+func TestRouteStdin_RoutesDataToBothLogsWhenTaskActive(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Set task before routing stdin
+	if err := router.SetTask("task-stdin", "planning"); err != nil {
+		t.Fatalf("SetTask failed: %v", err)
+	}
+
+	// Replace os.Stdin with a pipe
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin }()
+
+	testData := "data for both logs"
+	go func() {
+		w.Write([]byte(testData))
+		w.Close()
+	}()
+
+	if err := router.RouteStdin(context.Background()); err != nil {
+		t.Fatalf("RouteStdin returned error: %v", err)
+	}
+
+	if err := router.Flush(); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+
+	// Verify agent log
+	agentContent, err := os.ReadFile(filepath.Join(tmpDir, "agents", "test-agent.log"))
+	if err != nil {
+		t.Fatalf("failed to read agent log: %v", err)
+	}
+	if string(agentContent) != testData {
+		t.Errorf("agent log content = %q, want %q", string(agentContent), testData)
+	}
+
+	// Verify task log
+	taskContent, err := os.ReadFile(filepath.Join(tmpDir, "tasks", "task-stdin", "planning.log"))
+	if err != nil {
+		t.Fatalf("failed to read task log: %v", err)
+	}
+	if string(taskContent) != testData {
+		t.Errorf("task log content = %q, want %q", string(taskContent), testData)
+	}
+}
+
+func TestRouteStdin_ReturnsNilOnContextCancel(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Replace os.Stdin with a pipe that stays open
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() {
+		os.Stdin = origStdin
+		w.Close()
+		r.Close()
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- router.RouteStdin(ctx)
+	}()
+
+	// Cancel context to stop RouteStdin
+	cancel()
+
+	// Close the pipe to unblock the read
+	w.Close()
+
+	err = <-done
+	if err != nil {
+		t.Errorf("RouteStdin returned error %v, want nil on context cancel", err)
+	}
+}
+
+func TestSetTask_RejectsInvalidPhase(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	err = router.SetTask("task-1", "invalid")
+	if err == nil {
+		t.Fatal("SetTask with invalid phase should return error")
+	}
+	if !strings.Contains(err.Error(), "invalid phase") {
+		t.Errorf("error = %v, want to contain 'invalid phase'", err)
+	}
+}
+
+func TestSetTask_NoOpWhenSameTaskAndPhase(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Set task first time
+	if err := router.SetTask("task-1", "planning"); err != nil {
+		t.Fatalf("first SetTask failed: %v", err)
+	}
+
+	// Set same task and phase again — should be no-op
+	if err := router.SetTask("task-1", "planning"); err != nil {
+		t.Fatalf("second SetTask failed: %v", err)
+	}
+
+	// Verify task log exists (was created on first call)
+	taskLogPath := filepath.Join(tmpDir, "tasks", "task-1", "planning.log")
+	if _, err := os.Stat(taskLogPath); os.IsNotExist(err) {
+		t.Errorf("task log file was not created at %s", taskLogPath)
+	}
+}
+
+func TestSetTask_SwitchesTask(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Set task A and write data
+	if err := router.SetTask("task-a", "planning"); err != nil {
+		t.Fatalf("SetTask task-a failed: %v", err)
+	}
+	if _, err := router.Write([]byte("data-a")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Switch to task B and write data
+	if err := router.SetTask("task-b", "implementation"); err != nil {
+		t.Fatalf("SetTask task-b failed: %v", err)
+	}
+	if _, err := router.Write([]byte("data-b")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	if err := router.Flush(); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+
+	// Verify task A log has only its data
+	taskAContent, err := os.ReadFile(filepath.Join(tmpDir, "tasks", "task-a", "planning.log"))
+	if err != nil {
+		t.Fatalf("failed to read task-a log: %v", err)
+	}
+	if string(taskAContent) != "data-a" {
+		t.Errorf("task-a log content = %q, want %q", string(taskAContent), "data-a")
+	}
+
+	// Verify task B log has only its data
+	taskBContent, err := os.ReadFile(filepath.Join(tmpDir, "tasks", "task-b", "implementation.log"))
+	if err != nil {
+		t.Fatalf("failed to read task-b log: %v", err)
+	}
+	if string(taskBContent) != "data-b" {
+		t.Errorf("task-b log content = %q, want %q", string(taskBContent), "data-b")
+	}
+}
+
+func TestClose_CalledTwice(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+
+	// Set a task so closeTaskLogLocked is exercised
+	if err := router.SetTask("task-1", "planning"); err != nil {
+		t.Fatalf("SetTask failed: %v", err)
+	}
+
+	// First close should succeed
+	if err := router.Close(); err != nil {
+		t.Fatalf("first Close failed: %v", err)
+	}
+
+	// Second close should not panic (closeTaskLogLocked with nil taskWriter)
+	// It may return an error from double-closing the file, but should not panic.
+	router.Close()
+}
+
+func TestFlush_ReturnsErrorWhenAgentWriterBroken(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+
+	// Write data to fill the bufio buffer partially
+	if _, err := router.Write([]byte("some data")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Close the underlying agent rotator to break the writer
+	router.agentRotator.Close()
+
+	// Flush should return error since the underlying file is closed
+	err = router.Flush()
+	if err == nil {
+		t.Error("Flush should return error when agent writer is broken")
+	}
+}
+
+func TestFlush_ReturnsErrorWhenTaskWriterBroken(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+
+	// Set task
+	if err := router.SetTask("task-flush", "planning"); err != nil {
+		t.Fatalf("SetTask failed: %v", err)
+	}
+
+	// Write data to fill both buffers
+	if _, err := router.Write([]byte("some task data")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Close the underlying task rotator to break the task writer
+	router.taskRotator.Close()
+
+	// Flush should return error from task writer
+	err = router.Flush()
+	if err == nil {
+		t.Error("Flush should return error when task writer is broken")
+	}
+}
+
+func TestClose_ReturnsAggregateErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+
+	// Set task
+	if err := router.SetTask("task-err", "planning"); err != nil {
+		t.Fatalf("SetTask failed: %v", err)
+	}
+
+	// Write data to fill buffers
+	if _, err := router.Write([]byte("data for errors")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Close the underlying task rotator to cause close errors
+	router.taskRotator.Close()
+
+	// Also close the agent rotator
+	router.agentRotator.Close()
+
+	// Close should return errors from both
+	err = router.Close()
+	if err == nil {
+		t.Error("Close should return aggregate errors")
+	}
+}
+
+func TestSetTask_MkdirAllError(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Create a file at the tasks path to block MkdirAll
+	tasksPath := filepath.Join(tmpDir, "tasks")
+	if err := os.WriteFile(tasksPath, []byte("blocker"), 0644); err != nil {
+		t.Fatalf("failed to create blocker file: %v", err)
+	}
+
+	// SetTask should fail because it can't create directory
+	err = router.SetTask("task-1", "planning")
+	if err == nil {
+		t.Error("SetTask should return error when MkdirAll fails")
+	}
+}
+
+func TestRouteStdin_HandlesWriteError(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+
+	// Close the underlying agent rotator to cause write errors
+	router.agentRotator.Close()
+
+	// Replace os.Stdin with a pipe
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin }()
+
+	go func() {
+		w.Write([]byte("data that will fail to write"))
+		w.Close()
+	}()
+
+	// RouteStdin should still return nil on EOF even with write errors
+	// (write errors are printed to stderr but don't stop routing)
+	if err := router.RouteStdin(context.Background()); err != nil {
+		t.Errorf("RouteStdin returned error: %v", err)
+	}
+}
+
+func TestSetTask_ClosePreviousTaskLogWarning(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Set task first
+	if err := router.SetTask("task-1", "planning"); err != nil {
+		t.Fatalf("SetTask failed: %v", err)
+	}
+
+	// Write data to fill buffer
+	if _, err := router.Write([]byte("buffered data")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Close the task rotator to cause closeTaskLogLocked to fail when switching
+	router.taskRotator.Close()
+
+	// Switch to a different task — should trigger closeTaskLogLocked which will
+	// encounter errors, print warning, and then proceed to open new task
+	err = router.SetTask("task-2", "implementation")
+	if err != nil {
+		t.Fatalf("SetTask to task-2 should still succeed despite close warning: %v", err)
+	}
+
+	// Verify the new task log was created
+	taskLogPath := filepath.Join(tmpDir, "tasks", "task-2", "implementation.log")
+	if _, err := os.Stat(taskLogPath); os.IsNotExist(err) {
+		t.Errorf("new task log file was not created at %s", taskLogPath)
+	}
+}
+
+func TestNewLogRouter_RejectsInvalidBaseDir(t *testing.T) {
+	// Use a path that can't be opened (non-existent deep path)
+	router, err := NewLogRouter("test-agent", "/nonexistent/deeply/nested/path", 0)
+	if err == nil {
+		router.Close()
+		t.Error("NewLogRouter should fail with invalid base dir")
+	}
+}
+
+func TestWrite_ReturnsErrorWhenAgentWriteFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+
+	// Close the agent rotator
+	router.agentRotator.Close()
+
+	// Write enough data to exceed the 64KB bufio buffer and trigger a flush
+	bigData := make([]byte, 128*1024)
+	for i := range bigData {
+		bigData[i] = 'X'
+	}
+
+	_, err = router.Write(bigData)
+	if err == nil {
+		t.Error("Write should return error when agent writer flush fails")
+	}
+	if !strings.Contains(err.Error(), "failed to write to agent log") {
+		t.Errorf("error = %v, want to contain 'failed to write to agent log'", err)
+	}
+}
+
+func TestWrite_TaskWriteErrorWarning(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Set task
+	if err := router.SetTask("task-warn", "planning"); err != nil {
+		t.Fatalf("SetTask failed: %v", err)
+	}
+
+	// Close the task rotator to make task writes fail
+	router.taskRotator.Close()
+
+	// Write enough data to trigger task writer flush error
+	bigData := make([]byte, 128*1024)
+	for i := range bigData {
+		bigData[i] = 'Y'
+	}
+
+	// Write should succeed (agent log works) but print warning for task log
+	_, err = router.Write(bigData)
+	if err != nil {
+		t.Errorf("Write should succeed for agent log even if task log fails: %v", err)
+	}
+}
+
+func TestSetTask_NewRotatingWriterError(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+	defer router.Close()
+
+	// Create task directory but put a directory where the log file should be
+	taskLogDir := filepath.Join(tmpDir, "tasks", "task-blocked")
+	if err := os.MkdirAll(taskLogDir, 0755); err != nil {
+		t.Fatalf("failed to create task dir: %v", err)
+	}
+	// Create a directory named "planning.log" to block file creation
+	blockPath := filepath.Join(taskLogDir, "planning.log")
+	if err := os.MkdirAll(blockPath, 0755); err != nil {
+		t.Fatalf("failed to create blocker dir: %v", err)
+	}
+
+	err = router.SetTask("task-blocked", "planning")
+	if err == nil {
+		t.Error("SetTask should return error when log file can't be created")
+	}
+	if !strings.Contains(err.Error(), "failed to open task log file") {
+		t.Errorf("error = %v, want to contain 'failed to open task log file'", err)
+	}
+}
+
+func TestRouteStdin_HandlesWriteErrorInLoop(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("failed to create agent dir: %v", err)
+	}
+
+	router, err := NewLogRouter("test-agent", tmpDir, 0)
+	if err != nil {
+		t.Fatalf("NewLogRouter failed: %v", err)
+	}
+
+	// Close the agent rotator to cause write errors
+	router.agentRotator.Close()
+
+	// Replace os.Stdin with a pipe
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin }()
+
+	// Write enough data to exceed buffer and trigger write error in RouteStdin
+	go func() {
+		bigData := make([]byte, 128*1024)
+		for i := range bigData {
+			bigData[i] = 'Z'
+		}
+		w.Write(bigData)
+		w.Close()
+	}()
+
+	// RouteStdin should still return nil on EOF even with write errors
+	if err := router.RouteStdin(context.Background()); err != nil {
+		t.Errorf("RouteStdin returned error: %v", err)
 	}
 }

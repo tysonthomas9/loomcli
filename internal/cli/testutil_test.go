@@ -180,6 +180,7 @@ type FlexibleStub struct {
 // exact call order or count is not predictable (e.g., variable worktree counts)
 type FlexibleCommandMock struct {
 	t     *testing.T
+	mu    sync.Mutex
 	stubs []*FlexibleStub
 	calls []CommandStub // actual calls received
 }
@@ -191,6 +192,8 @@ func NewFlexibleCommandMock(t *testing.T) *FlexibleCommandMock {
 
 // AddStub adds a stub that matches by command name and optional arg prefix
 func (m *FlexibleCommandMock) AddStub(name string, argPrefix []string, result CommandResult) *FlexibleStub {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	stub := &FlexibleStub{
 		Name:      name,
 		ArgPrefix: argPrefix,
@@ -214,6 +217,9 @@ func (s *FlexibleStub) WithMaxCalls(n int) *FlexibleStub {
 
 // Exec implements the commandExecutor interface with pattern matching
 func (m *FlexibleCommandMock) Exec(dir, name string, args ...string) CommandResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	call := CommandStub{Dir: dir, Name: name, Args: args}
 	m.calls = append(m.calls, call)
 
@@ -253,6 +259,8 @@ func hasArgPrefix(args, prefix []string) bool {
 
 // Verify ensures all min/max call constraints were met
 func (m *FlexibleCommandMock) Verify() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, stub := range m.stubs {
 		if stub.MinCalls > 0 && stub.callCount < stub.MinCalls {
 			m.t.Errorf("stub %s %v: expected at least %d calls, got %d",
@@ -275,7 +283,11 @@ func (m *FlexibleCommandMock) Install() {
 
 // Calls returns the actual calls made to the mock
 func (m *FlexibleCommandMock) Calls() []CommandStub {
-	return m.calls
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]CommandStub, len(m.calls))
+	copy(result, m.calls)
+	return result
 }
 
 // LoadFixture reads a test fixture file from the testdata directory.

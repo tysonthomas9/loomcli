@@ -597,18 +597,19 @@ describe('IssueCard', () => {
 
   describe('review type badge', () => {
     describe('getReviewType logic', () => {
-      it('returns plan when title contains [Need Review]', () => {
-        const issue = createTestIssue({ title: '[Need Review] My feature plan' });
+      it('returns plan when status is review with no PR external_ref', () => {
+        const issue = createTestIssue({ title: 'Design auth flow', status: 'review' });
         render(<IssueCard issue={issue} />);
 
         expect(screen.getByText('Plan')).toBeInTheDocument();
         expect(screen.getByLabelText('Plan review')).toBeInTheDocument();
       });
 
-      it('returns code when status is review AND title does not contain [Need Review]', () => {
+      it('returns code when status is review with PR external_ref', () => {
         const issue = createTestIssue({
           title: 'Implement feature X',
           status: 'review',
+          external_ref: 'https://github.com/owner/repo/pull/42',
         });
         render(<IssueCard issue={issue} />);
 
@@ -650,42 +651,41 @@ describe('IssueCard', () => {
         expect(screen.queryByText('Help')).not.toBeInTheDocument();
       });
 
-      it('prioritizes plan over code when title has [Need Review] and status is review', () => {
+      it('returns plan when status is review with non-PR external_ref', () => {
         const issue = createTestIssue({
-          title: '[Need Review] Code review request',
+          title: 'Task',
           status: 'review',
+          external_ref: 'JIRA-123',
         });
         render(<IssueCard issue={issue} />);
 
-        // Plan takes priority over Code when [Need Review] is in title
         expect(screen.getByText('Plan')).toBeInTheDocument();
         expect(screen.queryByText('Code')).not.toBeInTheDocument();
       });
     });
 
     describe('badge rendering', () => {
-      it('shows Plan badge with icon for issues with [Need Review] in title', () => {
-        const issue = createTestIssue({ title: '[Need Review] Design proposal' });
+      it('shows Plan badge with icon for plan review', () => {
+        const issue = createTestIssue({ title: 'Design proposal', status: 'review' });
         render(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText('Plan review');
         expect(badge).toBeInTheDocument();
         expect(badge).toHaveTextContent('Plan');
-        // Check icon is rendered
         expect(screen.getByText('📝')).toBeInTheDocument();
       });
 
-      it('shows Code badge with icon for issues with review status', () => {
+      it('shows Code badge with icon for code review', () => {
         const issue = createTestIssue({
           title: 'Feature implementation',
           status: 'review',
+          external_ref: 'https://github.com/owner/repo/pull/10',
         });
         render(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText('Code review');
         expect(badge).toBeInTheDocument();
         expect(badge).toHaveTextContent('Code');
-        // Check icon is rendered
         expect(screen.getByText('🔍')).toBeInTheDocument();
       });
 
@@ -700,7 +700,6 @@ describe('IssueCard', () => {
         const badge = screen.getByLabelText('Help review');
         expect(badge).toBeInTheDocument();
         expect(badge).toHaveTextContent('Help');
-        // Check icon is rendered
         expect(screen.getByText('❓')).toBeInTheDocument();
       });
 
@@ -717,7 +716,7 @@ describe('IssueCard', () => {
       });
 
       it('badge icon has aria-hidden attribute', () => {
-        const issue = createTestIssue({ title: '[Need Review] Feature' });
+        const issue = createTestIssue({ title: 'Feature', status: 'review' });
         render(<IssueCard issue={issue} />);
 
         const icon = screen.getByText('📝');
@@ -725,7 +724,7 @@ describe('IssueCard', () => {
       });
 
       it('applies reviewPlan class to Plan badge', () => {
-        const issue = createTestIssue({ title: '[Need Review] Plan item' });
+        const issue = createTestIssue({ title: 'Plan item', status: 'review' });
         render(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText('Plan review');
@@ -736,6 +735,7 @@ describe('IssueCard', () => {
         const issue = createTestIssue({
           title: 'Code item',
           status: 'review',
+          external_ref: 'https://github.com/owner/repo/pull/5',
         });
         render(<IssueCard issue={issue} />);
 
@@ -753,6 +753,41 @@ describe('IssueCard', () => {
 
         const badge = screen.getByLabelText('Help review');
         expect(badge.className).toMatch(/reviewHelp/);
+      });
+    });
+
+    describe('PR link', () => {
+      it('shows PR link for code reviews', () => {
+        const issue = createTestIssue({
+          status: 'review',
+          external_ref: 'https://github.com/owner/repo/pull/42',
+        });
+        render(<IssueCard issue={issue} />);
+
+        const link = screen.getByLabelText('View pull request');
+        expect(link).toHaveAttribute('href', 'https://github.com/owner/repo/pull/42');
+        expect(link).toHaveAttribute('target', '_blank');
+      });
+
+      it('does not show PR link for plan reviews', () => {
+        const issue = createTestIssue({ status: 'review' });
+        render(<IssueCard issue={issue} />);
+
+        expect(screen.queryByLabelText('View pull request')).not.toBeInTheDocument();
+      });
+
+      it('PR link click does not trigger card onClick', () => {
+        const issue = createTestIssue({
+          status: 'review',
+          external_ref: 'https://github.com/owner/repo/pull/42',
+        });
+        const onClick = vi.fn();
+        render(<IssueCard issue={issue} onClick={onClick} />);
+
+        const link = screen.getByLabelText('View pull request');
+        fireEvent.click(link);
+
+        expect(onClick).not.toHaveBeenCalled();
       });
     });
 
@@ -777,21 +812,78 @@ describe('IssueCard', () => {
         // Empty string notes should not trigger Help badge
         expect(screen.queryByText('Help')).not.toBeInTheDocument();
       });
+    });
+  });
 
-      it('[Need Review] detection is case sensitive', () => {
-        const issue = createTestIssue({ title: '[need review] lowercase' });
-        render(<IssueCard issue={issue} />);
+  describe('open status badge', () => {
+    it('shows "Ready" badge when card is in Open column with design', () => {
+      const issue = createTestIssue({ design: 'Implementation plan for feature X' });
+      render(<IssueCard issue={issue} columnId="ready" />);
 
-        // Should not match because case is different
-        expect(screen.queryByText('Plan')).not.toBeInTheDocument();
-      });
+      expect(screen.getByText('Ready')).toBeInTheDocument();
+      expect(screen.getByText('✅')).toBeInTheDocument();
+    });
 
-      it('[Need Review] can be anywhere in title', () => {
-        const issue = createTestIssue({ title: 'My feature [Need Review] for approval' });
-        render(<IssueCard issue={issue} />);
+    it('shows "Needs Plan" badge when card is in Open column without design', () => {
+      const issue = createTestIssue();
+      render(<IssueCard issue={issue} columnId="ready" />);
 
-        expect(screen.getByText('Plan')).toBeInTheDocument();
-      });
+      expect(screen.getByText('Needs Plan')).toBeInTheDocument();
+      expect(screen.getByText('📋')).toBeInTheDocument();
+    });
+
+    it('does not show open status badge in other columns', () => {
+      const issue = createTestIssue({ design: 'Some design content' });
+      render(<IssueCard issue={issue} columnId="in_progress" />);
+
+      expect(screen.queryByText('Ready')).not.toBeInTheDocument();
+      expect(screen.queryByText('Needs Plan')).not.toBeInTheDocument();
+    });
+
+    it('does not show open status badge when no columnId is provided', () => {
+      const issue = createTestIssue({ design: 'Some design content' });
+      render(<IssueCard issue={issue} />);
+
+      expect(screen.queryByText('Ready')).not.toBeInTheDocument();
+      expect(screen.queryByText('Needs Plan')).not.toBeInTheDocument();
+    });
+
+    it('Ready badge has correct aria-label', () => {
+      const issue = createTestIssue({ design: 'Design document' });
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      expect(screen.getByLabelText('Ready')).toBeInTheDocument();
+    });
+
+    it('Needs Plan badge has correct aria-label', () => {
+      const issue = createTestIssue();
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      expect(screen.getByLabelText('Needs Plan')).toBeInTheDocument();
+    });
+
+    it('badge icon has aria-hidden attribute', () => {
+      const issue = createTestIssue({ design: 'Design doc' });
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      const icon = screen.getByText('✅');
+      expect(icon).toHaveAttribute('aria-hidden', 'true');
+    });
+
+    it('applies openReady class to Ready badge', () => {
+      const issue = createTestIssue({ design: 'Design doc' });
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      const badge = screen.getByLabelText('Ready');
+      expect(badge.className).toMatch(/openReady/);
+    });
+
+    it('applies openNeedsPlan class to Needs Plan badge', () => {
+      const issue = createTestIssue();
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      const badge = screen.getByLabelText('Needs Plan');
+      expect(badge.className).toMatch(/openNeedsPlan/);
     });
   });
 

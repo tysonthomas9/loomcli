@@ -1136,3 +1136,199 @@ func itoa(i int) string {
 	}
 	return string(buf[pos:])
 }
+
+// --- Happy path tests for log handlers ---
+
+// TestHandleGetAgentLog_Success tests the full success path with an actual log file.
+func TestHandleGetAgentLog_Success(t *testing.T) {
+	// Redirect HOME to a temp dir so we don't write to the real ~/.loom/logs/
+	// Resolve symlinks first (macOS /tmp -> /private/tmp) so validatePathWithinDir works.
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
+		t.Fatalf("failed to create agent log dir: %v", err)
+	}
+
+	testAgentName := "testcoveragexyz123"
+	logPath := filepath.Join(agentLogDir, testAgentName+".log")
+	logContent := "line 1: agent started\nline 2: processing task\nline 3: task complete\n"
+	if err := os.WriteFile(logPath, []byte(logContent), 0o644); err != nil {
+		t.Fatalf("failed to write test log: %v", err)
+	}
+
+	handler := handleGetAgentLog()
+
+	// Use the mux to route properly with path params
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{name}/logs", handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+testAgentName+"/logs", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp LogContentResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true, got false (error: %s)", resp.Error)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+	if len(resp.Data.Lines) == 0 {
+		t.Error("expected non-empty lines")
+	}
+}
+
+// TestHandleGetAgentLog_LinesParam tests the lines query parameter.
+func TestHandleGetAgentLog_LinesParam(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
+		t.Fatalf("failed to create agent log dir: %v", err)
+	}
+
+	testAgentName := "testcoveragelines"
+	logPath := filepath.Join(agentLogDir, testAgentName+".log")
+	var lines []string
+	for i := 0; i < 50; i++ {
+		lines = append(lines, fmt.Sprintf("line %d: test data", i+1))
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write test log: %v", err)
+	}
+
+	handler := handleGetAgentLog()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{name}/logs", handler)
+
+	// Request only 5 lines
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+testAgentName+"/logs?lines=5", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp LogContentResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true, error: %s", resp.Error)
+	}
+	if resp.Data != nil && len(resp.Data.Lines) > 5 {
+		t.Errorf("expected at most 5 lines, got %d", len(resp.Data.Lines))
+	}
+}
+
+// TestHandleListTaskPhases_Success tests the full success path for listing task phases.
+func TestHandleListTaskPhases_Success(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	taskID := "testcoveragetask123"
+	taskDir := filepath.Join(tmpHome, ".loom", "logs", "tasks", taskID)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatalf("failed to create task log dir: %v", err)
+	}
+
+	// Create phase log files
+	for _, phase := range []string{"planning", "implementation"} {
+		logPath := filepath.Join(taskDir, phase+".log")
+		if err := os.WriteFile(logPath, []byte("test log content\n"), 0o644); err != nil {
+			t.Fatalf("failed to write %s log: %v", phase, err)
+		}
+	}
+
+	handler := handleListTaskPhases()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/tasks/{id}/logs", handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskID+"/logs", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp TaskPhasesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true, error: %s", resp.Error)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+	if len(resp.Data.Phases) != 2 {
+		t.Errorf("expected 2 phases, got %d", len(resp.Data.Phases))
+	}
+}
+
+// TestHandleGetTaskLog_Success tests the full success path for reading a task log.
+func TestHandleGetTaskLog_Success(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	taskID := "testcoveragetasklog"
+	taskDir := filepath.Join(tmpHome, ".loom", "logs", "tasks", taskID)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatalf("failed to create task log dir: %v", err)
+	}
+
+	logPath := filepath.Join(taskDir, "planning.log")
+	if err := os.WriteFile(logPath, []byte("plan step 1\nplan step 2\n"), 0o644); err != nil {
+		t.Fatalf("failed to write planning log: %v", err)
+	}
+
+	handler := handleGetTaskLog()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}", handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskID+"/logs/planning", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp LogContentResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true, error: %s", resp.Error)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+	if len(resp.Data.Lines) == 0 {
+		t.Error("expected non-empty lines")
+	}
+}

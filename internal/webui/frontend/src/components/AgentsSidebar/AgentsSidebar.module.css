@@ -290,6 +290,7 @@
 
 .syncWarning {
   color: var(--color-warning);
+  cursor: help;
 }
 
 .syncSeparator {

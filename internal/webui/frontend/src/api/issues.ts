@@ -163,12 +163,12 @@ export async function getBlockedIssues(options?: BlockedFilter): Promise<Blocked
 
 /**
  * Get issues for the Kanban board view.
- * Excludes closed/tombstone issues and includes blocked dependency info.
+ * Excludes tombstone issues and includes blocked dependency info.
  * Returns issues enriched with is_blocked, blocked_by_count, blocked_by fields.
  */
 export async function getKanbanIssues(options?: WorkFilter): Promise<Issue[]> {
   const params: Record<string, unknown> = {
-    exclude_status: 'closed,tombstone',
+    exclude_status: 'tombstone',
     include_blocked: 'true',
   };
   if (options) {
@@ -314,6 +314,7 @@ export interface UpdateIssueRequest {
   status?: Status;
   assignee?: string;
   labels?: string[];
+  add_labels?: string[];
   issue_type?: IssueType;
 }
 

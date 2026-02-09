@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -304,8 +305,10 @@ func TestHandleSSE_Headers(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
-	// Create a test request
+	// Create a test request with cancelable context
+	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
 	// Run handler in goroutine since it blocks
@@ -317,6 +320,10 @@ func TestHandleSSE_Headers(t *testing.T) {
 
 	// Give handler time to set headers and write initial response
 	time.Sleep(100 * time.Millisecond)
+
+	// Cancel context and wait for handler to exit before reading response
+	cancel()
+	<-done
 
 	// Check headers
 	if ct := rr.Header().Get("Content-Type"); ct != "text/event-stream" {
@@ -391,7 +398,9 @@ func TestHandleSSE_ParsesLastEventID(t *testing.T) {
 			if tt.sinceParam != "" {
 				url += "?since=" + tt.sinceParam
 			}
+			ctx, cancel := context.WithCancel(context.Background())
 			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req = req.WithContext(ctx)
 			if tt.lastEventID != "" {
 				req.Header.Set("Last-Event-ID", tt.lastEventID)
 			}
@@ -404,6 +413,8 @@ func TestHandleSSE_ParsesLastEventID(t *testing.T) {
 			}()
 
 			time.Sleep(100 * time.Millisecond)
+			cancel()
+			<-done
 
 			// If expectedSince > 0, getMutations should have been called
 			if tt.expectedSince > 0 && capturedSince != tt.expectedSince {
@@ -421,7 +432,9 @@ func TestHandleSSE_SendsConnectedEvent(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
+	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
 	done := make(chan struct{})
@@ -431,6 +444,8 @@ func TestHandleSSE_SendsConnectedEvent(t *testing.T) {
 	}()
 
 	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
 
 	body := rr.Body.String()
 	if !strings.Contains(body, "event: connected") {
@@ -462,7 +477,9 @@ func TestHandleSSE_CatchUpEvents(t *testing.T) {
 	handler := handleSSE(hub, getMutations)
 
 	// Connect with a since timestamp to trigger catch-up
+	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/events?since=1000", nil)
+	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
 	done := make(chan struct{})
@@ -472,6 +489,8 @@ func TestHandleSSE_CatchUpEvents(t *testing.T) {
 	}()
 
 	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
 
 	body := rr.Body.String()
 	// Should contain mutation event for catch-up
@@ -994,7 +1013,9 @@ func TestHandleSSE_SendsRetryField(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
+	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
 	done := make(chan struct{})
@@ -1004,6 +1025,8 @@ func TestHandleSSE_SendsRetryField(t *testing.T) {
 	}()
 
 	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
 
 	body := rr.Body.String()
 	expectedRetry := fmt.Sprintf("retry: %d", sseRetryMs)
@@ -1030,7 +1053,9 @@ func TestHandleSSE_HeartbeatSent(t *testing.T) {
 
 	handler := handleSSE(hub, nil)
 
+	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
 	done := make(chan struct{})
@@ -1040,6 +1065,8 @@ func TestHandleSSE_HeartbeatSent(t *testing.T) {
 	}()
 
 	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
 
 	body := rr.Body.String()
 	// Verify initial handshake is present (connected event + retry field)

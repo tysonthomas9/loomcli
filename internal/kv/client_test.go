@@ -2,7 +2,12 @@ package kv
 
 import (
 	"context"
+	"errors"
+	"net"
 	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 )
 
 func TestNewClient(t *testing.T) {
@@ -143,3 +148,332 @@ func TestClaimTask_InvalidInputs(t *testing.T) {
 		t.Error("expected error for workerID with colon")
 	}
 }
+
+func TestRedisShouldTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"context.Canceled", context.Canceled, false},
+		{"context.DeadlineExceeded", context.DeadlineExceeded, false},
+		{"net.Error", &net.OpError{Op: "dial", Err: errors.New("connection refused")}, true},
+		{"connection refused string", errors.New("connection refused"), true},
+		{"EOF", errors.New("EOF"), true},
+		{"connection reset", errors.New("connection reset by peer"), true},
+		{"broken pipe", errors.New("broken pipe"), true},
+		{"generic error", errors.New("some random error"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RedisShouldTrip(tt.err)
+			if got != tt.want {
+				t.Errorf("RedisShouldTrip(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// newTestBreaker creates a circuit breaker suitable for tests.
+// High failure threshold so operations pass through without tripping.
+func newTestBreaker() *circuitbreaker.Breaker {
+	return circuitbreaker.NewBreaker("test", circuitbreaker.Config{
+		FailureThreshold: 100,
+		OpenTimeout:      30 * time.Second,
+		ShouldTrip:       RedisShouldTrip,
+	})
+}
+
+func TestSetCircuitBreaker(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	b := newTestBreaker()
+	client.SetCircuitBreaker(b)
+
+	// Verify breaker is set by running an operation through the breaker path
+	result, err := client.ClaimTask(ctx, "worker-1", "task-1", "Test", "spark")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("expected claim to succeed through breaker")
+	}
+}
+
+func TestClaimTask_WithCircuitBreaker(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	result, err := client.ClaimTask(ctx, "worker-1", "task-1", "Test task", "spark")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got failure with owner: %s", result.ExistingOwner)
+	}
+}
+
+func TestHeartbeat_WithCircuitBreaker(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	// Claim first (through breaker)
+	_, err := client.ClaimTask(ctx, "worker-1", "task-1", "Test", "spark")
+	if err != nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+
+	// Heartbeat through breaker
+	result, err := client.Heartbeat(ctx, "worker-1")
+	if err != nil {
+		t.Fatalf("heartbeat failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected heartbeat success, got error: %s", result.Error)
+	}
+}
+
+func TestHeartbeat_InvalidInput(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	_, err := client.Heartbeat(ctx, "")
+	if err == nil {
+		t.Error("expected error for empty workerID")
+	}
+
+	_, err = client.Heartbeat(ctx, "worker:bad")
+	if err == nil {
+		t.Error("expected error for workerID with colon")
+	}
+}
+
+func TestCompleteTask_WithCircuitBreaker(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	// Claim then complete through breaker
+	_, err := client.ClaimTask(ctx, "worker-1", "task-1", "Test", "spark")
+	if err != nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+
+	result, err := client.CompleteTask(ctx, "worker-1", "task-1")
+	if err != nil {
+		t.Fatalf("complete failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+}
+
+func TestCompleteTask_InvalidInputs(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	_, err := client.CompleteTask(ctx, "", "task-1")
+	if err == nil {
+		t.Error("expected error for empty workerID")
+	}
+
+	_, err = client.CompleteTask(ctx, "worker-1", "")
+	if err == nil {
+		t.Error("expected error for empty taskID")
+	}
+
+	_, err = client.CompleteTask(ctx, "worker:bad", "task-1")
+	if err == nil {
+		t.Error("expected error for workerID with invalid chars")
+	}
+}
+
+func TestGetStaleWorkers_WithCircuitBreaker(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	// Seed stale worker
+	oldTime := float64(time.Now().Add(-10 * time.Minute).UnixMilli())
+	mr.ZAdd(activeWorkersKey(), oldTime, "old-worker")
+
+	entries, err := client.GetStaleWorkers(ctx, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 stale entry, got %d", len(entries))
+	}
+	if entries[0].WorkerID != "old-worker" {
+		t.Errorf("expected old-worker, got %s", entries[0].WorkerID)
+	}
+}
+
+func TestGetWorkerState_WithCircuitBreaker(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	mr.HSet(workerStateKey("worker-1"), "task_id", "task-1", "state", "working")
+
+	state, err := client.GetWorkerState(ctx, "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state["task_id"] != "task-1" {
+		t.Errorf("expected task_id=task-1, got %s", state["task_id"])
+	}
+}
+
+func TestSetLeaderKey_WithCircuitBreaker(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	ok, err := client.SetLeaderKey(ctx, "test:leader", "server-1", 30*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected SETNX to succeed")
+	}
+
+	// Second set should fail
+	ok, err = client.SetLeaderKey(ctx, "test:leader", "server-2", 30*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected SETNX to fail when key exists")
+	}
+}
+
+func TestDeleteTaskOwner_WithCircuitBreaker(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	mr.Set(taskOwnerKey("task-1"), "worker-1")
+
+	err := client.DeleteTaskOwner(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mr.Exists(taskOwnerKey("task-1")) {
+		t.Error("key should be deleted")
+	}
+}
+
+func TestDeleteWorkerState_WithCircuitBreaker(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	mr.HSet(workerStateKey("worker-1"), "state", "working")
+
+	err := client.DeleteWorkerState(ctx, "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mr.Exists(workerStateKey("worker-1")) {
+		t.Error("key should be deleted")
+	}
+}
+
+func TestRemoveActiveWorker_WithCircuitBreaker(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	mr.ZAdd(activeWorkersKey(), 1000, "worker-1")
+
+	err := client.RemoveActiveWorker(ctx, "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	members, _ := mr.ZMembers(activeWorkersKey())
+	for _, m := range members {
+		if m == "worker-1" {
+			t.Error("worker-1 should be removed")
+		}
+	}
+}
+
+func TestRenewLeaderKey_WithCircuitBreaker(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	mr.Set("test:leader", "server-1")
+
+	err := client.RenewLeaderKey(ctx, "test:leader", 30*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify TTL was set
+	ttl := mr.TTL("test:leader")
+	if ttl <= 0 {
+		t.Errorf("expected positive TTL, got %v", ttl)
+	}
+}
+
+func TestDeleteLeaderKey_WithCircuitBreaker(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	mr.Set("test:leader", "server-1")
+
+	err := client.DeleteLeaderKey(ctx, "test:leader")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mr.Exists("test:leader") {
+		t.Error("leader key should be deleted")
+	}
+}
+
+func TestGetTaskOwner_WithCircuitBreaker(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	mr.Set(taskOwnerKey("task-1"), "worker-1")
+
+	owner, err := client.GetTaskOwner(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if owner != "worker-1" {
+		t.Errorf("expected worker-1, got %s", owner)
+	}
+
+	// Non-existent task through breaker
+	owner, err = client.GetTaskOwner(ctx, "nonexistent")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if owner != "" {
+		t.Errorf("expected empty string, got %s", owner)
+	}
+}
+

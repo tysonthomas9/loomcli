@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 
 import type { Issue } from '@/types';
 
-import { DEFAULT_COLUMNS } from '../columnConfigs';
+import { DEFAULT_COLUMNS, createColumns } from '../columnConfigs';
 import type { BlockedInfo } from '../KanbanBoard';
 
 /**
@@ -316,6 +316,15 @@ describe('columnConfigs', () => {
   });
 
   // ---------------------------------------------------------------
+  // Done column defaultLimit
+  // ---------------------------------------------------------------
+  describe('Done column defaultLimit', () => {
+    it('has defaultLimit of 10', () => {
+      expect(getColumn('done').defaultLimit).toBe(10);
+    });
+  });
+
+  // ---------------------------------------------------------------
   // Blocked column identity
   // ---------------------------------------------------------------
   describe('Blocked column identity', () => {
@@ -333,6 +342,260 @@ describe('columnConfigs', () => {
 
     it('only allows drops to done', () => {
       expect(getColumn('blocked').allowedDropTargets).toEqual(['done']);
+    });
+  });
+
+  // ---------------------------------------------------------------
+  // createColumns() factory function
+  // ---------------------------------------------------------------
+  describe('createColumns()', () => {
+    /**
+     * Helper to look up a column by id from a given column array.
+     */
+    function getColumnFrom(columns: ReturnType<typeof createColumns>, id: string) {
+      const col = columns.find((c) => c.id === id);
+      if (!col) throw new Error(`Column "${id}" not found`);
+      return col;
+    }
+
+    describe('no arguments (default behavior)', () => {
+      it('returns the same column structure as DEFAULT_COLUMNS', () => {
+        const columns = createColumns();
+        expect(columns.map((c) => c.id)).toEqual(DEFAULT_COLUMNS.map((c) => c.id));
+        expect(columns.map((c) => c.label)).toEqual(DEFAULT_COLUMNS.map((c) => c.label));
+      });
+
+      it('filters out epics from Backlog', () => {
+        const columns = createColumns();
+        const backlog = getColumnFrom(columns, 'backlog');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'deferred' });
+        expect(backlog.filter(epicIssue, notBlocked)).toBe(false);
+      });
+
+      it('filters out epics from Open', () => {
+        const columns = createColumns();
+        const open = getColumnFrom(columns, 'ready');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'open' });
+        expect(open.filter(epicIssue, notBlocked)).toBe(false);
+      });
+
+      it('filters out epics from Blocked', () => {
+        const columns = createColumns();
+        const blockedCol = getColumnFrom(columns, 'blocked');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'open' });
+        expect(blockedCol.filter(epicIssue, blocked)).toBe(false);
+      });
+
+      it('filters out epics from In Progress', () => {
+        const columns = createColumns();
+        const inProgress = getColumnFrom(columns, 'in_progress');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'in_progress' });
+        expect(inProgress.filter(epicIssue, notBlocked)).toBe(false);
+      });
+
+      it('filters out epics from Needs Review', () => {
+        const columns = createColumns();
+        const review = getColumnFrom(columns, 'review');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'review' });
+        expect(review.filter(epicIssue, notBlocked)).toBe(false);
+      });
+
+      it('allows epics in Done', () => {
+        const columns = createColumns();
+        const done = getColumnFrom(columns, 'done');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'closed' });
+        expect(done.filter(epicIssue, notBlocked)).toBe(true);
+      });
+
+      it('still allows non-epic issues through all columns', () => {
+        const columns = createColumns();
+        const taskOpen = createMockIssue({ issue_type: 'task', status: 'open' });
+        const taskDeferred = createMockIssue({ issue_type: 'task', status: 'deferred' });
+        const taskBlocked = createMockIssue({ issue_type: 'task', status: 'open' });
+        const taskInProgress = createMockIssue({ issue_type: 'task', status: 'in_progress' });
+        const taskReview = createMockIssue({ issue_type: 'task', status: 'review' });
+        const taskClosed = createMockIssue({ issue_type: 'task', status: 'closed' });
+
+        expect(getColumnFrom(columns, 'ready').filter(taskOpen, notBlocked)).toBe(true);
+        expect(getColumnFrom(columns, 'backlog').filter(taskDeferred, notBlocked)).toBe(true);
+        expect(getColumnFrom(columns, 'blocked').filter(taskBlocked, blocked)).toBe(true);
+        expect(getColumnFrom(columns, 'in_progress').filter(taskInProgress, notBlocked)).toBe(true);
+        expect(getColumnFrom(columns, 'review').filter(taskReview, notBlocked)).toBe(true);
+        expect(getColumnFrom(columns, 'done').filter(taskClosed, notBlocked)).toBe(true);
+      });
+    });
+
+    describe('with includeEpics: true', () => {
+      it('allows epics in Backlog (deferred)', () => {
+        const columns = createColumns({ includeEpics: true });
+        const backlog = getColumnFrom(columns, 'backlog');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'deferred' });
+        expect(backlog.filter(epicIssue, notBlocked)).toBe(true);
+      });
+
+      it('allows epics in Open', () => {
+        const columns = createColumns({ includeEpics: true });
+        const open = getColumnFrom(columns, 'ready');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'open' });
+        expect(open.filter(epicIssue, notBlocked)).toBe(true);
+      });
+
+      it('allows epics in Blocked (open + blocked by deps)', () => {
+        const columns = createColumns({ includeEpics: true });
+        const blockedCol = getColumnFrom(columns, 'blocked');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'open' });
+        expect(blockedCol.filter(epicIssue, blocked)).toBe(true);
+      });
+
+      it('allows epics in Blocked (blocked status)', () => {
+        const columns = createColumns({ includeEpics: true });
+        const blockedCol = getColumnFrom(columns, 'blocked');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'blocked' });
+        expect(blockedCol.filter(epicIssue, notBlocked)).toBe(true);
+      });
+
+      it('allows epics in In Progress', () => {
+        const columns = createColumns({ includeEpics: true });
+        const inProgress = getColumnFrom(columns, 'in_progress');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'in_progress' });
+        expect(inProgress.filter(epicIssue, notBlocked)).toBe(true);
+      });
+
+      it('allows epics in Needs Review (status)', () => {
+        const columns = createColumns({ includeEpics: true });
+        const review = getColumnFrom(columns, 'review');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'review' });
+        expect(review.filter(epicIssue, notBlocked)).toBe(true);
+      });
+
+      it('allows epics in Needs Review (title)', () => {
+        const columns = createColumns({ includeEpics: true });
+        const review = getColumnFrom(columns, 'review');
+        const epicIssue = createMockIssue({
+          issue_type: 'epic',
+          title: '[Need Review] Epic cleanup',
+          status: 'open',
+        });
+        expect(review.filter(epicIssue, notBlocked)).toBe(true);
+      });
+
+      it('allows epics in Done', () => {
+        const columns = createColumns({ includeEpics: true });
+        const done = getColumnFrom(columns, 'done');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'closed' });
+        expect(done.filter(epicIssue, notBlocked)).toBe(true);
+      });
+
+      it('still respects other filter logic (status matching)', () => {
+        const columns = createColumns({ includeEpics: true });
+        // An epic with status=open should NOT match Backlog (which requires deferred)
+        const epicOpen = createMockIssue({ issue_type: 'epic', status: 'open' });
+        expect(getColumnFrom(columns, 'backlog').filter(epicOpen, notBlocked)).toBe(false);
+      });
+
+      it('still respects [Need Review] title routing', () => {
+        const columns = createColumns({ includeEpics: true });
+        // An epic with [Need Review] in title should go to review, not backlog
+        const epicReviewTitle = createMockIssue({
+          issue_type: 'epic',
+          title: '[Need Review] Deferred epic',
+          status: 'deferred',
+        });
+        expect(getColumnFrom(columns, 'backlog').filter(epicReviewTitle, notBlocked)).toBe(false);
+        expect(getColumnFrom(columns, 'review').filter(epicReviewTitle, notBlocked)).toBe(true);
+      });
+
+      it('still allows non-epic issues through all columns', () => {
+        const columns = createColumns({ includeEpics: true });
+        const taskOpen = createMockIssue({ issue_type: 'task', status: 'open' });
+        expect(getColumnFrom(columns, 'ready').filter(taskOpen, notBlocked)).toBe(true);
+      });
+    });
+
+    describe('with includeEpics: false (explicit)', () => {
+      it('filters out epics from Open (same as default)', () => {
+        const columns = createColumns({ includeEpics: false });
+        const open = getColumnFrom(columns, 'ready');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'open' });
+        expect(open.filter(epicIssue, notBlocked)).toBe(false);
+      });
+
+      it('filters out epics from In Progress (same as default)', () => {
+        const columns = createColumns({ includeEpics: false });
+        const inProgress = getColumnFrom(columns, 'in_progress');
+        const epicIssue = createMockIssue({ issue_type: 'epic', status: 'in_progress' });
+        expect(inProgress.filter(epicIssue, notBlocked)).toBe(false);
+      });
+    });
+
+    describe('column structure consistency', () => {
+      it('returns 6 columns regardless of includeEpics', () => {
+        expect(createColumns().length).toBe(6);
+        expect(createColumns({ includeEpics: true }).length).toBe(6);
+        expect(createColumns({ includeEpics: false }).length).toBe(6);
+      });
+
+      it('returns columns with the same IDs regardless of includeEpics', () => {
+        const defaultIds = createColumns().map((c) => c.id);
+        const withEpicsIds = createColumns({ includeEpics: true }).map((c) => c.id);
+        const withoutEpicsIds = createColumns({ includeEpics: false }).map((c) => c.id);
+
+        expect(defaultIds).toEqual(['backlog', 'ready', 'blocked', 'in_progress', 'review', 'done']);
+        expect(withEpicsIds).toEqual(defaultIds);
+        expect(withoutEpicsIds).toEqual(defaultIds);
+      });
+
+      it('preserves column metadata (style, droppableDisabled, allowedDropTargets)', () => {
+        const withEpics = createColumns({ includeEpics: true });
+        const backlog = getColumnFrom(withEpics, 'backlog');
+        const blockedCol = getColumnFrom(withEpics, 'blocked');
+        const done = getColumnFrom(withEpics, 'done');
+
+        expect(backlog.style).toBe('muted');
+        expect(backlog.droppableDisabled).toBe(true);
+        expect(backlog.allowedDropTargets).toEqual(['done']);
+
+        expect(blockedCol.style).toBe('muted');
+        expect(blockedCol.droppableDisabled).toBe(true);
+        expect(blockedCol.allowedDropTargets).toEqual(['done']);
+
+        expect(done.defaultLimit).toBe(10);
+      });
+
+      it('returns independent column arrays (no shared references)', () => {
+        const columns1 = createColumns();
+        const columns2 = createColumns({ includeEpics: true });
+
+        expect(columns1).not.toBe(columns2);
+        expect(columns1[0]).not.toBe(columns2[0]);
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------
+  // DEFAULT_COLUMNS backward compatibility
+  // ---------------------------------------------------------------
+  describe('DEFAULT_COLUMNS backward compatibility', () => {
+    it('DEFAULT_COLUMNS is defined as createColumns() with no args', () => {
+      // DEFAULT_COLUMNS should produce the same column IDs and labels
+      const freshDefault = createColumns();
+      expect(DEFAULT_COLUMNS.map((c) => c.id)).toEqual(freshDefault.map((c) => c.id));
+      expect(DEFAULT_COLUMNS.map((c) => c.label)).toEqual(freshDefault.map((c) => c.label));
+    });
+
+    it('DEFAULT_COLUMNS filters epics from all columns except Done', () => {
+      const epicOpen = createMockIssue({ issue_type: 'epic', status: 'open' });
+      const epicDeferred = createMockIssue({ issue_type: 'epic', status: 'deferred' });
+      const epicInProgress = createMockIssue({ issue_type: 'epic', status: 'in_progress' });
+      const epicReview = createMockIssue({ issue_type: 'epic', status: 'review' });
+      const epicClosed = createMockIssue({ issue_type: 'epic', status: 'closed' });
+
+      expect(getColumn('backlog').filter(epicDeferred, notBlocked)).toBe(false);
+      expect(getColumn('ready').filter(epicOpen, notBlocked)).toBe(false);
+      expect(getColumn('blocked').filter(epicOpen, blocked)).toBe(false);
+      expect(getColumn('in_progress').filter(epicInProgress, notBlocked)).toBe(false);
+      expect(getColumn('review').filter(epicReview, notBlocked)).toBe(false);
+      expect(getColumn('done').filter(epicClosed, notBlocked)).toBe(true);
     });
   });
 });

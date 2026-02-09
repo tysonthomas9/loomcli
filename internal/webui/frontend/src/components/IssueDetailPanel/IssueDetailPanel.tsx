@@ -286,7 +286,8 @@ function DefaultContent({
 
   // Determine which log URL to connect to
   const shouldConnectToLogs =
-    isTaskType && (activeLogTab === 'planning' || activeLogTab === 'implementation');
+    isTaskType &&
+    ((activeLogTab === 'planning' && !issue?.design) || activeLogTab === 'implementation');
   const logStreamUrl =
     issue && shouldConnectToLogs ? getTaskLogStreamUrl(issue.id, activeLogTab) : '';
 
@@ -660,8 +661,15 @@ function DefaultContent({
         </div>
       )}
 
-      {/* Log Viewer (shown when Planning or Implementation tab is active) */}
-      {shouldConnectToLogs ? (
+      {/* Planning tab with design content (shown when design field exists) */}
+      {activeLogTab === 'planning' && issue?.design ? (
+        <div className={styles.scrollableContent}>
+          <div className={styles.detailContent}>
+            <MarkdownRenderer content={issue.design} />
+          </div>
+        </div>
+      ) : /* Log Viewer (shown when Planning fallback or Implementation tab is active) */
+      shouldConnectToLogs ? (
         <div className={styles.logsContainer}>
           <LogViewer
             lines={logLines}

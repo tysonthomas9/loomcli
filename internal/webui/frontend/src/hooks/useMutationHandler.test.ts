@@ -1555,6 +1555,151 @@ describe('useMutationHandler', () => {
     });
   });
 
+  describe('handleMutation - empty issue_id guard', () => {
+    it('skips create mutation with empty issue_id', () => {
+      const onIssueCreated = vi.fn();
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+          onIssueCreated,
+        })
+      );
+
+      const mutation = createMutationPayload({
+        type: 'create',
+        issue_id: '',
+        title: 'Ghost Issue',
+        timestamp: '2025-01-23T12:00:00Z',
+      });
+
+      act(() => {
+        result.current.handleMutation(mutation);
+      });
+
+      expect(mockSetIssues).not.toHaveBeenCalled();
+      expect(onIssueCreated).not.toHaveBeenCalled();
+    });
+
+    it('skips update mutation with empty issue_id', () => {
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        })
+      );
+
+      const mutation = createMutationPayload({
+        type: 'update',
+        issue_id: '',
+        title: 'Ghost Update',
+        timestamp: '2025-01-23T12:00:00Z',
+      });
+
+      act(() => {
+        result.current.handleMutation(mutation);
+      });
+
+      expect(mockSetIssues).not.toHaveBeenCalled();
+    });
+
+    it('skips delete mutation with empty issue_id', () => {
+      const onIssueDeleted = vi.fn();
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+          onIssueDeleted,
+        })
+      );
+
+      const mutation = createMutationPayload({
+        type: 'delete',
+        issue_id: '',
+        timestamp: '2025-01-23T12:00:00Z',
+      });
+
+      act(() => {
+        result.current.handleMutation(mutation);
+      });
+
+      expect(mockSetIssues).not.toHaveBeenCalled();
+      expect(onIssueDeleted).not.toHaveBeenCalled();
+    });
+
+    it('skips status mutation with empty issue_id', () => {
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        })
+      );
+
+      const mutation = createMutationPayload({
+        type: 'status',
+        issue_id: '',
+        new_status: 'active',
+        timestamp: '2025-01-23T12:00:00Z',
+      });
+
+      act(() => {
+        result.current.handleMutation(mutation);
+      });
+
+      expect(mockSetIssues).not.toHaveBeenCalled();
+    });
+
+    it('does not increment mutationCount for empty issue_id', () => {
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        })
+      );
+
+      expect(result.current.mutationCount).toBe(0);
+
+      act(() => {
+        result.current.handleMutation(
+          createMutationPayload({
+            type: 'create',
+            issue_id: '',
+            title: 'Ghost Issue',
+            timestamp: '2025-01-23T12:00:00Z',
+          })
+        );
+      });
+
+      expect(result.current.mutationCount).toBe(0);
+    });
+
+    it('allows refresh mutation with empty issue_id', () => {
+      const onRefreshRequired = vi.fn();
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+          onRefreshRequired,
+        })
+      );
+
+      const mutation = createMutationPayload({
+        type: 'refresh',
+        issue_id: '',
+        timestamp: '2025-01-23T12:00:00Z',
+      });
+
+      act(() => {
+        result.current.handleMutation(mutation);
+      });
+
+      // Refresh events legitimately have empty issue_id and should still work
+      expect(onRefreshRequired).toHaveBeenCalledTimes(1);
+      expect(result.current.mutationCount).toBe(1);
+      expect(result.current.lastMutationAt).toBe('2025-01-23T12:00:00Z');
+    });
+  });
+
   describe('handleMutation - refresh type', () => {
     it('calls onRefreshRequired callback when refresh mutation is received', () => {
       const onRefreshRequired = vi.fn();
