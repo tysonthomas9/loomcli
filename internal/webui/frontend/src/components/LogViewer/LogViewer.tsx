@@ -3,9 +3,10 @@
  * Terminal-style log display with auto-scroll, line numbers, and connection status.
  */
 
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 
 import type { LogLine, LogStreamState } from '@/hooks/useLogStream';
+import { stripAnsi, isEmptyAfterStrip } from '@/utils/ansiStrip';
 
 import styles from './LogViewer.module.css';
 
@@ -115,6 +116,16 @@ export function LogViewer({
     }
   }, [onAutoScrollChange]);
 
+  // Strip ANSI escape sequences and filter empty lines
+  const processedLines = useMemo(() => {
+    return lines
+      .map((logLine) => ({
+        ...logLine,
+        line: stripAnsi(logLine.line),
+      }))
+      .filter((logLine) => !isEmptyAfterStrip(logLine.line));
+  }, [lines]);
+
   const statusInfo = getStatusInfo(connectionState);
   const isPulsing = connectionState === 'connecting' || connectionState === 'reconnecting';
 
@@ -177,12 +188,12 @@ export function LogViewer({
       >
         {/* eslint-enable jsx-a11y/no-noninteractive-tabindex */}
         <div className={styles.logContent}>
-          {lines.length === 0 ? (
+          {processedLines.length === 0 ? (
             <div className={styles.empty}>
               No logs available yet. Logs appear when the agent starts working.
             </div>
           ) : (
-            lines.map((logLine) => (
+            processedLines.map((logLine) => (
               <div key={logLine.lineNumber} className={styles.line}>
                 {showLineNumbers && <span className={styles.lineNumber}>{logLine.lineNumber}</span>}
                 <span className={styles.lineContent}>{logLine.line}</span>
