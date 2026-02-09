@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -184,4 +185,259 @@ func TestDaemonConnection_Constants(t *testing.T) {
 	if DefaultDialTimeout > DefaultRequestTimeout {
 		t.Error("DefaultDialTimeout should not exceed DefaultRequestTimeout")
 	}
+}
+
+func TestNewDaemonConnectionAutoDiscover_EmptyPath(t *testing.T) {
+	_, err := NewDaemonConnectionAutoDiscover("")
+	if !errors.Is(err, ErrInvalidSocketPath) {
+		t.Errorf("expected ErrInvalidSocketPath, got %v", err)
+	}
+}
+
+func TestNewDaemonConnectionAutoDiscover_NoDaemon(t *testing.T) {
+	// A temp dir with no daemon running should still return a connection
+	// (lazy connect via ComputeSocketPath fallback)
+	dir := t.TempDir()
+	conn, err := NewDaemonConnectionAutoDiscover(dir)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if conn == nil {
+		t.Fatal("expected non-nil connection")
+	}
+	if conn.socketPath == "" {
+		t.Error("expected non-empty socket path")
+	}
+}
+
+func TestDaemonConnection_Connect_NoDaemon(t *testing.T) {
+	conn, err := NewDaemonConnection("/tmp/nonexistent-daemon-test.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.SetDialTimeout(100 * time.Millisecond)
+
+	err = conn.Connect()
+	if err == nil {
+		t.Fatal("expected error connecting to nonexistent socket")
+	}
+	if !errors.Is(err, ErrConnectionTimeout) && !errors.Is(err, ErrDaemonNotRunning) {
+		t.Errorf("expected ErrConnectionTimeout or ErrDaemonNotRunning, got %v", err)
+	}
+}
+
+func TestDaemonConnection_GetClient_NoDaemon(t *testing.T) {
+	conn, err := NewDaemonConnection("/tmp/nonexistent-daemon-test.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.SetDialTimeout(100 * time.Millisecond)
+
+	_, err = conn.GetClient()
+	if err == nil {
+		t.Fatal("expected error from GetClient with no daemon")
+	}
+}
+
+func TestDaemonConnection_Health_NoDaemon(t *testing.T) {
+	conn, err := NewDaemonConnection("/tmp/nonexistent-daemon-test.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.SetDialTimeout(100 * time.Millisecond)
+
+	_, err = conn.Health()
+	if err == nil {
+		t.Fatal("expected error from Health with no daemon")
+	}
+}
+
+func TestDaemonConnection_Reconnect_NoDaemon(t *testing.T) {
+	conn, err := NewDaemonConnection("/tmp/nonexistent-daemon-test.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.SetDialTimeout(100 * time.Millisecond)
+
+	err = conn.Reconnect()
+	if err == nil {
+		t.Fatal("expected error reconnecting to nonexistent socket")
+	}
+	if !errors.Is(err, ErrConnectionTimeout) && !errors.Is(err, ErrDaemonNotRunning) {
+		t.Errorf("expected ErrConnectionTimeout or ErrDaemonNotRunning, got %v", err)
+	}
+}
+
+func TestDaemonConnection_Connect_Success(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	conn, err := NewDaemonConnection(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = conn.Connect()
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	if !conn.IsConnected() {
+		t.Error("expected IsConnected() = true after Connect")
+	}
+	if conn.Client() == nil {
+		t.Error("expected non-nil Client() after Connect")
+	}
+
+	conn.Disconnect()
+}
+
+func TestDaemonConnection_GetClient_LazyConnect(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	conn, err := NewDaemonConnection(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// GetClient should auto-connect
+	client, err := conn.GetClient()
+	if err != nil {
+		t.Fatalf("GetClient() error = %v", err)
+	}
+	if client == nil {
+		t.Error("expected non-nil client from GetClient")
+	}
+	if !conn.IsConnected() {
+		t.Error("expected IsConnected() = true after GetClient")
+	}
+
+	conn.Disconnect()
+}
+
+func TestDaemonConnection_GetClient_AlreadyConnected(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	conn, err := NewDaemonConnection(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Connect first
+	if err := conn.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	firstClient := conn.Client()
+
+	// GetClient should return the existing client
+	client, err := conn.GetClient()
+	if err != nil {
+		t.Fatalf("GetClient() error = %v", err)
+	}
+	if client != firstClient {
+		t.Error("expected GetClient to return existing client")
+	}
+
+	conn.Disconnect()
+}
+
+func TestDaemonConnection_Disconnect_WithActiveConnection(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	conn, err := NewDaemonConnection(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := conn.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	if !conn.IsConnected() {
+		t.Fatal("expected connected after Connect")
+	}
+
+	err = conn.Disconnect()
+	if err != nil {
+		t.Errorf("Disconnect() error = %v", err)
+	}
+	if conn.IsConnected() {
+		t.Error("expected IsConnected() = false after Disconnect")
+	}
+	if conn.Client() != nil {
+		t.Error("expected nil Client() after Disconnect")
+	}
+}
+
+func TestDaemonConnection_SetRequestTimeout_WithClient(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	conn, err := NewDaemonConnection(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := conn.Connect(); err != nil {
+		t.Fatal(err)
+	}
+
+	// SetRequestTimeout with active client should not panic
+	newTimeout := 10 * time.Second
+	conn.SetRequestTimeout(newTimeout)
+
+	conn.mu.RLock()
+	actualTimeout := conn.requestTimeout
+	conn.mu.RUnlock()
+	if actualTimeout != newTimeout {
+		t.Errorf("requestTimeout = %v, want %v", actualTimeout, newTimeout)
+	}
+
+	conn.Disconnect()
+}
+
+func TestDaemonConnection_Health_Success(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	conn, err := NewDaemonConnection(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	health, err := conn.Health()
+	if err != nil {
+		t.Fatalf("Health() error = %v", err)
+	}
+	if health == nil {
+		t.Fatal("expected non-nil health response")
+	}
+	if health.Status != "healthy" {
+		t.Errorf("expected status 'healthy', got %q", health.Status)
+	}
+
+	conn.Disconnect()
+}
+
+func TestDaemonConnection_Reconnect_Success(t *testing.T) {
+	socketPath := startMockDaemonServer(t)
+	conn, err := NewDaemonConnection(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Connect first
+	if err := conn.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	firstClient := conn.Client()
+
+	// Reconnect should close old connection and establish new one
+	err = conn.Reconnect()
+	if err != nil {
+		t.Fatalf("Reconnect() error = %v", err)
+	}
+	if !conn.IsConnected() {
+		t.Error("expected IsConnected() = true after Reconnect")
+	}
+
+	newClient := conn.Client()
+	if newClient == nil {
+		t.Error("expected non-nil Client() after Reconnect")
+	}
+	if newClient == firstClient {
+		t.Error("expected Reconnect to establish a new client")
+	}
+
+	conn.Disconnect()
 }
