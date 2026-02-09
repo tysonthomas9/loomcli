@@ -274,6 +274,40 @@
 }
 
 /* =================================
+ * Open status badge styling
+ * Shown on cards in the Open column
+ * ================================= */
+
+.openStatusBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  border-radius: var(--radius-sm);
+}
+
+.openStatusBadge .openStatusIcon {
+  font-size: 0.7em;
+  line-height: 1;
+}
+
+/* Needs Plan - amber/warning color to indicate action needed */
+.openNeedsPlan {
+  background-color: var(--color-warning-bg);
+  color: var(--color-text);
+}
+
+/* Ready - green/success color to indicate ready for implementation */
+.openReady {
+  background-color: var(--color-success-bg);
+  color: var(--color-text);
+}
+
+/* =================================
  * Review action buttons (Approve/Reject)
  * Only shown for cards in Review column
  * ================================= */

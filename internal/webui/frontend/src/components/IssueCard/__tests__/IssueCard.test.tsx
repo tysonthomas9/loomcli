@@ -795,6 +795,78 @@ describe('IssueCard', () => {
     });
   });
 
+  describe('open status badge', () => {
+    it('shows "Ready" badge when card is in Open column with design', () => {
+      const issue = createTestIssue({ design: 'Implementation plan for feature X' });
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      expect(screen.getByText('Ready')).toBeInTheDocument();
+      expect(screen.getByText('✅')).toBeInTheDocument();
+    });
+
+    it('shows "Needs Plan" badge when card is in Open column without design', () => {
+      const issue = createTestIssue();
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      expect(screen.getByText('Needs Plan')).toBeInTheDocument();
+      expect(screen.getByText('📋')).toBeInTheDocument();
+    });
+
+    it('does not show open status badge in other columns', () => {
+      const issue = createTestIssue({ design: 'Some design content' });
+      render(<IssueCard issue={issue} columnId="in_progress" />);
+
+      expect(screen.queryByText('Ready')).not.toBeInTheDocument();
+      expect(screen.queryByText('Needs Plan')).not.toBeInTheDocument();
+    });
+
+    it('does not show open status badge when no columnId is provided', () => {
+      const issue = createTestIssue({ design: 'Some design content' });
+      render(<IssueCard issue={issue} />);
+
+      expect(screen.queryByText('Ready')).not.toBeInTheDocument();
+      expect(screen.queryByText('Needs Plan')).not.toBeInTheDocument();
+    });
+
+    it('Ready badge has correct aria-label', () => {
+      const issue = createTestIssue({ design: 'Design document' });
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      expect(screen.getByLabelText('Ready')).toBeInTheDocument();
+    });
+
+    it('Needs Plan badge has correct aria-label', () => {
+      const issue = createTestIssue();
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      expect(screen.getByLabelText('Needs Plan')).toBeInTheDocument();
+    });
+
+    it('badge icon has aria-hidden attribute', () => {
+      const issue = createTestIssue({ design: 'Design doc' });
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      const icon = screen.getByText('✅');
+      expect(icon).toHaveAttribute('aria-hidden', 'true');
+    });
+
+    it('applies openReady class to Ready badge', () => {
+      const issue = createTestIssue({ design: 'Design doc' });
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      const badge = screen.getByLabelText('Ready');
+      expect(badge.className).toMatch(/openReady/);
+    });
+
+    it('applies openNeedsPlan class to Needs Plan badge', () => {
+      const issue = createTestIssue();
+      render(<IssueCard issue={issue} columnId="ready" />);
+
+      const badge = screen.getByLabelText('Needs Plan');
+      expect(badge.className).toMatch(/openNeedsPlan/);
+    });
+  });
+
   describe('CSS module classes', () => {
     it('renders card with issueCard class from CSS module', () => {
       const issue = createTestIssue();

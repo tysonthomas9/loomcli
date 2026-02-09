@@ -10,6 +10,8 @@ import { useAgentContext } from '@/hooks';
 import type { BlockerRef, Issue } from '@/types';
 import { parseLoomStatus } from '@/types';
 import { formatIssueId } from '@/utils/formatIssueId';
+import { getOpenStatus } from '@/utils/openStatus';
+import type { OpenStatus } from '@/utils/openStatus';
 import { getReviewType } from '@/utils/reviewType';
 import type { ReviewType } from '@/utils/reviewType';
 
@@ -25,6 +27,14 @@ const REVIEW_BADGE_CONFIG: Record<ReviewType, { icon: string; label: string; cla
     code: { icon: '🔍', label: 'Code', className: styles.reviewCode ?? '' },
     help: { icon: '❓', label: 'Help', className: styles.reviewHelp ?? '' },
   };
+
+/**
+ * Open status badge configuration by type.
+ */
+const OPEN_BADGE_CONFIG: Record<OpenStatus, { icon: string; label: string; className: string }> = {
+  needs_plan: { icon: '📋', label: 'Needs Plan', className: styles.openNeedsPlan ?? '' },
+  ready: { icon: '✅', label: 'Ready', className: styles.openReady ?? '' },
+};
 
 /**
  * Props for the IssueCard component.
@@ -80,6 +90,7 @@ export function IssueCard({
   const displayTitle = issue.title || 'Untitled';
   const isBlocked = (blockedByCount ?? 0) > 0;
   const reviewType = getReviewType(issue);
+  const openStatus = columnId === 'ready' ? getOpenStatus(issue) : null;
 
   // Compute agent row data for in_progress cards with an assignee
   const showAgentRow = columnId === 'in_progress' && !!issue.assignee;
@@ -135,6 +146,17 @@ export function IssueCard({
               {REVIEW_BADGE_CONFIG[reviewType].icon}
             </span>
             {REVIEW_BADGE_CONFIG[reviewType].label}
+          </span>
+        )}
+        {openStatus && (
+          <span
+            className={`${styles.openStatusBadge} ${OPEN_BADGE_CONFIG[openStatus].className}`}
+            aria-label={OPEN_BADGE_CONFIG[openStatus].label}
+          >
+            <span className={styles.openStatusIcon} aria-hidden="true">
+              {OPEN_BADGE_CONFIG[openStatus].icon}
+            </span>
+            {OPEN_BADGE_CONFIG[openStatus].label}
           </span>
         )}
         {isBlocked && (

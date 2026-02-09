@@ -3266,3 +3266,137 @@ func TestBdIssueUnmarshalDependenciesRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestCompleteSyncStatusDetails tests that completeSyncStatus populates
+// GitPushDetails and GitPullDetails from agent Ahead/Behind counts.
+func TestCompleteSyncStatusDetails(t *testing.T) {
+	tests := []struct {
+		name              string
+		agents            []AgentStatus
+		wantPushDetails   []WorktreeSyncDetail
+		wantPullDetails   []WorktreeSyncDetail
+		wantNeedsPush     int
+		wantNeedsPull     int
+	}{
+		{
+			name: "agent_ahead_populates_push_details",
+			agents: []AgentStatus{
+				{Name: "nova", Ahead: 3, Behind: 0},
+			},
+			wantPushDetails: []WorktreeSyncDetail{
+				{Name: "nova", Count: 3},
+			},
+			wantPullDetails: nil,
+			wantNeedsPush:   1,
+			wantNeedsPull:   0,
+		},
+		{
+			name: "agent_behind_populates_pull_details",
+			agents: []AgentStatus{
+				{Name: "falcon", Ahead: 0, Behind: 2},
+			},
+			wantPushDetails: nil,
+			wantPullDetails: []WorktreeSyncDetail{
+				{Name: "falcon", Count: 2},
+			},
+			wantNeedsPush: 0,
+			wantNeedsPull: 1,
+		},
+		{
+			name: "agent_no_ahead_no_behind_no_details",
+			agents: []AgentStatus{
+				{Name: "cobalt", Ahead: 0, Behind: 0},
+			},
+			wantPushDetails: nil,
+			wantPullDetails: nil,
+			wantNeedsPush:   0,
+			wantNeedsPull:   0,
+		},
+		{
+			name: "multiple_agents_multiple_details",
+			agents: []AgentStatus{
+				{Name: "nova", Ahead: 3, Behind: 0},
+				{Name: "falcon", Ahead: 0, Behind: 2},
+				{Name: "ember", Ahead: 5, Behind: 1},
+				{Name: "cobalt", Ahead: 0, Behind: 0},
+			},
+			wantPushDetails: []WorktreeSyncDetail{
+				{Name: "nova", Count: 3},
+				{Name: "ember", Count: 5},
+			},
+			wantPullDetails: []WorktreeSyncDetail{
+				{Name: "falcon", Count: 2},
+				{Name: "ember", Count: 1},
+			},
+			wantNeedsPush: 2,
+			wantNeedsPull: 2,
+		},
+		{
+			name:            "empty_agents_no_details",
+			agents:          []AgentStatus{},
+			wantPushDetails: nil,
+			wantPullDetails: nil,
+			wantNeedsPush:   0,
+			wantNeedsPull:   0,
+		},
+		{
+			name: "name_field_matches_agent_name",
+			agents: []AgentStatus{
+				{Name: "my-custom-agent", Ahead: 7, Behind: 4},
+			},
+			wantPushDetails: []WorktreeSyncDetail{
+				{Name: "my-custom-agent", Count: 7},
+			},
+			wantPullDetails: []WorktreeSyncDetail{
+				{Name: "my-custom-agent", Count: 4},
+			},
+			wantNeedsPush: 1,
+			wantNeedsPull: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			info := SyncInfo{DBSynced: true}
+			result := completeSyncStatus(info, tc.agents)
+
+			// Check push count
+			if result.GitNeedsPush != tc.wantNeedsPush {
+				t.Errorf("GitNeedsPush = %d, want %d", result.GitNeedsPush, tc.wantNeedsPush)
+			}
+
+			// Check pull count
+			if result.GitNeedsPull != tc.wantNeedsPull {
+				t.Errorf("GitNeedsPull = %d, want %d", result.GitNeedsPull, tc.wantNeedsPull)
+			}
+
+			// Check push details
+			if len(result.GitPushDetails) != len(tc.wantPushDetails) {
+				t.Fatalf("GitPushDetails len = %d, want %d", len(result.GitPushDetails), len(tc.wantPushDetails))
+			}
+			for i, want := range tc.wantPushDetails {
+				got := result.GitPushDetails[i]
+				if got.Name != want.Name {
+					t.Errorf("GitPushDetails[%d].Name = %q, want %q", i, got.Name, want.Name)
+				}
+				if got.Count != want.Count {
+					t.Errorf("GitPushDetails[%d].Count = %d, want %d", i, got.Count, want.Count)
+				}
+			}
+
+			// Check pull details
+			if len(result.GitPullDetails) != len(tc.wantPullDetails) {
+				t.Fatalf("GitPullDetails len = %d, want %d", len(result.GitPullDetails), len(tc.wantPullDetails))
+			}
+			for i, want := range tc.wantPullDetails {
+				got := result.GitPullDetails[i]
+				if got.Name != want.Name {
+					t.Errorf("GitPullDetails[%d].Name = %q, want %q", i, got.Name, want.Name)
+				}
+				if got.Count != want.Count {
+					t.Errorf("GitPullDetails[%d].Count = %d, want %d", i, got.Count, want.Count)
+				}
+			}
+		})
+	}
+}

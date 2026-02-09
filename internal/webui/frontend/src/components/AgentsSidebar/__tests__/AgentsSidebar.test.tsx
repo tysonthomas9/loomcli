@@ -4,50 +4,46 @@
 
 /**
  * Unit tests for AgentsSidebar component.
- * Focuses on the viewSwitcher slot behavior.
+ * Focuses on the viewSwitcher slot behavior and sync status rendering.
  */
 
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import '@testing-library/jest-dom';
 import { AgentsSidebar } from '../AgentsSidebar';
 
-// Default mock return value for useAgentContext
-const defaultContextValue = {
+// Default mock context value (used by most tests)
+const defaultMockContext = {
   agents: [],
-  tasks: { needs_planning: 0, ready_to_implement: 0, in_progress: 0, need_review: 0, blocked: 0 },
+  tasks: { needs_planning: 0, ready_to_implement: 0, in_progress: 0, need_review: 0, backlog: 0 },
   taskLists: {
     needsPlanning: [],
     readyToImplement: [],
     needsReview: [],
     inProgress: [],
-    blocked: [],
+    backlog: [],
   },
   agentTasks: {},
   sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
   stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
   isLoading: false,
   isConnected: true,
-  wasEverConnected: true,
   lastUpdated: new Date(),
 };
 
-// Mutable override object that tests can modify
-let contextOverrides: Record<string, unknown> = {};
+// Mutable override – tests can replace this before rendering
+let mockContextOverride: Partial<typeof defaultMockContext> = {};
 
 // Mock the hooks to prevent API calls in tests
 vi.mock('@/hooks', () => ({
-  useAgentContext: () => ({
-    ...defaultContextValue,
-    ...contextOverrides,
-  }),
+  useAgentContext: () => ({ ...defaultMockContext, ...mockContextOverride }),
 }));
 
 describe('AgentsSidebar', () => {
   beforeEach(() => {
     localStorage.clear();
-    contextOverrides = {};
+    mockContextOverride = {};
   });
 
   describe('viewSwitcher slot', () => {
@@ -109,44 +105,116 @@ describe('AgentsSidebar', () => {
     });
   });
 
-  describe('loading state with wasEverConnected', () => {
-    it('does not show "Loading agents..." when wasEverConnected is true even if isLoading and agents is empty', () => {
-      contextOverrides = {
-        isLoading: true,
-        agents: [],
-        isConnected: false,
-        wasEverConnected: true,
+  describe('sync status rendering', () => {
+    it('renders "unpushed" text when git_needs_push > 0', () => {
+      mockContextOverride = {
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 2, git_needs_pull: 0 },
       };
 
       render(<AgentsSidebar />);
 
-      expect(screen.queryByText('Loading agents...')).not.toBeInTheDocument();
+      expect(screen.getByText(/2 unpushed/)).toBeInTheDocument();
+      expect(screen.queryByText(/need push/)).not.toBeInTheDocument();
     });
 
-    it('shows "Loading agents..." when isLoading, agents empty, and wasEverConnected is false', () => {
-      contextOverrides = {
-        isLoading: true,
-        agents: [],
-        isConnected: false,
-        wasEverConnected: false,
+    it('renders "unpulled" text when git_needs_pull > 0', () => {
+      mockContextOverride = {
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 3 },
       };
 
       render(<AgentsSidebar />);
 
-      expect(screen.getByText('Loading agents...')).toBeInTheDocument();
+      expect(screen.getByText(/3 unpulled/)).toBeInTheDocument();
+      expect(screen.queryByText(/need pull/)).not.toBeInTheDocument();
     });
 
-    it('does not show "Loading agents..." when agents are present regardless of wasEverConnected', () => {
-      contextOverrides = {
-        isLoading: true,
-        agents: [{ name: 'nova', branch: 'main', status: 'ready', ahead: 0, behind: 0 }],
-        isConnected: true,
-        wasEverConnected: true,
+    it('renders both "unpushed" and "unpulled" when both counts > 0', () => {
+      mockContextOverride = {
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 1, git_needs_pull: 2 },
       };
 
       render(<AgentsSidebar />);
 
-      expect(screen.queryByText('Loading agents...')).not.toBeInTheDocument();
+      expect(screen.getByText(/1 unpushed/)).toBeInTheDocument();
+      expect(screen.getByText(/2 unpulled/)).toBeInTheDocument();
+    });
+
+    it('shows tooltip with worktree names for push details', () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: '',
+          git_needs_push: 2,
+          git_needs_pull: 0,
+          git_push_details: [
+            { name: 'nova', count: 3 },
+            { name: 'falcon', count: 1 },
+          ],
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const pushElement = screen.getByText(/2 unpushed/);
+      expect(pushElement).toHaveAttribute('title');
+      const title = pushElement.getAttribute('title')!;
+      expect(title).toContain('nova');
+      expect(title).toContain('3 commit');
+      expect(title).toContain('falcon');
+      expect(title).toContain('1 commit');
+      expect(title).toContain('ahead');
+    });
+
+    it('shows tooltip with worktree names for pull details', () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: '',
+          git_needs_push: 0,
+          git_needs_pull: 1,
+          git_pull_details: [{ name: 'ember', count: 5 }],
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const pullElement = screen.getByText(/1 unpulled/);
+      expect(pullElement).toHaveAttribute('title');
+      const title = pullElement.getAttribute('title')!;
+      expect(title).toContain('ember');
+      expect(title).toContain('5 commits');
+      expect(title).toContain('behind');
+    });
+
+    it('does not render sync warnings when counts are zero', () => {
+      mockContextOverride = {
+        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
+      };
+
+      render(<AgentsSidebar />);
+
+      expect(screen.queryByText(/unpushed/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/unpulled/)).not.toBeInTheDocument();
+    });
+
+    it('pluralizes commit correctly in tooltip for count=1', () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: '',
+          git_needs_push: 1,
+          git_needs_pull: 0,
+          git_push_details: [{ name: 'cobalt', count: 1 }],
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const pushElement = screen.getByText(/1 unpushed/);
+      const title = pushElement.getAttribute('title')!;
+      // Should say "1 commit ahead" (singular), not "1 commits ahead"
+      expect(title).toContain('1 commit ahead');
+      expect(title).not.toContain('1 commits');
     });
   });
 });
