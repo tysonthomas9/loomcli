@@ -1,10 +1,10 @@
 {
-  "pid": 42959,
+  "pid": 47804,
   "command": "task",
-  "started_at": "2026-02-08T09:37:23.196384-08:00",
-  "agent_name": "nova",
-  "task_id": "loomcli-4em",
-  "task_title": "Investigate flaky monitor test",
-  "task_started_at": "2026-02-08T09:38:24.213342-08:00",
+  "started_at": "2026-02-08T22:26:33.345795-08:00",
+  "agent_name": "ember",
+  "task_id": "loomcli-5g5",
+  "task_title": "Increase test coverage for internal/cli package (currently 62.5%)",
+  "task_started_at": "2026-02-08T22:27:15.085274-08:00",
   "state": "active"
 }
