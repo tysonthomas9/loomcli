@@ -269,6 +269,18 @@ function App() {
     }
   }, [pendingDragData, updateIssueStatus, showToast]);
 
+  // Handle panel close
+  const handlePanelClose = useCallback(() => {
+    setIsPanelOpen(false);
+    // Clear issue details after animation completes
+    // Store timeout ID to allow cancellation if panel reopens quickly
+    issuePanelTimeoutRef.current = setTimeout(() => {
+      if (!mountedRef.current) return;
+      clearIssue();
+      setSelectedIssueId(null);
+    }, 300); // Match CSS transition duration
+  }, [clearIssue]);
+
   // Handle approve button click on review cards
   const handleApprove = useCallback(
     async (issue: Issue) => {
@@ -288,13 +300,16 @@ function App() {
           // Needs help: Move to in_progress (unblock)
           await updateIssue(issue.id, { status: 'in_progress' });
         }
+
+        // Close detail panel after successful approve
+        handlePanelClose();
       } catch (err) {
         if (!mountedRef.current) return;
         const message = err instanceof Error ? err.message : 'Failed to approve';
         showToast(message, { type: 'error' });
       }
     },
-    [showToast]
+    [showToast, handlePanelClose]
   );
 
   // Handle reject button submission on review cards
@@ -312,13 +327,16 @@ function App() {
         } else {
           await updateIssue(issue.id, { status: 'open' });
         }
+
+        // Close detail panel after successful reject
+        handlePanelClose();
       } catch (err) {
         if (!mountedRef.current) return;
         const message = err instanceof Error ? err.message : 'Failed to reject';
         showToast(message, { type: 'error' });
       }
     },
-    [showToast]
+    [showToast, handlePanelClose]
   );
 
   // Handle search clear to sync both local and filter state
@@ -360,18 +378,6 @@ function App() {
     },
     [selectedIssueId, isPanelOpen, isAgentPanelOpen, isTerminalOpen, fetchIssue, clearTimeoutRef]
   );
-
-  // Handle panel close
-  const handlePanelClose = useCallback(() => {
-    setIsPanelOpen(false);
-    // Clear issue details after animation completes
-    // Store timeout ID to allow cancellation if panel reopens quickly
-    issuePanelTimeoutRef.current = setTimeout(() => {
-      if (!mountedRef.current) return;
-      clearIssue();
-      setSelectedIssueId(null);
-    }, 300); // Match CSS transition duration
-  }, [clearIssue]);
 
   // Handle agent click from AgentsSidebar or MonitorDashboard
   const handleAgentClick = useCallback(

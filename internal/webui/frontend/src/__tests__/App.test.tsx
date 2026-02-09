@@ -18,10 +18,19 @@ import type { Issue, Status } from '@/types';
 import App from '../App';
 
 // Create hoisted mocks that can be shared across mock definitions
-const { mockUseIssues, mockUseIssueDetail, mockUseToast, mockUseAgents, mockUseAgentContext } =
-  vi.hoisted(() => ({
+const {
+  mockUseIssues,
+  mockUseIssueDetail,
+  mockUseToast,
+  mockUseAgents,
+  mockUseAgentContext,
+  mockUpdateIssue,
+  mockAddComment,
+} = vi.hoisted(() => ({
     mockUseIssues: vi.fn(),
     mockUseIssueDetail: vi.fn(),
+    mockUpdateIssue: vi.fn(),
+    mockAddComment: vi.fn(),
     mockUseToast: vi.fn(() => ({
       toasts: [],
       showToast: vi.fn(),
@@ -93,6 +102,16 @@ const { mockUseIssues, mockUseIssueDetail, mockUseToast, mockUseAgents, mockUseA
 vi.mock('@/hooks/useIssues', () => ({
   useIssues: mockUseIssues,
 }));
+
+// Mock the API module used by handleApprove and handleReject (partial mock)
+vi.mock('@/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api')>();
+  return {
+    ...actual,
+    updateIssue: mockUpdateIssue,
+    addComment: mockAddComment,
+  };
+});
 
 // Mock GraphView to avoid ResizeObserver issues in jsdom
 vi.mock('@/components/GraphView', () => ({
@@ -336,6 +355,9 @@ describe('App', () => {
     mockUseViewState.mockReturnValue(['kanban', mockSetActiveView]);
     // Set up default useIssueDetail mock
     mockUseIssueDetail.mockReturnValue(createMockUseIssueDetailReturn());
+    // Set up default API mocks (resolve by default so existing tests aren't affected)
+    mockUpdateIssue.mockResolvedValue({});
+    mockAddComment.mockResolvedValue({});
   });
 
   describe('loading state', () => {
@@ -2832,6 +2854,283 @@ describe('App', () => {
 
       // Panel should still be open - the new agent click cancelled the timeout
       expect(agentPanel).toHaveAttribute('data-state', 'open');
+    });
+  });
+
+  describe('handleApprove and handleReject close panel on success', () => {
+    it('closes panel after successful approve on [Need Review] issue', async () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const showToast = vi.fn();
+
+      // Mock useToast to capture the showToast function
+      mockUseToast.mockReturnValue({
+        toasts: [],
+        showToast,
+        dismissToast: vi.fn(),
+        dismissAll: vi.fn(),
+      });
+
+      // Create a [Need Review] issue (plan review type)
+      const reviewIssue: Issue = {
+        id: 'review-1',
+        title: '[Need Review] Plan for feature X',
+        priority: 2,
+        status: 'open',
+        issue_type: 'task',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+
+      const issues = [reviewIssue];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      // Mock useIssueDetail to return the review issue details
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+          issueDetails: reviewIssue,
+          isLoading: false,
+        })
+      );
+
+      // Mock updateIssue to resolve successfully
+      mockUpdateIssue.mockResolvedValue(reviewIssue);
+
+      const { container } = render(<App />);
+
+      // Click on the issue to open the panel
+      const issueCard = screen.getByRole('button', { name: /Issue: \[Need Review\] Plan for feature X/ });
+      fireEvent.click(issueCard);
+
+      // Panel should be open
+      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+      expect(panel).toHaveAttribute('data-state', 'open');
+
+      // Click the approve button
+      const approveButton = screen.getByTestId('panel-approve-button');
+      fireEvent.click(approveButton);
+
+      // Wait for the async approve to complete and panel to close
+      await waitFor(() => {
+        expect(panel).toHaveAttribute('data-state', 'closed');
+      });
+
+      // updateIssue should have been called with title without [Need Review] and status 'open'
+      expect(mockUpdateIssue).toHaveBeenCalledWith('review-1', {
+        title: 'Plan for feature X',
+        status: 'open',
+      });
+
+      // No error toast should have been shown
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('closes panel after successful approve on status=review issue', async () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const showToast = vi.fn();
+
+      mockUseToast.mockReturnValue({
+        toasts: [],
+        showToast,
+        dismissToast: vi.fn(),
+        dismissAll: vi.fn(),
+      });
+
+      // Create a status=review issue (code review type)
+      const reviewIssue: Issue = {
+        id: 'review-2',
+        title: 'Implement feature Y',
+        priority: 2,
+        status: 'review' as Status,
+        issue_type: 'task',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+
+      const issues = [reviewIssue];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+          issueDetails: reviewIssue,
+          isLoading: false,
+        })
+      );
+
+      mockUpdateIssue.mockResolvedValue(reviewIssue);
+
+      const { container } = render(<App />);
+
+      // Click on the issue to open the panel
+      const issueCard = screen.getByRole('button', { name: /Issue: Implement feature Y/ });
+      fireEvent.click(issueCard);
+
+      // Panel should be open
+      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+      expect(panel).toHaveAttribute('data-state', 'open');
+
+      // Click the approve button
+      const approveButton = screen.getByTestId('panel-approve-button');
+      fireEvent.click(approveButton);
+
+      // Wait for the async approve to complete and panel to close
+      await waitFor(() => {
+        expect(panel).toHaveAttribute('data-state', 'closed');
+      });
+
+      // updateIssue should have been called with status 'open'
+      expect(mockUpdateIssue).toHaveBeenCalledWith('review-2', { status: 'open' });
+
+      // No error toast should have been shown
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('closes panel after successful reject', async () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const showToast = vi.fn();
+
+      mockUseToast.mockReturnValue({
+        toasts: [],
+        showToast,
+        dismissToast: vi.fn(),
+        dismissAll: vi.fn(),
+      });
+
+      // Create a [Need Review] issue for rejection
+      const reviewIssue: Issue = {
+        id: 'review-3',
+        title: '[Need Review] Plan for feature Z',
+        priority: 2,
+        status: 'open',
+        issue_type: 'task',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+
+      const issues = [reviewIssue];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+          issueDetails: reviewIssue,
+          isLoading: false,
+        })
+      );
+
+      mockAddComment.mockResolvedValue({ id: 'c1', text: 'Needs more work' });
+      mockUpdateIssue.mockResolvedValue(reviewIssue);
+
+      const { container } = render(<App />);
+
+      // Click on the issue to open the panel
+      const issueCard = screen.getByRole('button', { name: /Issue: \[Need Review\] Plan for feature Z/ });
+      fireEvent.click(issueCard);
+
+      // Panel should be open
+      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+      expect(panel).toHaveAttribute('data-state', 'open');
+
+      // Click the reject button to show the reject form
+      const rejectButton = screen.getByTestId('panel-reject-button');
+      fireEvent.click(rejectButton);
+
+      // Fill in the reject comment form
+      const textarea = screen.getByTestId('reject-textarea');
+      fireEvent.change(textarea, { target: { value: 'Needs more work' } });
+
+      // Submit the reject form
+      const submitButton = screen.getByTestId('reject-submit');
+      fireEvent.click(submitButton);
+
+      // Wait for the async reject to complete and panel to close
+      await waitFor(() => {
+        expect(panel).toHaveAttribute('data-state', 'closed');
+      });
+
+      // addComment should have been called with the rejection comment
+      expect(mockAddComment).toHaveBeenCalledWith('review-3', 'Needs more work');
+
+      // updateIssue should have been called with cleaned title and status 'open'
+      expect(mockUpdateIssue).toHaveBeenCalledWith('review-3', {
+        title: 'Plan for feature Z',
+        status: 'open',
+      });
+
+      // No error toast should have been shown
+      expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('keeps panel open and shows toast on approve failure', async () => {
+      const fetchIssue = vi.fn();
+      const clearIssue = vi.fn();
+      const showToast = vi.fn();
+
+      mockUseToast.mockReturnValue({
+        toasts: [],
+        showToast,
+        dismissToast: vi.fn(),
+        dismissAll: vi.fn(),
+      });
+
+      // Create a [Need Review] issue
+      const reviewIssue: Issue = {
+        id: 'review-4',
+        title: '[Need Review] Plan for feature W',
+        priority: 2,
+        status: 'open',
+        issue_type: 'task',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+
+      const issues = [reviewIssue];
+      const mockReturn = createMockUseIssuesReturn({ issues });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          fetchIssue,
+          clearIssue,
+          issueDetails: reviewIssue,
+          isLoading: false,
+        })
+      );
+
+      // Mock updateIssue to reject with an error
+      mockUpdateIssue.mockRejectedValue(new Error('Network error'));
+
+      const { container } = render(<App />);
+
+      // Click on the issue to open the panel
+      const issueCard = screen.getByRole('button', { name: /Issue: \[Need Review\] Plan for feature W/ });
+      fireEvent.click(issueCard);
+
+      // Panel should be open
+      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+      expect(panel).toHaveAttribute('data-state', 'open');
+
+      // Click the approve button
+      const approveButton = screen.getByTestId('panel-approve-button');
+      fireEvent.click(approveButton);
+
+      // Wait for the async approve to fail
+      await waitFor(() => {
+        expect(showToast).toHaveBeenCalledWith('Network error', { type: 'error' });
+      });
+
+      // Panel should still be open (not closed on failure)
+      expect(panel).toHaveAttribute('data-state', 'open');
     });
   });
 });
