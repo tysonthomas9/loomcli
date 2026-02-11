@@ -80,14 +80,45 @@ else
 fi
 
 echo ""
-echo "--- 4. Check agent assignments via monitor ---"
-OUTPUT=$(loom monitor -n 2>&1) || true
-echo "  $OUTPUT"
-# Monitor should show falcon and nova
-if echo "$OUTPUT" | grep -qi "falcon\|nova"; then
-  pass "Monitor shows configured agents"
+echo "--- 4. Wait for agent to claim a task ---"
+# The daemon spawns 'loom task <name> --auto --daemon-mode' for each agent.
+# Each agent acquires a lock, then Claude picks a task and calls 'loom claim'.
+# Poll until at least one agent has a non-empty task_id in its lock file
+# (up to 120 seconds — Claude needs time to start and select a task).
+echo "  Waiting for an agent to claim a task (up to 120s)..."
+CLAIMED=false
+CLAIM_AGENT=""
+CLAIM_TASK=""
+for i in $(seq 1 240); do
+  sleep 0.5
+  for AGENT in falcon nova; do
+    LOCK="worktrees/$AGENT/.agent.lock"
+    if [ -f "$LOCK" ]; then
+      TASK_ID=$(jq -r '.task_id // empty' "$LOCK" 2>/dev/null || true)
+      if [ -n "$TASK_ID" ]; then
+        CLAIM_AGENT="$AGENT"
+        CLAIM_TASK="$TASK_ID"
+        CLAIMED=true
+        break 2
+      fi
+    fi
+  done
+done
+# Report lock file state for both agents
+for AGENT in falcon nova; do
+  LOCK="worktrees/$AGENT/.agent.lock"
+  if [ -f "$LOCK" ]; then
+    LOCK_PID=$(jq -r '.pid // empty' "$LOCK" 2>/dev/null || true)
+    LOCK_TASK=$(jq -r '.task_id // "none"' "$LOCK" 2>/dev/null || true)
+    echo "  $AGENT: PID $LOCK_PID, task=$LOCK_TASK"
+  else
+    echo "  $AGENT: no lock file"
+  fi
+done
+if [ "$CLAIMED" = true ]; then
+  pass "Agent $CLAIM_AGENT claimed task $CLAIM_TASK"
 else
-  fail "Monitor did not show agents"
+  fail "No agent claimed a task within 120 seconds"
 fi
 
 echo ""

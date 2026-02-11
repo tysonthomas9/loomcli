@@ -298,8 +298,25 @@ func closeTask(worktreePath, taskID, reason string) {
 	}
 }
 
-// resetTask resets a task to open status
+// resetTask resets a task to open status, but only if it's still in_progress.
+// Tasks that have already reached review or closed status were successfully
+// processed and should not be reset.
 func resetTask(worktreePath, taskID string) {
+	// Check current status before resetting
+	showResult := execCommand(GetBeadsDir(), "bd", "show", taskID, "--json")
+	if showResult.Err == nil {
+		var issues []struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal([]byte(showResult.Stdout), &issues) == nil && len(issues) > 0 {
+			status := issues[0].Status
+			if status == "review" || status == "closed" {
+				fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, status)
+				return
+			}
+		}
+	}
+
 	result := execCommand(GetBeadsDir(), "bd", "update", taskID, "--status", "open", "--assignee", "")
 	if result.Err != nil {
 		fmt.Printf("Warning: failed to reset task: %v\n", result.Err)

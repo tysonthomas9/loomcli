@@ -31,8 +31,47 @@ mkdir -p worktrees
 git worktree add -q ./worktrees/falcon -b falcon
 git worktree add -q ./worktrees/nova   -b nova
 
-# Create a minimal loom.yaml for the daemon
+# Create loom.yaml configs for different test phases
+# Default config (both agents as task) — used by unit-style tests
 cat > loom.yaml <<'EOF'
+daemon:
+  pid_file: .loom/daemon.pid
+  log_dir: .loom/logs
+  restart_policy:
+    max_retries: 3
+    backoff_initial: 2
+    backoff_max: 60
+
+agents:
+  - worktree: falcon
+    role: task
+    auto: true
+  - worktree: nova
+    role: task
+    auto: true
+EOF
+
+# Planning config — both agents create designs
+cat > loom-plan.yaml <<'EOF'
+daemon:
+  pid_file: .loom/daemon.pid
+  log_dir: .loom/logs
+  restart_policy:
+    max_retries: 3
+    backoff_initial: 2
+    backoff_max: 60
+
+agents:
+  - worktree: falcon
+    role: plan
+    auto: true
+  - worktree: nova
+    role: plan
+    auto: true
+EOF
+
+# Implementation config — both agents implement approved designs
+cat > loom-task.yaml <<'EOF'
 daemon:
   pid_file: .loom/daemon.pid
   log_dir: .loom/logs

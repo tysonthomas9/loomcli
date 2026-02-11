@@ -103,9 +103,9 @@ run_test "Exhaustion Detection" "$SCRIPT_DIR/test-exhaustion.sh"
 run_test "Recovery"             "$SCRIPT_DIR/test-recovery.sh"
 
 if [ "$SKIP_DAEMON" = false ]; then
-  run_test "Daemon Lifecycle"   "$SCRIPT_DIR/test-daemon-lifecycle.sh"
+  run_test "Daemon E2E"   "$SCRIPT_DIR/test-daemon-e2e.sh"
 else
-  echo ">>> Skipping daemon lifecycle test (--skip-daemon)"
+  echo ">>> Skipping daemon E2E test (--skip-daemon)"
   SKIP=$((SKIP + 1))
 fi
 

@@ -62,8 +62,15 @@ func EnsureWorktreeBranch(worktreePath, targetBranch, fallbackRef string) error 
 		return GitCheckoutNewFromRef(worktreePath, targetBranch, "origin/"+targetBranch)
 	}
 
-	// Create new branch from fallback ref
-	return GitCheckoutNewFromRef(worktreePath, targetBranch, fallbackRef)
+	// Create new branch from fallback ref (e.g. origin/main)
+	if err := GitCheckoutNewFromRef(worktreePath, targetBranch, fallbackRef); err != nil {
+		// Fallback ref may not exist (no remote, or branch not pushed yet).
+		// Use HEAD as a last resort — the branch will diverge from wherever
+		// the worktree currently is, which is acceptable for local/test setups.
+		log.Printf("[daemon] Warning: fallback ref %q failed, creating branch from HEAD", fallbackRef)
+		return GitCheckoutNewFromRef(worktreePath, targetBranch, "HEAD")
+	}
+	return nil
 }
 
 // commitWIP stages all changes and creates a WIP commit.
