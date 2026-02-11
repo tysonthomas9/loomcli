@@ -81,7 +81,7 @@ fi
 
 echo ""
 echo "--- 4. Check agent assignments via monitor ---"
-OUTPUT=$(loom monitor 2>&1) || true
+OUTPUT=$(loom monitor -n 2>&1) || true
 echo "  $OUTPUT"
 # Monitor should show falcon and nova
 if echo "$OUTPUT" | grep -qi "falcon\|nova"; then

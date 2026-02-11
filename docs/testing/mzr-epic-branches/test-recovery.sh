@@ -101,7 +101,7 @@ fi
 echo ""
 echo "--- 6. Simulate stale lock file ---"
 cd "$TEST_DIR"
-LOCK_FILE="worktrees/falcon/.loom-lock"
+LOCK_FILE="worktrees/falcon/.agent.lock"
 # Match actual LockInfo struct from internal/cli/lock.go
 cat > "$LOCK_FILE" <<EOF
 {"pid":99999,"command":"loom task falcon --auto","started_at":"2026-01-01T00:00:00Z","agent_name":"falcon","task_id":"fake-task-id","task_title":"Test task"}
