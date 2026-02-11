@@ -82,7 +82,9 @@ func runReset(cmd *cobra.Command, args []string) {
 		if explicitBranch {
 			targetBranch = args[0]
 		}
-		resetAllWorktrees(targetBranch, explicitBranch)
+		if err := resetAllWorktrees(targetBranch, explicitBranch); err != nil {
+			os.Exit(1)
+		}
 	} else {
 		// Single worktree reset
 		worktreeName := args[0]
@@ -96,16 +98,16 @@ func runReset(cmd *cobra.Command, args []string) {
 	}
 }
 
-func resetAllWorktrees(targetBranch string, explicitTarget bool) {
+func resetAllWorktrees(targetBranch string, explicitTarget bool) error {
 	worktrees, err := DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error discovering worktrees: %w", err)
 	}
 
 	if len(worktrees) == 0 {
 		fmt.Println("No worktrees found.")
-		return
+		return nil
 	}
 
 	// Determine per-worktree target branches.
@@ -149,7 +151,7 @@ func resetAllWorktrees(targetBranch string, explicitTarget bool) {
 	if !resetForce {
 		if !confirmAction("Are you sure?") {
 			fmt.Println("Aborted.")
-			return
+			return nil
 		}
 		fmt.Println("")
 	}
@@ -167,7 +169,7 @@ func resetAllWorktrees(targetBranch string, explicitTarget bool) {
 	if len(failed) > 0 {
 		fmt.Fprintf(os.Stderr, "Failed to reset %d worktree(s): %v\n", len(failed), failed)
 		fmt.Println("=========================================")
-		os.Exit(1)
+		return fmt.Errorf("failed to reset %d worktree(s): %v", len(failed), failed)
 	}
 	if perRepoBranches {
 		fmt.Println("All worktrees reset to their integration branches!")
@@ -175,6 +177,7 @@ func resetAllWorktrees(targetBranch string, explicitTarget bool) {
 		fmt.Printf("All worktrees reset to %s!\n", targetBranch)
 	}
 	fmt.Println("=========================================")
+	return nil
 }
 
 func resetWorktree(worktreeName, targetBranch string, askConfirm bool) bool {
