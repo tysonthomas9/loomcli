@@ -233,7 +233,7 @@ func TestHasCommitsBetween(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
-				Args:   []string{"log", tc.target + "..origin/" + tc.source, "--oneline"},
+				Args:   []string{"log", tc.target + ".." + tc.source, "--oneline"},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})
@@ -937,7 +937,7 @@ func TestHasCommitsBetweenRemote(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := NewCommandMock(t, []CommandStub{{
 				Name:   "git",
-				Args:   []string{"log", tc.target + ".." + tc.wantRemote + "/" + tc.source, "--oneline"},
+				Args:   []string{"log", tc.wantRemote + "/" + tc.target + ".." + tc.source, "--oneline"},
 				Stdout: tc.mockOutput,
 				Err:    tc.mockErr,
 			}})

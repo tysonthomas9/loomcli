@@ -144,7 +144,7 @@ func HasCommitsBetween(dir, target, source string) (bool, error) {
 	if err := validateGitRef(source); err != nil {
 		return false, err
 	}
-	output, err := RunGitCommand(dir, "log", fmt.Sprintf("%s..origin/%s", target, source), "--oneline")
+	output, err := RunGitCommand(dir, "log", fmt.Sprintf("%s..%s", target, source), "--oneline")
 	if err != nil {
 		// If the command fails, assume there might be commits
 		return true, nil
@@ -231,7 +231,7 @@ func HasCommitsBetweenRemote(dir, remote, target, source string) (bool, error) {
 	if err := validateGitRef(source); err != nil {
 		return false, err
 	}
-	output, err := RunGitCommand(dir, "log", fmt.Sprintf("%s..%s/%s", target, r, source), "--oneline")
+	output, err := RunGitCommand(dir, "log", fmt.Sprintf("%s/%s..%s", r, target, source), "--oneline")
 	if err != nil {
 		return true, nil
 	}

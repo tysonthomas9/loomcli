@@ -101,8 +101,8 @@ func TestPushBranch(t *testing.T) {
 		name         string
 		sourceBranch string
 		targetBranch string
-		outputStubs  []OutputCommandStub // for GitFetch, GitCheckout, GitPull, GitMergeOrigin, GitPush
-		commandStubs []CommandStub       // for HasCommitsBetween, GetConflictedFiles
+		outputStubs  []OutputCommandStub // for GitFetch, GitCheckout, GitPull, GitMerge, GitPush
+		commandStubs []CommandStub       // for GetCurrentBranch, HasCommitsBetween, GetConflictedFiles
 		claudeCalled bool                // whether claude should be invoked
 		claudeErr    error               // error from claude invocation
 	}{
@@ -111,17 +111,19 @@ func TestPushBranch(t *testing.T) {
 			sourceBranch: "feature/test",
 			targetBranch: "main",
 			outputStubs: []OutputCommandStub{
-				{Args: []string{"fetch", "origin"}, Err: nil},                                                                                                             // GitFetch
-				{Args: []string{"stash"}, Err: nil},                                                                                                                       // GitStash (no-op)
-				{Args: []string{"checkout", "main"}, Err: nil},                                                                                                            // GitCheckout
-				{Args: []string{"pull", "origin", "main"}, Err: nil},                                                                                                      // GitPull
-				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil}, // GitMergeOrigin
-				{Args: []string{"push", "origin", "main"}, Err: nil},                                                                                                      // GitPush
+				{Args: []string{"fetch", "origin"}, Err: nil},                                                                                                                             // GitFetch
+				{Args: []string{"stash"}, Err: nil},                                                                                                                                       // GitStash (no-op)
+				{Args: []string{"checkout", "main"}, Err: nil},                                                                                                                            // GitCheckout
+				{Args: []string{"pull", "origin", "main"}, Err: nil},                                                                                                                      // GitPull
+				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil},                  // GitMerge
+				{Args: []string{"push", "origin", "main"}, Err: nil},                                                                                                                      // GitPush
+				{Args: []string{"checkout", "feature/test"}, Err: nil},                                                                                                                    // branch restore defer
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                     // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                     // getStashCount (after, same = not stashed)
-				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 some commit\n"}, // HasCommitsBetween
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                              // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                              // getStashCount (after, same = not stashed)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},                     // GetCurrentBranch
+				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 some commit\n"}, // HasCommitsBetween
 			},
 		},
 		{
@@ -134,11 +136,13 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
 				// No merge or push since already up to date
+				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // getStashCount (after)
-				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: ""}, // no commits
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
+				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: ""}, // no commits
 			},
 		},
 		{
@@ -158,10 +162,12 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"fetch", "origin"}, Err: nil},
 				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: errors.New("checkout failed")},
+				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (after)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
 			},
 		},
 		{
@@ -173,10 +179,12 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: errors.New("pull failed")},
+				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (after)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                          // getStashCount (after)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"}, // GetCurrentBranch
 			},
 		},
 		{
@@ -188,13 +196,15 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
+				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: errors.New("CONFLICT")},
 				// No push after conflicts
+				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
-				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                      // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                      // getStashCount (after)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},             // GetCurrentBranch
+				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"},
 			},
 			claudeCalled: true,
@@ -208,12 +218,14 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("merge failed")},
+				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: errors.New("merge failed")},
+				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
-				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                      // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                      // getStashCount (after)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},             // GetCurrentBranch
+				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: ""}, // no conflict files
 			},
 		},
@@ -226,13 +238,15 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil},
 				{Args: []string{"push", "origin", "main"}, Err: errors.New("push rejected")},
+				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
-				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                      // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                      // getStashCount (after)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},             // GetCurrentBranch
+				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 			},
 		},
 		{
@@ -244,12 +258,14 @@ func TestPushBranch(t *testing.T) {
 				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: errors.New("CONFLICT")},
+				{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: errors.New("CONFLICT")},
+				{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (before)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount (after)
-				{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                      // getStashCount (before)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                      // getStashCount (after)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},             // GetCurrentBranch
+				{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 				{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\n"},
 			},
 			claudeCalled: true,
@@ -312,23 +328,27 @@ func TestPushAllWorktrees(t *testing.T) {
 				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "origin/alpha-branch", "-m", "Merge alpha-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+				{Args: []string{"merge", "-m", "Merge alpha-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "alpha-branch"}, Err: nil},
 				{Args: []string{"push", "origin", "main"}, Err: nil},
+				{Args: []string{"checkout", "alpha-branch"}, Err: nil}, // branch restore defer
 				// Second worktree push: beta-branch -> main
 				{Args: []string{"fetch", "origin"}, Err: nil},
 				{Args: []string{"stash"}, Err: nil},
 				{Args: []string{"checkout", "main"}, Err: nil},
 				{Args: []string{"pull", "origin", "main"}, Err: nil},
-				{Args: []string{"merge", "origin/beta-branch", "-m", "Merge beta-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+				{Args: []string{"merge", "-m", "Merge beta-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "beta-branch"}, Err: nil},
 				{Args: []string{"push", "origin", "main"}, Err: nil},
+				{Args: []string{"checkout", "beta-branch"}, Err: nil}, // branch restore defer
 			},
 			commandStubs: []CommandStub{
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount before (alpha)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount after (alpha)
-				{Name: "git", Args: []string{"log", "main..origin/alpha-branch", "--oneline"}, Stdout: "abc commit\n"},
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount before (beta)
-				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                             // getStashCount after (beta)
-				{Name: "git", Args: []string{"log", "main..origin/beta-branch", "--oneline"}, Stdout: "def commit\n"},
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                          // getStashCount before (alpha)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                          // getStashCount after (alpha)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "alpha-branch\n"},                 // GetCurrentBranch (alpha)
+				{Name: "git", Args: []string{"log", "main..alpha-branch", "--oneline"}, Stdout: "abc commit\n"},
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                          // getStashCount before (beta)
+				{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                          // getStashCount after (beta)
+				{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "beta-branch\n"},                  // GetCurrentBranch (beta)
+				{Name: "git", Args: []string{"log", "main..beta-branch", "--oneline"}, Stdout: "def commit\n"},
 			},
 		},
 	}
@@ -422,31 +442,35 @@ func TestPushWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 	}
 
 	outputStubs := []OutputCommandStub{
-		// repo-a: fetch, stash, checkout, pull, merge, push
+		// repo-a: fetch, stash, checkout, pull, merge, push, restore
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-a"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
-		// repo-b: fetch, stash, checkout, pull, merge, push
+		{Args: []string{"checkout", "feat-a"}, Err: nil}, // branch restore defer
+		// repo-b: fetch, stash, checkout, pull, merge, push, restore
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/feat-b", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-b"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"checkout", "feat-b"}, Err: nil}, // branch restore defer
 	}
 
 	commandStubs := []CommandStub{
-		// getStashCount + HasCommitsBetweenRemote for repo-a
+		// getStashCount + GetCurrentBranch + HasCommitsBetweenRemote for repo-a
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "main..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
-		// getStashCount + HasCommitsBetweenRemote for repo-b
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feat-a\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feat-a", "--oneline"}, Stdout: "abc commit\n"},
+		// getStashCount + GetCurrentBranch + HasCommitsBetweenRemote for repo-b
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feat-b\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -487,24 +511,28 @@ func TestPushWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "develop"}, Err: nil},
 		{Args: []string{"pull", "origin", "develop"}, Err: nil},
-		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-a into develop\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-a"}, Err: nil},
 		{Args: []string{"push", "origin", "develop"}, Err: nil},
+		{Args: []string{"checkout", "feat-a"}, Err: nil}, // branch restore defer
 		// repo-b pushes into "staging"
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "staging"}, Err: nil},
 		{Args: []string{"pull", "origin", "staging"}, Err: nil},
-		{Args: []string{"merge", "origin/feat-b", "-m", "Merge feat-b into staging\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-b into staging\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-b"}, Err: nil},
 		{Args: []string{"push", "origin", "staging"}, Err: nil},
+		{Args: []string{"checkout", "feat-b"}, Err: nil}, // branch restore defer
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "develop..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feat-a\n"},
+		{Name: "git", Args: []string{"log", "origin/develop..feat-a", "--oneline"}, Stdout: "abc commit\n"},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "staging..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feat-b\n"},
+		{Name: "git", Args: []string{"log", "origin/staging..feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -539,14 +567,16 @@ func TestPushWorkspaceWorktrees_CLIArgOverridesConfig(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "release"}, Err: nil},
 		{Args: []string{"pull", "origin", "release"}, Err: nil},
-		{Args: []string{"merge", "origin/feat-a", "-m", "Merge feat-a into release\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-a into release\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-a"}, Err: nil},
 		{Args: []string{"push", "origin", "release"}, Err: nil},
+		{Args: []string{"checkout", "feat-a"}, Err: nil}, // branch restore defer
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "release..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feat-a\n"},
+		{Name: "git", Args: []string{"log", "origin/release..feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -579,14 +609,16 @@ func TestPushWorkspaceWorktrees_CustomRemote(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "upstream", "main"}, Err: nil},
-		{Args: []string{"merge", "upstream/feat-a", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-a into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-a"}, Err: nil},
 		{Args: []string{"push", "upstream", "main"}, Err: nil},
+		{Args: []string{"checkout", "feat-a"}, Err: nil}, // branch restore defer
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "main..upstream/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feat-a\n"},
+		{Name: "git", Args: []string{"log", "upstream/main..feat-a", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -614,14 +646,16 @@ func TestRunPush_LegacyMode(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},
+		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -661,14 +695,16 @@ func TestPushWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/feat-b", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feat-b into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feat-b"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"checkout", "feat-b"}, Err: nil}, // branch restore defer
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feat-b\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feat-b", "--oneline"}, Stdout: "def commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -694,15 +730,17 @@ func TestPushBranch_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil}, // GitStash
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"stash", "pop"}, Err: nil}, // GitStashPop (via defer)
+		{Args: []string{"checkout", "feature/test"}, Err: nil}, // branch restore defer (runs first, LIFO)
+		{Args: []string{"stash", "pop"}, Err: nil},             // GitStashPop (runs second, LIFO)
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before, 0)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, 1 = stashed)
-		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},           // GetCurrentBranch
+		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -728,15 +766,17 @@ func TestPushBranch_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/feature/test", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feature/test into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature/test"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"stash", "pop"}, Err: errors.New("conflict during stash pop")}, // stash pop fails
+		{Args: []string{"checkout", "feature/test"}, Err: nil},                          // branch restore defer (runs first, LIFO)
+		{Args: []string{"stash", "pop"}, Err: errors.New("conflict during stash pop")}, // stash pop fails (runs second, LIFO)
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
-		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},           // GetCurrentBranch
+		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "dirty.go\n"}, // HasUnmergedFiles returns true
 	}
 
@@ -793,15 +833,17 @@ func TestPushBranchInRepo_DirtyWorkingTree_StashesAndPops(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/feature", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"stash", "pop"}, Err: nil},
+		{Args: []string{"checkout", "feature"}, Err: nil}, // branch restore defer (runs first, LIFO)
+		{Args: []string{"stash", "pop"}, Err: nil},        // stash pop (runs second, LIFO)
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},                // GetCurrentBranch
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -862,15 +904,17 @@ func TestPushBranchInRepo_StashPopConflicts_WarnsButSucceeds(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/feature", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
-		{Args: []string{"stash", "pop"}, Err: errors.New("conflict")},
+		{Args: []string{"checkout", "feature"}, Err: nil},             // branch restore defer (runs first, LIFO)
+		{Args: []string{"stash", "pop"}, Err: errors.New("conflict")}, // stash pop (runs second, LIFO)
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // getStashCount (after, stashed)
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},                // GetCurrentBranch
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file.go\n"}, // HasUnmergedFiles
 	}
 
@@ -900,14 +944,16 @@ func TestPushBranchInRepo_CleanWorkingTree_NoStash(t *testing.T) {
 		{Args: []string{"stash"}, Err: nil}, // git stash runs but is no-op
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/feature", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge feature into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "feature"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"checkout", "feature"}, Err: nil}, // branch restore defer
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""}, // getStashCount (after, same = not stashed)
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1027,15 +1073,18 @@ func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {
 		{Args: []string{"checkout", "main"}, Err: errors.New("fatal: 'main' is already used by worktree at '/home/user/project'")}, // GitCheckout fails → fallback
 		{Args: nil, Err: nil},                                                                                      // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil},                                                                                      // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil},                                                                                      // GitMergeRemote
+		{Args: nil, Err: nil},                                                                                      // GitMerge
 		{Args: nil, Err: nil},                                                                                      // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil},                                                                                      // GitDeleteBranch (cleanup temp, deferred)
+		{Args: nil, Err: nil},                                                                                      // GitDeleteBranch (cleanup temp, detached defer LIFO)
+		{Args: nil, Err: nil},                                                                                      // GitCheckout (source, detached defer LIFO)
+		{Args: nil, Err: nil},                                                                                      // GitCheckout (restore original, caller defer)
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (before)
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (after, same = not stashed)
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                           // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                           // getStashCount (after, same = not stashed)
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},                       // GetCurrentBranch
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},    // HasCommitsBetweenRemote
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1062,13 +1111,14 @@ func TestPushBranchInRepoDetached_Success(t *testing.T) {
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil}, // GitMergeRemote (origin/feature)
+		{Args: nil, Err: nil}, // GitMerge (feature)
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
+		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1095,10 +1145,11 @@ func TestPushBranchInRepoDetached_AlreadyUpToDate(t *testing.T) {
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
 		// No create branch, merge, or push - already up to date
+		{Args: nil, Err: nil}, // GitCheckout (source, defer - always runs)
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: ""}, // no commits
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: ""}, // no commits
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1125,13 +1176,14 @@ func TestPushBranchInRepoDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: nil},                      // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil},                      // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: errors.New("CONFLICT")},   // GitMergeRemote fails with conflicts
+		{Args: nil, Err: errors.New("CONFLICT")},   // GitMerge fails with conflicts
 		// No push - conflicts
-		{Args: nil, Err: nil},                      // GitDeleteBranch (cleanup temp, deferred)
+		{Args: nil, Err: nil},                      // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
+		{Args: nil, Err: nil},                      // GitCheckout (source, defer LIFO - runs second)
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},    // HasCommitsBetweenRemote
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},    // HasCommitsBetweenRemote
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"}, // GetConflictedFiles
 	}
 
@@ -1194,13 +1246,14 @@ func TestPushBranchInRepoDetached_CustomRemote(t *testing.T) {
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: nil}, // GitCheckoutDetached (upstream/main)
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil}, // GitMergeRemote (upstream/feature)
+		{Args: nil, Err: nil}, // GitMerge (feature)
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main via upstream)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
+		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..upstream/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
+		{Name: "git", Args: []string{"log", "upstream/main..feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1231,15 +1284,18 @@ func TestPushBranch_WorktreeConflict_UsesDetached(t *testing.T) {
 		// Detached flow:
 		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil}, // GitMergeOrigin
+		{Args: nil, Err: nil}, // GitMerge
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, detached defer LIFO)
+		{Args: nil, Err: nil}, // GitCheckout (source, detached defer LIFO)
+		{Args: nil, Err: nil}, // GitCheckout (restore original, caller defer)
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                // getStashCount (after)
-		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"}, // HasCommitsBetween
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},                       // GetCurrentBranch
+		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},        // HasCommitsBetween
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1264,10 +1320,11 @@ func TestPushBranchDetached_AlreadyUpToDate(t *testing.T) {
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
 		// No create branch, merge, or push - already up to date
+		{Args: nil, Err: nil}, // GitCheckout (source, defer - always runs)
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: ""}, // HasCommitsBetween - no commits
+		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: ""}, // HasCommitsBetween - no commits
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1289,17 +1346,18 @@ func TestPushBranchDetached_AlreadyUpToDate(t *testing.T) {
 }
 
 func TestPushBranchDetached_Success(t *testing.T) {
-	// Full detached push flow in legacy mode (uses origin, HasCommitsBetween, GitMergeOrigin)
+	// Full detached push flow in legacy mode (uses origin, HasCommitsBetween, GitMerge)
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil}, // GitMergeOrigin (origin/feature)
+		{Args: nil, Err: nil}, // GitMerge (feature)
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main via origin)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
+		{Args: nil, Err: nil}, // GitCheckout (source, defer LIFO - runs second)
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetween
+		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetween
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1326,13 +1384,14 @@ func TestPushBranchDetached_MergeConflicts_InvokesClaude(t *testing.T) {
 	outputStubs := []OutputCommandStub{
 		{Args: nil, Err: nil},                    // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil},                    // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: errors.New("CONFLICT")}, // GitMergeOrigin fails
+		{Args: nil, Err: errors.New("CONFLICT")}, // GitMerge fails
 		// No push - conflicts
-		{Args: nil, Err: nil},                    // GitDeleteBranch (cleanup temp, deferred)
+		{Args: nil, Err: nil},                    // GitDeleteBranch (cleanup temp, defer LIFO - runs first)
+		{Args: nil, Err: nil},                    // GitCheckout (source, defer LIFO - runs second)
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"},    // HasCommitsBetween
+		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: "abc commit\n"},    // HasCommitsBetween
 		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "file1.go\nfile2.go\n"}, // GetConflictedFiles
 	}
 
@@ -1373,15 +1432,18 @@ func TestPushBranchInRepo_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 		{Args: []string{"checkout", "main"}, Err: errors.New("fatal: 'main' is already checked out at '/home/user/other'")},   // GitCheckout fails → fallback
 		{Args: nil, Err: nil},                                                                                                  // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil},                                                                                                  // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil},                                                                                                  // GitMergeRemote
+		{Args: nil, Err: nil},                                                                                                  // GitMerge
 		{Args: nil, Err: nil},                                                                                                  // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil},                                                                                                  // GitDeleteBranch (cleanup temp, deferred)
+		{Args: nil, Err: nil},                                                                                                  // GitDeleteBranch (cleanup temp, detached defer LIFO)
+		{Args: nil, Err: nil},                                                                                                  // GitCheckout (source, detached defer LIFO)
+		{Args: nil, Err: nil},                                                                                                  // GitCheckout (restore original, caller defer)
 	}
 
 	commandStubs := []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (before)
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                        // getStashCount (after, same = not stashed)
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc commit\n"}, // HasCommitsBetweenRemote
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                           // getStashCount (before)
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                           // getStashCount (after, same = not stashed)
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},                       // GetCurrentBranch
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc commit\n"},    // HasCommitsBetweenRemote
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -1412,15 +1474,18 @@ func TestPushBranch_CheckoutAlreadyCheckedOut_UsesDetached(t *testing.T) {
 		// Detached flow:
 		{Args: nil, Err: nil}, // GitCheckoutDetached (origin/main)
 		{Args: nil, Err: nil}, // GitCreateBranchFromHead (temp branch)
-		{Args: nil, Err: nil}, // GitMergeOrigin
+		{Args: nil, Err: nil}, // GitMerge
 		{Args: nil, Err: nil}, // GitPushRefspec (temp:main)
-		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, deferred)
+		{Args: nil, Err: nil}, // GitDeleteBranch (cleanup temp, detached defer LIFO)
+		{Args: nil, Err: nil}, // GitCheckout (source, detached defer LIFO)
+		{Args: nil, Err: nil}, // GitCheckout (restore original, caller defer)
 	}
 
 	commandStubs := []CommandStub{
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                // getStashCount (before)
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                                // getStashCount (after)
-		{Name: "git", Args: []string{"log", "main..origin/feature/test", "--oneline"}, Stdout: "abc123 commit\n"}, // HasCommitsBetween
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature/test\n"},                       // GetCurrentBranch
+		{Name: "git", Args: []string{"log", "main..feature/test", "--oneline"}, Stdout: "abc123 commit\n"},        // HasCommitsBetween
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)

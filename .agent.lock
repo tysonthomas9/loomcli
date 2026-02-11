@@ -1,10 +1,10 @@
 {
-  "pid": 94186,
+  "pid": 82685,
   "command": "task",
-  "started_at": "2026-02-09T11:20:01.005551-08:00",
-  "agent_name": "falcon",
-  "task_id": "loomcli-mzr.3",
-  "task_title": "Wire --parent-id filter through automode task discovery",
-  "task_started_at": "2026-02-09T11:20:32.23851-08:00",
+  "started_at": "2026-02-11T07:41:56.274737-08:00",
+  "agent_name": "nova",
+  "task_id": "loomcli-0at",
+  "task_title": "loom merge fails to detect commits ahead of main",
+  "task_started_at": "2026-02-11T07:42:26.832659-08:00",
   "state": "active"
 }
