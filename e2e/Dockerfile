@@ -74,7 +74,11 @@ RUN mkdir -p /etc/loom
 COPY e2e/task_template.txt /etc/loom/task_template.txt
 RUN chmod +x /usr/local/bin/verify_todo.sh
 
+# Install test orchestrator
+COPY e2e/run_test.sh /usr/local/bin/run_test.sh
+RUN chmod +x /usr/local/bin/run_test.sh
+
 ENV LOOM_BACKEND=claude \
     TERM=xterm-256color
 
-CMD ["go", "test", "-tags", "e2e", "-v", "-count=1", "./..."]
+CMD ["run_test.sh"]

@@ -58,6 +58,24 @@ docker run loomcli-e2e verify_todo.sh -v
 docker run loomcli-e2e verify_todo.sh -q
 ```
 
+## Test Orchestrator
+
+The container includes `run_test.sh` which runs the full test suite:
+
+```bash
+# Full suite (smoke + unit + e2e across all backends)
+docker run loomcli-e2e
+
+# E2E tests only
+docker run loomcli-e2e run_test.sh --phase e2e
+
+# Single backend
+docker run loomcli-e2e run_test.sh --backend claude
+
+# Pass extra go test flags
+docker run loomcli-e2e run_test.sh -- -run TestE2E_TmuxSession
+```
+
 ## Real Backend CLIs
 
 Mount a real CLI binary to replace a stub:
