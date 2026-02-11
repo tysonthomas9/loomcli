@@ -63,8 +63,8 @@ else
   exit 1
 fi
 
-# Poll until all tasks reach status=review (timeout: 5 minutes)
-PLAN_TIMEOUT=300
+# Poll until all tasks reach status=review (timeout: 5 minutes, overridable)
+PLAN_TIMEOUT=${PLAN_TIMEOUT:-300}
 PLAN_START=$SECONDS
 REVIEW_COUNT=0
 while [ $((SECONDS - PLAN_START)) -lt $PLAN_TIMEOUT ]; do
@@ -161,8 +161,8 @@ else
   exit 1
 fi
 
-# Poll until all tasks are closed (timeout: 15 minutes)
-IMPL_TIMEOUT=900
+# Poll until all tasks are closed (timeout: 15 minutes, overridable)
+IMPL_TIMEOUT=${IMPL_TIMEOUT:-900}
 IMPL_START=$SECONDS
 CLOSED_COUNT=0
 while [ $((SECONDS - IMPL_START)) -lt $IMPL_TIMEOUT ]; do

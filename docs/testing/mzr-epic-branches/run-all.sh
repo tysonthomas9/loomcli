@@ -104,9 +104,15 @@ run_test "Recovery"             "$SCRIPT_DIR/test-recovery.sh"
 
 if [ "$SKIP_DAEMON" = false ]; then
   run_test "Daemon E2E"   "$SCRIPT_DIR/test-daemon-e2e.sh"
+
+  # Single-worktree E2E test needs its own test dir (has its own setup.sh call)
+  SINGLE_WT_TEST_DIR="${TEST_DIR}-single"
+  rm -rf "$SINGLE_WT_TEST_DIR"
+  SINGLE_WT_TEST_DIR="$SINGLE_WT_TEST_DIR" \
+    run_test "Daemon E2E (single-worktree)" "$SCRIPT_DIR/test-daemon-e2e-single.sh"
 else
-  echo ">>> Skipping daemon E2E test (--skip-daemon)"
-  SKIP=$((SKIP + 1))
+  echo ">>> Skipping daemon E2E tests (--skip-daemon)"
+  SKIP=$((SKIP + 2))
 fi
 
 echo ""
