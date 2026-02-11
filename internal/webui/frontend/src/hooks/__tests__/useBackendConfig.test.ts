@@ -260,4 +260,213 @@ describe('useBackendConfig', () => {
       expect(result.current.config).toEqual(mockConfig);
     });
   });
+
+  describe('error handling during config update', () => {
+    it('sets error on non-Error exception during update', async () => {
+      const mockConfig = createMockConfig({ backend: 'anthropic' });
+      mockGetBackendConfig.mockResolvedValueOnce(mockConfig);
+
+      const { result } = renderHook(() => useBackendConfig());
+
+      await flushPromises();
+
+      // Reject with a string (not an Error)
+      mockUpdateBackendConfig.mockRejectedValueOnce('string error');
+
+      await act(async () => {
+        await result.current.updateBackend('openai');
+      });
+
+      expect(result.current.error).toBe('Failed to save backend config');
+      expect(result.current.config?.backend).toBe('anthropic');
+    });
+
+    it('clears error from previous update on new successful update', async () => {
+      const mockConfig = createMockConfig({ backend: 'anthropic' });
+      mockGetBackendConfig.mockResolvedValueOnce(mockConfig);
+
+      const { result } = renderHook(() => useBackendConfig());
+
+      await flushPromises();
+
+      // First update fails
+      mockUpdateBackendConfig.mockRejectedValueOnce(new Error('Save failed'));
+
+      await act(async () => {
+        await result.current.updateBackend('openai');
+      });
+
+      expect(result.current.error).toBe('Save failed');
+
+      // Second update succeeds
+      const updatedConfig = createMockConfig({ backend: 'local' });
+      mockUpdateBackendConfig.mockResolvedValueOnce(updatedConfig);
+
+      await act(async () => {
+        await result.current.updateBackend('local');
+      });
+
+      expect(result.current.error).toBeNull();
+      expect(result.current.config?.backend).toBe('local');
+    });
+
+    it('returns false on API failure', async () => {
+      const mockConfig = createMockConfig({ backend: 'anthropic' });
+      mockGetBackendConfig.mockResolvedValueOnce(mockConfig);
+
+      const { result } = renderHook(() => useBackendConfig());
+
+      await flushPromises();
+
+      mockUpdateBackendConfig.mockRejectedValueOnce(new Error('Save failed'));
+
+      let returnValue: boolean | undefined;
+      await act(async () => {
+        returnValue = await result.current.updateBackend('openai');
+      });
+
+      expect(returnValue).toBe(false);
+    });
+
+    it('returns true on API success', async () => {
+      const mockConfig = createMockConfig({ backend: 'anthropic' });
+      mockGetBackendConfig.mockResolvedValueOnce(mockConfig);
+
+      const { result } = renderHook(() => useBackendConfig());
+
+      await flushPromises();
+
+      const updatedConfig = createMockConfig({ backend: 'openai' });
+      mockUpdateBackendConfig.mockResolvedValueOnce(updatedConfig);
+
+      let returnValue: boolean | undefined;
+      await act(async () => {
+        returnValue = await result.current.updateBackend('openai');
+      });
+
+      expect(returnValue).toBe(true);
+    });
+  });
+
+  describe('optimistic update rollback on failure', () => {
+    it('preserves all original config fields on rollback', async () => {
+      const mockConfig = createMockConfig({
+        backend: 'anthropic',
+        source: 'project',
+        available: ['anthropic', 'openai'],
+        agents: [{ name: 'agent-1', backend: 'anthropic' }],
+      });
+      mockGetBackendConfig.mockResolvedValueOnce(mockConfig);
+
+      const { result } = renderHook(() => useBackendConfig());
+
+      await flushPromises();
+
+      // Verify initial state
+      expect(result.current.config?.source).toBe('project');
+      expect(result.current.config?.available).toEqual(['anthropic', 'openai']);
+      expect(result.current.config?.agents).toEqual([{ name: 'agent-1', backend: 'anthropic' }]);
+
+      // Trigger failing update
+      mockUpdateBackendConfig.mockRejectedValueOnce(new Error('Save failed'));
+
+      await act(async () => {
+        await result.current.updateBackend('openai');
+      });
+
+      // ALL fields should be restored, not just backend
+      expect(result.current.config?.backend).toBe('anthropic');
+      expect(result.current.config?.source).toBe('project');
+      expect(result.current.config?.available).toEqual(['anthropic', 'openai']);
+      expect(result.current.config?.agents).toEqual([{ name: 'agent-1', backend: 'anthropic' }]);
+    });
+
+    it('isSaving transitions: false → true → false on failure', async () => {
+      const mockConfig = createMockConfig({ backend: 'anthropic' });
+      mockGetBackendConfig.mockResolvedValueOnce(mockConfig);
+
+      const { result } = renderHook(() => useBackendConfig());
+
+      await flushPromises();
+
+      expect(result.current.isSaving).toBe(false);
+
+      // Use deferred promise to control timing
+      let rejectUpdate!: (err: Error) => void;
+      mockUpdateBackendConfig.mockImplementationOnce(
+        () => new Promise((_, reject) => { rejectUpdate = reject; })
+      );
+
+      let updatePromise: Promise<boolean>;
+      act(() => {
+        updatePromise = result.current.updateBackend('openai');
+      });
+
+      // isSaving should be true during API call
+      expect(result.current.isSaving).toBe(true);
+
+      // Reject the API call
+      await act(async () => {
+        rejectUpdate(new Error('Save failed'));
+        await updatePromise!;
+      });
+
+      // isSaving should be false after failure
+      expect(result.current.isSaving).toBe(false);
+    });
+  });
+
+  describe('unmount safety', () => {
+    it('does not update state after unmount during fetch', async () => {
+      // Use deferred promise for fetch
+      let resolveFetch!: (config: BackendConfigData) => void;
+      mockGetBackendConfig.mockImplementationOnce(
+        () => new Promise((resolve) => { resolveFetch = resolve; })
+      );
+
+      const { unmount } = renderHook(() => useBackendConfig());
+
+      // Unmount before fetch resolves
+      unmount();
+
+      // Resolve the fetch — should not throw (no state update on unmounted component)
+      await act(async () => {
+        resolveFetch(createMockConfig());
+        await Promise.resolve();
+      });
+
+      // If we got here without errors, the test passes
+    });
+
+    it('does not update state after unmount during updateBackend', async () => {
+      const mockConfig = createMockConfig({ backend: 'anthropic' });
+      mockGetBackendConfig.mockResolvedValueOnce(mockConfig);
+
+      const { result, unmount } = renderHook(() => useBackendConfig());
+
+      await flushPromises();
+
+      // Use deferred promise for update
+      let resolveUpdate!: (config: BackendConfigData) => void;
+      mockUpdateBackendConfig.mockImplementationOnce(
+        () => new Promise((resolve) => { resolveUpdate = resolve; })
+      );
+
+      let updatePromise: Promise<boolean>;
+      act(() => {
+        updatePromise = result.current.updateBackend('openai');
+      });
+
+      // Unmount before update resolves
+      unmount();
+
+      // Resolve the update — should not throw
+      await act(async () => {
+        resolveUpdate(createMockConfig({ backend: 'openai' }));
+        await updatePromise!;
+      });
+
+      // If we got here without errors, the test passes
+    });
+  });
 });

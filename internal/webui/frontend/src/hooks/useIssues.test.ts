@@ -14,6 +14,7 @@ import type { Issue } from '../types/issue';
 // Mock the API
 vi.mock('../api/issues', () => ({
   getReadyIssues: vi.fn(),
+  getKanbanIssues: vi.fn(),
   updateIssue: vi.fn(),
   fetchGraphIssues: vi.fn(),
 }));
@@ -995,6 +996,321 @@ describe('useIssues', () => {
       // Verify API data is used (not the old local state)
       expect(result.current.getIssue('issue-1')?.title).toBe('New Title from API');
       expect(result.current.getIssue('issue-1')?.updated_at).toBe('2025-01-23T12:00:00Z');
+    });
+  });
+
+  describe('Kanban mode', () => {
+    beforeEach(() => {
+      vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue([]);
+    });
+
+    it('calls getKanbanIssues when mode is kanban', async () => {
+      const mockIssues = [createTestIssue({ id: 'kanban-1' })];
+      vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue(mockIssues);
+
+      const { result } = renderHook(() => useIssues({ mode: 'kanban' }));
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(issuesApi.getKanbanIssues).toHaveBeenCalled();
+      expect(issuesApi.getReadyIssues).not.toHaveBeenCalled();
+      expect(result.current.issues).toEqual(mockIssues);
+    });
+
+    it('passes filter to getKanbanIssues', async () => {
+      const filter = { priority: 1, assignee: 'dev@example.com' };
+      vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue([]);
+
+      renderHook(() => useIssues({ mode: 'kanban', filter }));
+
+      await waitFor(() => {
+        expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith(filter);
+      });
+    });
+
+    it('returns issues with blocked enrichment fields', async () => {
+      const mockIssues = [
+        createTestIssue({
+          id: 'kanban-1',
+          is_blocked: true,
+          blocked_by_count: 2,
+          blocked_by: ['dep-1', 'dep-2'],
+        }),
+      ];
+      vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue(mockIssues);
+
+      const { result } = renderHook(() => useIssues({ mode: 'kanban' }));
+
+      await waitFor(() => expect(result.current.issues).toHaveLength(1));
+
+      const issue = result.current.getIssue('kanban-1');
+      expect(issue?.is_blocked).toBe(true);
+      expect(issue?.blocked_by_count).toBe(2);
+      expect(issue?.blocked_by).toEqual(['dep-1', 'dep-2']);
+    });
+
+    it('refetch uses kanban mode when mode is kanban', async () => {
+      vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue([]);
+
+      const { result } = renderHook(() => useIssues({ mode: 'kanban', autoFetch: false }));
+
+      await act(async () => {
+        await result.current.refetch();
+      });
+
+      expect(issuesApi.getKanbanIssues).toHaveBeenCalled();
+      expect(issuesApi.getReadyIssues).not.toHaveBeenCalled();
+    });
+
+    it('handles errors in kanban mode', async () => {
+      const errorMessage = 'Kanban API error';
+      vi.mocked(issuesApi.getKanbanIssues).mockRejectedValue(new Error(errorMessage));
+
+      const { result } = renderHook(() => useIssues({ mode: 'kanban' }));
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(result.current.error).toBe(errorMessage);
+      expect(result.current.issues).toHaveLength(0);
+    });
+  });
+
+  describe('Too-far-behind detection', () => {
+    it('triggers refetch when reconnecting→connected with attempts >= TOO_FAR_BEHIND_THRESHOLD (3)', async () => {
+      // Start with initial data
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+
+      let currentMockSSE = createMockSSE({ state: 'connected', isConnected: true });
+
+      vi.mocked(useSSEModule.useSSE).mockImplementation((options) => {
+        onMutationCallback = options?.onMutation;
+        return currentMockSSE;
+      });
+
+      const { result, rerender } = renderHook(() => useIssues());
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      // Clear call count from initial fetch
+      vi.mocked(issuesApi.getReadyIssues).mockClear();
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+
+      // Simulate reconnecting with 3 attempts
+      currentMockSSE = createMockSSE({
+        state: 'reconnecting',
+        isConnected: false,
+        reconnectAttempts: 3,
+      });
+      vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
+      rerender();
+
+      // Clear again since reconnecting state doesn't trigger refetch
+      vi.mocked(issuesApi.getReadyIssues).mockClear();
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+
+      // Now transition to connected
+      currentMockSSE = createMockSSE({
+        state: 'connected',
+        isConnected: true,
+        reconnectAttempts: 0,
+      });
+      vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
+      rerender();
+
+      // Should trigger refetch due to too-far-behind
+      await waitFor(() => {
+        expect(issuesApi.getReadyIssues).toHaveBeenCalled();
+      });
+    });
+
+    it('does NOT trigger refetch when reconnecting→connected with attempts < 3', async () => {
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+
+      let currentMockSSE = createMockSSE({ state: 'connected', isConnected: true });
+      vi.mocked(useSSEModule.useSSE).mockImplementation((options) => {
+        onMutationCallback = options?.onMutation;
+        return currentMockSSE;
+      });
+
+      const { result, rerender } = renderHook(() => useIssues());
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      vi.mocked(issuesApi.getReadyIssues).mockClear();
+
+      // Simulate reconnecting with only 2 attempts (below threshold)
+      currentMockSSE = createMockSSE({
+        state: 'reconnecting',
+        isConnected: false,
+        reconnectAttempts: 2,
+      });
+      vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
+      rerender();
+
+      vi.mocked(issuesApi.getReadyIssues).mockClear();
+
+      // Now transition to connected
+      currentMockSSE = createMockSSE({
+        state: 'connected',
+        isConnected: true,
+        reconnectAttempts: 0,
+      });
+      vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
+      rerender();
+
+      // Should NOT trigger refetch
+      expect(issuesApi.getReadyIssues).not.toHaveBeenCalled();
+    });
+
+    it('resets maxReconnectAttemptsRef after successful reconnection', async () => {
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+
+      let currentMockSSE = createMockSSE({ state: 'connected', isConnected: true });
+      vi.mocked(useSSEModule.useSSE).mockImplementation((options) => {
+        onMutationCallback = options?.onMutation;
+        return currentMockSSE;
+      });
+
+      const { result, rerender } = renderHook(() => useIssues());
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      // First cycle: reconnect with 3 attempts (triggers refetch)
+      currentMockSSE = createMockSSE({ state: 'reconnecting', isConnected: false, reconnectAttempts: 3 });
+      vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
+      rerender();
+
+      vi.mocked(issuesApi.getReadyIssues).mockClear();
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+
+      currentMockSSE = createMockSSE({ state: 'connected', isConnected: true, reconnectAttempts: 0 });
+      vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
+      rerender();
+
+      await waitFor(() => {
+        expect(issuesApi.getReadyIssues).toHaveBeenCalled();
+      });
+
+      // Second cycle: reconnect with only 1 attempt (should NOT trigger refetch because counter was reset)
+      vi.mocked(issuesApi.getReadyIssues).mockClear();
+
+      currentMockSSE = createMockSSE({ state: 'reconnecting', isConnected: false, reconnectAttempts: 1 });
+      vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
+      rerender();
+
+      currentMockSSE = createMockSSE({ state: 'connected', isConnected: true, reconnectAttempts: 0 });
+      vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
+      rerender();
+
+      // Should NOT trigger refetch
+      expect(issuesApi.getReadyIssues).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Empty ID defensive check', () => {
+    it('skips API issues with empty id during refetch merge', async () => {
+      const issueWithEmptyId = createTestIssue({ id: '', title: 'Empty ID' });
+      const validIssue = createTestIssue({ id: 'valid-1', title: 'Valid Issue' });
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([issueWithEmptyId, validIssue]);
+
+      const { result } = renderHook(() => useIssues());
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(result.current.issues).toHaveLength(1);
+      expect(result.current.getIssue('valid-1')).toBeDefined();
+      expect(result.current.issuesMap.has('')).toBe(false);
+    });
+  });
+
+  describe('Concurrent optimistic updates', () => {
+    it('concurrent status updates to different issues preserve both changes', async () => {
+      const issue1 = createTestIssue({ id: 'issue-1', status: 'open' });
+      const issue2 = createTestIssue({ id: 'issue-2', status: 'open' });
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([issue1, issue2]);
+
+      // Use deferred promises to control when API calls resolve
+      let resolveFirst!: (value: Issue) => void;
+      let resolveSecond!: (value: Issue) => void;
+      vi.mocked(issuesApi.updateIssue)
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+
+      const { result } = renderHook(() => useIssues());
+
+      await waitFor(() => expect(result.current.issues).toHaveLength(2));
+
+      // Start first update (optimistic)
+      let promise1: Promise<void>;
+      act(() => {
+        promise1 = result.current.updateIssueStatus('issue-1', 'in_progress');
+      });
+
+      // Start second update while first is still in-flight
+      let promise2: Promise<void>;
+      act(() => {
+        promise2 = result.current.updateIssueStatus('issue-2', 'closed');
+      });
+
+      // Both optimistic updates should be reflected before API calls resolve
+      expect(result.current.getIssue('issue-1')?.status).toBe('in_progress');
+      expect(result.current.getIssue('issue-2')?.status).toBe('closed');
+
+      // Resolve both API calls
+      await act(async () => {
+        resolveFirst({ ...issue1, status: 'in_progress' as const });
+        resolveSecond({ ...issue2, status: 'closed' as const });
+        await promise1!;
+        await promise2!;
+      });
+
+      // Both should retain their new statuses
+      expect(result.current.getIssue('issue-1')?.status).toBe('in_progress');
+      expect(result.current.getIssue('issue-2')?.status).toBe('closed');
+    });
+
+    it('rollback of one issue does not clobber a concurrent update to another issue', async () => {
+      const issue1 = createTestIssue({ id: 'issue-1', status: 'open' });
+      const issue2 = createTestIssue({ id: 'issue-2', status: 'open' });
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([issue1, issue2]);
+
+      // Use deferred promises: issue-1 will fail, issue-2 will succeed
+      let rejectFirst!: (err: Error) => void;
+      let resolveSecond!: (value: Issue) => void;
+      vi.mocked(issuesApi.updateIssue)
+        .mockImplementationOnce(() => new Promise((_, reject) => { rejectFirst = reject; }))
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+
+      const { result } = renderHook(() => useIssues());
+
+      await waitFor(() => expect(result.current.issues).toHaveLength(2));
+
+      // Start both updates while both are in-flight
+      let promise1: Promise<void>;
+      act(() => {
+        promise1 = result.current.updateIssueStatus('issue-1', 'in_progress');
+      });
+
+      let promise2: Promise<void>;
+      act(() => {
+        promise2 = result.current.updateIssueStatus('issue-2', 'closed');
+      });
+
+      // Both optimistic updates visible
+      expect(result.current.getIssue('issue-1')?.status).toBe('in_progress');
+      expect(result.current.getIssue('issue-2')?.status).toBe('closed');
+
+      // Reject first, resolve second
+      await act(async () => {
+        rejectFirst(new Error('API error'));
+        resolveSecond({ ...issue2, status: 'closed' as const });
+        try { await promise1!; } catch { /* expected */ }
+        await promise2!;
+      });
+
+      // issue-1 should be rolled back, issue-2 should retain new status
+      expect(result.current.getIssue('issue-1')?.status).toBe('open');
+      expect(result.current.getIssue('issue-2')?.status).toBe('closed');
     });
   });
 });

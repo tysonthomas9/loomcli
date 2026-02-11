@@ -740,4 +740,136 @@ describe('useSSE', () => {
       expect(onStateChange).not.toHaveBeenCalled();
     });
   });
+
+  describe('Unmount during connecting state', () => {
+    it('cleans up EventSource when unmounted during connecting state', () => {
+      const { result, unmount } = renderHook(() => useSSE({ autoConnect: false }));
+
+      act(() => {
+        result.current.connect();
+      });
+
+      // State should be connecting (EventSource created but not yet open)
+      expect(result.current.state).toBe('connecting');
+      const esInstance = MockEventSource.lastInstance;
+      expect(esInstance).toBeDefined();
+
+      // Unmount before simulateOpen
+      unmount();
+
+      // EventSource should be closed
+      expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
+    });
+
+    it('no state update callbacks fire after unmount during connecting', () => {
+      const onStateChange = vi.fn();
+      const onMutation = vi.fn();
+      const { result, unmount } = renderHook(() =>
+        useSSE({
+          autoConnect: false,
+          onStateChange,
+          onMutation,
+        })
+      );
+
+      act(() => {
+        result.current.connect();
+      });
+
+      onStateChange.mockClear();
+      const esInstance = MockEventSource.lastInstance;
+
+      unmount();
+
+      // Try to open and send mutations after unmount
+      esInstance?.simulateOpen();
+      esInstance?.simulateMutation({
+        type: 'create',
+        issue_id: 'post-unmount',
+        title: 'Should not trigger callback',
+        timestamp: '2025-01-23T12:00:00Z',
+      });
+
+      expect(onStateChange).not.toHaveBeenCalled();
+      expect(onMutation).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Rapid connect/disconnect cycles', () => {
+    it('handles rapid connect→disconnect→connect cycle', () => {
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
+
+      act(() => {
+        result.current.connect();
+      });
+
+      const firstInstance = MockEventSource.lastInstance;
+
+      act(() => {
+        result.current.disconnect();
+      });
+
+      act(() => {
+        result.current.connect();
+      });
+
+      const secondInstance = MockEventSource.lastInstance;
+
+      // First instance should be closed
+      expect(firstInstance?.readyState).toBe(MockEventSource.CLOSED);
+      // Second instance should be created (new EventSource)
+      expect(secondInstance).not.toBe(firstInstance);
+      expect(result.current.state).toBe('connecting');
+    });
+
+    it('handles rapid connect→disconnect→connect→open cycle', () => {
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
+
+      act(() => {
+        result.current.connect();
+      });
+
+      const firstInstance = MockEventSource.lastInstance;
+
+      act(() => {
+        result.current.disconnect();
+      });
+
+      act(() => {
+        result.current.connect();
+      });
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateOpen();
+      });
+
+      // First instance should be closed
+      expect(firstInstance?.readyState).toBe(MockEventSource.CLOSED);
+      // Should be connected via the second instance
+      expect(result.current.state).toBe('connected');
+      expect(result.current.isConnected).toBe(true);
+    });
+
+    it('five rapid connect/disconnect cycles produce clean state', () => {
+      const { result } = renderHook(() => useSSE({ autoConnect: false }));
+
+      for (let i = 0; i < 5; i++) {
+        act(() => {
+          result.current.connect();
+        });
+        act(() => {
+          result.current.disconnect();
+        });
+      }
+
+      // Final state should be disconnected
+      expect(result.current.state).toBe('disconnected');
+      expect(result.current.isConnected).toBe(false);
+
+      // All previous instances should be closed
+      for (const instance of MockEventSource.instances) {
+        expect(instance.readyState).toBe(MockEventSource.CLOSED);
+      }
+    });
+  });
 });
