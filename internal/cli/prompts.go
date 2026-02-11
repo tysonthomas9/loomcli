@@ -42,6 +42,8 @@ func buildWorkspaceContextBlock(workspace *WorkspaceConfig) string {
 
 // GeneratePlanningPrompt creates the prompt for the planning agent.
 // If workspace is non-nil, workspace context is injected into the prompt.
+// SYNC: The jq filters below must match taskfilter.go NeedsPlan() criteria:
+//   planning: design empty OR has "needs-revision" label
 func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
 	return fmt.Sprintf(`## WORKFLOW: Planning Task (Design Only - No Implementation)
@@ -172,6 +174,8 @@ Your job was ONLY to create the plan. Implementation happens later.
 
 // GenerateTaskPrompt creates the prompt for the implementation agent.
 // If workspace is non-nil, workspace context is injected into the prompt.
+// SYNC: The jq filters below must match taskfilter.go ReadyToImplement() criteria:
+//   implementation: design non-empty AND no "needs-revision" label
 func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
 	return fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)

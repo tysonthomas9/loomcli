@@ -613,31 +613,17 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 			needsPlanningCount := 0
 			readyToImplementCount := 0
 			for _, issue := range issues {
-				// Skip in_progress tasks - they appear in In Progress section
-				if issue.Status == "in_progress" {
+				// Skip non-open tasks - they appear in their own sections
+				if !IsOpen(issue) {
 					continue
 				}
-				// Skip review tasks - they appear in Need Review section
-				if issue.Status == "review" {
-					continue
-				}
-				// Skip epics - agents shouldn't work on epics directly
-				if issue.IssueType == "epic" {
+				if IsEpic(issue) {
 					continue
 				}
 
-				// Check for needs-revision label
-				hasRevisionLabel := false
-				for _, label := range issue.Labels {
-					if label == "needs-revision" {
-						hasRevisionLabel = true
-						break
-					}
-				}
-
-				// Split by whether task has a design (and no revision label)
-				if issue.Design != "" && !hasRevisionLabel {
-					// Has design and no revision needed - ready to implement
+				// Split by workflow stage using shared predicates
+				// SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
+				if ReadyToImplement(issue) {
 					summary.ReadyToImplement++
 					if readyToImplementCount < 5 {
 						readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
@@ -648,7 +634,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 						readyToImplementCount++
 					}
 				} else {
-					// No design OR needs revision - needs planning
+					// NeedsPlan: no design OR needs-revision label
 					summary.NeedsPlanning++
 					if needsPlanningCount < 5 {
 						needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
@@ -826,21 +812,14 @@ func collectReadyTasksByPriority(readyLimit int) map[int]int {
 	}
 
 	for _, issue := range issues {
-		if issue.Status == "in_progress" || issue.Status == "review" {
+		if !IsOpen(issue) {
 			continue
 		}
-		if issue.IssueType == "epic" {
+		if IsEpic(issue) {
 			continue
 		}
-		// Skip tasks with needs-revision label (consistent with collectTaskStatus)
-		hasRevisionLabel := false
-		for _, label := range issue.Labels {
-			if label == "needs-revision" {
-				hasRevisionLabel = true
-				break
-			}
-		}
-		if hasRevisionLabel {
+		// Skip tasks with needs-revision label (these are being re-planned)
+		if HasNeedsRevision(issue) {
 			continue
 		}
 		p := issue.Priority

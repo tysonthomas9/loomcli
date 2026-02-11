@@ -9,7 +9,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 
 import { updateIssue, addComment, closeIssue } from '@/api';
-import { getReviewType } from '@/utils/reviewType';
+import { getReviewType } from '@/utils/issueCategory';
 import {
   AppLayout,
   SwimLaneBoard,

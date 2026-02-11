@@ -78,6 +78,7 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 		{
 			name: "skip task with blocks dependency",
 			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-0", Title: "Blocker", Status: "open", Design: "has design"},
 				{ID: "T-1", Title: "Task with deps", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
@@ -193,6 +194,7 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 		{
 			name: "skip task with blocks dependency even with design",
 			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-0", Title: "Blocker", Status: "open"},
 				{ID: "T-1", Title: "Blocked with design", Status: "open", Design: "Implementation plan", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
@@ -2235,6 +2237,7 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 		{
 			name: "skip task with blocks dependency",
 			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-0", Title: "Blocker", Status: "open", IssueType: "epic"},
 				{ID: "T-1", Title: "Blocked task", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
@@ -2283,98 +2286,17 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 // hasOpenBlockers Tests
 // ============================================================================
 
+// TestHasOpenBlockers is kept for backward compatibility but delegates to
+// HasOpenBlockersInReadyList (now in taskfilter.go). Comprehensive tests
+// are in taskfilter_test.go TestHasOpenBlockersInReadyList.
 func TestHasOpenBlockers(t *testing.T) {
-	// allIssues simulates bd ready output (only open/ready issues)
-	allIssues := []BdIssue{
-		{ID: "T-0", Status: "open"},
-		{ID: "EPIC-1", Status: "open"},
-	}
-
-	tests := []struct {
-		name      string
-		deps      []Dependency
-		allIssues []BdIssue
-		want      bool
-	}{
-		{
-			name:      "nil slice",
-			deps:      nil,
-			allIssues: allIssues,
-			want:      false,
-		},
-		{
-			name:      "empty slice",
-			deps:      []Dependency{},
-			allIssues: allIssues,
-			want:      false,
-		},
-		{
-			name: "only parent-child deps",
-			deps: []Dependency{
-				{IssueID: "T-1", DependsOnID: "EPIC-1", Type: "parent-child"},
-			},
-			allIssues: allIssues,
-			want:      false,
-		},
-		{
-			name: "blocks dep with open blocker",
-			deps: []Dependency{
-				{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
-			},
-			allIssues: allIssues,
-			want:      true,
-		},
-		{
-			name: "blocks dep with closed blocker not in ready list",
-			deps: []Dependency{
-				{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
-			},
-			allIssues: allIssues,
-			want:      false,
-		},
-		{
-			name: "mixed deps with one open blocks",
-			deps: []Dependency{
-				{IssueID: "T-1", DependsOnID: "EPIC-1", Type: "parent-child"},
-				{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
-			},
-			allIssues: allIssues,
-			want:      true,
-		},
-		{
-			name: "mixed deps with resolved blocker",
-			deps: []Dependency{
-				{IssueID: "T-1", DependsOnID: "EPIC-1", Type: "parent-child"},
-				{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
-			},
-			allIssues: allIssues,
-			want:      false,
-		},
-		{
-			name: "unknown dependency type not treated as blocker",
-			deps: []Dependency{
-				{IssueID: "T-1", DependsOnID: "T-0", Type: "related"},
-			},
-			allIssues: allIssues,
-			want:      false,
-		},
-		{
-			name: "blocker not in ready list assumed resolved",
-			deps: []Dependency{
-				{IssueID: "T-1", DependsOnID: "T-UNKNOWN", Type: "blocks"},
-			},
-			allIssues: allIssues,
-			want:      false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := hasOpenBlockers(tt.deps, tt.allIssues)
-			if got != tt.want {
-				t.Errorf("hasOpenBlockers() = %v, want %v", got, tt.want)
-			}
-		})
+	allIssues := []BdIssue{{ID: "T-0", Status: "open"}}
+	got := HasOpenBlockersInReadyList(
+		[]Dependency{{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"}},
+		allIssues,
+	)
+	if !got {
+		t.Error("expected open blocker to be detected")
 	}
 }
 

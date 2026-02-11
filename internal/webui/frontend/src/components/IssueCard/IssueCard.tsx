@@ -10,10 +10,8 @@ import { useAgentContext } from '@/hooks';
 import type { BlockerRef, Issue } from '@/types';
 import { parseLoomStatus } from '@/types';
 import { formatIssueId } from '@/utils/formatIssueId';
-import { getOpenStatus } from '@/utils/openStatus';
-import type { OpenStatus } from '@/utils/openStatus';
-import { getReviewType } from '@/utils/reviewType';
-import type { ReviewType } from '@/utils/reviewType';
+import { getOpenStatus, getReviewType } from '@/utils/issueCategory';
+import type { OpenStatus, ReviewType } from '@/utils/issueCategory';
 
 import { AgentRow } from './AgentRow';
 import styles from './IssueCard.module.css';

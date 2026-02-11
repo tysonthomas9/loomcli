@@ -10,6 +10,8 @@
  * - Done: Closed issues
  */
 
+import { hasLegacyReviewPrefix } from '@/utils/issueCategory';
+
 import type { KanbanColumnConfig } from './types';
 
 const ClockIcon = (
@@ -30,11 +32,6 @@ const ClockIcon = (
  * Default kanban columns for multi-agent workflows.
  * Order matters: filter functions are evaluated in order, issue belongs to first match.
  */
-/**
- * Helper to check if issue needs review based on title.
- */
-const needsReviewByTitle = (title: string): boolean => title.includes('[Need Review]');
-
 export function createColumns(options?: { includeEpics?: boolean }): KanbanColumnConfig[] {
   const includeEpics = options?.includeEpics === true;
   return [
@@ -44,7 +41,7 @@ export function createColumns(options?: { includeEpics?: boolean }): KanbanColum
       filter: (issue) =>
         (includeEpics || issue.issue_type !== 'epic') &&
         issue.status === 'deferred' &&
-        !needsReviewByTitle(issue.title),
+        !hasLegacyReviewPrefix(issue.title),
       droppableDisabled: true, // Cannot drop TO backlog (auto-calculated)
       allowedDropTargets: ['done'], // Can only drag FROM backlog to Done
       style: 'muted',
@@ -57,7 +54,7 @@ export function createColumns(options?: { includeEpics?: boolean }): KanbanColum
         (includeEpics || issue.issue_type !== 'epic') &&
         (issue.status === 'open' || issue.status === undefined) &&
         (!blockedInfo || blockedInfo.blockedByCount === 0) &&
-        !needsReviewByTitle(issue.title),
+        !hasLegacyReviewPrefix(issue.title),
       targetStatus: 'open',
       allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
       style: 'normal',
@@ -71,7 +68,7 @@ export function createColumns(options?: { includeEpics?: boolean }): KanbanColum
           !!blockedInfo &&
           blockedInfo.blockedByCount > 0) ||
           issue.status === 'blocked') &&
-        !needsReviewByTitle(issue.title),
+        !hasLegacyReviewPrefix(issue.title),
       droppableDisabled: true, // Cannot drop TO blocked (auto-calculated)
       allowedDropTargets: ['done'], // Can only drag FROM blocked to Done
       style: 'muted',
@@ -90,7 +87,7 @@ export function createColumns(options?: { includeEpics?: boolean }): KanbanColum
       label: 'Needs Review',
       filter: (issue) =>
         (includeEpics || issue.issue_type !== 'epic') &&
-        (issue.status === 'review' || needsReviewByTitle(issue.title)),
+        (issue.status === 'review' || hasLegacyReviewPrefix(issue.title)),
       targetStatus: 'review',
       allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
       style: 'normal',

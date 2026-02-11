@@ -25,7 +25,7 @@ import type {
   Comment,
 } from '@/types';
 import type { Status } from '@/types/status';
-import { getReviewType } from '@/utils/reviewType';
+import { getReviewType } from '@/utils/issueCategory';
 
 import { CommentForm } from './CommentForm';
 import { CommentsSection } from './CommentsSection';

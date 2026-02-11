@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -109,29 +108,9 @@ func interruptibleSleep(d time.Duration, shutdown <-chan struct{}) bool {
 	}
 }
 
-// hasOpenBlockers returns true if any dependency is a blocking relationship
-// where the blocker is still unresolved. Since allIssues comes from bd ready
-// (which only returns open/ready issues), a blocker NOT in the list is assumed
-// resolved (closed/tombstone). Only blockers present and still open block work.
-func hasOpenBlockers(deps []Dependency, allIssues []BdIssue) bool {
-	// Build set of known open issue IDs from the ready list
-	openIDs := make(map[string]bool, len(allIssues))
-	for _, issue := range allIssues {
-		openIDs[issue.ID] = true
-	}
-
-	for _, dep := range deps {
-		if dep.Type == "blocks" && openIDs[dep.DependsOnID] {
-			return true
-		}
-	}
-	return false
-}
-
-// GetAvailablePlanningTasks returns tasks that need planning
-// (ready tasks without a design OR with needs-revision label, excluding epics)
-// When parentID is non-empty, only tasks under that epic are returned.
-func GetAvailablePlanningTasks(parentID string) ([]BdIssue, error) {
+// fetchReadyIssues runs "bd ready --json" and returns the parsed issues.
+// When parentID is non-empty, filters to tasks under that epic.
+func fetchReadyIssues(parentID string) ([]BdIssue, error) {
 	args := []string{"bd", "ready", "--json", "--limit", "100"}
 	if parentID != "" {
 		args = append(args, "--parent", parentID)
@@ -145,30 +124,24 @@ func GetAvailablePlanningTasks(parentID string) ([]BdIssue, error) {
 	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
 		return nil, fmt.Errorf("failed to parse task list: %w", err)
 	}
+	return issues, nil
+}
+
+// GetAvailablePlanningTasks returns tasks that need planning
+// (ready tasks without a design OR with needs-revision label, excluding epics)
+// When parentID is non-empty, only tasks under that epic are returned.
+func GetAvailablePlanningTasks(parentID string) ([]BdIssue, error) {
+	issues, err := fetchReadyIssues(parentID)
+	if err != nil {
+		return nil, err
+	}
 
 	var candidates []BdIssue
 	for _, issue := range issues {
-		// Only consider open tasks - skip in_progress, review, blocked, etc.
-		if issue.Status != "open" {
-			continue
-		}
-		// Skip epics - agents shouldn't work on epics directly
-		if issue.IssueType == "epic" {
-			continue
-		}
-		// Safety net: skip tasks with open blocking dependencies
-		if hasOpenBlockers(issue.Dependencies, issues) {
-			continue
-		}
-		// Task needs planning if:
-		// 1. No design (new task), OR
-		// 2. Has 'needs-revision' label (revision task)
-		hasRevisionLabel := slices.Contains(issue.Labels, "needs-revision")
-		if issue.Design == "" || hasRevisionLabel {
+		if IsAvailableForPlanning(issue, issues) {
 			candidates = append(candidates, issue)
 		}
 	}
-
 	return candidates, nil
 }
 
@@ -186,41 +159,17 @@ func HasAvailablePlanningTasks(parentID string) (bool, error) {
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
 // When parentID is non-empty, only tasks under that epic are returned.
 func GetAvailableImplementationTasks(parentID string) ([]BdIssue, error) {
-	args := []string{"bd", "ready", "--json", "--limit", "100"}
-	if parentID != "" {
-		args = append(args, "--parent", parentID)
-	}
-	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
-	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse task list: %w", err)
+	issues, err := fetchReadyIssues(parentID)
+	if err != nil {
+		return nil, err
 	}
 
 	var candidates []BdIssue
 	for _, issue := range issues {
-		// Only consider open tasks - skip in_progress, review, blocked, etc.
-		if issue.Status != "open" {
-			continue
-		}
-		// Skip epics - agents shouldn't work on epics directly
-		if issue.IssueType == "epic" {
-			continue
-		}
-		// Safety net: skip tasks with open blocking dependencies
-		if hasOpenBlockers(issue.Dependencies, issues) {
-			continue
-		}
-		// Task ready for implementation if it HAS a design AND no revision label
-		hasRevisionLabel := slices.Contains(issue.Labels, "needs-revision")
-		if issue.Design != "" && !hasRevisionLabel {
+		if IsAvailableForImplementation(issue, issues) {
 			candidates = append(candidates, issue)
 		}
 	}
-
 	return candidates, nil
 }
 
@@ -238,36 +187,17 @@ func HasAvailableImplementationTasks(parentID string) (bool, error) {
 // Used by custom roles with task_filter=any.
 // When parentID is non-empty, only tasks under that epic are returned.
 func GetAnyAvailableTasks(parentID string) ([]BdIssue, error) {
-	args := []string{"bd", "ready", "--json", "--limit", "100"}
-	if parentID != "" {
-		args = append(args, "--parent", parentID)
-	}
-	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
-	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse task list: %w", err)
+	issues, err := fetchReadyIssues(parentID)
+	if err != nil {
+		return nil, err
 	}
 
 	var candidates []BdIssue
 	for _, issue := range issues {
-		// Only consider open tasks - skip in_progress, review, blocked, etc.
-		if issue.Status != "open" {
-			continue
+		if IsAvailableForAny(issue, issues) {
+			candidates = append(candidates, issue)
 		}
-		if issue.IssueType == "epic" {
-			continue
-		}
-		// Safety net: skip tasks with open blocking dependencies
-		if hasOpenBlockers(issue.Dependencies, issues) {
-			continue
-		}
-		candidates = append(candidates, issue)
 	}
-
 	return candidates, nil
 }
 
