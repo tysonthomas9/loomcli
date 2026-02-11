@@ -137,6 +137,14 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) {
+	// Cache collectMonitorData results to avoid redundant shell-outs from
+	// concurrent API requests. The frontend polls 3 endpoints every 5s;
+	// without this cache each poll cycle spawns ~60-90 subprocesses.
+	collector := newCachedCollector(2*time.Second, func() *MonitorData {
+		return collectMonitorData(50)
+	})
+	collectDataFunc = collector.get
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
