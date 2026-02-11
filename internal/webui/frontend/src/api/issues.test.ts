@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import type { Issue, IssueDetails, Statistics, WorkFilter } from '@/types';
+import type { Issue, IssueDetails, Statistics, WorkFilter, BlockedIssue, Comment } from '@/types';
 
-import { ApiError, get, post, patch } from './client';
+import { ApiError, get, post, patch, del } from './client';
 import {
   getIssue,
   getReadyIssues,
   getKanbanIssues,
   getStats,
+  getBlockedIssues,
   createIssue,
   updateIssue,
   closeIssue,
+  addDependency,
+  removeDependency,
+  addComment,
   fetchGraphIssues,
   buildQueryString,
   unwrap,
@@ -25,6 +29,7 @@ vi.mock('./client', () => ({
   get: vi.fn(),
   post: vi.fn(),
   patch: vi.fn(),
+  del: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       public status: number,
@@ -40,6 +45,7 @@ vi.mock('./client', () => ({
 const mockGet = get as ReturnType<typeof vi.fn>;
 const mockPost = post as ReturnType<typeof vi.fn>;
 const mockPatch = patch as ReturnType<typeof vi.fn>;
+const mockDel = del as ReturnType<typeof vi.fn>;
 
 describe('issues API', () => {
   beforeEach(() => {
@@ -560,6 +566,171 @@ describe('issues API', () => {
       mockGet.mockRejectedValue(error);
 
       await expect(getStats()).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('getBlockedIssues', () => {
+    const mockBlockedIssues: BlockedIssue[] = [
+      {
+        id: 'issue-1',
+        title: 'Blocked Task',
+        issue_type: 'task',
+        priority: 'high',
+        status: 'open',
+        labels: ['blocked'],
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        blocked_by_count: 2,
+        blocked_by: ['issue-2', 'issue-3'],
+      },
+    ];
+
+    it('calls get with /api/blocked when no options', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues();
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+    });
+
+    it('calls get with /api/blocked when empty options', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({});
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+    });
+
+    it('builds query string with parent_id', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ parent_id: 'epic-1' });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked?parent_id=epic-1');
+    });
+
+    it('builds query string with priority', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ priority: 2 });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked?priority=2');
+    });
+
+    it('builds query string with priority 0', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ priority: 0 });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked?priority=0');
+    });
+
+    it('builds query string with type', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ type: 'bug' });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked?type=bug');
+    });
+
+    it('builds query string with assignee', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ assignee: 'dev1' });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked?assignee=dev1');
+    });
+
+    it('builds query string with limit', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ limit: 10 });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked?limit=10');
+    });
+
+    it('builds query string with limit 0', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ limit: 0 });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked?limit=0');
+    });
+
+    it('builds query string with all filter options', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({
+        parent_id: 'epic-1',
+        priority: 1,
+        type: 'bug',
+        assignee: 'dev1',
+        limit: 5,
+      });
+
+      const callArg = mockGet.mock.calls[0][0] as string;
+      expect(callArg).toContain('/api/blocked?');
+      expect(callArg).toContain('parent_id=epic-1');
+      expect(callArg).toContain('priority=1');
+      expect(callArg).toContain('type=bug');
+      expect(callArg).toContain('assignee=dev1');
+      expect(callArg).toContain('limit=5');
+    });
+
+    it('omits empty string parent_id', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ parent_id: '' });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+    });
+
+    it('omits empty string type', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ type: '' });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+    });
+
+    it('omits empty string assignee', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      await getBlockedIssues({ assignee: '' });
+
+      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+    });
+
+    it('unwraps successful response and returns BlockedIssue array', async () => {
+      mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
+
+      const result = await getBlockedIssues();
+
+      expect(result).toEqual(mockBlockedIssues);
+    });
+
+    it('returns empty array when no blocked issues', async () => {
+      mockGet.mockResolvedValue({ success: true, data: [] });
+
+      const result = await getBlockedIssues();
+
+      expect(result).toEqual([]);
+    });
+
+    it('throws ApiError on failure response', async () => {
+      mockGet.mockResolvedValue({ success: false, error: 'Database unavailable' });
+
+      await expect(getBlockedIssues()).rejects.toThrow(ApiError);
+    });
+
+    it('propagates ApiError from client', async () => {
+      const error = new ApiError(500, 'Internal Server Error');
+      mockGet.mockRejectedValue(error);
+
+      await expect(getBlockedIssues()).rejects.toThrow(ApiError);
+      await expect(getBlockedIssues()).rejects.toMatchObject({
+        status: 500,
+      });
     });
   });
 
@@ -1107,6 +1278,212 @@ describe('issues API', () => {
     });
   });
 
+  // ============= Dependency Operation Tests =============
+
+  describe('addDependency', () => {
+    it('calls post with correct URL and default dep_type', async () => {
+      mockPost.mockResolvedValue({ success: true, data: null });
+
+      await addDependency('issue-1', 'issue-2');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-1/dependencies', {
+        depends_on_id: 'issue-2',
+        dep_type: 'blocks',
+      });
+    });
+
+    it('calls post with custom dep_type', async () => {
+      mockPost.mockResolvedValue({ success: true, data: null });
+
+      await addDependency('issue-1', 'issue-2', 'related');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-1/dependencies', {
+        depends_on_id: 'issue-2',
+        dep_type: 'related',
+      });
+    });
+
+    it('encodes special characters in issueId', async () => {
+      mockPost.mockResolvedValue({ success: true, data: null });
+
+      await addDependency('issue/1', 'issue-2');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue%2F1/dependencies', {
+        depends_on_id: 'issue-2',
+        dep_type: 'blocks',
+      });
+    });
+
+    it('does not encode dependsOnId in URL (sent in body)', async () => {
+      mockPost.mockResolvedValue({ success: true, data: null });
+
+      await addDependency('issue-1', 'dep/with/slashes');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-1/dependencies', {
+        depends_on_id: 'dep/with/slashes',
+        dep_type: 'blocks',
+      });
+    });
+
+    it('returns void on success', async () => {
+      mockPost.mockResolvedValue({ success: true, data: null });
+
+      const result = await addDependency('issue-1', 'issue-2');
+
+      expect(result).toBeUndefined();
+    });
+
+    it('throws ApiError on failure response', async () => {
+      mockPost.mockResolvedValue({ success: false, error: 'Dependency cycle detected' });
+
+      await expect(addDependency('issue-1', 'issue-2')).rejects.toThrow(ApiError);
+    });
+
+    it('propagates ApiError from client', async () => {
+      const error = new ApiError(400, 'Bad Request');
+      mockPost.mockRejectedValue(error);
+
+      await expect(addDependency('issue-1', 'issue-2')).rejects.toThrow(ApiError);
+      await expect(addDependency('issue-1', 'issue-2')).rejects.toMatchObject({
+        status: 400,
+      });
+    });
+  });
+
+  describe('removeDependency', () => {
+    it('calls del with correct URL', async () => {
+      mockDel.mockResolvedValue({ success: true, data: null });
+
+      await removeDependency('issue-1', 'dep-2');
+
+      expect(mockDel).toHaveBeenCalledWith('/api/issues/issue-1/dependencies/dep-2');
+    });
+
+    it('encodes special characters in issueId', async () => {
+      mockDel.mockResolvedValue({ success: true, data: null });
+
+      await removeDependency('issue/1', 'dep-2');
+
+      expect(mockDel).toHaveBeenCalledWith('/api/issues/issue%2F1/dependencies/dep-2');
+    });
+
+    it('encodes special characters in dependsOnId', async () => {
+      mockDel.mockResolvedValue({ success: true, data: null });
+
+      await removeDependency('issue-1', 'dep/2');
+
+      expect(mockDel).toHaveBeenCalledWith('/api/issues/issue-1/dependencies/dep%2F2');
+    });
+
+    it('encodes special characters in both IDs', async () => {
+      mockDel.mockResolvedValue({ success: true, data: null });
+
+      await removeDependency('issue/1', 'dep/2');
+
+      expect(mockDel).toHaveBeenCalledWith('/api/issues/issue%2F1/dependencies/dep%2F2');
+    });
+
+    it('returns void on success', async () => {
+      mockDel.mockResolvedValue({ success: true, data: null });
+
+      const result = await removeDependency('issue-1', 'dep-2');
+
+      expect(result).toBeUndefined();
+    });
+
+    it('throws ApiError on failure response', async () => {
+      mockDel.mockResolvedValue({ success: false, error: 'Dependency not found' });
+
+      await expect(removeDependency('issue-1', 'dep-2')).rejects.toThrow(ApiError);
+    });
+
+    it('propagates ApiError from client', async () => {
+      const error = new ApiError(404, 'Not Found');
+      mockDel.mockRejectedValue(error);
+
+      await expect(removeDependency('issue-1', 'dep-2')).rejects.toThrow(ApiError);
+      await expect(removeDependency('issue-1', 'dep-2')).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+  });
+
+  // ============= Comment Operation Tests =============
+
+  describe('addComment', () => {
+    const mockComment: Comment = {
+      id: 1,
+      issue_id: 'issue-123',
+      author: 'user1',
+      text: 'This is a comment',
+      created_at: '2024-01-15T00:00:00Z',
+    };
+
+    it('calls post with correct URL and body', async () => {
+      mockPost.mockResolvedValue({ success: true, data: mockComment });
+
+      await addComment('issue-123', 'This is a comment');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-123/comments', {
+        text: 'This is a comment',
+      });
+    });
+
+    it('encodes special characters in issueId', async () => {
+      mockPost.mockResolvedValue({ success: true, data: mockComment });
+
+      await addComment('issue/1', 'hello');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue%2F1/comments', {
+        text: 'hello',
+      });
+    });
+
+    it('unwraps successful response and returns Comment', async () => {
+      mockPost.mockResolvedValue({ success: true, data: mockComment });
+
+      const result = await addComment('issue-123', 'This is a comment');
+
+      expect(result).toEqual(mockComment);
+    });
+
+    it('sends text as-is without sanitization', async () => {
+      mockPost.mockResolvedValue({ success: true, data: mockComment });
+
+      await addComment('issue-123', '<script>alert("xss")</script>');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-123/comments', {
+        text: '<script>alert("xss")</script>',
+      });
+    });
+
+    it('handles empty text', async () => {
+      mockPost.mockResolvedValue({ success: true, data: mockComment });
+
+      await addComment('issue-123', '');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-123/comments', {
+        text: '',
+      });
+    });
+
+    it('throws ApiError on failure response', async () => {
+      mockPost.mockResolvedValue({ success: false, error: 'Issue not found' });
+
+      await expect(addComment('issue-123', 'text')).rejects.toThrow(ApiError);
+    });
+
+    it('propagates ApiError from client', async () => {
+      const error = new ApiError(404, 'Not Found');
+      mockPost.mockRejectedValue(error);
+
+      await expect(addComment('issue-123', 'text')).rejects.toThrow(ApiError);
+      await expect(addComment('issue-123', 'text')).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+  });
+
   // ============= Integration-style Tests =============
 
   describe('error handling consistency', () => {
@@ -1119,6 +1496,7 @@ describe('issues API', () => {
       await expect(getReadyIssues()).rejects.toThrow(ApiError);
       await expect(getKanbanIssues()).rejects.toThrow(ApiError);
       await expect(getStats()).rejects.toThrow(ApiError);
+      await expect(getBlockedIssues()).rejects.toThrow(ApiError);
       await expect(fetchGraphIssues()).rejects.toThrow(ApiError);
     });
 
@@ -1127,12 +1505,16 @@ describe('issues API', () => {
 
       mockPost.mockRejectedValue(networkError);
       mockPatch.mockRejectedValue(networkError);
+      mockDel.mockRejectedValue(networkError);
 
       await expect(
         createIssue({ title: 'x', issue_type: 'bug', priority: 'high' })
       ).rejects.toThrow(ApiError);
       await expect(updateIssue('123', { title: 'x' })).rejects.toThrow(ApiError);
       await expect(closeIssue('123')).rejects.toThrow(ApiError);
+      await expect(addDependency('123', '456')).rejects.toThrow(ApiError);
+      await expect(removeDependency('123', '456')).rejects.toThrow(ApiError);
+      await expect(addComment('123', 'text')).rejects.toThrow(ApiError);
     });
   });
 });

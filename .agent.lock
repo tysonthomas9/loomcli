@@ -1,10 +1,10 @@
 {
-  "pid": 51605,
+  "pid": 19676,
   "command": "task",
-  "started_at": "2026-02-11T15:03:58.225071-08:00",
+  "started_at": "2026-02-11T15:50:18.620889-08:00",
   "agent_name": "falcon",
-  "task_id": "loomcli-duvj",
-  "task_title": "Add tests for WebUI log streaming handlers (handlers_logs.go)",
-  "task_started_at": "2026-02-11T15:04:22.900995-08:00",
+  "task_id": "loomcli-1wf1",
+  "task_title": "Add tests for frontend api/issues.ts untested functions",
+  "task_started_at": "2026-02-11T15:50:43.006698-08:00",
   "state": "active"
 }
