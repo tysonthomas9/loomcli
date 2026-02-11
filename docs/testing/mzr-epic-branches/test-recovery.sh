@@ -12,6 +12,8 @@ set -euo pipefail
 
 : "${TEST_DIR:?Run setup.sh first and source test-env.sh}"
 : "${EPIC_A:?Run setup.sh first and source test-env.sh}"
+: "${TASK_A1:?Run setup.sh first and source test-env.sh}"
+: "${TASK_A2:?Run setup.sh first and source test-env.sh}"
 
 cd "$TEST_DIR"
 
@@ -103,14 +105,17 @@ echo "--- 6. Simulate stale lock file ---"
 cd "$TEST_DIR"
 LOCK_FILE="worktrees/falcon/.agent.lock"
 # Match actual LockInfo struct from internal/cli/lock.go
+# Use a real task ID so recovery can find and reset it without errors
 cat > "$LOCK_FILE" <<EOF
-{"pid":99999,"command":"loom task falcon --auto","started_at":"2026-01-01T00:00:00Z","agent_name":"falcon","task_id":"fake-task-id","task_title":"Test task"}
+{"pid":99999,"command":"loom task falcon --auto","started_at":"2026-01-01T00:00:00Z","agent_name":"falcon","task_id":"$TASK_A1","task_title":"Implement login endpoint"}
 EOF
-echo "  Created stale lock: $LOCK_FILE"
+echo "  Created stale lock: $LOCK_FILE (task_id=$TASK_A1)"
 [ -f "$LOCK_FILE" ] && pass "Lock file created" || fail "Lock file not created"
 
 echo ""
 echo "--- 7. loom recover clears stale lock ---"
+# Mark task as in_progress first so recovery has something to reset
+bd update "$TASK_A1" --status=in_progress --assignee=falcon -q 2>/dev/null || true
 OUTPUT=$(loom recover falcon --no-analyze 2>&1) || true
 echo "  Output: $OUTPUT"
 if [ -f "$LOCK_FILE" ]; then
@@ -118,19 +123,44 @@ if [ -f "$LOCK_FILE" ]; then
 else
   pass "Lock file cleared by recovery"
 fi
+if echo "$OUTPUT" | grep -q "Lock cleared"; then
+  pass "Recovery reported lock cleared"
+else
+  fail "Recovery did not report lock cleared"
+fi
+# Verify the orphaned task was reset to open
+TASK_STATUS=$(bd show "$TASK_A1" --json 2>/dev/null | jq -r '.[0].status')
+if [ "$TASK_STATUS" = "open" ]; then
+  pass "Orphaned task $TASK_A1 reset to open"
+else
+  fail "Expected task status 'open', got '$TASK_STATUS'"
+fi
 
 echo ""
-echo "--- 8. loom recover --force (non-interactive) ---"
-# Create another stale lock
+echo "--- 8. loom recover --force --no-analyze (non-interactive) ---"
+# Create another stale lock with a different task
+bd update "$TASK_A2" --status=in_progress --assignee=falcon -q 2>/dev/null || true
 cat > "$LOCK_FILE" <<EOF
-{"pid":99998,"command":"loom task falcon --auto","started_at":"2026-01-01T00:00:00Z","agent_name":"falcon","task_id":"fake-task-2","task_title":"Another task"}
+{"pid":99998,"command":"loom task falcon --auto","started_at":"2026-01-01T00:00:00Z","agent_name":"falcon","task_id":"$TASK_A2","task_title":"Implement logout endpoint"}
 EOF
-OUTPUT=$(loom recover falcon --force 2>&1) || true
+OUTPUT=$(loom recover falcon --force --no-analyze 2>&1) || true
 echo "  Output: $OUTPUT"
+if [ -f "$LOCK_FILE" ]; then
+  fail "Lock file still exists after --force recovery"
+else
+  pass "Lock file cleared by --force recovery"
+fi
 if echo "$OUTPUT" | grep -qi "panic"; then
   fail "Recovery --force panicked"
 else
   pass "Recovery --force completed without panic"
+fi
+# Verify the task was reset
+TASK_STATUS=$(bd show "$TASK_A2" --json 2>/dev/null | jq -r '.[0].status')
+if [ "$TASK_STATUS" = "open" ]; then
+  pass "Orphaned task $TASK_A2 reset to open"
+else
+  fail "Expected task status 'open', got '$TASK_STATUS'"
 fi
 
 echo ""
