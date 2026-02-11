@@ -2,10 +2,14 @@ package rpc
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1815,5 +1819,182 @@ func TestClient_ConcurrentMixedOperations(t *testing.T) {
 		if err != "" {
 			t.Errorf("invariant violation: %s", err)
 		}
+	}
+}
+
+// mockConn implements net.Conn for testing client error paths.
+// Each method delegates to a configurable function, allowing tests to
+// inject specific failures at precise points in the protocol.
+type mockConn struct {
+	readFunc     func([]byte) (int, error)
+	writeFunc    func([]byte) (int, error)
+	closeFunc    func() error
+	deadlineFunc func(time.Time) error
+}
+
+func (c *mockConn) Read(p []byte) (int, error) {
+	if c.readFunc != nil {
+		return c.readFunc(p)
+	}
+	return 0, io.EOF
+}
+
+func (c *mockConn) Write(p []byte) (int, error) {
+	if c.writeFunc != nil {
+		return c.writeFunc(p)
+	}
+	return len(p), nil
+}
+
+func (c *mockConn) Close() error {
+	if c.closeFunc != nil {
+		return c.closeFunc()
+	}
+	return nil
+}
+
+func (c *mockConn) SetDeadline(t time.Time) error {
+	if c.deadlineFunc != nil {
+		return c.deadlineFunc(t)
+	}
+	return nil
+}
+
+func (c *mockConn) SetReadDeadline(time.Time) error { return nil }
+func (c *mockConn) SetWriteDeadline(time.Time) error { return nil }
+func (c *mockConn) LocalAddr() net.Addr              { return &net.UnixAddr{Name: "mock", Net: "unix"} }
+func (c *mockConn) RemoteAddr() net.Addr             { return &net.UnixAddr{Name: "mock", Net: "unix"} }
+
+func TestClient_Execute_ResponseTooLarge(t *testing.T) {
+	t.Parallel()
+
+	// Mock conn that returns infinite non-newline data on reads.
+	// The LimitedReader (10MB) will exhaust, triggering "response too large".
+	conn := &mockConn{
+		readFunc: func(p []byte) (int, error) {
+			for i := range p {
+				p[i] = 'x'
+			}
+			return len(p), nil
+		},
+	}
+
+	client := &Client{conn: conn, timeout: 0}
+
+	_, err := client.Execute(OpPing, nil)
+	if err == nil {
+		t.Fatal("Execute() should return error for oversized response")
+	}
+	if !strings.Contains(err.Error(), "response too large") {
+		t.Errorf("error should contain 'response too large', got: %v", err)
+	}
+	expectedSize := fmt.Sprintf("exceeds %d bytes", maxClientMessageSize)
+	if !strings.Contains(err.Error(), expectedSize) {
+		t.Errorf("error should contain size %q, got: %v", expectedSize, err)
+	}
+}
+
+func TestClient_Execute_WriteFailed(t *testing.T) {
+	t.Parallel()
+
+	conn := &mockConn{
+		writeFunc: func(p []byte) (int, error) {
+			return 0, fmt.Errorf("connection reset by peer")
+		},
+	}
+
+	client := &Client{conn: conn, timeout: 0}
+
+	_, err := client.Execute(OpPing, nil)
+	if err == nil {
+		t.Fatal("Execute() should return error for write failure")
+	}
+	// The specific error depends on bufio buffering; could be "write request",
+	// "write newline", or "flush" depending on request size vs buffer.
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "failed to write") && !strings.Contains(errMsg, "failed to flush") {
+		t.Errorf("error should mention write/flush failure, got: %v", err)
+	}
+}
+
+func TestClient_Execute_SetDeadlineFailed(t *testing.T) {
+	t.Parallel()
+
+	conn := &mockConn{
+		deadlineFunc: func(t time.Time) error {
+			return fmt.Errorf("broken pipe")
+		},
+	}
+
+	// timeout must be > 0 to trigger the SetDeadline call
+	client := &Client{conn: conn, timeout: 5 * time.Second}
+
+	_, err := client.Execute(OpPing, nil)
+	if err == nil {
+		t.Fatal("Execute() should return error for SetDeadline failure")
+	}
+	if !strings.Contains(err.Error(), "failed to set deadline") {
+		t.Errorf("error should contain 'failed to set deadline', got: %v", err)
+	}
+}
+
+func TestClient_Execute_MarshalArgsError(t *testing.T) {
+	t.Parallel()
+
+	conn := &mockConn{}
+	client := &Client{conn: conn, timeout: 0}
+
+	// Channels cannot be marshaled to JSON
+	_, err := client.Execute(OpPing, make(chan int))
+	if err == nil {
+		t.Fatal("Execute() should return error for unmarshalable args")
+	}
+	if !strings.Contains(err.Error(), "failed to marshal args") {
+		t.Errorf("error should contain 'failed to marshal args', got: %v", err)
+	}
+}
+
+func TestClient_Execute_ReadResponseError(t *testing.T) {
+	t.Parallel()
+
+	// Mock conn that accepts writes but fails on read (simulating connection drop).
+	// Returns io.ErrClosedPipe so lr.N > 0, triggering "failed to read response".
+	conn := &mockConn{
+		readFunc: func(p []byte) (int, error) {
+			return 0, io.ErrClosedPipe
+		},
+	}
+
+	client := &Client{conn: conn, timeout: 0}
+
+	_, err := client.Execute(OpPing, nil)
+	if err == nil {
+		t.Fatal("Execute() should return error for read failure")
+	}
+	if !strings.Contains(err.Error(), "failed to read response") {
+		t.Errorf("error should contain 'failed to read response', got: %v", err)
+	}
+}
+
+func TestClient_Execute_InvalidResponseJSON(t *testing.T) {
+	t.Parallel()
+
+	// Mock conn that returns garbage data terminated by newline.
+	// ReadBytes succeeds (finds '\n') but json.Unmarshal fails.
+	garbage := bytes.NewReader([]byte("this is not valid json\n"))
+	conn := &mockConn{
+		readFunc: func(p []byte) (int, error) {
+			return garbage.Read(p)
+		},
+	}
+
+	client := &Client{conn: conn, timeout: 0}
+
+	_, err := client.Execute(OpPing, nil)
+	if err == nil {
+		t.Fatal("Execute() should return error for invalid JSON response")
+	}
+	if !strings.Contains(err.Error(), "failed to unmarshal response") {
+		t.Errorf("error should contain 'failed to unmarshal response', got: %v", err)
 	}
 }
