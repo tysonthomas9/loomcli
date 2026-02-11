@@ -249,6 +249,9 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			}
 		}
 
+		// 5.6. Release epic assignment so next iteration re-evaluates
+		d.epicAssigner.ReleaseWorktree(ap.entry.Worktree)
+
 		// 6. Epic exhaustion check and reassignment
 		if err := d.handleEpicTransition(ap); err != nil {
 			log.Printf("[daemon] Agent %s: epic transition failed: %v", ap.entry.Worktree, err)

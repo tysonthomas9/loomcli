@@ -251,6 +251,123 @@ func TestEpicAssigner_ReleaseWorktree(t *testing.T) {
 	})
 }
 
+func TestEpicAssigner_ReassignAfterRelease(t *testing.T) {
+	t.Run("reassigns to higher-priority epic after release", func(t *testing.T) {
+		// Start with two epics: epic-1 (P1) and epic-2 (P2)
+		epics := []EpicInfo{
+			{ID: "epic-1", Priority: 1},
+			{ID: "epic-2", Priority: 2},
+		}
+		stubQueryOpenEpics(t, func() ([]EpicInfo, error) {
+			return epics, nil
+		})
+		stubEpicHasReadyTasks(t, func(string) (bool, error) {
+			return true, nil
+		})
+
+		ea := NewEpicAssigner()
+
+		// Assign falcon to epic-1 (highest priority)
+		id1, err := ea.AssignWorktree("falcon")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id1 != "epic-1" {
+			t.Fatalf("expected epic-1, got %q", id1)
+		}
+
+		// Release falcon
+		ea.ReleaseWorktree("falcon")
+
+		// Now a higher-priority epic appears
+		epics = []EpicInfo{
+			{ID: "epic-0", Priority: 0},
+			{ID: "epic-1", Priority: 1},
+			{ID: "epic-2", Priority: 2},
+		}
+
+		// Reassign — should get epic-0 (new highest priority), not epic-1
+		id2, err := ea.AssignWorktree("falcon")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id2 != "epic-0" {
+			t.Errorf("expected epic-0 after release, got %q", id2)
+		}
+	})
+
+	t.Run("reassigns to next epic when current is exhausted", func(t *testing.T) {
+		exhausted := map[string]bool{}
+		stubQueryOpenEpics(t, func() ([]EpicInfo, error) {
+			return []EpicInfo{
+				{ID: "epic-1", Priority: 1},
+				{ID: "epic-2", Priority: 2},
+			}, nil
+		})
+		stubEpicHasReadyTasks(t, func(id string) (bool, error) {
+			return !exhausted[id], nil
+		})
+
+		ea := NewEpicAssigner()
+
+		// Assign to epic-1
+		id1, err := ea.AssignWorktree("falcon")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id1 != "epic-1" {
+			t.Fatalf("expected epic-1, got %q", id1)
+		}
+
+		// Release and mark epic-1 as exhausted
+		ea.ReleaseWorktree("falcon")
+		exhausted["epic-1"] = true
+
+		// Reassign — should get epic-2 (epic-1 has no ready tasks)
+		id2, err := ea.AssignWorktree("falcon")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id2 != "epic-2" {
+			t.Errorf("expected epic-2 after exhaustion, got %q", id2)
+		}
+	})
+
+	t.Run("release and reassign with no epics returns empty", func(t *testing.T) {
+		callCount := 0
+		stubQueryOpenEpics(t, func() ([]EpicInfo, error) {
+			callCount++
+			if callCount == 1 {
+				return []EpicInfo{{ID: "epic-1", Priority: 1}}, nil
+			}
+			return nil, nil // no epics on second call
+		})
+		stubEpicHasReadyTasks(t, func(string) (bool, error) {
+			return true, nil
+		})
+
+		ea := NewEpicAssigner()
+
+		// Assign to epic-1
+		id1, _ := ea.AssignWorktree("falcon")
+		if id1 != "epic-1" {
+			t.Fatalf("expected epic-1, got %q", id1)
+		}
+
+		// Release
+		ea.ReleaseWorktree("falcon")
+
+		// Reassign — no epics available
+		id2, err := ea.AssignWorktree("falcon")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id2 != "" {
+			t.Errorf("expected empty after all epics gone, got %q", id2)
+		}
+	})
+}
+
 func TestEpicAssigner_GetAssignment(t *testing.T) {
 	t.Run("returns epic ID for assigned worktree", func(t *testing.T) {
 		stubQueryOpenEpics(t, func() ([]EpicInfo, error) {
