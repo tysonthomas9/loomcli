@@ -145,7 +145,7 @@
 .title {
   margin: 0;
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: var(--font-weight-normal);
   color: var(--color-text, #111827);
   line-height: var(--line-height-normal);
   /* Truncate to 2 lines */
@@ -156,9 +156,9 @@
   word-break: break-word;
 }
 
-/* P0 cards get bold titles for emphasis */
+/* P0 cards get medium weight titles for emphasis */
 .issueCard[data-priority='0'] .title {
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-medium);
 }
 
 /* =================================

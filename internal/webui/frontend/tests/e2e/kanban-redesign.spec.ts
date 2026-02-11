@@ -130,7 +130,7 @@ test.describe("IssueCard CSS Styling", () => {
     expect(shadow).toContain("0px 2px 5px")
   })
 
-  test("card title has font-weight 600 (semibold)", async ({ page }) => {
+  test("card title has font-weight 400 (normal)", async ({ page }) => {
     const issues = [
       makeIssue({ id: "fw-1", title: "Font Weight Test", status: "open" }),
     ]
@@ -143,10 +143,10 @@ test.describe("IssueCard CSS Styling", () => {
     const fontWeight = await title.evaluate(
       (el) => window.getComputedStyle(el).fontWeight
     )
-    expect(fontWeight).toBe("600")
+    expect(fontWeight).toBe("400")
   })
 
-  test("P0 card title has font-weight 700 (bold)", async ({ page }) => {
+  test("P0 card title has font-weight 500 (medium)", async ({ page }) => {
     const issues = [
       makeIssue({
         id: "p0-fw",
@@ -164,7 +164,7 @@ test.describe("IssueCard CSS Styling", () => {
     const fontWeight = await title.evaluate(
       (el) => window.getComputedStyle(el).fontWeight
     )
-    expect(fontWeight).toBe("700")
+    expect(fontWeight).toBe("500")
   })
 
   test("card hover elevates shadow to 0 3px 8px", async ({ page }) => {
