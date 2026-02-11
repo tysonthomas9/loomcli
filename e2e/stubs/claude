@@ -43,8 +43,8 @@ if [ "$IS_PIPE" = "true" ] && [ "$IS_STREAM_JSON" = "true" ]; then
         cat > /dev/null
     fi
 
-    # Use printf for JSON-safe output (avoids issues with special chars in RESPONSE)
-    printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\n' "$RESPONSE"
+    # Use jq to safely escape RESPONSE into JSON (handles quotes, backslashes, newlines)
+    jq -nc --arg t "$RESPONSE" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}'
     printf '{"type":"result","duration_ms":1234,"cost_usd":0.01,"is_error":false}\n'
 elif [ "$HAS_SKIP_PERMS" = "true" ]; then
     # Interactive mode

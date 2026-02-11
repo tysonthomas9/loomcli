@@ -38,7 +38,7 @@ if [ "$IS_EXEC" = "true" ] && [ "$IS_JSON" = "true" ]; then
         cat > /dev/null
     fi
 
-    printf '{"status":"completed","output":"%s"}\n' "$RESPONSE"
+    jq -nc --arg o "$RESPONSE" '{"status":"completed","output":$o}'
 elif [ "$IS_EXEC" = "true" ]; then
     # Exec mode without JSON
     if [ ! -t 0 ]; then

@@ -41,7 +41,7 @@ if [ "$IS_RUN" = "true" ] && [ "$IS_JSON" = "true" ]; then
         cat > /dev/null
     fi
 
-    printf '{"status":"completed","output":"%s"}\n' "$RESPONSE"
+    jq -nc --arg o "$RESPONSE" '{"status":"completed","output":$o}'
 elif [ "$IS_RUN" = "true" ]; then
     # Run mode without JSON
     if [ ! -t 0 ]; then
