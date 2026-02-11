@@ -2,10 +2,10 @@
 # claude-plan.sh - Run a Claude agent for planning tasks only
 #
 # Workflow:
-#   1. Agent picks up a task (skips [Need Review] and in_progress tasks)
+#   1. Agent picks up a task (skips review and in_progress tasks)
 #   2. Agent researches and creates a plan
 #   3. Agent saves plan to --design field
-#   4. Agent renames task to "[Need Review] <title>"
+#   4. Agent sets status to review
 #   5. Agent stops - human reviews before implementation
 #
 # Usage:
@@ -41,12 +41,11 @@ Follow this workflow EXACTLY for ONE task.
 
 ### Step 1: Select ONE Task for Planning
 - Run 'bd ready --limit 10' to see available tasks
-- SKIP any task with '[Need Review]' in the title (awaiting human approval)
 - SKIP any task already 'in_progress' by checking 'bd list --status=in_progress'
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
 - Run 'bd show <id>' to understand the task requirements
 - Run 'bd update <id> --status in_progress --assignee $WORKTREE_NAME' to claim it
-- REMEMBER this task ID and ORIGINAL TITLE
+- REMEMBER this task ID
 
 ### Step 2: Research the Codebase
 Before creating a plan:
@@ -101,14 +100,15 @@ IMPORTANT: Make sure the plan is complete and detailed enough that another agent
 (or human) could implement it without needing to ask questions.
 
 ### Step 5: Mark for Review
-Update the task title to indicate it needs human review:
+Set the task status to 'review' and clear the assignee:
 \`\`\`
-bd update <id> --title=\"[Need Review] <original title>\"
-bd update <id> --status open
+bd update <id> --status review --assignee=\"\"
 \`\`\`
 
-This puts the task back in the open state but with a marker that tells other agents
-to skip it. The human will review your plan.
+This puts the task in review status where:
+- It won't appear in 'bd ready' (filtered out)
+- The lead can find it with 'bd list --status=review'
+- Other agents won't accidentally pick it up
 
 ### Step 6: Sync and Exit
 \`\`\`
@@ -125,8 +125,8 @@ After completing Step 6, you are DONE.
 - Simply EXIT
 
 You have completed ONE planning task. The human will:
-1. Review your plan with 'bd show <id>'
-2. Either approve it (remove [Need Review] prefix) or request changes
+1. Review your plan with 'bd list --status=review' then 'bd show <id>'
+2. Either approve it (set status back to open) or request changes
 3. Run an implementation agent separately
 
 Your job was ONLY to create the plan. Implementation happens later.

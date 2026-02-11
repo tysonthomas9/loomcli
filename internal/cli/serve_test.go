@@ -32,7 +32,7 @@ func mockMonitorData() *MonitorData {
 			{ID: "bd-002", Title: "Fix bug Y", Priority: 2},
 		},
 		ReviewTasks: []TaskInfo{
-			{ID: "bd-003", Title: "[Need Review] Review task Z", Priority: 1},
+			{ID: "bd-003", Title: "Review task Z", Priority: 1},
 		},
 		InProgressTasks: []TaskInfo{
 			{ID: "bd-123", Title: "Current task", Priority: 1, Status: "in_progress"},

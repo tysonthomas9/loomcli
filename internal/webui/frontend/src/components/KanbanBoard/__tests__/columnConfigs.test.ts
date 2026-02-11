@@ -68,14 +68,6 @@ describe('columnConfigs', () => {
       expect(backlog.filter(issue, notBlocked)).toBe(true);
     });
 
-    it('rejects [Need Review] titled issues even if deferred', () => {
-      const issue = createMockIssue({
-        title: '[Need Review] Cleanup',
-        status: 'deferred',
-      });
-      expect(backlog.filter(issue, notBlocked)).toBe(false);
-    });
-
     it('rejects open issues blocked by dependencies (now in Blocked column)', () => {
       const issue = createMockIssue({ status: 'open' });
       expect(backlog.filter(issue, blocked)).toBe(false);
@@ -111,22 +103,6 @@ describe('columnConfigs', () => {
     it('matches issues with status=blocked', () => {
       const issue = createMockIssue({ status: 'blocked' });
       expect(blockedCol.filter(issue, notBlocked)).toBe(true);
-    });
-
-    it('rejects [Need Review] titled issues even if blocked by dependencies', () => {
-      const issue = createMockIssue({
-        title: '[Need Review] Fix login flow',
-        status: 'open',
-      });
-      expect(blockedCol.filter(issue, blocked)).toBe(false);
-    });
-
-    it('rejects [Need Review] titled issues even if status=blocked', () => {
-      const issue = createMockIssue({
-        title: '[Need Review] Blocked task',
-        status: 'blocked',
-      });
-      expect(blockedCol.filter(issue, notBlocked)).toBe(false);
     });
 
     it('rejects open issues with no blockers', () => {
@@ -176,12 +152,12 @@ describe('columnConfigs', () => {
       expect(review.filter(issue, notBlocked)).toBe(true);
     });
 
-    it('matches [Need Review] titled issues', () => {
+    it('does NOT match open issues with [Need Review] in title (legacy prefix removed)', () => {
       const issue = createMockIssue({
         title: '[Need Review] Update docs',
         status: 'open',
       });
-      expect(review.filter(issue, notBlocked)).toBe(true);
+      expect(review.filter(issue, notBlocked)).toBe(false);
     });
   });
 
@@ -201,7 +177,7 @@ describe('columnConfigs', () => {
   describe('Open filter', () => {
     const open = getColumn('ready');
 
-    it('matches open issues with no blockers and no [Need Review]', () => {
+    it('matches open issues with no blockers', () => {
       const issue = createMockIssue({ status: 'open' });
       expect(open.filter(issue, notBlocked)).toBe(true);
     });
@@ -216,12 +192,12 @@ describe('columnConfigs', () => {
       expect(open.filter(issue, blocked)).toBe(false);
     });
 
-    it('rejects [Need Review] titled issues', () => {
+    it('matches open issues even with [Need Review] in title (legacy prefix no longer used)', () => {
       const issue = createMockIssue({
         title: '[Need Review] Refactor API',
         status: 'open',
       });
-      expect(open.filter(issue, notBlocked)).toBe(false);
+      expect(open.filter(issue, notBlocked)).toBe(true);
     });
   });
 
@@ -288,14 +264,6 @@ describe('columnConfigs', () => {
 
     it('excludes epics from Needs Review (status)', () => {
       const issue = createMockIssue({ issue_type: 'epic', status: 'review' });
-      expect(getColumn('review').filter(issue, notBlocked)).toBe(false);
-    });
-
-    it('excludes epics from Needs Review (title)', () => {
-      const issue = createMockIssue({
-        issue_type: 'epic',
-        title: '[Need Review] Epic cleanup',
-      });
       expect(getColumn('review').filter(issue, notBlocked)).toBe(false);
     });
 
@@ -468,17 +436,6 @@ describe('columnConfigs', () => {
         expect(review.filter(epicIssue, notBlocked)).toBe(true);
       });
 
-      it('allows epics in Needs Review (title)', () => {
-        const columns = createColumns({ includeEpics: true });
-        const review = getColumnFrom(columns, 'review');
-        const epicIssue = createMockIssue({
-          issue_type: 'epic',
-          title: '[Need Review] Epic cleanup',
-          status: 'open',
-        });
-        expect(review.filter(epicIssue, notBlocked)).toBe(true);
-      });
-
       it('allows epics in Done', () => {
         const columns = createColumns({ includeEpics: true });
         const done = getColumnFrom(columns, 'done');
@@ -491,18 +448,6 @@ describe('columnConfigs', () => {
         // An epic with status=open should NOT match Backlog (which requires deferred)
         const epicOpen = createMockIssue({ issue_type: 'epic', status: 'open' });
         expect(getColumnFrom(columns, 'backlog').filter(epicOpen, notBlocked)).toBe(false);
-      });
-
-      it('still respects [Need Review] title routing', () => {
-        const columns = createColumns({ includeEpics: true });
-        // An epic with [Need Review] in title should go to review, not backlog
-        const epicReviewTitle = createMockIssue({
-          issue_type: 'epic',
-          title: '[Need Review] Deferred epic',
-          status: 'deferred',
-        });
-        expect(getColumnFrom(columns, 'backlog').filter(epicReviewTitle, notBlocked)).toBe(false);
-        expect(getColumnFrom(columns, 'review').filter(epicReviewTitle, notBlocked)).toBe(true);
       });
 
       it('still allows non-epic issues through all columns', () => {

@@ -918,10 +918,7 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxLine(fmt.Sprintf("  NEEDS REVIEW (%d):", data.Tasks.NeedReview)))
 	if len(data.ReviewTasks) > 0 {
 		for _, task := range data.ReviewTasks {
-			// Strip [Need Review] prefix from title for cleaner display
-			cleaned := task
-			cleaned.Title = strings.TrimPrefix(task.Title, "[Need Review] ")
-			renderTaskLine(&sb, cleaned)
+			renderTaskLine(&sb, task)
 		}
 	} else {
 		sb.WriteString(renderBoxLine("    (none)"))

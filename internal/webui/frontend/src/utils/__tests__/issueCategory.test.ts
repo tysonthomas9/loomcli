@@ -10,9 +10,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   NEEDS_REVISION_LABEL,
-  LEGACY_REVIEW_PREFIX,
   hasNeedsRevision,
-  hasLegacyReviewPrefix,
   getOpenStatus,
   isPRUrl,
   getReviewType,
@@ -43,30 +41,6 @@ describe('hasNeedsRevision', () => {
 
   it('returns false when labels contain only other values', () => {
     expect(hasNeedsRevision({ labels: ['bug', 'feature'] })).toBe(false);
-  });
-});
-
-// --- hasLegacyReviewPrefix ---
-
-describe('hasLegacyReviewPrefix', () => {
-  it('returns true for title starting with [Need Review]', () => {
-    expect(hasLegacyReviewPrefix('[Need Review] My feature')).toBe(true);
-  });
-
-  it('returns true for title containing [Need Review] anywhere', () => {
-    expect(hasLegacyReviewPrefix('Fix: [Need Review] auth flow')).toBe(true);
-  });
-
-  it('returns false for plain title', () => {
-    expect(hasLegacyReviewPrefix('Implement feature X')).toBe(false);
-  });
-
-  it('returns false for empty string', () => {
-    expect(hasLegacyReviewPrefix('')).toBe(false);
-  });
-
-  it('returns false for partial match', () => {
-    expect(hasLegacyReviewPrefix('[Need')).toBe(false);
   });
 });
 
@@ -266,9 +240,5 @@ describe('getReviewType', () => {
 describe('constants', () => {
   it('NEEDS_REVISION_LABEL matches expected value', () => {
     expect(NEEDS_REVISION_LABEL).toBe('needs-revision');
-  });
-
-  it('LEGACY_REVIEW_PREFIX matches expected value', () => {
-    expect(LEGACY_REVIEW_PREFIX).toBe('[Need Review]');
   });
 });

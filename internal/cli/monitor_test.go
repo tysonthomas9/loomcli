@@ -1867,7 +1867,7 @@ func TestRenderDashboardWithData(t *testing.T) {
 			{ID: "T-2", Title: "Implement this", Priority: 1},
 		},
 		ReviewTasks: []TaskInfo{
-			{ID: "T-3", Title: "[Need Review] Review this", Priority: 2},
+			{ID: "T-3", Title: "Review this", Priority: 2},
 		},
 		InProgressTasks: []TaskInfo{
 			{ID: "T-4", Title: "In progress task", Priority: 1},
@@ -1933,12 +1933,9 @@ func TestRenderDashboardWithData(t *testing.T) {
 		t.Error("task summary should use 'Backlog:' not 'Blocked:'")
 	}
 
-	// Check [Need Review] prefix stripped
-	if strings.Contains(output, "[Need Review] Review this") {
-		t.Error("[Need Review] prefix should be stripped from review task titles")
-	}
+	// Check review task title rendered
 	if !strings.Contains(output, "Review this") {
-		t.Error("expected stripped review task title")
+		t.Error("expected review task title")
 	}
 
 	// Check sync section shows errors

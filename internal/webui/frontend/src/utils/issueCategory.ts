@@ -8,7 +8,6 @@
 // --- Constants (match Go taskfilter.go) ---
 
 export const NEEDS_REVISION_LABEL = 'needs-revision';
-export const LEGACY_REVIEW_PREFIX = '[Need Review]';
 
 // --- Types ---
 
@@ -34,10 +33,6 @@ interface ReviewCheckable {
 
 export function hasNeedsRevision(issue: { labels?: string[] }): boolean {
   return issue.labels?.includes(NEEDS_REVISION_LABEL) ?? false;
-}
-
-export function hasLegacyReviewPrefix(title: string): boolean {
-  return title.includes(LEGACY_REVIEW_PREFIX);
 }
 
 // --- Open status (was openStatus.ts — now checks labels) ---
