@@ -1182,3 +1182,456 @@ func TestDaemonSubscriber_PollDBChanges_NilPool(t *testing.T) {
 		t.Error("Stop() blocked for too long with nil pool")
 	}
 }
+
+// TestDaemonSubscriber_ExternalChangeLoop_IntegrationDetectsChange tests the full
+// externalChangeLoop → pollDBChanges → hub.Broadcast path as an integration test.
+func TestDaemonSubscriber_ExternalChangeLoop_IntegrationDetectsChange(t *testing.T) {
+	var countCallNum int32
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "wait_for_mutations":
+			// Return empty mutations quickly - we only care about external change loop
+			return rpc.Response{Success: true, Data: []byte("[]")}
+		case "count":
+			n := atomic.AddInt32(&countCallNum, 1)
+			if n == 1 {
+				// First call: return count=5 (initialization)
+				countData, _ := json.Marshal(struct {
+					Count int64 `json:"count"`
+				}{Count: 5})
+				return rpc.Response{Success: true, Data: countData}
+			}
+			// Subsequent calls: return count=7 (change detected)
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 7})
+			return rpc.Response{Success: true, Data: countData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Register an SSE client to capture broadcasts
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.Start()
+
+	// Wait for a refresh broadcast to arrive (3x externalPollInterval to account for
+	// initialization poll + detection poll + some slack)
+	timeout := time.After(3*externalPollInterval + time.Second)
+	var received *MutationPayload
+waitLoop:
+	for {
+		select {
+		case msg := <-client.send:
+			if msg.Type == rpc.MutationRefresh {
+				received = msg
+				break waitLoop
+			}
+		case <-timeout:
+			break waitLoop
+		}
+	}
+
+	if received == nil {
+		t.Error("timed out waiting for refresh broadcast from externalChangeLoop")
+	}
+
+	// Clean shutdown
+	stopped := make(chan struct{})
+	go func() {
+		subscriber.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		// Good
+	case <-time.After(5 * time.Second):
+		t.Error("subscriber.Stop() blocked too long")
+	}
+}
+
+// TestDaemonSubscriber_ExternalChangeLoop_StopsPromptly tests that calling Stop()
+// interrupts the externalChangeLoop promptly.
+func TestDaemonSubscriber_ExternalChangeLoop_StopsPromptly(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Use nil pool so externalChangeLoop just loops with continue
+	subscriber := NewDaemonSubscriber(nil, hub)
+	subscriber.Start()
+
+	// Immediately call Stop
+	start := time.Now()
+	stopped := make(chan struct{})
+	go func() {
+		subscriber.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+		elapsed := time.Since(start)
+		if elapsed > 1*time.Second {
+			t.Errorf("Stop() took %v, expected < 1s", elapsed)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop() blocked for too long")
+	}
+}
+
+// TestDaemonSubscriber_SubscriptionLoop_FallbackTransition tests the end-to-end
+// fallback transition: wait_for_mutations fails with "unknown operation",
+// then the loop switches to get_mutations polling.
+func TestDaemonSubscriber_SubscriptionLoop_FallbackTransition(t *testing.T) {
+	ts := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+	mutations := []rpc.MutationEvent{
+		{Type: "create", IssueID: "bd-fallback-1", Timestamp: ts},
+	}
+	mutData, _ := json.Marshal(mutations)
+
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "wait_for_mutations":
+			return rpc.Response{Success: false, Error: "unknown operation: wait_for_mutations"}
+		case "get_mutations":
+			return rpc.Response{Success: true, Data: mutData}
+		case "count":
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 10})
+			return rpc.Response{Success: true, Data: countData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.Start()
+
+	// Wait for a mutation broadcast to arrive (proving fallback transition worked)
+	timeout := time.After(5 * time.Second)
+	var received *MutationPayload
+waitLoop:
+	for {
+		select {
+		case msg := <-client.send:
+			if msg.Type == "create" && msg.IssueID == "bd-fallback-1" {
+				received = msg
+				break waitLoop
+			}
+		case <-timeout:
+			break waitLoop
+		}
+	}
+
+	if received == nil {
+		t.Error("timed out waiting for mutation via fallback polling")
+	}
+
+	// Verify useFallback is true
+	subscriber.mu.RLock()
+	useFallback := subscriber.useFallback
+	subscriber.mu.RUnlock()
+	if !useFallback {
+		t.Error("expected useFallback to be true after unknown operation error")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		subscriber.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Error("subscriber.Stop() blocked too long")
+	}
+}
+
+// TestDaemonSubscriber_ConcurrentLoops_NoRace tests that both subscription loop and
+// external change loop can run concurrently without data races. This test is valuable
+// when run under `go test -race`.
+func TestDaemonSubscriber_ConcurrentLoops_NoRace(t *testing.T) {
+	ts := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+	mutations := []rpc.MutationEvent{
+		{Type: "create", IssueID: "bd-race-1", Timestamp: ts},
+	}
+	mutData, _ := json.Marshal(mutations)
+
+	socketPath := startSubscriptionMockServerRaw(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		case "wait_for_mutations":
+			// Return mutations (this simulates a working daemon)
+			return rpc.Response{Success: true, Data: mutData}
+		case "get_mutations":
+			return rpc.Response{Success: true, Data: mutData}
+		case "count":
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 10})
+			return rpc.Response{Success: true, Data: countData}
+		default:
+			return rpc.Response{Success: false, Error: "unknown operation: " + req.Operation}
+		}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Register a client to consume broadcasts (prevent channel backpressure)
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 512),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.Start()
+
+	// Let both loops run concurrently for 500ms (enough for -race to catch issues)
+	time.Sleep(500 * time.Millisecond)
+
+	// Clean shutdown
+	stopped := make(chan struct{})
+	go func() {
+		subscriber.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		// Good — clean shutdown, no race detected
+	case <-time.After(5 * time.Second):
+		t.Fatal("subscriber.Stop() blocked too long")
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_CountRPCNotSuccess tests that pollDBChanges handles
+// a non-success response from the count RPC gracefully.
+func TestDaemonSubscriber_PollDBChanges_CountRPCNotSuccess(t *testing.T) {
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		// Return Success: false for count operation
+		return rpc.Response{Success: false, Error: "permission denied"}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Should NOT receive any broadcast
+	select {
+	case received := <-client.send:
+		t.Errorf("expected no broadcast when count RPC fails, but received: %+v", received)
+	case <-time.After(200 * time.Millisecond):
+		// Good — no broadcast
+	}
+
+	// lastKnownCount should remain unchanged
+	if subscriber.lastKnownCount != 10 {
+		t.Errorf("lastKnownCount changed to %d, expected 10", subscriber.lastKnownCount)
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_InvalidCountJSON tests that pollDBChanges handles
+// invalid JSON in the count response gracefully without panicking.
+func TestDaemonSubscriber_PollDBChanges_InvalidCountJSON(t *testing.T) {
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		return rpc.Response{Success: true, Data: []byte("not json")}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	// Should not panic
+	subscriber.pollDBChanges()
+
+	// Should NOT receive any broadcast
+	select {
+	case received := <-client.send:
+		t.Errorf("expected no broadcast with invalid JSON, but received: %+v", received)
+	case <-time.After(200 * time.Millisecond):
+		// Good — no broadcast, no panic
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_UpdatedAfterCallFails tests that when the count is
+// the same but the updatedAfter RPC call returns an error, no broadcast occurs.
+func TestDaemonSubscriber_PollDBChanges_UpdatedAfterCallFails(t *testing.T) {
+	callNumber := int32(0)
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		n := atomic.AddInt32(&callNumber, 1)
+		if n == 1 {
+			// First call: return same count (10)
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 10})
+			return rpc.Response{Success: true, Data: countData}
+		}
+		// Second call (updatedAfter): return an error
+		return rpc.Response{Success: false, Error: "database locked"}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Should NOT receive any broadcast
+	select {
+	case received := <-client.send:
+		t.Errorf("expected no broadcast when updatedAfter call fails, but received: %+v", received)
+	case <-time.After(200 * time.Millisecond):
+		// Good — no broadcast
+	}
+}
+
+// TestDaemonSubscriber_PollDBChanges_UpdatedAfterNotSuccess tests that when the count is
+// the same and the updatedAfter response has Success: false, no broadcast occurs.
+func TestDaemonSubscriber_PollDBChanges_UpdatedAfterNotSuccess(t *testing.T) {
+	callNumber := int32(0)
+	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
+		n := atomic.AddInt32(&callNumber, 1)
+		if n == 1 {
+			// First call: return same count (10)
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 10})
+			return rpc.Response{Success: true, Data: countData}
+		}
+		// Second call (updatedAfter): return Success: false
+		return rpc.Response{Success: false, Error: "internal error"}
+	})
+
+	pool := newSubscriptionMockPool(socketPath)
+	defer pool.Close()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.countInitialized = true
+	subscriber.lastKnownCount = 10
+	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
+
+	subscriber.pollDBChanges()
+
+	// Should NOT receive any broadcast
+	select {
+	case received := <-client.send:
+		t.Errorf("expected no broadcast when updatedAfter not success, but received: %+v", received)
+	case <-time.After(200 * time.Millisecond):
+		// Good — no broadcast
+	}
+}

@@ -1190,3 +1190,206 @@ func TestSSEHub_UnregisterClientAfterStop(t *testing.T) {
 		t.Fatal("UnregisterClient blocked after hub was stopped")
 	}
 }
+
+// TestHandleSSE_ClientDisconnectDuringCatchUp tests that the handler exits cleanly
+// when the client disconnects while catch-up events are being delivered.
+func TestHandleSSE_ClientDisconnectDuringCatchUp(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Gate channel blocks after delivering a few events
+	gate := make(chan struct{})
+
+	getMutations := func(since int64) []rpc.MutationEvent {
+		events := make([]rpc.MutationEvent, 50)
+		for i := range events {
+			events[i] = rpc.MutationEvent{
+				Type:      "create",
+				IssueID:   fmt.Sprintf("bd-catchup-%d", i),
+				Timestamp: time.Now().UTC(),
+			}
+		}
+		// Wait on gate to simulate slow delivery
+		<-gate
+		return events
+	}
+
+	handler := handleSSE(hub, getMutations)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/events?since=1000", nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handlerDone := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(handlerDone)
+	}()
+
+	// Cancel client context while getMutations is blocked on gate
+	cancel()
+	// Now unblock getMutations so it can return
+	close(gate)
+
+	// Handler goroutine should exit cleanly
+	select {
+	case <-handlerDone:
+		// Good — handler exited without hanging
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler goroutine hung after client disconnect during catch-up")
+	}
+
+	// Hub should have 0 clients (cleanup via defer)
+	time.Sleep(50 * time.Millisecond)
+	if count := hub.ClientCount(); count != 0 {
+		t.Errorf("expected 0 clients after disconnect, got %d", count)
+	}
+}
+
+// TestHandleSSE_ContextAlreadyCancelled tests that the handler returns immediately
+// when the request context is already cancelled before calling the handler.
+func TestHandleSSE_ContextAlreadyCancelled(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	handler := handleSSE(hub, nil)
+
+	// Create request with already-cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel before calling handler
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handlerDone := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(handlerDone)
+	}()
+
+	select {
+	case <-handlerDone:
+		// Good — handler returned immediately
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return immediately with already-cancelled context")
+	}
+
+	// No client should have been registered with hub
+	time.Sleep(50 * time.Millisecond)
+	if count := hub.ClientCount(); count != 0 {
+		t.Errorf("expected 0 clients with pre-cancelled context, got %d", count)
+	}
+}
+
+// TestHandleSSE_NoCatchUpWhenGetMutationsSinceNil tests that the handler doesn't panic
+// when since > 0 but getMutationsSince is nil.
+func TestHandleSSE_NoCatchUpWhenGetMutationsSinceNil(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Pass nil for getMutationsSince, but connect with since=1000
+	handler := handleSSE(hub, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/events?since=1000", nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handlerDone := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(handlerDone)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-handlerDone
+
+	// Should still have connected event (no panic)
+	body := rr.Body.String()
+	if !strings.Contains(body, "event: connected") {
+		t.Error("expected connected event even with nil getMutationsSince")
+	}
+}
+
+// TestHandleSSE_NoCatchUpWhenSinceZero tests that getMutationsSince is NOT called
+// when lastSince is 0 (no reconnection needed).
+func TestHandleSSE_NoCatchUpWhenSinceZero(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	called := false
+	getMutations := func(since int64) []rpc.MutationEvent {
+		called = true
+		return nil
+	}
+
+	// Connect WITHOUT Last-Event-ID and without since param
+	handler := handleSSE(hub, getMutations)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handlerDone := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(handlerDone)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-handlerDone
+
+	if called {
+		t.Error("getMutationsSince should NOT be called when since is 0")
+	}
+
+	// Should still have connected event
+	body := rr.Body.String()
+	if !strings.Contains(body, "event: connected") {
+		t.Error("expected connected event")
+	}
+}
+
+// TestHandleSSE_SendChannelClosed tests that the handler exits cleanly
+// when the hub is stopped and closes all client send channels.
+func TestHandleSSE_SendChannelClosed(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+
+	handler := handleSSE(hub, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handlerDone := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(handlerDone)
+	}()
+
+	// Wait for handler to be registered
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop hub — this closes all client send channels
+	hub.Stop()
+
+	// Handler should exit via the `!ok` path when send channel is closed
+	select {
+	case <-handlerDone:
+		// Good — handler exited cleanly
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not exit after hub stopped and send channel closed")
+	}
+}
