@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // WorktreeInfo holds information about a discovered worktree
@@ -407,18 +408,46 @@ func GetDefaultBranch() string {
 	return getDefaultResolver().GetDefaultBranch()
 }
 
+// integrationBranchCache caches the result of DetectIntegrationBranch.
+// The integration branch changes rarely (only when someone pushes a new
+// remote branch), so a 60s TTL avoids the O(candidates × worktrees) git
+// commands that otherwise run on every monitor data collection.
+var (
+	integrationBranchMu      sync.Mutex
+	integrationBranchCache   string
+	integrationBranchCacheAt time.Time
+	integrationBranchTTL     = 60 * time.Second
+)
+
 // GetDefaultBranchForWorktrees returns the default integration branch using
 // pre-discovered worktrees to avoid redundant filesystem/git operations.
 func GetDefaultBranchForWorktrees(worktrees []WorktreeInfo) string {
 	if branch := os.Getenv("LOOM_DEFAULT_BRANCH"); branch != "" {
 		return branch
 	}
-	if len(worktrees) >= 2 {
-		if detected := DetectIntegrationBranch(worktrees); detected != "" {
-			return detected
-		}
+	if len(worktrees) < 2 {
+		return "main"
 	}
-	return "main"
+
+	integrationBranchMu.Lock()
+	if integrationBranchCache != "" && time.Since(integrationBranchCacheAt) < integrationBranchTTL {
+		result := integrationBranchCache
+		integrationBranchMu.Unlock()
+		return result
+	}
+	integrationBranchMu.Unlock()
+
+	result := "main"
+	if detected := DetectIntegrationBranch(worktrees); detected != "" {
+		result = detected
+	}
+
+	integrationBranchMu.Lock()
+	integrationBranchCache = result
+	integrationBranchCacheAt = time.Now()
+	integrationBranchMu.Unlock()
+
+	return result
 }
 
 // DetectIntegrationBranch analyzes worktree branches to find a common integration
