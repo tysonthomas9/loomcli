@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestValidAgentNameRegex tests the agent name validation regex.
@@ -1331,4 +1334,834 @@ func TestHandleGetTaskLog_Success(t *testing.T) {
 	if len(resp.Data.Lines) == 0 {
 		t.Error("expected non-empty lines")
 	}
+}
+
+// --- SSE Streaming Handler Tests ---
+
+// connectLogSSE connects to an arbitrary SSE endpoint path and returns an sseTestClient.
+// The caller must close the client when done.
+func connectLogSSE(t *testing.T, serverURL, path string) *sseTestClient {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, serverURL+path, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	client := &http.Client{Timeout: 0}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to connect to SSE endpoint: %v", err)
+	}
+
+	return &sseTestClient{
+		resp:    resp,
+		scanner: bufio.NewScanner(resp.Body),
+	}
+}
+
+// connectLogSSEWithContext connects to an SSE endpoint with a cancellable context.
+func connectLogSSEWithContext(t *testing.T, ctx context.Context, serverURL, path string) *sseTestClient {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+path, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	client := &http.Client{Timeout: 0}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to connect to SSE endpoint: %v", err)
+	}
+
+	return &sseTestClient{
+		resp:    resp,
+		scanner: bufio.NewScanner(resp.Body),
+	}
+}
+
+// setupAgentLogEnv creates a temp HOME with agent log directory structure
+// and returns the temp home path and the log file path.
+func setupAgentLogEnv(t *testing.T, agentName string, content string) (tmpHome string, logPath string) {
+	t.Helper()
+	var err error
+	tmpHome, err = filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
+		t.Fatalf("failed to create agent log dir: %v", err)
+	}
+
+	logPath = filepath.Join(agentLogDir, agentName+".log")
+	if content != "" {
+		if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test log: %v", err)
+		}
+	}
+	return tmpHome, logPath
+}
+
+// setupTaskLogEnv creates a temp HOME with task log directory structure
+// and returns the temp home path and the log file path.
+func setupTaskLogEnv(t *testing.T, taskID, phase, content string) (tmpHome string, logPath string) {
+	t.Helper()
+	var err error
+	tmpHome, err = filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	taskDir := filepath.Join(tmpHome, ".loom", "logs", "tasks", taskID)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatalf("failed to create task log dir: %v", err)
+	}
+
+	logPath = filepath.Join(taskDir, phase+".log")
+	if content != "" {
+		if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test log: %v", err)
+		}
+	}
+	return tmpHome, logPath
+}
+
+// assertJSONErrorResponse verifies a JSON error response from a log handler.
+func assertJSONErrorResponse(t *testing.T, resp *http.Response, expectedStatus int, expectedError string) {
+	t.Helper()
+	if resp.StatusCode != expectedStatus {
+		t.Errorf("status = %d, want %d", resp.StatusCode, expectedStatus)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var logResp LogContentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&logResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if logResp.Success {
+		t.Error("expected success to be false")
+	}
+	if logResp.Error != expectedError {
+		t.Errorf("error = %q, want %q", logResp.Error, expectedError)
+	}
+}
+
+// --- handleAgentLogStream error path tests ---
+
+// TestHandleAgentLogStream_MissingName tests that an empty agent name returns 400 JSON.
+func TestHandleAgentLogStream_MissingName(t *testing.T) {
+	handler := handleAgentLogStream()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents//logs/stream", nil)
+	req.SetPathValue("name", "")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
+
+	var resp LogContentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected success to be false")
+	}
+	if resp.Error != "missing agent name" {
+		t.Errorf("error = %q, want %q", resp.Error, "missing agent name")
+	}
+}
+
+// TestHandleAgentLogStream_InvalidName tests path traversal and invalid chars return 400 JSON.
+func TestHandleAgentLogStream_InvalidName(t *testing.T) {
+	handler := handleAgentLogStream()
+
+	tests := []struct {
+		name      string
+		agentName string
+	}{
+		{"contains space", "agent one"},
+		{"contains slash", "agent/one"},
+		{"contains dot", "agent.one"},
+		{"path traversal", "../etc/passwd"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/agents/invalid/logs/stream", nil)
+			req.SetPathValue("name", tt.agentName)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+			}
+
+			ct := w.Header().Get("Content-Type")
+			if ct != "application/json" {
+				t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+			}
+
+			var resp LogContentResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if resp.Success {
+				t.Error("expected success to be false")
+			}
+			if resp.Error != "invalid agent name: must match [a-zA-Z0-9_-]+" {
+				t.Errorf("error = %q, want %q", resp.Error, "invalid agent name: must match [a-zA-Z0-9_-]+")
+			}
+		})
+	}
+}
+
+// TestHandleAgentLogStream_FileNotFound tests that a valid but nonexistent agent returns 404 JSON.
+func TestHandleAgentLogStream_FileNotFound(t *testing.T) {
+	handler := handleAgentLogStream()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/nonexistent-agent-xyz/logs/stream", nil)
+	req.SetPathValue("name", "nonexistent-agent-xyz")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
+
+	var resp LogContentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected success to be false")
+	}
+	if resp.Error != "log file not found - agent may not be active" {
+		t.Errorf("error = %q, want %q", resp.Error, "log file not found - agent may not be active")
+	}
+}
+
+// --- handleTaskLogStream error path tests ---
+
+// TestHandleTaskLogStream_MissingID tests that an empty task ID returns 400 JSON.
+func TestHandleTaskLogStream_MissingID(t *testing.T) {
+	handler := handleTaskLogStream()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks//logs/planning/stream", nil)
+	req.SetPathValue("id", "")
+	req.SetPathValue("phase", "planning")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
+
+	var resp LogContentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected success to be false")
+	}
+	if resp.Error != "missing task ID" {
+		t.Errorf("error = %q, want %q", resp.Error, "missing task ID")
+	}
+}
+
+// TestHandleTaskLogStream_InvalidID tests path traversal and invalid chars return 400 JSON.
+func TestHandleTaskLogStream_InvalidID(t *testing.T) {
+	handler := handleTaskLogStream()
+
+	tests := []struct {
+		name   string
+		taskID string
+	}{
+		{"contains space", "task 123"},
+		{"contains slash", "task/123"},
+		{"path traversal", "../secrets"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/tasks/invalid/logs/planning/stream", nil)
+			req.SetPathValue("id", tt.taskID)
+			req.SetPathValue("phase", "planning")
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+			}
+
+			ct := w.Header().Get("Content-Type")
+			if ct != "application/json" {
+				t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+			}
+
+			var resp LogContentResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if resp.Success {
+				t.Error("expected success to be false")
+			}
+			if resp.Error != "invalid task ID: must match [a-zA-Z0-9_-]+" {
+				t.Errorf("error = %q, want %q", resp.Error, "invalid task ID: must match [a-zA-Z0-9_-]+")
+			}
+		})
+	}
+}
+
+// TestHandleTaskLogStream_MissingPhase tests that an empty phase returns 400 JSON.
+func TestHandleTaskLogStream_MissingPhase(t *testing.T) {
+	handler := handleTaskLogStream()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/task-123/logs//stream", nil)
+	req.SetPathValue("id", "task-123")
+	req.SetPathValue("phase", "")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
+
+	var resp LogContentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected success to be false")
+	}
+	if resp.Error != "missing phase" {
+		t.Errorf("error = %q, want %q", resp.Error, "missing phase")
+	}
+}
+
+// TestHandleTaskLogStream_InvalidPhase tests that invalid phase names return 400 JSON.
+func TestHandleTaskLogStream_InvalidPhase(t *testing.T) {
+	handler := handleTaskLogStream()
+
+	tests := []struct {
+		name  string
+		phase string
+	}{
+		{"execution", "execution"},
+		{"random", "random"},
+		{"PLANNING uppercase", "PLANNING"},
+		{"plan", "plan"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/tasks/task-123/logs/"+tt.phase+"/stream", nil)
+			req.SetPathValue("id", "task-123")
+			req.SetPathValue("phase", tt.phase)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+			}
+
+			ct := w.Header().Get("Content-Type")
+			if ct != "application/json" {
+				t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+			}
+
+			var resp LogContentResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if resp.Success {
+				t.Error("expected success to be false")
+			}
+			if resp.Error != "invalid phase: must be 'planning' or 'implementation'" {
+				t.Errorf("error = %q, want %q", resp.Error, "invalid phase: must be 'planning' or 'implementation'")
+			}
+		})
+	}
+}
+
+// TestHandleTaskLogStream_FileNotFound tests that a valid but nonexistent task returns 404 JSON.
+func TestHandleTaskLogStream_FileNotFound(t *testing.T) {
+	handler := handleTaskLogStream()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/nonexistent-task-xyz/logs/planning/stream", nil)
+	req.SetPathValue("id", "nonexistent-task-xyz")
+	req.SetPathValue("phase", "planning")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
+
+	var resp LogContentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected success to be false")
+	}
+	if resp.Error != "log file not found - task phase may not have started" {
+		t.Errorf("error = %q, want %q", resp.Error, "log file not found - task phase may not have started")
+	}
+}
+
+// --- handleAgentLogStream SSE happy path tests ---
+
+// TestHandleAgentLogStream_Success tests the full SSE streaming happy path.
+func TestHandleAgentLogStream_Success(t *testing.T) {
+	_, _ = setupAgentLogEnv(t, "stream-test-agent", "line 1: started\nline 2: processing\nline 3: done\n")
+
+	handler := handleAgentLogStream()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{name}/logs/stream", handler)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	client := connectLogSSEWithContext(t, ctx, server.URL, "/api/agents/stream-test-agent/logs/stream")
+	t.Cleanup(client.close)
+
+	// Verify SSE response headers
+	ct := client.resp.Header.Get("Content-Type")
+	if ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want %q", ct, "text/event-stream")
+	}
+	cc := client.resp.Header.Get("Cache-Control")
+	if cc != "no-cache" {
+		t.Errorf("Cache-Control = %q, want %q", cc, "no-cache")
+	}
+	conn := client.resp.Header.Get("Connection")
+	if conn != "keep-alive" {
+		t.Errorf("Connection = %q, want %q", conn, "keep-alive")
+	}
+	xab := client.resp.Header.Get("X-Accel-Buffering")
+	if xab != "no" {
+		t.Errorf("X-Accel-Buffering = %q, want %q", xab, "no")
+	}
+
+	// Read the 3 log-line events
+	for i := 1; i <= 3; i++ {
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("failed to read event %d: %v", i, err)
+		}
+		if evt.Event != "log-line" {
+			t.Errorf("event %d: event type = %q, want %q", i, evt.Event, "log-line")
+		}
+		if evt.ID == "" {
+			t.Errorf("event %d: expected non-empty ID", i)
+		}
+
+		var payload LogLinePayload
+		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+			t.Fatalf("event %d: failed to parse payload: %v", i, err)
+		}
+		if payload.LineNumber != int64(i) {
+			t.Errorf("event %d: line_number = %d, want %d", i, payload.LineNumber, i)
+		}
+		if payload.Timestamp == "" {
+			t.Errorf("event %d: expected non-empty timestamp", i)
+		}
+	}
+
+	cancel()
+}
+
+// TestHandleAgentLogStream_SinceParam tests the ?since= query parameter for catch-up.
+func TestHandleAgentLogStream_SinceParam(t *testing.T) {
+	// Create a 10-line log file
+	var lines []string
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, fmt.Sprintf("line %d: data", i))
+	}
+	_, _ = setupAgentLogEnv(t, "since-test-agent", strings.Join(lines, "\n")+"\n")
+
+	handler := handleAgentLogStream()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{name}/logs/stream", handler)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Connect with ?since=8 — should receive lines 8, 9, 10
+	client := connectLogSSEWithContext(t, ctx, server.URL, "/api/agents/since-test-agent/logs/stream?since=8")
+	t.Cleanup(client.close)
+
+	for i := 8; i <= 10; i++ {
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("failed to read event for line %d: %v", i, err)
+		}
+		if evt.Event != "log-line" {
+			t.Errorf("line %d: event type = %q, want %q", i, evt.Event, "log-line")
+		}
+
+		var payload LogLinePayload
+		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+			t.Fatalf("line %d: failed to parse payload: %v", i, err)
+		}
+		if payload.LineNumber != int64(i) {
+			t.Errorf("line %d: line_number = %d, want %d", i, payload.LineNumber, i)
+		}
+		expectedLine := fmt.Sprintf("line %d: data", i)
+		if payload.Line != expectedLine {
+			t.Errorf("line %d: line = %q, want %q", i, payload.Line, expectedLine)
+		}
+	}
+
+	cancel()
+}
+
+// TestHandleAgentLogStream_NewLinesAfterConnect tests that new lines appended
+// to the log file after connecting are delivered as SSE events via fsnotify.
+func TestHandleAgentLogStream_NewLinesAfterConnect(t *testing.T) {
+	_, logPath := setupAgentLogEnv(t, "live-test-agent", "initial line 1\n")
+
+	handler := handleAgentLogStream()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{name}/logs/stream", handler)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	client := connectLogSSEWithContext(t, ctx, server.URL, "/api/agents/live-test-agent/logs/stream")
+	t.Cleanup(client.close)
+
+	// Read the initial line event
+	evt, err := client.readEvent(5 * time.Second)
+	if err != nil {
+		t.Fatalf("failed to read initial event: %v", err)
+	}
+	if evt.Event != "log-line" {
+		t.Errorf("initial event type = %q, want %q", evt.Event, "log-line")
+	}
+
+	// Wait for fsnotify watcher to be set up
+	time.Sleep(100 * time.Millisecond)
+
+	// Append new lines to the file
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("failed to open log for append: %v", err)
+	}
+	if _, err := f.WriteString("new line 2\nnew line 3\n"); err != nil {
+		f.Close()
+		t.Fatalf("failed to append to log: %v", err)
+	}
+	f.Close()
+
+	// Read the new line events
+	for i := 2; i <= 3; i++ {
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("failed to read event for new line %d: %v", i, err)
+		}
+		if evt.Event != "log-line" {
+			t.Errorf("new line %d: event type = %q, want %q", i, evt.Event, "log-line")
+		}
+
+		var payload LogLinePayload
+		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+			t.Fatalf("new line %d: failed to parse payload: %v", i, err)
+		}
+		if payload.LineNumber != int64(i) {
+			t.Errorf("new line %d: line_number = %d, want %d", i, payload.LineNumber, i)
+		}
+	}
+
+	cancel()
+}
+
+// --- handleTaskLogStream SSE happy path tests ---
+
+// TestHandleTaskLogStream_Success tests the full SSE streaming happy path for task logs.
+func TestHandleTaskLogStream_Success(t *testing.T) {
+	_, _ = setupTaskLogEnv(t, "stream-task-123", "planning", "plan step 1\nplan step 2\n")
+
+	handler := handleTaskLogStream()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}/stream", handler)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	client := connectLogSSEWithContext(t, ctx, server.URL, "/api/tasks/stream-task-123/logs/planning/stream")
+	t.Cleanup(client.close)
+
+	// Verify SSE response headers
+	ct := client.resp.Header.Get("Content-Type")
+	if ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want %q", ct, "text/event-stream")
+	}
+
+	// Read the 2 log-line events
+	for i := 1; i <= 2; i++ {
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("failed to read event %d: %v", i, err)
+		}
+		if evt.Event != "log-line" {
+			t.Errorf("event %d: event type = %q, want %q", i, evt.Event, "log-line")
+		}
+		if evt.ID == "" {
+			t.Errorf("event %d: expected non-empty ID", i)
+		}
+
+		var payload LogLinePayload
+		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+			t.Fatalf("event %d: failed to parse payload: %v", i, err)
+		}
+		if payload.LineNumber != int64(i) {
+			t.Errorf("event %d: line_number = %d, want %d", i, payload.LineNumber, i)
+		}
+	}
+
+	cancel()
+}
+
+// TestHandleTaskLogStream_NewLinesAfterConnect tests that new lines appended
+// to a task log file after connecting are delivered as SSE events.
+func TestHandleTaskLogStream_NewLinesAfterConnect(t *testing.T) {
+	_, logPath := setupTaskLogEnv(t, "live-task-456", "implementation", "impl step 1\n")
+
+	handler := handleTaskLogStream()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}/stream", handler)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	client := connectLogSSEWithContext(t, ctx, server.URL, "/api/tasks/live-task-456/logs/implementation/stream")
+	t.Cleanup(client.close)
+
+	// Read the initial line event
+	evt, err := client.readEvent(5 * time.Second)
+	if err != nil {
+		t.Fatalf("failed to read initial event: %v", err)
+	}
+	if evt.Event != "log-line" {
+		t.Errorf("initial event type = %q, want %q", evt.Event, "log-line")
+	}
+
+	// Wait for fsnotify watcher to be set up
+	time.Sleep(100 * time.Millisecond)
+
+	// Append new lines
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("failed to open log for append: %v", err)
+	}
+	if _, err := f.WriteString("impl step 2\nimpl step 3\n"); err != nil {
+		f.Close()
+		t.Fatalf("failed to append to log: %v", err)
+	}
+	f.Close()
+
+	// Read the new line events
+	for i := 2; i <= 3; i++ {
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("failed to read event for new line %d: %v", i, err)
+		}
+		if evt.Event != "log-line" {
+			t.Errorf("new line %d: event type = %q, want %q", i, evt.Event, "log-line")
+		}
+
+		var payload LogLinePayload
+		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+			t.Fatalf("new line %d: failed to parse payload: %v", i, err)
+		}
+		if payload.LineNumber != int64(i) {
+			t.Errorf("new line %d: line_number = %d, want %d", i, payload.LineNumber, i)
+		}
+	}
+
+	cancel()
+}
+
+// --- LogStreamer truncation test ---
+
+// TestLogStreamer_FileTruncation tests that truncating a log file emits a truncated SSE event.
+func TestLogStreamer_FileTruncation(t *testing.T) {
+	_, logPath := setupAgentLogEnv(t, "truncate-test-agent", "line 1: long content here\nline 2: more content\nline 3: even more\n")
+
+	handler := handleAgentLogStream()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{name}/logs/stream", handler)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	client := connectLogSSEWithContext(t, ctx, server.URL, "/api/agents/truncate-test-agent/logs/stream")
+	t.Cleanup(client.close)
+
+	// Read the 3 initial line events
+	for i := 1; i <= 3; i++ {
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("failed to read initial event %d: %v", i, err)
+		}
+		if evt.Event != "log-line" {
+			t.Errorf("initial event %d: type = %q, want %q", i, evt.Event, "log-line")
+		}
+	}
+
+	// Wait for fsnotify watcher to be set up
+	time.Sleep(100 * time.Millisecond)
+
+	// Truncate the file by writing shorter content
+	if err := os.WriteFile(logPath, []byte("short\n"), 0o644); err != nil {
+		t.Fatalf("failed to truncate log file: %v", err)
+	}
+
+	// Read the truncated event
+	evt, err := client.readEvent(5 * time.Second)
+	if err != nil {
+		t.Fatalf("failed to read truncated event: %v", err)
+	}
+	if evt.Event != "truncated" {
+		t.Errorf("truncated event type = %q, want %q", evt.Event, "truncated")
+	}
+
+	cancel()
+}
+
+// --- LogStreamer debounce batching test ---
+
+// TestLogStreamer_DebounceBatching tests that rapidly appended lines arrive as
+// a batch after the debounce interval, not one-at-a-time.
+func TestLogStreamer_DebounceBatching(t *testing.T) {
+	_, logPath := setupAgentLogEnv(t, "debounce-test-agent", "initial line\n")
+
+	handler := handleAgentLogStream()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{name}/logs/stream", handler)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	client := connectLogSSEWithContext(t, ctx, server.URL, "/api/agents/debounce-test-agent/logs/stream")
+	t.Cleanup(client.close)
+
+	// Read the initial line event
+	_, err := client.readEvent(5 * time.Second)
+	if err != nil {
+		t.Fatalf("failed to read initial event: %v", err)
+	}
+
+	// Wait for fsnotify watcher to be set up
+	time.Sleep(100 * time.Millisecond)
+
+	// Rapidly append 5 lines within the debounce interval (50ms)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("failed to open log for append: %v", err)
+	}
+	for i := 2; i <= 6; i++ {
+		if _, err := f.WriteString(fmt.Sprintf("batch line %d\n", i)); err != nil {
+			f.Close()
+			t.Fatalf("failed to append line %d: %v", i, err)
+		}
+	}
+	f.Close()
+
+	// Read all 5 events - they should all arrive (within a reasonable timeout)
+	receivedCount := 0
+	deadline := time.After(5 * time.Second)
+	for receivedCount < 5 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for batch events, got %d of 5", receivedCount)
+		default:
+		}
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("failed to read batch event %d: %v", receivedCount+1, err)
+		}
+		if evt.Event != "log-line" {
+			t.Errorf("batch event %d: type = %q, want %q", receivedCount+1, evt.Event, "log-line")
+		}
+		var payload LogLinePayload
+		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+			t.Fatalf("batch event %d: failed to parse payload: %v", receivedCount+1, err)
+		}
+		expectedLine := fmt.Sprintf("batch line %d", receivedCount+2)
+		if payload.Line != expectedLine {
+			t.Errorf("batch event %d: line = %q, want %q", receivedCount+1, payload.Line, expectedLine)
+		}
+		receivedCount++
+	}
+
+	if receivedCount != 5 {
+		t.Errorf("received %d events, want 5", receivedCount)
+	}
+
+	cancel()
 }

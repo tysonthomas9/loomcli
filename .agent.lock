@@ -1,10 +1,10 @@
 {
-  "pid": 37381,
+  "pid": 51605,
   "command": "task",
-  "started_at": "2026-02-11T12:40:29.604176-08:00",
-  "agent_name": "nova",
-  "task_id": "loomcli-y82",
-  "task_title": "Fix Go test failures in subscription_test.go (PollDBChanges)",
-  "task_started_at": "2026-02-11T12:40:48.474596-08:00",
+  "started_at": "2026-02-11T15:03:58.225071-08:00",
+  "agent_name": "falcon",
+  "task_id": "loomcli-duvj",
+  "task_title": "Add tests for WebUI log streaming handlers (handlers_logs.go)",
+  "task_started_at": "2026-02-11T15:04:22.900995-08:00",
   "state": "active"
 }
