@@ -76,6 +76,24 @@ docker run loomcli-e2e run_test.sh --backend claude
 docker run loomcli-e2e run_test.sh -- -run TestE2E_TmuxSession
 ```
 
+## Go Test Harness
+
+Run the container tests from the host using Go's test framework:
+
+```bash
+# Run all container tests (builds image automatically)
+go test -tags container -v -timeout 15m ./e2e/
+
+# Run a specific test
+go test -tags container -v -timeout 15m -run TestContainer_SmokeTest ./e2e/
+
+# Skip image cleanup (for debugging)
+KEEP_IMAGE=1 go test -tags container -v -timeout 15m ./e2e/
+```
+
+Note: Requires Docker to be installed and running. Tests are automatically
+skipped if Docker is unavailable.
+
 ## Real Backend CLIs
 
 Mount a real CLI binary to replace a stub:
