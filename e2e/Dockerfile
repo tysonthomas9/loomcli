@@ -4,7 +4,7 @@
 # Build:  docker build -f e2e/Dockerfile -t loomcli-e2e .
 # Run:    docker run loomcli-e2e
 
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.25.6
 
 # ─── Stage 1: Build Go binaries ──────────────────────────────────────────────
 FROM golang:${GO_VERSION}-bookworm AS builder
@@ -68,7 +68,17 @@ COPY e2e/stubs/codex /usr/local/bin/codex
 COPY e2e/stubs/opencode /usr/local/bin/opencode
 RUN chmod +x /usr/local/bin/claude /usr/local/bin/codex /usr/local/bin/opencode
 
+# Install smoke test and task template
+COPY e2e/verify_todo.sh /usr/local/bin/verify_todo.sh
+RUN mkdir -p /etc/loom
+COPY e2e/task_template.txt /etc/loom/task_template.txt
+RUN chmod +x /usr/local/bin/verify_todo.sh
+
+# Install test orchestrator
+COPY e2e/run_test.sh /usr/local/bin/run_test.sh
+RUN chmod +x /usr/local/bin/run_test.sh
+
 ENV LOOM_BACKEND=claude \
     TERM=xterm-256color
 
-CMD ["go", "test", "-tags", "e2e", "-v", "-count=1", "./..."]
+CMD ["run_test.sh"]

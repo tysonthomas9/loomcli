@@ -344,8 +344,10 @@ func (s *DaemonSubscriber) pollDBChanges() {
 		updatedAfter := lastPollTime.UTC().Format(time.RFC3339)
 		updatedResp, err := client.Count(&rpc.CountArgs{UpdatedAfter: updatedAfter})
 		if err == nil && updatedResp.Success {
-			var updatedCount int64
-			if err := json.Unmarshal(updatedResp.Data, &updatedCount); err == nil && updatedCount > 0 {
+			var updatedResult struct {
+				Count int64 `json:"count"`
+			}
+			if err := json.Unmarshal(updatedResp.Data, &updatedResult); err == nil && updatedResult.Count > 0 {
 				changeDetected = true
 			}
 		}

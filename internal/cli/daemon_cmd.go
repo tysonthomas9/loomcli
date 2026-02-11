@@ -290,6 +290,9 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		if agent.PID > 0 {
 			fmt.Printf("      PID: %d\n", agent.PID)
 		}
+		if agent.EpicID != "" {
+			fmt.Printf("      Epic: %s\n", agent.EpicID)
+		}
 		if agent.TaskID != "" {
 			fmt.Printf("      Task: %s\n", agent.TaskID)
 		}

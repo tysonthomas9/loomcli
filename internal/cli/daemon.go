@@ -238,7 +238,27 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			// Non-fatal, continue with restart logic
 		}
 
-		// 6. Check shutdown after subprocess exit
+		// 5.5. Ensure PR exists for epic branch (non-fatal)
+		ap.mu.Lock()
+		currentEpicID := ap.assignedEpicID
+		ap.mu.Unlock()
+		if currentEpicID != "" {
+			if err := EnsureEpicPR(ap.worktreePath, currentEpicID); err != nil {
+				log.Printf("[daemon] Agent %s: PR creation failed: %v", ap.entry.Worktree, err)
+				// Non-fatal — don't block restart
+			}
+		}
+
+		// 5.6. Release epic assignment so next iteration re-evaluates
+		d.epicAssigner.ReleaseWorktree(ap.entry.Worktree)
+
+		// 6. Epic exhaustion check and reassignment
+		if err := d.handleEpicTransition(ap); err != nil {
+			log.Printf("[daemon] Agent %s: epic transition failed: %v", ap.entry.Worktree, err)
+			// Non-fatal: agent will respawn in current mode
+		}
+
+		// 7. Check shutdown after subprocess exit
 		select {
 		case <-d.shutdown:
 			log.Printf("[daemon] Agent %s: shutdown signal received after exit", ap.entry.Worktree)
@@ -246,13 +266,13 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		default:
 		}
 
-		// 7. Restart decision
+		// 8. Restart decision
 		if !d.shouldRestart(ap) {
 			log.Printf("[daemon] Agent %s: max restarts exceeded, stopping supervisor", ap.entry.Worktree)
 			return
 		}
 
-		// 8. Backoff sleep (interruptible)
+		// 9. Backoff sleep (interruptible)
 		backoff := d.computeBackoff(ap)
 		log.Printf("[daemon] Agent %s: waiting %v before restart (attempt %d)", ap.entry.Worktree, backoff, ap.restartCount)
 

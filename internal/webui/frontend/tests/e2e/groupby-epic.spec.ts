@@ -88,20 +88,51 @@ const mockIssues = [
 
 /**
  * Set up API mocks for epic grouping tests.
+ * Includes auth token, SSE events stream, and issue data endpoints.
+ * Note: Default view is 'kanban', which fetches from /api/issues (not /api/ready).
  */
 async function setupMocks(page: Page, issues: object[] = mockIssues) {
-  await page.route("**/api/ready", async (route) => {
+  // Mock auth token endpoint (app calls this on mount)
+  await page.route("**/api/auth/token", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
+      body: JSON.stringify({ token: "test-token-e2e" }),
     })
   })
 
+  // Mock SSE events endpoint (app connects for real-time updates)
+  await page.route("**/api/events**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      headers: { "Cache-Control": "no-cache", Connection: "keep-alive" },
+      body: "event: connected\ndata: {\"message\":\"connected\"}\n\n",
+    })
+  })
+
+  // Mock /api/issues endpoint (kanban mode fetches from here, not /api/ready)
+  // Use function matcher to handle query params (/api/issues?exclude_status=tombstone&...)
+  await page.route(
+    (url) => url.pathname.endsWith("/api/issues") || url.pathname.endsWith("/api/ready"),
+    async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: issues }),
+        })
+      } else {
+        await route.continue()
+      }
+    }
+  )
+
+  // Mock /api/issues/:id for PATCH (status updates via drag-and-drop)
   await page.route("**/api/issues/*", async (route) => {
     if (route.request().method() === "PATCH") {
       const url = route.request().url()
-      const issueId = url.split("/").pop()
+      const issueId = url.split("/").pop()?.split("?")[0]
       const body = route.request().postDataJSON() as { status?: string }
       const issue = issues.find(
         (i) => (i as { id: string }).id === issueId
@@ -123,11 +154,12 @@ async function setupMocks(page: Page, issues: object[] = mockIssues) {
 
 /**
  * Navigate to app with groupBy=epic and wait for API response.
+ * Default view is 'kanban' which fetches from /api/issues.
  */
 async function navigateToEpicView(page: Page) {
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
+      (res) => res.url().includes("/api/issues") && res.status() === 200
     ),
     page.goto("/?groupBy=epic"),
   ])
@@ -637,8 +669,10 @@ test.describe("groupBy Epic Swim Lanes", () => {
   test.describe("Edge Cases", () => {
     test("empty issues array shows no epic lanes", async ({ page }) => {
       await setupMocks(page, [])
-      await page.goto("/?groupBy=epic")
-      await page.waitForResponse((res) => res.url().includes("/api/ready"))
+      await Promise.all([
+        page.waitForResponse((res) => res.url().includes("/api/issues")),
+        page.goto("/?groupBy=epic"),
+      ])
 
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
       const lanes = page.locator('[data-testid^="swim-lane-lane-epic"]')
@@ -734,8 +768,10 @@ test.describe("groupBy Epic Swim Lanes", () => {
       page,
     }) => {
       await setupMocks(page)
-      await page.goto("/?groupBy=epic")
-      await page.waitForResponse((res) => res.url().includes("/api/ready"))
+      await Promise.all([
+        page.waitForResponse((res) => res.url().includes("/api/issues")),
+        page.goto("/?groupBy=epic"),
+      ])
 
       // Verify swim lanes visible
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()

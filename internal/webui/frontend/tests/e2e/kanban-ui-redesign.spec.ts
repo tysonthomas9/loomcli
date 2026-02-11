@@ -124,7 +124,7 @@ test.describe("Card Styling: in-progress blue border", () => {
 })
 
 test.describe("Card Styling: title and shadow", () => {
-  test("card title uses h3 element with semibold weight", async ({ page }) => {
+  test("card title uses h3 element with normal weight", async ({ page }) => {
     const issues = [
       makeIssue({ id: "t-1", title: "Title Weight Test", status: "open" }),
     ]
@@ -136,7 +136,7 @@ test.describe("Card Styling: title and shadow", () => {
     await expect(title).toHaveText("Title Weight Test")
   })
 
-  test("P0 card title uses bold font weight", async ({ page }) => {
+  test("P0 card title uses medium font weight", async ({ page }) => {
     const issues = [
       makeIssue({
         id: "p0-1",
@@ -150,7 +150,7 @@ test.describe("Card Styling: title and shadow", () => {
 
     const card = page.locator('article[data-priority="0"]')
     await expect(card).toBeVisible()
-    // CSS rule: .issueCard[data-priority='0'] .title { font-weight: var(--font-weight-bold) }
+    // CSS rule: .issueCard[data-priority='0'] .title { font-weight: var(--font-weight-medium) }
     // Just verify the card has the correct data attribute - CSS applies the style
     await expect(card).toHaveAttribute("data-priority", "0")
   })

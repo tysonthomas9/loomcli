@@ -1,0 +1,21 @@
+{
+  "needs_plan": {
+    "title": "E2E test: task needing planning",
+    "type": "task",
+    "priority": 2,
+    "description": "Smoke test task with no design field — should be picked by planning agents."
+  },
+  "ready_to_implement": {
+    "title": "E2E test: task ready for implementation",
+    "type": "task",
+    "priority": 2,
+    "description": "Smoke test task with approved design — should be picked by implementation agents.",
+    "design": "## Summary\nThis is a pre-approved design for E2E testing.\n\n## Technical Approach\nNo-op implementation — this task exists solely to verify task filtering logic.\n\n## Files to Create\nNone.\n\n## Files to Modify\nNone.\n\n## Testing Strategy\nVerify task appears in implementation-ready list and not in planning-needed list."
+  },
+  "epic": {
+    "title": "E2E test: epic (should be skipped)",
+    "type": "epic",
+    "priority": 2,
+    "description": "Smoke test epic — agents should skip this."
+  }
+}

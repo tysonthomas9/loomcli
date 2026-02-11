@@ -271,6 +271,14 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 		}()
 	}
 
+	// Save current branch so we can restore it after the operation
+	origBranch, _ := GetCurrentBranch(repoPath)
+	defer func() {
+		if origBranch != "" {
+			_ = GitCheckout(repoPath, origBranch)
+		}
+	}()
+
 	// Checkout target branch — if it's checked out in another worktree, git
 	// will fail and we fall back to the detached HEAD approach. This avoids a
 	// TOCTOU race where the worktree state could change between a pre-check
@@ -300,7 +308,7 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 
 	// Attempt merge
 	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
-	if err := GitMergeRemote(repoPath, remote, sourceBranch, mergeMsg); err != nil {
+	if err := GitMerge(repoPath, sourceBranch, mergeMsg); err != nil {
 		// Check for conflicts
 		conflicts, conflictErr := GetConflictedFiles(repoPath)
 		if conflictErr != nil || len(conflicts) == 0 {
@@ -345,6 +353,11 @@ func pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote strin
 		return fmt.Errorf("checking out %s/%s detached: %v", r, targetBranch, err)
 	}
 
+	// Ensure we restore source branch on any exit path (including early return)
+	defer func() {
+		_ = GitCheckout(repoPath, sourceBranch)
+	}()
+
 	// Check if there are commits to merge before creating temp branch
 	hasCommits, err := HasCommitsBetweenRemote(repoPath, remote, targetBranch, sourceBranch)
 	if err == nil && !hasCommits {
@@ -357,14 +370,14 @@ func pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote strin
 		return fmt.Errorf("creating temp branch: %v", err)
 	}
 
-	// Cleanup temp branch on exit (deferred after creation)
+	// Cleanup temp branch on exit
 	defer func() {
 		_ = GitDeleteBranch(repoPath, tempBranch, true)
 	}()
 
 	// Attempt merge
 	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
-	if err := GitMergeRemote(repoPath, remote, sourceBranch, mergeMsg); err != nil {
+	if err := GitMerge(repoPath, sourceBranch, mergeMsg); err != nil {
 		// Check for conflicts
 		conflicts, conflictErr := GetConflictedFiles(repoPath)
 		if conflictErr != nil || len(conflicts) == 0 {
@@ -478,6 +491,14 @@ func pushBranch(sourceBranch, targetBranch string) {
 		}()
 	}
 
+	// Save current branch so we can restore it after the operation
+	origBranch, _ := GetCurrentBranch(scriptDir)
+	defer func() {
+		if origBranch != "" {
+			_ = GitCheckout(scriptDir, origBranch)
+		}
+	}()
+
 	// Checkout target branch — if it's checked out in another worktree, git
 	// will fail and we fall back to the detached HEAD approach.
 	if err := GitCheckout(scriptDir, targetBranch); err != nil {
@@ -510,7 +531,7 @@ func pushBranch(sourceBranch, targetBranch string) {
 
 	// Attempt merge
 	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
-	if err := GitMergeOrigin(scriptDir, sourceBranch, mergeMsg); err != nil {
+	if err := GitMerge(scriptDir, sourceBranch, mergeMsg); err != nil {
 		// Check for conflicts
 		conflicts, conflictErr := GetConflictedFiles(scriptDir)
 		if conflictErr != nil || len(conflicts) == 0 {
@@ -556,6 +577,11 @@ func pushBranchDetached(scriptDir, sourceBranch, targetBranch string) error {
 		return fmt.Errorf("checking out origin/%s detached: %v", targetBranch, err)
 	}
 
+	// Ensure we restore source branch on any exit path (including early return)
+	defer func() {
+		_ = GitCheckout(scriptDir, sourceBranch)
+	}()
+
 	// Check if there are commits to merge before creating temp branch
 	hasCommits, err := HasCommitsBetween(scriptDir, targetBranch, sourceBranch)
 	if err == nil && !hasCommits {
@@ -568,14 +594,14 @@ func pushBranchDetached(scriptDir, sourceBranch, targetBranch string) error {
 		return fmt.Errorf("creating temp branch: %v", err)
 	}
 
-	// Cleanup temp branch on exit (deferred after creation)
+	// Cleanup temp branch on exit
 	defer func() {
 		_ = GitDeleteBranch(scriptDir, tempBranch, true)
 	}()
 
 	// Attempt merge
 	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
-	if err := GitMergeOrigin(scriptDir, sourceBranch, mergeMsg); err != nil {
+	if err := GitMerge(scriptDir, sourceBranch, mergeMsg); err != nil {
 		// Check for conflicts
 		conflicts, conflictErr := GetConflictedFiles(scriptDir)
 		if conflictErr != nil || len(conflicts) == 0 {

@@ -127,8 +127,8 @@ func TestCreatePR_Success(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		// HasCommitsBetweenRemote: git log main..origin/feature --oneline
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc123 some commit\n"},
+		// HasCommitsBetweenRemote: git log origin/main..feature --oneline
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc123 some commit\n"},
 		// generatePRInfo: git log origin/main..origin/feature --format=%s --reverse
 		{Name: "git", Args: []string{"log", "origin/main..origin/feature", "--format=%s", "--reverse"}, Stdout: "Add new feature\n"},
 		// gh pr create
@@ -166,7 +166,7 @@ func TestCreatePR_NoCommits(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		// HasCommitsBetweenRemote: no commits
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: ""},
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: ""},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -201,7 +201,7 @@ func TestCreatePR_PRAlreadyExists(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		// HasCommitsBetweenRemote
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc123 some commit\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc123 some commit\n"},
 		// generatePRInfo
 		{Name: "git", Args: []string{"log", "origin/main..origin/feature", "--format=%s", "--reverse"}, Stdout: "Add new feature\n"},
 		// gh pr create fails with "already exists"
@@ -241,7 +241,7 @@ func TestCreatePR_PushFails(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		// HasCommitsBetweenRemote
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc123 some commit\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feature", "--oneline"}, Stdout: "abc123 some commit\n"},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -275,8 +275,8 @@ func TestCreatePRLegacy_Success(t *testing.T) {
 	}
 
 	commandStubs := []CommandStub{
-		// HasCommitsBetween: git log main..origin/feature --oneline
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: "abc123 some commit\n"},
+		// HasCommitsBetween: git log main..feature --oneline
+		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: "abc123 some commit\n"},
 		// generatePRInfo: git log origin/main..origin/feature --format=%s --reverse
 		{Name: "git", Args: []string{"log", "origin/main..origin/feature", "--format=%s", "--reverse"}, Stdout: "Add legacy feature\n"},
 		// gh pr create
@@ -313,7 +313,7 @@ func TestCreatePRLegacy_NoCommits(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		// HasCommitsBetween: no commits
-		{Name: "git", Args: []string{"log", "main..origin/feature", "--oneline"}, Stdout: ""},
+		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: ""},
 	}
 
 	outputMock := NewOutputCommandMock(t, outputStubs)
@@ -365,13 +365,13 @@ func TestPrWorkspaceWorktrees_IteratesAllRepos(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		// repo-a: HasCommitsBetweenRemote
-		{Name: "git", Args: []string{"log", "main..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feat-a", "--oneline"}, Stdout: "abc commit\n"},
 		// repo-a: generatePRInfo
 		{Name: "git", Args: []string{"log", "origin/main..origin/feat-a", "--format=%s", "--reverse"}, Stdout: "Add feature A\n"},
 		// repo-a: gh pr create
 		{Name: "gh", Args: []string{"pr", "create", "--base", "main", "--head", "feat-a", "--title", "Add feature A", "--body", "---\nCreated with [loom](https://github.com/tysonthomas9/loomcli)"}, Stdout: "https://github.com/user/repo/pull/1\n"},
 		// repo-b: HasCommitsBetweenRemote
-		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feat-b", "--oneline"}, Stdout: "def commit\n"},
 		// repo-b: generatePRInfo
 		{Name: "git", Args: []string{"log", "origin/main..origin/feat-b", "--format=%s", "--reverse"}, Stdout: "Add feature B\n"},
 		// repo-b: gh pr create
@@ -419,7 +419,7 @@ func TestPrWorkspaceWorktrees_SkipsNilRepo(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		// repo-b: HasCommitsBetweenRemote
-		{Name: "git", Args: []string{"log", "main..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
+		{Name: "git", Args: []string{"log", "origin/main..feat-b", "--oneline"}, Stdout: "def commit\n"},
 		// repo-b: generatePRInfo
 		{Name: "git", Args: []string{"log", "origin/main..origin/feat-b", "--format=%s", "--reverse"}, Stdout: "Add feature B\n"},
 		// repo-b: gh pr create
@@ -469,13 +469,13 @@ func TestPrWorkspaceWorktrees_UsesPerRepoDefaultBranch(t *testing.T) {
 
 	commandStubs := []CommandStub{
 		// repo-a: HasCommitsBetweenRemote with develop
-		{Name: "git", Args: []string{"log", "develop..origin/feat-a", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"log", "origin/develop..feat-a", "--oneline"}, Stdout: "abc commit\n"},
 		// repo-a: generatePRInfo with develop
 		{Name: "git", Args: []string{"log", "origin/develop..origin/feat-a", "--format=%s", "--reverse"}, Stdout: "Feature A for develop\n"},
 		// repo-a: gh pr create with --base develop
 		{Name: "gh", Args: []string{"pr", "create", "--base", "develop", "--head", "feat-a", "--title", "Feature A for develop", "--body", "---\nCreated with [loom](https://github.com/tysonthomas9/loomcli)"}, Stdout: "https://github.com/user/repo/pull/10\n"},
 		// repo-b: HasCommitsBetweenRemote with staging
-		{Name: "git", Args: []string{"log", "staging..origin/feat-b", "--oneline"}, Stdout: "def commit\n"},
+		{Name: "git", Args: []string{"log", "origin/staging..feat-b", "--oneline"}, Stdout: "def commit\n"},
 		// repo-b: generatePRInfo with staging
 		{Name: "git", Args: []string{"log", "origin/staging..origin/feat-b", "--format=%s", "--reverse"}, Stdout: "Feature B for staging\n"},
 		// repo-b: gh pr create with --base staging

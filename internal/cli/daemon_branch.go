@@ -32,7 +32,10 @@ func EnsureWorktreeBranch(worktreePath, targetBranch, fallbackRef string) error 
 	if !clean {
 		msg := fmt.Sprintf("WIP: daemon branch switch from %s to %s", current, targetBranch)
 		if err := commitWIP(worktreePath, msg); err != nil {
-			log.Printf("[daemon] Warning: WIP commit failed: %v", err)
+			log.Printf("[daemon] WIP commit failed, falling back to stash: %v", err)
+			if _, stashErr := GitStash(worktreePath); stashErr != nil {
+				return fmt.Errorf("dirty worktree and both WIP commit and stash failed: commit: %w, stash: %v", err, stashErr)
+			}
 		}
 	}
 

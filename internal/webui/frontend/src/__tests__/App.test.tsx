@@ -1525,14 +1525,14 @@ describe('App', () => {
   });
 
   describe('useIssues mode parameter based on activeView', () => {
-    it('calls useIssues with mode: "ready" when activeView is "kanban"', () => {
+    it('calls useIssues with mode: "kanban" when activeView is "kanban"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
       vi.mocked(useViewState).mockReturnValue(['kanban', mockSetActiveView]);
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({ mode: 'ready' });
+      expect(useIssues).toHaveBeenCalledWith({ mode: 'kanban' });
     });
 
     it('calls useIssues with mode: "ready" when activeView is "table"', () => {
@@ -1565,8 +1565,8 @@ describe('App', () => {
 
       const { rerender } = render(<App />);
 
-      // Verify initial call with mode: 'ready'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'ready' });
+      // Verify initial call with mode: 'kanban'
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'kanban' });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();
@@ -1601,8 +1601,8 @@ describe('App', () => {
 
       rerender(<App />);
 
-      // Verify useIssues is called with mode: 'ready' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'ready' });
+      // Verify useIssues is called with mode: 'kanban' after view change
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'kanban' });
     });
 
     it('refetches issues when view changes from graph to table', () => {
@@ -1630,7 +1630,7 @@ describe('App', () => {
       expect(useIssues).toHaveBeenLastCalledWith({ mode: 'ready' });
     });
 
-    it('does not change mode when switching between kanban and table', () => {
+    it('switches from kanban mode to ready mode when view changes from kanban to table', () => {
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({ refetch });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -1640,8 +1640,8 @@ describe('App', () => {
 
       const { rerender } = render(<App />);
 
-      // Verify initial call with mode: 'ready'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'ready' });
+      // Verify initial call with mode: 'kanban'
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'kanban' });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();

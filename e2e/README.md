@@ -18,6 +18,82 @@ docker run loomcli-e2e
 docker run loomcli-e2e go test -tags e2e -v -run TestE2E_TmuxSessionLifecycle ./internal/cli/
 ```
 
+## Local Development (run_local.sh)
+
+The `run_local.sh` script wraps the build and run workflow with sensible defaults:
+
+```bash
+# Build and run all E2E tests
+e2e/run_local.sh
+
+# Skip rebuild, run specific test
+e2e/run_local.sh --no-build -- go test -tags e2e -v -run TestE2E_Foo ./internal/cli/
+
+# Mount real CLI binaries from host
+e2e/run_local.sh --mount-clis
+
+# Set a specific backend
+e2e/run_local.sh --backend codex
+
+# See all options
+e2e/run_local.sh --help
+```
+
+The script auto-detects and mounts auth config directories (`~/.claude/`, `~/.codex/`, `~/.config/opencode/`) read-only, and forwards `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and any `STUB_*` environment variables from the host.
+
+## Smoke Test
+
+Run the built-in smoke test to verify the container is correctly configured:
+
+```bash
+docker run loomcli-e2e verify_todo.sh
+```
+
+This verifies: binary existence, stub output, bd task CRUD, loom commands, lock files, and signal files.
+
+Use `-v` for detailed output or `-q` for summary only:
+
+```bash
+docker run loomcli-e2e verify_todo.sh -v
+docker run loomcli-e2e verify_todo.sh -q
+```
+
+## Test Orchestrator
+
+The container includes `run_test.sh` which runs the full test suite:
+
+```bash
+# Full suite (smoke + unit + e2e across all backends)
+docker run loomcli-e2e
+
+# E2E tests only
+docker run loomcli-e2e run_test.sh --phase e2e
+
+# Single backend
+docker run loomcli-e2e run_test.sh --backend claude
+
+# Pass extra go test flags
+docker run loomcli-e2e run_test.sh -- -run TestE2E_TmuxSession
+```
+
+## Go Test Harness
+
+Run the container tests from the host using Go's test framework:
+
+```bash
+# Run all container tests (builds image automatically)
+go test -tags container -v -timeout 15m ./e2e/
+
+# Run a specific test
+go test -tags container -v -timeout 15m -run TestContainer_SmokeTest ./e2e/
+
+# Skip image cleanup (for debugging)
+KEEP_IMAGE=1 go test -tags container -v -timeout 15m ./e2e/
+```
+
+Note: Requires Docker to be installed and running. Tests are automatically
+skipped if Docker is unavailable.
+
 ## Real Backend CLIs
 
 Mount a real CLI binary to replace a stub:
