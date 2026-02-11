@@ -15,11 +15,6 @@
   background-color: var(--color-bg-secondary);
 }
 
-/* Ensure columns don't shrink when scrolling */
-.board > * {
-  flex-shrink: 0;
-}
-
 .board > :last-child {
   border-right: none;
 }

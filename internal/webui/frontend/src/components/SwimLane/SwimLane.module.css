@@ -101,10 +101,6 @@
     padding 0.2s ease-out;
 }
 
-.laneContent > * {
-  flex-shrink: 0;
-}
-
 .laneContent > :last-child {
   border-right: none;
 }

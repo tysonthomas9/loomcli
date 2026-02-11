@@ -6,11 +6,8 @@
 .statusColumn {
   display: flex;
   flex-direction: column;
-  width: 240px;
-  min-width: 240px;
-  max-width: 240px;
-  /* Use flexbox stretch from parent instead of percentage height */
-  flex: 1 1 auto;
+  min-width: 220px;
+  flex: 1 0 220px;
   min-height: 0;
   background-color: var(--color-column-bg);
   border-radius: 0;
