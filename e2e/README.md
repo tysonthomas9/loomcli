@@ -18,6 +18,29 @@ docker run loomcli-e2e
 docker run loomcli-e2e go test -tags e2e -v -run TestE2E_TmuxSessionLifecycle ./internal/cli/
 ```
 
+## Local Development (run_local.sh)
+
+The `run_local.sh` script wraps the build and run workflow with sensible defaults:
+
+```bash
+# Build and run all E2E tests
+e2e/run_local.sh
+
+# Skip rebuild, run specific test
+e2e/run_local.sh --no-build -- go test -tags e2e -v -run TestE2E_Foo ./internal/cli/
+
+# Mount real CLI binaries from host
+e2e/run_local.sh --mount-clis
+
+# Set a specific backend
+e2e/run_local.sh --backend codex
+
+# See all options
+e2e/run_local.sh --help
+```
+
+The script auto-detects and mounts auth config directories (`~/.claude/`, `~/.codex/`, `~/.config/opencode/`) read-only, and forwards `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and any `STUB_*` environment variables from the host.
+
 ## Real Backend CLIs
 
 Mount a real CLI binary to replace a stub:
