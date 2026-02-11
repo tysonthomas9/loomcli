@@ -557,7 +557,9 @@ func TestDaemonSubscriber_PollDBChanges_CountChanged(t *testing.T) {
 	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
 		callCount++
 		// Return count of 5 (different from initialized lastKnownCount of 3)
-		countData, _ := json.Marshal(int64(5))
+		countData, _ := json.Marshal(struct {
+			Count int64 `json:"count"`
+		}{Count: 5})
 		return rpc.Response{Success: true, Data: countData}
 	})
 
@@ -615,11 +617,15 @@ func TestDaemonSubscriber_PollDBChanges_UpdateDetected(t *testing.T) {
 		callNumber++
 		if callNumber == 1 {
 			// First call: return same count (10) - no count change
-			countData, _ := json.Marshal(int64(10))
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 10})
 			return rpc.Response{Success: true, Data: countData}
 		}
 		// Second call (UpdatedAfter check): return 1 updated issue
-		countData, _ := json.Marshal(int64(1))
+		countData, _ := json.Marshal(struct {
+			Count int64 `json:"count"`
+		}{Count: 1})
 		return rpc.Response{Success: true, Data: countData}
 	})
 
@@ -664,11 +670,15 @@ func TestDaemonSubscriber_PollDBChanges_NoChange(t *testing.T) {
 		callNumber++
 		if callNumber == 1 {
 			// First call: return same count (10)
-			countData, _ := json.Marshal(int64(10))
+			countData, _ := json.Marshal(struct {
+				Count int64 `json:"count"`
+			}{Count: 10})
 			return rpc.Response{Success: true, Data: countData}
 		}
 		// Second call (UpdatedAfter): return 0 updated issues
-		countData, _ := json.Marshal(int64(0))
+		countData, _ := json.Marshal(struct {
+			Count int64 `json:"count"`
+		}{Count: 0})
 		return rpc.Response{Success: true, Data: countData}
 	})
 
@@ -713,7 +723,9 @@ func TestDaemonSubscriber_PollDBChanges_NoChange(t *testing.T) {
 func TestDaemonSubscriber_PollDBChanges_SkipsFirstPoll(t *testing.T) {
 	socketPath := startSubscriptionMockServer(t, func(req rpc.Request) rpc.Response {
 		// Return count of 7
-		countData, _ := json.Marshal(int64(7))
+		countData, _ := json.Marshal(struct {
+			Count int64 `json:"count"`
+		}{Count: 7})
 		return rpc.Response{Success: true, Data: countData}
 	})
 
