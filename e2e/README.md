@@ -41,6 +41,23 @@ e2e/run_local.sh --help
 
 The script auto-detects and mounts auth config directories (`~/.claude/`, `~/.codex/`, `~/.config/opencode/`) read-only, and forwards `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and any `STUB_*` environment variables from the host.
 
+## Smoke Test
+
+Run the built-in smoke test to verify the container is correctly configured:
+
+```bash
+docker run loomcli-e2e verify_todo.sh
+```
+
+This verifies: binary existence, stub output, bd task CRUD, loom commands, lock files, and signal files.
+
+Use `-v` for detailed output or `-q` for summary only:
+
+```bash
+docker run loomcli-e2e verify_todo.sh -v
+docker run loomcli-e2e verify_todo.sh -q
+```
+
 ## Real Backend CLIs
 
 Mount a real CLI binary to replace a stub:
