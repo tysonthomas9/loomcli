@@ -238,6 +238,17 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			// Non-fatal, continue with restart logic
 		}
 
+		// 5.5. Ensure PR exists for epic branch (non-fatal)
+		ap.mu.Lock()
+		currentEpicID := ap.assignedEpicID
+		ap.mu.Unlock()
+		if currentEpicID != "" {
+			if err := EnsureEpicPR(ap.worktreePath, currentEpicID); err != nil {
+				log.Printf("[daemon] Agent %s: PR creation failed: %v", ap.entry.Worktree, err)
+				// Non-fatal — don't block restart
+			}
+		}
+
 		// 6. Check shutdown after subprocess exit
 		select {
 		case <-d.shutdown:
