@@ -1896,3 +1896,596 @@ func TestFleetHeartbeat_StoreError_Returns500(t *testing.T) {
 	result := assertJSONResponse(t, w)
 	assertEnvelopeError(t, result, "last_heartbeat")
 }
+
+// =============================================================================
+// Fleet Claim Handler Edge Case Tests (Metrics, Errors, Filters)
+// =============================================================================
+
+func TestFleetClaim_Timeout_RecordsMetric(t *testing.T) {
+	metrics := fleet.NewClaimMetrics()
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return nil, context.DeadlineExceeded
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, metrics)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusGatewayTimeout {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusGatewayTimeout)
+	}
+
+	snap := metrics.Snapshot()
+	if snap.Timeout != 1 {
+		t.Errorf("timeout count = %d, want 1", snap.Timeout)
+	}
+}
+
+func TestFleetClaim_SpecificIssue_CollisionRecordsMetric(t *testing.T) {
+	metrics := fleet.NewClaimMetrics()
+
+	client := &mockFleetClient{
+		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: false,
+				Error:   "already claimed by other-worker",
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, metrics)
+
+	body, _ := json.Marshal(FleetClaimRequest{IssueID: "test-123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+
+	snap := metrics.Snapshot()
+	if snap.Collision != 1 {
+		t.Errorf("collision count = %d, want 1", snap.Collision)
+	}
+}
+
+func TestFleetClaim_SuccessRecordsMetric(t *testing.T) {
+	metrics := fleet.NewClaimMetrics()
+
+	issueData, _ := json.Marshal(types.Issue{
+		ID:     "test-123",
+		Title:  "Test Task",
+		Status: "in_progress",
+	})
+
+	client := &mockFleetClient{
+		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    issueData,
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, metrics)
+
+	body, _ := json.Marshal(FleetClaimRequest{IssueID: "test-123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	snap := metrics.Snapshot()
+	if snap.Success != 1 {
+		t.Errorf("success count = %d, want 1", snap.Success)
+	}
+}
+
+func TestFleetClaim_ReadyThenClaim_CollisionsRecordMetrics(t *testing.T) {
+	metrics := fleet.NewClaimMetrics()
+
+	readyIssues := []*types.Issue{
+		{ID: "task-1", Title: "First", Status: "open"},
+		{ID: "task-2", Title: "Second", Status: "open"},
+		{ID: "task-3", Title: "Third", Status: "open"},
+	}
+	readyData, _ := json.Marshal(readyIssues)
+
+	client := &mockFleetClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    readyData,
+			}, nil
+		},
+		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: false,
+				Error:   "already claimed by other-worker",
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, metrics)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
+	}
+
+	snap := metrics.Snapshot()
+	if snap.Collision != 3 {
+		t.Errorf("collision count = %d, want 3", snap.Collision)
+	}
+}
+
+func TestFleetClaim_PoolGetNonTimeoutError_Returns503(t *testing.T) {
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return nil, errors.New("connection refused")
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "payload")
+}
+
+func TestFleetClaim_ReadyResponseNotSuccess_Returns500(t *testing.T) {
+	client := &mockFleetClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: false,
+				Error:   "internal daemon error",
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "payload")
+
+	// Verify the daemon error is propagated
+	if errMsg, ok := result["error"].(string); ok {
+		if errMsg != "internal daemon error" {
+			t.Errorf("error = %q, want %q", errMsg, "internal daemon error")
+		}
+	}
+}
+
+func TestFleetClaim_ReadyResponseMalformedData_Returns500(t *testing.T) {
+	client := &mockFleetClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    []byte("not json"),
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "payload")
+}
+
+func TestFleetClaim_SpecificIssue_NonCollisionUpdateFailure_Returns500(t *testing.T) {
+	client := &mockFleetClient{
+		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: false,
+				Error:   "database locked",
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, nil)
+
+	body, _ := json.Marshal(FleetClaimRequest{IssueID: "test-123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "payload")
+
+	// Verify the error message is propagated (not "already claimed")
+	if errMsg, ok := result["error"].(string); ok {
+		if errMsg != "database locked" {
+			t.Errorf("error = %q, want %q", errMsg, "database locked")
+		}
+	}
+}
+
+func TestFleetClaim_SpecificIssue_MalformedResponseData_Returns500(t *testing.T) {
+	client := &mockFleetClient{
+		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    []byte("not json"),
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, nil)
+
+	body, _ := json.Marshal(FleetClaimRequest{IssueID: "test-123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeError(t, result, "payload")
+}
+
+func TestFleetClaim_ReadyThenClaim_RPCError_SkipsToNext(t *testing.T) {
+	readyIssues := []*types.Issue{
+		{ID: "task-1", Title: "First", Status: "open"},
+		{ID: "task-2", Title: "Second", Status: "open"},
+	}
+	readyData, _ := json.Marshal(readyIssues)
+
+	claimedData, _ := json.Marshal(types.Issue{
+		ID:     "task-2",
+		Title:  "Second",
+		Status: "in_progress",
+	})
+
+	callCount := 0
+	client := &mockFleetClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    readyData,
+			}, nil
+		},
+		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			callCount++
+			if callCount == 1 {
+				// First attempt: RPC error
+				return nil, errors.New("connection reset")
+			}
+			// Second attempt: success
+			return &rpc.Response{
+				Success: true,
+				Data:    claimedData,
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	if callCount != 2 {
+		t.Errorf("Update called %d times, want 2", callCount)
+	}
+
+	result := assertJSONResponse(t, w)
+	payload := result["payload"].(map[string]interface{})
+	issue := payload["issue"].(map[string]interface{})
+	if issue["id"] != "task-2" {
+		t.Errorf("claimed issue id = %v, want %q", issue["id"], "task-2")
+	}
+}
+
+func TestFleetClaim_ReadyThenClaim_MalformedClaimedData_SkipsToNext(t *testing.T) {
+	readyIssues := []*types.Issue{
+		{ID: "task-1", Title: "First", Status: "open"},
+		{ID: "task-2", Title: "Second", Status: "open"},
+	}
+	readyData, _ := json.Marshal(readyIssues)
+
+	claimedData, _ := json.Marshal(types.Issue{
+		ID:     "task-2",
+		Title:  "Second",
+		Status: "in_progress",
+	})
+
+	callCount := 0
+	client := &mockFleetClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    readyData,
+			}, nil
+		},
+		updateFunc: func(args *rpc.UpdateArgs) (*rpc.Response, error) {
+			callCount++
+			if callCount == 1 {
+				// First attempt: success but malformed data
+				return &rpc.Response{
+					Success: true,
+					Data:    []byte("bad json"),
+				}, nil
+			}
+			// Second attempt: success with valid data
+			return &rpc.Response{
+				Success: true,
+				Data:    claimedData,
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	if callCount != 2 {
+		t.Errorf("Update called %d times, want 2", callCount)
+	}
+
+	result := assertJSONResponse(t, w)
+	payload := result["payload"].(map[string]interface{})
+	issue := payload["issue"].(map[string]interface{})
+	if issue["id"] != "task-2" {
+		t.Errorf("claimed issue id = %v, want %q", issue["id"], "task-2")
+	}
+}
+
+func TestFleetClaim_WithFilters_PassedToReady(t *testing.T) {
+	maxPri := 1
+	var capturedArgs *rpc.ReadyArgs
+
+	emptyIssues, _ := json.Marshal([]*types.Issue{})
+
+	client := &mockFleetClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			capturedArgs = args
+			return &rpc.Response{
+				Success: true,
+				Data:    emptyIssues,
+			}, nil
+		},
+	}
+
+	pool := &mockFleetPool{
+		getFunc: func(ctx context.Context) (fleetClaimClient, error) {
+			return client, nil
+		},
+		putFunc: func(c fleetClaimClient) {},
+	}
+
+	handler := handleFleetClaimWithPool(pool, nil)
+
+	body, _ := json.Marshal(FleetClaimRequest{
+		IssueType:   "bug",
+		MaxPriority: &maxPri,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if capturedArgs == nil {
+		t.Fatal("Ready was not called")
+	}
+	if capturedArgs.Type != "bug" {
+		t.Errorf("readyArgs.Type = %q, want %q", capturedArgs.Type, "bug")
+	}
+	if capturedArgs.Priority == nil || *capturedArgs.Priority != 1 {
+		t.Errorf("readyArgs.Priority = %v, want 1", capturedArgs.Priority)
+	}
+	if capturedArgs.Limit != 10 {
+		t.Errorf("readyArgs.Limit = %d, want 10", capturedArgs.Limit)
+	}
+}
+
+// =============================================================================
+// Fleet Register Handler Edge Case Tests
+// =============================================================================
+
+func TestFleetRegister_RateLimiterNil_Bypassed(t *testing.T) {
+	store := &mockWorkerRegistrar{}
+	tokenCfg := testTokenConfig()
+	regCfg := &FleetRegisterConfig{
+		APIKey:      testFleetAPIKey,
+		RateLimiter: nil, // Explicitly nil
+	}
+	handler := handleFleetRegisterWithStore(store, tokenCfg, regCfg)
+
+	body, _ := json.Marshal(FleetRegisterRequest{
+		WorkerID: "worker-no-rl",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	setFleetAPIKeyHeader(req)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccessWithData(t, result, "token")
+}
+
+// =============================================================================
+// Fleet Done Handler Edge Case Tests
+// =============================================================================
+
+func TestFleetDone_ClaimWithEmptyTaskID_StillProcesses(t *testing.T) {
+	var capturedResult *fleet.TaskResult
+	var capturedReleaseTaskID string
+
+	store := &mockFleetDoneStore{
+		getWorkerFunc: func(ctx context.Context, workerID string) (*fleet.Worker, error) {
+			return &fleet.Worker{WorkerID: workerID, RegisteredAt: time.Now().Unix()}, nil
+		},
+		getWorkerClaimFunc: func(ctx context.Context, workerID string) (*fleet.ClaimResponse, error) {
+			return &fleet.ClaimResponse{TaskID: "", Success: true}, nil
+		},
+		recordResultFunc: func(ctx context.Context, result *fleet.TaskResult) error {
+			capturedResult = result
+			return nil
+		},
+		releaseClaimFunc: func(ctx context.Context, taskID string) error {
+			capturedReleaseTaskID = taskID
+			return nil
+		},
+		clearClaimFunc: func(ctx context.Context, workerID string) error {
+			return nil
+		},
+	}
+	handler := handleFleetDoneWithStore(store)
+
+	body, _ := json.Marshal(FleetDoneRequest{Success: true, CommitSHA: "abc123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/fleet/workers/worker-1/done", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "worker-1")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	result := assertJSONResponse(t, w)
+	assertEnvelopeSuccess(t, result)
+
+	// Verify RecordTaskResult was called with empty task ID
+	if capturedResult == nil {
+		t.Fatal("RecordTaskResult was not called")
+	}
+	if capturedResult.TaskID != "" {
+		t.Errorf("result.TaskID = %q, want empty string", capturedResult.TaskID)
+	}
+	if capturedResult.WorkerID != "worker-1" {
+		t.Errorf("result.WorkerID = %q, want %q", capturedResult.WorkerID, "worker-1")
+	}
+
+	// Verify ReleaseClaim was called with empty task ID
+	if capturedReleaseTaskID != "" {
+		t.Errorf("ReleaseClaim taskID = %q, want empty string", capturedReleaseTaskID)
+	}
+}
