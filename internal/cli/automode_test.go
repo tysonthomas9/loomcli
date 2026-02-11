@@ -2284,55 +2284,93 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 // ============================================================================
 
 func TestHasOpenBlockers(t *testing.T) {
+	// allIssues simulates bd ready output (only open/ready issues)
+	allIssues := []BdIssue{
+		{ID: "T-0", Status: "open"},
+		{ID: "EPIC-1", Status: "open"},
+	}
+
 	tests := []struct {
-		name string
-		deps []Dependency
-		want bool
+		name      string
+		deps      []Dependency
+		allIssues []BdIssue
+		want      bool
 	}{
 		{
-			name: "nil slice",
-			deps: nil,
-			want: false,
+			name:      "nil slice",
+			deps:      nil,
+			allIssues: allIssues,
+			want:      false,
 		},
 		{
-			name: "empty slice",
-			deps: []Dependency{},
-			want: false,
+			name:      "empty slice",
+			deps:      []Dependency{},
+			allIssues: allIssues,
+			want:      false,
 		},
 		{
 			name: "only parent-child deps",
 			deps: []Dependency{
 				{IssueID: "T-1", DependsOnID: "EPIC-1", Type: "parent-child"},
 			},
-			want: false,
+			allIssues: allIssues,
+			want:      false,
 		},
 		{
-			name: "only blocks dep",
+			name: "blocks dep with open blocker",
 			deps: []Dependency{
 				{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
 			},
-			want: true,
+			allIssues: allIssues,
+			want:      true,
 		},
 		{
-			name: "mixed deps with one blocks",
+			name: "blocks dep with closed blocker not in ready list",
+			deps: []Dependency{
+				{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
+			},
+			allIssues: allIssues,
+			want:      false,
+		},
+		{
+			name: "mixed deps with one open blocks",
 			deps: []Dependency{
 				{IssueID: "T-1", DependsOnID: "EPIC-1", Type: "parent-child"},
 				{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
 			},
-			want: true,
+			allIssues: allIssues,
+			want:      true,
+		},
+		{
+			name: "mixed deps with resolved blocker",
+			deps: []Dependency{
+				{IssueID: "T-1", DependsOnID: "EPIC-1", Type: "parent-child"},
+				{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
+			},
+			allIssues: allIssues,
+			want:      false,
 		},
 		{
 			name: "unknown dependency type not treated as blocker",
 			deps: []Dependency{
 				{IssueID: "T-1", DependsOnID: "T-0", Type: "related"},
 			},
-			want: false,
+			allIssues: allIssues,
+			want:      false,
+		},
+		{
+			name: "blocker not in ready list assumed resolved",
+			deps: []Dependency{
+				{IssueID: "T-1", DependsOnID: "T-UNKNOWN", Type: "blocks"},
+			},
+			allIssues: allIssues,
+			want:      false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := hasOpenBlockers(tt.deps)
+			got := hasOpenBlockers(tt.deps, tt.allIssues)
 			if got != tt.want {
 				t.Errorf("hasOpenBlockers() = %v, want %v", got, tt.want)
 			}
@@ -2651,24 +2689,35 @@ func TestGetAvailablePlanningTasks(t *testing.T) {
 			wantIDs: []string{"T-1", "T-3", "T-4"},
 		},
 		{
-			name: "skips task with blocks dependency",
+			name: "skips task with blocks dependency when blocker is open",
 			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Blocked task", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
 				}},
 			}),
-			wantIDs: nil,
+			wantIDs: []string{"T-0"},
+		},
+		{
+			name: "does not skip task when blocker is resolved",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Was blocked", Status: "open", Design: "", Dependencies: []Dependency{
+					{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
+				}},
+			}),
+			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "mixed blocked and unblocked returns only unblocked",
 			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Unblocked", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Blocked", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-2", DependsOnID: "T-0", Type: "blocks"},
 				}},
 				{ID: "T-3", Title: "Also unblocked", Status: "open", Design: ""},
 			}),
-			wantIDs: []string{"T-1", "T-3"},
+			wantIDs: []string{"T-0", "T-1", "T-3"},
 		},
 		{
 			name:    "bd error propagates",
@@ -2771,8 +2820,9 @@ func TestGetAvailableImplementationTasks(t *testing.T) {
 			wantIDs: []string{"T-2", "T-4"},
 		},
 		{
-			name: "skips task with blocks dependency even with design",
+			name: "skips task with blocks dependency when blocker is open",
 			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Blocked with design", Status: "open", Design: "Plan", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
 				}},
@@ -2780,8 +2830,18 @@ func TestGetAvailableImplementationTasks(t *testing.T) {
 			wantIDs: nil,
 		},
 		{
+			name: "does not skip task when blocker is resolved",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Was blocked with design", Status: "open", Design: "Plan", Dependencies: []Dependency{
+					{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
+				}},
+			}),
+			wantIDs: []string{"T-1"},
+		},
+		{
 			name: "mixed blocked and unblocked returns only unblocked",
 			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Unblocked with design", Status: "open", Design: "Plan A"},
 				{ID: "T-2", Title: "Blocked with design", Status: "open", Design: "Plan B", Dependencies: []Dependency{
 					{IssueID: "T-2", DependsOnID: "T-0", Type: "blocks"},
@@ -2892,24 +2952,35 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 			wantIDs: []string{"T-1", "T-3", "T-5"},
 		},
 		{
-			name: "skips task with blocks dependency",
+			name: "skips task with blocks dependency when blocker is open",
 			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Blocked task", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
 				}},
 			}),
-			wantIDs: nil,
+			wantIDs: []string{"T-0"},
+		},
+		{
+			name: "does not skip task when blocker is resolved",
+			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Was blocked", Status: "open", Design: "", Dependencies: []Dependency{
+					{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
+				}},
+			}),
+			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "mixed blocked and unblocked returns only unblocked",
 			bdOutput: mustJSON([]BdIssue{
+				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Unblocked", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Blocked", Status: "open", Design: "Plan", Dependencies: []Dependency{
 					{IssueID: "T-2", DependsOnID: "T-0", Type: "blocks"},
 				}},
 				{ID: "T-3", Title: "Also unblocked", Status: "open", Design: ""},
 			}),
-			wantIDs: []string{"T-1", "T-3"},
+			wantIDs: []string{"T-0", "T-1", "T-3"},
 		},
 		{
 			name:    "bd error propagates",

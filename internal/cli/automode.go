@@ -109,13 +109,19 @@ func interruptibleSleep(d time.Duration, shutdown <-chan struct{}) bool {
 	}
 }
 
-// hasOpenBlockers returns true if any dependency is a blocking relationship.
-// A blocking dependency indicates the task cannot start until the blocker is resolved.
-// The presence of a "blocks" dependency means the blocker hasn't been resolved yet
-// (resolved blockers have their dependencies removed from the database).
-func hasOpenBlockers(deps []Dependency) bool {
+// hasOpenBlockers returns true if any dependency is a blocking relationship
+// where the blocker is still unresolved. Since allIssues comes from bd ready
+// (which only returns open/ready issues), a blocker NOT in the list is assumed
+// resolved (closed/tombstone). Only blockers present and still open block work.
+func hasOpenBlockers(deps []Dependency, allIssues []BdIssue) bool {
+	// Build set of known open issue IDs from the ready list
+	openIDs := make(map[string]bool, len(allIssues))
+	for _, issue := range allIssues {
+		openIDs[issue.ID] = true
+	}
+
 	for _, dep := range deps {
-		if dep.Type == "blocks" {
+		if dep.Type == "blocks" && openIDs[dep.DependsOnID] {
 			return true
 		}
 	}
@@ -151,7 +157,7 @@ func GetAvailablePlanningTasks(parentID string) ([]BdIssue, error) {
 			continue
 		}
 		// Safety net: skip tasks with open blocking dependencies
-		if hasOpenBlockers(issue.Dependencies) {
+		if hasOpenBlockers(issue.Dependencies, issues) {
 			continue
 		}
 		// Task needs planning if:
@@ -205,7 +211,7 @@ func GetAvailableImplementationTasks(parentID string) ([]BdIssue, error) {
 			continue
 		}
 		// Safety net: skip tasks with open blocking dependencies
-		if hasOpenBlockers(issue.Dependencies) {
+		if hasOpenBlockers(issue.Dependencies, issues) {
 			continue
 		}
 		// Task ready for implementation if it HAS a design AND no revision label
@@ -256,7 +262,7 @@ func GetAnyAvailableTasks(parentID string) ([]BdIssue, error) {
 			continue
 		}
 		// Safety net: skip tasks with open blocking dependencies
-		if hasOpenBlockers(issue.Dependencies) {
+		if hasOpenBlockers(issue.Dependencies, issues) {
 			continue
 		}
 		candidates = append(candidates, issue)
