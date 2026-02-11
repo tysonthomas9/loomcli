@@ -3,3 +3,5 @@ worktrees/
 .beads/
 node_modules/
 *.log
+.loom/
+loom.yaml
