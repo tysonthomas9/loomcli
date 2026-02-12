@@ -2,7 +2,9 @@ package webui
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
+	"sync"
 	"testing"
 	"time"
 )
@@ -614,4 +616,407 @@ func TestTerminalMultipleManagersWithPrefixes(t *testing.T) {
 
 	// Cleanup mgr2.
 	mgr2.Shutdown()
+}
+
+// TestTerminalShutdownConcurrentWithAttach verifies that calling Shutdown()
+// concurrently with Attach() does not cause panics or data races.
+func TestTerminalShutdownConcurrentWithAttach(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 10)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	baseName := "test-" + t.Name()
+	t.Cleanup(func() {
+		// Clean up any straggler tmux sessions.
+		for i := 0; i < 15; i++ {
+			killTmuxSession(t, fmt.Sprintf("%s-%d", baseName, i))
+		}
+	})
+
+	// Attach a few initial sessions.
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("%s-%d", baseName, i)
+		if _, err := mgr.Attach(name, "", 80, 24); err != nil {
+			t.Fatalf("initial Attach(%q) error: %v", name, err)
+		}
+	}
+
+	var wg sync.WaitGroup
+
+	// Launch goroutines that try to Attach concurrently with Shutdown.
+	for i := 3; i < 13; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			name := fmt.Sprintf("%s-%d", baseName, idx)
+			// Attach may succeed or fail — both are acceptable.
+			_, _ = mgr.Attach(name, "", 80, 24)
+		}(i)
+	}
+
+	// Simultaneously call Shutdown.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = mgr.Shutdown()
+	}()
+
+	wg.Wait()
+
+	// Attach calls that raced after Shutdown may have added sessions to
+	// the fresh map. This is by design — Shutdown is idempotent and the
+	// manager remains reusable. Clean up any stragglers.
+	_ = mgr.Shutdown()
+
+	if got := mgr.SessionCount(); got != 0 {
+		t.Errorf("expected SessionCount()==0 after final Shutdown, got %d", got)
+	}
+}
+
+// TestTerminalShutdownIdempotent verifies that calling Shutdown() twice
+// does not panic or return an error.
+func TestTerminalShutdownIdempotent(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 5)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	name := "test-" + t.Name()
+	t.Cleanup(func() {
+		killTmuxSession(t, name)
+	})
+
+	if _, err := mgr.Attach(name, "", 80, 24); err != nil {
+		t.Fatalf("Attach() error: %v", err)
+	}
+
+	// First shutdown.
+	if err := mgr.Shutdown(); err != nil {
+		t.Fatalf("first Shutdown() error: %v", err)
+	}
+	if got := mgr.SessionCount(); got != 0 {
+		t.Errorf("expected SessionCount()==0 after first Shutdown, got %d", got)
+	}
+
+	// Second shutdown — should be a no-op, no panic.
+	if err := mgr.Shutdown(); err != nil {
+		t.Fatalf("second Shutdown() error: %v", err)
+	}
+	if got := mgr.SessionCount(); got != 0 {
+		t.Errorf("expected SessionCount()==0 after second Shutdown, got %d", got)
+	}
+}
+
+// TestTerminalKillSessionByNameConcurrentWithAttach verifies that calling
+// KillSessionByName concurrently with Attach does not cause panics or data races.
+func TestTerminalKillSessionByNameConcurrentWithAttach(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 20)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	name := "test-" + t.Name()
+	t.Cleanup(func() {
+		mgr.Shutdown()
+		killTmuxSession(t, name)
+	})
+
+	// Create initial session.
+	if _, err := mgr.Attach(name, "", 80, 24); err != nil {
+		t.Fatalf("initial Attach() error: %v", err)
+	}
+
+	var wg sync.WaitGroup
+
+	// Goroutines that kill the session by name.
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = mgr.KillSessionByName(name)
+		}()
+	}
+
+	// Goroutines that try to re-attach.
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = mgr.Attach(name, "", 80, 24)
+		}()
+	}
+
+	wg.Wait()
+
+	// Manager should be in a consistent state.
+	count := mgr.SessionCount()
+	if count < 0 {
+		t.Errorf("expected SessionCount() >= 0, got %d", count)
+	}
+}
+
+// TestTerminalPTYWriteAfterClose verifies that writing to a session's PTY
+// after Close() returns an error rather than panicking.
+func TestTerminalPTYWriteAfterClose(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 5)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	name := "test-" + t.Name()
+	t.Cleanup(func() {
+		mgr.Shutdown()
+		killTmuxSession(t, name)
+	})
+
+	session, err := mgr.Attach(name, "", 80, 24)
+	if err != nil {
+		t.Fatalf("Attach() error: %v", err)
+	}
+
+	ptyFd := session.PTY
+
+	// Close the session.
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	// Write to the closed PTY — should return an error, not panic.
+	_, writeErr := ptyFd.Write([]byte("hello"))
+	if writeErr == nil {
+		t.Error("expected Write to closed PTY to return an error")
+	}
+}
+
+// TestTerminalPTYWriteCloseConcurrent verifies that writing to a session's PTY
+// concurrently with Close() does not cause panics or data races.
+func TestTerminalPTYWriteCloseConcurrent(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 5)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	name := "test-" + t.Name()
+	t.Cleanup(func() {
+		mgr.Shutdown()
+		killTmuxSession(t, name)
+	})
+
+	session, err := mgr.Attach(name, "", 80, 24)
+	if err != nil {
+		t.Fatalf("Attach() error: %v", err)
+	}
+
+	ptyFd := session.PTY
+
+	var wg sync.WaitGroup
+
+	// Launch writers that write to the PTY in a loop.
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 20; j++ {
+				// Write may succeed or fail — both are acceptable.
+				_, _ = ptyFd.Write([]byte("x"))
+			}
+		}()
+	}
+
+	// Let writers start, then close.
+	time.Sleep(5 * time.Millisecond)
+	if err := session.Close(); err != nil {
+		t.Logf("Close() returned error (acceptable): %v", err)
+	}
+
+	wg.Wait()
+	// Key assertion: no panic, no data race (detected by -race).
+}
+
+// TestTerminalMaxSessionsExactBoundary verifies the exact boundary behavior of
+// max sessions enforcement: exactly N sessions succeed, N+1 fails, and freeing
+// one slot allows a new attach.
+func TestTerminalMaxSessionsExactBoundary(t *testing.T) {
+	skipIfNoTmux(t)
+
+	const maxSess = 5
+
+	mgr, err := NewTerminalManager("", "", maxSess)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	baseName := "test-" + t.Name()
+	t.Cleanup(func() {
+		mgr.Shutdown()
+		for i := 0; i < maxSess+2; i++ {
+			killTmuxSession(t, fmt.Sprintf("%s-%d", baseName, i))
+		}
+	})
+
+	// Attach exactly maxSess sessions — all should succeed.
+	sessions := make([]*TerminalSession, 0, maxSess)
+	for i := 0; i < maxSess; i++ {
+		name := fmt.Sprintf("%s-%d", baseName, i)
+		sess, err := mgr.Attach(name, "", 80, 24)
+		if err != nil {
+			t.Fatalf("Attach(%q) error at slot %d: %v", name, i, err)
+		}
+		sessions = append(sessions, sess)
+	}
+
+	if got := mgr.SessionCount(); got != maxSess {
+		t.Fatalf("expected SessionCount()==%d, got %d", maxSess, got)
+	}
+
+	// The (maxSess+1)th attach must fail.
+	overflowName := fmt.Sprintf("%s-%d", baseName, maxSess)
+	_, err = mgr.Attach(overflowName, "", 80, 24)
+	if !errors.Is(err, ErrMaxSessionsReached) {
+		t.Fatalf("expected ErrMaxSessionsReached for session %d, got: %v", maxSess+1, err)
+	}
+
+	// Detach one session to free a slot.
+	if err := mgr.Detach(sessions[0].ConnID); err != nil {
+		t.Fatalf("Detach() error: %v", err)
+	}
+
+	// Now a new attach should succeed.
+	replaceName := fmt.Sprintf("%s-%d", baseName, maxSess+1)
+	_, err = mgr.Attach(replaceName, "", 80, 24)
+	if err != nil {
+		t.Fatalf("Attach after Detach should succeed, got: %v", err)
+	}
+
+	if got := mgr.SessionCount(); got != maxSess {
+		t.Fatalf("expected SessionCount()==%d after replace, got %d", maxSess, got)
+	}
+}
+
+// TestTerminalMaxSessionsConcurrentAttach verifies that concurrent Attach calls
+// correctly enforce the max sessions limit without races.
+func TestTerminalMaxSessionsConcurrentAttach(t *testing.T) {
+	skipIfNoTmux(t)
+
+	const maxSess = 3
+	const totalAttempts = 10
+
+	mgr, err := NewTerminalManager("", "", maxSess)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	baseName := "test-" + t.Name()
+	t.Cleanup(func() {
+		mgr.Shutdown()
+		for i := 0; i < totalAttempts; i++ {
+			killTmuxSession(t, fmt.Sprintf("%s-%d", baseName, i))
+		}
+	})
+
+	type result struct {
+		err error
+	}
+	results := make(chan result, totalAttempts)
+
+	var wg sync.WaitGroup
+	for i := 0; i < totalAttempts; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			name := fmt.Sprintf("%s-%d", baseName, idx)
+			_, err := mgr.Attach(name, "", 80, 24)
+			results <- result{err: err}
+		}(i)
+	}
+
+	wg.Wait()
+	close(results)
+
+	var successes, maxReached int
+	for r := range results {
+		if r.err == nil {
+			successes++
+		} else if errors.Is(r.err, ErrMaxSessionsReached) {
+			maxReached++
+		} else {
+			t.Errorf("unexpected error: %v", r.err)
+		}
+	}
+
+	if successes != maxSess {
+		t.Errorf("expected exactly %d successes, got %d", maxSess, successes)
+	}
+	if maxReached != totalAttempts-maxSess {
+		t.Errorf("expected %d ErrMaxSessionsReached, got %d", totalAttempts-maxSess, maxReached)
+	}
+	if got := mgr.SessionCount(); got != maxSess {
+		t.Errorf("expected SessionCount()==%d, got %d", maxSess, got)
+	}
+}
+
+// TestTerminalDetachDuringShutdown verifies that calling Detach() concurrently
+// with Shutdown() does not cause panics or data races.
+func TestTerminalDetachDuringShutdown(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 10)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+
+	baseName := "test-" + t.Name()
+	t.Cleanup(func() {
+		for i := 0; i < 5; i++ {
+			killTmuxSession(t, fmt.Sprintf("%s-%d", baseName, i))
+		}
+	})
+
+	// Attach several sessions and collect their connection IDs.
+	var connIDs []string
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("%s-%d", baseName, i)
+		sess, err := mgr.Attach(name, "", 80, 24)
+		if err != nil {
+			t.Fatalf("Attach(%q) error: %v", name, err)
+		}
+		connIDs = append(connIDs, sess.ConnID)
+	}
+
+	var wg sync.WaitGroup
+
+	// Goroutines that try to Detach known connections.
+	for _, connID := range connIDs {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			// Detach may succeed or fail (Shutdown may have cleared it first).
+			_ = mgr.Detach(id)
+		}(connID)
+	}
+
+	// Simultaneously call Shutdown.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = mgr.Shutdown()
+	}()
+
+	wg.Wait()
+
+	// Manager should be in a clean state.
+	if got := mgr.SessionCount(); got != 0 {
+		t.Errorf("expected SessionCount()==0 after concurrent Detach+Shutdown, got %d", got)
+	}
 }
