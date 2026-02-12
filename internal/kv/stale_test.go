@@ -2,6 +2,7 @@ package kv
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -791,5 +792,74 @@ func TestStaleDetector_ReleaseLeadership_DifferentOwner(t *testing.T) {
 	}
 	if val != "server-1" {
 		t.Errorf("expected leader to be server-1, got %s", val)
+	}
+}
+
+// --- GetStaleWorkers edge case tests ---
+
+func TestGetStaleWorkers_EmptyZSET(t *testing.T) {
+	client, _ := setupStaleTest(t)
+	ctx := context.Background()
+
+	// No workers seeded — ZSET doesn't exist
+	entries, err := client.GetStaleWorkers(ctx, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries for empty ZSET, got %d", len(entries))
+	}
+}
+
+func TestGetStaleWorkers_RedisError(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	mr.Close()
+
+	_, err := client.GetStaleWorkers(ctx, 5*time.Minute)
+	if err == nil {
+		t.Fatal("expected error when Redis is closed")
+	}
+	if !strings.Contains(err.Error(), "ZRANGEBYSCORE failed") {
+		t.Errorf("expected error to contain 'ZRANGEBYSCORE failed', got: %v", err)
+	}
+}
+
+func TestGetStaleWorkers_AllWorkersStale(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	// Seed 3 workers all with timestamps 10 minutes ago
+	staleTime := float64(time.Now().Add(-10 * time.Minute).UnixMilli())
+	mr.ZAdd(activeWorkersKey(), staleTime, "worker-1")
+	mr.ZAdd(activeWorkersKey(), staleTime-1000, "worker-2")
+	mr.ZAdd(activeWorkersKey(), staleTime-2000, "worker-3")
+
+	entries, err := client.GetStaleWorkers(ctx, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 stale entries, got %d", len(entries))
+	}
+}
+
+func TestGetStaleWorkers_ZeroThreshold(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	// Seed workers with current timestamps
+	now := float64(time.Now().UnixMilli())
+	mr.ZAdd(activeWorkersKey(), now, "worker-1")
+	mr.ZAdd(activeWorkersKey(), now, "worker-2")
+
+	// Zero threshold means cutoff = now, so all workers at or before now are stale
+	entries, err := client.GetStaleWorkers(ctx, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 stale entries with zero threshold, got %d", len(entries))
 	}
 }

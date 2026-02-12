@@ -3,7 +3,10 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -476,4 +479,337 @@ func TestGetTaskOwner_WithCircuitBreaker(t *testing.T) {
 		t.Errorf("expected empty string, got %s", owner)
 	}
 }
+
+// --- Edge case tests ---
+
+func TestToInt64_Overflow(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"overflow positive", "9999999999999999999999"},
+		{"overflow negative", "-9999999999999999999999"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := toInt64(tt.input)
+			if err == nil {
+				t.Errorf("toInt64(%q) expected overflow error, got nil", tt.input)
+			}
+		})
+	}
+}
+
+func TestToInt64_EdgeValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   interface{}
+		want    int64
+		wantErr bool
+	}{
+		{"max int64 string", fmt.Sprintf("%d", math.MaxInt64), math.MaxInt64, false},
+		{"min int64 string", fmt.Sprintf("%d", math.MinInt64), math.MinInt64, false},
+		{"zero string", "0", 0, false},
+		{"zero int64", int64(0), 0, false},
+		{"empty string", "", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := toInt64(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("toInt64(%v) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("toInt64(%v) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToString_EdgeValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   interface{}
+		want    string
+		wantErr bool
+	}{
+		{"zero int64", int64(0), "0", false},
+		{"negative int64", int64(-1), "-1", false},
+		{"max int64", int64(math.MaxInt64), fmt.Sprintf("%d", math.MaxInt64), false},
+		{"byte slice", []byte("test"), "", true},
+		{"bool", true, "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := toString(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("toString(%v) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("toString(%v) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateID_UnicodeAndEmoji(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      string
+		wantErr bool
+	}{
+		{"null char", "worker-\x00", false},
+		{"emoji", "worker-emoji-🚀", false},
+		{"accented chars", "worker-café", false},
+		{"CJK characters", "worker-日本語", false},
+		{"mixed unicode", "worker-αβγ", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateID(tt.id, "testID")
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateID(%q) error = %v, wantErr %v", tt.id, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// customNetError implements net.Error for testing.
+type customNetError struct {
+	timeout   bool
+	temporary bool
+	msg       string
+}
+
+func (e *customNetError) Error() string   { return e.msg }
+func (e *customNetError) Timeout() bool   { return e.timeout }
+func (e *customNetError) Temporary() bool { return e.temporary }
+
+func TestRedisShouldTrip_CustomNetError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			"timeout and temporary",
+			&customNetError{timeout: true, temporary: true, msg: "custom timeout"},
+			true,
+		},
+		{
+			"not timeout not temporary",
+			&customNetError{timeout: false, temporary: false, msg: "custom error"},
+			true,
+		},
+		{
+			"wrapped net.Error",
+			fmt.Errorf("wrapped: %w", &customNetError{msg: "inner net error"}),
+			true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RedisShouldTrip(tt.err)
+			if got != tt.want {
+				t.Errorf("RedisShouldTrip(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRedisShouldTrip_WrappedErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			"wrapped context.Canceled not caught by ==",
+			fmt.Errorf("wrapper: %w", context.Canceled),
+			false,
+		},
+		{
+			"connection refused string match through wrapping",
+			fmt.Errorf("connection refused: %w", errors.New("inner")),
+			true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RedisShouldTrip(tt.err)
+			if got != tt.want {
+				t.Errorf("RedisShouldTrip(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// newOpenBreaker creates a circuit breaker that is already in OPEN state.
+func newOpenBreaker() *circuitbreaker.Breaker {
+	b := circuitbreaker.NewBreaker("test-open", circuitbreaker.Config{
+		FailureThreshold: 1,
+		OpenTimeout:      1 * time.Hour, // long timeout so it stays open
+		ShouldTrip:       func(err error) bool { return true },
+	})
+	// Trip the breaker by executing a failing function
+	_ = b.Execute(func() error { return errors.New("trip") })
+	return b
+}
+
+func TestCircuitBreaker_OpenState_ClaimTask(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+	client.SetCircuitBreaker(newOpenBreaker())
+
+	_, err := client.ClaimTask(ctx, "worker-1", "task-1", "Test", "spark")
+	if !errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+		t.Errorf("expected ErrCircuitOpen, got %v", err)
+	}
+}
+
+func TestCircuitBreaker_OpenState_Heartbeat(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+	client.SetCircuitBreaker(newOpenBreaker())
+
+	_, err := client.Heartbeat(ctx, "worker-1")
+	if !errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+		t.Errorf("expected ErrCircuitOpen, got %v", err)
+	}
+}
+
+func TestCircuitBreaker_OpenState_CompleteTask(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+	client.SetCircuitBreaker(newOpenBreaker())
+
+	_, err := client.CompleteTask(ctx, "worker-1", "task-1")
+	if !errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+		t.Errorf("expected ErrCircuitOpen, got %v", err)
+	}
+}
+
+func TestCircuitBreaker_OpenState_GetStaleWorkers(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+	client.SetCircuitBreaker(newOpenBreaker())
+
+	_, err := client.GetStaleWorkers(ctx, 5*time.Minute)
+	if !errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+		t.Errorf("expected ErrCircuitOpen, got %v", err)
+	}
+}
+
+func TestCircuitBreaker_OpenState_GetWorkerState(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+	client.SetCircuitBreaker(newOpenBreaker())
+
+	_, err := client.GetWorkerState(ctx, "worker-1")
+	if !errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+		t.Errorf("expected ErrCircuitOpen, got %v", err)
+	}
+}
+
+func TestCircuitBreaker_OpenState_GetTaskOwner(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+	client.SetCircuitBreaker(newOpenBreaker())
+
+	_, err := client.GetTaskOwner(ctx, "task-1")
+	if !errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+		t.Errorf("expected ErrCircuitOpen, got %v", err)
+	}
+}
+
+func TestCircuitBreaker_OpenState_SetLeaderKey(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+	client.SetCircuitBreaker(newOpenBreaker())
+
+	_, err := client.SetLeaderKey(ctx, "test:leader", "server-1", 30*time.Second)
+	if !errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+		t.Errorf("expected ErrCircuitOpen, got %v", err)
+	}
+}
+
+func TestCircuitBreaker_OpenState_DeleteOps(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+	client.SetCircuitBreaker(newOpenBreaker())
+
+	tests := []struct {
+		name string
+		fn   func() error
+	}{
+		{"DeleteTaskOwner", func() error { return client.DeleteTaskOwner(ctx, "task-1") }},
+		{"DeleteWorkerState", func() error { return client.DeleteWorkerState(ctx, "worker-1") }},
+		{"RemoveActiveWorker", func() error { return client.RemoveActiveWorker(ctx, "worker-1") }},
+		{"RenewLeaderKey", func() error { return client.RenewLeaderKey(ctx, "test:leader", 30*time.Second) }},
+		{"DeleteLeaderKey", func() error { return client.DeleteLeaderKey(ctx, "test:leader") }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fn()
+			if !errors.Is(err, circuitbreaker.ErrCircuitOpen) {
+				t.Errorf("expected ErrCircuitOpen, got %v", err)
+			}
+		})
+	}
+}
+
+func TestClaimTask_ScriptError(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	mr.Close()
+
+	_, err := client.ClaimTask(ctx, "worker-1", "task-1", "Test", "spark")
+	if err == nil {
+		t.Fatal("expected error when Redis is closed")
+	}
+	if !strings.Contains(err.Error(), "claim script failed") {
+		t.Errorf("expected error to contain 'claim script failed', got: %v", err)
+	}
+}
+
+func TestHeartbeat_ScriptError(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	mr.Close()
+
+	_, err := client.Heartbeat(ctx, "worker-1")
+	if err == nil {
+		t.Fatal("expected error when Redis is closed")
+	}
+	if !strings.Contains(err.Error(), "heartbeat script failed") {
+		t.Errorf("expected error to contain 'heartbeat script failed', got: %v", err)
+	}
+}
+
+func TestCompleteTask_ScriptError(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	mr.Close()
+
+	_, err := client.CompleteTask(ctx, "worker-1", "task-1")
+	if err == nil {
+		t.Fatal("expected error when Redis is closed")
+	}
+	if !strings.Contains(err.Error(), "complete script failed") {
+		t.Errorf("expected error to contain 'complete script failed', got: %v", err)
+	}
+}
+
 
