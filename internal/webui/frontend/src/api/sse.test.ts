@@ -194,6 +194,38 @@ describe('BeadsSSEClient', () => {
       expect(MockEventSource.instances.length).toBe(1);
     });
 
+    it('handles EventSource constructor throwing', () => {
+      const onStateChange = vi.fn();
+      const onError = vi.fn();
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      // Override EventSource to throw on construction
+      const ThrowingEventSource = function () {
+        throw new Error('SecurityError');
+      } as unknown as typeof EventSource;
+      ThrowingEventSource.CONNECTING = 0;
+      ThrowingEventSource.OPEN = 1;
+      ThrowingEventSource.CLOSED = 2;
+
+      global.EventSource = ThrowingEventSource;
+
+      const client = new BeadsSSEClient({ onStateChange, onError });
+      client.connect();
+
+      // handleError is called but eventSource is null, so state stays 'connecting'
+      expect(client.getState()).toBe('connecting');
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        '[SSE] Failed to create EventSource:',
+        expect.any(Error)
+      );
+      // onError is NOT called because handleError requires non-null eventSource
+      expect(onError).not.toHaveBeenCalled();
+
+      consoleErrorSpy.mockRestore();
+      // Restore MockEventSource for subsequent tests
+      global.EventSource = MockEventSource as unknown as typeof EventSource;
+    });
+
     it('connect() when connecting does nothing', () => {
       const client = new BeadsSSEClient();
 
@@ -479,6 +511,104 @@ describe('BeadsSSEClient', () => {
       client.connect(1706100000000);
 
       expect(MockEventSource.lastInstance?.url).toContain('since=1706100000000');
+    });
+
+    it('ignores lastEventId of 0', () => {
+      const client = new BeadsSSEClient();
+
+      client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const mutation: MutationPayload = {
+        type: 'create',
+        issue_id: 'beads-100',
+        title: 'Test',
+        timestamp: '2025-01-23T12:00:00Z',
+      };
+
+      MockEventSource.lastInstance?.simulateMutation(mutation, '0');
+
+      expect(client.getLastEventId()).toBeUndefined();
+    });
+
+    it('ignores negative lastEventId', () => {
+      const client = new BeadsSSEClient();
+
+      client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const mutation: MutationPayload = {
+        type: 'create',
+        issue_id: 'beads-101',
+        title: 'Test',
+        timestamp: '2025-01-23T12:00:00Z',
+      };
+
+      MockEventSource.lastInstance?.simulateMutation(mutation, '-1');
+
+      expect(client.getLastEventId()).toBeUndefined();
+    });
+
+    it('ignores non-numeric lastEventId', () => {
+      const client = new BeadsSSEClient();
+
+      client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const mutation: MutationPayload = {
+        type: 'create',
+        issue_id: 'beads-102',
+        title: 'Test',
+        timestamp: '2025-01-23T12:00:00Z',
+      };
+
+      MockEventSource.lastInstance?.simulateMutation(mutation, 'abc');
+
+      expect(client.getLastEventId()).toBeUndefined();
+    });
+
+    it('does not overwrite newer ID with older ID (out-of-order)', () => {
+      const client = new BeadsSSEClient();
+
+      client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const mutation1: MutationPayload = {
+        type: 'create',
+        issue_id: 'beads-103',
+        title: 'First',
+        timestamp: '2025-01-23T12:00:00Z',
+      };
+
+      const mutation2: MutationPayload = {
+        type: 'update',
+        issue_id: 'beads-104',
+        title: 'Second',
+        timestamp: '2025-01-23T11:00:00Z',
+      };
+
+      MockEventSource.lastInstance?.simulateMutation(mutation1, '2000');
+      MockEventSource.lastInstance?.simulateMutation(mutation2, '1000');
+
+      expect(client.getLastEventId()).toBe(2000);
+    });
+
+    it('handles empty lastEventId string', () => {
+      const client = new BeadsSSEClient();
+
+      client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const mutation: MutationPayload = {
+        type: 'create',
+        issue_id: 'beads-105',
+        title: 'Test',
+        timestamp: '2025-01-23T12:00:00Z',
+      };
+
+      MockEventSource.lastInstance?.simulateMutation(mutation, '');
+
+      expect(client.getLastEventId()).toBeUndefined();
     });
 
     it('invalid timestamp in mutation is ignored for tracking', () => {

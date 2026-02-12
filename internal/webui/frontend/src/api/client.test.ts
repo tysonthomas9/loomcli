@@ -715,6 +715,149 @@ describe('API Client', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
+    it('fetchApi injects auth token as Bearer header when authenticated', async () => {
+      await resetAuthState();
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data: 'test' }),
+      });
+
+      await get('/api/test');
+
+      const mockFn = global.fetch as ReturnType<typeof vi.fn>;
+      const call = mockFn.mock.calls[0];
+      const options = call?.[1] as { headers: Record<string, string> };
+      expect(options.headers['Authorization']).toBe('Bearer reset-token');
+    });
+
+    it('fetchApi does not override explicit Authorization header', async () => {
+      await resetAuthState();
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({}),
+      });
+
+      await get('/api/test', { headers: { Authorization: 'Bearer custom' } });
+
+      const mockFn = global.fetch as ReturnType<typeof vi.fn>;
+      const call = mockFn.mock.calls[0];
+      const options = call?.[1] as { headers: Record<string, string> };
+      expect(options.headers['Authorization']).toBe('Bearer custom');
+    });
+
+    it('fetchApi does not inject auth header when token is null', async () => {
+      // Set up authenticated state, then clear token via 401 interceptor
+      await resetAuthState();
+
+      const clearMock = vi.fn();
+      // Call 1: returns 401 → triggers interceptor which sets authToken=null
+      clearMock.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: () => Promise.resolve('unauthorized'),
+      });
+      // Call 2: re-auth returns 404 → state=disabled, token stays null
+      clearMock.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        text: () => Promise.resolve('not found'),
+      });
+      global.fetch = clearMock;
+      await get('/api/clear-token').catch(() => {});
+      expect(getAuthToken()).toBeNull();
+
+      // Now verify a fresh request has no Authorization header
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({}),
+      });
+
+      await get('/api/test');
+
+      const mockFn = global.fetch as ReturnType<typeof vi.fn>;
+      const call = mockFn.mock.calls[0];
+      const options = call?.[1] as { headers: Record<string, string> };
+      expect(options.headers).not.toHaveProperty('Authorization');
+    });
+
+    it('401 interceptor does not trigger when authToken is null', async () => {
+      // Set up authenticated state, then clear token via 401 interceptor
+      await resetAuthState();
+
+      const clearMock = vi.fn();
+      clearMock.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: () => Promise.resolve('unauthorized'),
+      });
+      clearMock.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        text: () => Promise.resolve('not found'),
+      });
+      global.fetch = clearMock;
+      await get('/api/clear-token').catch(() => {});
+      expect(getAuthToken()).toBeNull();
+
+      // Now with null token, a 401 response should NOT trigger re-auth
+      const testMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: () => Promise.resolve('unauthorized'),
+      });
+      global.fetch = testMock;
+
+      await expect(get('/api/test')).rejects.toMatchObject({
+        status: 401,
+      });
+      // Only 1 fetch call - no re-auth attempt
+      expect(testMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('onAuthStateChange unsubscribe prevents further callbacks', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        text: () => Promise.resolve('not found'),
+      });
+      await initAuth();
+      expect(getAuthState()).toBe('disabled');
+
+      const callback = vi.fn();
+      const unsubscribe = onAuthStateChange(callback);
+      unsubscribe();
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ token: 'unsub-test' }),
+      });
+      await initAuth();
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('initAuth with maxRetries=0 does not retry on network error', async () => {
+      const mockFetch = vi.fn().mockRejectedValue(new TypeError('Network error'));
+      global.fetch = mockFetch;
+
+      await initAuth({ maxRetries: 0 });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(getAuthState()).toBe('failed');
+    });
+
     it('onAuthStateChange fires on state transitions', async () => {
       // First set a non-authenticated state so that transitioning to 'authenticated'
       // actually triggers the listener
