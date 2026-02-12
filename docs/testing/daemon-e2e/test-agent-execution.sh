@@ -50,8 +50,8 @@ while [ $SECONDS -lt $DEADLINE ]; do
   sleep 60
 
   CLOSED=$(bd list --status=closed --json 2>/dev/null | jq '[.[] | select(.issue_type != "epic")] | length' 2>/dev/null || echo "0")
-  IN_PROGRESS=$(bd list --status=in_progress 2>/dev/null | grep -c "task" || echo "0")
-  REVIEW=$(bd list --status=review 2>/dev/null | grep -c "task" || echo "0")
+  IN_PROGRESS=$(bd list --status=in_progress 2>/dev/null | grep -c "task" || true)
+  REVIEW=$(bd list --status=review 2>/dev/null | grep -c "task" || true)
 
   CURRENT_STATUS="closed=$CLOSED in_progress=$IN_PROGRESS review=$REVIEW"
   if [ "$CURRENT_STATUS" != "$LAST_STATUS" ]; then
@@ -81,20 +81,19 @@ echo ""
 echo "--- Verification ---"
 
 CLOSED_TASKS=$(bd list --status=closed --json 2>/dev/null | jq -r '.[] | select(.issue_type != "epic") | .id' 2>/dev/null || echo "")
-CLOSED_COUNT=$(echo "$CLOSED_TASKS" | grep -c . || echo "0")
+CLOSED_COUNT=$(echo "$CLOSED_TASKS" | grep -c . || true)
 
 if [ "$CLOSED_COUNT" -ge 1 ]; then pass "$CLOSED_COUNT task(s) closed by agents"; else fail "no tasks were closed"; fi
 
 # Test: Commits exist in worktrees
 echo "--- Commits ---"
 for wt in falcon nova; do
-  COMMIT_COUNT=$(cd "worktrees/$wt" && git log --oneline --all | grep -cv "initial commit\|WIP:\|Add Python" || echo "0")
+  COMMIT_COUNT=$(cd "worktrees/$wt" && git log --oneline --all | grep -cv "initial commit\|WIP:\|Add Python" || true)
   if [ "$COMMIT_COUNT" -gt 0 ]; then
     pass "$wt has $COMMIT_COUNT agent commit(s)"
-    cd "worktrees/$wt" && git log --oneline --all | grep -v "initial commit\|WIP:" | head -5 | while read -r line; do
+    (cd "worktrees/$wt" && git log --oneline --all | grep -v "initial commit\|WIP:" | head -5 | while read -r line; do
       echo "    $line"
-    done
-    cd "$TEST_DIR"
+    done)
   else
     echo "  INFO: $wt has no agent commits (may be expected if it was the plan agent)"
   fi

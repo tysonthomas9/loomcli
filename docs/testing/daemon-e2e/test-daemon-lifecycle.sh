@@ -88,6 +88,7 @@ if [ -n "$PID" ]; then
     if ! kill -0 "$PID" 2>/dev/null; then EXITED=true; break; fi
   done
   if $EXITED; then pass "daemon exited on SIGTERM within 10s"; else fail "daemon did not exit on SIGTERM"; fi
+  sleep 0.5  # Allow PID file cleanup to complete
   if [ ! -f .loom/daemon.pid ]; then pass "PID file cleaned up after SIGTERM"; else fail "PID file still exists after SIGTERM"; fi
   if grep -q "Daemon stopped" .loom/logs/daemon-stdout.log; then
     pass "clean shutdown message logged"
