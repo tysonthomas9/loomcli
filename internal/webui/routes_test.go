@@ -1410,3 +1410,418 @@ func TestHandleAPIHealth_SuccessWithMockServer(t *testing.T) {
 		t.Errorf("Daemon.Version = %q, want %q", resp.Daemon.Version, "1.0.0")
 	}
 }
+
+// --- SSE route conditional registration tests ---
+
+// TestSetupRoutes_SSEEndpointNotRegisteredWhenHubNil verifies that GET /api/events
+// falls through to the frontend handler when hub is nil.
+func TestSetupRoutes_SSEEndpointNotRegisteredWhenHubNil(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// With nil hub, the SSE route is not registered; request falls through to frontend
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected /api/events to fall through to frontend with status %d, got %d",
+			http.StatusOK, rr.Code)
+	}
+
+	ct := rr.Header().Get("Content-Type")
+	if ct != "text/html; charset=utf-8" {
+		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	}
+}
+
+// TestSetupRoutes_SSEEndpointRegisteredWhenHubNonNil verifies that GET /api/events
+// is handled by the SSE handler when hub is non-nil.
+func TestSetupRoutes_SSEEndpointRegisteredWhenHubNonNil(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, hub, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "")
+
+	// Use a context with short timeout because the SSE handler streams forever
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// With non-nil hub, the route IS registered.
+	// The SSE handler sets Content-Type to text/event-stream, not HTML.
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Error("expected SSE route to be registered, but request fell through to frontend handler")
+	}
+}
+
+// --- Auth token route conditional registration tests ---
+
+// TestSetupRoutes_AuthTokenRegisteredWhenEnabled verifies that GET /api/auth/token
+// is handled when authEnabled=true.
+func TestSetupRoutes_AuthTokenRegisteredWhenEnabled(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "test-api-key", true, nil, nil, nil, nil, false, false, "", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/token", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// Auth token handler returns JSON, not HTML
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Error("expected auth token route to be registered, but request fell through to frontend handler")
+	}
+
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+}
+
+// TestSetupRoutes_AuthTokenNotRegisteredWhenDisabled verifies that GET /api/auth/token
+// falls through to the frontend when authEnabled=false.
+func TestSetupRoutes_AuthTokenNotRegisteredWhenDisabled(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/token", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// Route is not registered; falls through to frontend
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected /api/auth/token to fall through to frontend with status %d, got %d",
+			http.StatusOK, rr.Code)
+	}
+
+	ct := rr.Header().Get("Content-Type")
+	if ct != "text/html; charset=utf-8" {
+		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	}
+}
+
+// --- Terminal token route conditional registration tests ---
+
+// TestSetupRoutes_TerminalTokenRegisteredWithAuth verifies that GET /api/terminal/token
+// is handled when both termManager and termAuth are non-nil.
+func TestSetupRoutes_TerminalTokenRegisteredWithAuth(t *testing.T) {
+	termMgr, err := NewTerminalManager("bash", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	t.Cleanup(func() { termMgr.Shutdown() })
+
+	termAuth, err := newTerminalAuth()
+	if err != nil {
+		t.Fatalf("failed to create terminal auth: %v", err)
+	}
+	t.Cleanup(func() { termAuth.Stop() })
+
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, termMgr, "bash", termAuth, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=test", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// Route is registered; handler returns JSON (either token or error)
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Error("expected terminal token route to be registered, but request fell through to frontend handler")
+	}
+}
+
+// TestSetupRoutes_TerminalTokenNotRegisteredWithoutAuth verifies that GET /api/terminal/token
+// falls through to the frontend when termAuth is nil (even if termManager is non-nil).
+func TestSetupRoutes_TerminalTokenNotRegisteredWithoutAuth(t *testing.T) {
+	termMgr, err := NewTerminalManager("bash", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	t.Cleanup(func() { termMgr.Shutdown() })
+
+	mux := http.NewServeMux()
+	// termAuth is nil
+	setupRoutes(mux, nil, nil, nil, termMgr, "bash", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=test", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// Route is not registered (termAuth is nil); falls through to frontend
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected /api/terminal/token to fall through to frontend with status %d, got %d",
+			http.StatusOK, rr.Code)
+	}
+
+	ct := rr.Header().Get("Content-Type")
+	if ct != "text/html; charset=utf-8" {
+		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	}
+}
+
+// --- Health endpoint method restriction test ---
+
+// TestSetupRoutes_HealthEndpoint_GETOnly verifies that GET /health returns 200 JSON
+// and POST /health falls through to the frontend.
+func TestSetupRoutes_HealthEndpoint_GETOnly(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "")
+
+	// GET should return JSON health response
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("GET /health: expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	ct := rr.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("GET /health: expected Content-Type 'application/json', got %q", ct)
+	}
+
+	// POST should fall through to frontend handler
+	req = httptest.NewRequest(http.MethodPost, "/health", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	ct = rr.Header().Get("Content-Type")
+	if ct == "application/json" {
+		t.Error("POST /health: should fall through to frontend, not return JSON")
+	}
+}
+
+// --- Issue endpoints method restriction tests ---
+
+// TestSetupRoutes_IssueEndpoints_MethodRestrictions verifies HTTP method restrictions
+// on issue endpoints. Uses a mock server pool to avoid nil-pool panics in handlers.
+func TestSetupRoutes_IssueEndpoints_MethodRestrictions(t *testing.T) {
+	socketPath := startRoutesMockServer(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		default:
+			return rpc.Response{Success: false, Error: "not implemented: " + req.Operation}
+		}
+	})
+	pool := newRoutesMockPool(t, socketPath)
+
+	mux := http.NewServeMux()
+	setupRoutes(mux, pool, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "")
+
+	tests := []struct {
+		name        string
+		method      string
+		path        string
+		expectRoute bool // true if route is registered for this method
+	}{
+		{"GET /api/issues", http.MethodGet, "/api/issues", true},
+		{"POST /api/issues", http.MethodPost, "/api/issues", true},
+		{"DELETE /api/issues", http.MethodDelete, "/api/issues", false},
+		{"GET /api/issues/test-id", http.MethodGet, "/api/issues/test-id", true},
+		{"PATCH /api/issues/test-id", http.MethodPatch, "/api/issues/test-id", true},
+		{"PUT /api/issues/test-id", http.MethodPut, "/api/issues/test-id", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+
+			ct := rr.Header().Get("Content-Type")
+			isHTML := ct == "text/html; charset=utf-8"
+
+			if tt.expectRoute && isHTML {
+				t.Errorf("%s %s: expected route handler, but fell through to frontend (HTML)",
+					tt.method, tt.path)
+			}
+			if !tt.expectRoute && !isHTML {
+				t.Errorf("%s %s: expected to fall through to frontend (HTML), got Content-Type %q",
+					tt.method, tt.path, ct)
+			}
+		})
+	}
+}
+
+// --- Dependency endpoints method restriction tests ---
+
+// TestSetupRoutes_DependencyEndpoints_MethodRestrictions verifies HTTP method
+// restrictions on dependency endpoints. Uses a mock server pool.
+func TestSetupRoutes_DependencyEndpoints_MethodRestrictions(t *testing.T) {
+	socketPath := startRoutesMockServer(t, func(req rpc.Request) rpc.Response {
+		switch req.Operation {
+		case "health":
+			hd, _ := json.Marshal(rpc.HealthResponse{Status: "healthy", Version: "0.0.0", Compatible: true})
+			return rpc.Response{Success: true, Data: hd}
+		case "ping":
+			return rpc.Response{Success: true}
+		default:
+			return rpc.Response{Success: false, Error: "not implemented: " + req.Operation}
+		}
+	})
+	pool := newRoutesMockPool(t, socketPath)
+
+	mux := http.NewServeMux()
+	setupRoutes(mux, pool, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "")
+
+	tests := []struct {
+		name        string
+		method      string
+		path        string
+		expectRoute bool
+	}{
+		{"POST /api/issues/id/dependencies", http.MethodPost, "/api/issues/test-id/dependencies", true},
+		{"DELETE /api/issues/id/dependencies/depId", http.MethodDelete, "/api/issues/test-id/dependencies/dep-1", true},
+		{"GET /api/issues/id/dependencies", http.MethodGet, "/api/issues/test-id/dependencies", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+
+			ct := rr.Header().Get("Content-Type")
+			isHTML := ct == "text/html; charset=utf-8"
+
+			if tt.expectRoute && isHTML {
+				t.Errorf("%s %s: expected route handler, but fell through to frontend (HTML)",
+					tt.method, tt.path)
+			}
+			if !tt.expectRoute && !isHTML {
+				t.Errorf("%s %s: expected to fall through to frontend (HTML), got Content-Type %q",
+					tt.method, tt.path, ct)
+			}
+		})
+	}
+}
+
+// --- Fleet endpoints all routes test ---
+
+// TestSetupRoutes_FleetEndpoints_AllRoutes verifies that all fleet endpoints are
+// registered when fleetEnabled=true and that GET on POST-only routes falls through.
+func TestSetupRoutes_FleetEndpoints_AllRoutes(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, true, false, "", "")
+
+	// POST routes should be handled (not fall through to frontend)
+	postRoutes := []string{
+		"/api/fleet/register",
+		"/api/fleet/claim",
+		"/api/fleet/done/test-id",
+		"/api/fleet/heartbeat",
+	}
+
+	for _, path := range postRoutes {
+		t.Run("POST "+path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+
+			ct := rr.Header().Get("Content-Type")
+			if ct == "text/html; charset=utf-8" {
+				t.Errorf("POST %s: expected fleet handler, but fell through to frontend", path)
+			}
+		})
+	}
+
+	// GET on POST-only fleet routes should fall through to frontend
+	for _, path := range postRoutes {
+		t.Run("GET "+path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+
+			ct := rr.Header().Get("Content-Type")
+			if ct != "text/html; charset=utf-8" {
+				t.Errorf("GET %s: expected to fall through to frontend, got Content-Type %q", path, ct)
+			}
+		})
+	}
+}
+
+// --- Dev mode frontend handler test ---
+
+// TestSetupRoutes_DevMode_FrontendHandler verifies that the catch-all handler
+// uses devFrontendHandler when devMode=true and doesn't panic.
+func TestSetupRoutes_DevMode_FrontendHandler(t *testing.T) {
+	mux := http.NewServeMux()
+	// Pass devMode=true with a non-existent dir; the handler should not panic
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, true, "/nonexistent/dev/dir", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	// This should not panic
+	mux.ServeHTTP(rr, req)
+
+	// The dev handler will try to serve from the directory; since it doesn't exist,
+	// it will attempt SPA fallback. Either way, we get a response (no crash).
+	if rr.Code == 0 {
+		t.Error("expected a non-zero status code")
+	}
+}
+
+// --- Loom proxy conditional registration tests ---
+
+// TestSetupRoutes_LoomProxy_RegisteredWhenURLSet verifies that /api/loom/ is handled
+// when a valid loomServerURL is provided.
+func TestSetupRoutes_LoomProxy_RegisteredWhenURLSet(t *testing.T) {
+	// Clear env to avoid interference
+	t.Setenv("LOOM_SERVER_URL", "")
+
+	mux := http.NewServeMux()
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "http://localhost:9999")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/loom/status", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// With a valid URL, the proxy is registered.
+	// The proxy will fail to connect to localhost:9999 but the route IS handled
+	// (not falling through to the frontend handler).
+	ct := rr.Header().Get("Content-Type")
+	if ct == "text/html; charset=utf-8" {
+		t.Error("expected loom proxy route to be registered, but request fell through to frontend handler")
+	}
+}
+
+// TestSetupRoutes_LoomProxy_NotRegisteredWhenURLInvalid verifies that /api/loom/ falls
+// through when the loomServerURL is invalid and causes newLoomProxy to return nil.
+func TestSetupRoutes_LoomProxy_NotRegisteredWhenURLInvalid(t *testing.T) {
+	// Clear env and use an invalid scheme so newLoomProxy returns nil
+	t.Setenv("LOOM_SERVER_URL", "")
+	t.Setenv("LOOM_PROXY_ALLOWED_HOSTS", "")
+
+	mux := http.NewServeMux()
+	// Use a URL with a non-localhost host and no allowed hosts → proxy returns nil
+	setupRoutes(mux, nil, nil, nil, nil, "", nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "http://external-host.example.com:9999")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/loom/status", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// With nil proxy, the route falls through to frontend handler
+	ct := rr.Header().Get("Content-Type")
+	if ct != "text/html; charset=utf-8" {
+		t.Errorf("expected /api/loom/status to fall through to frontend, got Content-Type %q", ct)
+	}
+}
