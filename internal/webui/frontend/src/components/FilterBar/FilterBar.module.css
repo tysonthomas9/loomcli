@@ -31,7 +31,7 @@
 .label {
   font-size: var(--font-size-xs);
   font-weight: 500;
-  color: #6f6f6f;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .select {
@@ -40,14 +40,14 @@
   padding-right: var(--space-8);
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
-  color: var(--color-text);
-  background-color: var(--color-bg);
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23666' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  color: var(--color-text-inverse);
+  background-color: rgba(255, 255, 255, 0.15);
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23999' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
   background-position: right var(--space-2) center;
   background-repeat: no-repeat;
   background-size: 16px;
-  border: 1px solid #cfcfcf;
-  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 9999px;
   cursor: pointer;
   appearance: none;
   transition:
@@ -57,13 +57,14 @@
 }
 
 .select:hover {
-  border-color: #bdbdbd;
+  border-color: rgba(255, 255, 255, 0.4);
+  background-color: rgba(255, 255, 255, 0.15);
 }
 
 .select:focus {
   outline: none;
-  border-color: #999999;
-  background-color: var(--color-bg);
+  border-color: rgba(255, 255, 255, 0.5);
+  background-color: rgba(255, 255, 255, 0.15);
   box-shadow: none;
 }
 
@@ -73,10 +74,10 @@
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
+  color: rgba(255, 255, 255, 0.8);
   background-color: transparent;
-  border: 1px solid #cfcfcf;
-  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 9999px;
   cursor: pointer;
   transition:
     color var(--transition-fast),
@@ -85,13 +86,13 @@
 }
 
 .clearButton:hover {
-  color: var(--color-text);
-  background-color: var(--color-bg-tertiary);
-  border-color: #bdbdbd;
+  color: var(--color-text-inverse);
+  background-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .clearButton:focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 2px solid rgba(255, 255, 255, 0.8);
   outline-offset: 1px;
 }
 
@@ -109,10 +110,10 @@
   padding: 4px 10px;
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
-  color: var(--color-text);
-  background-color: var(--color-bg);
-  border: 1px solid #cfcfcf;
-  border-radius: var(--radius-md);
+  color: var(--color-text-inverse);
+  background-color: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 9999px;
   cursor: pointer;
   transition:
     border-color var(--transition-fast),
@@ -120,18 +121,19 @@
 }
 
 .dropdownTrigger:hover {
-  border-color: #bdbdbd;
+  border-color: rgba(255, 255, 255, 0.4);
+  background-color: rgba(255, 255, 255, 0.2);
 }
 
 .dropdownTrigger:focus {
   outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
 }
 
 .dropdownArrow {
   font-size: 10px;
-  color: var(--color-text-muted);
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .dropdownMenu {
@@ -179,7 +181,7 @@
   align-items: center;
   gap: var(--space-2);
   font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
+  color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
   user-select: none;
   white-space: nowrap; /* Prevent text wrapping */

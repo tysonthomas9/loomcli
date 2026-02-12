@@ -12,37 +12,45 @@
 }
 
 .header {
-  position: sticky;
-  top: 0;
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: var(--z-sticky);
-  background-color: var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
+  background-color: #000000;
+  border-bottom: none;
   height: var(--unified-header-height);
+  border-radius: 9999px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  width: fit-content;
+  max-width: calc(100vw - 32px);
 }
 
 .headerContent {
   display: flex;
   align-items: center;
   height: 100%;
-  gap: var(--space-4);
+  gap: 24px;
+  padding: 0 16px;
 }
 
 .brand {
   flex-shrink: 0;
-  width: 292px;
-  border-right: 1px solid var(--color-border);
+  width: auto;
+  border-right: none;
   display: flex;
   align-items: center;
-  padding-left: 24px;
+  gap: 8px;
+  padding-left: 0;
   height: 100%;
 }
 
 .title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   letter-spacing: -0.03em;
-  color: var(--color-text);
+  color: var(--color-text-inverse);
 }
 
 .navigation {
@@ -51,15 +59,15 @@
   height: 100%;
   flex: 1;
   justify-content: stretch;
-  padding: 0 var(--space-5);
+  padding: 0;
 }
 
 .actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--space-3);
-  padding-right: 24px;
+  gap: 8px;
+  padding-right: 0;
 }
 
 .contentWrapper {
@@ -67,6 +75,7 @@
   display: flex;
   overflow: hidden;
   background-color: var(--color-bg-secondary);
+  padding-top: 72px;
 }
 
 .main {
@@ -81,31 +90,44 @@
 
 /* Responsive: tablet adjustments */
 @media (width <= 1024px) {
-  .actions {
-    gap: var(--space-2);
+  .header {
+    max-width: calc(100vw - 24px);
+  }
+
+  .headerContent {
+    gap: 16px;
   }
 }
 
 /* Responsive: mobile adjustments */
 @media (width <= 640px) {
-  .brand {
-    width: auto;
-    padding-left: var(--space-3);
-    padding-right: var(--space-3);
-    border-right: none;
+  .header {
+    top: 8px;
+    max-width: calc(100vw - 16px);
+  }
+
+  .headerContent {
+    gap: 16px;
+    padding: 0 12px;
   }
 
   .title {
-    font-size: var(--font-size-base);
+    font-size: 14px;
   }
 
-  .actions {
-    padding-right: var(--space-3);
-    gap: var(--space-2);
+  .contentWrapper {
+    padding-top: 64px;
   }
 
   .main {
     padding: var(--space-3);
+  }
+}
+
+/* Responsive: hide brand text on very small screens */
+@media (width <= 480px) {
+  .brand {
+    display: none;
   }
 }
 

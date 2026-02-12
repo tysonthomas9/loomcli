@@ -17,13 +17,10 @@
  * Actions Container (user-area)
  * =========================== */
 .headerControls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  display: flex;
   align-items: center;
-  column-gap: var(--space-4);
-  width: 100%;
+  gap: 16px;
   height: 100%;
-  position: relative;
 }
 
 .headerActions {
@@ -34,38 +31,21 @@
 
 .searchWrapper {
   width: 380px;
-  justify-self: center;
-  grid-column: 2;
+  flex-shrink: 0;
 }
 
 .filtersWrapper {
   display: flex;
   align-items: center;
-  justify-self: end;
-  grid-column: 3;
+  flex-shrink: 0;
 }
 
 @media (width <= 1024px) {
   .headerControls {
-    margin: 0;
-    padding-left: var(--space-2);
-    padding-right: var(--space-2);
-    height: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
     gap: var(--space-3);
   }
 
   .searchWrapper {
-    width: 100%;
-    position: static;
-    transform: none;
-    grid-column: auto;
-  }
-
-  .filtersWrapper {
-    width: 100%;
-    justify-self: start;
+    width: 280px;
   }
 }

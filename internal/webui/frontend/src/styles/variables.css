@@ -14,8 +14,8 @@
   --text-secondary: #444444;
   --accent-bg: #f3e9f7;
   --accent-text: #f05d46;
-  --font-main: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --unified-header-height: 56px;
+  --font-main: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --unified-header-height: 40px;
 
   /* ===========================
    * Colors - Priority

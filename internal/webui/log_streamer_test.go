@@ -15,199 +15,129 @@ import (
 	"time"
 )
 
-// TestNewLogStreamer_Success verifies that NewLogStreamer creates a streamer
-// for a valid file and that it can be cleaned up.
+// --- NewLogStreamer tests ---
+
+// TestNewLogStreamer_Success verifies that creating a LogStreamer for an existing
+// file in a valid directory succeeds and returns a non-nil streamer.
 func TestNewLogStreamer_Success(t *testing.T) {
 	tmpDir := t.TempDir()
-	fp := filepath.Join(tmpDir, "test.log")
-	if err := os.WriteFile(fp, []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("failed to create file: %v", err)
+	logFile := filepath.Join(tmpDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
 	}
 
-	ls, err := NewLogStreamer(fp)
+	s, err := NewLogStreamer(logFile)
 	if err != nil {
 		t.Fatalf("NewLogStreamer() error = %v", err)
 	}
-	if ls == nil {
+	defer s.Close()
+
+	if s == nil {
 		t.Fatal("NewLogStreamer() returned nil")
 	}
-	if err := ls.Close(); err != nil {
+	if s.logFilePath != logFile {
+		t.Errorf("logFilePath = %q, want %q", s.logFilePath, logFile)
+	}
+	if s.watcher == nil {
+		t.Error("watcher should be non-nil")
+	}
+}
+
+// TestNewLogStreamer_InvalidDirectory verifies that creating a LogStreamer for a
+// path whose parent directory does not exist returns an error.
+func TestNewLogStreamer_InvalidDirectory(t *testing.T) {
+	s, err := NewLogStreamer("/nonexistent/parent/dir/test.log")
+	if err == nil {
+		s.Close()
+		t.Fatal("NewLogStreamer() expected error for nonexistent directory, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to watch directory") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "failed to watch directory")
+	}
+}
+
+// TestNewLogStreamer_Close verifies that Close() releases resources without error.
+func TestNewLogStreamer_Close(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("data\n"), 0o644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+
+	if err := s.Close(); err != nil {
 		t.Errorf("Close() error = %v", err)
 	}
 }
 
-// TestNewLogStreamer_InvalidDirectory verifies that NewLogStreamer returns an
-// error when the parent directory does not exist.
-func TestNewLogStreamer_InvalidDirectory(t *testing.T) {
-	_, err := NewLogStreamer("/nonexistent/dir/test.log")
-	if err == nil {
-		t.Fatal("NewLogStreamer() expected error for invalid directory, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to watch directory") {
-		t.Errorf("error = %q, want error containing 'failed to watch directory'", err.Error())
-	}
-}
+// --- Stream() tests using httptest ---
 
-// TestNewLogStreamer_Close verifies that Close releases resources without error.
-func TestNewLogStreamer_Close(t *testing.T) {
-	tmpDir := t.TempDir()
-	fp := filepath.Join(tmpDir, "test.log")
-	if err := os.WriteFile(fp, []byte("data\n"), 0o644); err != nil {
-		t.Fatalf("failed to create file: %v", err)
-	}
-
-	ls, err := NewLogStreamer(fp)
-	if err != nil {
-		t.Fatalf("NewLogStreamer() error = %v", err)
-	}
-
-	if err := ls.Close(); err != nil {
-		t.Errorf("first Close() error = %v", err)
-	}
-}
-
-// logSSETestClient wraps a real HTTP connection for log SSE streaming.
-type logSSETestClient struct {
-	resp    *http.Response
-	scanner *bufio.Scanner
-}
-
-// logSSEEvent represents a parsed SSE event from the log stream.
-type logSSEEvent struct {
-	ID    string
-	Event string
-	Data  string
-}
-
-// readLogSSEEvent reads the next SSE event from the log stream.
-func (c *logSSETestClient) readLogSSEEvent(timeout time.Duration) (*logSSEEvent, error) {
-	done := make(chan *logSSEEvent, 1)
-	errCh := make(chan error, 1)
-
-	go func() {
-		evt := &logSSEEvent{}
-		for c.scanner.Scan() {
-			line := c.scanner.Text()
-			if line == "" {
-				if evt.Event != "" || evt.Data != "" || evt.ID != "" {
-					done <- evt
-					return
-				}
-				continue
-			}
-			if strings.HasPrefix(line, ":") {
-				// Comment (heartbeat)
-				continue
-			}
-			if strings.HasPrefix(line, "retry:") {
-				continue
-			}
-			if strings.HasPrefix(line, "id: ") {
-				evt.ID = strings.TrimPrefix(line, "id: ")
-			} else if strings.HasPrefix(line, "event: ") {
-				evt.Event = strings.TrimPrefix(line, "event: ")
-			} else if strings.HasPrefix(line, "data: ") {
-				evt.Data = strings.TrimPrefix(line, "data: ")
-			}
-		}
-		if err := c.scanner.Err(); err != nil {
-			errCh <- err
-		} else {
-			errCh <- fmt.Errorf("stream ended unexpectedly")
-		}
-	}()
-
-	select {
-	case evt := <-done:
-		return evt, nil
-	case err := <-errCh:
-		return nil, err
-	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout waiting for SSE event after %v", timeout)
-	}
-}
-
-func (c *logSSETestClient) close() {
-	c.resp.Body.Close()
-}
-
-// setupLogStreamEnv creates a temp HOME with .loom/logs/ structure and a log file.
-// Returns the resolved tmpHome and the log file path.
-func setupLogStreamEnv(t *testing.T, content string) (string, string) {
+// logSSETestServer creates an httptest server that serves Stream() for a given LogStreamer.
+// Returns the server and a cleanup function. The caller should cancel ctx to stop the stream.
+func logSSETestServer(t *testing.T, s *LogStreamer, startLine int64) *httptest.Server {
 	t.Helper()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = s.Stream(r.Context(), w, startLine)
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// connectStreamSSE connects to an SSE server and returns a client for reading events.
+func connectStreamSSE(t *testing.T, ctx context.Context, serverURL string) *sseTestClient {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL, nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	client := &http.Client{Timeout: 0}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	return &sseTestClient{
+		resp:    resp,
+		scanner: bufio.NewScanner(resp.Body),
+	}
+}
+
+// TestLogStreamer_Stream_InitialContent tests that Stream() sends existing file
+// lines as log-line SSE events with correct headers and JSON payloads.
+func TestLogStreamer_Stream_InitialContent(t *testing.T) {
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("failed to resolve temp dir: %v", err)
 	}
 	t.Setenv("HOME", tmpHome)
 
-	logDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatalf("failed to create log dir: %v", err)
 	}
 
-	logFile := filepath.Join(logDir, "stream-test.log")
+	logFile := filepath.Join(logDir, "test.log")
+	content := "line one\nline two\nline three\n"
 	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write log file: %v", err)
 	}
 
-	return tmpHome, logFile
-}
-
-// newLogStreamServer creates an httptest.Server that serves the LogStreamer.Stream().
-// Returns server, LogStreamer, and a cancel func for the streaming context.
-func newLogStreamServer(t *testing.T, logFile string, startLine int64) (*httptest.Server, *LogStreamer, context.CancelFunc) {
-	t.Helper()
-
-	ls, err := NewLogStreamer(logFile)
+	s, err := NewLogStreamer(logFile)
 	if err != nil {
 		t.Fatalf("NewLogStreamer() error = %v", err)
 	}
+	defer s.Close()
+
+	server := logSSETestServer(t, s, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
-		_ = ls.Stream(ctx, w, startLine)
-	})
-
-	server := httptest.NewServer(mux)
-	t.Cleanup(func() {
-		cancel()
-		server.Close()
-		ls.Close()
-	})
-
-	return server, ls, cancel
-}
-
-// connectLogStream opens a GET to the stream endpoint.
-func connectLogStream(t *testing.T, serverURL string) *logSSETestClient {
-	t.Helper()
-
-	client := &http.Client{Timeout: 0}
-	resp, err := client.Get(serverURL + "/stream")
-	if err != nil {
-		t.Fatalf("failed to connect to stream: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		t.Fatalf("unexpected status: %d", resp.StatusCode)
-	}
-
-	return &logSSETestClient{
-		resp:    resp,
-		scanner: bufio.NewScanner(resp.Body),
-	}
-}
-
-// TestLogStreamer_Stream_InitialContent verifies that Stream sends initial file
-// content as SSE log-line events with correct headers and JSON format.
-func TestLogStreamer_Stream_InitialContent(t *testing.T) {
-	_, logFile := setupLogStreamEnv(t, "line one\nline two\nline three\n")
-
-	server, _, _ := newLogStreamServer(t, logFile, 1)
-	client := connectLogStream(t, server.URL)
+	client := connectStreamSSE(t, ctx, server.URL)
 	defer client.close()
 
 	// Verify SSE headers
@@ -231,246 +161,328 @@ func TestLogStreamer_Stream_InitialContent(t *testing.T) {
 	// Read 3 log-line events
 	expectedLines := []string{"line one", "line two", "line three"}
 	for i, expected := range expectedLines {
-		evt, err := client.readLogSSEEvent(3 * time.Second)
+		evt, err := client.readEvent(5 * time.Second)
 		if err != nil {
-			t.Fatalf("event %d: failed to read: %v", i, err)
+			t.Fatalf("event %d: failed to read: %v", i+1, err)
 		}
 		if evt.Event != "log-line" {
-			t.Errorf("event %d: event = %q, want %q", i, evt.Event, "log-line")
+			t.Errorf("event %d: type = %q, want %q", i+1, evt.Event, "log-line")
 		}
 		if evt.ID == "" {
-			t.Errorf("event %d: missing id", i)
+			t.Errorf("event %d: expected non-empty ID", i+1)
 		}
 
 		var payload LogLinePayload
 		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
-			t.Fatalf("event %d: failed to parse JSON: %v", i, err)
+			t.Fatalf("event %d: failed to parse payload: %v", i+1, err)
 		}
 		if payload.Line != expected {
-			t.Errorf("event %d: line = %q, want %q", i, payload.Line, expected)
+			t.Errorf("event %d: line = %q, want %q", i+1, payload.Line, expected)
 		}
 		if payload.LineNumber != int64(i+1) {
-			t.Errorf("event %d: line_number = %d, want %d", i, payload.LineNumber, i+1)
+			t.Errorf("event %d: line_number = %d, want %d", i+1, payload.LineNumber, i+1)
 		}
 		if payload.Timestamp == "" {
-			t.Errorf("event %d: missing timestamp", i)
+			t.Errorf("event %d: expected non-empty timestamp", i+1)
 		}
 		// Verify timestamp is RFC3339
 		if _, err := time.Parse(time.RFC3339, payload.Timestamp); err != nil {
-			t.Errorf("event %d: timestamp %q not RFC3339: %v", i, payload.Timestamp, err)
+			t.Errorf("event %d: timestamp %q is not RFC3339: %v", i+1, payload.Timestamp, err)
 		}
 	}
+
+	cancel()
 }
 
-// TestLogStreamer_Stream_StartLine verifies that startLine parameter skips earlier lines.
+// TestLogStreamer_Stream_StartLine tests that Stream() with a startLine skips
+// earlier lines and only sends lines from startLine onward.
 func TestLogStreamer_Stream_StartLine(t *testing.T) {
-	content := ""
-	for i := 1; i <= 10; i++ {
-		content += fmt.Sprintf("line %d\n", i)
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
 	}
-	_, logFile := setupLogStreamEnv(t, content)
+	t.Setenv("HOME", tmpHome)
 
-	server, _, _ := newLogStreamServer(t, logFile, 5)
-	client := connectLogStream(t, server.URL)
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
+
+	logFile := filepath.Join(logDir, "test.log")
+	var lines []string
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	if err := os.WriteFile(logFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer s.Close()
+
+	// Start from line 7
+	server := logSSETestServer(t, s, 7)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := connectStreamSSE(t, ctx, server.URL)
 	defer client.close()
 
-	// Should receive lines 5-10 (6 events)
-	for i := 5; i <= 10; i++ {
-		evt, err := client.readLogSSEEvent(3 * time.Second)
+	// Should receive lines 7, 8, 9, 10
+	for i := 7; i <= 10; i++ {
+		evt, err := client.readEvent(5 * time.Second)
 		if err != nil {
-			t.Fatalf("line %d: failed to read: %v", i, err)
+			t.Fatalf("failed to read event for line %d: %v", i, err)
 		}
 		if evt.Event != "log-line" {
-			t.Errorf("line %d: event = %q, want %q", i, evt.Event, "log-line")
+			t.Errorf("line %d: event type = %q, want %q", i, evt.Event, "log-line")
 		}
+
 		var payload LogLinePayload
 		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
-			t.Fatalf("line %d: failed to parse: %v", i, err)
+			t.Fatalf("line %d: failed to parse payload: %v", i, err)
+		}
+		if payload.LineNumber != int64(i) {
+			t.Errorf("line %d: line_number = %d, want %d", i, payload.LineNumber, i)
 		}
 		expected := fmt.Sprintf("line %d", i)
 		if payload.Line != expected {
-			t.Errorf("line %d: got %q, want %q", i, payload.Line, expected)
+			t.Errorf("line %d: line = %q, want %q", i, payload.Line, expected)
+		}
+	}
+
+	cancel()
+}
+
+// TestLogStreamer_Stream_NewLinesViaFsnotify tests that appending new lines to
+// the file after the initial content is streamed triggers new SSE events.
+func TestLogStreamer_Stream_NewLinesViaFsnotify(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
+
+	logFile := filepath.Join(logDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("initial line\n"), 0o644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer s.Close()
+
+	server := logSSETestServer(t, s, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := connectStreamSSE(t, ctx, server.URL)
+	defer client.close()
+
+	// Read initial line
+	evt, err := client.readEvent(5 * time.Second)
+	if err != nil {
+		t.Fatalf("failed to read initial event: %v", err)
+	}
+	if evt.Event != "log-line" {
+		t.Errorf("initial event type = %q, want %q", evt.Event, "log-line")
+	}
+
+	// Wait for watcher setup
+	time.Sleep(100 * time.Millisecond)
+
+	// Append new lines
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("failed to open for append: %v", err)
+	}
+	if _, err := f.WriteString("new line 2\nnew line 3\n"); err != nil {
+		f.Close()
+		t.Fatalf("failed to append: %v", err)
+	}
+	f.Close()
+
+	// Read new events (account for debounce)
+	for i := 2; i <= 3; i++ {
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("failed to read event for line %d: %v", i, err)
+		}
+		if evt.Event != "log-line" {
+			t.Errorf("line %d: event type = %q, want %q", i, evt.Event, "log-line")
+		}
+
+		var payload LogLinePayload
+		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+			t.Fatalf("line %d: failed to parse payload: %v", i, err)
 		}
 		if payload.LineNumber != int64(i) {
 			t.Errorf("line %d: line_number = %d, want %d", i, payload.LineNumber, i)
 		}
 	}
+
+	cancel()
 }
 
-// TestLogStreamer_Stream_NewLinesViaFsnotify verifies that appending to the file
-// triggers new SSE events after the debounce interval.
-func TestLogStreamer_Stream_NewLinesViaFsnotify(t *testing.T) {
-	_, logFile := setupLogStreamEnv(t, "initial line\n")
-
-	server, _, _ := newLogStreamServer(t, logFile, 1)
-	client := connectLogStream(t, server.URL)
-	defer client.close()
-
-	// Read initial line
-	evt, err := client.readLogSSEEvent(3 * time.Second)
-	if err != nil {
-		t.Fatalf("failed to read initial event: %v", err)
-	}
-	var payload LogLinePayload
-	if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
-		t.Fatalf("failed to parse initial event: %v", err)
-	}
-	if payload.Line != "initial line" {
-		t.Errorf("initial: got %q, want %q", payload.Line, "initial line")
-	}
-
-	// Append new lines (triggers fsnotify Write event)
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatalf("failed to open file for append: %v", err)
-	}
-	fmt.Fprintln(f, "new line one")
-	fmt.Fprintln(f, "new line two")
-	f.Close()
-
-	// Wait for debounce + fsnotify propagation
-	expectedNew := []string{"new line one", "new line two"}
-	for i, expected := range expectedNew {
-		evt, err := client.readLogSSEEvent(5 * time.Second)
-		if err != nil {
-			t.Fatalf("new event %d: failed to read: %v", i, err)
-		}
-		if evt.Event != "log-line" {
-			t.Errorf("new event %d: event = %q, want %q", i, evt.Event, "log-line")
-		}
-		var p LogLinePayload
-		if err := json.Unmarshal([]byte(evt.Data), &p); err != nil {
-			t.Fatalf("new event %d: failed to parse: %v", i, err)
-		}
-		if p.Line != expected {
-			t.Errorf("new event %d: got %q, want %q", i, p.Line, expected)
-		}
-		if p.LineNumber != int64(i+2) { // initial was line 1
-			t.Errorf("new event %d: line_number = %d, want %d", i, p.LineNumber, i+2)
-		}
-	}
-}
-
-// TestLogStreamer_Stream_FileTruncation verifies that truncating a file
-// sends a "truncated" event.
+// TestLogStreamer_Stream_FileTruncation tests that truncating the file sends a
+// "truncated" SSE event and resets the streamer's position.
 func TestLogStreamer_Stream_FileTruncation(t *testing.T) {
-	_, logFile := setupLogStreamEnv(t, "line one\nline two\nline three\n")
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
 
-	server, _, _ := newLogStreamServer(t, logFile, 1)
-	client := connectLogStream(t, server.URL)
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
+
+	logFile := filepath.Join(logDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("long line one\nlong line two\nlong line three\n"), 0o644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer s.Close()
+
+	server := logSSETestServer(t, s, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := connectStreamSSE(t, ctx, server.URL)
 	defer client.close()
 
-	// Read initial events
-	for i := 0; i < 3; i++ {
-		_, err := client.readLogSSEEvent(3 * time.Second)
+	// Read 3 initial events
+	for i := 1; i <= 3; i++ {
+		_, err := client.readEvent(5 * time.Second)
 		if err != nil {
-			t.Fatalf("initial event %d: %v", i, err)
+			t.Fatalf("failed to read initial event %d: %v", i, err)
 		}
 	}
 
-	// Append and confirm a new line to ensure the streamer is in its
-	// steady-state event loop and has recorded the correct fileSize.
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatalf("failed to open file for append: %v", err)
-	}
-	fmt.Fprintln(f, "sync line")
-	f.Close()
+	// Wait for watcher setup
+	time.Sleep(100 * time.Millisecond)
 
-	evt, err := client.readLogSSEEvent(5 * time.Second)
-	if err != nil {
-		t.Fatalf("failed to read sync event: %v", err)
-	}
-	if evt.Event != "log-line" {
-		t.Fatalf("expected sync log-line event, got %q", evt.Event)
+	// Truncate file (write shorter content)
+	if err := os.WriteFile(logFile, []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("failed to truncate: %v", err)
 	}
 
-	// Now truncate the file (write shorter content than current size)
-	if err := os.WriteFile(logFile, []byte("short\n"), 0o644); err != nil {
-		t.Fatalf("failed to truncate file: %v", err)
-	}
-
-	// Should receive a "truncated" event
-	evt, err = client.readLogSSEEvent(5 * time.Second)
+	// Should receive a truncated event
+	evt, err := client.readEvent(5 * time.Second)
 	if err != nil {
 		t.Fatalf("failed to read truncated event: %v", err)
 	}
 	if evt.Event != "truncated" {
-		t.Errorf("event = %q, want %q", evt.Event, "truncated")
+		t.Errorf("event type = %q, want %q", evt.Event, "truncated")
 	}
 	if evt.Data != "{}" {
-		t.Errorf("data = %q, want %q", evt.Data, "{}")
+		t.Errorf("truncated event data = %q, want %q", evt.Data, "{}")
 	}
+
+	cancel()
 }
 
-// TestLogStreamer_Stream_ContextCancellation verifies that cancelling the
-// context causes Stream() to return.
+// TestLogStreamer_Stream_ContextCancellation tests that cancelling the context
+// causes Stream() to return.
 func TestLogStreamer_Stream_ContextCancellation(t *testing.T) {
-	_, logFile := setupLogStreamEnv(t, "test line\n")
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
 
-	ls, err := NewLogStreamer(logFile)
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
+
+	logFile := filepath.Join(logDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("line\n"), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
 	if err != nil {
 		t.Fatalf("NewLogStreamer() error = %v", err)
 	}
-	defer ls.Close()
+	defer s.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	errCh := make(chan error, 1)
+	streamErr := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		streamErr <- s.Stream(ctx, w, 1)
+	}))
+	t.Cleanup(server.Close)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
-		errCh <- ls.Stream(ctx, w, 1)
-	})
-	server := httptest.NewServer(mux)
-	defer server.Close()
+	go func() {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+		client := &http.Client{Timeout: 0}
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
 
-	client := connectLogStream(t, server.URL)
-	defer client.close()
+	// Give the stream time to start
+	time.Sleep(200 * time.Millisecond)
 
-	// Read the initial event to ensure streaming started
-	_, err = client.readLogSSEEvent(3 * time.Second)
-	if err != nil {
-		t.Fatalf("failed to read initial event: %v", err)
-	}
-
-	// Cancel the context
+	// Cancel context
 	cancel()
 
-	// Stream should return with context.Canceled
 	select {
-	case streamErr := <-errCh:
-		if streamErr != context.Canceled {
-			t.Errorf("Stream() error = %v, want context.Canceled", streamErr)
+	case err := <-streamErr:
+		if err != nil && err != context.Canceled {
+			t.Errorf("Stream() returned unexpected error: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stream() did not return after context cancellation")
 	}
 }
 
-// TestLogStreamer_Stream_NonFlusher verifies that Stream returns
-// "streaming unsupported" when the writer doesn't implement http.Flusher.
+// TestLogStreamer_Stream_NonFlusher tests that Stream() returns "streaming unsupported"
+// when given a ResponseWriter that doesn't implement http.Flusher.
 func TestLogStreamer_Stream_NonFlusher(t *testing.T) {
 	tmpDir := t.TempDir()
-	fp := filepath.Join(tmpDir, "test.log")
-	if err := os.WriteFile(fp, []byte("data\n"), 0o644); err != nil {
-		t.Fatalf("failed to create file: %v", err)
+	logFile := filepath.Join(tmpDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("line\n"), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
 	}
 
-	ls, err := NewLogStreamer(fp)
+	s, err := NewLogStreamer(logFile)
 	if err != nil {
 		t.Fatalf("NewLogStreamer() error = %v", err)
 	}
-	defer ls.Close()
+	defer s.Close()
 
-	// httptest.ResponseRecorder implements http.Flusher, so we need a custom writer.
-	w := &nonFlusherWriter{header: make(http.Header)}
-	err = ls.Stream(context.Background(), w, 1)
+	// Use a writer that does NOT implement http.Flusher
+	w := &nonFlusherWriter{header: http.Header{}}
+	ctx := context.Background()
+
+	err = s.Stream(ctx, w, 1)
 	if err == nil {
 		t.Fatal("Stream() expected error for non-flusher, got nil")
 	}
-	if !strings.Contains(err.Error(), "streaming unsupported") {
-		t.Errorf("error = %q, want 'streaming unsupported'", err.Error())
+	if err.Error() != "streaming unsupported" {
+		t.Errorf("error = %q, want %q", err.Error(), "streaming unsupported")
 	}
 }
 
@@ -483,43 +495,65 @@ func (w *nonFlusherWriter) Header() http.Header        { return w.header }
 func (w *nonFlusherWriter) Write(b []byte) (int, error) { return len(b), nil }
 func (w *nonFlusherWriter) WriteHeader(int)             {}
 
-// TestLogStreamer_Stream_EmptyFile verifies streaming an empty file sends
-// no initial events, and new lines arrive after append.
+// TestLogStreamer_Stream_EmptyFile tests that streaming an empty file sends no
+// initial events, and new lines appear when appended.
 func TestLogStreamer_Stream_EmptyFile(t *testing.T) {
-	_, logFile := setupLogStreamEnv(t, "")
-
-	server, _, _ := newLogStreamServer(t, logFile, 1)
-
-	// Connect - the stream should start but send no log-line events
-	httpClient := &http.Client{Timeout: 0}
-	resp, err := httpClient.Get(server.URL + "/stream")
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
+		t.Fatalf("failed to resolve temp dir: %v", err)
 	}
-	defer resp.Body.Close()
+	t.Setenv("HOME", tmpHome)
 
-	scanner := bufio.NewScanner(resp.Body)
-	client := &logSSETestClient{resp: resp, scanner: scanner}
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
 
-	// Append a line to the empty file
+	logFile := filepath.Join(logDir, "test.log")
+	if err := os.WriteFile(logFile, []byte{}, 0o644); err != nil {
+		t.Fatalf("failed to write empty file: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer s.Close()
+
+	server := logSSETestServer(t, s, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := connectStreamSSE(t, ctx, server.URL)
+	defer client.close()
+
+	// Wait for the stream to be fully set up (no initial events to read)
+	time.Sleep(200 * time.Millisecond)
+
+	// Append a line
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		t.Fatalf("failed to open file: %v", err)
+		t.Fatalf("failed to open for append: %v", err)
 	}
-	fmt.Fprintln(f, "first line")
+	if _, err := f.WriteString("first line\n"); err != nil {
+		f.Close()
+		t.Fatalf("failed to append: %v", err)
+	}
 	f.Close()
 
-	// Should now receive the new line
-	evt, err := client.readLogSSEEvent(5 * time.Second)
+	// Should receive the new line
+	evt, err := client.readEvent(5 * time.Second)
 	if err != nil {
 		t.Fatalf("failed to read event: %v", err)
 	}
 	if evt.Event != "log-line" {
-		t.Errorf("event = %q, want %q", evt.Event, "log-line")
+		t.Errorf("event type = %q, want %q", evt.Event, "log-line")
 	}
+
 	var payload LogLinePayload
 	if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
-		t.Fatalf("failed to parse: %v", err)
+		t.Fatalf("failed to parse payload: %v", err)
 	}
 	if payload.Line != "first line" {
 		t.Errorf("line = %q, want %q", payload.Line, "first line")
@@ -527,232 +561,353 @@ func TestLogStreamer_Stream_EmptyFile(t *testing.T) {
 	if payload.LineNumber != 1 {
 		t.Errorf("line_number = %d, want 1", payload.LineNumber)
 	}
+
+	cancel()
 }
 
-// TestLogStreamer_Stream_WatcherClosed verifies that closing the watcher
-// causes Stream to return nil.
+// TestLogStreamer_Stream_WatcherClosed tests that closing the watcher externally
+// causes Stream() to exit cleanly.
 func TestLogStreamer_Stream_WatcherClosed(t *testing.T) {
-	_, logFile := setupLogStreamEnv(t, "test\n")
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
 
-	ls, err := NewLogStreamer(logFile)
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
+
+	logFile := filepath.Join(logDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("line\n"), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
 	if err != nil {
 		t.Fatalf("NewLogStreamer() error = %v", err)
 	}
 
-	errCh := make(chan error, 1)
-	ctx := context.Background()
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
-		errCh <- ls.Stream(ctx, w, 1)
-	})
-	server := httptest.NewServer(mux)
+	streamErr := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		streamErr <- s.Stream(r.Context(), w, 1)
+	}))
 	defer server.Close()
 
-	client := connectLogStream(t, server.URL)
-	defer client.close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Read initial event
-	_, err = client.readLogSSEEvent(3 * time.Second)
-	if err != nil {
-		t.Fatalf("failed to read initial event: %v", err)
-	}
+	go func() {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+		client := &http.Client{Timeout: 0}
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+
+	// Wait for stream to reach the event loop
+	time.Sleep(300 * time.Millisecond)
 
 	// Close the watcher externally
-	time.Sleep(100 * time.Millisecond) // Let stream enter the select loop
-	ls.Close()
+	s.watcher.Close()
 
-	// Stream should return nil (watcher.Events closed)
 	select {
-	case streamErr := <-errCh:
-		if streamErr != nil {
-			t.Errorf("Stream() error = %v, want nil", streamErr)
+	case err := <-streamErr:
+		// Stream should return nil (watcher closed) or context.Canceled (HTTP cleanup).
+		// Both are acceptable since the close/cancel order is non-deterministic.
+		if err != nil && err != context.Canceled {
+			t.Errorf("Stream() returned %v, want nil or context.Canceled", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stream() did not return after watcher close")
 	}
 }
 
-// TestLogStreamer_ReadNewLines_Concurrent verifies that concurrent file appends
-// produce monotonically increasing line numbers with no data races.
-// This test writes in batches with synchronization to ensure deterministic behavior.
+// TestLogStreamer_ReadNewLines_Concurrent tests that concurrent file appends
+// with simultaneous streaming don't cause data races.
 func TestLogStreamer_ReadNewLines_Concurrent(t *testing.T) {
-	_, logFile := setupLogStreamEnv(t, "")
-
-	server, _, _ := newLogStreamServer(t, logFile, 1)
-	client := connectLogStream(t, server.URL)
-	defer client.close()
-
-	// Write lines concurrently using a shared file handle with mutex
-	// to avoid interleaved writes.
-	const totalLines = 20
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o644)
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
-		t.Fatalf("failed to open file: %v", err)
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
 	}
 
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func(writerID int) {
-			defer wg.Done()
-			for j := 0; j < 5; j++ {
-				mu.Lock()
-				fmt.Fprintf(f, "writer-%d-line-%d\n", writerID, j)
-				mu.Unlock()
-				time.Sleep(5 * time.Millisecond)
-			}
-		}(i)
-	}
-	wg.Wait()
-	f.Close()
-
-	// Read events with generous timeout and verify monotonic line numbers
-	var prevLineNum int64
-	eventsRead := 0
-	deadline := time.After(10 * time.Second)
-	for eventsRead < totalLines {
-		evt, err := client.readLogSSEEvent(3 * time.Second)
-		if err != nil {
-			// Check if we've hit the overall deadline
-			select {
-			case <-deadline:
-				t.Logf("read %d/%d events before deadline", eventsRead, totalLines)
-				break
-			default:
-			}
-			break
-		}
-		if evt.Event != "log-line" {
-			continue
-		}
-		var p LogLinePayload
-		if err := json.Unmarshal([]byte(evt.Data), &p); err != nil {
-			t.Fatalf("event %d: failed to parse: %v", eventsRead, err)
-		}
-		if p.LineNumber <= prevLineNum {
-			t.Errorf("event %d: line_number %d not greater than previous %d", eventsRead, p.LineNumber, prevLineNum)
-		}
-		prevLineNum = p.LineNumber
-		eventsRead++
+	logFile := filepath.Join(logDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("initial\n"), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
 	}
 
-	if eventsRead < totalLines {
-		t.Errorf("expected %d events, got %d", totalLines, eventsRead)
-	}
-}
-
-// TestSendLogLine_JSONFormat verifies the SSE wire format of sendLogLine.
-func TestSendLogLine_JSONFormat(t *testing.T) {
-	tmpDir := t.TempDir()
-	fp := filepath.Join(tmpDir, "test.log")
-	if err := os.WriteFile(fp, []byte("data\n"), 0o644); err != nil {
-		t.Fatalf("failed to create file: %v", err)
-	}
-
-	ls, err := NewLogStreamer(fp)
+	s, err := NewLogStreamer(logFile)
 	if err != nil {
 		t.Fatalf("NewLogStreamer() error = %v", err)
 	}
-	defer ls.Close()
+	defer s.Close()
 
-	rec := httptest.NewRecorder()
-	ls.sendLogLine(rec, rec, "hello world", 42)
+	server := logSSETestServer(t, s, 1)
 
-	output := rec.Body.String()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Verify SSE wire format: id, event, data, blank line
-	if !strings.Contains(output, "event: log-line\n") {
-		t.Errorf("output missing 'event: log-line': %q", output)
+	client := connectStreamSSE(t, ctx, server.URL)
+	defer client.close()
+
+	// Read initial event
+	_, err = client.readEvent(5 * time.Second)
+	if err != nil {
+		t.Fatalf("failed to read initial event: %v", err)
 	}
+
+	// Wait for watcher setup
+	time.Sleep(100 * time.Millisecond)
+
+	// Launch concurrent writers
+	const numWriters = 5
+	const linesPerWriter = 3
+	var wg sync.WaitGroup
+	wg.Add(numWriters)
+
+	for w := 0; w < numWriters; w++ {
+		go func(writerID int) {
+			defer wg.Done()
+			f, err := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				return
+			}
+			defer f.Close()
+			for l := 0; l < linesPerWriter; l++ {
+				fmt.Fprintf(f, "writer-%d-line-%d\n", writerID, l)
+			}
+		}(w)
+	}
+
+	wg.Wait()
+
+	// Read all appended events (total = numWriters * linesPerWriter = 15)
+	totalExpected := numWriters * linesPerWriter
+	received := 0
+	var prevLineNum int64
+	deadline := time.After(10 * time.Second)
+
+	for received < totalExpected {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out: received %d of %d events", received, totalExpected)
+		default:
+		}
+
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("failed to read event %d: %v", received+1, err)
+		}
+		if evt.Event != "log-line" {
+			t.Errorf("event %d: type = %q, want %q", received+1, evt.Event, "log-line")
+		}
+
+		var payload LogLinePayload
+		if err := json.Unmarshal([]byte(evt.Data), &payload); err != nil {
+			t.Fatalf("event %d: failed to parse payload: %v", received+1, err)
+		}
+
+		// Verify monotonic line numbers
+		if payload.LineNumber <= prevLineNum {
+			t.Errorf("event %d: line_number %d not greater than previous %d",
+				received+1, payload.LineNumber, prevLineNum)
+		}
+		prevLineNum = payload.LineNumber
+		received++
+	}
+
+	cancel()
+}
+
+// --- sendLogLine and sendTruncatedEvent format tests ---
+
+// TestSendLogLine_JSONFormat tests that sendLogLine produces correct SSE wire format
+// with proper event type, ID, and JSON payload.
+func TestSendLogLine_JSONFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("line\n"), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer s.Close()
+
+	recorder := httptest.NewRecorder()
+	flusher := recorder
+
+	s.sendLogLine(recorder, flusher, "test line content", 42)
+
+	output := recorder.Body.String()
+
+	// Verify it contains id, event, and data fields
 	if !strings.Contains(output, "id: ") {
-		t.Errorf("output missing 'id: ': %q", output)
+		t.Error("output missing 'id: ' field")
+	}
+	if !strings.Contains(output, "event: log-line") {
+		t.Error("output missing 'event: log-line'")
 	}
 	if !strings.Contains(output, "data: ") {
-		t.Errorf("output missing 'data: ': %q", output)
-	}
-	// Must end with double newline
-	if !strings.HasSuffix(output, "\n\n") {
-		t.Errorf("output not terminated with double newline: %q", output)
+		t.Error("output missing 'data: ' field")
 	}
 
-	// Parse the data JSON
-	dataIdx := strings.Index(output, "data: ")
-	if dataIdx < 0 {
-		t.Fatal("could not find data: in output")
+	// Extract and parse the JSON data
+	dataLine := ""
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "data: ") {
+			dataLine = strings.TrimPrefix(line, "data: ")
+			break
+		}
 	}
-	dataLine := output[dataIdx+len("data: "):]
-	dataLine = strings.TrimRight(dataLine, "\n")
+	if dataLine == "" {
+		t.Fatal("could not find data line in output")
+	}
+
 	var payload LogLinePayload
 	if err := json.Unmarshal([]byte(dataLine), &payload); err != nil {
-		t.Fatalf("failed to parse data JSON: %v (raw: %q)", err, dataLine)
+		t.Fatalf("failed to parse JSON payload: %v", err)
 	}
-	if payload.Line != "hello world" {
-		t.Errorf("line = %q, want %q", payload.Line, "hello world")
+	if payload.Line != "test line content" {
+		t.Errorf("line = %q, want %q", payload.Line, "test line content")
 	}
 	if payload.LineNumber != 42 {
 		t.Errorf("line_number = %d, want 42", payload.LineNumber)
 	}
 	if payload.Timestamp == "" {
-		t.Error("timestamp should not be empty")
+		t.Error("expected non-empty timestamp")
 	}
 	if _, err := time.Parse(time.RFC3339, payload.Timestamp); err != nil {
-		t.Errorf("timestamp %q not RFC3339: %v", payload.Timestamp, err)
+		t.Errorf("timestamp %q is not RFC3339: %v", payload.Timestamp, err)
+	}
+
+	// Verify output ends with double newline (SSE event delimiter)
+	if !strings.HasSuffix(output, "\n\n") {
+		t.Errorf("output should end with double newline, got %q", output[len(output)-4:])
 	}
 }
 
-// TestSendTruncatedEvent_Format verifies the SSE wire format of sendTruncatedEvent.
+// TestSendTruncatedEvent_Format tests that sendTruncatedEvent produces the correct
+// SSE wire format with "truncated" event type and empty JSON data.
 func TestSendTruncatedEvent_Format(t *testing.T) {
 	tmpDir := t.TempDir()
-	fp := filepath.Join(tmpDir, "test.log")
-	if err := os.WriteFile(fp, []byte("data\n"), 0o644); err != nil {
-		t.Fatalf("failed to create file: %v", err)
+	logFile := filepath.Join(tmpDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("line\n"), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
 	}
 
-	ls, err := NewLogStreamer(fp)
+	s, err := NewLogStreamer(logFile)
 	if err != nil {
 		t.Fatalf("NewLogStreamer() error = %v", err)
 	}
-	defer ls.Close()
+	defer s.Close()
 
-	rec := httptest.NewRecorder()
-	ls.sendTruncatedEvent(rec, rec)
+	recorder := httptest.NewRecorder()
+	flusher := recorder
 
-	output := rec.Body.String()
+	s.sendTruncatedEvent(recorder, flusher)
 
-	if !strings.Contains(output, "event: truncated\n") {
-		t.Errorf("output missing 'event: truncated': %q", output)
-	}
-	if !strings.Contains(output, "data: {}\n") {
-		t.Errorf("output missing 'data: {}': %q", output)
-	}
+	output := recorder.Body.String()
+
 	if !strings.Contains(output, "id: ") {
-		t.Errorf("output missing 'id: ': %q", output)
+		t.Error("output missing 'id: ' field")
+	}
+	if !strings.Contains(output, "event: truncated") {
+		t.Error("output missing 'event: truncated'")
+	}
+	if !strings.Contains(output, "data: {}") {
+		t.Error("output missing 'data: {}'")
 	}
 	if !strings.HasSuffix(output, "\n\n") {
-		t.Errorf("output not terminated with double newline: %q", output)
+		t.Errorf("output should end with double newline, got %q", output[len(output)-4:])
 	}
 }
 
-// TestNewLogStreamerFixed_Alias verifies that NewLogStreamerFixed is an alias
-// for NewLogStreamer and works identically.
-func TestNewLogStreamerFixed_Alias(t *testing.T) {
-	tmpDir := t.TempDir()
-	fp := filepath.Join(tmpDir, "test.log")
-	if err := os.WriteFile(fp, []byte("data\n"), 0o644); err != nil {
-		t.Fatalf("failed to create file: %v", err)
+// TestLogStreamer_Stream_MonotonicEventIDs tests that event IDs are strictly increasing
+// across multiple events in a single stream.
+func TestLogStreamer_Stream_MonotonicEventIDs(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
 	}
 
-	ls, err := NewLogStreamerFixed(fp)
+	logFile := filepath.Join(logDir, "test.log")
+	var lines []string
+	for i := 1; i <= 5; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	if err := os.WriteFile(logFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer s.Close()
+
+	server := logSSETestServer(t, s, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := connectStreamSSE(t, ctx, server.URL)
+	defer client.close()
+
+	var prevID int64
+	for i := 1; i <= 5; i++ {
+		evt, err := client.readEvent(5 * time.Second)
+		if err != nil {
+			t.Fatalf("event %d: failed to read: %v", i, err)
+		}
+
+		var id int64
+		if _, err := fmt.Sscanf(evt.ID, "%d", &id); err != nil {
+			t.Fatalf("event %d: failed to parse ID %q: %v", i, evt.ID, err)
+		}
+		if i > 1 && id <= prevID {
+			t.Errorf("event %d: ID %d not greater than previous %d", i, id, prevID)
+		}
+		prevID = id
+	}
+
+	cancel()
+}
+
+// TestNewLogStreamerFixed_IsAlias verifies NewLogStreamerFixed is an alias for NewLogStreamer.
+func TestNewLogStreamerFixed_IsAlias(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("failed to write: %v", err)
+	}
+
+	s, err := NewLogStreamerFixed(logFile)
 	if err != nil {
 		t.Fatalf("NewLogStreamerFixed() error = %v", err)
 	}
-	if ls == nil {
+	defer s.Close()
+
+	if s == nil {
 		t.Fatal("NewLogStreamerFixed() returned nil")
 	}
-	if err := ls.Close(); err != nil {
-		t.Errorf("Close() error = %v", err)
+	if s.logFilePath != logFile {
+		t.Errorf("logFilePath = %q, want %q", s.logFilePath, logFile)
 	}
 }

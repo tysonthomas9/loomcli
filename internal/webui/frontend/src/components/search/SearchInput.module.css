@@ -14,7 +14,7 @@
 .icon {
   position: absolute;
   left: 10px;
-  color: var(--color-text-secondary);
+  color: rgba(255, 255, 255, 0.6);
   pointer-events: none;
   transition: color var(--transition-fast);
 }
@@ -24,11 +24,11 @@
   padding: 6px 12px;
   padding-left: 34px; /* icon offset */
   font-family: var(--font-family-base);
-  font-size: var(--font-size-sm);
-  color: var(--color-text);
-  background-color: var(--color-bg);
-  border: 1px solid #000;
-  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--color-text-inverse);
+  background-color: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 9999px;
   transition:
     border-color var(--transition-fast),
     background-color var(--transition-fast),
@@ -37,7 +37,7 @@
 
 /* Placeholder text */
 .input::placeholder {
-  color: var(--color-text-muted);
+  color: rgba(255, 255, 255, 0.6);
 }
 
 /* Remove native search input styling */
@@ -49,26 +49,27 @@
 
 /* Hover state */
 .input:hover:not(:disabled) {
-  border-color: var(--color-text);
+  border-color: rgba(255, 255, 255, 0.4);
+  background-color: rgba(255, 255, 255, 0.15);
 }
 
 /* Focus state */
 .input:focus {
   outline: none;
-  border-color: var(--color-text);
-  background-color: var(--color-bg);
+  border-color: rgba(255, 255, 255, 0.5);
+  background-color: rgba(255, 255, 255, 0.15);
   box-shadow: none;
 }
 
 .searchInput:focus-within .icon {
-  color: var(--color-text);
+  color: var(--color-text-inverse);
 }
 
 /* Disabled state */
 .input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  background-color: var(--color-bg-tertiary);
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
 /* Clear button */
@@ -81,7 +82,7 @@
   width: 24px;
   height: 24px;
   padding: 0;
-  color: var(--color-text-muted);
+  color: rgba(255, 255, 255, 0.6);
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
@@ -92,12 +93,12 @@
 }
 
 .clear:hover {
-  color: var(--color-text);
-  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-inverse);
+  background-color: rgba(255, 255, 255, 0.2);
 }
 
 .clear:focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 2px solid rgba(255, 255, 255, 0.8);
   outline-offset: 1px;
 }
 
@@ -119,7 +120,7 @@
 
 /* Size variants - Medium */
 .md .input {
-  height: 30px;
+  height: 28px;
 }
 
 /* Size variants - Large */
