@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sync/atomic"
 	"syscall"
+	"unsafe"
 )
 
 // CodexBackend implements the Backend interface for the OpenAI Codex CLI.
@@ -45,7 +46,34 @@ func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	return cmd
 }
 
+// isTerminal reports whether f is connected to a terminal (TTY)
+// using the TIOCGWINSZ ioctl, which only succeeds on real terminals.
+func isTerminal(f *os.File) bool {
+	var ws [4]uint16 // struct winsize: rows, cols, xpixel, ypixel
+	_, _, err := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws[0])))
+	return err == 0
+}
+
 func defaultCodexInvoker(workDir, prompt, agentName string) error {
+	// When stdin is not a TTY (e.g. daemon subprocess), Codex interactive
+	// mode fails with "stdin is not a terminal". Fall back to non-interactive
+	// exec mode which works headlessly.
+	if !isTerminal(os.Stdin) {
+		fmt.Println("Launching Codex agent (non-interactive, no TTY)...")
+		fmt.Println("")
+
+		cmd := exec.Command("codex", "exec", "--full-auto", prompt)
+		cmd.Dir = workDir
+		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
+		if agentName != "" {
+			env = append(env, "BD_ACTOR="+agentName)
+		}
+		cmd.Env = env
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
+
 	cmd := buildCodexInteractiveCmd(workDir, prompt, agentName)
 
 	fmt.Println("Launching Codex agent...")
