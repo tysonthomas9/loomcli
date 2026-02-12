@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -86,11 +87,12 @@ func (p *adaptivePoller) hadNoActivity() {
 func SetupSignalHandler() chan struct{} {
 	shutdown := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	go func() {
-		<-sigChan
-		fmt.Println("\n[auto] Shutdown signal received, stopping gracefully...")
+		sig := <-sigChan
+		log.Printf("[auto] Shutdown signal received: %v (PID=%d, PGID=%d)", sig, os.Getpid(), syscall.Getpgrp())
+		fmt.Printf("\n[auto] Shutdown signal received (%v), stopping gracefully...\n", sig)
 		close(shutdown) // Closing unblocks ALL receivers
 	}()
 

@@ -33,7 +33,7 @@ var codexNonInteractiveInvoker = defaultCodexNonInteractiveInvoker
 // buildCodexInteractiveCmd constructs the exec.Cmd for interactive Codex invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("codex", "--full-auto", prompt)
+	cmd := exec.Command("codex", "--dangerously-bypass-approvals-and-sandbox", prompt)
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
@@ -62,7 +62,7 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 		fmt.Println("Launching Codex agent (non-interactive, no TTY)...")
 		fmt.Println("")
 
-		cmd := exec.Command("codex", "exec", "--full-auto", prompt)
+		cmd := exec.Command("codex", "exec", "--dangerously-bypass-approvals-and-sandbox", prompt)
 		cmd.Dir = workDir
 		env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
@@ -83,7 +83,7 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
-	cmd := exec.Command("codex", "exec", "--json")
+	cmd := exec.Command("codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox")
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {

@@ -97,6 +97,18 @@ func init() {
 }
 
 func runDaemon(cmd *cobra.Command, args []string) {
+	// 0. Create own process group so signals to the parent's group don't kill us.
+	// This is critical when the daemon is launched via `loom daemon &` from a
+	// script — without this, the daemon shares the script's PGID and any
+	// process-group-wide signal can take down the daemon.
+	if err := syscall.Setpgid(0, 0); err != nil {
+		// Setpgid can fail if we're already a session leader or after exec in
+		// some configurations. Fall back to setsid which creates a new session.
+		if _, err2 := syscall.Setsid(); err2 != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not isolate process group (setpgid: %v, setsid: %v)\n", err, err2)
+		}
+	}
+
 	// 1. Get project directory (current working directory)
 	projectDir, err := os.Getwd()
 	if err != nil {
