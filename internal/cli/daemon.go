@@ -387,6 +387,9 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 	// Set working directory to worktree
 	cmd.Dir = ap.worktreePath
 
+	// Create a new process group so we can kill the entire tree on stop
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	// Set environment
 	cmd.Env = append(FilteredEnv(),
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
@@ -535,9 +538,10 @@ func (d *Daemon) getBackoffMax() int {
 	return 300 // default seconds
 }
 
-// stopAgent sends SIGTERM then SIGKILL to a single agent.
+// stopAgent sends SIGTERM then SIGKILL to a single agent and its entire process group.
 // This function is safe to call concurrently with waitForAgent.
 // It uses polling instead of cmd.Wait() to avoid double-wait issues.
+// The process group kill ensures child processes (e.g. codex) are not orphaned.
 func (d *Daemon) stopAgent(ap *AgentProcess) {
 	ap.mu.Lock()
 	proc := ap.cmd
@@ -548,13 +552,16 @@ func (d *Daemon) stopAgent(ap *AgentProcess) {
 		return
 	}
 
-	log.Printf("[daemon] Agent %s: sending SIGTERM to PID %d", ap.entry.Worktree, pid)
+	log.Printf("[daemon] Agent %s: sending SIGTERM to process group %d", ap.entry.Worktree, pid)
 
-	// Try graceful shutdown
-	if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
-		// Process may have already exited
-		log.Printf("[daemon] Agent %s: SIGTERM failed (process may have exited): %v", ap.entry.Worktree, err)
-		return
+	// Send SIGTERM to the entire process group (negative PID)
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+		// Process group may have already exited; try the process directly
+		log.Printf("[daemon] Agent %s: SIGTERM to process group failed: %v (trying process directly)", ap.entry.Worktree, err)
+		if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
+			log.Printf("[daemon] Agent %s: SIGTERM failed (process may have exited): %v", ap.entry.Worktree, err)
+			return
+		}
 	}
 
 	// Poll for process exit up to 5 seconds instead of calling Wait()
@@ -580,14 +587,14 @@ func (d *Daemon) stopAgent(ap *AgentProcess) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Force kill if still running
+	// Force kill the entire process group if still running
 	ap.mu.Lock()
 	stillRunning := ap.pid != 0
 	ap.mu.Unlock()
 
 	if stillRunning {
-		log.Printf("[daemon] Agent %s: sending SIGKILL to PID %d", ap.entry.Worktree, pid)
-		_ = proc.Process.Signal(syscall.SIGKILL)
+		log.Printf("[daemon] Agent %s: sending SIGKILL to process group %d", ap.entry.Worktree, pid)
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
 	}
 }
 

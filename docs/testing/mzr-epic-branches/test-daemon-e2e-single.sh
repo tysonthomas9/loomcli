@@ -11,16 +11,24 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TEST_DIR="${1:-${SINGLE_WT_TEST_DIR:-/tmp/loom-mzr-test-single}}"
+TEST_DIR="${SINGLE_WT_TEST_DIR:-/tmp/loom-mzr-test-single}"
+BACKEND_FLAG=""
+for arg in "$@"; do
+  case "$arg" in
+    --backend=*) BACKEND_FLAG="$arg" ;;
+    *)           TEST_DIR="$arg" ;;
+  esac
+done
 
 # Setup with single worktree
-bash "$SCRIPT_DIR/setup.sh" --single-worktree "$TEST_DIR"
+bash "$SCRIPT_DIR/setup.sh" --single-worktree $BACKEND_FLAG "$TEST_DIR"
 
 source "$TEST_DIR/test-env.sh"
 
 # Longer timeouts since all work is sequential through 1 agent
-export PLAN_TIMEOUT=600   # 10 min (was 5 min with 2 agents)
-export IMPL_TIMEOUT=2100  # 35 min (4 sequential tasks @ ~7 min each + overhead)
+# Can be overridden via env vars (e.g. for slower backends like codex)
+export PLAN_TIMEOUT=${PLAN_TIMEOUT:-600}    # default 10 min
+export IMPL_TIMEOUT=${IMPL_TIMEOUT:-2100}   # default 35 min
 
 # Run the standard E2E test (plan → review → implement)
 E2E_EXIT=0

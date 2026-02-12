@@ -2,19 +2,22 @@
 # setup.sh — Create a temporary git repo with beads and worktrees for testing
 # the Daemon-Managed Epic Branches feature (loomcli-mzr).
 #
-# Usage: ./setup.sh [--single-worktree] [test_dir]
+# Usage: ./setup.sh [--single-worktree] [--backend=<name>] [test_dir]
 #   test_dir defaults to /tmp/loom-mzr-test
 #   --single-worktree: create only the falcon worktree (for epic transition testing)
+#   --backend=<name>: set the AI backend (e.g. codex, claude). Default: none (uses global config)
 #
 # Outputs a test-env.sh file that can be sourced by other scripts.
 
 set -euo pipefail
 
 SINGLE_WORKTREE=false
+BACKEND=""
 TEST_DIR=""
 for arg in "$@"; do
   case "$arg" in
     --single-worktree) SINGLE_WORKTREE=true ;;
+    --backend=*)       BACKEND="${arg#--backend=}" ;;
     *)                 TEST_DIR="$arg" ;;
   esac
 done
@@ -66,6 +69,11 @@ else
     auto: true'
 fi
 
+BACKEND_LINE=""
+if [ -n "$BACKEND" ]; then
+  BACKEND_LINE="backend: $BACKEND"
+fi
+
 DAEMON_BLOCK='daemon:
   pid_file: .loom/daemon.pid
   log_dir: .loom/logs
@@ -76,6 +84,7 @@ DAEMON_BLOCK='daemon:
 
 # Default config (agents as task) — used by unit-style tests
 cat > loom.yaml <<EOF
+$BACKEND_LINE
 $DAEMON_BLOCK
 
 agents:
@@ -84,6 +93,7 @@ EOF
 
 # Planning config — agents create designs
 cat > loom-plan.yaml <<EOF
+$BACKEND_LINE
 $DAEMON_BLOCK
 
 agents:
@@ -92,6 +102,7 @@ EOF
 
 # Implementation config — agents implement approved designs
 cat > loom-task.yaml <<EOF
+$BACKEND_LINE
 $DAEMON_BLOCK
 
 agents:
