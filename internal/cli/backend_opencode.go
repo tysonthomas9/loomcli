@@ -32,7 +32,7 @@ var openCodeNonInteractiveInvoker = defaultOpenCodeNonInteractiveInvoker
 // buildOpenCodeInteractiveCmd constructs the exec.Cmd for interactive OpenCode invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildOpenCodeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("opencode", "--prompt", prompt)
+	cmd := exec.Command("opencode", "run", prompt)
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
