@@ -1,6 +1,6 @@
 /**
  * LogViewer component styles.
- * Terminal-style log display with dark background and monospace font.
+ * Terminal-style log display with dark background using xterm.js.
  */
 
 .container {
@@ -106,70 +106,11 @@
   flex-shrink: 0;
 }
 
-/* ============= Scroll Container ============= */
+/* ============= Terminal Container ============= */
 
-.scrollContainer {
+.terminalContainer {
   flex: 1;
-  overflow: hidden auto;
+  overflow: hidden;
   min-height: 0;
-}
-
-.scrollContainer:focus {
-  outline: none;
-}
-
-.scrollContainer:focus-visible {
-  outline: 2px solid var(--color-primary, #3b82f6);
-  outline-offset: -2px;
-}
-
-/* ============= Log Content ============= */
-
-.logContent {
-  padding: 12px;
-  font-family: var(
-    --font-mono,
-    'SF Mono',
-    'Monaco',
-    'Inconsolata',
-    'Fira Mono',
-    'Droid Sans Mono',
-    'Source Code Pro',
-    monospace
-  );
-  font-size: var(--font-xs, 12px);
-  line-height: 1.5;
-}
-
-.empty {
-  color: #6b7280;
-  font-style: italic;
-  padding: 20px 0;
-  text-align: center;
-}
-
-.line {
-  display: flex;
-  gap: 12px;
-  padding: 1px 0;
-  transition: background-color 0.1s;
-}
-
-.line:hover {
-  background-color: rgba(255, 255, 255, 0.03);
-}
-
-.lineNumber {
-  min-width: 40px;
-  text-align: right;
-  color: #6b7280;
-  user-select: none;
-  flex-shrink: 0;
-}
-
-.lineContent {
-  color: #e5e5e5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  flex: 1;
+  background-color: #1e1e1e;
 }

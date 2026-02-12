@@ -3,16 +3,94 @@
  */
 
 /**
- * Unit tests for LogViewer component.
+ * Unit tests for LogViewer component (xterm.js-based).
  */
 
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
 
 import type { LogLine } from '@/hooks/useLogStream';
 
 import { LogViewer } from '../LogViewer';
+
+// Track terminal instances for test assertions
+let lastTerminalInstance: MockTerminalInstance | null = null;
+let lastFitAddonInstance: MockFitAddonInstance | null = null;
+
+interface MockTerminalInstance {
+  open: ReturnType<typeof vi.fn>;
+  dispose: ReturnType<typeof vi.fn>;
+  write: ReturnType<typeof vi.fn>;
+  clear: ReturnType<typeof vi.fn>;
+  loadAddon: ReturnType<typeof vi.fn>;
+  scrollToBottom: ReturnType<typeof vi.fn>;
+  onScroll: ReturnType<typeof vi.fn>;
+  buffer: { active: { viewportY: number; baseY: number } };
+  options: Record<string, unknown>;
+}
+
+interface MockFitAddonInstance {
+  fit: ReturnType<typeof vi.fn>;
+  dispose: ReturnType<typeof vi.fn>;
+}
+
+vi.mock('@xterm/xterm', () => {
+  class MockTerminal {
+    open = vi.fn();
+    dispose = vi.fn();
+    write = vi.fn();
+    clear = vi.fn();
+    loadAddon = vi.fn();
+    scrollToBottom = vi.fn();
+    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
+    buffer = { active: { viewportY: 0, baseY: 0 } };
+    options: Record<string, unknown> = {};
+
+    constructor(opts?: Record<string, unknown>) {
+      this.options = opts ?? {};
+      lastTerminalInstance = this as unknown as MockTerminalInstance;
+    }
+  }
+  return { Terminal: MockTerminal };
+});
+
+vi.mock('@xterm/addon-fit', () => {
+  class MockFitAddon {
+    fit = vi.fn();
+    dispose = vi.fn();
+
+    constructor() {
+      lastFitAddonInstance = this as unknown as MockFitAddonInstance;
+    }
+  }
+  return { FitAddon: MockFitAddon };
+});
+
+vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
+
+// Mock ResizeObserver (not available in jsdom)
+class MockResizeObserver {
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+}
+
+const OriginalResizeObserver = globalThis.ResizeObserver;
+
+type GlobalWithMocks = typeof globalThis & {
+  ResizeObserver: typeof MockResizeObserver | typeof ResizeObserver;
+};
+
+beforeEach(() => {
+  (globalThis as GlobalWithMocks).ResizeObserver = MockResizeObserver;
+  lastTerminalInstance = null;
+  lastFitAddonInstance = null;
+});
+
+afterEach(() => {
+  (globalThis as GlobalWithMocks).ResizeObserver = OriginalResizeObserver;
+});
 
 /**
  * Create a test log line with required fields.
@@ -38,25 +116,54 @@ function createLogLines(count: number, startNumber = 1): LogLine[] {
 }
 
 describe('LogViewer', () => {
-  describe('Empty state', () => {
-    it('renders empty state message when no lines', () => {
+  describe('Terminal creation', () => {
+    it('creates Terminal with correct config', () => {
       render(<LogViewer lines={[]} connectionState="connected" />);
 
-      expect(
-        screen.getByText(/No logs available yet. Logs appear when the agent starts working./i)
-      ).toBeInTheDocument();
+      expect(lastTerminalInstance).not.toBeNull();
+      expect(lastTerminalInstance!.options).toMatchObject({
+        disableStdin: true,
+        fontSize: 14,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        scrollback: 5000,
+        convertEol: true,
+        cursorBlink: false,
+        cursorStyle: 'bar',
+        cursorWidth: 0,
+        theme: {
+          background: '#1e1e1e',
+          foreground: '#d4d4d4',
+        },
+      });
     });
 
-    it('renders empty state with proper container', () => {
+    it('loads FitAddon and calls fit', () => {
       render(<LogViewer lines={[]} connectionState="connected" />);
 
-      const viewer = screen.getByTestId('log-viewer');
-      expect(viewer).toBeInTheDocument();
+      expect(lastTerminalInstance!.loadAddon).toHaveBeenCalledWith(lastFitAddonInstance);
+      expect(lastFitAddonInstance!.fit).toHaveBeenCalled();
+    });
+
+    it('opens terminal in container', () => {
+      render(<LogViewer lines={[]} connectionState="connected" />);
+
+      expect(lastTerminalInstance!.open).toHaveBeenCalledTimes(1);
+      const arg = lastTerminalInstance!.open.mock.calls[0][0];
+      expect(arg).toBeInstanceOf(HTMLDivElement);
+    });
+
+    it('disposes terminal on unmount', () => {
+      const { unmount } = render(<LogViewer lines={[]} connectionState="connected" />);
+
+      const terminal = lastTerminalInstance!;
+      unmount();
+
+      expect(terminal.dispose).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe('Line rendering', () => {
-    it('renders log lines', () => {
+  describe('Line writing', () => {
+    it('writes lines to terminal', () => {
       const lines = [
         createLogLine({ line: 'First message', lineNumber: 1 }),
         createLogLine({ line: 'Second message', lineNumber: 2 }),
@@ -64,54 +171,45 @@ describe('LogViewer', () => {
 
       render(<LogViewer lines={lines} connectionState="connected" />);
 
-      expect(screen.getByText('First message')).toBeInTheDocument();
-      expect(screen.getByText('Second message')).toBeInTheDocument();
+      expect(lastTerminalInstance!.write).toHaveBeenCalledWith('First message\n');
+      expect(lastTerminalInstance!.write).toHaveBeenCalledWith('Second message\n');
     });
 
-    it('renders line numbers by default', () => {
-      const lines = [
-        createLogLine({ lineNumber: 1 }),
-        createLogLine({ lineNumber: 2 }),
-        createLogLine({ lineNumber: 3 }),
-      ];
+    it('writes lines incrementally on update', () => {
+      const lines1 = createLogLines(3);
+      const { rerender } = render(<LogViewer lines={lines1} connectionState="connected" />);
 
-      render(<LogViewer lines={lines} connectionState="connected" />);
+      // Should have written 3 lines
+      expect(lastTerminalInstance!.write).toHaveBeenCalledTimes(3);
 
-      expect(screen.getByText('1')).toBeInTheDocument();
-      expect(screen.getByText('2')).toBeInTheDocument();
-      expect(screen.getByText('3')).toBeInTheDocument();
+      const lines2 = [...lines1, ...createLogLines(2, 4)];
+      rerender(<LogViewer lines={lines2} connectionState="connected" />);
+
+      // Should have written only 2 new lines (5 total)
+      expect(lastTerminalInstance!.write).toHaveBeenCalledTimes(5);
+      expect(lastTerminalInstance!.write).toHaveBeenCalledWith('Log line 4\n');
+      expect(lastTerminalInstance!.write).toHaveBeenCalledWith('Log line 5\n');
     });
 
-    it('hides line numbers when showLineNumbers is false', () => {
-      const lines = [createLogLine({ lineNumber: 42, line: 'My log message' })];
+    it('clears terminal and rewrites when lines reset (stream change)', () => {
+      const lines1 = createLogLines(5);
+      const { rerender } = render(<LogViewer lines={lines1} connectionState="connected" />);
 
-      render(<LogViewer lines={lines} connectionState="connected" showLineNumbers={false} />);
+      expect(lastTerminalInstance!.write).toHaveBeenCalledTimes(5);
 
-      expect(screen.queryByText('42')).not.toBeInTheDocument();
-      expect(screen.getByText('My log message')).toBeInTheDocument();
+      // Simulate stream reset (new agent/task)
+      const lines2 = createLogLines(2, 100);
+      rerender(<LogViewer lines={lines2} connectionState="connected" />);
+
+      expect(lastTerminalInstance!.clear).toHaveBeenCalled();
+      expect(lastTerminalInstance!.write).toHaveBeenCalledWith('Log line 100\n');
+      expect(lastTerminalInstance!.write).toHaveBeenCalledWith('Log line 101\n');
     });
 
-    it('renders many lines correctly', () => {
-      const lines = createLogLines(100);
+    it('handles empty lines array', () => {
+      render(<LogViewer lines={[]} connectionState="connected" />);
 
-      render(<LogViewer lines={lines} connectionState="connected" />);
-
-      expect(screen.getByText('Log line 1')).toBeInTheDocument();
-      expect(screen.getByText('Log line 100')).toBeInTheDocument();
-    });
-
-    it('preserves non-sequential line numbers', () => {
-      const lines = [
-        createLogLine({ lineNumber: 50, line: 'Line at 50' }),
-        createLogLine({ lineNumber: 51, line: 'Line at 51' }),
-        createLogLine({ lineNumber: 52, line: 'Line at 52' }),
-      ];
-
-      render(<LogViewer lines={lines} connectionState="connected" />);
-
-      expect(screen.getByText('50')).toBeInTheDocument();
-      expect(screen.getByText('51')).toBeInTheDocument();
-      expect(screen.getByText('52')).toBeInTheDocument();
+      expect(lastTerminalInstance!.write).not.toHaveBeenCalled();
     });
   });
 
@@ -230,6 +328,17 @@ describe('LogViewer', () => {
       expect(onAutoScrollChange).toHaveBeenCalledWith(true);
     });
 
+    it('calls terminal.scrollToBottom when scroll button is clicked', () => {
+      render(
+        <LogViewer lines={createLogLines(10)} connectionState="connected" autoScroll={false} />
+      );
+
+      const scrollButton = screen.getByRole('button', { name: /scroll to bottom/i });
+      fireEvent.click(scrollButton);
+
+      expect(lastTerminalInstance!.scrollToBottom).toHaveBeenCalled();
+    });
+
     it('does not throw when clicking scroll button without onAutoScrollChange', () => {
       render(
         <LogViewer lines={createLogLines(10)} connectionState="connected" autoScroll={false} />
@@ -237,6 +346,12 @@ describe('LogViewer', () => {
 
       const scrollButton = screen.getByRole('button', { name: /scroll to bottom/i });
       expect(() => fireEvent.click(scrollButton)).not.toThrow();
+    });
+
+    it('scrolls to bottom on new lines when auto-scroll is enabled', () => {
+      render(<LogViewer lines={createLogLines(5)} connectionState="connected" autoScroll={true} />);
+
+      expect(lastTerminalInstance!.scrollToBottom).toHaveBeenCalled();
     });
   });
 
@@ -283,31 +398,16 @@ describe('LogViewer', () => {
   });
 
   describe('Accessibility', () => {
-    it('has proper log role on scroll container', () => {
-      render(<LogViewer lines={createLogLines(5)} connectionState="connected" />);
+    it('has data-testid on log viewer container', () => {
+      render(<LogViewer lines={[]} connectionState="connected" />);
 
-      expect(screen.getByRole('log')).toBeInTheDocument();
+      expect(screen.getByTestId('log-viewer')).toBeInTheDocument();
     });
 
-    it('has aria-live attribute for live updates', () => {
-      render(<LogViewer lines={createLogLines(5)} connectionState="connected" />);
+    it('has data-testid on terminal container', () => {
+      render(<LogViewer lines={[]} connectionState="connected" />);
 
-      const logContainer = screen.getByRole('log');
-      expect(logContainer).toHaveAttribute('aria-live', 'polite');
-    });
-
-    it('has aria-label on log container', () => {
-      render(<LogViewer lines={createLogLines(5)} connectionState="connected" />);
-
-      const logContainer = screen.getByRole('log');
-      expect(logContainer).toHaveAttribute('aria-label', 'Log output');
-    });
-
-    it('scroll container is keyboard focusable', () => {
-      render(<LogViewer lines={createLogLines(5)} connectionState="connected" />);
-
-      const logContainer = screen.getByRole('log');
-      expect(logContainer).toHaveAttribute('tabIndex', '0');
+      expect(screen.getByTestId('terminal-container')).toBeInTheDocument();
     });
 
     it('status dot has aria-hidden for screen readers', () => {
@@ -315,12 +415,6 @@ describe('LogViewer', () => {
 
       const statusDot = container.querySelector('[data-state]');
       expect(statusDot).toHaveAttribute('aria-hidden', 'true');
-    });
-
-    it('has data-testid for e2e tests', () => {
-      render(<LogViewer lines={[]} connectionState="connected" />);
-
-      expect(screen.getByTestId('log-viewer')).toBeInTheDocument();
     });
 
     it('scroll button has proper type attribute', () => {
@@ -333,110 +427,19 @@ describe('LogViewer', () => {
     });
   });
 
-  describe('Scroll behavior', () => {
-    it('scroll container exists and is scrollable', () => {
-      render(<LogViewer lines={createLogLines(100)} connectionState="connected" />);
-
-      const logContainer = screen.getByRole('log');
-      expect(logContainer).toBeInTheDocument();
-    });
-
-    it('disables auto-scroll when user scrolls up', () => {
-      const onAutoScrollChange = vi.fn();
-
-      render(
-        <LogViewer
-          lines={createLogLines(100)}
-          connectionState="connected"
-          autoScroll={true}
-          onAutoScrollChange={onAutoScrollChange}
-        />
-      );
-
-      const logContainer = screen.getByRole('log');
-
-      // Simulate scrolling up by changing scrollTop
-      Object.defineProperty(logContainer, 'scrollTop', {
-        writable: true,
-        value: 100,
-      });
-      Object.defineProperty(logContainer, 'scrollHeight', {
-        writable: true,
-        value: 1000,
-      });
-      Object.defineProperty(logContainer, 'clientHeight', {
-        writable: true,
-        value: 200,
-      });
-
-      // First scroll to set lastScrollTop
-      fireEvent.scroll(logContainer);
-
-      // Now scroll up (decrease scrollTop)
-      Object.defineProperty(logContainer, 'scrollTop', {
-        writable: true,
-        value: 50,
-      });
-
-      fireEvent.scroll(logContainer);
-
-      expect(onAutoScrollChange).toHaveBeenCalledWith(false);
-    });
-  });
-
   describe('Edge cases', () => {
-    it('filters out empty line content', () => {
-      const lines = [createLogLine({ line: '', lineNumber: 1 })];
-
-      render(<LogViewer lines={lines} connectionState="connected" />);
-
-      // Empty lines are filtered out by ANSI stripping, showing empty state
-      expect(screen.getByText(/No logs available yet/i)).toBeInTheDocument();
-    });
-
-    it('handles lines with special characters', () => {
-      const lines = [
-        createLogLine({ line: '<script>alert("xss")</script>', lineNumber: 1 }),
-        createLogLine({ line: 'Line with "quotes" and \'apostrophes\'', lineNumber: 2 }),
-        createLogLine({ line: 'Line with & ampersand', lineNumber: 3 }),
-      ];
-
-      render(<LogViewer lines={lines} connectionState="connected" />);
-
-      // Content should be escaped/rendered as text
-      expect(screen.getByText('<script>alert("xss")</script>')).toBeInTheDocument();
-      expect(screen.getByText('Line with "quotes" and \'apostrophes\'')).toBeInTheDocument();
-      expect(screen.getByText('Line with & ampersand')).toBeInTheDocument();
-    });
-
-    it('handles very long lines', () => {
-      const longLine = 'A'.repeat(10000);
-      const lines = [createLogLine({ line: longLine, lineNumber: 1 })];
-
-      render(<LogViewer lines={lines} connectionState="connected" />);
-
-      expect(screen.getByText(longLine)).toBeInTheDocument();
-    });
-
-    it('handles unicode characters', () => {
-      const lines = [createLogLine({ line: 'Hello World', lineNumber: 1 })];
-
-      render(<LogViewer lines={lines} connectionState="connected" />);
-
-      expect(screen.getByText('Hello World')).toBeInTheDocument();
-    });
-
     it('handles rapid prop updates', () => {
       const { rerender } = render(
         <LogViewer lines={createLogLines(5)} connectionState="connecting" />
       );
 
-      // Rapid rerenders
       rerender(<LogViewer lines={createLogLines(10)} connectionState="connected" />);
       rerender(<LogViewer lines={createLogLines(15)} connectionState="connected" />);
       rerender(<LogViewer lines={createLogLines(20)} connectionState="connected" />);
 
-      expect(screen.getByText('Log line 20')).toBeInTheDocument();
+      // Should have written all 20 lines total
+      expect(lastTerminalInstance!.write).toHaveBeenCalledTimes(20);
+      expect(lastTerminalInstance!.write).toHaveBeenCalledWith('Log line 20\n');
     });
 
     it('handles transition from lines to empty', () => {
@@ -444,11 +447,25 @@ describe('LogViewer', () => {
         <LogViewer lines={createLogLines(5)} connectionState="connected" />
       );
 
-      expect(screen.getByText('Log line 1')).toBeInTheDocument();
+      expect(lastTerminalInstance!.write).toHaveBeenCalledTimes(5);
 
       rerender(<LogViewer lines={[]} connectionState="connected" />);
 
-      expect(screen.getByText(/No logs available yet/i)).toBeInTheDocument();
+      expect(lastTerminalInstance!.clear).toHaveBeenCalled();
+    });
+
+    it('passes raw content to terminal (xterm handles escaping)', () => {
+      const lines = [
+        createLogLine({ line: '<script>alert("xss")</script>', lineNumber: 1 }),
+        createLogLine({ line: 'Line with & ampersand', lineNumber: 2 }),
+      ];
+
+      render(<LogViewer lines={lines} connectionState="connected" />);
+
+      expect(lastTerminalInstance!.write).toHaveBeenCalledWith(
+        '<script>alert("xss")</script>\n'
+      );
+      expect(lastTerminalInstance!.write).toHaveBeenCalledWith('Line with & ampersand\n');
     });
   });
 
