@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -396,4 +397,82 @@ func TestNormalizePathForComparison(t *testing.T) {
 			t.Error("Should return non-empty for relative path")
 		}
 	})
+}
+
+func TestEnsureSocketDir_LstatNonNotExistError(t *testing.T) {
+	// Trigger the path where os.Lstat returns an error that is NOT os.IsNotExist.
+	// A path component exceeding NAME_MAX (255 on macOS/Linux) causes ENAMETOOLONG.
+	longName := "beads-" + strings.Repeat("x", 300)
+	socketPath := filepath.Join("/tmp", longName, "bd.sock")
+
+	_, err := EnsureSocketDir(socketPath)
+	if err == nil {
+		t.Fatal("EnsureSocketDir() should return error for path exceeding NAME_MAX")
+	}
+	if !strings.Contains(err.Error(), "failed to stat socket directory") {
+		t.Errorf("error should contain 'failed to stat socket directory', got: %v", err)
+	}
+}
+
+func TestEnsureSocketDir_MkdirNonExistError(t *testing.T) {
+	// Test the path where Mkdir fails with an error other than os.IsExist.
+	// Use a nested path under a non-existent parent so Lstat returns IsNotExist
+	// (triggering the Mkdir attempt) but Mkdir also fails (parent doesn't exist).
+	uniqueParent := "beads-noparent-" + strings.ReplaceAll(t.Name(), "/", "-")
+	dir := filepath.Join("/tmp", uniqueParent, "nested")
+	socketPath := filepath.Join(dir, "bd.sock")
+
+	os.RemoveAll(filepath.Join("/tmp", uniqueParent))
+	t.Cleanup(func() { os.RemoveAll(filepath.Join("/tmp", uniqueParent)) })
+
+	_, err := EnsureSocketDir(socketPath)
+	if err == nil {
+		t.Fatal("EnsureSocketDir() should return error when parent doesn't exist")
+	}
+	if !strings.Contains(err.Error(), "failed to create socket directory") {
+		t.Errorf("error should contain 'failed to create socket directory', got: %v", err)
+	}
+}
+
+func TestNormalizePathForComparison_EvalSymlinksFallback(t *testing.T) {
+	t.Parallel()
+
+	// Use a non-existent path where EvalSymlinks fails but Abs succeeds,
+	// exercising the fallback to the absolute path.
+	nonExistent := "/nonexistent/path/that/does/not/exist"
+	result := normalizePathForComparison(nonExistent)
+
+	if result == "" {
+		t.Fatal("Should return non-empty for non-existent absolute path")
+	}
+
+	// On case-insensitive systems, the result should be lowercased
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		if result != strings.ToLower(nonExistent) {
+			t.Errorf("normalizePathForComparison() = %q, want %q (lowercased)", result, strings.ToLower(nonExistent))
+		}
+	} else {
+		if result != nonExistent {
+			t.Errorf("normalizePathForComparison() = %q, want %q", result, nonExistent)
+		}
+	}
+}
+
+func TestNormalizePathForComparison_SymlinkResolution(t *testing.T) {
+	t.Parallel()
+
+	// Create a temp dir and a symlink to it, verify both resolve to same canonical path
+	target := t.TempDir()
+	linkParent := t.TempDir()
+	symlinkPath := filepath.Join(linkParent, "link")
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		t.Fatalf("Symlink() error: %v", err)
+	}
+
+	result1 := normalizePathForComparison(target)
+	result2 := normalizePathForComparison(symlinkPath)
+
+	if result1 != result2 {
+		t.Errorf("Symlink and target should normalize to same path:\n  target:  %q\n  symlink: %q", result1, result2)
+	}
 }

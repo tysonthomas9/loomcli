@@ -1,13 +1,15 @@
 /**
  * LogViewer component.
- * Terminal-style log display with auto-scroll, line numbers, and connection status.
+ * Terminal-style log display using xterm.js for proper ANSI rendering.
  */
 
-import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import { FitAddon } from '@xterm/addon-fit';
+import { Terminal } from '@xterm/xterm';
+import { useRef, useEffect, useCallback, useState } from 'react';
 
 import type { LogLine, LogStreamState } from '@/hooks/useLogStream';
-import { stripAnsi, isEmptyAfterStrip } from '@/utils/ansiStrip';
 
+import '@xterm/xterm/css/xterm.css';
 import styles from './LogViewer.module.css';
 
 /**
@@ -22,7 +24,7 @@ export interface LogViewerProps {
   autoScroll?: boolean;
   /** Callback when auto-scroll preference changes */
   onAutoScrollChange?: (enabled: boolean) => void;
-  /** Whether to show line numbers. Default: true */
+  /** Whether to show line numbers (kept for backward compat, not used with xterm) */
   showLineNumbers?: boolean;
   /** Additional CSS class name */
   className?: string;
@@ -50,81 +52,131 @@ function getStatusInfo(state: LogStreamState): { label: string; color: string } 
 }
 
 /**
- * LogViewer displays streaming logs in a terminal-style interface.
+ * LogViewer displays streaming logs using xterm.js for proper terminal rendering.
  */
 export function LogViewer({
   lines,
   connectionState,
   autoScroll: autoScrollProp = true,
   onAutoScrollChange,
-  showLineNumbers = true,
   className,
   error,
   height = '100%',
 }: LogViewerProps): JSX.Element {
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const lastWrittenIndexRef = useRef(0);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(autoScrollProp);
-  const isUserScrollingRef = useRef(false);
-  const lastScrollTopRef = useRef(0);
 
   // Sync autoScrollEnabled with prop
   useEffect(() => {
     setAutoScrollEnabled(autoScrollProp);
   }, [autoScrollProp]);
 
-  // Handle scroll event to detect manual scrolling
-  const handleScroll = useCallback(() => {
-    const container = scrollContainerRef.current;
+  // Create terminal on mount, destroy on unmount
+  useEffect(() => {
+    const container = terminalContainerRef.current;
     if (!container) return;
 
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+    const terminal = new Terminal({
+      disableStdin: true,
+      fontSize: 14,
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      scrollback: 5000,
+      convertEol: true,
+      cursorBlink: false,
+      cursorStyle: 'bar',
+      cursorWidth: 0,
+      theme: {
+        background: '#1e1e1e',
+        foreground: '#d4d4d4',
+      },
+    });
 
-    // User scrolled up
-    if (scrollTop < lastScrollTopRef.current && !isAtBottom) {
-      isUserScrollingRef.current = true;
-      if (autoScrollEnabled) {
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+
+    terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
+
+    terminal.open(container);
+    fitAddon.fit();
+
+    // Detect user scroll to disable auto-scroll
+    terminal.onScroll(() => {
+      if (!terminalRef.current) return;
+      const term = terminalRef.current;
+      const buffer = term.buffer.active;
+      const isAtBottom = buffer.viewportY >= buffer.baseY;
+      if (!isAtBottom) {
         setAutoScrollEnabled(false);
         onAutoScrollChange?.(false);
       }
-    }
+    });
 
-    // User scrolled to bottom
-    if (isAtBottom && !autoScrollEnabled) {
-      isUserScrollingRef.current = false;
-    }
+    // ResizeObserver for dynamic sizing
+    let resizeTimer: ReturnType<typeof setTimeout>;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (fitAddonRef.current) {
+          fitAddonRef.current.fit();
+        }
+      }, 100);
+    });
+    observer.observe(container);
 
-    lastScrollTopRef.current = scrollTop;
-  }, [autoScrollEnabled, onAutoScrollChange]);
+    // Reset write index since terminal is fresh
+    lastWrittenIndexRef.current = 0;
 
-  // Auto-scroll to bottom when new lines arrive
+    return () => {
+      clearTimeout(resizeTimer);
+      observer.disconnect();
+      terminal.dispose();
+      terminalRef.current = null;
+      fitAddonRef.current = null;
+      lastWrittenIndexRef.current = 0;
+    };
+    // onAutoScrollChange excluded from deps — we only want to create terminal once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Write new lines to terminal incrementally
   useEffect(() => {
-    if (!autoScrollEnabled || !scrollContainerRef.current) return;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
 
-    const container = scrollContainerRef.current;
-    container.scrollTop = container.scrollHeight;
+    // Stream was reset (agent/task changed) — clear and rewrite
+    if (lines.length < lastWrittenIndexRef.current) {
+      terminal.clear();
+      lastWrittenIndexRef.current = 0;
+    }
+
+    // Write only new lines
+    for (let i = lastWrittenIndexRef.current; i < lines.length; i++) {
+      const logLine = lines[i];
+      if (logLine) {
+        terminal.write(logLine.line + '\n');
+      }
+    }
+    lastWrittenIndexRef.current = lines.length;
+
+    // Auto-scroll to bottom
+    if (autoScrollEnabled) {
+      terminal.scrollToBottom();
+    }
   }, [lines, autoScrollEnabled]);
 
   // Re-enable auto-scroll
   const handleScrollToBottom = useCallback(() => {
     setAutoScrollEnabled(true);
     onAutoScrollChange?.(true);
-    isUserScrollingRef.current = false;
 
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    if (terminalRef.current) {
+      terminalRef.current.scrollToBottom();
     }
   }, [onAutoScrollChange]);
-
-  // Strip ANSI escape sequences and filter empty lines
-  const processedLines = useMemo(() => {
-    return lines
-      .map((logLine) => ({
-        ...logLine,
-        line: stripAnsi(logLine.line),
-      }))
-      .filter((logLine) => !isEmptyAfterStrip(logLine.line));
-  }, [lines]);
 
   const statusInfo = getStatusInfo(connectionState);
   const isPulsing = connectionState === 'connecting' || connectionState === 'reconnecting';
@@ -175,33 +227,12 @@ export function LogViewer({
         </div>
       )}
 
-      {/* Scrollable log content - tabIndex needed for keyboard navigation in log region */}
-      {/* eslint-disable jsx-a11y/no-noninteractive-tabindex */}
+      {/* Terminal container for xterm.js */}
       <div
-        ref={scrollContainerRef}
-        className={styles.scrollContainer}
-        onScroll={handleScroll}
-        tabIndex={0}
-        role="log"
-        aria-live="polite"
-        aria-label="Log output"
-      >
-        {/* eslint-enable jsx-a11y/no-noninteractive-tabindex */}
-        <div className={styles.logContent}>
-          {processedLines.length === 0 ? (
-            <div className={styles.empty}>
-              No logs available yet. Logs appear when the agent starts working.
-            </div>
-          ) : (
-            processedLines.map((logLine) => (
-              <div key={logLine.lineNumber} className={styles.line}>
-                {showLineNumbers && <span className={styles.lineNumber}>{logLine.lineNumber}</span>}
-                <span className={styles.lineContent}>{logLine.line}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+        ref={terminalContainerRef}
+        className={styles.terminalContainer}
+        data-testid="terminal-container"
+      />
     </div>
   );
 }

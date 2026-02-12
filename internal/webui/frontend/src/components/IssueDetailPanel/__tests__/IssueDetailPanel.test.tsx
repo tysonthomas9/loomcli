@@ -47,6 +47,40 @@ vi.mock('@/hooks', async (importOriginal) => {
   };
 });
 
+// Mock xterm.js (used by LogViewer)
+vi.mock('@xterm/xterm', () => {
+  class MockTerminal {
+    open = vi.fn();
+    dispose = vi.fn();
+    write = vi.fn();
+    clear = vi.fn();
+    loadAddon = vi.fn();
+    scrollToBottom = vi.fn();
+    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
+    buffer = { active: { viewportY: 0, baseY: 0 } };
+  }
+  return { Terminal: MockTerminal };
+});
+
+vi.mock('@xterm/addon-fit', () => {
+  class MockFitAddon {
+    fit = vi.fn();
+    dispose = vi.fn();
+  }
+  return { FitAddon: MockFitAddon };
+});
+
+vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
+
+// Mock ResizeObserver (not available in jsdom, needed by LogViewer)
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  } as unknown as typeof ResizeObserver;
+}
+
 /**
  * Create a minimal test issue with required fields.
  */
