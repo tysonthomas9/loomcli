@@ -715,3 +715,203 @@ func TestDaemonAgents(t *testing.T) {
 		}
 	})
 }
+
+func TestGetOutputTimeout(t *testing.T) {
+	t.Run("returns default when not configured", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		daemon := &Daemon{config: config}
+		got := daemon.getOutputTimeout()
+		if got != 900 {
+			t.Errorf("getOutputTimeout() = %d, want 900", got)
+		}
+	})
+
+	t.Run("returns configured value", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(600)
+		daemon := &Daemon{config: config}
+		got := daemon.getOutputTimeout()
+		if got != 600 {
+			t.Errorf("getOutputTimeout() = %d, want 600", got)
+		}
+	})
+
+	t.Run("returns 0 when disabled", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(0)
+		daemon := &Daemon{config: config}
+		got := daemon.getOutputTimeout()
+		if got != 0 {
+			t.Errorf("getOutputTimeout() = %d, want 0", got)
+		}
+	})
+}
+
+func TestCheckAgentHealth_Watchdog(t *testing.T) {
+	t.Run("does not kill agent with recent output", func(t *testing.T) {
+		// Create a temporary log file with recent modification time
+		tmpDir := t.TempDir()
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte("recent output\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(60) // 60 seconds
+
+		ap := &AgentProcess{
+			entry:       AgentEntry{Worktree: "test", Role: "task"},
+			pid:         99999999, // fake PID that won't exist
+			logFilePath: logPath,
+			lastStart:   time.Now().Add(-30 * time.Second),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		// Should not panic or kill anything — agent has recent output
+		daemon.checkAgentHealth()
+
+		// Agent should still have its PID (not killed)
+		ap.mu.Lock()
+		pid := ap.pid
+		ap.mu.Unlock()
+		if pid != 99999999 {
+			t.Errorf("pid = %d, want 99999999 (should not be killed)", pid)
+		}
+	})
+
+	t.Run("kills agent with stale output", func(t *testing.T) {
+		// Create a temporary log file with old modification time
+		tmpDir := t.TempDir()
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte("old output\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		// Set modification time to 20 minutes ago
+		oldTime := time.Now().Add(-20 * time.Minute)
+		if err := os.Chtimes(logPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(60) // 60 seconds
+
+		ap := &AgentProcess{
+			entry:       AgentEntry{Worktree: "test", Role: "task"},
+			pid:         99999999, // fake PID — stopAgent will fail gracefully
+			logFilePath: logPath,
+			lastStart:   time.Now().Add(-25 * time.Minute),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		// This will try to stop the agent (stopAgent handles non-existent PIDs gracefully)
+		daemon.checkAgentHealth()
+		// We can't easily assert stopAgent was called since the PID doesn't exist,
+		// but the code path should execute without panic
+	})
+
+	t.Run("skips watchdog when disabled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte("old output\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		oldTime := time.Now().Add(-20 * time.Minute)
+		if err := os.Chtimes(logPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(0) // disabled
+
+		ap := &AgentProcess{
+			entry:       AgentEntry{Worktree: "test", Role: "task"},
+			pid:         99999999,
+			logFilePath: logPath,
+			lastStart:   time.Now().Add(-25 * time.Minute),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		daemon.checkAgentHealth()
+
+		// Agent should still have its PID (watchdog disabled, so no kill)
+		ap.mu.Lock()
+		pid := ap.pid
+		ap.mu.Unlock()
+		if pid != 99999999 {
+			t.Errorf("pid = %d, want 99999999 (watchdog disabled, should not kill)", pid)
+		}
+	})
+
+	t.Run("uses lastStart when log not yet written", func(t *testing.T) {
+		// Agent just spawned, log file exists but hasn't been written to
+		tmpDir := t.TempDir()
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte{}, 0600); err != nil {
+			t.Fatal(err)
+		}
+		// Log file mtime is before lastStart (file was created before agent started)
+		oldTime := time.Now().Add(-30 * time.Minute)
+		if err := os.Chtimes(logPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = intPtr(300) // 5 minutes
+
+		// lastStart is 2 minutes ago — well within timeout
+		ap := &AgentProcess{
+			entry:       AgentEntry{Worktree: "test", Role: "task"},
+			pid:         99999999,
+			logFilePath: logPath,
+			lastStart:   time.Now().Add(-2 * time.Minute),
+		}
+
+		daemon := &Daemon{
+			config: config,
+			agents: []*AgentProcess{ap},
+		}
+
+		daemon.checkAgentHealth()
+
+		// Should NOT be killed — lastStart (2 min ago) is within 5 min timeout
+		ap.mu.Lock()
+		pid := ap.pid
+		ap.mu.Unlock()
+		if pid != 99999999 {
+			t.Errorf("pid = %d, want 99999999 (should use lastStart, not stale log mtime)", pid)
+		}
+	})
+}

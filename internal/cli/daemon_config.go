@@ -23,6 +23,7 @@ type RestartPolicy struct {
 	MaxRetries     *int `yaml:"max_retries,omitempty"`
 	BackoffInitial *int `yaml:"backoff_initial,omitempty"` // seconds
 	BackoffMax     *int `yaml:"backoff_max,omitempty"`     // seconds
+	OutputTimeout  *int `yaml:"output_timeout,omitempty"`  // seconds; kill agent after this long with no output (0 = disabled)
 }
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
@@ -108,6 +109,7 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 				MaxRetries:     intPtr(3),
 				BackoffInitial: intPtr(2),
 				BackoffMax:     intPtr(300),
+				OutputTimeout:  intPtr(900), // 15 minutes
 			},
 			MaxAgents: intPtr(20),
 		},
@@ -179,6 +181,9 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	}
 	if src.RestartPolicy.BackoffMax != nil {
 		dst.RestartPolicy.BackoffMax = src.RestartPolicy.BackoffMax
+	}
+	if src.RestartPolicy.OutputTimeout != nil {
+		dst.RestartPolicy.OutputTimeout = src.RestartPolicy.OutputTimeout
 	}
 	if src.MaxAgents != nil {
 		dst.MaxAgents = src.MaxAgents

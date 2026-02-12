@@ -17,9 +17,10 @@ type AgentProcess struct {
 	roleConfig   RoleConfig // resolved role configuration
 	worktreePath string     // resolved worktree path
 
-	cmd     *exec.Cmd // current subprocess (nil when not running)
-	pid     int       // PID of current subprocess (0 when not running)
-	logFile *os.File  // log file handle for subprocess output (nil if not logging)
+	cmd         *exec.Cmd // current subprocess (nil when not running)
+	pid         int       // PID of current subprocess (0 when not running)
+	logFile     *os.File  // log file handle for subprocess output (nil if not logging)
+	logFilePath string    // path to agent log file for watchdog stat checks
 
 	restartCount    int       // consecutive restart attempts
 	lastStart       time.Time // when subprocess was last spawned
@@ -415,6 +416,7 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 			// Sanitize worktree name to prevent path traversal in log filename
 			safeWorktree := filepath.Base(ap.entry.Worktree)
 			logFilePath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", ap.entry.Role, safeWorktree))
+			ap.logFilePath = logFilePath // store for watchdog stat checks
 			f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 			if err != nil {
 				log.Printf("[daemon] Agent %s: failed to open log file: %v", ap.entry.Worktree, err)
@@ -547,6 +549,13 @@ func (d *Daemon) getBackoffMax() int {
 	return 300 // default seconds
 }
 
+func (d *Daemon) getOutputTimeout() int {
+	if d.config.Daemon.RestartPolicy.OutputTimeout != nil {
+		return *d.config.Daemon.RestartPolicy.OutputTimeout
+	}
+	return 900 // default: 15 minutes
+}
+
 // stopAgent sends SIGTERM then SIGKILL to a single agent and its entire process group.
 // This function is safe to call concurrently with waitForAgent.
 // It uses polling instead of cmd.Wait() to avoid double-wait issues.
@@ -624,11 +633,15 @@ func (d *Daemon) healthChecker() {
 
 // checkAgentHealth performs health checks on all agents.
 func (d *Daemon) checkAgentHealth() {
+	outputTimeout := d.getOutputTimeout()
+
 	for _, ap := range d.agents {
 		ap.mu.Lock()
 		pid := ap.pid
 		worktreePath := ap.worktreePath
 		worktreeName := ap.entry.Worktree
+		logPath := ap.logFilePath
+		lastStart := ap.lastStart
 		ap.mu.Unlock()
 
 		if pid == 0 {
@@ -645,6 +658,24 @@ func (d *Daemon) checkAgentHealth() {
 		lockInfo, isRunning, err := CheckLock(worktreePath)
 		if err == nil && lockInfo != nil && !isRunning {
 			log.Printf("[daemon] Stale lock detected for agent %s", worktreeName)
+		}
+
+		// Watchdog: kill agent if no log output for outputTimeout seconds
+		if outputTimeout > 0 && logPath != "" {
+			if info, err := os.Stat(logPath); err == nil {
+				lastOutput := info.ModTime()
+				// Use lastStart if log hasn't been written yet (agent just spawned)
+				if lastOutput.Before(lastStart) {
+					lastOutput = lastStart
+				}
+				silent := time.Since(lastOutput)
+				threshold := time.Duration(outputTimeout) * time.Second
+				if silent > threshold {
+					log.Printf("[daemon] Agent %s: no output for %v (threshold %ds), killing hung process",
+						worktreeName, silent.Truncate(time.Second), outputTimeout)
+					d.stopAgent(ap)
+				}
+			}
 		}
 	}
 }
