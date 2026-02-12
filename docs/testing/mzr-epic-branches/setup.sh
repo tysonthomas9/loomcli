@@ -119,18 +119,26 @@ echo "==> Creating test epics and tasks"
 EPIC_A=$(bd create --title="Epic Alpha: Auth system" --type=epic --priority=1 --json 2>/dev/null | jq -r '.id')
 [ -n "$EPIC_A" ] || { echo "FAIL: Could not create Epic A"; exit 1; }
 
-TASK_A1=$(bd create --title="Implement login endpoint" --type=task --priority=1 --parent="$EPIC_A" --json 2>/dev/null | jq -r '.id')
-TASK_A2=$(bd create --title="Implement logout endpoint" --type=task --priority=2 --parent="$EPIC_A" --json 2>/dev/null | jq -r '.id')
+TASK_A1=$(bd create --title="Implement login endpoint" --type=task --priority=1 --parent="$EPIC_A" \
+  --description="Create a POST /auth/login endpoint from scratch. The repository is empty — scaffold the full project structure including package.json, tsconfig.json, and all source files. Use Express.js with TypeScript. The endpoint should accept email+password, verify credentials with bcrypt, and return a JWT token. Include basic input validation and error handling." \
+  --json 2>/dev/null | jq -r '.id')
+TASK_A2=$(bd create --title="Implement logout endpoint" --type=task --priority=2 --parent="$EPIC_A" \
+  --description="Create a POST /auth/logout endpoint. Build on the existing project structure created by the login endpoint task. The endpoint should invalidate the user session or JWT token. Add to existing auth routes." \
+  --json 2>/dev/null | jq -r '.id')
 [ -n "$TASK_A1" ] && [ -n "$TASK_A2" ] || { echo "FAIL: Could not create Epic A tasks"; exit 1; }
 
 EPIC_B=$(bd create --title="Epic Beta: Logging" --type=epic --priority=2 --json 2>/dev/null | jq -r '.id')
 [ -n "$EPIC_B" ] || { echo "FAIL: Could not create Epic B"; exit 1; }
 
-TASK_B1=$(bd create --title="Add structured logging" --type=task --priority=2 --parent="$EPIC_B" --json 2>/dev/null | jq -r '.id')
+TASK_B1=$(bd create --title="Add structured logging" --type=task --priority=2 --parent="$EPIC_B" \
+  --description="Add structured JSON logging to the application. Create a logger module using a lightweight logging library (e.g. pino or winston). Replace any console.log calls with structured log calls. Include request-id correlation in log output." \
+  --json 2>/dev/null | jq -r '.id')
 [ -n "$TASK_B1" ] || { echo "FAIL: Could not create Epic B task"; exit 1; }
 
 # A standalone non-epic task (for fallback branch testing)
-TASK_S=$(bd create --title="Fix typo in README" --type=task --priority=3 --json 2>/dev/null | jq -r '.id')
+TASK_S=$(bd create --title="Fix typo in README" --type=task --priority=3 \
+  --description="Create a README.md file with project name, description, setup instructions, and API documentation for the auth endpoints. If README.md already exists, review and fix any typos." \
+  --json 2>/dev/null | jq -r '.id')
 [ -n "$TASK_S" ] || { echo "FAIL: Could not create standalone task"; exit 1; }
 
 bd sync 2>/dev/null || true
