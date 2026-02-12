@@ -136,9 +136,43 @@ func (d *Daemon) resolveRoleConfig(roleName string, agentIndex int) (RoleConfig,
 	return rc, nil
 }
 
+// resetWorktreeBranches moves all worktrees back to their default
+// (worktree-named) branches. This prevents cross-checkout deadlocks
+// when epic assignments differ from a prior daemon run — git refuses
+// to checkout a branch that is already checked out in another worktree.
+func (d *Daemon) resetWorktreeBranches() {
+	for _, ap := range d.agents {
+		current, err := GetCurrentBranch(ap.worktreePath)
+		if err != nil {
+			log.Printf("[daemon] Warning: failed to get branch for %s: %v", ap.entry.Worktree, err)
+			continue
+		}
+		defaultBranch := ap.entry.Worktree
+		if current == defaultBranch {
+			continue
+		}
+		log.Printf("[daemon] Resetting worktree %s from %s to %s", ap.entry.Worktree, current, defaultBranch)
+		// Create WIP commit if dirty
+		clean, _ := IsCleanWorkingTree(ap.worktreePath)
+		if !clean {
+			msg := fmt.Sprintf("WIP: daemon startup reset from %s", current)
+			if err := commitWIP(ap.worktreePath, msg); err != nil {
+				log.Printf("[daemon] Warning: WIP commit failed for %s: %v", ap.entry.Worktree, err)
+			}
+		}
+		if err := GitCheckout(ap.worktreePath, defaultBranch); err != nil {
+			log.Printf("[daemon] Warning: failed to reset worktree %s to %s: %v", ap.entry.Worktree, defaultBranch, err)
+		}
+	}
+}
+
 // Start launches supervisor goroutines for all configured agents.
 func (d *Daemon) Start() error {
 	d.shutdown = make(chan struct{})
+
+	// Reset all worktrees to their default branches to prevent
+	// cross-checkout conflicts from prior daemon runs.
+	d.resetWorktreeBranches()
 
 	// Start healthChecker goroutine
 	d.wg.Add(1)
