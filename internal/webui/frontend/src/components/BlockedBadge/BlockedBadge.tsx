@@ -6,7 +6,8 @@
  * - "blocks": Shows "Blocks X issues" (for Graph nodes)
  */
 
-import { useState, useCallback, memo } from 'react';
+import { useState, useCallback, useRef, useLayoutEffect, useEffect, memo } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { BlockerRef } from '@/types';
 
@@ -78,6 +79,9 @@ function BlockedBadgeComponent({
   className,
 }: BlockedBadgeProps): JSX.Element | null {
   const [showTooltip, setShowTooltip] = useState(false);
+  const badgeRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0, arrowLeft: 0, ready: false });
 
   const handleShow = useCallback(() => {
     setShowTooltip(true);
@@ -85,7 +89,45 @@ function BlockedBadgeComponent({
 
   const handleHide = useCallback(() => {
     setShowTooltip(false);
+    setTooltipPos((prev) => ({ ...prev, ready: false }));
   }, []);
+
+  // Position the tooltip relative to the badge using fixed coordinates
+  useLayoutEffect(() => {
+    if (!showTooltip || !badgeRef.current || !tooltipRef.current) return;
+
+    const badgeRect = badgeRef.current.getBoundingClientRect();
+    const tooltipRect = tooltipRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const margin = 8;
+    const gap = 8;
+
+    const top = badgeRect.bottom + gap;
+    const badgeCenterX = badgeRect.left + badgeRect.width / 2;
+    let left = badgeCenterX - tooltipRect.width / 2;
+
+    // Clamp to viewport edges
+    left = Math.max(margin, Math.min(left, viewportWidth - tooltipRect.width - margin));
+
+    // Clamp arrow to stay within tooltip bounds
+    const arrowPad = 12; // 6px border width on each side
+    const arrowLeft = Math.max(arrowPad, Math.min(badgeCenterX - left, tooltipRect.width - arrowPad));
+
+    setTooltipPos({ top, left, arrowLeft, ready: true });
+  }, [showTooltip]);
+
+  // Close tooltip on scroll/resize to avoid stale positions
+  useEffect(() => {
+    if (!showTooltip) return;
+
+    const close = () => setShowTooltip(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [showTooltip]);
 
   // Keyboard handler for accessibility
   const handleKeyDown = useCallback(
@@ -114,6 +156,7 @@ function BlockedBadgeComponent({
 
   return (
     <span
+      ref={badgeRef}
       className={rootClassName}
       onMouseEnter={handleShow}
       onMouseLeave={handleHide}
@@ -131,8 +174,18 @@ function BlockedBadgeComponent({
       </span>
       <span className={styles.count}>{count}</span>
 
-      {showTooltip && issueList.length > 0 && (
-        <div className={styles.tooltip} role="tooltip">
+      {showTooltip && issueList.length > 0 && createPortal(
+        <div
+          ref={tooltipRef}
+          className={styles.tooltip}
+          role="tooltip"
+          style={{
+            top: tooltipPos.top,
+            left: tooltipPos.left,
+            visibility: tooltipPos.ready ? 'visible' : 'hidden',
+            '--arrow-left': `${tooltipPos.arrowLeft}px`,
+          } as React.CSSProperties}
+        >
           <div className={styles.tooltipHeader}>{tooltipHeader}</div>
           <ul className={styles.tooltipList}>
             {issueList.map((id, index) => (
@@ -141,7 +194,8 @@ function BlockedBadgeComponent({
               </li>
             ))}
           </ul>
-        </div>
+        </div>,
+        document.body
       )}
     </span>
   );

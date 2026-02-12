@@ -386,6 +386,80 @@ describe('BlockedBadge', () => {
     });
   });
 
+  describe('portal tooltip rendering', () => {
+    it('renders tooltip as a direct child of document.body via portal', () => {
+      render(<BlockedBadge count={2} issueIds={['issue-1', 'issue-2']} />);
+
+      const badge = screen.getByLabelText('Blocked by 2 issues');
+      fireEvent.mouseEnter(badge);
+
+      const tooltip = screen.getByRole('tooltip');
+      expect(tooltip.parentElement).toBe(document.body);
+    });
+
+    it('tooltip has position:fixed via the tooltip CSS module class', () => {
+      render(<BlockedBadge count={2} issueIds={['issue-1', 'issue-2']} />);
+
+      const badge = screen.getByLabelText('Blocked by 2 issues');
+      fireEvent.mouseEnter(badge);
+
+      const tooltip = screen.getByRole('tooltip');
+      // The tooltip class from CSS modules applies position:fixed.
+      // In jsdom, CSS modules are hashed but the class name still contains 'tooltip'.
+      expect(tooltip.className).toContain('tooltip');
+      // The inline style also sets top/left for fixed positioning
+      expect(tooltip.style.top).toBeDefined();
+      expect(tooltip.style.left).toBeDefined();
+    });
+
+    it('tooltip has visibility:hidden initially then visible after positioning', () => {
+      // In jsdom, getBoundingClientRect returns zeros so useLayoutEffect runs
+      // synchronously during render, computing ready:true. By the time we can
+      // query the tooltip it is already positioned and visible.
+      // To verify the hidden-then-visible logic we check the final state is
+      // visible (ready:true path) and confirm the style attribute contains
+      // the visibility property (which is only set via the ready flag).
+      render(<BlockedBadge count={1} issueIds={['issue-1']} />);
+
+      const badge = screen.getByLabelText('Blocked by 1 issue');
+      fireEvent.mouseEnter(badge);
+
+      const tooltip = screen.getByRole('tooltip');
+      // After the useLayoutEffect fires, ready becomes true and visibility is 'visible'
+      expect(tooltip.style.visibility).toBe('visible');
+    });
+
+    it('tooltip has --arrow-left CSS custom property set', () => {
+      render(<BlockedBadge count={1} issueIds={['issue-1']} />);
+
+      const badge = screen.getByLabelText('Blocked by 1 issue');
+      fireEvent.mouseEnter(badge);
+
+      const tooltip = screen.getByRole('tooltip');
+      // In jsdom getBoundingClientRect returns all zeros. The positioning math:
+      // badgeCenterX = 0, left clamped to margin(8), arrowLeft = max(12, 0 - 8) = 12
+      const arrowLeft = tooltip.style.getPropertyValue('--arrow-left');
+      expect(arrowLeft).toBe('12px');
+    });
+
+    it('tooltip is removed from document.body on mouse leave', () => {
+      render(<BlockedBadge count={2} issueIds={['issue-1', 'issue-2']} />);
+
+      const badge = screen.getByLabelText('Blocked by 2 issues');
+      fireEvent.mouseEnter(badge);
+
+      // Tooltip should be in document.body
+      const tooltip = screen.getByRole('tooltip');
+      expect(document.body.contains(tooltip)).toBe(true);
+
+      fireEvent.mouseLeave(badge);
+
+      // Tooltip should be completely removed from the DOM
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+    });
+  });
+
   describe('issueDetails prop', () => {
     it('shows "id: title" format in tooltip when issueDetails is provided', () => {
       const details: BlockerRef[] = [

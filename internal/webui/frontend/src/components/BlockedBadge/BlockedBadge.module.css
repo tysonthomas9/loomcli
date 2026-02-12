@@ -44,13 +44,9 @@
   line-height: 1;
 }
 
-/* Tooltip container */
+/* Tooltip container — rendered via portal to document.body */
 .tooltip {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-top: var(--space-2);
+  position: fixed;
   padding: var(--space-2) var(--space-3);
   background-color: var(--color-text);
   color: var(--color-text-inverse);
@@ -63,12 +59,12 @@
   font-weight: var(--font-weight-normal);
 }
 
-/* Tooltip arrow */
+/* Tooltip arrow — positioned dynamically via --arrow-left */
 .tooltip::before {
   content: '';
   position: absolute;
   bottom: 100%;
-  left: 50%;
+  left: var(--arrow-left, 50%);
   transform: translateX(-50%);
   border: 6px solid transparent;
   border-bottom-color: var(--color-text);
