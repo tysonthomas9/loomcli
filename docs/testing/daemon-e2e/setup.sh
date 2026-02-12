@@ -142,18 +142,96 @@ EOF
 
 echo "==> Creating test epics and tasks"
 
-EPIC_A=$(bd create --title="Calculator improvements" --type=epic --priority=1 --json 2>/dev/null | jq -r '.id')
+EPIC_A=$(bd create --title="Calculator improvements" --type=epic --priority=1 \
+  --description="Add exponentiation to the calculator module and ensure all functions have comprehensive test coverage." \
+  --json 2>/dev/null | jq -r '.id')
 [ -n "$EPIC_A" ] || { echo "FAIL: Could not create Epic A"; exit 1; }
 
-TASK_A1=$(bd create --title="Add a power(base, exp) function to src/calculator.py" --type=task --priority=1 --parent="$EPIC_A" --json 2>/dev/null | jq -r '.id')
-TASK_A2=$(bd create --title="Write unit tests for all functions in src/calculator.py" --type=task --priority=2 --parent="$EPIC_A" --json 2>/dev/null | jq -r '.id')
+TASK_A1=$(bd create --title="Add a power(base, exp) function to src/calculator.py" \
+  --type=task --priority=1 --parent="$EPIC_A" \
+  --description="$(cat <<'DESC'
+Add a power(base, exp) function to src/calculator.py that returns base**exp.
+
+Requirements:
+- Function signature: power(base: float, exp: float) -> float
+- Follow existing conventions: type hints, docstring with Raises section
+- Raise ValueError when base is 0 and exp is negative (consistent with divide's zero handling)
+- Use Python's built-in ** operator
+
+Acceptance criteria:
+- power(2, 3) returns 8
+- power(5, 0) returns 1
+- power(0, -1) raises ValueError
+- Function has a docstring
+DESC
+)" --json 2>/dev/null | jq -r '.id')
+
+TASK_A2=$(bd create --title="Write unit tests for all functions in src/calculator.py" \
+  --type=task --priority=2 --parent="$EPIC_A" \
+  --description="$(cat <<'DESC'
+Create tests/test_calculator.py with pytest unit tests for all functions in src/calculator.py (add, subtract, multiply, divide, and power).
+
+Requirements:
+- Use pytest framework
+- Test each function with: positive numbers, negative numbers, zero, floats
+- Test error cases: divide(x, 0) raises ValueError, power(0, negative) raises ValueError
+- Minimum 20 test cases total
+
+Acceptance criteria:
+- tests/test_calculator.py exists
+- All tests pass when run with: python3 -m pytest tests/test_calculator.py
+- At least 20 test functions defined
+DESC
+)" --json 2>/dev/null | jq -r '.id')
+
 [ -n "$TASK_A1" ] && [ -n "$TASK_A2" ] || { echo "FAIL: Could not create Epic A tasks"; exit 1; }
 
-EPIC_B=$(bd create --title="Utils improvements" --type=epic --priority=2 --json 2>/dev/null | jq -r '.id')
+EPIC_B=$(bd create --title="Utils improvements" --type=epic --priority=2 \
+  --description="Add snake_case conversion to the utils module and ensure all functions have comprehensive test coverage." \
+  --json 2>/dev/null | jq -r '.id')
 [ -n "$EPIC_B" ] || { echo "FAIL: Could not create Epic B"; exit 1; }
 
-TASK_B1=$(bd create --title="Add a snake_case(text) function to src/utils.py" --type=task --priority=2 --parent="$EPIC_B" --json 2>/dev/null | jq -r '.id')
-TASK_B2=$(bd create --title="Write unit tests for all functions in src/utils.py" --type=task --priority=3 --parent="$EPIC_B" --json 2>/dev/null | jq -r '.id')
+TASK_B1=$(bd create --title="Add a snake_case(text) function to src/utils.py" \
+  --type=task --priority=2 --parent="$EPIC_B" \
+  --description="$(cat <<'DESC'
+Add a snake_case(text) function to src/utils.py that converts strings to snake_case format.
+
+Requirements:
+- Function signature: snake_case(text: str) -> str
+- Handle camelCase, PascalCase, spaces, hyphens, and mixed separators
+- Handle acronyms (e.g. HTMLParser -> html_parser)
+- Use only Python standard library (re module)
+- Follow existing conventions: type hints, docstring
+
+Acceptance criteria:
+- snake_case('camelCase') returns 'camel_case'
+- snake_case('PascalCase') returns 'pascal_case'
+- snake_case('HTMLParser') returns 'html_parser'
+- snake_case('hello world') returns 'hello_world'
+- snake_case('') returns ''
+- Function has a docstring
+DESC
+)" --json 2>/dev/null | jq -r '.id')
+
+TASK_B2=$(bd create --title="Write unit tests for all functions in src/utils.py" \
+  --type=task --priority=3 --parent="$EPIC_B" \
+  --description="$(cat <<'DESC'
+Create tests/test_utils.py with pytest unit tests for all functions in src/utils.py (reverse, capitalize_words, truncate, and snake_case).
+
+Requirements:
+- Use pytest framework
+- Test each function with normal inputs, empty strings, and edge cases
+- Test truncate with custom suffix
+- Test snake_case with camelCase, PascalCase, acronyms, spaces, hyphens
+- Minimum 15 test cases total
+
+Acceptance criteria:
+- tests/test_utils.py exists
+- All tests pass when run with: python3 -m pytest tests/test_utils.py
+- At least 15 test functions defined
+DESC
+)" --json 2>/dev/null | jq -r '.id')
+
 [ -n "$TASK_B1" ] && [ -n "$TASK_B2" ] || { echo "FAIL: Could not create Epic B tasks"; exit 1; }
 
 bd sync 2>/dev/null || true
