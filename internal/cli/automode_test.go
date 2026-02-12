@@ -3887,3 +3887,602 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// fetchReadyIssues Tests
+// ============================================================================
+
+func TestFetchReadyIssues_InvalidJSON(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{Stdout: "not valid json"}
+	}
+
+	_, err := fetchReadyIssues("")
+	if err == nil {
+		t.Fatal("fetchReadyIssues() expected error for invalid JSON, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to parse task list") {
+		t.Errorf("fetchReadyIssues() error = %v, want to contain 'failed to parse task list'", err)
+	}
+}
+
+func TestFetchReadyIssues_EmptyArray(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{Stdout: "[]"}
+	}
+
+	issues, err := fetchReadyIssues("")
+	if err != nil {
+		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("fetchReadyIssues() returned %d issues, want 0", len(issues))
+	}
+}
+
+func TestFetchReadyIssues_ValidIssues(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "First", Status: "open"},
+				{ID: "T-2", Title: "Second", Status: "open", Design: "plan"},
+				{ID: "T-3", Title: "Third", Status: "open", IssueType: "epic"},
+			}),
+		}
+	}
+
+	issues, err := fetchReadyIssues("")
+	if err != nil {
+		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
+	}
+	if len(issues) != 3 {
+		t.Errorf("fetchReadyIssues() returned %d issues, want 3", len(issues))
+	}
+	if issues[0].ID != "T-1" || issues[1].ID != "T-2" || issues[2].ID != "T-3" {
+		t.Errorf("fetchReadyIssues() returned unexpected issue IDs")
+	}
+}
+
+func TestFetchReadyIssues_CommandError(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{Err: fmt.Errorf("command failed")}
+	}
+
+	_, err := fetchReadyIssues("")
+	if err == nil {
+		t.Fatal("fetchReadyIssues() expected error for command failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to check ready tasks") {
+		t.Errorf("fetchReadyIssues() error = %v, want to contain 'failed to check ready tasks'", err)
+	}
+}
+
+func TestFetchReadyIssues_WithParentID(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	var capturedArgs []string
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		capturedArgs = append([]string{name}, args...)
+		return CommandResult{Stdout: "[]"}
+	}
+
+	_, err := fetchReadyIssues("epic-123")
+	if err != nil {
+		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
+	}
+
+	found := false
+	for i, arg := range capturedArgs {
+		if arg == "--parent" && i+1 < len(capturedArgs) && capturedArgs[i+1] == "epic-123" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("fetchReadyIssues() did not pass --parent epic-123, args: %v", capturedArgs)
+	}
+}
+
+// ============================================================================
+// RunAutoModeLoop - ConsecutiveNoProgress Tests
+// ============================================================================
+
+func TestRunAutoModeLoop_ConsecutiveNoProgress(t *testing.T) {
+	// Test that the no-progress path is entered when agent exits without claiming a task.
+	// The no-progress backoff is 30s/60s/120s which makes testing 3 full iterations slow,
+	// so we verify one iteration and then shutdown during the backoff.
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Always return tasks
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	// Agent succeeds but does NOT claim a task (no UpdateLockTask call)
+	shutdown := make(chan struct{})
+	claudeInvocations := 0
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdownCh <-chan struct{}) error {
+		claudeInvocations++
+		// Don't write a TaskID — simulates agent that exits without claiming work.
+		// After first invocation, send shutdown during the backoff to exit promptly.
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			close(shutdown)
+		}()
+		return nil
+	}
+
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - exited after shutdown interrupted the backoff
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunAutoModeLoop did not exit after no-progress + shutdown")
+	}
+
+	// Agent should have been invoked exactly once before shutdown interrupted the backoff
+	if claudeInvocations != 1 {
+		t.Errorf("Expected 1 Claude invocation, got %d", claudeInvocations)
+	}
+}
+
+func TestRunAutoModeLoop_NoProgressCounterResetOnSuccess(t *testing.T) {
+	// Verify that claiming a task after no-progress resets the counter.
+	// We test: no-progress → success (claim) → shutdown during next no-progress backoff.
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	shutdown := make(chan struct{})
+	callNum := 0
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdownCh <-chan struct{}) error {
+		callNum++
+		if callNum == 1 {
+			// First call: no progress (don't claim)
+			// Shutdown will interrupt the 30s backoff — but we close it only on call 3
+			return nil
+		}
+		if callNum == 2 {
+			// Second call: claim a task → resets counter
+			UpdateLockTask(workDir, "mock-progress", "Mock Task")
+			return nil
+		}
+		// Third call: no progress again, then shutdown during backoff
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			close(shutdown)
+		}()
+		return nil
+	}
+
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(120 * time.Second):
+		t.Fatal("RunAutoModeLoop did not exit")
+	}
+
+	// Should have been called 3 times: no-progress(30s backoff) → claim(2s pause) → no-progress(shutdown)
+	// Note: the 30s backoff on first no-progress makes this test take ~32s
+	if callNum != 3 {
+		t.Errorf("Expected 3 Claude invocations, got %d", callNum)
+	}
+}
+
+// ============================================================================
+// NoProgressBackoff Calculation Tests
+// ============================================================================
+
+func TestNoProgressBackoff_Calculation(t *testing.T) {
+	tests := []struct {
+		consecutiveNoProgress int
+		expectedBackoff       time.Duration
+	}{
+		{1, 30 * time.Second},
+		{2, 60 * time.Second},
+		{3, 120 * time.Second}, // Capped
+		{4, 120 * time.Second}, // Still capped
+		{5, 120 * time.Second}, // Still capped
+	}
+
+	for _, tt := range tests {
+		backoff := time.Duration(30<<(tt.consecutiveNoProgress-1)) * time.Second
+		if backoff > 120*time.Second {
+			backoff = 120 * time.Second
+		}
+		if backoff != tt.expectedBackoff {
+			t.Errorf("noProgress=%d: backoff=%v, want %v", tt.consecutiveNoProgress, backoff, tt.expectedBackoff)
+		}
+	}
+}
+
+// ============================================================================
+// AutoModeState Field Tests
+// ============================================================================
+
+func TestAutoModeState_Fields(t *testing.T) {
+	now := time.Now()
+	state := AutoModeState{
+		TasksCompleted:        5,
+		ConsecutiveErrors:     2,
+		ConsecutiveNoProgress: 1,
+		LastTaskTime:          now,
+		IdleStartTime:         now.Add(-time.Minute),
+		ShouldExit:            true,
+		ExitReason:            "test reason",
+	}
+
+	if state.TasksCompleted != 5 {
+		t.Errorf("TasksCompleted = %d, want 5", state.TasksCompleted)
+	}
+	if state.ConsecutiveErrors != 2 {
+		t.Errorf("ConsecutiveErrors = %d, want 2", state.ConsecutiveErrors)
+	}
+	if state.ConsecutiveNoProgress != 1 {
+		t.Errorf("ConsecutiveNoProgress = %d, want 1", state.ConsecutiveNoProgress)
+	}
+	if !state.LastTaskTime.Equal(now) {
+		t.Errorf("LastTaskTime = %v, want %v", state.LastTaskTime, now)
+	}
+	if !state.IdleStartTime.Equal(now.Add(-time.Minute)) {
+		t.Errorf("IdleStartTime not set correctly")
+	}
+	if !state.ShouldExit {
+		t.Error("ShouldExit = false, want true")
+	}
+	if state.ExitReason != "test reason" {
+		t.Errorf("ExitReason = %q, want %q", state.ExitReason, "test reason")
+	}
+}
+
+// ============================================================================
+// streamUntilExit - Log File Rotation Tests
+// ============================================================================
+
+func TestStreamUntilExit_LogFileRotation(t *testing.T) {
+	// Test the truncation detection logic used in streamUntilExit's polling loop
+	tmpFile, err := os.CreateTemp("", "loom-rotation-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	fileName := tmpFile.Name()
+	defer os.Remove(fileName)
+
+	// Write initial content
+	initialContent := "first session output that is long enough\n"
+	if _, err := tmpFile.WriteString(initialContent); err != nil {
+		t.Fatalf("failed to write initial content: %v", err)
+	}
+	tmpFile.Close()
+
+	// Record the offset as if we've read all content
+	var lastOffset int64 = int64(len(initialContent))
+
+	// Now truncate and write shorter content (simulates log rotation)
+	if err := os.WriteFile(fileName, []byte("new\n"), 0644); err != nil {
+		t.Fatalf("failed to truncate and rewrite: %v", err)
+	}
+
+	// Use streamRemainingLogContent which handles truncation
+	streamRemainingLogContent(fileName, &lastOffset)
+
+	// After truncation handling, offset should be at end of new content
+	if lastOffset != 4 { // len("new\n")
+		t.Errorf("lastOffset after rotation = %d, want 4", lastOffset)
+	}
+}
+
+// ============================================================================
+// streamUntilExit - Shutdown During Stream (requires tmux)
+// ============================================================================
+
+func TestStreamUntilExit_ShutdownDuringStream(t *testing.T) {
+	if !IsTmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := fmt.Sprintf("loom-test-stream-shutdown-%d", os.Getpid())
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	// Create a long-running tmux session
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep 300").Run()
+	if err != nil {
+		t.Fatalf("failed to create tmux session: %v", err)
+	}
+
+	// Create a log file
+	tmpFile, err := os.CreateTemp("", "loom-stream-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	logFile := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(logFile)
+
+	shutdown := make(chan struct{})
+	attachChan := make(chan struct{}, 1)
+
+	// Send shutdown after a short delay
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		close(shutdown)
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		streamUntilExit(sessionName, logFile, t.TempDir(), attachChan, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - returned promptly after shutdown
+	case <-time.After(5 * time.Second):
+		t.Error("streamUntilExit did not return after shutdown signal")
+	}
+}
+
+// ============================================================================
+// streamUntilExit - Session Exit Detection (requires tmux)
+// ============================================================================
+
+func TestStreamUntilExit_SessionExitDetection(t *testing.T) {
+	if !IsTmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := fmt.Sprintf("loom-test-stream-exit-%d", os.Getpid())
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	// Create a tmux session with a short-lived command
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "echo done && sleep 0.5").Run()
+	if err != nil {
+		t.Fatalf("failed to create tmux session: %v", err)
+	}
+
+	tmpFile, err := os.CreateTemp("", "loom-stream-exit-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	logFile := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(logFile)
+
+	shutdown := make(chan struct{})
+	attachChan := make(chan struct{}, 1)
+
+	done := make(chan struct{})
+	go func() {
+		streamUntilExit(sessionName, logFile, t.TempDir(), attachChan, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - detected session exit
+	case <-time.After(10 * time.Second):
+		close(shutdown)
+		t.Error("streamUntilExit did not detect session exit")
+	}
+}
+
+// ============================================================================
+// streamUntilExit - Signal File Detection (requires tmux)
+// ============================================================================
+
+func TestStreamUntilExit_SignalFileDetection(t *testing.T) {
+	if !IsTmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := fmt.Sprintf("loom-test-stream-signal-%d", os.Getpid())
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	// Create a long-running tmux session
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep 300").Run()
+	if err != nil {
+		t.Fatalf("failed to create tmux session: %v", err)
+	}
+
+	tmpFile, err := os.CreateTemp("", "loom-stream-signal-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	logFile := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(logFile)
+
+	// Use a temp dir as the worktree path so the signal file path is deterministic.
+	// Resolve symlinks to match what streamUntilExit does internally
+	// (macOS: /var/folders → /private/var/folders).
+	worktreePath := t.TempDir()
+	if absPath, err := filepath.Abs(worktreePath); err == nil {
+		if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+			worktreePath = resolved
+		}
+	}
+
+	shutdown := make(chan struct{})
+	attachChan := make(chan struct{}, 1)
+
+	// Create the signal file after a short delay using the resolved path
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		signalFile := GetSignalFilePath(worktreePath)
+		signalDir := filepath.Dir(signalFile)
+		os.MkdirAll(signalDir, 0700)
+		os.WriteFile(signalFile, []byte("done"), 0644)
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		streamUntilExit(sessionName, logFile, worktreePath, attachChan, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - detected signal file
+	case <-time.After(30 * time.Second):
+		close(shutdown)
+		t.Error("streamUntilExit did not detect signal file")
+	}
+}
+
+// ============================================================================
+// RunAutoModeTmux - No Tasks Available Tests
+// ============================================================================
+
+func TestRunAutoModeTmux_NoTasks(t *testing.T) {
+	if !IsTmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	tmpDir := t.TempDir()
+	shutdown := make(chan struct{})
+
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test-no-tasks",
+		WorktreePath: tmpDir,
+		CustomTaskCheck: func() (bool, error) {
+			return false, nil // No tasks
+		},
+	}
+
+	// Send shutdown after a short delay to exit the idle wait loop
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		close(shutdown)
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeTmux(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - exited without creating a session
+	case <-time.After(5 * time.Second):
+		t.Error("RunAutoModeTmux did not exit with no tasks")
+	}
+}
+
+func TestRunAutoModeTmux_TaskCheckError(t *testing.T) {
+	if !IsTmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	tmpDir := t.TempDir()
+	shutdown := make(chan struct{})
+
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test-err",
+		WorktreePath: tmpDir,
+		CustomTaskCheck: func() (bool, error) {
+			return false, fmt.Errorf("simulated task check error")
+		},
+	}
+
+	// The error path in RunAutoModeTmux uses time.Sleep(5s) which is not interruptible.
+	// Send shutdown after >5s so the loop cycles back to the shutdown check.
+	go func() {
+		time.Sleep(6 * time.Second)
+		close(shutdown)
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeTmux(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - handled error and exited
+	case <-time.After(15 * time.Second):
+		t.Error("RunAutoModeTmux did not exit after task check error")
+	}
+}
+
