@@ -25,6 +25,7 @@ func (d *Daemon) handleEpicTransition(ap *AgentProcess) error {
 			ap.entry.Worktree, currentEpicID, err)
 		return nil
 	}
+	log.Printf("[daemon] Agent %s: epic %s hasReadyTasks=%v", ap.entry.Worktree, currentEpicID, hasReady)
 	if hasReady {
 		// Epic still has work — no transition needed
 		return nil

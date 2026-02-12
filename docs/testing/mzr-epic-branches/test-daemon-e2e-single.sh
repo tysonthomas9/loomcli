@@ -20,7 +20,7 @@ source "$TEST_DIR/test-env.sh"
 
 # Longer timeouts since all work is sequential through 1 agent
 export PLAN_TIMEOUT=600   # 10 min (was 5 min with 2 agents)
-export IMPL_TIMEOUT=1500  # 25 min (was 15 min with 2 agents)
+export IMPL_TIMEOUT=2100  # 35 min (4 sequential tasks @ ~7 min each + overhead)
 
 # Run the standard E2E test (plan → review → implement)
 E2E_EXIT=0

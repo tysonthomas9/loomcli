@@ -47,7 +47,8 @@ echo ""
 # ─────────────────────────────────────────────────
 echo "--- Phase 1: Planning (waiting for all $TASK_COUNT tasks to reach status=review) ---"
 cp loom-plan.yaml loom.yaml
-loom daemon > /dev/null 2>&1 &
+DAEMON_LOG=".loom/logs/daemon-planning.log"
+loom daemon > /dev/null 2>"$DAEMON_LOG" &
 DAEMON_PID=$!
 
 # Wait for daemon PID file
@@ -141,11 +142,12 @@ echo ""
 # Phase 3: Implementation
 # ─────────────────────────────────────────────────
 echo "--- Phase 3: Implementation (waiting for all $TASK_COUNT tasks to close) ---"
-# Clear logs from planning phase
-rm -f .loom/logs/*.log
+# Preserve planning logs, clear agent logs only
+rm -f .loom/logs/plan-*.log .loom/logs/task-*.log
 
 cp loom-task.yaml loom.yaml
-loom daemon > /dev/null 2>&1 &
+DAEMON_LOG=".loom/logs/daemon-impl.log"
+loom daemon > /dev/null 2>"$DAEMON_LOG" &
 DAEMON_PID=$!
 
 # Wait for daemon PID file
