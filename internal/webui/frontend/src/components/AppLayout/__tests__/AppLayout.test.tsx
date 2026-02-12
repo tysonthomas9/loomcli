@@ -293,6 +293,292 @@ describe('AppLayout', () => {
     });
   });
 
+  describe('floating pill header structure', () => {
+    it('header contains a headerContent wrapper div', () => {
+      const { container } = render(
+        <AppLayout title="Cortex">
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const header = container.querySelector('header');
+      const headerContent = header?.querySelector('[class*="headerContent"]');
+
+      expect(headerContent).toBeInTheDocument();
+      expect(headerContent?.className).toMatch(/headerContent/);
+    });
+
+    it('headerContent wraps brand, navigation, and actions', () => {
+      const { container } = render(
+        <AppLayout
+          title="Cortex"
+          navigation={<span data-testid="nav-slot">Nav</span>}
+          actions={<span data-testid="actions-slot">Actions</span>}
+        >
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const header = container.querySelector('header');
+      const headerContent = header?.querySelector('[class*="headerContent"]');
+
+      // All three slots should be inside headerContent
+      const brandDiv = headerContent?.querySelector('[class*="brand"]');
+      const navElement = headerContent?.querySelector('nav');
+      const actionsDiv = headerContent?.querySelector('[class*="actions"]');
+
+      expect(brandDiv).toBeInTheDocument();
+      expect(navElement).toBeInTheDocument();
+      expect(actionsDiv).toBeInTheDocument();
+    });
+
+    it('headerContent is the only direct child of header', () => {
+      const { container } = render(
+        <AppLayout
+          title="Cortex"
+          navigation={<button>Nav</button>}
+          actions={<button>Action</button>}
+        >
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const header = container.querySelector('header');
+      const directChildren = header?.children;
+
+      // header should have exactly one direct child: headerContent
+      expect(directChildren).toHaveLength(1);
+      expect(directChildren?.[0]?.className).toMatch(/headerContent/);
+    });
+
+    it('brand is the first element inside headerContent', () => {
+      const { container } = render(
+        <AppLayout title="Cortex" navigation={<button>Nav</button>}>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const headerContent = container.querySelector('[class*="headerContent"]');
+      const firstChild = headerContent?.firstElementChild;
+
+      expect(firstChild?.className).toMatch(/brand/);
+    });
+
+    it('navigation appears after brand in headerContent', () => {
+      const { container } = render(
+        <AppLayout title="Cortex" navigation={<button>Nav</button>}>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const headerContent = container.querySelector('[class*="headerContent"]');
+      const children = Array.from(headerContent?.children ?? []);
+
+      const brandIndex = children.findIndex((el) => el.className.match(/brand/));
+      const navIndex = children.findIndex((el) => el.tagName === 'NAV');
+
+      expect(brandIndex).toBeLessThan(navIndex);
+    });
+
+    it('actions appears after navigation in headerContent', () => {
+      const { container } = render(
+        <AppLayout
+          title="Cortex"
+          navigation={<button>Nav</button>}
+          actions={<button>Action</button>}
+        >
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const headerContent = container.querySelector('[class*="headerContent"]');
+      const children = Array.from(headerContent?.children ?? []);
+
+      const navIndex = children.findIndex((el) => el.tagName === 'NAV');
+      const actionsIndex = children.findIndex((el) => el.className.match(/actions/));
+
+      expect(navIndex).toBeLessThan(actionsIndex);
+    });
+
+    it('header has the header CSS module class for pill styling', () => {
+      const { container } = render(
+        <AppLayout>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const header = container.querySelector('header');
+
+      // CSS Modules assigns a class matching /header/ for the floating pill styles
+      expect(header?.className).toMatch(/header/);
+    });
+
+    it('title h1 has the title CSS module class', () => {
+      const { container } = render(
+        <AppLayout title="Cortex">
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const heading = screen.getByRole('heading', { name: 'Cortex' });
+
+      expect(heading.className).toMatch(/title/);
+    });
+
+    it('contentWrapper div wraps the main element', () => {
+      const { container } = render(
+        <AppLayout>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const main = container.querySelector('main');
+      const contentWrapper = main?.parentElement;
+
+      expect(contentWrapper).toBeInTheDocument();
+      expect(contentWrapper?.className).toMatch(/contentWrapper/);
+    });
+
+    it('contentWrapper is a direct child of root layout div', () => {
+      const { container } = render(
+        <AppLayout>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const rootDiv = container.firstChild as HTMLElement;
+      const contentWrapper = rootDiv.querySelector('[class*="contentWrapper"]');
+
+      expect(contentWrapper?.parentElement).toBe(rootDiv);
+    });
+
+    it('root div has appLayout CSS module class', () => {
+      const { container } = render(
+        <AppLayout>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const rootDiv = container.firstChild as HTMLElement;
+
+      expect(rootDiv.className).toMatch(/appLayout/);
+    });
+
+    it('navigation CSS class is applied to nav element', () => {
+      const { container } = render(
+        <AppLayout navigation={<button>Nav</button>}>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const nav = container.querySelector('nav');
+
+      expect(nav?.className).toMatch(/navigation/);
+    });
+
+    it('actions CSS class is applied to actions container', () => {
+      const { container } = render(
+        <AppLayout actions={<button>Action</button>}>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const header = container.querySelector('header');
+      const actionsDiv = header?.querySelector('[class*="actions"]');
+
+      expect(actionsDiv).toBeInTheDocument();
+      expect(actionsDiv?.className).toMatch(/actions/);
+    });
+
+    it('renders all three header slots in correct order: brand, nav, actions', () => {
+      const { container } = render(
+        <AppLayout
+          title="Cortex"
+          navigation={<span data-testid="nav">Nav Content</span>}
+          actions={<span data-testid="act">Action Content</span>}
+        >
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const headerContent = container.querySelector('[class*="headerContent"]');
+      const children = Array.from(headerContent?.children ?? []);
+
+      expect(children).toHaveLength(3);
+      expect(children[0]?.className).toMatch(/brand/);
+      expect(children[1]?.tagName).toBe('NAV');
+      expect(children[2]?.className).toMatch(/actions/);
+    });
+
+    it('renders only brand when no navigation or actions provided', () => {
+      const { container } = render(
+        <AppLayout title="Cortex">
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const headerContent = container.querySelector('[class*="headerContent"]');
+      const children = Array.from(headerContent?.children ?? []);
+
+      expect(children).toHaveLength(1);
+      expect(children[0]?.className).toMatch(/brand/);
+    });
+
+    it('renders brand and actions without navigation', () => {
+      const { container } = render(
+        <AppLayout title="Cortex" actions={<button>Action</button>}>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const headerContent = container.querySelector('[class*="headerContent"]');
+      const children = Array.from(headerContent?.children ?? []);
+
+      expect(children).toHaveLength(2);
+      expect(children[0]?.className).toMatch(/brand/);
+      expect(children[1]?.className).toMatch(/actions/);
+    });
+
+    it('renders brand and navigation without actions', () => {
+      const { container } = render(
+        <AppLayout title="Cortex" navigation={<button>Nav</button>}>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const headerContent = container.querySelector('[class*="headerContent"]');
+      const children = Array.from(headerContent?.children ?? []);
+
+      expect(children).toHaveLength(2);
+      expect(children[0]?.className).toMatch(/brand/);
+      expect(children[1]?.tagName).toBe('NAV');
+    });
+
+    it('main element has main CSS module class', () => {
+      const { container } = render(
+        <AppLayout>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const main = container.querySelector('main');
+
+      expect(main?.className).toMatch(/main/);
+    });
+
+    it('skip link has skipLink CSS module class', () => {
+      const { container } = render(
+        <AppLayout>
+          <p>Content</p>
+        </AppLayout>
+      );
+
+      const skipLink = container.querySelector('a[href="#main-content"]');
+
+      expect(skipLink?.className).toMatch(/skipLink/);
+    });
+  });
+
   describe('props', () => {
     it('preserves existing classes when adding custom className', () => {
       const { container } = render(
