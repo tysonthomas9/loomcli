@@ -137,7 +137,13 @@ func runRecover(cmd *cobra.Command, args []string) {
 // It wraps the existing recovery helpers with force=true and analyze=false semantics:
 // force-release any stale lock, kill running processes, reset orphaned tasks to open,
 // and clean untracked files without prompting.
-func RecoverWorktree(worktreePath, agentName string) error {
+//
+// exitCode informs recovery behavior: on clean exit (0) tasks that are still
+// in_progress are likely mid-completion (e.g. the agent signalled done but the
+// status update hasn't landed yet), so we log but still run the status-aware
+// resetTask which preserves review/closed tasks. On non-zero exit the task is
+// more likely genuinely orphaned.
+func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 	// 1. Check lock status
 	lockInfo, isRunning, err := CheckLock(worktreePath)
 	if err != nil {
@@ -157,8 +163,15 @@ func RecoverWorktree(worktreePath, agentName string) error {
 			return fmt.Errorf("failed to clear lock: %w", err)
 		}
 
-		// 4. Handle orphaned task from lock (no analysis)
+		// 4. Handle orphaned task from lock
 		if lockInfo.TaskID != "" {
+			if exitCode == 0 {
+				fmt.Printf("[recover] Agent %s exited cleanly (code 0), checking task %s\n",
+					agentName, lockInfo.TaskID)
+			} else {
+				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
+					agentName, exitCode, lockInfo.TaskID)
+			}
 			resetTask(worktreePath, lockInfo.TaskID)
 		}
 	}

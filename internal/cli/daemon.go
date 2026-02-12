@@ -224,7 +224,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		}
 
 		// 1. Pre-flight recovery
-		if err := d.recoverAgent(ap); err != nil {
+		if err := d.recoverAgent(ap, 0); err != nil {
 			log.Printf("[daemon] Agent %s: pre-flight recovery failed: %v", ap.entry.Worktree, err)
 			// Continue with caution - spawn may still work
 		}
@@ -264,10 +264,17 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 4. Wait for exit
 		exitCode := d.waitForAgent(ap)
-		log.Printf("[daemon] Agent %s: exited with code %d", ap.entry.Worktree, exitCode)
 
-		// 5. Post-mortem recovery
-		if err := d.recoverAgent(ap); err != nil {
+		// Log exit with task details from lock file (before recovery clears it)
+		if lockInfo, _, _ := CheckLock(ap.worktreePath); lockInfo != nil && lockInfo.TaskID != "" {
+			log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
+				ap.entry.Worktree, exitCode, lockInfo.TaskID, lockInfo.TaskTitle)
+		} else {
+			log.Printf("[daemon] Agent %s: exited with code %d", ap.entry.Worktree, exitCode)
+		}
+
+		// 5. Post-mortem recovery (exit-code-aware)
+		if err := d.recoverAgent(ap, exitCode); err != nil {
 			log.Printf("[daemon] Agent %s: post-mortem recovery failed: %v", ap.entry.Worktree, err)
 			// Non-fatal, continue with restart logic
 		}
@@ -472,8 +479,10 @@ func (d *Daemon) waitForAgent(ap *AgentProcess) int {
 }
 
 // recoverAgent calls RecoverWorktree for cleanup.
-func (d *Daemon) recoverAgent(ap *AgentProcess) error {
-	return RecoverWorktree(ap.worktreePath, ap.entry.Worktree)
+// exitCode is passed so recovery can make smarter decisions (e.g. skip task
+// reset on clean exit when the task status is already terminal).
+func (d *Daemon) recoverAgent(ap *AgentProcess, exitCode int) error {
+	return RecoverWorktree(ap.worktreePath, ap.entry.Worktree, exitCode)
 }
 
 // shouldRestart determines if agent should restart based on backoff policy.
