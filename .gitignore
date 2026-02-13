@@ -3,6 +3,7 @@
 loom
 loomcli
 logrouter
+*.test
 tmp/
 
 # Frontend dependencies
