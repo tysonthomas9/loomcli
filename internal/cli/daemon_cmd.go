@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -133,6 +134,9 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	logDir := resolveDaemonPath(projectDir, config.Daemon.LogDir)
 	stateFilePath := filepath.Join(filepath.Dir(pidFilePath), "daemon-agents.json")
 	lockFilePath := filepath.Join(filepath.Dir(pidFilePath), "daemon.lock")
+
+	// 3.5. Validate paths stay within expected boundaries
+	validateDaemonPaths(projectDir, pidFilePath, logDir)
 
 	// 4. Dry-run mode: print config and exit (before acquiring lock)
 	if daemonDryRun {
@@ -381,6 +385,33 @@ func resolveDaemonPath(projectDir, path string) string {
 		return path
 	}
 	return filepath.Join(projectDir, path)
+}
+
+// validateDaemonPaths warns if LogDir or PIDFile paths resolve outside expected boundaries.
+// Expected boundaries: within projectDir or within the loom config directory (~/.loom/).
+func validateDaemonPaths(projectDir, pidFilePath, logDir string) {
+	configDir := GetConfigDir()
+
+	for _, entry := range []struct{ name, path string }{
+		{"pid_file", pidFilePath},
+		{"log_dir", logDir},
+	} {
+		resolved, err := filepath.Abs(entry.path)
+		if err != nil {
+			log.Printf("[daemon] Warning: cannot resolve %s path %q: %v", entry.name, entry.path, err)
+			continue
+		}
+		absProject, _ := filepath.Abs(projectDir)
+		absConfig, _ := filepath.Abs(configDir)
+
+		if strings.HasPrefix(resolved, absProject+string(filepath.Separator)) || resolved == absProject {
+			continue // within project dir
+		}
+		if configDir != "" && (strings.HasPrefix(resolved, absConfig+string(filepath.Separator)) || resolved == absConfig) {
+			continue // within ~/.loom/
+		}
+		log.Printf("[daemon] Warning: %s path %q resolves outside project and config directories", entry.name, entry.path)
+	}
 }
 
 // isLoomDaemonRunning checks if a loom daemon is running by reading PID file and checking process
