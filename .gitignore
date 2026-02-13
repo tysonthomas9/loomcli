@@ -2,7 +2,6 @@
 # Build artifacts
 loom
 loomcli
-logrouter
 tmp/
 
 # Frontend dependencies
