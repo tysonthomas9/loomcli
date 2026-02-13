@@ -362,6 +362,46 @@ func TestSetLeaderKey_WithCircuitBreaker(t *testing.T) {
 	}
 }
 
+func TestDeleteTaskOwnerIfMatch_WithCircuitBreaker(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	client.SetCircuitBreaker(newTestBreaker())
+
+	mr.Set(taskOwnerKey("task-1"), "worker-1")
+
+	deleted, err := client.DeleteTaskOwnerIfMatch(ctx, "task-1", "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected true when owner matches")
+	}
+	if mr.Exists(taskOwnerKey("task-1")) {
+		t.Error("key should be deleted")
+	}
+}
+
+func TestDeleteTaskOwnerIfMatch_InvalidInputs(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	_, err := client.DeleteTaskOwnerIfMatch(ctx, "", "worker-1")
+	if err == nil {
+		t.Error("expected error for empty taskID")
+	}
+
+	_, err = client.DeleteTaskOwnerIfMatch(ctx, "task-1", "")
+	if err == nil {
+		t.Error("expected error for empty expectedOwner")
+	}
+
+	_, err = client.DeleteTaskOwnerIfMatch(ctx, "task:bad", "worker-1")
+	if err == nil {
+		t.Error("expected error for taskID with colon")
+	}
+}
+
 func TestDeleteTaskOwner_WithCircuitBreaker(t *testing.T) {
 	client, mr := setupTest(t)
 	ctx := context.Background()
@@ -750,6 +790,10 @@ func TestCircuitBreaker_OpenState_DeleteOps(t *testing.T) {
 		name string
 		fn   func() error
 	}{
+		{"DeleteTaskOwnerIfMatch", func() error {
+			_, err := client.DeleteTaskOwnerIfMatch(ctx, "task-1", "worker-1")
+			return err
+		}},
 		{"DeleteTaskOwner", func() error { return client.DeleteTaskOwner(ctx, "task-1") }},
 		{"DeleteWorkerState", func() error { return client.DeleteWorkerState(ctx, "worker-1") }},
 		{"RemoveActiveWorker", func() error { return client.RemoveActiveWorker(ctx, "worker-1") }},
@@ -809,6 +853,21 @@ func TestCompleteTask_ScriptError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "complete script failed") {
 		t.Errorf("expected error to contain 'complete script failed', got: %v", err)
+	}
+}
+
+func TestDeleteTaskOwnerIfMatch_ScriptError(t *testing.T) {
+	client, mr := setupTest(t)
+	ctx := context.Background()
+
+	mr.Close()
+
+	_, err := client.DeleteTaskOwnerIfMatch(ctx, "task-1", "worker-1")
+	if err == nil {
+		t.Fatal("expected error when Redis is closed")
+	}
+	if !strings.Contains(err.Error(), "cleanup owner script failed") {
+		t.Errorf("expected error to contain 'cleanup owner script failed', got: %v", err)
 	}
 }
 

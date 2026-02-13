@@ -352,6 +352,36 @@ func (c *Client) GetTaskOwner(ctx context.Context, taskID string) (string, error
 	return get()
 }
 
+// DeleteTaskOwnerIfMatch atomically checks task ownership and deletes only if it matches.
+// Returns true if the key was deleted or didn't exist (both are success for cleanup).
+// Returns false if the key exists but belongs to a different worker.
+func (c *Client) DeleteTaskOwnerIfMatch(ctx context.Context, taskID, expectedOwner string) (bool, error) {
+	if c.breaker != nil {
+		return circuitbreaker.ExecuteWithResult(c.breaker, func() (bool, error) {
+			return c.deleteTaskOwnerIfMatch(ctx, taskID, expectedOwner)
+		})
+	}
+	return c.deleteTaskOwnerIfMatch(ctx, taskID, expectedOwner)
+}
+
+func (c *Client) deleteTaskOwnerIfMatch(ctx context.Context, taskID, expectedOwner string) (bool, error) {
+	if err := validateID(taskID, "taskID"); err != nil {
+		return false, err
+	}
+	if err := validateID(expectedOwner, "expectedOwner"); err != nil {
+		return false, err
+	}
+
+	keys := []string{taskOwnerKey(taskID)}
+	args := []interface{}{expectedOwner}
+
+	result, err := cleanupOwnerScript.Run(ctx, c.rdb, keys, args...).Int64()
+	if err != nil {
+		return false, fmt.Errorf("cleanup owner script failed: %w", err)
+	}
+	return result == 1, nil
+}
+
 // DeleteTaskOwner removes the ownership key for a task.
 func (c *Client) DeleteTaskOwner(ctx context.Context, taskID string) error {
 	fn := func() error {

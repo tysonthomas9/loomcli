@@ -269,16 +269,12 @@ func (sd *StaleDetector) detectStaleWorkers(ctx context.Context) ([]StaleWorker,
 }
 
 func (sd *StaleDetector) cleanupWorker(ctx context.Context, worker StaleWorker) error {
-	// Release task ownership if this worker still owns it
+	// Release task ownership atomically — only delete if this worker still owns it.
+	// Uses a Lua script to prevent a TOCTOU race where a new worker could claim the
+	// task between a GET and DEL.
 	if worker.TaskID != "" {
-		owner, err := sd.client.GetTaskOwner(ctx, worker.TaskID)
-		if err != nil {
-			return fmt.Errorf("get task owner: %w", err)
-		}
-		if owner == worker.WorkerID {
-			if err := sd.client.DeleteTaskOwner(ctx, worker.TaskID); err != nil {
-				return fmt.Errorf("delete task owner: %w", err)
-			}
+		if _, err := sd.client.DeleteTaskOwnerIfMatch(ctx, worker.TaskID, worker.WorkerID); err != nil {
+			return fmt.Errorf("cleanup task owner: %w", err)
 		}
 	}
 
