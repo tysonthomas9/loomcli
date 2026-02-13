@@ -4486,3 +4486,393 @@ func TestRunAutoModeTmux_TaskCheckError(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// RunAutoModeLoop - Lock State Transitions
+// ============================================================================
+
+func TestRunAutoModeLoop_LockStateTransitions(t *testing.T) {
+	// Verify UpdateLockState is called with StateIdle at loop start, StateActive
+	// before agent invocation, and StateIdle after agent completes.
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Always return tasks
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	// In the mock invoker: read lock file and verify State == StateActive
+	var stateBeforeAgent string
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		info, err := ReadLockFile(workDir)
+		if err != nil {
+			t.Errorf("ReadLockFile failed during agent invocation: %v", err)
+		} else {
+			stateBeforeAgent = info.State
+		}
+		// Simulate claiming a task so the loop counts progress
+		UpdateLockTask(workDir, "mock-1", "Mock Task")
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     1,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit after max tasks")
+	}
+
+	// Verify state was active during agent invocation
+	if stateBeforeAgent != StateActive {
+		t.Errorf("State during agent invocation = %q, want %q", stateBeforeAgent, StateActive)
+	}
+
+	// After RunAutoModeLoop returns: verify state is idle
+	info, err := ReadLockFile(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadLockFile failed after loop: %v", err)
+	}
+	if info.State != StateIdle {
+		t.Errorf("State after loop = %q, want %q", info.State, StateIdle)
+	}
+}
+
+// ============================================================================
+// RunAutoModeLoop - ClearsTaskIDBeforeEachSession
+// ============================================================================
+
+func TestRunAutoModeLoop_ClearsTaskIDBeforeEachSession(t *testing.T) {
+	// Verify ClearLockTaskID is called before each agent invocation, so
+	// leftover task IDs from previous sessions don't cause false progress.
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	callNum := 0
+	taskIDOnEntry := make([]string, 0, 2)
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		callNum++
+		// Read the current TaskID to see if it was cleared before invocation
+		info, err := ReadLockFile(workDir)
+		if err != nil {
+			t.Errorf("ReadLockFile failed on call %d: %v", callNum, err)
+		} else {
+			taskIDOnEntry = append(taskIDOnEntry, info.TaskID)
+		}
+		// Claim a task to simulate progress
+		UpdateLockTask(workDir, fmt.Sprintf("task-%d", callNum), fmt.Sprintf("Task %d", callNum))
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     2,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit after max tasks")
+	}
+
+	if callNum != 2 {
+		t.Fatalf("Expected 2 invocations, got %d", callNum)
+	}
+
+	// Both invocations should see an empty TaskID (cleared before each session)
+	for i, tid := range taskIDOnEntry {
+		if tid != "" {
+			t.Errorf("Invocation %d: TaskID on entry = %q, want empty (ClearLockTaskID should have cleared it)", i+1, tid)
+		}
+	}
+}
+
+// ============================================================================
+// startTmuxSession - Terminal Dimensions
+// ============================================================================
+
+func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
+	if !IsTmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	tmpDir := t.TempDir()
+	sessionName := fmt.Sprintf("loom-test-dims-%d", os.Getpid())
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	opts := AutoModeOptions{
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	err := startTmuxSession(sessionName, opts, logFile)
+	if err != nil {
+		t.Fatalf("startTmuxSession failed: %v", err)
+	}
+
+	// Query the window dimensions from the created tmux session
+	out, err := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_width} #{window_height}").Output()
+	if err != nil {
+		t.Fatalf("failed to get window dimensions: %v", err)
+	}
+
+	dims := strings.TrimSpace(string(out))
+	var width, height int
+	n, err := fmt.Sscanf(dims, "%d %d", &width, &height)
+	if err != nil || n != 2 {
+		t.Fatalf("failed to parse tmux window dimensions: %q (err=%v)", dims, err)
+	}
+
+	// Verify dimensions are reasonable (> 0)
+	if width <= 0 || height <= 0 {
+		t.Errorf("tmux window dimensions should be positive: width=%d, height=%d", width, height)
+	}
+
+	// If we can get the terminal size, verify the tmux window matches
+	if termWidth, termHeight, termErr := getTerminalSize(); termErr == nil && termWidth > 0 && termHeight > 0 {
+		if width != termWidth {
+			t.Errorf("tmux window width = %d, terminal width = %d (should match)", width, termWidth)
+		}
+		if height != termHeight {
+			t.Errorf("tmux window height = %d, terminal height = %d (should match)", height, termHeight)
+		}
+	}
+}
+
+// ============================================================================
+// startTmuxSession - Pipe-Pane and Focus Events
+// ============================================================================
+
+func TestStartTmuxSession_PipePaneAndFocusEvents(t *testing.T) {
+	if !IsTmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	tmpDir := t.TempDir()
+	sessionName := fmt.Sprintf("loom-test-pipe-%d", os.Getpid())
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	opts := AutoModeOptions{
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	err := startTmuxSession(sessionName, opts, logFile)
+	if err != nil {
+		t.Fatalf("startTmuxSession failed: %v", err)
+	}
+
+	// Verify focus-events is off (prevents ^[[I and ^[[O in output)
+	out, err := exec.Command("tmux", "show-options", "-t", sessionName, "focus-events").Output()
+	if err != nil {
+		t.Fatalf("failed to query focus-events: %v", err)
+	}
+
+	focusEvents := strings.TrimSpace(string(out))
+	if !strings.Contains(focusEvents, "off") {
+		t.Errorf("focus-events should be off, got: %q", focusEvents)
+	}
+}
+
+// ============================================================================
+// streamUntilExit - Zombie Session Cleanup (requires tmux)
+// ============================================================================
+
+func TestStreamUntilExit_ZombieSessionCleanup(t *testing.T) {
+	if !IsTmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := fmt.Sprintf("loom-test-zombie-%d", os.Getpid())
+	t.Cleanup(func() {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	})
+
+	// Create a tmux session with a short-lived command. Use "sleep 2" to give
+	// us time to set remain-on-exit before the command exits.
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep 2").Run()
+	if err != nil {
+		t.Fatalf("failed to create tmux session: %v", err)
+	}
+	// Set remain-on-exit BEFORE the command exits so session becomes zombie
+	if setErr := exec.Command("tmux", "set", "-t", sessionName, "remain-on-exit", "on").Run(); setErr != nil {
+		t.Fatalf("failed to set remain-on-exit: %v", setErr)
+	}
+
+	// Wait for command to exit (pane becomes dead)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if tmuxPaneDead(sessionName) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !tmuxPaneDead(sessionName) {
+		t.Fatal("pane did not die within timeout")
+	}
+
+	// Session should still exist (zombie state)
+	if !tmuxSessionExists(sessionName) {
+		t.Fatal("session should still exist in zombie state")
+	}
+
+	tmpFile, err := os.CreateTemp("", "loom-zombie-test-*.log")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	logFile := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(logFile)
+
+	shutdown := make(chan struct{})
+	attachChan := make(chan struct{}, 1)
+
+	done := make(chan struct{})
+	go func() {
+		streamUntilExit(sessionName, logFile, t.TempDir(), attachChan, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - detected zombie session and cleaned up
+	case <-time.After(10 * time.Second):
+		close(shutdown)
+		t.Error("streamUntilExit did not detect zombie session")
+	}
+
+	// Session should have been cleaned up
+	if tmuxSessionExists(sessionName) {
+		t.Error("zombie session should have been cleaned up")
+	}
+}
+
+// ============================================================================
+// RunAutoModeLoop - Three Consecutive No-Progress Exits
+// ============================================================================
+
+func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test in short mode (requires ~90s for backoff waits)")
+	}
+
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	// Always return tasks
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	// Agent succeeds but does NOT claim a task (no UpdateLockTask call)
+	claudeInvocations := 0
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeInvocations++
+		// Don't write a TaskID — simulates agent that exits without claiming work
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     0,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - should have exited after 3 consecutive no-progress sessions
+	case <-time.After(120 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit after 3 consecutive no-progress sessions")
+	}
+
+	// Should have been invoked exactly 3 times before exiting
+	if claudeInvocations != 3 {
+		t.Errorf("Expected 3 Claude invocations, got %d", claudeInvocations)
+	}
+}
+
