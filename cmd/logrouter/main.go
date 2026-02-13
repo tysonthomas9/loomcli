@@ -10,6 +10,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+
+	"github.com/tysonthomas9/loomcli/internal/logrouter"
 )
 
 func main() {
@@ -65,7 +67,7 @@ func main() {
 	maxLogSizeBytes := int64(*maxLogSizeMB) * 1024 * 1024
 
 	// Create the router
-	router, err := NewLogRouter(*agentName, *baseDir, maxLogSizeBytes)
+	router, err := logrouter.NewLogRouter(*agentName, *baseDir, maxLogSizeBytes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating log router: %v\n", err)
 		os.Exit(1)
@@ -73,7 +75,7 @@ func main() {
 	defer router.Close()
 
 	// Create and start the lock file watcher
-	watcher, err := NewLockWatcher(*lockPath, router)
+	watcher, err := logrouter.NewLockWatcher(*lockPath, router)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating lock watcher: %v\n", err)
 		os.Exit(1)
