@@ -20,8 +20,8 @@ import (
 
 // FleetRegisterConfig holds configuration for fleet worker registration authentication.
 type FleetRegisterConfig struct {
-	APIKey      string             // Pre-shared API key for fleet registration
-	RateLimiter *FleetRateLimiter  // Optional rate limiter (nil = no rate limiting)
+	APIKey      string            // Pre-shared API key for fleet registration
+	RateLimiter *FleetRateLimiter // Optional rate limiter (nil = no rate limiting)
 }
 
 // FleetRegisterRequest represents the JSON body for POST /api/fleet/register.
@@ -421,9 +421,9 @@ type FleetClaimRequest struct {
 
 // FleetClaimResponse wraps the claim result for JSON response.
 type FleetClaimResponse struct {
-	Success bool                       `json:"success"`
-	Payload *types.WorkHandoffPayload  `json:"payload,omitempty"`
-	Error   string                     `json:"error,omitempty"`
+	Success bool                      `json:"success"`
+	Payload *types.WorkHandoffPayload `json:"payload,omitempty"`
+	Error   string                    `json:"error,omitempty"`
 }
 
 // fleetClaimClient is an internal interface for testing fleet claim operations.

@@ -1821,9 +1821,9 @@ func TestIssueType_IsBuiltIn(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
+		name      string
 		issueType IssueType
-		want     bool
+		want      bool
 	}{
 		{"bug", TypeBug, true},
 		{"feature", TypeFeature, true},

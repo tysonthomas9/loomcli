@@ -867,4 +867,3 @@ func TestReadAndUpdateLock_ClearTaskErrorWarning(t *testing.T) {
 	// which will encounter an error — should print warning but not crash
 	watcher.readAndUpdateLock()
 }
-

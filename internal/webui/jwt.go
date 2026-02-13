@@ -17,7 +17,7 @@ type WorkerClaims struct {
 // TokenConfig holds JWT configuration for fleet worker tokens.
 type TokenConfig struct {
 	SigningKey []byte
-	Expiry    time.Duration
+	Expiry     time.Duration
 }
 
 // GenerateWorkerToken creates a signed JWT for a fleet worker.

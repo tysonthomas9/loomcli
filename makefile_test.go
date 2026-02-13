@@ -131,8 +131,8 @@ func TestMakeDryRun_UpdateBeads(t *testing.T) {
 	out := runMake(t, "-n", "update-beads")
 
 	checks := []struct {
-		name    string
-		substr  string
+		name   string
+		substr string
 	}{
 		{"git subtree pull", "git subtree pull"},
 		{"prefix flag", "--prefix=third_party/beads"},

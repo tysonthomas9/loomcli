@@ -19,15 +19,15 @@ import (
 
 // AutoModeOptions holds configuration for auto mode
 type AutoModeOptions struct {
-	Interval    int  // Polling interval in seconds when no tasks available
-	MaxTasks    int  // Maximum tasks to process before exiting (0 = unlimited)
-	IdleTimeout int  // Exit after N minutes with no available tasks (0 = no timeout)
-	AgentType   string // "plan" or "task"
-	AgentName   string
-	WorktreePath string
-	ParentID     string // Epic ID to scope task discovery to (empty = all tasks)
+	Interval        int    // Polling interval in seconds when no tasks available
+	MaxTasks        int    // Maximum tasks to process before exiting (0 = unlimited)
+	IdleTimeout     int    // Exit after N minutes with no available tasks (0 = no timeout)
+	AgentType       string // "plan" or "task"
+	AgentName       string
+	WorktreePath    string
+	ParentID        string                                // Epic ID to scope task discovery to (empty = all tasks)
 	CustomPromptGen func(string, *WorkspaceConfig) string // Custom prompt generator (overrides AgentType selection)
-	CustomTaskCheck func() (bool, error)                   // Custom task availability check (overrides AgentType selection)
+	CustomTaskCheck func() (bool, error)                  // Custom task availability check (overrides AgentType selection)
 }
 
 // AutoModeState tracks the current state of auto mode execution
@@ -847,11 +847,9 @@ func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shut
 						}
 					}
 				}
-			} else {
+			} else if poller != nil {
 				// No new output - back off
-				if poller != nil {
-					poller.hadNoActivity()
-				}
+				poller.hadNoActivity()
 			}
 			file.Close()
 		}

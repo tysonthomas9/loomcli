@@ -102,9 +102,7 @@ func runPR(cmd *cobra.Command, args []string) {
 			}
 
 			wsName := prWorkspace
-			if wsName == "" {
-				wsName = resolver.WorkspaceName()
-			} else {
+			if wsName != "" {
 				if err := resolver.SetWorkspace(wsName); err != nil {
 					available := resolver.WorkspaceNames()
 					fmt.Fprintf(os.Stderr, "Error: workspace %q not found. Available: %v\n", wsName, available)

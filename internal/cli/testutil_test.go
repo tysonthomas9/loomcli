@@ -168,12 +168,12 @@ func SetupTestEnv(t *testing.T, vars map[string]string) {
 
 // FlexibleStub represents a command pattern that can match multiple calls
 type FlexibleStub struct {
-	Name      string       // Command name to match (required)
-	ArgPrefix []string     // Args prefix to match (optional, nil = match any)
+	Name      string        // Command name to match (required)
+	ArgPrefix []string      // Args prefix to match (optional, nil = match any)
 	Result    CommandResult // Result to return
-	MinCalls  int          // Minimum expected calls (default 0)
-	MaxCalls  int          // Maximum expected calls (0 = unlimited)
-	callCount int          // Internal: actual call count
+	MinCalls  int           // Minimum expected calls (default 0)
+	MaxCalls  int           // Maximum expected calls (0 = unlimited)
+	callCount int           // Internal: actual call count
 }
 
 // FlexibleCommandMock provides a pattern-based command mock for tests where

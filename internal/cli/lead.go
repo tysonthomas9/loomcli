@@ -8,8 +8,8 @@ import (
 )
 
 var leadCmd = &cobra.Command{
-	Use:   "lead",
-	Short: "Interactive project management with AI agent",
+	Use:     "lead",
+	Short:   "Interactive project management with AI agent",
 	GroupID: "agents",
 	Long: `Launch an interactive AI agent session for project management.
 

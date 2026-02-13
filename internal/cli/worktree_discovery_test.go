@@ -636,4 +636,3 @@ func TestResolveAgentTarget_WorkspaceMode_NoWorkspacePath(t *testing.T) {
 		t.Errorf("expected error containing 'has no path configured', got %q", got)
 	}
 }
-

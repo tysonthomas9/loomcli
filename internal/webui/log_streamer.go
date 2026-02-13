@@ -51,9 +51,9 @@ type LogContentData struct {
 
 // TaskPhasesResponse is the response for listing task log phases.
 type TaskPhasesResponse struct {
-	Success bool             `json:"success"`
-	Data    *TaskPhasesData  `json:"data,omitempty"`
-	Error   string           `json:"error,omitempty"`
+	Success bool            `json:"success"`
+	Data    *TaskPhasesData `json:"data,omitempty"`
+	Error   string          `json:"error,omitempty"`
 }
 
 // TaskPhasesData contains the available log phases for a task.

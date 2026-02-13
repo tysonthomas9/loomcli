@@ -24,10 +24,10 @@ type WorkspaceConfig struct {
 
 // RepoConfig defines a single repository within a workspace
 type RepoConfig struct {
-	Name          string `yaml:"name" json:"name"`                                // Display name / identifier
-	Path          string `yaml:"path" json:"path"`                                // Path to the repo (absolute or relative to workspace)
+	Name          string `yaml:"name" json:"name"`                                         // Display name / identifier
+	Path          string `yaml:"path" json:"path"`                                         // Path to the repo (absolute or relative to workspace)
 	DefaultBranch string `yaml:"default_branch,omitempty" json:"default_branch,omitempty"` // Override default branch (defaults to "main")
-	Remote        string `yaml:"remote,omitempty" json:"remote,omitempty"`        // Git remote name (defaults to "origin")
+	Remote        string `yaml:"remote,omitempty" json:"remote,omitempty"`                 // Git remote name (defaults to "origin")
 }
 
 // ValidateRemoteName checks if a remote name is safe for use in git commands.

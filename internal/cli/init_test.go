@@ -962,7 +962,7 @@ func TestShowWorkspaceSummary(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	showWorkspaceSummary("myws", ws)
+	showWorkspaceSummary(ws)
 
 	w.Close()
 	os.Stdout = origStdout
@@ -1000,7 +1000,7 @@ func TestShowWorkspaceSummary_NoRepos(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	showWorkspaceSummary("emptyws", ws)
+	showWorkspaceSummary(ws)
 
 	w.Close()
 	os.Stdout = origStdout

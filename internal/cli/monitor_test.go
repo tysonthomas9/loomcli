@@ -213,11 +213,11 @@ func TestAgentStatusStates(t *testing.T) {
 // Test fallback logic for replacing "..." with task ID
 func TestFallbackLogic(t *testing.T) {
 	tests := []struct {
-		name         string
-		lockStatus   string
-		taskID       string
-		taskStatus   string
-		wantPrefix   string
+		name       string
+		lockStatus string
+		taskID     string
+		taskStatus string
+		wantPrefix string
 	}{
 		{
 			name:       "planning_needs_review_becomes_review",
@@ -420,10 +420,10 @@ func TestMonitorDataStruct(t *testing.T) {
 // Closed tasks without a lock show "ready" (not "done") to avoid stale state
 func TestTaskInfoStatus(t *testing.T) {
 	tests := []struct {
-		name         string
-		taskStatus   string
-		expectError  bool
-		expectReady  bool
+		name        string
+		taskStatus  string
+		expectError bool
+		expectReady bool
 	}{
 		{"in_progress_no_lock_is_error", "in_progress", true, false},
 		{"closed_no_lock_is_ready", "closed", false, true}, // Changed: closed without lock = ready
@@ -780,36 +780,36 @@ func TestCollectStatistics(t *testing.T) {
 			wantBlocked:    0,
 		},
 		{
-			name:       "empty stats (no issues)",
-			bdOutput:   `{"summary":{"total_issues":0,"open_issues":0,"closed_issues":0}}`,
-			wantOpen:   0,
-			wantClosed: 0,
-			wantTotal:  0,
-			wantCompl:  0,
+			name:           "empty stats (no issues)",
+			bdOutput:       `{"summary":{"total_issues":0,"open_issues":0,"closed_issues":0}}`,
+			wantOpen:       0,
+			wantClosed:     0,
+			wantTotal:      0,
+			wantCompl:      0,
 			wantRemaining:  0,
 			wantInProgress: 0,
 			wantReview:     0,
 			wantBlocked:    0,
 		},
 		{
-			name:       "command failure returns zero values",
-			bdErr:      fmt.Errorf("command failed"),
-			wantOpen:   0,
-			wantClosed: 0,
-			wantTotal:  0,
-			wantCompl:  0,
+			name:           "command failure returns zero values",
+			bdErr:          fmt.Errorf("command failed"),
+			wantOpen:       0,
+			wantClosed:     0,
+			wantTotal:      0,
+			wantCompl:      0,
 			wantRemaining:  0,
 			wantInProgress: 0,
 			wantReview:     0,
 			wantBlocked:    0,
 		},
 		{
-			name:       "invalid JSON returns zero values",
-			bdOutput:   `not valid json`,
-			wantOpen:   0,
-			wantClosed: 0,
-			wantTotal:  0,
-			wantCompl:  0,
+			name:           "invalid JSON returns zero values",
+			bdOutput:       `not valid json`,
+			wantOpen:       0,
+			wantClosed:     0,
+			wantTotal:      0,
+			wantCompl:      0,
 			wantRemaining:  0,
 			wantInProgress: 0,
 			wantReview:     0,
@@ -831,13 +831,13 @@ func TestCollectStatistics(t *testing.T) {
 		{
 			name: "all bd stats fields populated",
 			// total=20, open=10, in_progress=2, closed=5, blocked=1, deferred=0, tombstone=0, pinned=0
-			bdOutput: `{"summary":{"total_issues":20,"open_issues":10,"in_progress_issues":2,"closed_issues":5,"blocked_issues":1,"deferred_issues":0,"tombstone_issues":0,"pinned_issues":0}}`,
+			bdOutput:   `{"summary":{"total_issues":20,"open_issues":10,"in_progress_issues":2,"closed_issues":5,"blocked_issues":1,"deferred_issues":0,"tombstone_issues":0,"pinned_issues":0}}`,
 			wantOpen:   10,
 			wantClosed: 5,
 			wantTotal:  20,
 			wantCompl:  25.0,
 			// Remaining = 20 - 5 - 0 (tombstone) = 15
-			wantRemaining: 15,
+			wantRemaining:  15,
 			wantInProgress: 2,
 			wantBlocked:    1,
 			// Review = 20 - 10 - 2 - 5 - 1 - 0 - 0 - 0 = 2
@@ -847,7 +847,7 @@ func TestCollectStatistics(t *testing.T) {
 			name: "negative review clamped to zero",
 			// total=10, open=5, in_progress=3, closed=3, blocked=2, deferred=0, tombstone=0, pinned=0
 			// Review = 10 - 5 - 3 - 3 - 2 - 0 - 0 - 0 = -3 -> clamped to 0
-			bdOutput: `{"summary":{"total_issues":10,"open_issues":5,"in_progress_issues":3,"closed_issues":3,"blocked_issues":2,"deferred_issues":0,"tombstone_issues":0,"pinned_issues":0}}`,
+			bdOutput:   `{"summary":{"total_issues":10,"open_issues":5,"in_progress_issues":3,"closed_issues":3,"blocked_issues":2,"deferred_issues":0,"tombstone_issues":0,"pinned_issues":0}}`,
 			wantOpen:   5,
 			wantClosed: 3,
 			wantTotal:  10,
@@ -862,7 +862,7 @@ func TestCollectStatistics(t *testing.T) {
 			name: "negative remaining clamped to zero",
 			// total=5, open=0, closed=6, tombstone=1 (closed+tombstone > total)
 			// Remaining = 5 - 6 - 1 = -2 -> clamped to 0
-			bdOutput: `{"summary":{"total_issues":5,"open_issues":0,"in_progress_issues":0,"closed_issues":6,"blocked_issues":0,"deferred_issues":0,"tombstone_issues":1,"pinned_issues":0}}`,
+			bdOutput:   `{"summary":{"total_issues":5,"open_issues":0,"in_progress_issues":0,"closed_issues":6,"blocked_issues":0,"deferred_issues":0,"tombstone_issues":1,"pinned_issues":0}}`,
 			wantOpen:   0,
 			wantClosed: 6,
 			wantTotal:  5,
@@ -878,7 +878,7 @@ func TestCollectStatistics(t *testing.T) {
 			name: "review computed with deferred and pinned",
 			// total=30, open=10, in_progress=3, closed=8, blocked=2, deferred=2, tombstone=1, pinned=1
 			// Review = 30 - 10 - 3 - 8 - 2 - 2 - 1 - 1 = 3
-			bdOutput: `{"summary":{"total_issues":30,"open_issues":10,"in_progress_issues":3,"closed_issues":8,"blocked_issues":2,"deferred_issues":2,"tombstone_issues":1,"pinned_issues":1}}`,
+			bdOutput:   `{"summary":{"total_issues":30,"open_issues":10,"in_progress_issues":3,"closed_issues":8,"blocked_issues":2,"deferred_issues":2,"tombstone_issues":1,"pinned_issues":1}}`,
 			wantOpen:   10,
 			wantClosed: 8,
 			wantTotal:  30,
@@ -932,13 +932,13 @@ func TestCollectStatistics(t *testing.T) {
 
 func TestCollectSyncStatus(t *testing.T) {
 	tests := []struct {
-		name           string
-		bdOutput       string
-		bdErr          error
-		agents         []AgentStatus
-		wantDBSynced   bool
-		wantNeedsPush  int
-		wantNeedsPull  int
+		name          string
+		bdOutput      string
+		bdErr         error
+		agents        []AgentStatus
+		wantDBSynced  bool
+		wantNeedsPush int
+		wantNeedsPull int
 	}{
 		{
 			name:         "synced state (no errors in output)",
@@ -1032,7 +1032,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		wantReadyToImplement    int
 		wantInProgress          int
 		wantNeedReview          int
-		wantBacklog            int
+		wantBacklog             int
 		wantNeedsPlanningLen    int
 		wantReadyToImplementLen int
 		wantReviewTasksLen      int
@@ -1063,7 +1063,7 @@ func TestCollectTaskStatus(t *testing.T) {
 			wantNeedsPlanningLen: 1,
 		},
 		{
-			name: "tasks with review status go to NeedReview",
+			name:        "tasks with review status go to NeedReview",
 			readyOutput: "[]",
 			needReviewOutput: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Review this task", Status: "review"},
@@ -1229,7 +1229,7 @@ func TestCollectTaskStatus(t *testing.T) {
 			if summary.NeedReview != tt.wantNeedReview {
 				t.Errorf("NeedReview = %d, want %d", summary.NeedReview, tt.wantNeedReview)
 			}
-			if summary.Backlog != tt.wantBacklog{
+			if summary.Backlog != tt.wantBacklog {
 				t.Errorf("Backlog = %d, want %d", summary.Backlog, tt.wantBacklog)
 			}
 			if len(needsPlanningTasks) != tt.wantNeedsPlanningLen {
@@ -1818,13 +1818,13 @@ func TestRunMonitorOneShot(t *testing.T) {
 
 func TestRenderDashboardEmptyData(t *testing.T) {
 	data := &MonitorData{
-		Timestamp:      fixedTime(),
-		Agents:         nil,
-		Tasks:          TaskSummary{},
-		AgentTasks:     make(map[string]TaskInfo),
-		TaskConflicts:  make(map[string][]string),
-		SyncStatus:     SyncInfo{DBSynced: true},
-		Stats:          MonitorStats{},
+		Timestamp:     fixedTime(),
+		Agents:        nil,
+		Tasks:         TaskSummary{},
+		AgentTasks:    make(map[string]TaskInfo),
+		TaskConflicts: make(map[string][]string),
+		SyncStatus:    SyncInfo{DBSynced: true},
+		Stats:         MonitorStats{},
 	}
 
 	output := renderDashboard(data)
@@ -1989,7 +1989,7 @@ func TestRenderBoxLineEmptyContent(t *testing.T) {
 	}
 	// Empty content should get full padding
 	expectedLen := dashboardWidth + len("║") + len("║") + len("\n") - 2 // account for unicode chars
-	_ = expectedLen // just verify it doesn't panic
+	_ = expectedLen                                                     // just verify it doesn't panic
 }
 
 func TestRenderTaskLineAlignment(t *testing.T) {
@@ -2123,10 +2123,10 @@ func TestGetWorktreeGitSyncStatusCustomBranch(t *testing.T) {
 
 func TestCollectAgentStatusLockFallback(t *testing.T) {
 	tests := []struct {
-		name           string
-		lockCommand    string // "plan" or "task"
-		taskStatus     string // return from getTaskStatus mock
-		expectPrefix   string
+		name         string
+		lockCommand  string // "plan" or "task"
+		taskStatus   string // return from getTaskStatus mock
+		expectPrefix string
 	}{
 		{
 			name:         "planning_agent_task_needs_review_becomes_review",
@@ -2275,9 +2275,9 @@ func TestRenderDashboardSyncGitPullOnly(t *testing.T) {
 
 func TestRenderDashboardAgentStatusIcons(t *testing.T) {
 	tests := []struct {
-		name       string
-		status     string
-		wantIcon   string
+		name     string
+		status   string
+		wantIcon string
 	}{
 		{"ready_shows_checkmark", "ready", "✓"},
 		{"changes_shows_bullet", "3 changes", "●"},
@@ -2324,11 +2324,11 @@ func TestRenderDashboardWorkspaceMode(t *testing.T) {
 			{Name: "nova", Branch: "nova", Status: "ready", Ahead: 0, Behind: 0, Workspace: "my-workspace"},
 			{Name: "spark", Branch: "spark", Status: "3 changes", Ahead: 0, Behind: 1, Workspace: "other-ws"},
 		},
-		Tasks:          TaskSummary{},
-		AgentTasks:     make(map[string]TaskInfo),
-		TaskConflicts:  make(map[string][]string),
-		SyncStatus:     SyncInfo{DBSynced: true},
-		Stats:          MonitorStats{},
+		Tasks:         TaskSummary{},
+		AgentTasks:    make(map[string]TaskInfo),
+		TaskConflicts: make(map[string][]string),
+		SyncStatus:    SyncInfo{DBSynced: true},
+		Stats:         MonitorStats{},
 	}
 
 	output := renderDashboard(data)
@@ -2375,11 +2375,11 @@ func TestRenderDashboardMixedWorkspace(t *testing.T) {
 			{Name: "nova", Branch: "nova", Status: "ready", Workspace: ""},
 			{Name: "spark", Branch: "spark", Status: "dirty", Workspace: ""},
 		},
-		Tasks:          TaskSummary{},
-		AgentTasks:     make(map[string]TaskInfo),
-		TaskConflicts:  make(map[string][]string),
-		SyncStatus:     SyncInfo{DBSynced: true},
-		Stats:          MonitorStats{},
+		Tasks:         TaskSummary{},
+		AgentTasks:    make(map[string]TaskInfo),
+		TaskConflicts: make(map[string][]string),
+		SyncStatus:    SyncInfo{DBSynced: true},
+		Stats:         MonitorStats{},
 	}
 
 	output := renderDashboard(data)
@@ -2414,11 +2414,11 @@ func TestRenderDashboardLegacyModeNoWorkspace(t *testing.T) {
 			{Name: "falcon", Branch: "falcon", Status: "ready", Workspace: ""},
 			{Name: "nova", Branch: "nova", Status: "3 changes", Workspace: ""},
 		},
-		Tasks:          TaskSummary{},
-		AgentTasks:     make(map[string]TaskInfo),
-		TaskConflicts:  make(map[string][]string),
-		SyncStatus:     SyncInfo{DBSynced: true},
-		Stats:          MonitorStats{},
+		Tasks:         TaskSummary{},
+		AgentTasks:    make(map[string]TaskInfo),
+		TaskConflicts: make(map[string][]string),
+		SyncStatus:    SyncInfo{DBSynced: true},
+		Stats:         MonitorStats{},
 	}
 
 	output := renderDashboard(data)
@@ -2586,21 +2586,21 @@ func TestRenderAgentLine(t *testing.T) {
 		expectContains []string
 	}{
 		{
-			name:   "ready_agent_with_sync",
-			agent:  AgentStatus{Name: "falcon", Branch: "falcon", Status: "ready", Ahead: 2, Behind: 1},
-			indent: "  ",
+			name:           "ready_agent_with_sync",
+			agent:          AgentStatus{Name: "falcon", Branch: "falcon", Status: "ready", Ahead: 2, Behind: 1},
+			indent:         "  ",
 			expectContains: []string{"falcon", "✓", "ready", "↑2", "↓1"},
 		},
 		{
-			name:   "working_agent_no_sync",
-			agent:  AgentStatus{Name: "nova", Branch: "nova", Status: "working: T-1 (5m)"},
-			indent: "   ",
+			name:           "working_agent_no_sync",
+			agent:          AgentStatus{Name: "nova", Branch: "nova", Status: "working: T-1 (5m)"},
+			indent:         "   ",
 			expectContains: []string{"nova", "●", "working:"},
 		},
 		{
-			name:   "dirty_agent",
-			agent:  AgentStatus{Name: "spark", Branch: "spark", Status: "dirty"},
-			indent: "  ",
+			name:           "dirty_agent",
+			agent:          AgentStatus{Name: "spark", Branch: "spark", Status: "dirty"},
+			indent:         "  ",
 			expectContains: []string{"spark", "●", "dirty"},
 		},
 	}
@@ -2760,7 +2760,7 @@ func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
 		PID: os.Getpid(),
 		Agents: []DaemonAgentStateEntry{
 			{Worktree: "falcon", Status: "running"},
-			{Worktree: "", Status: "running"},      // empty worktree name
+			{Worktree: "", Status: "running"}, // empty worktree name
 			{Worktree: "nova", Status: "idle"},
 		},
 	}
@@ -2791,7 +2791,6 @@ func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
 		t.Error("result[\"\"].Managed = true, want false (empty worktree name should be skipped)")
 	}
 }
-
 
 func TestLoadDaemonManagedAgents_WithRole(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -2992,11 +2991,11 @@ func TestRenderDashboardWithDaemonManagedAgents(t *testing.T) {
 			{Name: "nova", Branch: "nova", Status: "ready", DaemonManaged: false},
 			{Name: "spark", Branch: "spark", Status: "3 changes", DaemonManaged: true},
 		},
-		Tasks:          TaskSummary{},
-		AgentTasks:     make(map[string]TaskInfo),
-		TaskConflicts:  make(map[string][]string),
-		SyncStatus:     SyncInfo{DBSynced: true},
-		Stats:          MonitorStats{},
+		Tasks:         TaskSummary{},
+		AgentTasks:    make(map[string]TaskInfo),
+		TaskConflicts: make(map[string][]string),
+		SyncStatus:    SyncInfo{DBSynced: true},
+		Stats:         MonitorStats{},
 	}
 
 	output := renderDashboard(data)
@@ -3092,12 +3091,12 @@ func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
 
 func TestBdIssueUnmarshalDependencies(t *testing.T) {
 	tests := []struct {
-		name         string
-		jsonInput    string
-		wantDepsLen  int
-		wantIssueID  string
-		wantTitle    string
-		wantDep0     *Dependency // expected first dependency (nil if none)
+		name        string
+		jsonInput   string
+		wantDepsLen int
+		wantIssueID string
+		wantTitle   string
+		wantDep0    *Dependency // expected first dependency (nil if none)
 	}{
 		{
 			name:        "null dependencies field",
@@ -3268,12 +3267,12 @@ func TestBdIssueUnmarshalDependenciesRoundTrip(t *testing.T) {
 // GitPushDetails and GitPullDetails from agent Ahead/Behind counts.
 func TestCompleteSyncStatusDetails(t *testing.T) {
 	tests := []struct {
-		name              string
-		agents            []AgentStatus
-		wantPushDetails   []WorktreeSyncDetail
-		wantPullDetails   []WorktreeSyncDetail
-		wantNeedsPush     int
-		wantNeedsPull     int
+		name            string
+		agents          []AgentStatus
+		wantPushDetails []WorktreeSyncDetail
+		wantPullDetails []WorktreeSyncDetail
+		wantNeedsPush   int
+		wantNeedsPull   int
 	}{
 		{
 			name: "agent_ahead_populates_push_details",

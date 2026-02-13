@@ -84,10 +84,8 @@ func TestPrCmd_ArgsValidation(t *testing.T) {
 				if tc.errorMsg != "" && !strings.Contains(err.Error(), tc.errorMsg) {
 					t.Errorf("expected error containing %q, got %q", tc.errorMsg, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("expected no error, got %v", err)
 			}
 		})
 	}
@@ -122,8 +120,8 @@ func TestCreatePR_Success(t *testing.T) {
 	// createPR: fetch (output), HasCommitsBetweenRemote (command), push (output),
 	// generatePRInfo (command), gh pr create (command)
 	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},              // GitFetchRemote
-		{Args: []string{"push", "origin", "feature"}, Err: nil},    // GitPushRemote
+		{Args: []string{"fetch", "origin"}, Err: nil},           // GitFetchRemote
+		{Args: []string{"push", "origin", "feature"}, Err: nil}, // GitPushRemote
 	}
 
 	commandStubs := []CommandStub{
@@ -235,7 +233,7 @@ func TestCreatePR_PRAlreadyExists(t *testing.T) {
 func TestCreatePR_PushFails(t *testing.T) {
 	// fetch succeeds, push fails; gh pr create should not be called
 	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},                          // GitFetchRemote
+		{Args: []string{"fetch", "origin"}, Err: nil},                                   // GitFetchRemote
 		{Args: []string{"push", "origin", "feature"}, Err: errors.New("push rejected")}, // GitPushRemote fails
 	}
 
@@ -270,8 +268,8 @@ func TestCreatePRLegacy_Success(t *testing.T) {
 	// createPRLegacy: GitFetch (output), HasCommitsBetween (command), GitPush (output),
 	// generatePRInfo (command), gh pr create (command)
 	outputStubs := []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},              // GitFetch
-		{Args: []string{"push", "origin", "feature"}, Err: nil},    // GitPush
+		{Args: []string{"fetch", "origin"}, Err: nil},           // GitFetch
+		{Args: []string{"push", "origin", "feature"}, Err: nil}, // GitPush
 	}
 
 	commandStubs := []CommandStub{

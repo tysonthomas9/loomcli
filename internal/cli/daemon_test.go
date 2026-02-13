@@ -355,8 +355,8 @@ func TestShouldRestart(t *testing.T) {
 		daemon := &Daemon{config: config}
 
 		ap := &AgentProcess{
-			restartCount: 2,              // had previous restarts
-			lastExitCode: 0,              // successful exit
+			restartCount: 2,                                // had previous restarts
+			lastExitCode: 0,                                // successful exit
 			lastStart:    time.Now().Add(-2 * time.Minute), // ran for >1 minute
 		}
 
@@ -379,7 +379,7 @@ func TestShouldRestart(t *testing.T) {
 
 		ap := &AgentProcess{
 			restartCount: 1,
-			lastExitCode: 0,                               // successful exit
+			lastExitCode: 0,                                 // successful exit
 			lastStart:    time.Now().Add(-30 * time.Second), // ran for <1 minute
 		}
 
