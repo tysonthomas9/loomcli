@@ -354,11 +354,9 @@ func (d *Daemon) handleRestartAfterError(ap *AgentProcess) bool {
 	}
 }
 
-// spawnAgent starts the subprocess for an agent.
-func (d *Daemon) spawnAgent(ap *AgentProcess) error {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
-
+// buildCommand constructs the exec.Cmd for spawning an agent subprocess.
+// Extracted from spawnAgent for testability. Does not start the process.
+func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 	var cmd *exec.Cmd
 
 	// Resolve backend for this agent: per-agent > project > global > default
@@ -403,6 +401,16 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
 	)
+
+	return cmd
+}
+
+// spawnAgent starts the subprocess for an agent.
+func (d *Daemon) spawnAgent(ap *AgentProcess) error {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+
+	cmd := d.buildCommand(ap)
 
 	// Set up log files if log directory is configured
 	if d.config.Daemon.LogDir != "" {

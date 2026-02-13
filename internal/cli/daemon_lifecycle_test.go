@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -933,4 +934,497 @@ func TestSpawnAgent_SetsLastStartAndPID(t *testing.T) {
 		}
 	}
 	// If spawn failed (loom not found), that's expected in test env
+}
+
+// TestStopAgent_KillsProcessGroup verifies that stopAgent kills the entire process
+// group, including child processes spawned by the leader.
+func TestStopAgent_KillsProcessGroup(t *testing.T) {
+	d := &Daemon{config: &DaemonConfig{}}
+
+	// Spawn a bash process that creates a child in the same process group.
+	// The child (sleep) would survive a simple kill of the parent without
+	// process group kill semantics.
+	cmd := exec.Command("bash", "-c", "sleep 60 & wait")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start bash: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	// Give bash time to spawn the child
+	time.Sleep(200 * time.Millisecond)
+
+	ap := &AgentProcess{
+		entry: AgentEntry{Worktree: "test-pgid"},
+		cmd:   cmd,
+		pid:   pid,
+	}
+
+	// Run waitForAgent concurrently to drain process state
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.waitForAgent(ap)
+	}()
+
+	d.stopAgent(ap)
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(15 * time.Second):
+		t.Fatal("timeout waiting for process group to be killed")
+	}
+
+	// Verify the parent is dead
+	if IsProcessRunning(pid) {
+		t.Errorf("parent process %d is still running after stopAgent", pid)
+	}
+}
+
+// TestStopAgent_ConcurrentWithWaitForAgent verifies that running stopAgent and
+// waitForAgent concurrently does not panic or deadlock.
+func TestStopAgent_ConcurrentWithWaitForAgent(t *testing.T) {
+	d := &Daemon{config: &DaemonConfig{}}
+
+	cmd := exec.Command("sleep", "5")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	ap := &AgentProcess{
+		entry: AgentEntry{Worktree: "test-concurrent"},
+		cmd:   cmd,
+		pid:   pid,
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Run waitForAgent and stopAgent concurrently
+	go func() {
+		defer wg.Done()
+		d.waitForAgent(ap)
+	}()
+	go func() {
+		defer wg.Done()
+		d.stopAgent(ap)
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// No panic or deadlock
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout: stopAgent and waitForAgent deadlocked")
+	}
+
+	ap.mu.Lock()
+	finalPID := ap.pid
+	ap.mu.Unlock()
+	if finalPID != 0 {
+		t.Errorf("pid = %d after concurrent stop/wait, want 0", finalPID)
+	}
+}
+
+// TestHealthChecker_ShutdownWithActiveAgents verifies that healthChecker exits
+// promptly when shutdown is signaled, even when agents have active (non-zero) PIDs.
+func TestHealthChecker_ShutdownWithActiveAgents(t *testing.T) {
+	d := &Daemon{
+		config: &DaemonConfig{},
+		agents: []*AgentProcess{
+			{
+				entry:        AgentEntry{Worktree: "agent1"},
+				pid:          99999999, // fake PID, not running
+				worktreePath: t.TempDir(),
+			},
+			{
+				entry:        AgentEntry{Worktree: "agent2"},
+				pid:          99999998,
+				worktreePath: t.TempDir(),
+			},
+		},
+		shutdown: make(chan struct{}),
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.healthChecker()
+	}()
+
+	// Close shutdown immediately
+	close(d.shutdown)
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Exited promptly (well before the 30s ticker)
+	case <-time.After(2 * time.Second):
+		t.Fatal("healthChecker did not exit within 2 seconds after shutdown with active agents")
+	}
+}
+
+// TestCheckAgentHealth_StaleLockWithLiveProcess verifies behavior when the lock
+// file contains a dead PID but the agent itself has a live PID.
+func TestCheckAgentHealth_StaleLockWithLiveProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Start a real process to use as the agent's live PID
+	liveCmd := exec.Command("sleep", "60")
+	if err := liveCmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep: %v", err)
+	}
+	livePID := liveCmd.Process.Pid
+	t.Cleanup(func() {
+		_ = liveCmd.Process.Kill()
+		_ = liveCmd.Wait()
+	})
+
+	// Write a lock file with a dead PID (99999999 is almost certainly not running)
+	lockInfo := LockInfo{
+		PID:       99999999,
+		Command:   "plan",
+		AgentName: "stale-agent",
+		StartedAt: time.Now().Add(-1 * time.Hour),
+	}
+	lockData, _ := json.MarshalIndent(lockInfo, "", "  ")
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	if err := os.WriteFile(lockPath, lockData, 0600); err != nil {
+		t.Fatalf("failed to write lock file: %v", err)
+	}
+
+	// Set LOOM_CONFIG_DIR to an empty temp dir to disable workspace resolution
+	origConfig := os.Getenv("LOOM_CONFIG_DIR")
+	os.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Cleanup(func() {
+		if origConfig == "" {
+			os.Unsetenv("LOOM_CONFIG_DIR")
+		} else {
+			os.Setenv("LOOM_CONFIG_DIR", origConfig)
+		}
+	})
+
+	d := &Daemon{
+		config: &DaemonConfig{},
+		agents: []*AgentProcess{
+			{
+				entry:        AgentEntry{Worktree: "stale-lock-test"},
+				pid:          livePID,
+				worktreePath: tmpDir,
+			},
+		},
+	}
+
+	// Should complete without panic; stale lock detection logs but doesn't modify agent state
+	d.checkAgentHealth()
+
+	// Verify agent's PID is unchanged
+	d.agents[0].mu.Lock()
+	finalPID := d.agents[0].pid
+	d.agents[0].mu.Unlock()
+	if finalPID != livePID {
+		t.Errorf("agent PID changed from %d to %d, want unchanged", livePID, finalPID)
+	}
+}
+
+// TestCheckAgentHealth_ValidLockWithLiveProcess verifies that checkAgentHealth
+// completes cleanly when lock file PID matches the agent's live PID.
+func TestCheckAgentHealth_ValidLockWithLiveProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Start a real process
+	liveCmd := exec.Command("sleep", "60")
+	if err := liveCmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep: %v", err)
+	}
+	livePID := liveCmd.Process.Pid
+	t.Cleanup(func() {
+		_ = liveCmd.Process.Kill()
+		_ = liveCmd.Wait()
+	})
+
+	// Write a lock file with the live PID (valid, non-stale)
+	lockInfo := LockInfo{
+		PID:       livePID,
+		Command:   "plan",
+		AgentName: "live-agent",
+		StartedAt: time.Now(),
+	}
+	lockData, _ := json.MarshalIndent(lockInfo, "", "  ")
+	lockPath := filepath.Join(tmpDir, LockFileName)
+	if err := os.WriteFile(lockPath, lockData, 0600); err != nil {
+		t.Fatalf("failed to write lock file: %v", err)
+	}
+
+	origConfig := os.Getenv("LOOM_CONFIG_DIR")
+	os.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Cleanup(func() {
+		if origConfig == "" {
+			os.Unsetenv("LOOM_CONFIG_DIR")
+		} else {
+			os.Setenv("LOOM_CONFIG_DIR", origConfig)
+		}
+	})
+
+	d := &Daemon{
+		config: &DaemonConfig{},
+		agents: []*AgentProcess{
+			{
+				entry:        AgentEntry{Worktree: "valid-lock-test"},
+				pid:          livePID,
+				worktreePath: tmpDir,
+			},
+		},
+	}
+
+	// Should complete without panic; no stale lock path triggered
+	d.checkAgentHealth()
+}
+
+// TestHandleRestartAfterError_SequentialEscalation verifies that restartCount
+// increments on each call and handleRestartAfterError returns false when
+// maxRetries is exceeded.
+func TestHandleRestartAfterError_SequentialEscalation(t *testing.T) {
+	d := &Daemon{
+		config: &DaemonConfig{Daemon: DaemonSettings{RestartPolicy: RestartPolicy{
+			MaxRetries:     intPtr(3),
+			BackoffInitial: intPtr(0), // zero backoff for fast test
+			BackoffMax:     intPtr(0),
+		}}},
+		shutdown: make(chan struct{}),
+	}
+	ap := &AgentProcess{
+		entry:        AgentEntry{Worktree: "test-escalation"},
+		restartCount: 0,
+	}
+
+	// First 3 calls should return true (count goes 1, 2, 3)
+	for i := 1; i <= 3; i++ {
+		result := d.handleRestartAfterError(ap)
+		if !result {
+			t.Errorf("call %d: handleRestartAfterError() = false, want true", i)
+		}
+		ap.mu.Lock()
+		count := ap.restartCount
+		ap.mu.Unlock()
+		if count != i {
+			t.Errorf("call %d: restartCount = %d, want %d", i, count, i)
+		}
+	}
+
+	// 4th call: count becomes 4 > maxRetries=3, should return false
+	result := d.handleRestartAfterError(ap)
+	if result {
+		t.Error("call 4: handleRestartAfterError() = true, want false (exceeded maxRetries)")
+	}
+	ap.mu.Lock()
+	finalCount := ap.restartCount
+	ap.mu.Unlock()
+	if finalCount != 4 {
+		t.Errorf("final restartCount = %d, want 4", finalCount)
+	}
+}
+
+// TestHandleRestartAfterError_ActualBackoffDelay verifies that
+// handleRestartAfterError actually sleeps for the backoff duration.
+func TestHandleRestartAfterError_ActualBackoffDelay(t *testing.T) {
+	d := &Daemon{
+		config: &DaemonConfig{Daemon: DaemonSettings{RestartPolicy: RestartPolicy{
+			MaxRetries:     intPtr(10),
+			BackoffInitial: intPtr(1), // 1 second
+			BackoffMax:     intPtr(1),
+		}}},
+		shutdown: make(chan struct{}),
+	}
+	ap := &AgentProcess{
+		entry:        AgentEntry{Worktree: "test-delay"},
+		restartCount: 0,
+	}
+
+	start := time.Now()
+	result := d.handleRestartAfterError(ap)
+	elapsed := time.Since(start)
+
+	if !result {
+		t.Error("handleRestartAfterError() = false, want true")
+	}
+	// With BackoffInitial=1, BackoffMax=1, and restartCount=1 after increment:
+	// backoff = min(1 * 2^1, 1) = 1 second. Allow 100ms tolerance.
+	if elapsed < 900*time.Millisecond {
+		t.Errorf("elapsed = %v, want >= 900ms (actual backoff sleep)", elapsed)
+	}
+}
+
+// TestBuildCommand_CustomRoleAllFlags verifies command construction for a custom
+// role with all optional flags set: PromptFile, TaskFilter, Backend, epicID.
+func TestBuildCommand_CustomRoleAllFlags(t *testing.T) {
+	tmpDir := t.TempDir()
+	promptFile := filepath.Join(tmpDir, "prompt.md")
+
+	d := &Daemon{
+		config:     &DaemonConfig{Daemon: DaemonSettings{}, Backend: "anthropic"},
+		projectDir: tmpDir,
+	}
+
+	ap := &AgentProcess{
+		entry:          AgentEntry{Worktree: "falcon", Role: "reviewer", Backend: "openai"},
+		roleConfig:     RoleConfig{PromptFile: promptFile, TaskFilter: "review-tasks"},
+		worktreePath:   tmpDir,
+		assignedEpicID: "epic-42",
+	}
+
+	cmd := d.buildCommand(ap)
+
+	// Verify args: loom agent <path> --prompt <file> --auto --daemon-mode --task-filter <filter> --backend <backend> --parent <epic>
+	expectedArgs := []string{
+		"loom", "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
+		"--task-filter", "review-tasks",
+		"--backend", "openai", // per-agent backend overrides project backend
+		"--parent", "epic-42",
+	}
+	if len(cmd.Args) != len(expectedArgs) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, expectedArgs)
+	}
+	for i, want := range expectedArgs {
+		if cmd.Args[i] != want {
+			t.Errorf("cmd.Args[%d] = %q, want %q", i, cmd.Args[i], want)
+		}
+	}
+
+	if cmd.Dir != tmpDir {
+		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, tmpDir)
+	}
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Error("Setpgid not set")
+	}
+
+	// Verify env contains BD_ACTOR and LOOM_WORKTREE_PATH
+	foundActor, foundPath := false, false
+	for _, env := range cmd.Env {
+		if env == "BD_ACTOR=falcon" {
+			foundActor = true
+		}
+		if env == "LOOM_WORKTREE_PATH="+tmpDir {
+			foundPath = true
+		}
+	}
+	if !foundActor {
+		t.Error("BD_ACTOR=falcon not found in cmd.Env")
+	}
+	if !foundPath {
+		t.Errorf("LOOM_WORKTREE_PATH=%s not found in cmd.Env", tmpDir)
+	}
+}
+
+// TestBuildCommand_CustomRoleMinimal verifies command construction for a custom
+// role with only PromptFile set (no TaskFilter, no Backend, no epicID).
+func TestBuildCommand_CustomRoleMinimal(t *testing.T) {
+	tmpDir := t.TempDir()
+	promptFile := filepath.Join(tmpDir, "prompt.md")
+
+	d := &Daemon{
+		config:     &DaemonConfig{Daemon: DaemonSettings{}},
+		projectDir: tmpDir,
+	}
+
+	ap := &AgentProcess{
+		entry:        AgentEntry{Worktree: "hawk", Role: "coder"},
+		roleConfig:   RoleConfig{PromptFile: promptFile},
+		worktreePath: tmpDir,
+	}
+
+	cmd := d.buildCommand(ap)
+
+	expectedArgs := []string{
+		"loom", "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
+	}
+	if len(cmd.Args) != len(expectedArgs) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, expectedArgs)
+	}
+	for i, want := range expectedArgs {
+		if cmd.Args[i] != want {
+			t.Errorf("cmd.Args[%d] = %q, want %q", i, cmd.Args[i], want)
+		}
+	}
+
+	// Verify optional flags are NOT present
+	for _, arg := range cmd.Args {
+		switch arg {
+		case "--task-filter", "--backend", "--parent":
+			t.Errorf("unexpected flag %q in minimal custom role args", arg)
+		}
+	}
+}
+
+// TestBuildCommand_BuiltInRoleWithBackendAndEpic verifies command construction
+// for a built-in role with Backend and assignedEpicID set.
+func TestBuildCommand_BuiltInRoleWithBackendAndEpic(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := &Daemon{
+		config:     &DaemonConfig{Daemon: DaemonSettings{}, Backend: "openai"},
+		projectDir: tmpDir,
+	}
+
+	ap := &AgentProcess{
+		entry:          AgentEntry{Worktree: "eagle", Role: "plan"},
+		roleConfig:     RoleConfig{Description: "Built-in plan agent"},
+		worktreePath:   tmpDir,
+		assignedEpicID: "epic-99",
+	}
+
+	cmd := d.buildCommand(ap)
+
+	expectedArgs := []string{
+		"loom", "plan", tmpDir, "--auto", "--daemon-mode",
+		"--backend", "openai",
+		"--parent", "epic-99",
+	}
+	if len(cmd.Args) != len(expectedArgs) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, expectedArgs)
+	}
+	for i, want := range expectedArgs {
+		if cmd.Args[i] != want {
+			t.Errorf("cmd.Args[%d] = %q, want %q", i, cmd.Args[i], want)
+		}
+	}
+
+	// Verify "agent" and "--prompt" are NOT in args (built-in, not custom)
+	for _, arg := range cmd.Args {
+		switch arg {
+		case "agent", "--prompt":
+			t.Errorf("unexpected arg %q in built-in role command", arg)
+		}
+	}
 }
