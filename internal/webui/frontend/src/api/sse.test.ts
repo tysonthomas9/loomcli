@@ -194,6 +194,60 @@ describe('BeadsSSEClient', () => {
       expect(MockEventSource.instances.length).toBe(1);
     });
 
+    it('catches EventSource constructor error and logs it', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const onStateChange = vi.fn();
+
+      // Replace with a throwing EventSource
+      const constructorError = new Error('EventSource not supported');
+      global.EventSource = class ThrowingEventSource {
+        static readonly CONNECTING = 0;
+        static readonly OPEN = 1;
+        static readonly CLOSED = 2;
+        constructor() {
+          throw constructorError;
+        }
+      } as unknown as typeof EventSource;
+
+      const client = new BeadsSSEClient({ onStateChange });
+      await client.connect();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        '[SSE] Failed to create EventSource:',
+        constructorError
+      );
+      // handleError checks this.eventSource which is null (constructor threw before assignment),
+      // so both if-branches are skipped and state remains 'connecting'
+      expect(client.getState()).toBe('connecting');
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('eventSource remains null after constructor failure and disconnect works', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      global.EventSource = class ThrowingEventSource {
+        static readonly CONNECTING = 0;
+        static readonly OPEN = 1;
+        static readonly CLOSED = 2;
+        constructor() {
+          throw new Error('EventSource not supported');
+        }
+      } as unknown as typeof EventSource;
+
+      const client = new BeadsSSEClient();
+      await client.connect();
+
+      // Verify no active connection
+      expect(client.getState()).toBe('connecting');
+
+      // disconnect() should work without error even though eventSource is null
+      client.disconnect();
+      expect(client.getState()).toBe('disconnected');
+
+      consoleErrorSpy.mockRestore();
+    });
+
     it('connect() when connecting does nothing', () => {
       const client = new BeadsSSEClient();
 
