@@ -47,8 +47,8 @@ jobs:
         if: matrix.coverage
         run: |
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          MIN_COVERAGE=25
-          WARN_COVERAGE=40
+          MIN_COVERAGE=42
+          WARN_COVERAGE=55
           echo "Coverage: $COVERAGE%"
           if (( $(echo "$COVERAGE < $MIN_COVERAGE" | bc -l) )); then
             echo "Coverage is below ${MIN_COVERAGE}% threshold"
