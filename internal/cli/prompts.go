@@ -42,22 +42,33 @@ func buildWorkspaceContextBlock(workspace *WorkspaceConfig) string {
 
 // GeneratePlanningPrompt creates the prompt for the planning agent.
 // If workspace is non-nil, workspace context is injected into the prompt.
+// If parentID is non-empty, the prompt scopes task discovery to that epic.
 // SYNC: The jq filters below must match taskfilter.go NeedsPlan() criteria:
-//
-//	planning: design empty OR has "needs-revision" label
-func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig) string {
+//   planning: design empty OR has "needs-revision" label
+func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig, parentID string) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
+
+	// Build bd ready command with optional --parent filter
+	bdReadyJSON := "bd ready --json"
+	bdReadyFallback := "bd ready --limit 10"
+	epicScope := ""
+	if parentID != "" {
+		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --json", parentID)
+		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 10", parentID)
+		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
+	}
+
 	return fmt.Sprintf(`## WORKFLOW: Planning Task (Design Only - No Implementation)
 
 You are a disciplined software architect. Your job is to CREATE PLANS, not implement them.
 Follow this workflow EXACTLY for ONE task.
 
 **Your agent name is: %s** (BD_ACTOR is set automatically)
-%s
+%s%s
 ### Step 1: Select ONE Task for Planning
 - Run this command to find tasks needing planning (no design yet OR needs revision):
-  bd ready --json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.design == null or .design == "") or ((.labels // []) | index("needs-revision"))) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: Run 'bd ready --limit 10' and manually SKIP epics and tasks that already have a --design field (unless they have the 'needs-revision' label)
+  %s | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.design == null or .design == "") or ((.labels // []) | index("needs-revision"))) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: Run '%s' and manually SKIP epics and tasks that already have a --design field (unless they have the 'needs-revision' label)
 - SKIP any task already 'in_progress' by checking 'bd list --status=in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -170,26 +181,37 @@ You have completed ONE planning task. The human will:
 3. Run an implementation agent separately
 
 Your job was ONLY to create the plan. Implementation happens later.
-`, agentName, wsBlock)
+`, agentName, wsBlock, epicScope, bdReadyJSON, bdReadyFallback)
 }
 
 // GenerateTaskPrompt creates the prompt for the implementation agent.
 // If workspace is non-nil, workspace context is injected into the prompt.
+// If parentID is non-empty, the prompt scopes task discovery to that epic.
 // SYNC: The jq filters below must match taskfilter.go ReadyToImplement() criteria:
-//
-//	implementation: design non-empty AND no "needs-revision" label
-func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig) string {
+//   implementation: design non-empty AND no "needs-revision" label
+func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID string) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
+
+	// Build bd ready command with optional --parent filter
+	bdReadyJSON := "bd ready --json"
+	bdReadyFallback := "bd ready --limit 10"
+	epicScope := ""
+	if parentID != "" {
+		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --json", parentID)
+		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 10", parentID)
+		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
+	}
+
 	return fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)
 
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
 
 **Your agent name is: %s** (BD_ACTOR is set automatically)
-%s
+%s%s
 ### Step 1: Select ONE Task
 - Run this command to find tasks ready to implement (has design, not needs-revision):
-  bd ready --json | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select(.design) | select((.design == "") | not) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: Run 'bd ready --limit 10' and manually SKIP epics, tasks without a --design field, or tasks with 'needs-revision' label
+  %s | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select(.design) | select((.design == "") | not) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: Run '%s' and manually SKIP epics, tasks without a --design field, or tasks with 'needs-revision' label
 - Run 'bd list --status=in_progress --json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'bd update <id> --status in_progress --assignee %s')
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is not already in_progress
@@ -289,7 +311,7 @@ After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
 - Simply EXIT
 
 You have completed ONE task through the full workflow. The human will run you again for the next task.
-`, agentName, wsBlock, agentName)
+`, agentName, wsBlock, epicScope, bdReadyJSON, bdReadyFallback, agentName)
 }
 
 // GenerateFleetPlanningPrompt creates the prompt for a fleet planning agent with a pre-assigned task.

@@ -200,16 +200,21 @@ fi
 # --- Task A2: Calculator tests ---
 echo "--- A2: Calculator unit tests ---"
 # Test file could be in whichever worktree implemented it (may differ from CALC_DIR)
+# Search flexibly for test_calculator*.py (agents may name the file differently)
 TEST_CALC_DIR=""
+TEST_CALC_FILE=""
 for wt in falcon nova; do
-  if [ -f "worktrees/$wt/tests/test_calculator.py" ]; then
+  FOUND=$(find "worktrees/$wt/tests" -name 'test_calculator*.py' -type f 2>/dev/null | head -1)
+  if [ -n "$FOUND" ]; then
     TEST_CALC_DIR="worktrees/$wt"
+    TEST_CALC_FILE="$FOUND"
     break
   fi
 done
-if [ -n "$TEST_CALC_DIR" ]; then
-  pass "tests/test_calculator.py exists (in $TEST_CALC_DIR)"
-  TEST_COUNT=$(grep -c "def test_" "$TEST_CALC_DIR/tests/test_calculator.py" || echo "0")
+if [ -n "$TEST_CALC_FILE" ]; then
+  REL_FILE="${TEST_CALC_FILE#$TEST_CALC_DIR/}"
+  pass "$REL_FILE exists (in $TEST_CALC_DIR)"
+  TEST_COUNT=$(grep -c "def test_" "$TEST_CALC_FILE" || echo "0")
   if [ "$TEST_COUNT" -ge 20 ]; then
     pass "test_calculator has $TEST_COUNT tests (>= 20)"
   else
@@ -217,26 +222,31 @@ if [ -n "$TEST_CALC_DIR" ]; then
   fi
   # Need power() to be in the same worktree for tests to pass
   if grep -q "def power" "$TEST_CALC_DIR/src/calculator.py" 2>/dev/null; then
-    (cd "$TEST_CALC_DIR" && python3 -m pytest tests/test_calculator.py -q 2>&1) && pass "test_calculator.py all tests pass" || fail "test_calculator.py has failing tests"
+    (cd "$TEST_CALC_DIR" && python3 -m pytest "$REL_FILE" -q 2>&1) && pass "calculator tests all pass" || fail "calculator tests have failures"
   else
     echo "  INFO: power() not in same worktree as tests — skipping pytest run"
   fi
 else
-  fail "tests/test_calculator.py missing from all worktrees"
+  fail "test_calculator*.py missing from all worktrees"
 fi
 
 # --- Task B2: Utils tests ---
 echo "--- B2: Utils unit tests ---"
+# Search flexibly for test_utils*.py (agents may name the file differently)
 TEST_UTILS_DIR=""
+TEST_UTILS_FILE=""
 for wt in falcon nova; do
-  if [ -f "worktrees/$wt/tests/test_utils.py" ]; then
+  FOUND=$(find "worktrees/$wt/tests" -name 'test_utils*.py' -type f 2>/dev/null | head -1)
+  if [ -n "$FOUND" ]; then
     TEST_UTILS_DIR="worktrees/$wt"
+    TEST_UTILS_FILE="$FOUND"
     break
   fi
 done
-if [ -n "$TEST_UTILS_DIR" ]; then
-  pass "tests/test_utils.py exists (in $TEST_UTILS_DIR)"
-  TEST_COUNT=$(grep -c "def test_" "$TEST_UTILS_DIR/tests/test_utils.py" || echo "0")
+if [ -n "$TEST_UTILS_FILE" ]; then
+  REL_FILE="${TEST_UTILS_FILE#$TEST_UTILS_DIR/}"
+  pass "$REL_FILE exists (in $TEST_UTILS_DIR)"
+  TEST_COUNT=$(grep -c "def test_" "$TEST_UTILS_FILE" || echo "0")
   if [ "$TEST_COUNT" -ge 15 ]; then
     pass "test_utils has $TEST_COUNT tests (>= 15)"
   else
@@ -244,12 +254,12 @@ if [ -n "$TEST_UTILS_DIR" ]; then
   fi
   # Need snake_case() to be in the same worktree for tests to pass
   if grep -q "def snake_case" "$TEST_UTILS_DIR/src/utils.py" 2>/dev/null; then
-    (cd "$TEST_UTILS_DIR" && python3 -m pytest tests/test_utils.py -q 2>&1) && pass "test_utils.py all tests pass" || fail "test_utils.py has failing tests"
+    (cd "$TEST_UTILS_DIR" && python3 -m pytest "$REL_FILE" -q 2>&1) && pass "utils tests all pass" || fail "utils tests have failures"
   else
     echo "  INFO: snake_case() not in same worktree as tests — skipping pytest run"
   fi
 else
-  fail "tests/test_utils.py missing from all worktrees"
+  fail "test_utils*.py missing from all worktrees"
 fi
 
 echo ""

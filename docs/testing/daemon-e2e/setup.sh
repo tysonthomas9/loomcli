@@ -90,6 +90,14 @@ PYEOF
 cat > tests/__init__.py <<'PYEOF'
 PYEOF
 
+# OpenCode config (committed so daemon recovery doesn't delete it as untracked)
+cat > opencode.json <<'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "openai/gpt-5.2"
+}
+EOF
+
 # Commit source files
 git add -A
 git commit -q -m "Add Python project and loom config"
@@ -233,6 +241,39 @@ DESC
 )" --json 2>/dev/null | jq -r '.id')
 
 [ -n "$TASK_B1" ] && [ -n "$TASK_B2" ] || { echo "FAIL: Could not create Epic B tasks"; exit 1; }
+
+# Pre-populate design fields so task agents can work without a plan phase.
+# The design just restates the description — its presence signals "planned".
+bd update "$TASK_A1" --design="$(cat <<'DESIGN'
+## Implementation
+Add `power(base: float, exp: float) -> float` to `src/calculator.py` after `divide`.
+Use `base ** exp`. Raise `ValueError("Cannot raise zero to a negative power")` when `base == 0 and exp < 0`.
+Include docstring with Raises section, matching existing style.
+DESIGN
+)" 2>/dev/null
+bd update "$TASK_A2" --design="$(cat <<'DESIGN'
+## Implementation
+Create `tests/test_calculator.py`. Import all functions from `src.calculator`.
+Write pytest tests for add, subtract, multiply, divide, and power.
+Cover: positive, negative, zero, float inputs. Test ValueError for divide(x,0) and power(0,neg).
+Minimum 20 test functions.
+DESIGN
+)" 2>/dev/null
+bd update "$TASK_B1" --design="$(cat <<'DESIGN'
+## Implementation
+Add `snake_case(text: str) -> str` to `src/utils.py`. Use `re` module.
+Insert underscores at camelCase boundaries, handle acronyms, replace non-alnum with underscores, lowercase.
+Include docstring matching existing style.
+DESIGN
+)" 2>/dev/null
+bd update "$TASK_B2" --design="$(cat <<'DESIGN'
+## Implementation
+Create `tests/test_utils.py`. Import all functions from `src.utils`.
+Write pytest tests for reverse, capitalize_words, truncate, and snake_case.
+Cover: normal inputs, empty strings, edge cases, custom suffix for truncate, various naming conventions for snake_case.
+Minimum 15 test functions.
+DESIGN
+)" 2>/dev/null
 
 bd sync 2>/dev/null || true
 

@@ -240,10 +240,14 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		generatePrompt = opts.CustomPromptGen
 	} else if opts.AgentType == "plan" {
 		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID) }
-		generatePrompt = GeneratePlanningPrompt
+		generatePrompt = func(name string, ws *WorkspaceConfig) string {
+			return GeneratePlanningPrompt(name, ws, opts.ParentID)
+		}
 	} else {
 		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
-		generatePrompt = GenerateTaskPrompt
+		generatePrompt = func(name string, ws *WorkspaceConfig) string {
+			return GenerateTaskPrompt(name, ws, opts.ParentID)
+		}
 	}
 
 	fmt.Println("=========================================")

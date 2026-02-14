@@ -37,7 +37,7 @@ func TestGeneratePlanningPrompt(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt := GeneratePlanningPrompt(tc.agentName, nil)
+			prompt := GeneratePlanningPrompt(tc.agentName, nil, "")
 
 			for _, part := range tc.wantParts {
 				if !strings.Contains(prompt, part) {
@@ -80,7 +80,7 @@ func TestGenerateTaskPrompt(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt := GenerateTaskPrompt(tc.agentName, nil)
+			prompt := GenerateTaskPrompt(tc.agentName, nil, "")
 
 			for _, part := range tc.wantParts {
 				if !strings.Contains(prompt, part) {
@@ -88,6 +88,68 @@ func TestGenerateTaskPrompt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGeneratePlanningPrompt_WithParent(t *testing.T) {
+	prompt := GeneratePlanningPrompt("falcon", nil, "my-epic-abc")
+
+	wantParts := []string{
+		"bd ready --parent my-epic-abc --json",
+		"bd ready --parent my-epic-abc --limit 10",
+		"Epic scope: my-epic-abc",
+		"MUST only select tasks from this epic",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("planning prompt with parentID missing expected part: %q", part)
+		}
+	}
+
+	// Should NOT contain unscoped bd ready
+	if strings.Contains(prompt, "bd ready --json |") {
+		t.Error("planning prompt with parentID should not contain unscoped 'bd ready --json |'")
+	}
+}
+
+func TestGenerateTaskPrompt_WithParent(t *testing.T) {
+	prompt := GenerateTaskPrompt("nova", nil, "proj-xyz")
+
+	wantParts := []string{
+		"bd ready --parent proj-xyz --json",
+		"bd ready --parent proj-xyz --limit 10",
+		"Epic scope: proj-xyz",
+		"MUST only select tasks from this epic",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("task prompt with parentID missing expected part: %q", part)
+		}
+	}
+
+	// Should NOT contain unscoped bd ready
+	if strings.Contains(prompt, "bd ready --json |") {
+		t.Error("task prompt with parentID should not contain unscoped 'bd ready --json |'")
+	}
+}
+
+func TestGeneratePrompts_NoParent_NoEpicScope(t *testing.T) {
+	planPrompt := GeneratePlanningPrompt("test", nil, "")
+	taskPrompt := GenerateTaskPrompt("test", nil, "")
+
+	if strings.Contains(planPrompt, "Epic scope") {
+		t.Error("planning prompt without parentID should not contain 'Epic scope'")
+	}
+	if strings.Contains(taskPrompt, "Epic scope") {
+		t.Error("task prompt without parentID should not contain 'Epic scope'")
+	}
+
+	// Should contain unscoped bd ready
+	if !strings.Contains(planPrompt, "bd ready --json") {
+		t.Error("planning prompt without parentID should contain 'bd ready --json'")
+	}
+	if !strings.Contains(taskPrompt, "bd ready --json") {
+		t.Error("task prompt without parentID should contain 'bd ready --json'")
 	}
 }
 
@@ -218,7 +280,7 @@ func TestGenerateLeadPrompt(t *testing.T) {
 
 func TestPromptStructure(t *testing.T) {
 	t.Run("planning prompt has required sections", func(t *testing.T) {
-		prompt := GeneratePlanningPrompt("test", nil)
+		prompt := GeneratePlanningPrompt("test", nil, "")
 		sections := []string{
 			"Step 1:",
 			"Step 2:",
@@ -236,7 +298,7 @@ func TestPromptStructure(t *testing.T) {
 	})
 
 	t.Run("task prompt has required sections", func(t *testing.T) {
-		prompt := GenerateTaskPrompt("test", nil)
+		prompt := GenerateTaskPrompt("test", nil, "")
 		sections := []string{
 			"Step 1:",
 			"Step 2:",
@@ -265,7 +327,7 @@ func TestGeneratePlanningPrompt_Workspace(t *testing.T) {
 		},
 	}
 
-	prompt := GeneratePlanningPrompt("falcon", ws)
+	prompt := GeneratePlanningPrompt("falcon", ws, "")
 
 	// Verify workspace context is present
 	wantParts := []string{
@@ -302,7 +364,7 @@ func TestGenerateTaskPrompt_Workspace(t *testing.T) {
 		},
 	}
 
-	prompt := GenerateTaskPrompt("nova", ws)
+	prompt := GenerateTaskPrompt("nova", ws, "")
 
 	// Verify workspace context block
 	wantParts := []string{

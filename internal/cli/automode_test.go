@@ -1740,7 +1740,7 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 	}
 
 	// Verify that plan prompt was generated
-	expectedPrompt := GeneratePlanningPrompt("planner", nil)
+	expectedPrompt := GeneratePlanningPrompt("planner", nil, "")
 	if receivedPrompt != expectedPrompt {
 		t.Errorf("Plan agent did not receive planning prompt")
 	}
@@ -1798,7 +1798,7 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 	}
 
 	// Verify that task prompt was generated
-	expectedPrompt := GenerateTaskPrompt("worker", nil)
+	expectedPrompt := GenerateTaskPrompt("worker", nil, "")
 	if receivedPrompt != expectedPrompt {
 		t.Errorf("Task agent did not receive task prompt")
 	}
@@ -2411,7 +2411,7 @@ func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
 	}
 
 	// Verify it's NOT the default task prompt
-	defaultTaskPrompt := GenerateTaskPrompt("custom-agent", nil)
+	defaultTaskPrompt := GenerateTaskPrompt("custom-agent", nil, "")
 	if receivedPrompt == defaultTaskPrompt {
 		t.Error("Received default task prompt instead of custom prompt")
 	}
@@ -2474,7 +2474,7 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 
 	// Should receive the default task prompt (NOT the custom prompt)
 	// because CustomTaskCheck is nil, so both custom fields are ignored
-	expectedPrompt := GenerateTaskPrompt("fallback-agent", nil)
+	expectedPrompt := GenerateTaskPrompt("fallback-agent", nil, "")
 	if receivedPrompt != expectedPrompt {
 		t.Errorf("Received prompt %q, want default task prompt %q", receivedPrompt, expectedPrompt)
 	}
@@ -2542,7 +2542,7 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 	}
 
 	// Should receive default task prompt since CustomPromptGen is nil
-	expectedPrompt := GenerateTaskPrompt("taskcheck-agent", nil)
+	expectedPrompt := GenerateTaskPrompt("taskcheck-agent", nil, "")
 	if receivedPrompt != expectedPrompt {
 		t.Errorf("Received prompt %q, want default task prompt", receivedPrompt)
 	}
@@ -3080,7 +3080,7 @@ func TestRunAutoModeLoop_CodexPlanAgentType(t *testing.T) {
 		t.Error("Codex invoker should have been called")
 	}
 	// Verify planning prompt was generated
-	expectedPrompt := GeneratePlanningPrompt("codex-planner", nil)
+	expectedPrompt := GeneratePlanningPrompt("codex-planner", nil, "")
 	if receivedPrompt != expectedPrompt {
 		t.Errorf("Codex did not receive planning prompt")
 	}
