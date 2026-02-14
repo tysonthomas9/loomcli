@@ -1,0 +1,106 @@
+// Package testutil provides shared test utilities for use across packages.
+// This package should only be imported by _test.go files.
+package testutil
+
+import (
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// SetupTestEnv sets environment variables and registers cleanup with t.Cleanup().
+func SetupTestEnv(t *testing.T, vars map[string]string) {
+	t.Helper()
+	origVals := make(map[string]string)
+	origSet := make(map[string]bool)
+
+	for k, v := range vars {
+		origVals[k], origSet[k] = os.LookupEnv(k)
+		if err := os.Setenv(k, v); err != nil {
+			t.Fatalf("failed to set env %s: %v", k, err)
+		}
+	}
+
+	t.Cleanup(func() {
+		for k := range vars {
+			if origSet[k] {
+				_ = os.Setenv(k, origVals[k])
+			} else {
+				_ = os.Unsetenv(k)
+			}
+		}
+	})
+}
+
+// MockStdin replaces os.Stdin with a pipe containing the given input.
+// Restores original stdin via t.Cleanup().
+func MockStdin(t *testing.T, input string) {
+	t.Helper()
+	origStdin := os.Stdin
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	defer w.Close()
+
+	_, err = io.WriteString(w, input)
+	if err != nil {
+		t.Fatalf("failed to write to pipe: %v", err)
+	}
+
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		r.Close()
+	})
+}
+
+// ContainsSubstring checks if any element in the slice contains the substring.
+func ContainsSubstring(slice []string, substr string) bool {
+	for _, s := range slice {
+		if strings.Contains(s, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// LoadFixture reads a test fixture file from a testdata directory.
+// It searches for testdata/<path> relative to the current working directory
+// (which go test sets to the package directory), then walks up parent
+// directories toward the repository root looking for testdata/<path>.
+func LoadFixture(t *testing.T, path string) string {
+	t.Helper()
+
+	// Primary: testdata/<path> relative to CWD (go test sets CWD to package dir)
+	target := filepath.Join("testdata", path)
+	if data, err := os.ReadFile(target); err == nil { //nolint:gosec // test fixture loading by design
+		return string(data)
+	}
+
+	// Walk up directories to find testdata/<path>
+	if cwd, err := os.Getwd(); err == nil {
+		dir := cwd
+		for i := 0; i < 10; i++ {
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+			candidate := filepath.Join(dir, "testdata", path)
+			if data, err := os.ReadFile(candidate); err == nil { //nolint:gosec // test fixture loading by design
+				return string(data)
+			}
+			// Stop at repo root
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				break
+			}
+		}
+	}
+
+	t.Fatalf("failed to load fixture %s: not found in any search path", path)
+	return ""
+}
