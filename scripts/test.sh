@@ -25,6 +25,7 @@ SKIP_PATTERN=$(build_skip_pattern)
 VERBOSE="${TEST_VERBOSE:-}"
 RUN_PATTERN="${TEST_RUN:-}"
 COVERAGE="${TEST_COVER:-}"
+TAGS="${TEST_TAGS:-}"
 COVERPROFILE="${TEST_COVERPROFILE:-/tmp/loom.coverage.out}"
 COVERPKG="${TEST_COVERPKG:-}"
 
@@ -53,6 +54,10 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
+        -tags)
+            TAGS="$2"
+            shift 2
+            ;;
         *)
             PACKAGES+=("$1")
             shift
@@ -78,6 +83,10 @@ fi
 
 if [[ -n "$RUN_PATTERN" ]]; then
     CMD+=(-run "$RUN_PATTERN")
+fi
+
+if [[ -n "$TAGS" ]]; then
+    CMD+=(-tags "$TAGS")
 fi
 
 if [[ -n "$COVERAGE" ]]; then
