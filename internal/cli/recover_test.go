@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestForceReleaseLock_RemovesLockFile(t *testing.T) {
@@ -586,8 +587,9 @@ func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
 }
 
 func TestKillProcess_Success(t *testing.T) {
-	// Start a sleep process that we can kill
+	// Start a sleep process in its own process group (as the daemon does)
 	cmd := exec.Command("sleep", "60")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep process: %v", err)
 	}
@@ -606,7 +608,7 @@ func TestKillProcess_Success(t *testing.T) {
 		close(done)
 	}()
 
-	// Kill it (sends SIGTERM first, then SIGKILL if needed)
+	// Kill it (sends SIGTERM to process group, then SIGKILL if needed)
 	err := killProcess(pid)
 	if err != nil {
 		t.Errorf("killProcess returned error: %v", err)
@@ -632,19 +634,61 @@ func TestKillProcess_NonExistentPid(t *testing.T) {
 func TestKillProcess_AlreadyDead(t *testing.T) {
 	// Start and immediately kill a process to get a dead PID
 	cmd := exec.Command("sleep", "60")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep process: %v", err)
 	}
 	pid := cmd.Process.Pid
 
-	// Kill it directly
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	// Kill the process group directly
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	_ = cmd.Wait()
 
 	// Now killProcess should handle the already-dead case gracefully
 	err := killProcess(pid)
 	if err != nil {
 		t.Errorf("killProcess should succeed for already-dead process, got: %v", err)
+	}
+}
+
+func TestKillProcess_WithChildProcesses(t *testing.T) {
+	// Start a process that spawns children, all in their own process group.
+	// killProcess should terminate the entire group.
+	cmd := exec.Command("bash", "-c", "sleep 60 & sleep 60 & wait")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start bash process: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	// Give children a moment to spawn
+	time.Sleep(200 * time.Millisecond)
+
+	// Reap the parent in a goroutine
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+
+	// Kill the process group
+	err := killProcess(pid)
+	if err != nil {
+		t.Errorf("killProcess returned error: %v", err)
+	}
+
+	<-done
+
+	// Verify parent is dead
+	if IsProcessRunning(pid) {
+		t.Error("parent process should not be running after kill")
+	}
+
+	// Verify no process in the group is still running.
+	// Sending signal 0 to the process group checks for existence.
+	err = syscall.Kill(-pid, 0)
+	if err != syscall.ESRCH {
+		t.Errorf("process group should not exist after kill, got err: %v", err)
 	}
 }
 

@@ -119,8 +119,8 @@ func TestResolveLockDir_RelativeRepoPaths(t *testing.T) {
 			"myws": {
 				Path: wsDir,
 				Repos: []RepoConfig{
-					{Name: "repo1", Path: "repo1"},       // relative
-					{Name: "repo2", Path: "sub/repo2"},   // relative with subdir
+					{Name: "repo1", Path: "repo1"},     // relative
+					{Name: "repo2", Path: "sub/repo2"}, // relative with subdir
 				},
 			},
 		},

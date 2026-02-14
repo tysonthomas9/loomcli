@@ -955,7 +955,7 @@ func TestHasCommitsBetweenRemote(t *testing.T) {
 func TestGitStash_DirtyWorkingTree(t *testing.T) {
 	// When tracked changes exist, git stash increases stash count → stashed=true
 	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                    // before: 0 entries
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // before: 0 entries
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on main: abc1234\n"}, // after: 1 entry
 	})
 	cmdMock.Install()
@@ -1063,7 +1063,7 @@ func TestGitStash_StashCommandFails(t *testing.T) {
 func TestGitStash_SecondStashListFails(t *testing.T) {
 	// When the second stash list call fails after a successful stash, return error
 	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                  // before: 0
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},                                // before: 0
 		{Name: "git", Args: []string{"stash", "list"}, Err: errors.New("unexpected stash error")}, // after: fails
 	})
 	cmdMock.Install()

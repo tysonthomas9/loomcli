@@ -414,8 +414,8 @@ func TestClient_StressTestConcurrentOperations(t *testing.T) {
 	}
 
 	const (
-		numSetterGoroutines = 50
-		numReaderGoroutines = 100
+		numSetterGoroutines    = 50
+		numReaderGoroutines    = 100
 		operationsPerGoroutine = 200
 	)
 
@@ -1860,7 +1860,7 @@ func (c *mockConn) SetDeadline(t time.Time) error {
 	return nil
 }
 
-func (c *mockConn) SetReadDeadline(time.Time) error { return nil }
+func (c *mockConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *mockConn) SetWriteDeadline(time.Time) error { return nil }
 func (c *mockConn) LocalAddr() net.Addr              { return &net.UnixAddr{Name: "mock", Net: "unix"} }
 func (c *mockConn) RemoteAddr() net.Addr             { return &net.UnixAddr{Name: "mock", Net: "unix"} }

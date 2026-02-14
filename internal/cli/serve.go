@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/kv"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -24,21 +25,21 @@ import (
 )
 
 var (
-	servePort        int
-	serveBindAddr    string
-	serveCorsOrigin  string
-	serveWebUIPort   int
-	serveWebUISocket string
-	serveNoWebUI     bool
-	serveNoDaemon    bool
+	servePort          int
+	serveBindAddr      string
+	serveCorsOrigin    string
+	serveWebUIPort     int
+	serveWebUISocket   string
+	serveNoWebUI       bool
+	serveNoDaemon      bool
 	serveRedisAddr     string
 	serveRedisPassword string
 	serveAPIKey        string
-	serveFleetAPIKey string
-	serveNoAuth      bool
-	serveHSTS        bool
-	serveDev         bool
-	serveDevFrontDir string
+	serveFleetAPIKey   string
+	serveNoAuth        bool
+	serveHSTS          bool
+	serveDev           bool
+	serveDevFrontDir   string
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
@@ -436,10 +437,10 @@ type HealthResponse struct {
 
 // AgentsResponse wraps the agents list with optional workspace grouping.
 type AgentsResponse struct {
-	Workspace   WorkspaceInfo              `json:"workspace"`               // workspace mode info
-	Agents      []AgentStatus              `json:"agents"`                  // flat list (existing)
-	ByWorkspace map[string][]AgentStatus   `json:"by_workspace,omitempty"` // grouped by workspace
-	Timestamp   time.Time                  `json:"timestamp"`
+	Workspace   WorkspaceInfo            `json:"workspace"`              // workspace mode info
+	Agents      []AgentStatus            `json:"agents"`                 // flat list (existing)
+	ByWorkspace map[string][]AgentStatus `json:"by_workspace,omitempty"` // grouped by workspace
+	Timestamp   time.Time                `json:"timestamp"`
 }
 
 // TasksResponse wraps task information.

@@ -319,4 +319,3 @@ func TestValidateForImport_EstimatedMinutes(t *testing.T) {
 		})
 	}
 }
-

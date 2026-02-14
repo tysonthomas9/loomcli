@@ -19,15 +19,15 @@ import (
 
 // AutoModeOptions holds configuration for auto mode
 type AutoModeOptions struct {
-	Interval    int  // Polling interval in seconds when no tasks available
-	MaxTasks    int  // Maximum tasks to process before exiting (0 = unlimited)
-	IdleTimeout int  // Exit after N minutes with no available tasks (0 = no timeout)
-	AgentType   string // "plan" or "task"
-	AgentName   string
-	WorktreePath string
-	ParentID     string // Epic ID to scope task discovery to (empty = all tasks)
+	Interval        int    // Polling interval in seconds when no tasks available
+	MaxTasks        int    // Maximum tasks to process before exiting (0 = unlimited)
+	IdleTimeout     int    // Exit after N minutes with no available tasks (0 = no timeout)
+	AgentType       string // "plan" or "task"
+	AgentName       string
+	WorktreePath    string
+	ParentID        string                                // Epic ID to scope task discovery to (empty = all tasks)
 	CustomPromptGen func(string, *WorkspaceConfig) string // Custom prompt generator (overrides AgentType selection)
-	CustomTaskCheck func() (bool, error)                   // Custom task availability check (overrides AgentType selection)
+	CustomTaskCheck func() (bool, error)                  // Custom task availability check (overrides AgentType selection)
 }
 
 // AutoModeState tracks the current state of auto mode execution
@@ -649,12 +649,12 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	// Disable tmux focus-events to prevent ^[[I and ^[[O in output
 	_ = exec.Command("tmux", "set", "-t", sessionName, "focus-events", "off").Run()
 
-	// Setup logging via loom-router for intelligent log routing
-	// loom-router writes to agent log always, and task log when a task is claimed
+	// Setup logging via loom log-router for intelligent log routing
+	// log-router writes to agent log always, and task log when a task is claimed
 	// logFile is ~/.loom/logs/agents/{agentName}.log, so logDir is two levels up
 	logDir := filepath.Dir(filepath.Dir(logFile))
 	lockPath := filepath.Join(ResolveLockDir(opts.WorktreePath), LockFileName)
-	routerCmd := fmt.Sprintf("loom-router --agent %s --base-dir %s --lock-path %s --max-log-size 50",
+	routerCmd := fmt.Sprintf("loom log-router --agent %s --base-dir %s --lock-path %s --max-log-size 50",
 		shellQuote(opts.AgentName),
 		shellQuote(logDir),
 		shellQuote(lockPath))
@@ -847,11 +847,9 @@ func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shut
 						}
 					}
 				}
-			} else {
+			} else if poller != nil {
 				// No new output - back off
-				if poller != nil {
-					poller.hadNoActivity()
-				}
+				poller.hadNoActivity()
 			}
 			file.Close()
 		}

@@ -550,7 +550,6 @@ func TestCrashRecoveryFlow(t *testing.T) {
 	}
 }
 
-
 // TestMonitorAgentStatusVariants tests all agent status display states
 func TestMonitorAgentStatusVariants(t *testing.T) {
 	tests := []struct {
@@ -917,4 +916,3 @@ func TestLoadFixtures(t *testing.T) {
 		})
 	}
 }
-

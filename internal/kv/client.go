@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 )
 

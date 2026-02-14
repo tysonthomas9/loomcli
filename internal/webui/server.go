@@ -34,26 +34,26 @@ const (
 
 // ServerConfig holds configuration for the web UI server.
 type ServerConfig struct {
-	Port            int
-	BindAddress     string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
-	SocketPath      string
-	PoolSize        int
-	CORSEnabled     bool
-	CORSOrigins     []string
-	ShutdownTimeout time.Duration
-	MaxPortAttempts int
+	Port                int
+	BindAddress         string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
+	SocketPath          string
+	PoolSize            int
+	CORSEnabled         bool
+	CORSOrigins         []string
+	ShutdownTimeout     time.Duration
+	MaxPortAttempts     int
 	TerminalCmd         string
 	MaxTerminalSessions int  // Maximum concurrent terminal connections (0 = default 20)
 	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
 	FleetRedis          *fleet.RedisConfig
-	FleetJWTKey     []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
-	FleetAPIKey     string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	APIKey          string // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
-	AuthEnabled     bool   // Whether API authentication is enabled (default: true)
-	HSTSEnabled     bool   // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
-	LoomServerURL  string // Default target URL for the loom API proxy (set by 'loom serve')
-	DevMode        bool   // Serve frontend from disk instead of embedded FS
-	DevFrontendDir string // Directory to serve in dev mode (default: internal/webui/frontend/dist)
+	FleetJWTKey         []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey         string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
+	APIKey              string // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
+	AuthEnabled         bool   // Whether API authentication is enabled (default: true)
+	HSTSEnabled         bool   // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	LoomServerURL       string // Default target URL for the loom API proxy (set by 'loom serve')
+	DevMode             bool   // Serve frontend from disk instead of embedded FS
+	DevFrontendDir      string // Directory to serve in dev mode (default: internal/webui/frontend/dist)
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.
@@ -269,7 +269,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			if fleetStore != nil {
 				tokenCfg = &TokenConfig{
 					SigningKey: jwtKey,
-					Expiry:    time.Hour,
+					Expiry:     time.Hour,
 				}
 				log.Printf("Fleet store initialized (Redis: %s)", config.FleetRedis.Address)
 			}

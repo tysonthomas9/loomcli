@@ -18,11 +18,11 @@ const (
 
 // MutationEvent represents a database mutation for event-driven sync
 type MutationEvent struct {
-	Type      string    `json:"type"`                 // One of the Mutation* constants
-	IssueID   string    `json:"issue_id"`             // e.g., "bd-42"
-	Title     string    `json:"title,omitempty"`      // Issue title for display context (may be empty for some operations)
-	Assignee  string    `json:"assignee,omitempty"`   // Issue assignee for display context (may be empty)
-	Actor     string    `json:"actor,omitempty"`      // Who performed the action (may differ from assignee)
+	Type      string    `json:"type"`               // One of the Mutation* constants
+	IssueID   string    `json:"issue_id"`           // e.g., "bd-42"
+	Title     string    `json:"title,omitempty"`    // Issue title for display context (may be empty for some operations)
+	Assignee  string    `json:"assignee,omitempty"` // Issue assignee for display context (may be empty)
+	Actor     string    `json:"actor,omitempty"`    // Who performed the action (may differ from assignee)
 	Timestamp time.Time `json:"timestamp"`
 	// Optional metadata for richer events (used by status, bonded, etc.)
 	OldStatus string `json:"old_status,omitempty"` // Previous status (for status events)

@@ -59,8 +59,8 @@ func TestGenerateTaskPrompt(t *testing.T) {
 			agentName: "ember",
 			wantParts: []string{
 				"Your agent name is: ember",
-				"--claim",                 // Main task claiming uses atomic --claim
-				"--assignee ember",        // Reclaiming stale tasks still uses --assignee
+				"--claim",          // Main task claiming uses atomic --claim
+				"--assignee ember", // Reclaiming stale tasks still uses --assignee
 				"Implementation Task",
 				"--design",
 				"git push origin HEAD",

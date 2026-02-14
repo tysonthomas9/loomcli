@@ -345,10 +345,16 @@ func resetTask(taskID string) {
 	}
 }
 
-// killProcess sends SIGTERM then SIGKILL to the given PID
+// killProcess sends SIGTERM then SIGKILL to the given PID's process group.
+// It uses negative PID to target the entire process group, which is safe against
+// PID recycling: even if the original PID is recycled to a new process, that new
+// process will have a different PGID, so signaling -pid will fail with ESRCH
+// (no such process group), which we treat as success. This assumes the target
+// process was spawned with Setpgid: true (as the daemon does for all agent
+// processes), so its PGID equals its original PID.
 func killProcess(pid int) error {
-	// Try graceful shutdown first
-	err := syscall.Kill(pid, syscall.SIGTERM)
+	// Try graceful shutdown of the entire process group
+	err := syscall.Kill(-pid, syscall.SIGTERM)
 	if err == syscall.ESRCH {
 		return nil
 	}
@@ -364,8 +370,8 @@ func killProcess(pid int) error {
 		}
 	}
 
-	// Force kill if still running
-	err = syscall.Kill(pid, syscall.SIGKILL)
+	// Force kill the entire process group if still running
+	err = syscall.Kill(-pid, syscall.SIGKILL)
 	if err == syscall.ESRCH {
 		return nil
 	}

@@ -12,8 +12,9 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"nhooyr.io/websocket"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // Constants for terminal WebSocket communication.

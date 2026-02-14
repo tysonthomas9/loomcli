@@ -8,9 +8,9 @@ import (
 
 func TestEpicBranchName(t *testing.T) {
 	tests := []struct {
-		name    string
-		epicID  string
-		want    string
+		name   string
+		epicID string
+		want   string
 	}{
 		{"basic epic ID", "bd-spq5", "epic/bd-spq5"},
 		{"numeric epic ID", "12345", "epic/12345"},

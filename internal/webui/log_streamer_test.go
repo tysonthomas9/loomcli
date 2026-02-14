@@ -400,7 +400,7 @@ func TestLogStreamer_Stream_FileTruncation(t *testing.T) {
 	cancel()
 }
 
-// TestLogStreamer_Stream_ContextCancellation tests that cancelling the context
+// TestLogStreamer_Stream_ContextCancellation tests that canceling the context
 // causes Stream() to return.
 func TestLogStreamer_Stream_ContextCancellation(t *testing.T) {
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
@@ -491,7 +491,7 @@ type nonFlusherWriter struct {
 	header http.Header
 }
 
-func (w *nonFlusherWriter) Header() http.Header        { return w.header }
+func (w *nonFlusherWriter) Header() http.Header         { return w.header }
 func (w *nonFlusherWriter) Write(b []byte) (int, error) { return len(b), nil }
 func (w *nonFlusherWriter) WriteHeader(int)             {}
 

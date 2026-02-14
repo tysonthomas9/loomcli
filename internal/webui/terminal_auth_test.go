@@ -284,10 +284,10 @@ func TestCleanup_RemovesOldNonces(t *testing.T) {
 
 	// Directly populate the used map with old and recent nonces
 	ta.mu.Lock()
-	ta.used["old-nonce-1"] = time.Now().Add(-3 * time.Minute)  // older than terminalNonceMaxAge (2 min)
+	ta.used["old-nonce-1"] = time.Now().Add(-3 * time.Minute)   // older than terminalNonceMaxAge (2 min)
 	ta.used["old-nonce-2"] = time.Now().Add(-10 * time.Minute)  // much older
-	ta.used["recent-nonce"] = time.Now().Add(-30 * time.Second)  // recent, should survive
-	ta.used["just-now-nonce"] = time.Now()                       // very recent
+	ta.used["recent-nonce"] = time.Now().Add(-30 * time.Second) // recent, should survive
+	ta.used["just-now-nonce"] = time.Now()                      // very recent
 	ta.mu.Unlock()
 
 	// Run cleanup

@@ -30,7 +30,7 @@ func TestKeyBuilders(t *testing.T) {
 	}{
 		{"taskOwnerKey", func() string { return taskOwnerKey("task-123") }, "loom:task:task-123:owner"},
 		{"workerStateKey", func() string { return workerStateKey("worker-1") }, "loom:worker:worker-1:state"},
-		{"activeWorkersKey", func() string { return activeWorkersKey() }, "loom:workers:active"},
+		{"activeWorkersKey", activeWorkersKey, "loom:workers:active"},
 	}
 
 	for _, tt := range tests {
@@ -811,5 +811,3 @@ func TestCompleteTask_ScriptError(t *testing.T) {
 		t.Errorf("expected error to contain 'complete script failed', got: %v", err)
 	}
 }
-
-

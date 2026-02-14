@@ -134,10 +134,10 @@ type CircuitBreakerStatus struct {
 
 // HealthStatus represents the detailed health status of the API.
 type HealthStatus struct {
-	Status         string                 `json:"status"`                    // "ok", "degraded", "unhealthy"
-	Daemon         DaemonStatus           `json:"daemon"`                    // Daemon connection status
-	Pool           *daemon.PoolStats      `json:"pool,omitempty"`            // Connection pool stats
-	CircuitBreaker *CircuitBreakerStatus  `json:"circuit_breaker,omitempty"` // Circuit breaker state
+	Status         string                `json:"status"`                    // "ok", "degraded", "unhealthy"
+	Daemon         DaemonStatus          `json:"daemon"`                    // Daemon connection status
+	Pool           *daemon.PoolStats     `json:"pool,omitempty"`            // Connection pool stats
+	CircuitBreaker *CircuitBreakerStatus `json:"circuit_breaker,omitempty"` // Circuit breaker state
 }
 
 // breakerStater is an optional interface for pools that have a circuit breaker.

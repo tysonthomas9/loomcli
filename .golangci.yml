@@ -2,7 +2,7 @@ version: "2"
 
 run:
   timeout: 5m
-  tests: false
+  tests: true
 
 linters:
   default: none
@@ -11,12 +11,22 @@ linters:
     - errcheck
     - funlen
     - gocognit
+    - gocritic
     - gosec
+    - govet
+    - ineffassign
     - misspell
+    - revive
+    - staticcheck
     - unconvert
     - unparam
 
   settings:
+    gocritic:
+      disabled-tags:
+        - experimental
+        - opinionated
+        - performance
     errcheck:
       exclude-functions:
         - (*os.File).Close
@@ -36,9 +46,34 @@ linters:
       min-complexity: 30
     misspell:
       locale: US
+    staticcheck:
+      checks:
+        - "all"
+        - "-QF*"   # Disable quick-fix suggestions (stylistic, low value)
+        - "-ST1000" # Package comments are optional
+        - "-ST1003" # Naming conventions are stylistic
+        - "-ST1020" # Exported comment format is stylistic
+        - "-ST1022" # Var/const comment format is stylistic
+    revive:
+      rules:
+        # Disable rules that are too noisy
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        # Allow meaningful package names
+        - name: var-naming
+          arguments:
+            - []  # No extra initialisms
+            - []  # No skip packages
+            - - upperCaseConst: false  # Allow lowercase constants
 
   exclusions:
+    paths:
+      - third_party
     rules:
+      # === Existing loomcli-specific exclusions ===
+
       # G104: Unhandled errors for cleanup operations (Close, Remove) are acceptable
       - linters:
           - gosec
@@ -66,6 +101,11 @@ linters:
       - linters:
           - gosec
         text: "G306"
+      # G204: Subprocess launches for AI agent backends and daemon
+      - path: 'internal/cli/(backend_claude|backend_codex|backend_opencode|daemon)\.go'
+        linters:
+          - gosec
+        text: "G204"
       # G602: False positive - buf[0] access is after successful Read
       - path: 'internal/cli/automode\.go'
         linters:
@@ -132,5 +172,197 @@ linters:
       - path: "internal/webui/sse\\.go"
         linters: [gocognit]
 
+      # === Test file relaxations (matching beads patterns) ===
+
+      # gosec: Various security checks relaxed in test files
+      - path: '_test\.go'
+        linters:
+          - gosec
+        text: "G304"
+      - path: '_test\.go'
+        linters:
+          - gosec
+        text: "G306"
+      - path: '_test\.go'
+        linters:
+          - gosec
+        text: "G115"
+      - path: '_test\.go'
+        linters:
+          - gosec
+        text: "G404"
+      - path: '_test\.go'
+        linters:
+          - gosec
+        text: "G204"
+      - path: '_test\.go'
+        linters:
+          - gosec
+        text: "G302"
+      - path: '_test\.go'
+        linters:
+          - gosec
+        text: "G602"
+      # errcheck: Ignore unchecked errors in test files
+      - path: '_test\.go'
+        linters:
+          - errcheck
+      # unparam: Test helper functions commonly have consistent signatures
+      - path: '_test\.go'
+        linters:
+          - unparam
+      # staticcheck: Some checks are overly strict in test code
+      - path: '_test\.go'
+        linters:
+          - staticcheck
+        text: "SA1019|SA1029|SA4000|SA4003|SA4006|SA5011|SA9003|S1021"
+
+      # === New linter exclusions ===
+
+      # gocritic: exitAfterDefer in CLI exit paths - process terminates intentionally
+      - linters:
+          - gocritic
+        text: 'exitAfterDefer'
+      # gocritic: ifElseChain is stylistic - some if-else chains are clearer than switches
+      - linters:
+          - gocritic
+        text: 'ifElseChain'
+      # gocritic: singleCaseSwitch - type assertions with single case are a common Go idiom
+      - linters:
+          - gocritic
+        text: 'singleCaseSwitch'
+      # misspell: "cancelled" is intentional - matching GitHub/API convention
+      - linters:
+          - misspell
+        text: '[Cc]ancelled'
+
+      # === errcheck exclusions for cleanup/HTTP patterns ===
+
+      # errcheck: Close() on custom types in cleanup/defer paths
+      - path: 'cmd/logrouter/'
+        linters:
+          - errcheck
+        text: '\.Close'
+      - path: 'internal/cli/serve\.go'
+        linters:
+          - errcheck
+        text: '\.Close'
+      - path: 'internal/webui/'
+        linters:
+          - errcheck
+        text: '\.Close'
+      # errcheck: HTTP response writes where errors are non-actionable
+      - path: 'internal/webui/'
+        linters:
+          - errcheck
+        text: 'Encode|Fprintf'
+      # errcheck: Prometheus metric writes where errors are non-actionable
+      - path: 'internal/cli/serve\.go'
+        linters:
+          - errcheck
+        text: 'Fprintf'
+      # errcheck: Terminal session cleanup is best-effort
+      - path: 'internal/webui/handlers_terminal\.go'
+        linters:
+          - errcheck
+        text: 'KillSessionByName'
+
+      # === gosec exclusions for intentional patterns ===
+
+      # G103: Unsafe calls for PTY window size detection
+      - path: 'internal/cli/backend_codex\.go'
+        linters:
+          - gosec
+        text: "G103"
+      # G306: Config files use 0644 for readability
+      - path: 'internal/cli/config\.go|internal/webui/handlers_config\.go'
+        linters:
+          - gosec
+        text: "G306"
+      # G115: Safe int-to-uint32 conversion for UID comparison
+      - path: 'internal/cli/signal_dir_unix\.go|internal/rpc/socket_path\.go'
+        linters:
+          - gosec
+        text: "G115"
+      # G204: Subprocess launches for bd commands and tmux
+      - path: 'internal/kv/reconcile\.go|internal/webui/terminal\.go'
+        linters:
+          - gosec
+        text: "G204"
+      # G304: Intentional file reads from known paths
+      - path: 'internal/rpc/auth\.go|internal/webui/(auth|handlers_config|log_open_unix|log_streamer)\.go'
+        linters:
+          - gosec
+        text: "G304"
+      # G101: False positive on RPC operation constants and test token values
+      - path: 'internal/rpc/protocol\.go'
+        linters:
+          - gosec
+        text: "G101"
+      - path: '_test\.go'
+        linters:
+          - gosec
+        text: "G101"
+      # G302: Socket directory permissions 0700 are intentional
+      - path: 'internal/rpc/socket_path\.go'
+        linters:
+          - gosec
+        text: "G302"
+
+      # === staticcheck exclusions ===
+
+      # SA4032: Windows runtime check in non-windows file - cross-platform code
+      - path: 'internal/rpc/socket_path'
+        linters:
+          - staticcheck
+        text: "SA4032"
+      # SA1019: Deprecated websocket library - migration tracked separately
+      - path: 'internal/webui/handlers_terminal\.go'
+        linters:
+          - staticcheck
+        text: "SA1019"
+
+      # === revive exclusions ===
+
+      # revive: var-naming underscore names in tests where Go keywords conflict
+      - path: '_test\.go'
+        linters:
+          - revive
+        text: "don't use underscores in Go names"
+      # revive: "types" is a standard meaningful package name
+      - path: 'internal/types/'
+        linters:
+          - revive
+        text: 'avoid meaningless package names'
+
+      # === unparam exclusions ===
+
+      # unparam: Cobra command handlers require (cmd, args) signature
+      - path: 'internal/cli/init\.go'
+        linters:
+          - unparam
+        text: 'is unused'
+      # unparam: Parameter kept for API flexibility
+      - path: 'cmd/logrouter/rotation\.go'
+        linters:
+          - unparam
+        text: 'maxBackups'
+      # unparam: Error return kept for future error paths
+      - path: 'internal/cli/pr\.go'
+        linters:
+          - unparam
+        text: 'generatePRInfo.*always nil'
+
 issues:
   uniq-by-line: true
+
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/tysonthomas9/loomcli
+  exclusions:
+    paths:
+      - third_party
