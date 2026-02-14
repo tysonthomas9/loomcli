@@ -139,7 +139,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 // and clean untracked files without prompting.
 //
 // exitCode informs recovery behavior: on clean exit (0) tasks that are still
-// in_progress are likely mid-completion (e.g. the agent signalled done but the
+// in_progress are likely mid-completion (e.g. the agent signaled done but the
 // status update hasn't landed yet), so we log but still run the status-aware
 // resetTask which preserves review/closed tasks. On non-zero exit the task is
 // more likely genuinely orphaned.
@@ -172,7 +172,7 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
 					agentName, exitCode, lockInfo.TaskID)
 			}
-			resetTask(worktreePath, lockInfo.TaskID)
+			resetTask(lockInfo.TaskID)
 		}
 	}
 
@@ -199,14 +199,14 @@ func handleOrphanedTask(worktreePath, taskID string, analyze bool) {
 
 		if completed {
 			fmt.Printf("Task appears COMPLETE: %s\n", reason)
-			closeTask(worktreePath, taskID, reason)
+			closeTask(taskID, reason)
 		} else {
 			fmt.Printf("Task appears INCOMPLETE: %s\n", reason)
-			resetTask(worktreePath, taskID)
+			resetTask(taskID)
 		}
 	} else {
 		fmt.Println("Skipping analysis (--no-analyze)")
-		resetTask(worktreePath, taskID)
+		resetTask(taskID)
 	}
 }
 
@@ -297,7 +297,7 @@ INCOMPLETE: <brief reason>
 }
 
 // closeTask closes a completed task
-func closeTask(worktreePath, taskID, reason string) {
+func closeTask(taskID, reason string) {
 	closeReason := fmt.Sprintf("Completed (verified by recovery analysis): %s", reason)
 	result := execCommand(GetBeadsDir(), "bd", "close", taskID, "--reason", closeReason)
 	if result.Err != nil {
@@ -314,7 +314,7 @@ func closeTask(worktreePath, taskID, reason string) {
 // resetTask resets a task to open status, but only if it's still in_progress.
 // Tasks that have already reached review or closed status were successfully
 // processed and should not be reset.
-func resetTask(worktreePath, taskID string) {
+func resetTask(taskID string) {
 	// Check current status before resetting
 	showResult := execCommand(GetBeadsDir(), "bd", "show", taskID, "--json")
 	if showResult.Err == nil {
@@ -345,10 +345,16 @@ func resetTask(worktreePath, taskID string) {
 	}
 }
 
-// killProcess sends SIGTERM then SIGKILL to the given PID
+// killProcess sends SIGTERM then SIGKILL to the given PID's process group.
+// It uses negative PID to target the entire process group, which is safe against
+// PID recycling: even if the original PID is recycled to a new process, that new
+// process will have a different PGID, so signaling -pid will fail with ESRCH
+// (no such process group), which we treat as success. This assumes the target
+// process was spawned with Setpgid: true (as the daemon does for all agent
+// processes), so its PGID equals its original PID.
 func killProcess(pid int) error {
-	// Try graceful shutdown first
-	err := syscall.Kill(pid, syscall.SIGTERM)
+	// Try graceful shutdown of the entire process group
+	err := syscall.Kill(-pid, syscall.SIGTERM)
 	if err == syscall.ESRCH {
 		return nil
 	}
@@ -364,8 +370,8 @@ func killProcess(pid int) error {
 		}
 	}
 
-	// Force kill if still running
-	err = syscall.Kill(pid, syscall.SIGKILL)
+	// Force kill the entire process group if still running
+	err = syscall.Kill(-pid, syscall.SIGKILL)
 	if err == syscall.ESRCH {
 		return nil
 	}

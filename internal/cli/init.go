@@ -161,7 +161,7 @@ func runInitWorkspace(cmd *cobra.Command, args []string) {
 	fmt.Println("")
 
 	// Step 4: Show workspace ready summary
-	showWorkspaceSummary(initWorkspace, ws)
+	showWorkspaceSummary(ws)
 }
 
 func initBeadsInWorkspace(wsPath string) {
@@ -174,7 +174,7 @@ func initBeadsInWorkspace(wsPath string) {
 	fmt.Println("✓ beads initialized in workspace root")
 }
 
-func showWorkspaceSummary(wsName string, ws WorkspaceConfig) {
+func showWorkspaceSummary(ws WorkspaceConfig) {
 	fmt.Println("Workspace ready! 🎉")
 	fmt.Println("")
 	fmt.Println("Directory structure:")

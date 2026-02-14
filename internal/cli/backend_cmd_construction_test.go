@@ -144,17 +144,17 @@ func TestBuildInteractiveCmd_BinaryAndFlags(t *testing.T) {
 
 func TestBuildInteractiveCmd_EnvVars(t *testing.T) {
 	tests := []struct {
-		name      string
-		buildFn   buildFunc
-		workDir   string
-		agentName string
-		wantEnv   map[string]string // key -> expected value
+		name       string
+		buildFn    buildFunc
+		workDir    string
+		agentName  string
+		wantEnv    map[string]string // key -> expected value
 		wantAbsent []string          // keys that must NOT be present
 	}{
 		{
-			name:    "claude with agent",
-			buildFn: buildClaudeInteractiveCmd,
-			workDir: "/projects/myapp",
+			name:      "claude with agent",
+			buildFn:   buildClaudeInteractiveCmd,
+			workDir:   "/projects/myapp",
 			agentName: "nova",
 			wantEnv: map[string]string{
 				"LOOM_WORKTREE_PATH": "/projects/myapp",
@@ -162,9 +162,9 @@ func TestBuildInteractiveCmd_EnvVars(t *testing.T) {
 			},
 		},
 		{
-			name:    "codex with agent",
-			buildFn: buildCodexInteractiveCmd,
-			workDir: "/projects/myapp",
+			name:      "codex with agent",
+			buildFn:   buildCodexInteractiveCmd,
+			workDir:   "/projects/myapp",
 			agentName: "nova",
 			wantEnv: map[string]string{
 				"LOOM_WORKTREE_PATH": "/projects/myapp",
@@ -172,9 +172,9 @@ func TestBuildInteractiveCmd_EnvVars(t *testing.T) {
 			},
 		},
 		{
-			name:    "opencode with agent",
-			buildFn: buildOpenCodeInteractiveCmd,
-			workDir: "/projects/myapp",
+			name:      "opencode with agent",
+			buildFn:   buildOpenCodeInteractiveCmd,
+			workDir:   "/projects/myapp",
 			agentName: "nova",
 			wantEnv: map[string]string{
 				"LOOM_WORKTREE_PATH": "/projects/myapp",

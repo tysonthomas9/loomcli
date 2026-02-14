@@ -179,9 +179,9 @@ func (sd *StaleDetector) runCycle(ctx context.Context) {
 
 		if sw.TaskID != "" {
 			orphanedTasks = append(orphanedTasks, OrphanedTask{
-				TaskID:    sw.TaskID,
-				TaskTitle: sw.TaskTitle,
-				WorkerID:  sw.WorkerID,
+				TaskID:     sw.TaskID,
+				TaskTitle:  sw.TaskTitle,
+				WorkerID:   sw.WorkerID,
 				StaleSince: sw.LastHeartbeat,
 			})
 		}
@@ -303,4 +303,3 @@ func GenerateServerID() string {
 	}
 	return fmt.Sprintf("%s:%d:%d", hostname, os.Getpid(), time.Now().UnixMilli())
 }
-

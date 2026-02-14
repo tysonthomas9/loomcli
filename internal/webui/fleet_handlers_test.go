@@ -13,6 +13,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -550,7 +551,7 @@ func (m *mockWorkerRegistrar) RegisterWorker(ctx context.Context, worker *fleet.
 func testTokenConfig() *TokenConfig {
 	return &TokenConfig{
 		SigningKey: []byte("test-secret-key-for-jwt-signing!"),
-		Expiry:    time.Hour,
+		Expiry:     time.Hour,
 	}
 }
 

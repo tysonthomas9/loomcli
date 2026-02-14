@@ -43,7 +43,8 @@ func buildWorkspaceContextBlock(workspace *WorkspaceConfig) string {
 // GeneratePlanningPrompt creates the prompt for the planning agent.
 // If workspace is non-nil, workspace context is injected into the prompt.
 // SYNC: The jq filters below must match taskfilter.go NeedsPlan() criteria:
-//   planning: design empty OR has "needs-revision" label
+//
+//	planning: design empty OR has "needs-revision" label
 func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
 	return fmt.Sprintf(`## WORKFLOW: Planning Task (Design Only - No Implementation)
@@ -126,22 +127,22 @@ Write a comprehensive plan that includes:
 
 ### Step 4: Save the Plan
 Save your plan to the task's design field:
-` + "```" + `
+`+"```"+`
 bd update <id> --design="<your complete plan here>"
-` + "```" + `
+`+"```"+`
 
 IMPORTANT: Make sure the plan is complete and detailed enough that another agent
 (or human) could implement it without needing to ask questions.
 
 ### Step 5: Mark for Review
 Set the task status to 'review' and clear the assignee:
-` + "```" + `
+`+"```"+`
 # For revision tasks, first remove the label:
 bd label remove <id> needs-revision
 
 # Then mark for review:
 bd update <id> --status review --assignee=""
-` + "```" + `
+`+"```"+`
 
 This puts the task in review status where:
 - It won't appear in 'bd ready' (filtered out)
@@ -149,10 +150,10 @@ This puts the task in review status where:
 - Other agents won't accidentally pick it up
 
 ### Step 6: Signal Completion and Exit
-` + "```" + `
+`+"```"+`
 bd sync
 loom complete
-` + "```" + `
+`+"```"+`
 
 ### CRITICAL: STOP - DO NOT IMPLEMENT
 
@@ -175,7 +176,8 @@ Your job was ONLY to create the plan. Implementation happens later.
 // GenerateTaskPrompt creates the prompt for the implementation agent.
 // If workspace is non-nil, workspace context is injected into the prompt.
 // SYNC: The jq filters below must match taskfilter.go ReadyToImplement() criteria:
-//   implementation: design non-empty AND no "needs-revision" label
+//
+//	implementation: design non-empty AND no "needs-revision" label
 func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
 	return fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)

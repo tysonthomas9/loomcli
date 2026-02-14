@@ -2554,11 +2554,11 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 
 func TestGetAvailablePlanningTasks(t *testing.T) {
 	tests := []struct {
-		name      string
-		bdOutput  string
-		bdErr     error
-		wantIDs   []string
-		wantErr   bool
+		name     string
+		bdOutput string
+		bdErr    error
+		wantIDs  []string
+		wantErr  bool
 	}{
 		{
 			name: "returns task needing planning (no design)",
@@ -3878,10 +3878,8 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 				if !strings.Contains(paneCmd, expectedFlag1) && !strings.Contains(paneCmd, expectedFlag2) {
 					t.Errorf("Expected command to contain --parent flag with %q, got: %s", tt.parentID, paneCmd)
 				}
-			} else {
-				if strings.Contains(paneCmd, "--parent") {
-					t.Errorf("Expected command NOT to contain --parent flag, got: %s", paneCmd)
-				}
+			} else if strings.Contains(paneCmd, "--parent") {
+				t.Errorf("Expected command NOT to contain --parent flag, got: %s", paneCmd)
 			}
 		})
 	}
@@ -4485,4 +4483,3 @@ func TestRunAutoModeTmux_TaskCheckError(t *testing.T) {
 		t.Error("RunAutoModeTmux did not exit after task check error")
 	}
 }
-

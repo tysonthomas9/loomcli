@@ -90,14 +90,14 @@ type FileChange struct {
 type AgentStatus struct {
 	Name          string         `json:"name"`
 	Branch        string         `json:"branch"`
-	Status        string         `json:"status"`                    // "ready", "3 changes", "running (plan, 5m ago)"
-	Ahead         int            `json:"ahead"`                     // commits ahead of integration branch
-	Behind        int            `json:"behind"`                    // commits behind integration branch
-	Role          string         `json:"role,omitempty"`            // role from daemon config (e.g., "plan", "task")
-	Workspace     string         `json:"workspace"`                 // workspace name (empty in legacy mode)
-	DaemonManaged bool           `json:"daemon_managed,omitempty"`  // true if under daemon supervision
-	Commits       []CommitDetail `json:"commits,omitempty"`         // recent commits ahead of integration branch
-	Changes       []FileChange   `json:"changes,omitempty"`         // uncommitted file changes
+	Status        string         `json:"status"`                   // "ready", "3 changes", "running (plan, 5m ago)"
+	Ahead         int            `json:"ahead"`                    // commits ahead of integration branch
+	Behind        int            `json:"behind"`                   // commits behind integration branch
+	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
+	Workspace     string         `json:"workspace"`                // workspace name (empty in legacy mode)
+	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
+	Commits       []CommitDetail `json:"commits,omitempty"`        // recent commits ahead of integration branch
+	Changes       []FileChange   `json:"changes,omitempty"`        // uncommitted file changes
 }
 
 // TaskInfo represents a task with basic info
@@ -116,7 +116,6 @@ type TaskSummary struct {
 	NeedReview       int `json:"need_review"`
 	Backlog          int `json:"backlog"`
 }
-
 
 // WorktreeSyncDetail holds per-worktree sync detail (commits ahead or behind).
 type WorktreeSyncDetail struct {
@@ -239,11 +238,11 @@ func loadDaemonManagedAgents() map[string]DaemonAgentInfo {
 func runMonitor(cmd *cobra.Command, args []string) {
 	if !monitorNoWatch {
 		// Watch mode - show loading message while first data collection runs
-		fmt.Print("\033[?25l")  // Hide cursor
-		fmt.Print("\033[H")     // Move to home position
-		fmt.Print("\033[J")     // Clear screen
+		fmt.Print("\033[?25l") // Hide cursor
+		fmt.Print("\033[H")    // Move to home position
+		fmt.Print("\033[J")    // Clear screen
 		fmt.Print("Loading...")
-		fmt.Print("\033[?25h")  // Show cursor
+		fmt.Print("\033[?25h") // Show cursor
 
 		// Collect first batch before entering loop (loading message visible during this)
 		data := collectMonitorData(100)
@@ -264,11 +263,11 @@ func runMonitor(cmd *cobra.Command, args []string) {
 			// Build complete output including status line (no trailing newline)
 			fullOutput := output + fmt.Sprintf("\nPress Ctrl+C to exit (refreshing every %ds)", monitorInterval)
 
-			fmt.Print("\033[?25l")  // Hide cursor
-			fmt.Print("\033[H")     // Move to home position
+			fmt.Print("\033[?25l") // Hide cursor
+			fmt.Print("\033[H")    // Move to home position
 			fmt.Print(fullOutput)
-			fmt.Print("\033[J")     // Clear from cursor to end of screen
-			fmt.Print("\033[?25h")  // Show cursor
+			fmt.Print("\033[J")    // Clear from cursor to end of screen
+			fmt.Print("\033[?25h") // Show cursor
 		}
 	} else {
 		// One-shot mode - show loading message on stderr
@@ -578,7 +577,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	var (
 		readyOutput, inProgressOutput, needReviewOutput, backlogOutput string
 		readyErr, inProgressErr, needReviewErr, backlogErr             error
-		wg                                                              sync.WaitGroup
+		wg                                                             sync.WaitGroup
 	)
 
 	wg.Add(4)

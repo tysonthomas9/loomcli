@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
-	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 const (
@@ -35,11 +35,11 @@ type IssueWithParent struct {
 // Returned when include_blocked=true is passed to /api/issues.
 type KanbanIssue struct {
 	*types.IssueWithCounts
-	Parent           *string           `json:"parent,omitempty"`
-	ParentTitle      *string           `json:"parent_title,omitempty"`
-	IsBlocked        bool              `json:"is_blocked"`
-	BlockedByCount   int               `json:"blocked_by_count"`
-	BlockedBy        []string          `json:"blocked_by,omitempty"`
+	Parent           *string            `json:"parent,omitempty"`
+	ParentTitle      *string            `json:"parent_title,omitempty"`
+	IsBlocked        bool               `json:"is_blocked"`
+	BlockedByCount   int                `json:"blocked_by_count"`
+	BlockedBy        []string           `json:"blocked_by,omitempty"`
 	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`
 }
 
@@ -2032,15 +2032,15 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 
 // SSEMetrics represents the runtime metrics for the SSE hub.
 type SSEMetrics struct {
-	ConnectedClients   int     `json:"connected_clients"`
-	DroppedMutations   int64   `json:"dropped_mutations"`
-	RetryQueueDepth    int     `json:"retry_queue_depth"`
-	UptimeSeconds      float64 `json:"uptime_seconds"`
-	FleetTimeoutsTotal int64   `json:"loom_fleet_timeouts_total,omitempty"`
-	FleetClaimsSuccess   int64 `json:"loom_fleet_claims_success,omitempty"`
-	FleetClaimsCollision int64 `json:"loom_fleet_claims_collision,omitempty"`
-	FleetClaimsTimeout   int64 `json:"loom_fleet_claims_timeout,omitempty"`
-	FleetClaimsTotal     int64 `json:"loom_fleet_claims_total,omitempty"`
+	ConnectedClients     int     `json:"connected_clients"`
+	DroppedMutations     int64   `json:"dropped_mutations"`
+	RetryQueueDepth      int     `json:"retry_queue_depth"`
+	UptimeSeconds        float64 `json:"uptime_seconds"`
+	FleetTimeoutsTotal   int64   `json:"loom_fleet_timeouts_total,omitempty"`
+	FleetClaimsSuccess   int64   `json:"loom_fleet_claims_success,omitempty"`
+	FleetClaimsCollision int64   `json:"loom_fleet_claims_collision,omitempty"`
+	FleetClaimsTimeout   int64   `json:"loom_fleet_claims_timeout,omitempty"`
+	FleetClaimsTotal     int64   `json:"loom_fleet_claims_total,omitempty"`
 }
 
 // MetricsResponse wraps the SSE hub metrics for JSON response.

@@ -454,4 +454,3 @@ func TestGetWorktreeFileChanges(t *testing.T) {
 		}
 	})
 }
-

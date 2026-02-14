@@ -25,17 +25,17 @@ const defaultMaxBackups = 2
 
 // LogRouter handles routing log output to multiple destinations.
 type LogRouter struct {
-	baseDir     string
-	agentName   string
-	maxLogSize  int64
-	agentWriter *bufio.Writer
+	baseDir      string
+	agentName    string
+	maxLogSize   int64
+	agentWriter  *bufio.Writer
 	agentRotator *rotatingWriter
 
-	mu           sync.Mutex
-	taskID       string
-	phase        string
-	taskWriter   *bufio.Writer
-	taskRotator  *rotatingWriter
+	mu          sync.Mutex
+	taskID      string
+	phase       string
+	taskWriter  *bufio.Writer
+	taskRotator *rotatingWriter
 }
 
 // NewLogRouter creates a new LogRouter that writes to the agent log file.

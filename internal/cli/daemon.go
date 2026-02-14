@@ -22,11 +22,11 @@ type AgentProcess struct {
 	logFile     *os.File  // log file handle for subprocess output (nil if not logging)
 	logFilePath string    // path to agent log file for watchdog stat checks
 
-	restartCount    int       // consecutive restart attempts
-	lastStart       time.Time // when subprocess was last spawned
-	lastExit        time.Time // when subprocess last exited
-	lastExitCode    int       // exit code from last run
-	assignedEpicID  string    // epic this agent is currently assigned to (empty = non-epic mode)
+	restartCount   int       // consecutive restart attempts
+	lastStart      time.Time // when subprocess was last spawned
+	lastExit       time.Time // when subprocess last exited
+	lastExitCode   int       // exit code from last run
+	assignedEpicID string    // epic this agent is currently assigned to (empty = non-epic mode)
 
 	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID
 }

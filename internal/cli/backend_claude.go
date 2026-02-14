@@ -61,6 +61,7 @@ func defaultClaudeInvoker(workDir, prompt, agentName string) error {
 }
 
 // InvokeClaude runs Claude directly, bypassing the backend registry.
+//
 // Deprecated: Use InvokeAgent() instead which dispatches through the active backend.
 func InvokeClaude(workDir, prompt, agentName string) error {
 	return claudeInvoker(workDir, prompt, agentName)
@@ -202,12 +203,14 @@ func displayStreamEvent(line string) {
 }
 
 // InvokeClaudeNonInteractive runs Claude directly in non-interactive mode.
+//
 // Deprecated: Use InvokeAgentNonInteractive() instead which dispatches through the active backend.
 func InvokeClaudeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
 }
 
 // InvokeClaudeForConflicts runs Claude to resolve merge conflicts.
+//
 // Deprecated: Use InvokeAgentForConflicts() instead which dispatches through the active backend.
 func InvokeClaudeForConflicts(workDir, sourceBranch, targetBranch string, conflicts []string) error {
 	prompt := GenerateConflictResolutionPrompt(sourceBranch, targetBranch, conflicts)

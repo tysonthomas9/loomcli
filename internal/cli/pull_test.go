@@ -87,10 +87,8 @@ func TestPullCmd_ArgsValidation(t *testing.T) {
 				if tc.errorMsg != "" && !strings.Contains(err.Error(), tc.errorMsg) {
 					t.Errorf("expected error containing %q, got %q", tc.errorMsg, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("expected no error, got %v", err)
 			}
 		})
 	}
@@ -738,10 +736,8 @@ func TestPullCmd_WorkspaceModeArgsValidation(t *testing.T) {
 				if tc.errorSubstr != "" && !strings.Contains(err.Error(), tc.errorSubstr) {
 					t.Errorf("expected error containing %q, got %q", tc.errorSubstr, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("expected no error, got %v", err)
 			}
 		})
 	}

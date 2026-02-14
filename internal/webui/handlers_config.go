@@ -11,9 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
-	"gopkg.in/yaml.v3"
 )
 
 // validBackends is the list of supported AI backend names.
@@ -30,7 +31,7 @@ type BackendConfigResponse struct {
 type BackendConfigData struct {
 	Backend   string                 `json:"backend"`
 	Source    string                 `json:"source"`
-	Available []string              `json:"available"`
+	Available []string               `json:"available"`
 	Agents    []AgentBackendOverride `json:"agents"`
 }
 
@@ -49,9 +50,9 @@ type BackendConfigPatchRequest struct {
 // projectFile is a local YAML struct mirroring cli.ProjectFile.
 // We define it locally to avoid coupling webui to the cli package.
 type projectFile struct {
-	Backend string    `yaml:"backend,omitempty"`
-	Daemon  yaml.Node `yaml:"daemon,omitempty"`
-	Roles   yaml.Node `yaml:"roles,omitempty"`
+	Backend string       `yaml:"backend,omitempty"`
+	Daemon  yaml.Node    `yaml:"daemon,omitempty"`
+	Roles   yaml.Node    `yaml:"roles,omitempty"`
 	Agents  []agentEntry `yaml:"agents,omitempty"`
 }
 

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestForceReleaseLock_RemovesLockFile(t *testing.T) {
@@ -60,7 +61,7 @@ func TestCloseTask_Success(t *testing.T) {
 	mock.Install()
 
 	// closeTask doesn't return anything, just verify no panic and correct args
-	closeTask("/test/worktree", "task-123", "Tests pass")
+	closeTask("task-123", "Tests pass")
 }
 
 func TestCloseTask_Failure(t *testing.T) {
@@ -76,37 +77,55 @@ func TestCloseTask_Failure(t *testing.T) {
 	mock.Install()
 
 	// closeTask prints warning but doesn't panic
-	closeTask("/test/worktree", "task-456", "Done")
+	closeTask("task-456", "Done")
 }
 
 func TestResetTask_Success(t *testing.T) {
 	ResetBeadsDirCache()
-	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    ".",
-		Name:   "bd",
-		Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
-		Stdout: "Task updated\n",
-		Err:    nil,
-	}})
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-789", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
+			Stdout: "Task updated\n",
+			Err:    nil,
+		},
+	})
 	mock.Install()
 
-	resetTask("/test/worktree", "task-789")
+	resetTask("task-789")
 }
 
 func TestResetTask_Failure(t *testing.T) {
 	ResetBeadsDirCache()
-	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    ".",
-		Name:   "bd",
-		Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
-		Stdout: "",
-		Stderr: "Error: invalid task\n",
-		Err:    errors.New("exit status 1"),
-	}})
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-789", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
+			Stdout: "",
+			Stderr: "Error: invalid task\n",
+			Err:    errors.New("exit status 1"),
+		},
+	})
 	mock.Install()
 
 	// resetTask prints warning and manual instructions but doesn't panic
-	resetTask("/test/worktree", "task-789")
+	resetTask("task-789")
 }
 
 func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
@@ -450,7 +469,15 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 			Stdout: "INCOMPLETE: No work found\n",
 			Err:    nil,
 		},
-		// resetTask call
+		// resetTask: show check
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-orphan2", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
+		// resetTask: update call
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -467,7 +494,15 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
-		// resetTask call only (no analyze)
+		// resetTask: show check
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-orphan3", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
+		// resetTask: update call
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -554,8 +589,9 @@ func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
 }
 
 func TestKillProcess_Success(t *testing.T) {
-	// Start a sleep process that we can kill
+	// Start a sleep process in its own process group (as the daemon does)
 	cmd := exec.Command("sleep", "60")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep process: %v", err)
 	}
@@ -574,7 +610,7 @@ func TestKillProcess_Success(t *testing.T) {
 		close(done)
 	}()
 
-	// Kill it (sends SIGTERM first, then SIGKILL if needed)
+	// Kill it (sends SIGTERM to process group, then SIGKILL if needed)
 	err := killProcess(pid)
 	if err != nil {
 		t.Errorf("killProcess returned error: %v", err)
@@ -600,19 +636,61 @@ func TestKillProcess_NonExistentPid(t *testing.T) {
 func TestKillProcess_AlreadyDead(t *testing.T) {
 	// Start and immediately kill a process to get a dead PID
 	cmd := exec.Command("sleep", "60")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep process: %v", err)
 	}
 	pid := cmd.Process.Pid
 
-	// Kill it directly
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	// Kill the process group directly
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	_ = cmd.Wait()
 
 	// Now killProcess should handle the already-dead case gracefully
 	err := killProcess(pid)
 	if err != nil {
 		t.Errorf("killProcess should succeed for already-dead process, got: %v", err)
+	}
+}
+
+func TestKillProcess_WithChildProcesses(t *testing.T) {
+	// Start a process that spawns children, all in their own process group.
+	// killProcess should terminate the entire group.
+	cmd := exec.Command("bash", "-c", "sleep 60 & sleep 60 & wait")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start bash process: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	// Give children a moment to spawn
+	time.Sleep(200 * time.Millisecond)
+
+	// Reap the parent in a goroutine
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+
+	// Kill the process group
+	err := killProcess(pid)
+	if err != nil {
+		t.Errorf("killProcess returned error: %v", err)
+	}
+
+	<-done
+
+	// Verify parent is dead
+	if IsProcessRunning(pid) {
+		t.Error("parent process should not be running after kill")
+	}
+
+	// Verify no process in the group is still running.
+	// Sending signal 0 to the process group checks for existence.
+	err = syscall.Kill(-pid, 0)
+	if err != syscall.ESRCH {
+		t.Errorf("process group should not exist after kill, got err: %v", err)
 	}
 }
 
@@ -626,7 +704,15 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 			Stdout: `[{"id":"task-1","title":"First task"},{"id":"task-2","title":"Second task"}]`,
 			Err:    nil,
 		},
-		// resetTask for task-1
+		// resetTask for task-1: show check
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-1", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
+		// resetTask for task-1: update
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -634,7 +720,15 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 			Stdout: "Updated\n",
 			Err:    nil,
 		},
-		// resetTask for task-2
+		// resetTask for task-2: show check
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-2", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
+		// resetTask for task-2: update
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -658,7 +752,15 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 			Stdout: `[{"id":"task-1","title":"Already handled"},{"id":"task-2","title":"Orphaned task"}]`,
 			Err:    nil,
 		},
-		// resetTask for task-2 only (task-1 is already handled)
+		// resetTask for task-2: show check (task-1 is already handled)
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-2", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
+		// resetTask for task-2: update
 		{
 			Dir:    ".",
 			Name:   "bd",

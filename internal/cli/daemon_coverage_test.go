@@ -115,11 +115,11 @@ func TestDaemon_ComputeBackoff(t *testing.T) {
 		restartCount int
 		expect       time.Duration
 	}{
-		{0, 2 * time.Second},                // 2 * 2^0 = 2
-		{1, 4 * time.Second},                // 2 * 2^1 = 4
-		{2, 8 * time.Second},                // 2 * 2^2 = 8
-		{3, 16 * time.Second},               // 2 * 2^3 = 16
-		{10, 2048 * time.Second},            // 2 * 2^10 = 2048 but capped to 300... wait 2048 < 300? no, 2048 > 300
+		{0, 2 * time.Second},     // 2 * 2^0 = 2
+		{1, 4 * time.Second},     // 2 * 2^1 = 4
+		{2, 8 * time.Second},     // 2 * 2^2 = 8
+		{3, 16 * time.Second},    // 2 * 2^3 = 16
+		{10, 2048 * time.Second}, // 2 * 2^10 = 2048 but capped to 300... wait 2048 < 300? no, 2048 > 300
 	}
 
 	for _, tc := range tests {

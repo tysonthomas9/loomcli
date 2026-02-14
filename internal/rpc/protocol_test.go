@@ -523,4 +523,3 @@ func TestGateArgs_JSONRoundTrip(t *testing.T) {
 		}
 	})
 }
-

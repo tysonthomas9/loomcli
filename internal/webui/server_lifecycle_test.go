@@ -27,7 +27,7 @@ func waitForServerReady(t *testing.T, client *http.Client, serverAddr string) {
 }
 
 // TestStartServer_GracefulShutdown_CompletesWithinTimeout verifies that
-// cancelling the context triggers graceful shutdown that completes within
+// canceling the context triggers graceful shutdown that completes within
 // the configured ShutdownTimeout.
 func TestStartServer_GracefulShutdown_CompletesWithinTimeout(t *testing.T) {
 	port := 59900

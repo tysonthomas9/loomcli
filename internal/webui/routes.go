@@ -62,14 +62,14 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("POST /api/fleet/register", handleFleetRegister(fleetStore, tokenCfg, fleetRegCfg))
 		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
 			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
-			mux.Handle("POST /api/fleet/claim", fleetAuth(http.HandlerFunc(handleFleetClaim(pool, claimMetrics))))
+			mux.Handle("POST /api/fleet/claim", fleetAuth(handleFleetClaim(pool, claimMetrics)))
 		} else {
 			mux.HandleFunc("POST /api/fleet/claim", handleFleetClaim(pool, claimMetrics))
 		}
 		mux.HandleFunc("POST /api/fleet/done/{id}", handleFleetDone(fleetStore))
 		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
 			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
-			mux.Handle("POST /api/fleet/heartbeat", fleetAuth(http.HandlerFunc(handleFleetHeartbeat(fleetStore))))
+			mux.Handle("POST /api/fleet/heartbeat", fleetAuth(handleFleetHeartbeat(fleetStore)))
 		} else {
 			mux.HandleFunc("POST /api/fleet/heartbeat", handleFleetHeartbeat(fleetStore))
 		}
@@ -139,10 +139,10 @@ type CircuitBreakerStatus struct {
 
 // HealthStatus represents the detailed health status of the API.
 type HealthStatus struct {
-	Status         string                 `json:"status"`                    // "ok", "degraded", "unhealthy"
-	Daemon         DaemonStatus           `json:"daemon"`                    // Daemon connection status
-	Pool           *daemon.PoolStats      `json:"pool,omitempty"`            // Connection pool stats
-	CircuitBreaker *CircuitBreakerStatus  `json:"circuit_breaker,omitempty"` // Circuit breaker state
+	Status         string                `json:"status"`                    // "ok", "degraded", "unhealthy"
+	Daemon         DaemonStatus          `json:"daemon"`                    // Daemon connection status
+	Pool           *daemon.PoolStats     `json:"pool,omitempty"`            // Connection pool stats
+	CircuitBreaker *CircuitBreakerStatus `json:"circuit_breaker,omitempty"` // Circuit breaker state
 }
 
 // breakerStater is an optional interface for pools that have a circuit breaker.
