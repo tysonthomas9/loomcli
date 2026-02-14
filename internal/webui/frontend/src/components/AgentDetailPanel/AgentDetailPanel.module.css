@@ -224,11 +224,16 @@
 .logsContainer {
   flex: 1;
   min-height: 0;
-  padding: 16px 20px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  min-width: 0;
+}
+
+.logsContainer > [data-testid='log-viewer'] {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
 }
 
 .logsMetaRow {
@@ -236,6 +241,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 16px 20px 8px;
+  flex-shrink: 0;
 }
 
 .logsModeBadge {

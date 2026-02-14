@@ -9,6 +9,9 @@
   background-color: #1e1e1e;
   border-radius: var(--radius-md, 8px);
   overflow: hidden;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
 }
 
 /* ============= Header ============= */
@@ -112,5 +115,42 @@
   flex: 1;
   overflow: hidden;
   min-height: 0;
+  min-width: 0;
   background-color: #1e1e1e;
+}
+
+.terminalContainer :global(.xterm) {
+  height: 100%;
+  width: 100%;
+}
+
+.terminalContainer :global(.xterm-screen) {
+  height: 100%;
+}
+
+.terminalContainer :global(.xterm-viewport) {
+  width: 100% !important;
+  overflow-y: auto !important;
+}
+
+.terminalContainer :global(.xterm-viewport)::-webkit-scrollbar {
+  width: 8px;
+}
+
+.terminalContainer :global(.xterm-viewport)::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.terminalContainer :global(.xterm-viewport)::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+.terminalContainer :global(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
+
+.terminalContainer :global(.xterm-viewport) {
+  scrollbar-width: thin;
+  scrollbar-color: #555 #1e1e1e;
 }

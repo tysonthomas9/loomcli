@@ -289,8 +289,16 @@
 .logsContainer {
   flex: 1;
   min-height: 0;
-  padding: 16px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.logsContainer > [data-testid='log-viewer'] {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
 }
 
 /* ============= Scrollable Content ============= */

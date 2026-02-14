@@ -110,15 +110,24 @@ export function LogViewer({
     fitAddonRef.current = fitAddon;
 
     terminal.open(container);
-    fitAddon.fit();
-    onTerminalResize?.(terminal.cols, terminal.rows);
+
+    const runFit = () => {
+      if (!fitAddonRef.current || !terminalRef.current) return;
+      fitAddonRef.current.fit();
+      onTerminalResize?.(terminalRef.current.cols, terminalRef.current.rows);
+    };
+
+    // Fit once immediately, then again after layout settles (panel slide-in/resize).
+    runFit();
+    const initialFitFrame = requestAnimationFrame(runFit);
+    const initialFitTimeout = setTimeout(runFit, 120);
 
     const inputDisposable = onTerminalData
       ? terminal.onData((data: string) => onTerminalData(data))
       : null;
 
     // Detect user scroll to disable auto-scroll
-    terminal.onScroll(() => {
+    const scrollDisposable = terminal.onScroll(() => {
       if (!terminalRef.current) return;
       const term = terminalRef.current;
       const buffer = term.buffer.active;
@@ -134,12 +143,7 @@ export function LogViewer({
     const observer = new ResizeObserver(() => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        if (fitAddonRef.current) {
-          fitAddonRef.current.fit();
-          if (terminalRef.current) {
-            onTerminalResize?.(terminalRef.current.cols, terminalRef.current.rows);
-          }
-        }
+        runFit();
       }, 100);
     });
     observer.observe(container);
@@ -148,8 +152,11 @@ export function LogViewer({
     lastWrittenIndexRef.current = 0;
 
     return () => {
+      cancelAnimationFrame(initialFitFrame);
+      clearTimeout(initialFitTimeout);
       clearTimeout(resizeTimer);
       observer.disconnect();
+      scrollDisposable.dispose();
       inputDisposable?.dispose();
       terminal.dispose();
       terminalRef.current = null;
