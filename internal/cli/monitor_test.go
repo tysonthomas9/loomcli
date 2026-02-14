@@ -2625,11 +2625,10 @@ func TestRenderAgentLine(t *testing.T) {
 // ===========================================================================
 
 func TestLoadDaemonManagedAgents_NoFile(t *testing.T) {
-	// Set LOOM_CONFIG_DIR to a temp directory that doesn't contain daemon-agents.json
 	tmpDir := t.TempDir()
-	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
 
-	result := loadDaemonManagedAgents()
+	result := loadDaemonManagedAgents(stateFilePath)
 
 	// When file doesn't exist, should return nil
 	if result != nil {
@@ -2639,7 +2638,7 @@ func TestLoadDaemonManagedAgents_NoFile(t *testing.T) {
 
 func TestLoadDaemonManagedAgents_ValidFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
 
 	// Create valid daemon-agents.json with current PID (so it passes the "is running" check)
 	state := DaemonAgentState{
@@ -2654,11 +2653,11 @@ func TestLoadDaemonManagedAgents_ValidFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal state: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
 		t.Fatalf("failed to write daemon-agents.json: %v", err)
 	}
 
-	result := loadDaemonManagedAgents()
+	result := loadDaemonManagedAgents(stateFilePath)
 
 	// Should return map with all three worktrees
 	if result == nil {
@@ -2680,14 +2679,14 @@ func TestLoadDaemonManagedAgents_ValidFile(t *testing.T) {
 
 func TestLoadDaemonManagedAgents_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
 
 	// Create file with invalid JSON
-	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), []byte("not valid json"), 0644); err != nil {
+	if err := os.WriteFile(stateFilePath, []byte("not valid json"), 0644); err != nil {
 		t.Fatalf("failed to write daemon-agents.json: %v", err)
 	}
 
-	result := loadDaemonManagedAgents()
+	result := loadDaemonManagedAgents(stateFilePath)
 
 	// Should return nil on invalid JSON
 	if result != nil {
@@ -2697,7 +2696,7 @@ func TestLoadDaemonManagedAgents_InvalidJSON(t *testing.T) {
 
 func TestLoadDaemonManagedAgents_StaleDaemon(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
 
 	// Create daemon-agents.json with a PID that doesn't exist (very high PID unlikely to exist)
 	// Use a PID that's almost certainly not running
@@ -2711,11 +2710,11 @@ func TestLoadDaemonManagedAgents_StaleDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal state: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
 		t.Fatalf("failed to write daemon-agents.json: %v", err)
 	}
 
-	result := loadDaemonManagedAgents()
+	result := loadDaemonManagedAgents(stateFilePath)
 
 	// Should return nil when daemon process is not running (stale state file)
 	if result != nil {
@@ -2725,7 +2724,7 @@ func TestLoadDaemonManagedAgents_StaleDaemon(t *testing.T) {
 
 func TestLoadDaemonManagedAgents_EmptyAgents(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
 
 	// Create valid daemon-agents.json with current PID but empty agents array
 	state := DaemonAgentState{
@@ -2736,11 +2735,11 @@ func TestLoadDaemonManagedAgents_EmptyAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal state: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
 		t.Fatalf("failed to write daemon-agents.json: %v", err)
 	}
 
-	result := loadDaemonManagedAgents()
+	result := loadDaemonManagedAgents(stateFilePath)
 
 	// Should return empty map (not nil) when agents array is empty but file is valid
 	if result == nil {
@@ -2753,7 +2752,7 @@ func TestLoadDaemonManagedAgents_EmptyAgents(t *testing.T) {
 
 func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
 
 	// Create daemon-agents.json with some empty worktree names
 	state := DaemonAgentState{
@@ -2768,11 +2767,11 @@ func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal state: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
 		t.Fatalf("failed to write daemon-agents.json: %v", err)
 	}
 
-	result := loadDaemonManagedAgents()
+	result := loadDaemonManagedAgents(stateFilePath)
 
 	// Should only include non-empty worktree names
 	if result == nil {
@@ -2794,7 +2793,7 @@ func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
 
 func TestLoadDaemonManagedAgents_WithRole(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
 
 	state := DaemonAgentState{
 		PID: os.Getpid(),
@@ -2808,11 +2807,11 @@ func TestLoadDaemonManagedAgents_WithRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal state: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "daemon-agents.json"), data, 0644); err != nil {
+	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
 		t.Fatalf("failed to write daemon-agents.json: %v", err)
 	}
 
-	result := loadDaemonManagedAgents()
+	result := loadDaemonManagedAgents(stateFilePath)
 	if result == nil {
 		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
 	}

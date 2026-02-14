@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -203,10 +202,9 @@ type DaemonAgentInfo struct {
 // loadDaemonManagedAgents reads the daemon state file and returns metadata
 // for worktrees under daemon supervision, including their role.
 // Returns nil if the file doesn't exist, can't be parsed, or daemon isn't running.
-// The state file is expected at ~/.loom/daemon-agents.json (global location).
-func loadDaemonManagedAgents() map[string]DaemonAgentInfo {
-	daemonStatePath := filepath.Join(GetConfigDir(), "daemon-agents.json")
-	data, err := os.ReadFile(daemonStatePath)
+// The stateFilePath should be resolved via ResolveDaemonStatePath().
+func loadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
+	data, err := os.ReadFile(stateFilePath)
 	if err != nil {
 		return nil // File doesn't exist or can't be read
 	}
@@ -440,7 +438,11 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 	}
 
 	// Load daemon-managed agents (if any)
-	daemonManaged := loadDaemonManagedAgents()
+	var daemonManaged map[string]DaemonAgentInfo
+	if projectDir, err2 := os.Getwd(); err2 == nil {
+		daemonStatePath := ResolveDaemonStatePath(projectDir)
+		daemonManaged = loadDaemonManagedAgents(daemonStatePath)
+	}
 
 	var agents []AgentStatus
 	taskIDToAgents := make(map[string][]string) // Track which agents claim which tasks

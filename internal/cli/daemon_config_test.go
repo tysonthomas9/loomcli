@@ -611,3 +611,62 @@ agents:
 		}
 	})
 }
+
+func TestResolveDaemonStatePath_DefaultConfig(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	projectDir := t.TempDir()
+
+	got := ResolveDaemonStatePath(projectDir)
+	want := filepath.Join(projectDir, ".loom", "daemon-agents.json")
+	if got != want {
+		t.Errorf("ResolveDaemonStatePath() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveDaemonStatePath_CustomPIDFile(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	projectDir := t.TempDir()
+	localYAML := `daemon:
+  pid_file: /tmp/custom/daemon.pid
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ResolveDaemonStatePath(projectDir)
+	want := "/tmp/custom/daemon-agents.json"
+	if got != want {
+		t.Errorf("ResolveDaemonStatePath() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveDaemonStatePath_RelativePIDFile(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	projectDir := t.TempDir()
+	localYAML := `daemon:
+  pid_file: custom/daemon.pid
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ResolveDaemonStatePath(projectDir)
+	want := filepath.Join(projectDir, "custom", "daemon-agents.json")
+	if got != want {
+		t.Errorf("ResolveDaemonStatePath() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveDaemonStatePath_InvalidConfig(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte("{{{invalid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ResolveDaemonStatePath(projectDir)
+	want := filepath.Join(projectDir, ".loom", "daemon-agents.json")
+	if got != want {
+		t.Errorf("ResolveDaemonStatePath() = %q, want %q (fallback on invalid config)", got, want)
+	}
+}

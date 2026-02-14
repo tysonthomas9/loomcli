@@ -130,10 +130,10 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// 3. Resolve paths (PID file, log dir)
+	// 3. Resolve paths (PID file, log dir, state file)
 	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
 	logDir := resolveDaemonPath(projectDir, config.Daemon.LogDir)
-	stateFilePath := filepath.Join(filepath.Dir(pidFilePath), "daemon-agents.json")
+	stateFilePath := ResolveDaemonStatePath(projectDir)
 	lockFilePath := filepath.Join(filepath.Dir(pidFilePath), "daemon.lock")
 
 	// 3.5. Validate paths stay within expected boundaries
@@ -278,7 +278,7 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	}
 
 	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
-	stateFilePath := filepath.Join(filepath.Dir(pidFilePath), "daemon-agents.json")
+	stateFilePath := ResolveDaemonStatePath(projectDir)
 
 	// Check if daemon is running
 	pid, running := isLoomDaemonRunning(pidFilePath)

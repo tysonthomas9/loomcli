@@ -199,6 +199,18 @@ func (dc *DaemonConfig) ResolveRole(name string) (RoleConfig, bool) {
 	return rc, ok
 }
 
+// ResolveDaemonStatePath returns the path to daemon-agents.json for the given project directory.
+// It loads the daemon config to determine the PID file location, then returns the state file
+// path adjacent to the PID file. On config load error, falls back to <projectDir>/.loom/daemon-agents.json.
+func ResolveDaemonStatePath(projectDir string) string {
+	config, err := LoadDaemonConfig(projectDir)
+	if err != nil {
+		return filepath.Join(projectDir, ".loom", "daemon-agents.json")
+	}
+	pidFilePath := resolveDaemonPath(projectDir, config.Daemon.PIDFile)
+	return filepath.Join(filepath.Dir(pidFilePath), "daemon-agents.json")
+}
+
 // LoadPromptTemplate reads a prompt template file and executes it with the given data.
 // Returns the rendered prompt string.
 func LoadPromptTemplate(path string, data PromptData) (string, error) {
