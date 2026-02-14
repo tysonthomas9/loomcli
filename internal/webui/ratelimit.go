@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"encoding/json"
 	"math"
 	"net/http"
 	"strconv"
@@ -82,10 +81,8 @@ func NewRateLimitMiddleware(config RateLimitConfig) (*rateLimiter, func(http.Han
 
 			if !limiter.Allow() {
 				retryAfter := int(math.Ceil(1.0 / float64(limiter.Limit())))
-				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-				w.WriteHeader(http.StatusTooManyRequests)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				respondJSON(w, http.StatusTooManyRequests, map[string]interface{}{
 					"error":       "rate limit exceeded",
 					"retry_after": retryAfter,
 				})

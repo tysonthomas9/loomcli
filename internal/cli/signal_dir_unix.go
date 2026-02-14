@@ -56,7 +56,7 @@ func checkSignalDir(fi os.FileInfo, dir string) error {
 		return fmt.Errorf("failed to get ownership info for signal directory: %s", dir)
 	}
 
-	if stat.Uid != uint32(os.Getuid()) {
+	if stat.Uid != uint32(os.Getuid()) { //nolint:gosec // G115: uid fits uint32 on supported platforms
 		return fmt.Errorf("signal directory owned by uid %d, expected %d: %s", stat.Uid, os.Getuid(), dir)
 	}
 

@@ -60,7 +60,7 @@ func TestCloseTask_Success(t *testing.T) {
 	mock.Install()
 
 	// closeTask doesn't return anything, just verify no panic and correct args
-	closeTask("/test/worktree", "task-123", "Tests pass")
+	closeTask("task-123", "Tests pass")
 }
 
 func TestCloseTask_Failure(t *testing.T) {
@@ -76,37 +76,55 @@ func TestCloseTask_Failure(t *testing.T) {
 	mock.Install()
 
 	// closeTask prints warning but doesn't panic
-	closeTask("/test/worktree", "task-456", "Done")
+	closeTask("task-456", "Done")
 }
 
 func TestResetTask_Success(t *testing.T) {
 	ResetBeadsDirCache()
-	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    ".",
-		Name:   "bd",
-		Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
-		Stdout: "Task updated\n",
-		Err:    nil,
-	}})
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-789", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
+			Stdout: "Task updated\n",
+			Err:    nil,
+		},
+	})
 	mock.Install()
 
-	resetTask("/test/worktree", "task-789")
+	resetTask("task-789")
 }
 
 func TestResetTask_Failure(t *testing.T) {
 	ResetBeadsDirCache()
-	mock := NewCommandMock(t, []CommandStub{{
-		Dir:    ".",
-		Name:   "bd",
-		Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
-		Stdout: "",
-		Stderr: "Error: invalid task\n",
-		Err:    errors.New("exit status 1"),
-	}})
+	mock := NewCommandMock(t, []CommandStub{
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-789", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"update", "task-789", "--status", "open", "--assignee", ""},
+			Stdout: "",
+			Stderr: "Error: invalid task\n",
+			Err:    errors.New("exit status 1"),
+		},
+	})
 	mock.Install()
 
 	// resetTask prints warning and manual instructions but doesn't panic
-	resetTask("/test/worktree", "task-789")
+	resetTask("task-789")
 }
 
 func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
@@ -450,7 +468,14 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 			Stdout: "INCOMPLETE: No work found\n",
 			Err:    nil,
 		},
-		// resetTask call
+		// resetTask: show then update
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-orphan2", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -467,7 +492,14 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
-		// resetTask call only (no analyze)
+		// resetTask: show then update (no analyze)
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-orphan3", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -626,7 +658,14 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 			Stdout: `[{"id":"task-1","title":"First task"},{"id":"task-2","title":"Second task"}]`,
 			Err:    nil,
 		},
-		// resetTask for task-1
+		// resetTask for task-1: show then update
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-1", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -634,7 +673,14 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 			Stdout: "Updated\n",
 			Err:    nil,
 		},
-		// resetTask for task-2
+		// resetTask for task-2: show then update
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-2", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -658,7 +704,14 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 			Stdout: `[{"id":"task-1","title":"Already handled"},{"id":"task-2","title":"Orphaned task"}]`,
 			Err:    nil,
 		},
-		// resetTask for task-2 only (task-1 is already handled)
+		// resetTask for task-2 only (task-1 is already handled): show then update
+		{
+			Dir:    ".",
+			Name:   "bd",
+			Args:   []string{"show", "task-2", "--json"},
+			Stdout: `[{"status":"in_progress"}]`,
+			Err:    nil,
+		},
 		{
 			Dir:    ".",
 			Name:   "bd",

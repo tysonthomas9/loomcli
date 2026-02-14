@@ -106,7 +106,7 @@ func (sd *StaleDetector) Status() StaleDetectorStatus {
 	return sd.status
 }
 
-// Run starts the main detection loop. It blocks until ctx is cancelled.
+// Run starts the main detection loop. It blocks until ctx is canceled.
 func (sd *StaleDetector) Run(ctx context.Context) error {
 	log.Printf("Stale detector started (server=%s, interval=%s, threshold=%s)",
 		sd.serverID, sd.config.CheckInterval, sd.config.StaleThreshold)

@@ -2,7 +2,6 @@ package webui
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
@@ -70,12 +69,5 @@ func WorkerClaimsFromContext(ctx context.Context) (*WorkerClaims, bool) {
 
 // writeFleetAuthError writes a 401 JSON error response using the FleetClaimResponse envelope.
 func writeFleetAuthError(w http.ResponseWriter, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	if err := json.NewEncoder(w).Encode(FleetClaimResponse{
-		Success: false,
-		Error:   msg,
-	}); err != nil {
-		log.Printf("Failed to encode fleet auth error response: %v", err)
-	}
+	respondJSON(w, http.StatusUnauthorized, FleetClaimResponse{Success: false, Error: msg})
 }

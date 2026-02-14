@@ -100,7 +100,7 @@ func runInit(cmd *cobra.Command, args []string) {
 	showSummary(worktreesDir, names)
 }
 
-func runInitWorkspace(cmd *cobra.Command, args []string) {
+func runInitWorkspace(_ *cobra.Command, _ []string) {
 	fmt.Println("")
 	fmt.Println("🔧 Loom Workspace Setup")
 	fmt.Println("=========================")
@@ -161,7 +161,7 @@ func runInitWorkspace(cmd *cobra.Command, args []string) {
 	fmt.Println("")
 
 	// Step 4: Show workspace ready summary
-	showWorkspaceSummary(initWorkspace, ws)
+	showWorkspaceSummary(ws)
 }
 
 func initBeadsInWorkspace(wsPath string) {
@@ -174,7 +174,7 @@ func initBeadsInWorkspace(wsPath string) {
 	fmt.Println("✓ beads initialized in workspace root")
 }
 
-func showWorkspaceSummary(wsName string, ws WorkspaceConfig) {
+func showWorkspaceSummary(ws WorkspaceConfig) {
 	fmt.Println("Workspace ready! 🎉")
 	fmt.Println("")
 	fmt.Println("Directory structure:")
@@ -543,7 +543,7 @@ func getFirstName(names []string) string {
 
 // Interactive prompt helpers
 
-func promptYesNo(prompt string, defaultYes bool) bool {
+func promptYesNo(prompt string, defaultYes bool) bool { //nolint:unparam // defaultYes is always true in production but tested with false
 	reader := bufio.NewReader(os.Stdin)
 	hint := "[y/N]"
 	if defaultYes {

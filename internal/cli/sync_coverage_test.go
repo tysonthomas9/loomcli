@@ -38,13 +38,14 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 	syncPullOnly = false
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// Push phase: fetch, stash, checkout, pull, merge, push
+		// Push phase: fetch, stash, checkout, pull, merge, push, restore-checkout
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/api-branch", "-m", "Merge api-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge api-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "api-branch"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"checkout", "api-branch"}, Err: nil},
 		// Pull phase: fetch, merge, push
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"merge", "origin/main", "-m", "Pull from main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
@@ -55,10 +56,11 @@ func TestSyncSingleWorkspace_PushAndPull(t *testing.T) {
 	cmdMock := NewCommandMock(t, []CommandStub{
 		// DiscoverWorktrees: GetCurrentBranch for api
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
-		// Push phase: stash list x2 + HasCommitsBetweenRemote
+		// Push phase: stash list x2, GetCurrentBranch, HasCommitsBetweenRemote
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "main..origin/api-branch", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
+		{Name: "git", Args: []string{"log", "origin/main..api-branch", "--oneline"}, Stdout: "abc commit\n"},
 	})
 	cmdMock.Install()
 
@@ -113,13 +115,14 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 	syncPullOnly = false
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// Push phase only
+		// Push phase only: fetch, stash, checkout, pull, merge, push, restore-checkout
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"checkout", "main"}, Err: nil},
 		{Args: []string{"pull", "origin", "main"}, Err: nil},
-		{Args: []string{"merge", "origin/api-branch", "-m", "Merge api-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"}, Err: nil},
+		{Args: []string{"merge", "-m", "Merge api-branch into main\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", "--", "api-branch"}, Err: nil},
 		{Args: []string{"push", "origin", "main"}, Err: nil},
+		{Args: []string{"checkout", "api-branch"}, Err: nil},
 	})
 	outputMock.Install()
 
@@ -127,7 +130,8 @@ func TestSyncSingleWorkspace_PushOnly(t *testing.T) {
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"log", "main..origin/api-branch", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "api-branch\n"},
+		{Name: "git", Args: []string{"log", "origin/main..api-branch", "--oneline"}, Stdout: "abc commit\n"},
 	})
 	cmdMock.Install()
 

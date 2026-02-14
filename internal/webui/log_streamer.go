@@ -80,7 +80,7 @@ func NewLogStreamer(fp string) (*LogStreamer, error) {
 	// Watch the directory to catch file creation/rotation
 	dir := filepath.Dir(fp)
 	if err := watcher.Add(dir); err != nil {
-		watcher.Close()
+		_ = watcher.Close()
 		return nil, fmt.Errorf("failed to watch directory: %w", err)
 	}
 
@@ -218,7 +218,7 @@ func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string
 }
 
 // Stream starts SSE streaming to the ResponseWriter.
-// Blocks until context cancelled or error.
+// Blocks until context canceled or error.
 func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startLine int64) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -232,7 +232,7 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startLi
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	// Send retry interval
-	fmt.Fprintf(w, "retry: %d\n\n", sseRetryMs)
+	_, _ = fmt.Fprintf(w, "retry: %d\n\n", sseRetryMs)
 	flusher.Flush()
 
 	// Open file and seek to position
@@ -391,14 +391,14 @@ func (s *LogStreamer) sendLogLine(w http.ResponseWriter, flusher http.Flusher, l
 		return
 	}
 	eventID := sseEventIDCounter.Add(1)
-	fmt.Fprintf(w, "id: %d\nevent: log-line\ndata: %s\n\n", eventID, string(data))
+	_, _ = fmt.Fprintf(w, "id: %d\nevent: log-line\ndata: %s\n\n", eventID, string(data))
 	flusher.Flush()
 }
 
 // sendTruncatedEvent notifies the client that the file was truncated.
 func (s *LogStreamer) sendTruncatedEvent(w http.ResponseWriter, flusher http.Flusher) {
 	eventID := sseEventIDCounter.Add(1)
-	fmt.Fprintf(w, "id: %d\nevent: truncated\ndata: {}\n\n", eventID)
+	_, _ = fmt.Fprintf(w, "id: %d\nevent: truncated\ndata: {}\n\n", eventID)
 	flusher.Flush()
 }
 

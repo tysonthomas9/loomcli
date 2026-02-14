@@ -116,7 +116,7 @@ func EnsureSocketDir(socketPath string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("failed to get ownership info for socket directory %s", dir)
 	}
-	if stat.Uid != uint32(os.Getuid()) {
+	if stat.Uid != uint32(os.Getuid()) { //nolint:gosec // G115: uid fits uint32 on supported platforms
 		return "", fmt.Errorf("socket directory %s is owned by uid %d, expected %d (possible attack)", dir, stat.Uid, os.Getuid())
 	}
 

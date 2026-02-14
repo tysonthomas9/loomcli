@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -62,14 +61,14 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("POST /api/fleet/register", handleFleetRegister(fleetStore, tokenCfg, fleetRegCfg))
 		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
 			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
-			mux.Handle("POST /api/fleet/claim", fleetAuth(http.HandlerFunc(handleFleetClaim(pool, claimMetrics))))
+			mux.Handle("POST /api/fleet/claim", fleetAuth(handleFleetClaim(pool, claimMetrics)))
 		} else {
 			mux.HandleFunc("POST /api/fleet/claim", handleFleetClaim(pool, claimMetrics))
 		}
 		mux.HandleFunc("POST /api/fleet/done/{id}", handleFleetDone(fleetStore))
 		if tokenCfg != nil && len(tokenCfg.SigningKey) > 0 {
 			fleetAuth := NewFleetAuthMiddleware(tokenCfg.SigningKey)
-			mux.Handle("POST /api/fleet/heartbeat", fleetAuth(http.HandlerFunc(handleFleetHeartbeat(fleetStore))))
+			mux.Handle("POST /api/fleet/heartbeat", fleetAuth(handleFleetHeartbeat(fleetStore)))
 		} else {
 			mux.HandleFunc("POST /api/fleet/heartbeat", handleFleetHeartbeat(fleetStore))
 		}
@@ -122,11 +121,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 // This is for load balancers and basic monitoring - it doesn't check daemon connectivity.
 func handleHealth(pool daemon.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
-			log.Printf("Failed to encode health response: %v", err)
-		}
+		respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }
 
@@ -218,16 +213,11 @@ func handleAPIHealth(pool daemon.Pool) http.HandlerFunc {
 			status.Daemon.Error = "connection pool not initialized"
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		if status.Status == "ok" {
-			w.WriteHeader(http.StatusOK)
-		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
+		httpStatus := http.StatusOK
+		if status.Status != "ok" {
+			httpStatus = http.StatusServiceUnavailable
 		}
-
-		if err := json.NewEncoder(w).Encode(status); err != nil {
-			log.Printf("Failed to encode API health response: %v", err)
-		}
+		respondJSON(w, httpStatus, status)
 	}
 }
 
@@ -276,16 +266,11 @@ func handleStats(pool daemon.Pool) http.HandlerFunc {
 // handleStatsWithPool is the internal implementation that accepts an interface for testing.
 func handleStatsWithPool(pool statsConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(StatsResponse{
+			respondJSON(w, http.StatusServiceUnavailable, StatsResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode stats response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -299,13 +284,7 @@ func handleStatsWithPool(pool statsConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(StatsResponse{
-				Success: false,
-				Error:   err.Error(),
-			}); err != nil {
-				log.Printf("Failed to encode stats response: %v", err)
-			}
+			respondJSON(w, status, StatsResponse{Success: false, Error: err.Error()})
 			return
 		}
 		defer pool.Put(client)
@@ -313,47 +292,32 @@ func handleStatsWithPool(pool statsConnectionGetter) http.HandlerFunc {
 		// Execute Stats RPC call
 		resp, err := client.Stats()
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(StatsResponse{
+			respondJSON(w, http.StatusInternalServerError, StatsResponse{
 				Success: false,
 				Error:   fmt.Sprintf("rpc error: %v", err),
-			}); err != nil {
-				log.Printf("Failed to encode stats response: %v", err)
-			}
+			})
 			return
 		}
 
 		if !resp.Success {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(StatsResponse{
+			respondJSON(w, http.StatusInternalServerError, StatsResponse{
 				Success: false,
 				Error:   resp.Error,
-			}); err != nil {
-				log.Printf("Failed to encode stats response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Parse the statistics from RPC response
 		var stats types.Statistics
 		if err := json.Unmarshal(resp.Data, &stats); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(StatsResponse{
+			respondJSON(w, http.StatusInternalServerError, StatsResponse{
 				Success: false,
 				Error:   fmt.Sprintf("failed to parse stats: %v", err),
-			}); err != nil {
-				log.Printf("Failed to encode stats response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(StatsResponse{
-			Success: true,
-			Data:    &stats,
-		}); err != nil {
-			log.Printf("Failed to encode stats response: %v", err)
-		}
+		respondJSON(w, http.StatusOK, StatsResponse{Success: true, Data: &stats})
 	}
 }
 
@@ -368,16 +332,11 @@ type DaemonStatusResponse struct {
 // This includes auto-commit, auto-push, auto-pull, local-mode, sync-interval, and daemon-mode.
 func handleDaemonStatus(pool daemon.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(DaemonStatusResponse{
+			respondJSON(w, http.StatusServiceUnavailable, DaemonStatusResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode daemon status response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -391,13 +350,7 @@ func handleDaemonStatus(pool daemon.Pool) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(DaemonStatusResponse{
-				Success: false,
-				Error:   err.Error(),
-			}); err != nil {
-				log.Printf("Failed to encode daemon status response: %v", err)
-			}
+			respondJSON(w, status, DaemonStatusResponse{Success: false, Error: err.Error()})
 			return
 		}
 		defer pool.Put(client)
@@ -405,22 +358,13 @@ func handleDaemonStatus(pool daemon.Pool) http.HandlerFunc {
 		// Get daemon status
 		daemonStatus, err := client.Status()
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(DaemonStatusResponse{
+			respondJSON(w, http.StatusInternalServerError, DaemonStatusResponse{
 				Success: false,
 				Error:   fmt.Sprintf("rpc error: %v", err),
-			}); err != nil {
-				log.Printf("Failed to encode daemon status response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(DaemonStatusResponse{
-			Success: true,
-			Data:    daemonStatus,
-		}); err != nil {
-			log.Printf("Failed to encode daemon status response: %v", err)
-		}
+		respondJSON(w, http.StatusOK, DaemonStatusResponse{Success: true, Data: daemonStatus})
 	}
 }

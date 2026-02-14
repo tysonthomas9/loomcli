@@ -48,13 +48,13 @@ func TestBuildInteractiveCmd_PromptInArgs(t *testing.T) {
 			name:     "codex",
 			buildFn:  buildCodexInteractiveCmd,
 			prompt:   "do something",
-			wantArgs: []string{"codex", "--full-auto", "do something"},
+			wantArgs: []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "do something"},
 		},
 		{
 			name:     "opencode",
 			buildFn:  buildOpenCodeInteractiveCmd,
 			prompt:   "do something",
-			wantArgs: []string{"opencode", "--prompt", "do something"},
+			wantArgs: []string{"opencode", "run", "do something"},
 		},
 	}
 
@@ -110,13 +110,13 @@ func TestBuildInteractiveCmd_BinaryAndFlags(t *testing.T) {
 			name:       "codex",
 			buildFn:    buildCodexInteractiveCmd,
 			wantBinary: "codex",
-			wantFlags:  []string{"--full-auto"},
+			wantFlags:  []string{"--dangerously-bypass-approvals-and-sandbox"},
 		},
 		{
 			name:       "opencode",
 			buildFn:    buildOpenCodeInteractiveCmd,
 			wantBinary: "opencode",
-			wantFlags:  []string{"--prompt"},
+			wantFlags:  []string{"run"},
 		},
 	}
 

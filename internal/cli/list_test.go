@@ -127,6 +127,7 @@ func TestRunListNoWorktrees(t *testing.T) {
 }
 
 func TestRunListWithWorktrees(t *testing.T) {
+	resetIntegrationBranchCache()
 	tests := []struct {
 		name                 string
 		worktreeNames        []string
@@ -508,6 +509,7 @@ func TestGetWorktreeListStatus(t *testing.T) {
 }
 
 func TestRunListWorkspaceMode(t *testing.T) {
+	resetIntegrationBranchCache()
 	// Save and restore working directory
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -613,6 +615,7 @@ func TestRunListWorkspaceMode(t *testing.T) {
 }
 
 func TestRunListWorkspaceModeDetection(t *testing.T) {
+	resetIntegrationBranchCache()
 	// Verify that runList detects workspace mode when any worktree has Workspace set.
 	// We test this by setting up real worktree dirs with workspace config.
 
@@ -676,6 +679,7 @@ func TestRunListWorkspaceModeDetection(t *testing.T) {
 }
 
 func TestRenderListLegacy(t *testing.T) {
+	resetIntegrationBranchCache()
 	// Test that renderListLegacy produces the expected format
 	worktrees := []WorktreeInfo{
 		{Name: "falcon", Path: "/tmp/falcon", Branch: "falcon"},

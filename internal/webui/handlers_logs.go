@@ -198,7 +198,7 @@ func handleAgentLogStream() http.HandlerFunc {
 			}
 			return
 		}
-		defer streamer.Close()
+		defer func() { _ = streamer.Close() }()
 
 		// Disable write timeout for this long-lived SSE connection
 		rc := http.NewResponseController(w)
@@ -206,7 +206,7 @@ func handleAgentLogStream() http.HandlerFunc {
 			log.Printf("Agent log stream: failed to disable write deadline: %v", err)
 		}
 
-		// Stream logs (blocks until context cancelled)
+		// Stream logs (blocks until context canceled)
 		if err := streamer.Stream(r.Context(), w, startLine); err != nil {
 			log.Printf("Log stream error for agent %s: %v", agentName, err)
 		}
@@ -503,7 +503,7 @@ func handleTaskLogStream() http.HandlerFunc {
 			}
 			return
 		}
-		defer streamer.Close()
+		defer func() { _ = streamer.Close() }()
 
 		// Disable write timeout for this long-lived SSE connection
 		rc := http.NewResponseController(w)
@@ -511,7 +511,7 @@ func handleTaskLogStream() http.HandlerFunc {
 			log.Printf("Task log stream: failed to disable write deadline: %v", err)
 		}
 
-		// Stream logs (blocks until context cancelled)
+		// Stream logs (blocks until context canceled)
 		if err := streamer.Stream(r.Context(), w, startLine); err != nil {
 			log.Printf("Log stream error for task %s/%s: %v", taskID, phase, err)
 		}
