@@ -183,7 +183,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	var fleetJWTKey []byte
 	var fleetRedisConfig *fleet.RedisConfig
 	if serveRedisAddr != "" {
-		fleetRedisConfig = &fleet.RedisConfig{Address: serveRedisAddr}
+		fleetRedisConfig = &fleet.RedisConfig{Address: serveRedisAddr, Password: serveRedisPassword}
 
 		if envKey := os.Getenv("LOOM_FLEET_JWT_KEY"); envKey != "" {
 			decoded, err := hex.DecodeString(envKey)
@@ -194,7 +194,7 @@ func runServe(cmd *cobra.Command, args []string) {
 			log.Printf("Using JWT signing key from LOOM_FLEET_JWT_KEY environment variable")
 		} else {
 			// Get or create shared signing key from Redis
-			redisClient := fleet.NewRedisClient(serveRedisAddr, "", 0)
+			redisClient := fleet.NewRedisClient(serveRedisAddr, serveRedisPassword, 0)
 			mgr := fleet.NewSigningKeyManager(redisClient, nil)
 			key, err := mgr.GetOrCreateSigningKey(ctx)
 			_ = redisClient.Close()

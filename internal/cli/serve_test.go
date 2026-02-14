@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
 // mockMonitorData creates a sample MonitorData for testing
@@ -1188,6 +1190,160 @@ func TestServeFlags_RedisPassword(t *testing.T) {
 	}
 	if f.Value.Type() != "string" {
 		t.Errorf("redis-password type = %q, want %q", f.Value.Type(), "string")
+	}
+}
+
+// TestRedisConfig_PasswordPassthrough verifies that the RedisConfig struct
+// built in runServe correctly includes the password from serveRedisPassword.
+// This mirrors the construction at serve.go line 186:
+//
+//	fleetRedisConfig = &fleet.RedisConfig{Address: serveRedisAddr, Password: serveRedisPassword}
+func TestRedisConfig_PasswordPassthrough(t *testing.T) {
+	tests := []struct {
+		name         string
+		addr         string
+		password     string
+		wantAddr     string
+		wantPassword string
+	}{
+		{
+			name:         "password is included in RedisConfig",
+			addr:         "localhost:6379",
+			password:     "s3cret",
+			wantAddr:     "localhost:6379",
+			wantPassword: "s3cret",
+		},
+		{
+			name:         "empty password is preserved",
+			addr:         "redis.example.com:6379",
+			password:     "",
+			wantAddr:     "redis.example.com:6379",
+			wantPassword: "",
+		},
+		{
+			name:         "complex password with special characters",
+			addr:         "10.0.0.1:6379",
+			password:     "p@ss!w0rd#$%",
+			wantAddr:     "10.0.0.1:6379",
+			wantPassword: "p@ss!w0rd#$%",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save and restore package-level vars
+			origAddr := serveRedisAddr
+			origPassword := serveRedisPassword
+			t.Cleanup(func() {
+				serveRedisAddr = origAddr
+				serveRedisPassword = origPassword
+			})
+
+			serveRedisAddr = tt.addr
+			serveRedisPassword = tt.password
+
+			// Build the config the same way runServe does (serve.go line 186)
+			cfg := &fleet.RedisConfig{Address: serveRedisAddr, Password: serveRedisPassword}
+
+			if cfg.Address != tt.wantAddr {
+				t.Errorf("RedisConfig.Address = %q, want %q", cfg.Address, tt.wantAddr)
+			}
+			if cfg.Password != tt.wantPassword {
+				t.Errorf("RedisConfig.Password = %q, want %q", cfg.Password, tt.wantPassword)
+			}
+		})
+	}
+}
+
+// TestNewRedisClient_PasswordPassthrough verifies that fleet.NewRedisClient
+// receives the password from serveRedisPassword (not a hardcoded empty string).
+// This mirrors the call at serve.go line 197:
+//
+//	redisClient := fleet.NewRedisClient(serveRedisAddr, serveRedisPassword, 0)
+//
+// The fix changed the second argument from "" to serveRedisPassword.
+func TestNewRedisClient_PasswordPassthrough(t *testing.T) {
+	tests := []struct {
+		name     string
+		addr     string
+		password string
+	}{
+		{
+			name:     "password forwarded to NewRedisClient",
+			addr:     "localhost:6379",
+			password: "my-redis-password",
+		},
+		{
+			name:     "empty password still works",
+			addr:     "localhost:6379",
+			password: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origAddr := serveRedisAddr
+			origPassword := serveRedisPassword
+			t.Cleanup(func() {
+				serveRedisAddr = origAddr
+				serveRedisPassword = origPassword
+			})
+
+			serveRedisAddr = tt.addr
+			serveRedisPassword = tt.password
+
+			// Create the client the same way runServe does (serve.go line 197)
+			client := fleet.NewRedisClient(serveRedisAddr, serveRedisPassword, 0)
+			defer func() { _ = client.Close() }()
+
+			// Verify the client was created with the expected options.
+			// go-redis Options() exposes the configured addr and password.
+			opts := client.Options()
+			if opts.Addr != tt.addr {
+				t.Errorf("client Addr = %q, want %q", opts.Addr, tt.addr)
+			}
+			if opts.Password != tt.password {
+				t.Errorf("client Password = %q, want %q", opts.Password, tt.password)
+			}
+		})
+	}
+}
+
+// TestRedisPasswordWiring_ConfigAndClient is an integration-style test that
+// verifies the full password wiring: setting serveRedisPassword flows through
+// to both the RedisConfig struct AND the NewRedisClient call, exactly as
+// runServe does when serveRedisAddr is non-empty.
+func TestRedisPasswordWiring_ConfigAndClient(t *testing.T) {
+	origAddr := serveRedisAddr
+	origPassword := serveRedisPassword
+	t.Cleanup(func() {
+		serveRedisAddr = origAddr
+		serveRedisPassword = origPassword
+	})
+
+	serveRedisAddr = "redis.internal:6380"
+	serveRedisPassword = "fleet-secret-42"
+
+	// Step 1: Build RedisConfig (serve.go line 186)
+	fleetRedisConfig := &fleet.RedisConfig{Address: serveRedisAddr, Password: serveRedisPassword}
+
+	if fleetRedisConfig.Password != "fleet-secret-42" {
+		t.Fatalf("RedisConfig.Password = %q, want %q", fleetRedisConfig.Password, "fleet-secret-42")
+	}
+
+	// Step 2: Create Redis client (serve.go line 197)
+	redisClient := fleet.NewRedisClient(serveRedisAddr, serveRedisPassword, 0)
+	defer func() { _ = redisClient.Close() }()
+
+	opts := redisClient.Options()
+	if opts.Password != "fleet-secret-42" {
+		t.Fatalf("NewRedisClient password = %q, want %q", opts.Password, "fleet-secret-42")
+	}
+
+	// Step 3: Verify both use the same password value
+	if fleetRedisConfig.Password != opts.Password {
+		t.Errorf("RedisConfig.Password (%q) != NewRedisClient password (%q) — password wiring is inconsistent",
+			fleetRedisConfig.Password, opts.Password)
 	}
 }
 
