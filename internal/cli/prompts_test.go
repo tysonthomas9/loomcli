@@ -95,8 +95,8 @@ func TestGeneratePlanningPrompt_WithParent(t *testing.T) {
 	prompt := GeneratePlanningPrompt("falcon", nil, "my-epic-abc")
 
 	wantParts := []string{
-		"bd ready --parent my-epic-abc --json",
-		"bd ready --parent my-epic-abc --limit 10",
+		"bd ready --parent my-epic-abc --limit 50 --json",
+		"bd ready --parent my-epic-abc --limit 50",
 		"Epic scope: my-epic-abc",
 		"MUST only select tasks from this epic",
 	}
@@ -116,8 +116,8 @@ func TestGenerateTaskPrompt_WithParent(t *testing.T) {
 	prompt := GenerateTaskPrompt("nova", nil, "proj-xyz")
 
 	wantParts := []string{
-		"bd ready --parent proj-xyz --json",
-		"bd ready --parent proj-xyz --limit 10",
+		"bd ready --parent proj-xyz --limit 50 --json",
+		"bd ready --parent proj-xyz --limit 50",
 		"Epic scope: proj-xyz",
 		"MUST only select tasks from this epic",
 	}
@@ -145,11 +145,11 @@ func TestGeneratePrompts_NoParent_NoEpicScope(t *testing.T) {
 	}
 
 	// Should contain unscoped bd ready
-	if !strings.Contains(planPrompt, "bd ready --json") {
-		t.Error("planning prompt without parentID should contain 'bd ready --json'")
+	if !strings.Contains(planPrompt, "bd ready --limit 50 --json") {
+		t.Error("planning prompt without parentID should contain 'bd ready --limit 50 --json'")
 	}
-	if !strings.Contains(taskPrompt, "bd ready --json") {
-		t.Error("task prompt without parentID should contain 'bd ready --json'")
+	if !strings.Contains(taskPrompt, "bd ready --limit 50 --json") {
+		t.Error("task prompt without parentID should contain 'bd ready --limit 50 --json'")
 	}
 }
 

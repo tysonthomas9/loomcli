@@ -49,12 +49,12 @@ func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig, parent
 	wsBlock := buildWorkspaceContextBlock(workspace)
 
 	// Build bd ready command with optional --parent filter
-	bdReadyJSON := "bd ready --json"
-	bdReadyFallback := "bd ready --limit 10"
+	bdReadyJSON := "bd ready --limit 50 --json"
+	bdReadyFallback := "bd ready --limit 50"
 	epicScope := ""
 	if parentID != "" {
-		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --json", parentID)
-		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 10", parentID)
+		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --limit 50 --json", parentID)
+		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 50", parentID)
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
@@ -193,12 +193,12 @@ func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID s
 	wsBlock := buildWorkspaceContextBlock(workspace)
 
 	// Build bd ready command with optional --parent filter
-	bdReadyJSON := "bd ready --json"
-	bdReadyFallback := "bd ready --limit 10"
+	bdReadyJSON := "bd ready --limit 50 --json"
+	bdReadyFallback := "bd ready --limit 50"
 	epicScope := ""
 	if parentID != "" {
-		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --json", parentID)
-		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 10", parentID)
+		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --limit 50 --json", parentID)
+		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 50", parentID)
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
