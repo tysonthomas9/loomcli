@@ -246,7 +246,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	} else {
 		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
 		generatePrompt = func(name string, ws *WorkspaceConfig) string {
-			return GenerateTaskPrompt(name, ws, opts.ParentID)
+			return GenerateTaskPrompt(name, ws, opts.ParentID, GetBackendName())
 		}
 	}
 

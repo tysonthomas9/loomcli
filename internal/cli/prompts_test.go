@@ -80,7 +80,7 @@ func TestGenerateTaskPrompt(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt := GenerateTaskPrompt(tc.agentName, nil, "")
+			prompt := GenerateTaskPrompt(tc.agentName, nil, "", "claude")
 
 			for _, part := range tc.wantParts {
 				if !strings.Contains(prompt, part) {
@@ -113,7 +113,7 @@ func TestGeneratePlanningPrompt_WithParent(t *testing.T) {
 }
 
 func TestGenerateTaskPrompt_WithParent(t *testing.T) {
-	prompt := GenerateTaskPrompt("nova", nil, "proj-xyz")
+	prompt := GenerateTaskPrompt("nova", nil, "proj-xyz", "claude")
 
 	wantParts := []string{
 		"bd ready --parent proj-xyz --json",
@@ -135,7 +135,7 @@ func TestGenerateTaskPrompt_WithParent(t *testing.T) {
 
 func TestGeneratePrompts_NoParent_NoEpicScope(t *testing.T) {
 	planPrompt := GeneratePlanningPrompt("test", nil, "")
-	taskPrompt := GenerateTaskPrompt("test", nil, "")
+	taskPrompt := GenerateTaskPrompt("test", nil, "", "claude")
 
 	if strings.Contains(planPrompt, "Epic scope") {
 		t.Error("planning prompt without parentID should not contain 'Epic scope'")
@@ -298,7 +298,7 @@ func TestPromptStructure(t *testing.T) {
 	})
 
 	t.Run("task prompt has required sections", func(t *testing.T) {
-		prompt := GenerateTaskPrompt("test", nil, "")
+		prompt := GenerateTaskPrompt("test", nil, "", "claude")
 		sections := []string{
 			"Step 1:",
 			"Step 2:",
@@ -364,7 +364,7 @@ func TestGenerateTaskPrompt_Workspace(t *testing.T) {
 		},
 	}
 
-	prompt := GenerateTaskPrompt("nova", ws, "")
+	prompt := GenerateTaskPrompt("nova", ws, "", "claude")
 
 	// Verify workspace context block
 	wantParts := []string{
@@ -392,6 +392,60 @@ func TestGenerateTaskPrompt_Workspace(t *testing.T) {
 		if !strings.Contains(prompt, part) {
 			t.Errorf("task prompt with workspace missing expected part: %q", part)
 		}
+	}
+}
+
+func TestGenerateTaskPrompt_BackendAware(t *testing.T) {
+	tests := []struct {
+		name         string
+		backendName  string
+		wantParts    []string
+		notWantParts []string
+	}{
+		{
+			name:        "claude backend uses subagent instructions",
+			backendName: "claude",
+			wantParts:   []string{"Task tool", "subagent_type", "spawn agent"},
+		},
+		{
+			name:         "codex backend uses generic instructions",
+			backendName:  "codex",
+			wantParts:    []string{"Write Tests", "Code Review", "Write unit tests", "Review your own changes"},
+			notWantParts: []string{"Task tool", "subagent_type", "spawn agent"},
+		},
+		{
+			name:         "opencode backend uses generic instructions",
+			backendName:  "opencode",
+			wantParts:    []string{"Write Tests", "Code Review"},
+			notWantParts: []string{"Task tool", "subagent_type"},
+		},
+		{
+			name:         "unknown future backend uses generic instructions",
+			backendName:  "some-future-backend",
+			notWantParts: []string{"Task tool", "subagent_type"},
+		},
+		{
+			name:         "empty backend uses generic instructions",
+			backendName:  "",
+			notWantParts: []string{"Task tool", "subagent_type"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := GenerateTaskPrompt("test", nil, "", tc.backendName)
+
+			for _, part := range tc.wantParts {
+				if !strings.Contains(prompt, part) {
+					t.Errorf("prompt missing expected part: %q", part)
+				}
+			}
+			for _, part := range tc.notWantParts {
+				if strings.Contains(prompt, part) {
+					t.Errorf("prompt should not contain: %q", part)
+				}
+			}
+		})
 	}
 }
 
@@ -614,7 +668,7 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt := GenerateFleetTaskPrompt(tc.agentName, tc.taskID, nil)
+			prompt := GenerateFleetTaskPrompt(tc.agentName, tc.taskID, nil, "claude")
 
 			for _, part := range tc.wantParts {
 				if !strings.Contains(prompt, part) {
@@ -672,7 +726,7 @@ func TestGenerateFleetTaskPrompt_Workspace(t *testing.T) {
 		},
 	}
 
-	prompt := GenerateFleetTaskPrompt("nova", "bd-xyz.3", ws)
+	prompt := GenerateFleetTaskPrompt("nova", "bd-xyz.3", ws, "claude")
 
 	wantParts := []string{
 		"Workspace Mode: Multi-Repo Environment",
@@ -704,6 +758,60 @@ func TestGenerateFleetTaskPrompt_Workspace(t *testing.T) {
 	}
 }
 
+func TestGenerateFleetTaskPrompt_BackendAware(t *testing.T) {
+	tests := []struct {
+		name         string
+		backendName  string
+		wantParts    []string
+		notWantParts []string
+	}{
+		{
+			name:        "claude backend uses subagent instructions",
+			backendName: "claude",
+			wantParts:   []string{"Task tool", "subagent_type", "spawn agent"},
+		},
+		{
+			name:         "codex backend uses generic instructions",
+			backendName:  "codex",
+			wantParts:    []string{"Write Tests", "Code Review", "Write unit tests", "Review your own changes"},
+			notWantParts: []string{"Task tool", "subagent_type", "spawn agent"},
+		},
+		{
+			name:         "opencode backend uses generic instructions",
+			backendName:  "opencode",
+			wantParts:    []string{"Write Tests", "Code Review"},
+			notWantParts: []string{"Task tool", "subagent_type"},
+		},
+		{
+			name:         "unknown future backend uses generic instructions",
+			backendName:  "some-future-backend",
+			notWantParts: []string{"Task tool", "subagent_type"},
+		},
+		{
+			name:         "empty backend uses generic instructions",
+			backendName:  "",
+			notWantParts: []string{"Task tool", "subagent_type"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil, tc.backendName)
+
+			for _, part := range tc.wantParts {
+				if !strings.Contains(prompt, part) {
+					t.Errorf("prompt missing expected part: %q", part)
+				}
+			}
+			for _, part := range tc.notWantParts {
+				if strings.Contains(prompt, part) {
+					t.Errorf("prompt should not contain: %q", part)
+				}
+			}
+		})
+	}
+}
+
 func TestFleetPromptStructure(t *testing.T) {
 	t.Run("fleet planning prompt has required sections", func(t *testing.T) {
 		prompt := GenerateFleetPlanningPrompt("test", "bd-test.1", nil)
@@ -725,7 +833,7 @@ func TestFleetPromptStructure(t *testing.T) {
 	})
 
 	t.Run("fleet task prompt has required sections", func(t *testing.T) {
-		prompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil)
+		prompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil, "claude")
 		sections := []string{
 			"Step 1:",
 			"Step 2:",
@@ -748,7 +856,7 @@ func TestFleetPromptStructure(t *testing.T) {
 
 func TestFleetPromptsNoClaimCommand(t *testing.T) {
 	planPrompt := GenerateFleetPlanningPrompt("test", "bd-test.1", nil)
-	taskPrompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil)
+	taskPrompt := GenerateFleetTaskPrompt("test", "bd-test.1", nil, "claude")
 
 	notWantParts := []string{
 		"bd update <id> --claim",

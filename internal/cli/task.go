@@ -93,7 +93,7 @@ func runTask(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 		}
 		workspace, _ := ResolveActiveWorkspace()
-		prompt := GenerateTaskPrompt(agentName, workspace, taskParentID)
+		prompt := GenerateTaskPrompt(agentName, workspace, taskParentID, GetBackendName())
 		if err := InvokeAgent(worktreePath, prompt, agentName); err != nil { // Interactive mode, nice output
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -165,7 +165,7 @@ func runTask(cmd *cobra.Command, args []string) {
 
 	// Generate and run the task prompt
 	workspace, _ := ResolveActiveWorkspace()
-	prompt := GenerateTaskPrompt(agentName, workspace, taskParentID)
+	prompt := GenerateTaskPrompt(agentName, workspace, taskParentID, GetBackendName())
 	if err := InvokeAgent(worktreePath, prompt, agentName); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
 		os.Exit(1)

@@ -189,7 +189,7 @@ Your job was ONLY to create the plan. Implementation happens later.
 // If parentID is non-empty, the prompt scopes task discovery to that epic.
 // SYNC: The jq filters below must match taskfilter.go ReadyToImplement() criteria:
 //   implementation: design non-empty AND no "needs-revision" label
-func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID string) string {
+func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID string, backendName string) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
 
 	// Build bd ready command with optional --parent filter
@@ -200,6 +200,29 @@ func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID s
 		bdReadyJSON = fmt.Sprintf("bd ready --parent %s --json", parentID)
 		bdReadyFallback = fmt.Sprintf("bd ready --parent %s --limit 10", parentID)
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
+	}
+
+	// Build backend-aware test and review steps
+	var testStep, reviewStep string
+	if backendName == "claude" {
+		testStep = `### Step 5: Write Tests (spawn agent)
+- Use the Task tool to spawn an agent to write tests
+- Prompt: 'Write unit tests for the changes made in [files]. Follow existing test patterns in the codebase.'
+- Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- If tests fail, fix the code or tests until they pass`
+		reviewStep = `### Step 6: Code Review (spawn agent)
+- Use the Task tool with subagent_type='feature-dev:code-reviewer'
+- Prompt: 'Review the changes for this task. Check for bugs, security issues, code quality, and adherence to project conventions.'
+- Document all issues found`
+	} else {
+		testStep = `### Step 5: Write Tests
+- Write unit tests for your changes, following existing test patterns in the codebase
+- Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- If tests fail, fix the code or tests until they pass`
+		reviewStep = `### Step 6: Code Review
+- Review your own changes for bugs, security issues, code quality, and adherence to project conventions
+- Check for common issues: error handling, edge cases, naming consistency
+- Document and fix all issues found`
 	}
 
 	return fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)
@@ -249,16 +272,9 @@ Before writing any code:
 - If it fails: debug, fix, and re-test before proceeding
 - Do NOT proceed until manual testing passes
 
-### Step 5: Write Tests (spawn agent)
-- Use the Task tool to spawn an agent to write tests
-- Prompt: 'Write unit tests for the changes made in [files]. Follow existing test patterns in the codebase.'
-- Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
-- If tests fail, fix the code or tests until they pass
+%s
 
-### Step 6: Code Review (spawn agent)
-- Use the Task tool with subagent_type='feature-dev:code-reviewer'
-- Prompt: 'Review the changes for this task. Check for bugs, security issues, code quality, and adherence to project conventions.'
-- Document all issues found
+%s
 
 ### Step 7: Fix Review Issues
 - Address ALL issues identified in code review
@@ -311,7 +327,7 @@ After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
 - Simply EXIT
 
 You have completed ONE task through the full workflow. The human will run you again for the next task.
-`, agentName, wsBlock, epicScope, bdReadyJSON, bdReadyFallback, agentName)
+`, agentName, wsBlock, epicScope, bdReadyJSON, bdReadyFallback, agentName, testStep, reviewStep)
 }
 
 // GenerateFleetPlanningPrompt creates the prompt for a fleet planning agent with a pre-assigned task.
@@ -442,8 +458,32 @@ Your job was ONLY to create the plan. Implementation happens later.
 
 // GenerateFleetTaskPrompt creates the prompt for a fleet implementation agent with a pre-assigned task.
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
-func GenerateFleetTaskPrompt(agentName, taskID string, workspace *WorkspaceConfig) string {
+func GenerateFleetTaskPrompt(agentName, taskID string, workspace *WorkspaceConfig, backendName string) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
+
+	// Build backend-aware test and review steps
+	var testStep, reviewStep string
+	if backendName == "claude" {
+		testStep = `### Step 5: Write Tests (spawn agent)
+- Use the Task tool to spawn an agent to write tests
+- Prompt: 'Write unit tests for the changes made in [files]. Follow existing test patterns in the codebase.'
+- Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- If tests fail, fix the code or tests until they pass`
+		reviewStep = `### Step 6: Code Review (spawn agent)
+- Use the Task tool with subagent_type='feature-dev:code-reviewer'
+- Prompt: 'Review the changes for this task. Check for bugs, security issues, code quality, and adherence to project conventions.'
+- Document all issues found`
+	} else {
+		testStep = `### Step 5: Write Tests
+- Write unit tests for your changes, following existing test patterns in the codebase
+- Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- If tests fail, fix the code or tests until they pass`
+		reviewStep = `### Step 6: Code Review
+- Review your own changes for bugs, security issues, code quality, and adherence to project conventions
+- Check for common issues: error handling, edge cases, naming consistency
+- Document and fix all issues found`
+	}
+
 	return fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)
 
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
@@ -485,16 +525,9 @@ Before writing any code:
 - If it fails: debug, fix, and re-test before proceeding
 - Do NOT proceed until manual testing passes
 
-### Step 5: Write Tests (spawn agent)
-- Use the Task tool to spawn an agent to write tests
-- Prompt: 'Write unit tests for the changes made in [files]. Follow existing test patterns in the codebase.'
-- Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
-- If tests fail, fix the code or tests until they pass
+%s
 
-### Step 6: Code Review (spawn agent)
-- Use the Task tool with subagent_type='feature-dev:code-reviewer'
-- Prompt: 'Review the changes for this task. Check for bugs, security issues, code quality, and adherence to project conventions.'
-- Document all issues found
+%s
 
 ### Step 7: Fix Review Issues
 - Address ALL issues identified in code review
@@ -547,7 +580,7 @@ After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
 - Simply EXIT
 
 You have completed ONE task through the full workflow. The human will run you again for the next task.
-`, agentName, wsBlock, taskID, taskID, taskID, agentName, taskID)
+`, agentName, wsBlock, taskID, taskID, taskID, agentName, taskID, testStep, reviewStep)
 }
 
 // GenerateConflictResolutionPrompt creates the prompt for merge conflict resolution
