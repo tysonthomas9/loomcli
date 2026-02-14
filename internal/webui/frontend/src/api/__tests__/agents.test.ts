@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import type { LoomTaskLists } from '@/types';
 
-import { fetchAgents, fetchStatus, fetchTasks, type FetchStatusResult } from '../agents';
+import { fetchAgents, fetchStatus, fetchTasks, checkLoomHealth, type FetchStatusResult } from '../agents';
 
 // Mock fetch for testing
 const mockFetch = vi.fn();
@@ -511,6 +511,79 @@ describe('fetchTasks', () => {
     mockFetch.mockRejectedValueOnce(new Error('Connection timeout'));
 
     await expect(fetchTasks()).rejects.toThrow('Connection timeout');
+  });
+});
+
+describe('checkLoomHealth', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns true when server responds with ok', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true });
+
+    const result = await checkLoomHealth();
+
+    expect(result).toBe(true);
+  });
+
+  it('returns false when server responds with non-ok status', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 503 });
+
+    const result = await checkLoomHealth();
+
+    expect(result).toBe(false);
+  });
+
+  it('returns false on network error (error swallowing)', async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const result = await checkLoomHealth();
+
+    expect(result).toBe(false);
+  });
+
+  it('returns false on abort error', async () => {
+    mockFetch.mockRejectedValueOnce(new DOMException('The operation was aborted', 'AbortError'));
+
+    const result = await checkLoomHealth();
+
+    expect(result).toBe(false);
+  });
+});
+
+describe('fetchWithTimeout via fetchAgents', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('clears timeout after successful response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ agents: [] }),
+    });
+
+    await fetchAgents();
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('passes AbortSignal to fetch', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ agents: [] }),
+    });
+
+    await fetchAgents();
+
+    const call = mockFetch.mock.calls[0];
+    const options = call?.[1] as { signal?: AbortSignal };
+    expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 });
 

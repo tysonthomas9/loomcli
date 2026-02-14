@@ -873,6 +873,68 @@ func TestFleetPromptsNoClaimCommand(t *testing.T) {
 	}
 }
 
+func TestGenerateFleetPlanningPrompt_TaskIDSubstitutionCount(t *testing.T) {
+	taskID := "UNIQUE-TASK-XYZ-12345"
+	prompt := GenerateFleetPlanningPrompt("agent", taskID, nil)
+	count := strings.Count(prompt, taskID)
+	if count != 6 {
+		t.Errorf("expected taskID to appear 6 times, got %d", count)
+	}
+}
+
+func TestGenerateFleetTaskPrompt_TaskIDSubstitutionCount(t *testing.T) {
+	taskID := "UNIQUE-TASK-XYZ-12345"
+	prompt := GenerateFleetTaskPrompt("agent", taskID, nil)
+	count := strings.Count(prompt, taskID)
+	if count != 4 {
+		t.Errorf("expected taskID to appear 4 times, got %d", count)
+	}
+}
+
+func TestBuildWorkspaceContextBlock_RepoWithEmptyName(t *testing.T) {
+	ws := &WorkspaceConfig{
+		Path: "/home/user/ws",
+		Repos: []RepoConfig{
+			{Name: "", Path: "somepath", DefaultBranch: "main", Remote: "origin"},
+		},
+	}
+	result := buildWorkspaceContextBlock(ws)
+	if !strings.Contains(result, "|  | ./somepath | main |") {
+		t.Errorf("expected table row with empty name, got:\n%s", result)
+	}
+}
+
+func TestGenerateConflictResolutionPrompt_EmptyConflicts(t *testing.T) {
+	prompt := GenerateConflictResolutionPrompt("feature", "main", []string{})
+	wantParts := []string{
+		"Resolve Merge Conflicts",
+		"Step 1",
+		"Step 2",
+		"Step 3",
+		"Step 4",
+		"Step 5",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("prompt missing expected part: %q", part)
+		}
+	}
+}
+
+func TestGenerateConflictResolutionPrompt_EmptyBranchNames(t *testing.T) {
+	prompt := GenerateConflictResolutionPrompt("", "", []string{"file.go"})
+	wantParts := []string{
+		"Resolve Merge Conflicts",
+		"file.go",
+		"Step 1",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("prompt missing expected part: %q", part)
+		}
+	}
+}
+
 func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 	// Create a temp empty directory and point LOOM_CONFIG_DIR to it
 	tmpDir := t.TempDir()
