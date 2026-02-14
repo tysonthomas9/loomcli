@@ -5,6 +5,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,7 +44,7 @@ func TestEnsureSignalDir_RejectsSymlink(t *testing.T) {
 	if err == nil {
 		t.Fatal("ensureSignalDir should reject symlinks")
 	}
-	if !contains(err.Error(), "symlink") {
+	if !strings.Contains(err.Error(), "symlink") {
 		t.Errorf("error should mention symlink, got: %v", err)
 	}
 }
@@ -73,7 +74,7 @@ func TestEnsureSignalDir_RejectsFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("ensureSignalDir should reject regular files")
 	}
-	if !contains(err.Error(), "not a directory") {
+	if !strings.Contains(err.Error(), "not a directory") {
 		t.Errorf("error should mention 'not a directory', got: %v", err)
 	}
 }
@@ -94,7 +95,7 @@ func TestValidateSignalDir_RejectsSymlink(t *testing.T) {
 	if err == nil {
 		t.Fatal("validateSignalDir should reject symlinks")
 	}
-	if !contains(err.Error(), "symlink") {
+	if !strings.Contains(err.Error(), "symlink") {
 		t.Errorf("error should mention symlink, got: %v", err)
 	}
 }
@@ -122,12 +123,3 @@ func TestValidateSignalDir_RejectsNonexistent(t *testing.T) {
 	}
 }
 
-// contains checks if s contains substr (avoids importing strings in test)
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

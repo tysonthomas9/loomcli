@@ -532,38 +532,38 @@ func TestFlockFunctions(t *testing.T) {
 
 func TestIsProcessRunning(t *testing.T) {
 	t.Run("current process is running", func(t *testing.T) {
-		if !isProcessRunning(os.Getpid()) {
+		if !IsProcessRunning(os.Getpid()) {
 			t.Error("expected current process to be running")
 		}
 	})
 
 	t.Run("non-existent process is not running", func(t *testing.T) {
-		if isProcessRunning(99999) {
+		if IsProcessRunning(99999) {
 			t.Error("expected non-existent process to not be running")
 		}
 	})
 
 	t.Run("parent process is running", func(t *testing.T) {
 		ppid := os.Getppid()
-		if ppid > 0 && !isProcessRunning(ppid) {
+		if ppid > 0 && !IsProcessRunning(ppid) {
 			t.Error("expected parent process to be running")
 		}
 	})
 
 	t.Run("very high PID is not running", func(t *testing.T) {
-		if isProcessRunning(999999999) {
+		if IsProcessRunning(999999999) {
 			t.Error("expected PID 999999999 to not be running")
 		}
 	})
 
 	t.Run("PID 0 is not running", func(t *testing.T) {
-		if isProcessRunning(0) {
+		if IsProcessRunning(0) {
 			t.Error("expected PID 0 to not be running")
 		}
 	})
 
 	t.Run("negative PID is not running", func(t *testing.T) {
-		if isProcessRunning(-1) {
+		if IsProcessRunning(-1) {
 			t.Error("expected PID -1 to not be running")
 		}
 	})

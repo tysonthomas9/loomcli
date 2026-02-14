@@ -368,7 +368,7 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 	// Wait for daemon to exit (up to 30 seconds)
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if !IsProcessRunning(pid) {
+		if !lockfile.IsProcessRunning(pid) {
 			fmt.Println("Daemon stopped.")
 			return
 		}
@@ -432,7 +432,7 @@ func isLoomDaemonRunning(pidFilePath string) (int, bool) {
 		return 0, false
 	}
 
-	return pid, IsProcessRunning(pid)
+	return pid, lockfile.IsProcessRunning(pid)
 }
 
 // writePIDFile atomically writes the PID file
@@ -505,7 +505,7 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 
 // computeAgentStatus determines the status string based on agent state
 func computeAgentStatus(ap SupervisedAgentStatus) string {
-	if ap.PID > 0 && IsProcessRunning(ap.PID) {
+	if ap.PID > 0 && lockfile.IsProcessRunning(ap.PID) {
 		return "running"
 	}
 	// Not running - check if it failed

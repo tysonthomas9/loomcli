@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 func TestForceReleaseLock_RemovesLockFile(t *testing.T) {
@@ -596,7 +598,7 @@ func TestKillProcess_Success(t *testing.T) {
 	pid := cmd.Process.Pid
 
 	// Verify it's running
-	if !IsProcessRunning(pid) {
+	if !lockfile.IsProcessRunning(pid) {
 		t.Fatal("process should be running before kill")
 	}
 
@@ -617,7 +619,7 @@ func TestKillProcess_Success(t *testing.T) {
 	<-done
 
 	// Verify it's dead
-	if IsProcessRunning(pid) {
+	if lockfile.IsProcessRunning(pid) {
 		t.Error("process should not be running after kill")
 	}
 }
@@ -680,7 +682,7 @@ func TestKillProcess_WithChildProcesses(t *testing.T) {
 	<-done
 
 	// Verify parent is dead
-	if IsProcessRunning(pid) {
+	if lockfile.IsProcessRunning(pid) {
 		t.Error("parent process should not be running after kill")
 	}
 

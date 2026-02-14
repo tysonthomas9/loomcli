@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 var (
@@ -365,7 +367,7 @@ func killProcess(pid int) error {
 	// Wait up to 5 seconds for graceful exit
 	for i := 0; i < 50; i++ {
 		time.Sleep(100 * time.Millisecond)
-		if !IsProcessRunning(pid) {
+		if !lockfile.IsProcessRunning(pid) {
 			return nil
 		}
 	}

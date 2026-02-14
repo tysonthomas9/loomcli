@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -386,15 +387,6 @@ func isUnknownOperationError(err error) bool {
 	}
 	errStr := err.Error()
 	return len(errStr) > 0 &&
-		(contains(errStr, "unknown operation") || contains(errStr, "unsupported"))
+		(strings.Contains(errStr, "unknown operation") || strings.Contains(errStr, "unsupported"))
 }
 
-// contains checks if s contains substr (simple implementation to avoid strings import).
-func contains(s, substr string) bool {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

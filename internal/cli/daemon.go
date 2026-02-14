@@ -9,6 +9,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 // AgentProcess tracks a single supervised agent subprocess.
@@ -597,7 +599,7 @@ func (d *Daemon) stopAgent(ap *AgentProcess) {
 		}
 
 		// Also check if process is still running via OS
-		if !IsProcessRunning(pid) {
+		if !lockfile.IsProcessRunning(pid) {
 			log.Printf("[daemon] Agent %s: process exited gracefully", ap.entry.Worktree)
 			return
 		}
@@ -649,7 +651,7 @@ func (d *Daemon) checkAgentHealth() {
 		}
 
 		// Check if PID is alive
-		if !IsProcessRunning(pid) {
+		if !lockfile.IsProcessRunning(pid) {
 			// Process died unexpectedly - superviseAgent will detect via cmd.Wait()
 			log.Printf("[daemon] Agent %s (PID %d) is not running", worktreeName, pid)
 		}

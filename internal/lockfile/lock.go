@@ -86,7 +86,7 @@ func checkPIDFile(beadsDir string) (running bool, pid int) {
 		return false, 0
 	}
 
-	if !isProcessRunning(pidVal) {
+	if !IsProcessRunning(pidVal) {
 		return false, 0
 	}
 

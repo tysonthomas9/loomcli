@@ -1234,7 +1234,7 @@ textLoop:
 	for {
 		select {
 		case output := <-outputCh:
-			if contains(output, "E2E_TERMINAL_TEST_OK") {
+			if strings.Contains(output, "E2E_TERMINAL_TEST_OK") {
 				found = true
 				break textLoop
 			}
@@ -1259,7 +1259,7 @@ binaryLoop:
 	for {
 		select {
 		case output := <-outputCh:
-			if contains(output, "E2E_BINARY_TEST_OK") {
+			if strings.Contains(output, "E2E_BINARY_TEST_OK") {
 				foundBinary = true
 				break binaryLoop
 			}

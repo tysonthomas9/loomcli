@@ -6,8 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 // LockFileName is the name of the lock file in each worktree
@@ -211,7 +212,7 @@ func CheckLock(worktreePath string) (*LockInfo, bool, error) {
 	}
 
 	// Check if the process is still running
-	running := IsProcessRunning(info.PID)
+	running := lockfile.IsProcessRunning(info.PID)
 
 	return &info, running, nil
 }
@@ -323,19 +324,6 @@ func ClearLockTaskID(worktreePath string) error {
 	}
 
 	return os.WriteFile(lockPath, data, 0600)
-}
-
-// IsProcessRunning checks if a process with the given PID is still running
-func IsProcessRunning(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-
-	// On Unix, FindProcess always succeeds, so we need to send signal 0
-	// to check if the process actually exists
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
 }
 
 // GetLockStatus returns a human-readable status for a worktree's lock

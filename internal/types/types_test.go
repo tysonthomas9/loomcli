@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -182,7 +183,7 @@ func TestIssueValidation(t *testing.T) {
 					t.Errorf("Validate() expected error containing %q, got nil", tt.errMsg)
 					return
 				}
-				if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
 				}
 			} else if err != nil {
@@ -496,7 +497,7 @@ func TestValidateForImport(t *testing.T) {
 					t.Errorf("ValidateForImport() expected error, got nil")
 					return
 				}
-				if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("ValidateForImport() error = %v, want error containing %q", err, tt.errMsg)
 				}
 			} else if err != nil {
@@ -1196,19 +1197,6 @@ func timePtr(t time.Time) *time.Time {
 	return &t
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsMiddle(s, substr)))
-}
-
-func containsMiddle(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
 func TestSetDefaults(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -1640,7 +1628,7 @@ func TestIssueDetailsJSONStructure(t *testing.T) {
 			`"comments":[]`,
 		}
 		for _, pattern := range expectedPatterns {
-			if !containsMiddle(jsonStr, pattern) {
+			if !strings.Contains(jsonStr, pattern) {
 				t.Errorf("Expected JSON to contain %q, but it doesn't. JSON: %s", pattern, jsonStr)
 			}
 		}

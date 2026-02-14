@@ -1163,7 +1163,7 @@ func TestParseReadyParams_Priority(t *testing.T) {
 					t.Error("parseReadyParams() expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !containsSubstring(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -1240,7 +1240,7 @@ func TestParseReadyParams_Limit(t *testing.T) {
 					t.Error("parseReadyParams() expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !containsSubstring(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -1303,7 +1303,7 @@ func TestParseReadyParams_SortPolicy(t *testing.T) {
 					t.Error("parseReadyParams() expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !containsSubstring(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -1469,7 +1469,7 @@ func TestParseReadyParams_BooleanParams(t *testing.T) {
 					t.Error("parseReadyParams() expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !containsSubstring(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -1561,7 +1561,7 @@ func TestParseReadyParams_MolType(t *testing.T) {
 					t.Error("parseReadyParams() expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !containsSubstring(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -1674,7 +1674,7 @@ func TestHandleReady_InvalidParams(t *testing.T) {
 	if resp.Success {
 		t.Error("Success = true, want false")
 	}
-	if !containsSubstring(resp.Error, "invalid priority value") {
+	if !strings.Contains(resp.Error, "invalid priority value") {
 		t.Errorf("Error = %q, expected to contain 'invalid priority value'", resp.Error)
 	}
 }
@@ -1730,19 +1730,6 @@ func TestHandleReady_ContentType(t *testing.T) {
 
 func intPtr(i int) *int {
 	return &i
-}
-
-func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstringHelper(s, substr))
-}
-
-func containsSubstringHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // Verify that rpc.ReadyArgs fields match what we expect (compile-time check)
@@ -2104,7 +2091,7 @@ func TestValidateCreateRequest(t *testing.T) {
 					t.Error("validateCreateRequest() expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !containsSubstring(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -2344,7 +2331,7 @@ func TestHandleCreateIssue_MalformedJSON(t *testing.T) {
 	if resp.Code != "INVALID_JSON" {
 		t.Errorf("code = %q, want %q", resp.Code, "INVALID_JSON")
 	}
-	if !containsSubstring(resp.Error, "invalid request body") {
+	if !strings.Contains(resp.Error, "invalid request body") {
 		t.Errorf("error = %q, expected to contain 'invalid request body'", resp.Error)
 	}
 }
@@ -2413,7 +2400,7 @@ func TestHandleCreateIssue_MissingTitle(t *testing.T) {
 	if resp.Code != "VALIDATION_ERROR" {
 		t.Errorf("code = %q, want %q", resp.Code, "VALIDATION_ERROR")
 	}
-	if !containsSubstring(resp.Error, "title is required") {
+	if !strings.Contains(resp.Error, "title is required") {
 		t.Errorf("error = %q, expected to contain 'title is required'", resp.Error)
 	}
 }
@@ -2449,7 +2436,7 @@ func TestHandleCreateIssue_WhitespaceTitle(t *testing.T) {
 	if resp.Code != "VALIDATION_ERROR" {
 		t.Errorf("code = %q, want %q", resp.Code, "VALIDATION_ERROR")
 	}
-	if !containsSubstring(resp.Error, "title is required") {
+	if !strings.Contains(resp.Error, "title is required") {
 		t.Errorf("error = %q, expected to contain 'title is required'", resp.Error)
 	}
 }
@@ -2485,7 +2472,7 @@ func TestHandleCreateIssue_MissingIssueType(t *testing.T) {
 	if resp.Code != "VALIDATION_ERROR" {
 		t.Errorf("code = %q, want %q", resp.Code, "VALIDATION_ERROR")
 	}
-	if !containsSubstring(resp.Error, "issue_type is required") {
+	if !strings.Contains(resp.Error, "issue_type is required") {
 		t.Errorf("error = %q, expected to contain 'issue_type is required'", resp.Error)
 	}
 }
@@ -2521,7 +2508,7 @@ func TestHandleCreateIssue_InvalidIssueType(t *testing.T) {
 	if resp.Code != "VALIDATION_ERROR" {
 		t.Errorf("code = %q, want %q", resp.Code, "VALIDATION_ERROR")
 	}
-	if !containsSubstring(resp.Error, "invalid issue_type") {
+	if !strings.Contains(resp.Error, "invalid issue_type") {
 		t.Errorf("error = %q, expected to contain 'invalid issue_type'", resp.Error)
 	}
 }
@@ -2568,7 +2555,7 @@ func TestHandleCreateIssue_InvalidPriority(t *testing.T) {
 			if resp.Code != "VALIDATION_ERROR" {
 				t.Errorf("code = %q, want %q", resp.Code, "VALIDATION_ERROR")
 			}
-			if !containsSubstring(resp.Error, "priority must be between 0 and 4") {
+			if !strings.Contains(resp.Error, "priority must be between 0 and 4") {
 				t.Errorf("error = %q, expected to contain 'priority must be between 0 and 4'", resp.Error)
 			}
 		})
@@ -2882,7 +2869,7 @@ func TestHandleCreateIssue_RPCError(t *testing.T) {
 	if resp.Code != "RPC_ERROR" {
 		t.Errorf("code = %q, want %q", resp.Code, "RPC_ERROR")
 	}
-	if !containsSubstring(resp.Error, "failed to create issue") {
+	if !strings.Contains(resp.Error, "failed to create issue") {
 		t.Errorf("error = %q, expected to contain 'failed to create issue'", resp.Error)
 	}
 }
@@ -4534,7 +4521,7 @@ func TestHandleGraph_InvalidStatus(t *testing.T) {
 	if resp.Success {
 		t.Error("Success = true, want false")
 	}
-	if !containsSubstring(resp.Error, "invalid status") {
+	if !strings.Contains(resp.Error, "invalid status") {
 		t.Errorf("Error = %q, expected to contain 'invalid status'", resp.Error)
 	}
 }
@@ -4634,7 +4621,7 @@ func TestHandleGraph_RPCError(t *testing.T) {
 	if resp.Success {
 		t.Error("Success = true, want false")
 	}
-	if !containsSubstring(resp.Error, "internal server error") {
+	if !strings.Contains(resp.Error, "internal server error") {
 		t.Errorf("Error = %q, expected to contain 'internal server error'", resp.Error)
 	}
 }
@@ -4674,7 +4661,7 @@ func TestHandleGraph_DaemonError(t *testing.T) {
 	if resp.Success {
 		t.Error("Success = true, want false")
 	}
-	if !containsSubstring(resp.Error, "internal server error") {
+	if !strings.Contains(resp.Error, "internal server error") {
 		t.Errorf("Error = %q, want to contain %q", resp.Error, "internal server error")
 	}
 }
@@ -6906,7 +6893,7 @@ func TestParseBlockedParams_Priority(t *testing.T) {
 					t.Error("parseBlockedParams() expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !containsSubstring(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -6989,7 +6976,7 @@ func TestParseBlockedParams_Limit(t *testing.T) {
 					t.Error("parseBlockedParams() expected error, got nil")
 					return
 				}
-				if tt.errSubstr != "" && !containsSubstring(err.Error(), tt.errSubstr) {
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
 					t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
 				}
 				return
@@ -7099,7 +7086,7 @@ func TestParseBlockedParams_InvalidParams(t *testing.T) {
 				t.Error("parseBlockedParams() expected error, got nil")
 				return
 			}
-			if !containsSubstring(err.Error(), tt.errSubstr) {
+			if !strings.Contains(err.Error(), tt.errSubstr) {
 				t.Errorf("error = %q, want to contain %q", err.Error(), tt.errSubstr)
 			}
 		})

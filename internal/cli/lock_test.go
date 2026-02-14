@@ -155,21 +155,6 @@ func TestReleaseLockNoLock(t *testing.T) {
 	}
 }
 
-func TestIsProcessRunning(t *testing.T) {
-	// Current process should be running
-	if !IsProcessRunning(os.Getpid()) {
-		t.Error("Current process should be running")
-	}
-
-	// Non-existent PID (very high number unlikely to exist)
-	if IsProcessRunning(999999999) {
-		t.Error("Non-existent PID should not be running")
-	}
-
-	// PID 0 is special (kernel), should return false for normal check
-	// Note: This test might behave differently on some systems
-}
-
 func TestGetLockStatus(t *testing.T) {
 	tmpDir := t.TempDir()
 

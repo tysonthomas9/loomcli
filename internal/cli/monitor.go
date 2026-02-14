@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 const (
@@ -215,7 +217,7 @@ func loadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 	}
 
 	// Check if daemon process is still running (PID must be valid and process alive)
-	if state.PID <= 0 || !IsProcessRunning(state.PID) {
+	if state.PID <= 0 || !lockfile.IsProcessRunning(state.PID) {
 		return nil // Invalid PID or daemon died, don't show stale [D] markers
 	}
 

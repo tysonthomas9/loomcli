@@ -8,8 +8,8 @@ import (
 
 const stillActive = 259
 
-// isProcessRunning checks if a process with the given PID is running
-func isProcessRunning(pid int) bool {
+// IsProcessRunning checks if a process with the given PID is running.
+func IsProcessRunning(pid int) bool {
 	if pid <= 0 {
 		return false // Invalid PID
 	}
