@@ -1,36 +1,23 @@
-name: CI
+name: Nightly Full Tests
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  schedule:
+    # Run at 2am UTC daily
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allow manual trigger
 
 jobs:
-  # Cross-platform test matrix
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        include:
-          # Linux: full test suite with coverage
-          - os: ubuntu-latest
-            coverage: true
-            test-flags: '-v -race -coverprofile=coverage.out'
-          # macOS: full test suite, no coverage (faster)
-          - os: macos-latest
-            coverage: false
-            test-flags: '-v -race'
+  full-test:
+    name: Full Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: 'go.mod'
 
       - name: Configure Git
         run: |
@@ -40,14 +27,13 @@ jobs:
       - name: Build
         run: go build -v ./...
 
-      - name: Test
-        run: go test ${{ matrix.test-flags }} ./...
+      - name: Full Test Suite (including integration tests)
+        run: go test -v -race -tags=integration -coverprofile=coverage.out -timeout=30m ./...
 
       - name: Check coverage threshold
-        if: matrix.coverage
         run: |
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          MIN_COVERAGE=42
+          MIN_COVERAGE=50
           WARN_COVERAGE=55
           echo "Coverage: $COVERAGE%"
           if (( $(echo "$COVERAGE < $MIN_COVERAGE" | bc -l) )); then
@@ -61,24 +47,27 @@ jobs:
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
-        if: matrix.coverage && success()
+        if: success()
         with:
           file: ./coverage.out
           fail_ci_if_error: false
 
-  lint:
-    name: Lint
+  e2e:
+    name: E2E Container Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: 'go.mod'
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          args: --timeout=5m
+      - name: Configure Git
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@loomcli.test"
+
+      - name: E2E Container Tests
+        run: go test -tags container -v -timeout 15m ./e2e/

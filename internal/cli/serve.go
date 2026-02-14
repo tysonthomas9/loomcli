@@ -197,7 +197,7 @@ func runServe(cmd *cobra.Command, args []string) {
 			redisClient := fleet.NewRedisClient(serveRedisAddr, "", 0)
 			mgr := fleet.NewSigningKeyManager(redisClient, nil)
 			key, err := mgr.GetOrCreateSigningKey(ctx)
-			redisClient.Close()
+			_ = redisClient.Close()
 			if err != nil {
 				log.Printf("Warning: failed to provision JWT signing key from Redis: %v", err)
 				log.Printf("Fleet auth will use an ephemeral key (tokens won't validate on other servers)")
@@ -572,23 +572,23 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write loom_ready_tasks metric
-	fmt.Fprintf(w, "# HELP loom_ready_tasks Number of tasks ready to be claimed\n")
-	fmt.Fprintf(w, "# TYPE loom_ready_tasks gauge\n")
+	_, _ = fmt.Fprintf(w, "# HELP loom_ready_tasks Number of tasks ready to be claimed\n")
+	_, _ = fmt.Fprintf(w, "# TYPE loom_ready_tasks gauge\n")
 	for p := 0; p <= 4; p++ {
-		fmt.Fprintf(w, "loom_ready_tasks{priority=\"%d\"} %d\n", p, readyByPriority[p])
+		_, _ = fmt.Fprintf(w, "loom_ready_tasks{priority=\"%d\"} %d\n", p, readyByPriority[p])
 	}
 
 	// Write loom_in_progress_tasks metric
-	fmt.Fprintf(w, "\n# HELP loom_in_progress_tasks Number of tasks currently being worked on\n")
-	fmt.Fprintf(w, "# TYPE loom_in_progress_tasks gauge\n")
-	fmt.Fprintf(w, "loom_in_progress_tasks %d\n", inProgress)
+	_, _ = fmt.Fprintf(w, "\n# HELP loom_in_progress_tasks Number of tasks currently being worked on\n")
+	_, _ = fmt.Fprintf(w, "# TYPE loom_in_progress_tasks gauge\n")
+	_, _ = fmt.Fprintf(w, "loom_in_progress_tasks %d\n", inProgress)
 
 	// Write loom_fleet_workers metric
 	workerCounts := collectWorkerStatusCounts()
-	fmt.Fprintf(w, "\n# HELP loom_fleet_workers Number of fleet workers by status\n")
-	fmt.Fprintf(w, "# TYPE loom_fleet_workers gauge\n")
+	_, _ = fmt.Fprintf(w, "\n# HELP loom_fleet_workers Number of fleet workers by status\n")
+	_, _ = fmt.Fprintf(w, "# TYPE loom_fleet_workers gauge\n")
 	for _, status := range []string{"active", "idle", "blocked"} {
-		fmt.Fprintf(w, "loom_fleet_workers{status=\"%s\"} %d\n", status, workerCounts[status])
+		_, _ = fmt.Fprintf(w, "loom_fleet_workers{status=\"%s\"} %d\n", status, workerCounts[status])
 	}
 }
 
@@ -615,7 +615,7 @@ func collectWorkerStatusCounts() map[string]int {
 		// Daemon not running - return zeros
 		return counts
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	resp, err := client.GetWorkerStatus(&rpc.GetWorkerStatusArgs{})
 	if err != nil || resp == nil {

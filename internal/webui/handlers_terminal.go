@@ -68,7 +68,9 @@ func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
 		if session == "" || !validTerminalSession.MatchString(session) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "invalid session"})
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": "invalid session"}); err != nil {
+				log.Printf("Failed to encode terminal response: %v", err)
+			}
 			return
 		}
 
@@ -77,13 +79,17 @@ func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
 			log.Printf("Failed to generate terminal token: %v", err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"})
+			if err := json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"}); err != nil {
+				log.Printf("Failed to encode terminal response: %v", err)
+			}
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(map[string]string{"token": token})
+		if err := json.NewEncoder(w).Encode(map[string]string{"token": token}); err != nil {
+			log.Printf("Failed to encode terminal response: %v", err)
+		}
 	}
 }
 
@@ -106,7 +112,9 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "method not allowed"})
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "method not allowed"}); err != nil {
+				log.Printf("Failed to encode terminal response: %v", err)
+			}
 			return
 		}
 
@@ -114,12 +122,16 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 		session := r.URL.Query().Get("session")
 		if session == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "missing session parameter"})
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "missing session parameter"}); err != nil {
+				log.Printf("Failed to encode terminal response: %v", err)
+			}
 			return
 		}
 		if !validTerminalSession.MatchString(session) {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "invalid session name"})
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "invalid session name"}); err != nil {
+				log.Printf("Failed to encode terminal response: %v", err)
+			}
 			return
 		}
 
@@ -128,14 +140,18 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 			token := r.URL.Query().Get("token")
 			if err := auth.ValidateToken(token, session); err != nil {
 				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "terminal authentication failed"})
+				if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "terminal authentication failed"}); err != nil {
+					log.Printf("Failed to encode terminal response: %v", err)
+				}
 				return
 			}
 		}
 
 		if manager == nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "terminal manager not initialized"})
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "terminal manager not initialized"}); err != nil {
+				log.Printf("Failed to encode terminal response: %v", err)
+			}
 			return
 		}
 
@@ -152,10 +168,12 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 					}
 					if !isValidBackend(b) {
 						w.WriteHeader(http.StatusBadRequest)
-						json.NewEncoder(w).Encode(map[string]interface{}{
+						if err := json.NewEncoder(w).Encode(map[string]interface{}{
 							"success": false,
 							"error":   fmt.Sprintf("invalid backend %q; valid: claude, codex, opencode", b),
-						})
+						}); err != nil {
+							log.Printf("Failed to encode terminal response: %v", err)
+						}
 						return
 					}
 					backend = b
@@ -165,11 +183,13 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 
 		// Kill existing session first, then update command. This ordering ensures
 		// racing Attach calls either get killed or use the new backend.
-		manager.KillSessionByName(session)
+		_ = manager.KillSessionByName(session)
 		manager.SetDefaultCommand(backend)
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "backend": backend})
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "backend": backend}); err != nil {
+			log.Printf("Failed to encode terminal response: %v", err)
+		}
 	}
 }
 
@@ -271,7 +291,7 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 		closeStatus := websocket.StatusInternalError
 		closeReason := "connection closed"
 		defer func() {
-			conn.Close(closeStatus, closeReason)
+			_ = conn.Close(closeStatus, closeReason)
 		}()
 
 		// Attach to terminal session with default 80x24 size

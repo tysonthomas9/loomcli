@@ -469,7 +469,7 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 			Stdout: "INCOMPLETE: No work found\n",
 			Err:    nil,
 		},
-		// resetTask: show check
+		// resetTask: show then update
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -477,7 +477,6 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 			Stdout: `[{"status":"in_progress"}]`,
 			Err:    nil,
 		},
-		// resetTask: update call
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -494,7 +493,7 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 	ResetBeadsDirCache()
 	mock := NewCommandMock(t, []CommandStub{
-		// resetTask: show check
+		// resetTask: show then update (no analyze)
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -502,7 +501,6 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 			Stdout: `[{"status":"in_progress"}]`,
 			Err:    nil,
 		},
-		// resetTask: update call
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -704,7 +702,7 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 			Stdout: `[{"id":"task-1","title":"First task"},{"id":"task-2","title":"Second task"}]`,
 			Err:    nil,
 		},
-		// resetTask for task-1: show check
+		// resetTask for task-1: show then update
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -712,7 +710,6 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 			Stdout: `[{"status":"in_progress"}]`,
 			Err:    nil,
 		},
-		// resetTask for task-1: update
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -720,7 +717,7 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 			Stdout: "Updated\n",
 			Err:    nil,
 		},
-		// resetTask for task-2: show check
+		// resetTask for task-2: show then update
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -728,7 +725,6 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 			Stdout: `[{"status":"in_progress"}]`,
 			Err:    nil,
 		},
-		// resetTask for task-2: update
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -752,7 +748,7 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 			Stdout: `[{"id":"task-1","title":"Already handled"},{"id":"task-2","title":"Orphaned task"}]`,
 			Err:    nil,
 		},
-		// resetTask for task-2: show check (task-1 is already handled)
+		// resetTask for task-2 only (task-1 is already handled): show then update
 		{
 			Dir:    ".",
 			Name:   "bd",
@@ -760,7 +756,6 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 			Stdout: `[{"status":"in_progress"}]`,
 			Err:    nil,
 		},
-		// resetTask for task-2: update
 		{
 			Dir:    ".",
 			Name:   "bd",

@@ -506,10 +506,7 @@ func TestGeneratePRInfo_SingleCommit(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	title, body, err := generatePRInfo("/repo", "origin", "main", "feature")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	title, body := generatePRInfo("/repo", "origin", "main", "feature")
 	if title != "Fix authentication bug" {
 		t.Errorf("expected title %q, got %q", "Fix authentication bug", title)
 	}
@@ -528,10 +525,7 @@ func TestGeneratePRInfo_MultipleCommits(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	title, body, err := generatePRInfo("/repo", "origin", "main", "feature")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	title, body := generatePRInfo("/repo", "origin", "main", "feature")
 	if title != "Add login form" {
 		t.Errorf("expected title %q, got %q", "Add login form", title)
 	}
@@ -561,10 +555,7 @@ func TestGeneratePRInfo_NoCommits(t *testing.T) {
 	cmdMock := NewCommandMock(t, commandStubs)
 	cmdMock.Install()
 
-	title, body, err := generatePRInfo("/repo", "origin", "main", "feature")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	title, body := generatePRInfo("/repo", "origin", "main", "feature")
 	// When git log fails completely, branch name should be used as title
 	if title != "feature" {
 		t.Errorf("expected title to be branch name %q, got %q", "feature", title)

@@ -12,7 +12,7 @@ import (
 //
 // Name returns a unique identifier for the backend (e.g. "claude", "codex").
 // InvokeInteractive starts a live, interactive agent session in the terminal.
-// InvokeNonInteractive runs a headless agent session that can be cancelled via
+// InvokeNonInteractive runs a headless agent session that can be canceled via
 // the shutdown channel.
 type Backend interface {
 	Name() string

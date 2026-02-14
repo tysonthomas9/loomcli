@@ -7,7 +7,10 @@ run:
 linters:
   default: none
   enable:
+    - cyclop
     - errcheck
+    - funlen
+    - gocognit
     - gocritic
     - gosec
     - govet
@@ -33,6 +36,14 @@ linters:
         - (*io.PipeWriter).Close
         - os.Remove
         - (*os.File).Sync
+    cyclop:
+      max-complexity: 20
+    funlen:
+      lines: 100
+      statements: -1
+      ignore-comments: true
+    gocognit:
+      min-complexity: 30
     misspell:
       locale: US
     staticcheck:
@@ -71,21 +82,25 @@ linters:
       - linters:
           - gosec
         text: "G301"
-      # G302: Lock/config file permissions - we use 0644 for cross-process access
-      - path: 'internal/cli/(lock|daemon_cmd)\.go'
+      # G302: File/directory permissions - intentional for cross-process access and security hardening
+      - path: 'internal/(cli/(lock|daemon_cmd)|rpc/socket_path)\.go'
         linters:
           - gosec
         text: "G302"
       # G304: File inclusion via variable - these are intentional file operations
-      - path: 'internal/cli/(agent_cmd|automode|config|daemon|daemon_cmd|daemon_config|lock|monitor|workspace_cmd)\.go'
+      - path: 'internal/(cli/(automode|lock|agent_cmd|config|daemon|daemon_cmd|daemon_config|monitor|workspace_cmd)|rpc/auth|webui/(auth|handlers_config|log_open_unix|log_streamer))\.go'
         linters:
           - gosec
         text: "G304"
-      # G204: Subprocess launches are intentional for tmux, claude, bd commands
-      - path: 'internal/cli/(automode|recover)\.go'
+      # G204: Subprocess launches are intentional for tmux, claude, bd, loom commands
+      - path: 'internal/(cli/(automode|recover|daemon)|kv/reconcile|webui/terminal)\.go'
         linters:
           - gosec
         text: "G204"
+      # G306: WriteFile 0644 is intentional for config files (world-readable)
+      - linters:
+          - gosec
+        text: "G306"
       # G204: Subprocess launches for AI agent backends and daemon
       - path: 'internal/cli/(backend_claude|backend_codex|backend_opencode|daemon)\.go'
         linters:
@@ -96,6 +111,66 @@ linters:
         linters:
           - gosec
         text: "G602"
+      # funlen/cyclop/gocognit: Large files with dedicated cleanup tasks
+      # Remove exclusions as cleanup tasks complete
+      # handlers split files — tracked by loomcli-6yk.5
+      - path: "internal/webui/handlers_issues\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/webui/handlers_deps\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/webui/handlers_health\\.go"
+        linters: [funlen, cyclop, gocognit]
+      # types.go — tracked by loomcli-6yk.6
+      - path: "internal/types/types\\.go"
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+      # automode.go — tracked by loomcli-6yk.7
+      - path: "internal/cli/automode\\.go"
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+      # monitor.go — tracked by loomcli-6yk.8
+      - path: "internal/cli/monitor\\.go"
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+      # Existing complexity violations — TODO: address in follow-up cleanup
+      - path: "internal/cli/agent_cmd\\.go"
+        linters: [funlen]
+      - path: "internal/cli/daemon_cmd\\.go"
+        linters: [funlen, cyclop]
+      - path: "internal/cli/daemon\\.go"
+        linters: [cyclop, gocognit]
+      - path: "internal/cli/prompts\\.go"
+        linters: [funlen]
+      - path: "internal/cli/push\\.go"
+        linters: [cyclop, gocognit]
+      - path: "internal/cli/serve\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/workspace_cmd\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/worktree\\.go"
+        linters: [cyclop, gocognit]
+      - path: "internal/webui/cors\\.go"
+        linters: [gocognit]
+      - path: "internal/webui/fleet_handlers\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/webui/handlers_comments\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/webui/handlers_logs\\.go"
+        linters: [funlen, gocognit]
+      - path: "internal/webui/handlers_terminal\\.go"
+        linters: [funlen, gocognit]
+      - path: "internal/webui/log_streamer\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/webui/server\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/webui/sse\\.go"
+        linters: [gocognit]
 
       # === Test file relaxations (matching beads patterns) ===
 

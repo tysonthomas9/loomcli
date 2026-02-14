@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -806,5 +809,127 @@ func TestStateFileLifecycle(t *testing.T) {
 	}
 	if len(state.Agents) != 2 {
 		t.Errorf("len(Agents) = %d, want 2", len(state.Agents))
+	}
+}
+
+// ============================================================================
+// validateDaemonPaths Tests
+// ============================================================================
+
+// captureLogOutput runs fn while capturing log output to a buffer, then
+// restores the original log output and returns the captured string.
+func captureLogOutput(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf bytes.Buffer
+	origOutput := log.Writer()
+	origFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0) // disable timestamps for easier matching
+	defer func() {
+		log.SetOutput(origOutput)
+		log.SetFlags(origFlags)
+	}()
+	fn()
+	return buf.String()
+}
+
+func TestValidateDaemonPaths_WithinProjectDir(t *testing.T) {
+	projectDir := t.TempDir()
+	pidFile := filepath.Join(projectDir, ".loom", "daemon.pid")
+	logDir := filepath.Join(projectDir, ".loom", "logs")
+
+	output := captureLogOutput(t, func() {
+		validateDaemonPaths(projectDir, pidFile, logDir)
+	})
+
+	if strings.Contains(output, "Warning") {
+		t.Errorf("expected no warnings for paths within project dir, got: %s", output)
+	}
+}
+
+func TestValidateDaemonPaths_WithinConfigDir(t *testing.T) {
+	projectDir := t.TempDir()
+	configDir := t.TempDir() // simulate ~/.loom/
+
+	// Override LOOM_CONFIG_DIR so GetConfigDir() returns our temp dir
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	pidFile := filepath.Join(configDir, "daemon.pid")
+	logDir := filepath.Join(configDir, "logs")
+
+	output := captureLogOutput(t, func() {
+		validateDaemonPaths(projectDir, pidFile, logDir)
+	})
+
+	if strings.Contains(output, "Warning") {
+		t.Errorf("expected no warnings for paths within config dir, got: %s", output)
+	}
+}
+
+func TestValidateDaemonPaths_PIDFileOutsideBoundaries(t *testing.T) {
+	projectDir := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	// PID file in /tmp (outside both project and config dirs)
+	outsideDir := t.TempDir()
+	pidFile := filepath.Join(outsideDir, "daemon.pid")
+	logDir := filepath.Join(projectDir, ".loom", "logs")
+
+	output := captureLogOutput(t, func() {
+		validateDaemonPaths(projectDir, pidFile, logDir)
+	})
+
+	if !strings.Contains(output, "Warning") {
+		t.Error("expected warning for pid_file outside boundaries, got no warning")
+	}
+	if !strings.Contains(output, "pid_file") {
+		t.Errorf("expected warning to mention pid_file, got: %s", output)
+	}
+	// log_dir is inside project, so no warning for it
+	if strings.Contains(output, "log_dir") {
+		t.Errorf("expected no warning for log_dir (inside project dir), got: %s", output)
+	}
+}
+
+func TestValidateDaemonPaths_LogDirPathTraversal(t *testing.T) {
+	projectDir := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	pidFile := filepath.Join(projectDir, ".loom", "daemon.pid")
+	// Path traversal that escapes the project directory
+	logDir := filepath.Join(projectDir, "../../outside")
+
+	output := captureLogOutput(t, func() {
+		validateDaemonPaths(projectDir, pidFile, logDir)
+	})
+
+	if !strings.Contains(output, "Warning") {
+		t.Error("expected warning for log_dir with path traversal, got no warning")
+	}
+	if !strings.Contains(output, "log_dir") {
+		t.Errorf("expected warning to mention log_dir, got: %s", output)
+	}
+}
+
+func TestValidateDaemonPaths_AbsolutePathOutsideBoundaries(t *testing.T) {
+	projectDir := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	pidFile := filepath.Join(projectDir, ".loom", "daemon.pid")
+	// Absolute path outside both boundaries
+	logDir := "/tmp/loom-logs"
+
+	output := captureLogOutput(t, func() {
+		validateDaemonPaths(projectDir, pidFile, logDir)
+	})
+
+	if !strings.Contains(output, "Warning") {
+		t.Error("expected warning for absolute log_dir outside boundaries, got no warning")
+	}
+	if !strings.Contains(output, "log_dir") {
+		t.Errorf("expected warning to mention log_dir, got: %s", output)
 	}
 }

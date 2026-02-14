@@ -14,8 +14,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /out/loom ./cmd/loom && \
-    go build -o /out/logrouter ./cmd/logrouter
+RUN go build -o /out/loom ./cmd/loom
 
 # Build bd CLI from vendored source (if available)
 RUN if [ -f third_party/beads/cmd/bd/main.go ]; then \
@@ -49,7 +48,6 @@ RUN npx playwright install --with-deps chromium
 
 # Copy compiled binaries
 COPY --from=builder /out/loom /usr/local/bin/loom
-COPY --from=builder /out/logrouter /usr/local/bin/logrouter
 # Copy bd if it was built (ignore error if not)
 COPY --from=builder /out/b[d] /usr/local/bin/
 

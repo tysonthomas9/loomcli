@@ -8354,3 +8354,216 @@ func TestHandleListIssues_PoolGetError(t *testing.T) {
 		t.Errorf("status = %d, want %d or %d", rr.Code, http.StatusServiceUnavailable, http.StatusGatewayTimeout)
 	}
 }
+
+// ===========================================================================
+// Tests for shared helpers (handlers.go) after file split refactoring
+// ===========================================================================
+
+// TestWriteIssuesError tests the writeIssuesError helper that was extracted to handlers.go.
+func TestWriteIssuesError(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     int
+		message    string
+		code       string
+		wantStatus int
+	}{
+		{
+			name:       "bad request with code",
+			status:     http.StatusBadRequest,
+			message:    "invalid params",
+			code:       "INVALID_PARAMS",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "service unavailable with pool code",
+			status:     http.StatusServiceUnavailable,
+			message:    "connection pool not initialized",
+			code:       "POOL_NOT_INITIALIZED",
+			wantStatus: http.StatusServiceUnavailable,
+		},
+		{
+			name:       "internal error with rpc code",
+			status:     http.StatusInternalServerError,
+			message:    "failed to list issues",
+			code:       "RPC_ERROR",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "empty message and code",
+			status:     http.StatusBadRequest,
+			message:    "",
+			code:       "",
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			writeIssuesError(w, tt.status, tt.message, tt.code)
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
+			}
+
+			var resp IssuesResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+
+			if resp.Success {
+				t.Error("expected success=false, got true")
+			}
+			if resp.Error != tt.message {
+				t.Errorf("error = %q, want %q", resp.Error, tt.message)
+			}
+			if resp.Code != tt.code {
+				t.Errorf("code = %q, want %q", resp.Code, tt.code)
+			}
+		})
+	}
+}
+
+// TestMaxListLimitConstant verifies the MaxListLimit constant value is accessible and correct.
+func TestMaxListLimitConstant(t *testing.T) {
+	if MaxListLimit != 1000 {
+		t.Errorf("MaxListLimit = %d, want 1000", MaxListLimit)
+	}
+}
+
+// ===========================================================================
+// Tests for parseListParams fields not previously covered
+// ===========================================================================
+
+// TestParseListParams_DescriptionContains verifies description_contains is parsed.
+func TestParseListParams_DescriptionContains(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?description_contains=login+flow", nil)
+	args, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if args.DescriptionContains != "login flow" {
+		t.Errorf("DescriptionContains = %q, want %q", args.DescriptionContains, "login flow")
+	}
+}
+
+// TestParseListParams_NotesContains verifies notes_contains is parsed.
+func TestParseListParams_NotesContains(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?notes_contains=workaround", nil)
+	args, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if args.NotesContains != "workaround" {
+		t.Errorf("NotesContains = %q, want %q", args.NotesContains, "workaround")
+	}
+}
+
+// TestParseListParams_NoLabels verifies no_labels=true is parsed.
+func TestParseListParams_NoLabels(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?no_labels=true", nil)
+	args, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !args.NoLabels {
+		t.Error("expected NoLabels=true, got false")
+	}
+}
+
+// TestParseListParams_NoLabelsNotSet verifies no_labels defaults to false when absent.
+func TestParseListParams_NoLabelsNotSet(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	args, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if args.NoLabels {
+		t.Error("expected NoLabels=false when not set, got true")
+	}
+}
+
+// TestParseListParams_ContainsFieldsEmpty verifies empty contains fields are not set.
+func TestParseListParams_ContainsFieldsEmpty(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?status=open", nil)
+	args, err := parseListParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if args.DescriptionContains != "" {
+		t.Errorf("DescriptionContains = %q, want empty", args.DescriptionContains)
+	}
+	if args.NotesContains != "" {
+		t.Errorf("NotesContains = %q, want empty", args.NotesContains)
+	}
+}
+
+// ===========================================================================
+// Cross-file visibility tests: verify types/functions from split files
+// are accessible and work together correctly.
+// ===========================================================================
+
+// TestHandlerFileSplit_SharedHelpersFromIssues verifies that issue handlers
+// can call shared helpers from handlers.go (writeErrorResponse, writeIssuesError, splitAndTrim).
+func TestHandlerFileSplit_SharedHelpersFromIssues(t *testing.T) {
+	// This test verifies the split didn't break cross-file references.
+	// handleGetIssueWithPool uses writeErrorResponse (from handlers.go).
+	// handleListIssues uses writeIssuesError and splitAndTrim (from handlers.go).
+
+	// writeErrorResponse called from issue handler path (empty ID)
+	pool := &mockPool{
+		getFunc: func(ctx context.Context) (issueGetter, error) {
+			return &mockClient{}, nil
+		},
+	}
+	handler := handleGetIssueWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/", nil)
+	req.SetPathValue("id", "")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if resp["error"] != "missing issue ID" {
+		t.Errorf("error = %q, want %q", resp["error"], "missing issue ID")
+	}
+}
+
+// TestHandlerFileSplit_SharedHelpersFromDeps verifies that dependency handlers
+// can call shared helpers from handlers.go.
+func TestHandlerFileSplit_SharedHelpersFromDeps(t *testing.T) {
+	// handleBlockedWithPool uses MaxListLimit (from handlers.go) via parseBlockedParams.
+	// Test that parseBlockedParams respects the MaxListLimit constant.
+	limitStr := strconv.Itoa(MaxListLimit + 500)
+	req := httptest.NewRequest(http.MethodGet, "/api/blocked?limit="+limitStr, nil)
+	args, err := parseBlockedParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if args.Limit != MaxListLimit {
+		t.Errorf("Limit = %d, want %d (should be capped at MaxListLimit)", args.Limit, MaxListLimit)
+	}
+}
+
+// TestHandlerFileSplit_SharedHelpersFromHealth verifies that health handlers
+// can call splitAndTrim from handlers.go (via parseReadyParams labels parsing).
+func TestHandlerFileSplit_SharedHelpersFromHealth(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/ready?labels=bug,+feature+,urgent", nil)
+	args, err := parseReadyParams(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(args.Labels) != 3 {
+		t.Fatalf("expected 3 labels, got %d: %v", len(args.Labels), args.Labels)
+	}
+	// Verify trimming happened (splitAndTrim from handlers.go)
+	if args.Labels[1] != "feature" {
+		t.Errorf("labels[1] = %q, want %q (should be trimmed)", args.Labels[1], "feature")
+	}
+}

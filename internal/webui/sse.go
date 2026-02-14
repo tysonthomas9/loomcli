@@ -294,7 +294,7 @@ func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEv
 		}
 
 		// Check if shutting down before registering (r.Context() derives from
-		// the server's BaseContext, which is cancelled on shutdown signal).
+		// the server's BaseContext, which is canceled on shutdown signal).
 		select {
 		case <-r.Context().Done():
 			return
@@ -323,11 +323,11 @@ func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEv
 		}
 
 		// Send retry interval first so client knows reconnection time from the start
-		fmt.Fprintf(w, "retry: %d\n\n", sseRetryMs)
+		_, _ = fmt.Fprintf(w, "retry: %d\n\n", sseRetryMs)
 		flusher.Flush()
 
 		// Send initial connection event
-		fmt.Fprintf(w, "event: connected\ndata: {\"clientId\":%d}\n\n", client.id)
+		_, _ = fmt.Fprintf(w, "event: connected\ndata: {\"clientId\":%d}\n\n", client.id)
 		flusher.Flush()
 
 		// Start heartbeat ticker to keep connection alive through proxies
@@ -372,7 +372,7 @@ func writeSSEEvent(w http.ResponseWriter, mutation *MutationPayload) {
 		return
 	}
 
-	fmt.Fprintf(w, "id: %d\nevent: mutation\ndata: %s\n\n", eventID, string(data))
+	_, _ = fmt.Fprintf(w, "id: %d\nevent: mutation\ndata: %s\n\n", eventID, string(data))
 }
 
 // rpcMutationToPayload converts an RPC mutation event to a payload.

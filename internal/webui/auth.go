@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -52,21 +51,13 @@ func NewAuthMiddleware(config AuthConfig) func(http.Handler) http.Handler {
 			// Extract and validate token
 			token := extractToken(r)
 			if token == "" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]string{
-					"error": "authentication required",
-				})
+				respondError(w, http.StatusUnauthorized, "authentication required")
 				return
 			}
 
 			// Constant-time comparison to prevent timing attacks
 			if subtle.ConstantTimeCompare([]byte(token), keyBytes) != 1 {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]string{
-					"error": "invalid token",
-				})
+				respondError(w, http.StatusUnauthorized, "invalid token")
 				return
 			}
 
@@ -175,19 +166,12 @@ func handleAuthToken(apiKey string) http.HandlerFunc {
 		// those through since they need the key to call any other endpoint.
 		secFetchSite := r.Header.Get("Sec-Fetch-Site")
 		if secFetchSite != "" && secFetchSite != "same-origin" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusForbidden)
-			json.NewEncoder(w).Encode(map[string]string{
-				"error": "cross-origin requests not allowed",
-			})
+			respondError(w, http.StatusForbidden, "cross-origin requests not allowed")
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(map[string]string{
-			"token": apiKey,
-		})
+		respondJSON(w, http.StatusOK, map[string]string{"token": apiKey})
 	}
 }
 

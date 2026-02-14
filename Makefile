@@ -58,9 +58,10 @@ update-beads:
 	git subtree pull --prefix=$(BEADS_PREFIX) $(BEADS_REMOTE) $(BEADS_BRANCH) --squash
 	$(MAKE) sync-beads
 
-# Quality gate — build + vet + test (used by pre-push hook)
+# Quality gate — lint + build + vet + test (used by pre-push hook)
 gate: frontend
 	@echo "=== Quality Gate ==="
+	@$(MAKE) lint
 	@go build ./...
 	@go vet ./...
 	@go test -race -timeout 15m ./...
@@ -92,7 +93,7 @@ help:
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
 	@echo "  make update-beads - Pull latest beads + sync"
-	@echo "  make gate         - Quality gate (build + vet + test)"
+	@echo "  make gate         - Quality gate (lint + build + vet + test)"
 	@echo "  make hooks        - Install git hooks (pre-push gate)"
 	@echo "  make dev          - Start dev environment (air + Vite hot-reload)"
 	@echo "  make dev-check    - Check dev dependencies (air, node)"

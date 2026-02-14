@@ -85,7 +85,7 @@ func findAvailablePort(bindAddr string, startPort, maxAttempts int) (net.Listene
 }
 
 // StartServer starts the web UI server with the given configuration.
-// It blocks until the context is cancelled, then performs graceful shutdown.
+// It blocks until the context is canceled, then performs graceful shutdown.
 // Returns the actual port used (which may differ from config.Port if it was in use).
 func StartServer(ctx context.Context, config ServerConfig) error {
 	// Apply defaults for zero values
@@ -262,7 +262,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 				jwtKey = make([]byte, 32)
 				if _, err := rand.Read(jwtKey); err != nil {
 					log.Printf("Warning: failed to generate JWT signing key: %v", err)
-					fleetStore.Close()
+					_ = fleetStore.Close()
 					fleetStore = nil
 				}
 			}
@@ -276,7 +276,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 	if fleetStore != nil {
-		defer fleetStore.Close()
+		defer func() { _ = fleetStore.Close() }()
 	}
 
 	// Initialize fleet timeout enforcer
@@ -303,7 +303,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		if config.FleetRedis != nil {
 			rlClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
 			fleetRegCfg.RateLimiter = NewFleetRateLimiter(rlClient, 10, time.Minute)
-			defer fleetRegCfg.RateLimiter.Close()
+			defer func() { _ = fleetRegCfg.RateLimiter.Close() }()
 		}
 		log.Printf("Fleet API key authentication enabled")
 	} else if fleetStore != nil && config.FleetAPIKey == "" {
@@ -353,7 +353,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	handler := h2c.NewHandler(rateLimitMiddleware(securityMiddleware(authMiddleware(corsMiddleware(mux)))), &http2.Server{})
 
 	// Create a shutdown context that all request contexts will derive from.
-	// When cancelled, in-flight handlers' r.Context().Done() fires, causing
+	// When canceled, in-flight handlers' r.Context().Done() fires, causing
 	// them to abort quickly rather than waiting the full drain timeout.
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
@@ -395,7 +395,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// fires immediately, causing them to abort quickly (e.g., pool.Get(r.Context()) fails fast).
 	shutdownCancel()
 
-	// Drain in-flight HTTP requests first (up to ShutdownTimeout, but most abort quickly due to cancelled context).
+	// Drain in-flight HTTP requests first (up to ShutdownTimeout, but most abort quickly due to canceled context).
 	// This ensures no handlers are running when we stop components below.
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), config.ShutdownTimeout)
 	defer drainCancel()

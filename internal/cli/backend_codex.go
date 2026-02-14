@@ -50,7 +50,7 @@ func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 // using the TIOCGWINSZ ioctl, which only succeeds on real terminals.
 func isTerminal(f *os.File) bool {
 	var ws [4]uint16 // struct winsize: rows, cols, xpixel, ypixel
-	_, _, err := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws[0])))
+	_, _, err := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws[0]))) //nolint:gosec // G103: deliberate unsafe for TIOCGWINSZ ioctl
 	return err == 0
 }
 

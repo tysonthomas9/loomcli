@@ -295,10 +295,7 @@ func createPR(repoPath, sourceBranch, targetBranch, remote string) (string, erro
 	}
 
 	// Generate PR title and body
-	title, body, err := generatePRInfo(repoPath, r, targetBranch, sourceBranch)
-	if err != nil {
-		return "", fmt.Errorf("generating PR info: %v", err)
-	}
+	title, body := generatePRInfo(repoPath, r, targetBranch, sourceBranch)
 
 	// Create PR using gh CLI
 	result := execCommand(repoPath, "gh", "pr", "create",
@@ -352,10 +349,7 @@ func createPRLegacy(repoPath, sourceBranch, targetBranch string) (string, error)
 	}
 
 	// Generate PR title and body
-	title, body, err := generatePRInfo(repoPath, "origin", targetBranch, sourceBranch)
-	if err != nil {
-		return "", fmt.Errorf("generating PR info: %v", err)
-	}
+	title, body := generatePRInfo(repoPath, "origin", targetBranch, sourceBranch)
 
 	// Create PR using gh CLI
 	result := execCommand(repoPath, "gh", "pr", "create",
@@ -427,7 +421,7 @@ func prWorktree(sourceBranch, targetBranch string) {
 	}
 }
 
-func generatePRInfo(repoPath, remote, targetBranch, sourceBranch string) (string, string, error) {
+func generatePRInfo(repoPath, remote, targetBranch, sourceBranch string) (string, string) {
 	// Get commit messages between target and source
 	logRange := fmt.Sprintf("%s/%s..%s/%s", remote, targetBranch, remote, sourceBranch)
 	output, err := RunGitCommand(repoPath, "log", logRange, "--format=%s", "--reverse")
@@ -437,13 +431,13 @@ func generatePRInfo(repoPath, remote, targetBranch, sourceBranch string) (string
 		output, err = RunGitCommand(repoPath, "log", logRange, "--format=%s", "--reverse")
 		if err != nil {
 			// Use branch name as title if we can't get commit messages
-			return sourceBranch, "", nil
+			return sourceBranch, ""
 		}
 	}
 
 	subjects := strings.Split(strings.TrimSpace(output), "\n")
 	if len(subjects) == 0 || (len(subjects) == 1 && subjects[0] == "") {
-		return sourceBranch, "", nil
+		return sourceBranch, ""
 	}
 
 	title := strings.ReplaceAll(subjects[0], "\n", " ")
@@ -463,7 +457,7 @@ func generatePRInfo(repoPath, remote, targetBranch, sourceBranch string) (string
 		body = strings.Join(lines, "\n") + "\n\n---\nCreated with [loom](https://github.com/tysonthomas9/loomcli)"
 	}
 
-	return title, body, nil
+	return title, body
 }
 
 func getExistingPRURL(repoPath, sourceBranch string) (string, error) {

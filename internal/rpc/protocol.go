@@ -47,7 +47,7 @@ const (
 	OpMolStale            = "mol_stale"
 	OpGetParentIDs        = "get_parent_ids"
 	OpGetGraphData        = "get_graph_data"
-	OpWaitForMutations    = "wait_for_mutations"
+	OpWaitForMutations    = "wait_for_mutations" //nolint:gosec // G101: not a credential, RPC operation name
 
 	// Gate operations
 	OpGateCreate = "gate_create"
