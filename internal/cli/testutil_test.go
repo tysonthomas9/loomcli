@@ -2,12 +2,12 @@ package cli
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // CommandStub represents an expected command call and its response
@@ -124,46 +124,13 @@ func SetupTestWorktree(t *testing.T, name string) string {
 // Restores original stdin via t.Cleanup().
 func MockStdin(t *testing.T, input string) {
 	t.Helper()
-	origStdin := os.Stdin
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("failed to create pipe: %v", err)
-	}
-	defer w.Close()
-
-	_, err = io.WriteString(w, input)
-	if err != nil {
-		t.Fatalf("failed to write to pipe: %v", err)
-	}
-
-	os.Stdin = r
-	t.Cleanup(func() {
-		os.Stdin = origStdin
-		r.Close()
-	})
+	testutil.MockStdin(t, input)
 }
 
-// SetupTestEnv sets environment variables and registers cleanup with t.Cleanup()
+// SetupTestEnv sets environment variables and registers cleanup with t.Cleanup().
 func SetupTestEnv(t *testing.T, vars map[string]string) {
 	t.Helper()
-	origVals := make(map[string]string)
-	origSet := make(map[string]bool)
-
-	for k, v := range vars {
-		origVals[k], origSet[k] = os.LookupEnv(k)
-		os.Setenv(k, v)
-	}
-
-	t.Cleanup(func() {
-		for k := range vars {
-			if origSet[k] {
-				os.Setenv(k, origVals[k])
-			} else {
-				os.Unsetenv(k)
-			}
-		}
-	})
+	testutil.SetupTestEnv(t, vars)
 }
 
 // FlexibleStub represents a command pattern that can match multiple calls
@@ -291,43 +258,9 @@ func (m *FlexibleCommandMock) Calls() []CommandStub {
 }
 
 // LoadFixture reads a test fixture file from the testdata directory.
-// It searches for testdata in the current directory and common relative paths.
 func LoadFixture(t *testing.T, path string) string {
 	t.Helper()
-
-	// Try multiple possible locations for testdata
-	searchPaths := []string{
-		filepath.Join("testdata", path),
-		filepath.Join("internal", "cli", "testdata", path),
-		filepath.Join("..", "..", "internal", "cli", "testdata", path),
-	}
-
-	// Also try from GOPATH or module root
-	if cwd, err := os.Getwd(); err == nil {
-		// Walk up to find the repo root (has go.mod)
-		dir := cwd
-		for i := 0; i < 10; i++ {
-			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-				searchPaths = append(searchPaths, filepath.Join(dir, "internal", "cli", "testdata", path))
-				break
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	}
-
-	for _, searchPath := range searchPaths {
-		data, err := os.ReadFile(searchPath)
-		if err == nil {
-			return string(data)
-		}
-	}
-
-	t.Fatalf("failed to load fixture %s: not found in any search path", path)
-	return ""
+	return testutil.LoadFixture(t, path)
 }
 
 // SetupMultiWorktreeEnv creates multiple worktree directories with optional lock files.
@@ -407,12 +340,7 @@ func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockAgentInvokerReco
 	return SetupMockAgentInvoker(t, returnErr)
 }
 
-// containsSubstring checks if any element in the slice contains the substring
+// containsSubstring checks if any element in the slice contains the substring.
 func containsSubstring(slice []string, substr string) bool {
-	for _, s := range slice {
-		if strings.Contains(s, substr) {
-			return true
-		}
-	}
-	return false
+	return testutil.ContainsSubstring(slice, substr)
 }

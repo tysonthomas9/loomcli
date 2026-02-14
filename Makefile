@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test lint clean install help frontend sync-beads update-beads gate hooks dev dev-check
+.PHONY: all build test test-integration test-all lint clean install help frontend sync-beads update-beads gate hooks dev dev-check
 
 # Default target
 all: build
@@ -14,6 +14,16 @@ build: frontend
 test:
 	@echo "Running tests..."
 	@TEST_COVER=1 ./scripts/test.sh
+
+# Run integration tests (includes unit tests + integration tests)
+test-integration:
+	@echo "Running integration tests..."
+	@TEST_TAGS=integration TEST_COVER=1 ./scripts/test.sh
+
+# Run all tests (unit + integration + e2e)
+test-all:
+	@echo "Running all tests..."
+	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
 
 # Run linter
 lint:
@@ -86,7 +96,9 @@ dev: dev-check
 help:
 	@echo "Loomcli Makefile targets:"
 	@echo "  make build   - Build the loom binary (builds frontend first)"
-	@echo "  make test    - Run all tests with coverage"
+	@echo "  make test              - Run unit tests with coverage"
+	@echo "  make test-integration  - Run unit + integration tests"
+	@echo "  make test-all          - Run all tests (unit + integration + e2e)"
 	@echo "  make lint    - Run golangci-lint"
 	@echo "  make install - Install loom to GOPATH/bin"
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
