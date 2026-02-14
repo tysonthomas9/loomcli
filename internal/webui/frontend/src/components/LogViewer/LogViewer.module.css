@@ -129,8 +129,8 @@
 }
 
 .terminalContainer :global(.xterm-viewport) {
-  width: 100% !important;
-  overflow-y: auto !important;
+  scrollbar-width: thin;
+  scrollbar-color: #555 #1e1e1e;
 }
 
 .terminalContainer :global(.xterm-viewport)::-webkit-scrollbar {
@@ -148,9 +148,4 @@
 
 .terminalContainer :global(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
   background: #777;
-}
-
-.terminalContainer :global(.xterm-viewport) {
-  scrollbar-width: thin;
-  scrollbar-color: #555 #1e1e1e;
 }

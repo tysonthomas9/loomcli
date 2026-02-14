@@ -15,18 +15,14 @@ import type { Issue, IssueDetails, IssueWithDependencyMetadata } from '@/types';
 import { IssueDetailPanel } from '../IssueDetailPanel';
 
 // Create hoisted mocks
-const { mockGetTaskLogPhases, mockUseLogStream } = vi.hoisted(() => ({
+const { mockGetTaskLogPhases, mockUseTaskLogPolling } = vi.hoisted(() => ({
   mockGetTaskLogPhases: vi.fn().mockResolvedValue([]),
-  mockUseLogStream: vi.fn(() => ({
+  mockUseTaskLogPolling: vi.fn(() => ({
     chunks: [],
     state: 'disconnected' as const,
-    isConnected: false,
-    reconnectAttempts: 0,
-    lastError: null,
+    error: null,
     resetVersion: 0,
-    clearChunks: vi.fn(),
-    connect: vi.fn(),
-    disconnect: vi.fn(),
+    refresh: vi.fn(),
   })),
 }));
 
@@ -36,15 +32,14 @@ vi.mock('@/api', () => ({
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
   getTaskLogPhases: mockGetTaskLogPhases,
-  getTaskLogStreamUrl: vi.fn().mockReturnValue('/api/tasks/test/logs/planning/stream'),
 }));
 
-// Mock the useLogStream hook
+// Mock the task log polling hook
 vi.mock('@/hooks', async (importOriginal) => {
   const orig = await importOriginal<typeof import('@/hooks')>();
   return {
     ...orig,
-    useLogStream: mockUseLogStream,
+    useTaskLogPolling: mockUseTaskLogPolling,
   };
 });
 

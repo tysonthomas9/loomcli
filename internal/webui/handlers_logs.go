@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
-	"time"
 )
 
 // validAgentName matches alphanumeric characters, hyphens, and underscores.
@@ -231,102 +230,5 @@ func handleGetTaskLog() http.HandlerFunc {
 				LineCount: lineCount + int64(len(content)) - 1,
 			},
 		})
-	}
-}
-
-// handleTaskLogStream returns an SSE endpoint for real-time task log streaming.
-// GET /api/tasks/{id}/logs/{phase}/stream
-// Query params: ?since_bytes=<byte_offset> for catch-up
-// Events: event: log-chunk, data: {chunk_b64: "...", byte_offset: N}
-func handleTaskLogStream() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Get task ID from path
-		taskID := r.PathValue("id")
-		if taskID == "" {
-			respondJSON(w, http.StatusBadRequest, LogContentResponse{
-				Success: false,
-				Error:   "missing task ID",
-			})
-			return
-		}
-
-		// Validate task ID
-		if !validTaskID.MatchString(taskID) {
-			respondJSON(w, http.StatusBadRequest, LogContentResponse{
-				Success: false,
-				Error:   "invalid task ID: must match [a-zA-Z0-9_-]+",
-			})
-			return
-		}
-
-		// Get phase from path
-		phase := r.PathValue("phase")
-		if phase == "" {
-			respondJSON(w, http.StatusBadRequest, LogContentResponse{
-				Success: false,
-				Error:   "missing phase",
-			})
-			return
-		}
-
-		// Validate phase
-		if !validPhase.MatchString(phase) {
-			respondJSON(w, http.StatusBadRequest, LogContentResponse{
-				Success: false,
-				Error:   "invalid phase: must be 'planning' or 'implementation'",
-			})
-			return
-		}
-
-		// Get log file path
-		logPath, err := getTaskLogPath(taskID, phase)
-		if err != nil {
-			log.Printf("Task log path error for %s/%s: %v", taskID, phase, err)
-			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
-				Success: false,
-				Error:   "failed to resolve log path",
-			})
-			return
-		}
-
-		// Check if file exists
-		if !fileExists(logPath) {
-			respondJSON(w, http.StatusNotFound, LogContentResponse{
-				Success: false,
-				Error:   "log file not found - task phase may not have started",
-			})
-			return
-		}
-
-		// Parse since_bytes parameter
-		var startOffset int64
-		if since := r.URL.Query().Get("since_bytes"); since != "" {
-			if n, err := strconv.ParseInt(since, 10, 64); err == nil && n > 0 {
-				startOffset = n
-			}
-		}
-
-		// Create log streamer
-		streamer, err := NewLogStreamerFixed(logPath)
-		if err != nil {
-			log.Printf("Log streamer error for task %s/%s: %v", taskID, phase, err)
-			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
-				Success: false,
-				Error:   "failed to open log stream",
-			})
-			return
-		}
-		defer func() { _ = streamer.Close() }()
-
-		// Disable write timeout for this long-lived SSE connection
-		rc := http.NewResponseController(w)
-		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-			log.Printf("Task log stream: failed to disable write deadline: %v", err)
-		}
-
-		// Stream logs (blocks until context canceled)
-		if err := streamer.Stream(r.Context(), w, startOffset); err != nil {
-			log.Printf("Log stream error for task %s/%s: %v", taskID, phase, err)
-		}
 	}
 }

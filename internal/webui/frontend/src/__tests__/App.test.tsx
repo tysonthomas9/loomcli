@@ -257,16 +257,12 @@ vi.mock('@/hooks', () => ({
     addRecentAssignee: vi.fn(),
     clearRecentAssignees: vi.fn(),
   })),
-  useLogStream: vi.fn(() => ({
+  useTaskLogPolling: vi.fn(() => ({
     chunks: [],
     state: 'disconnected' as const,
-    isConnected: false,
-    reconnectAttempts: 0,
-    lastError: null,
+    error: null,
     resetVersion: 0,
-    clearChunks: vi.fn(),
-    connect: vi.fn(),
-    disconnect: vi.fn(),
+    refresh: vi.fn(),
   })),
   useAgentTerminalLogs: vi.fn(() => ({
     mode: 'idle' as const,

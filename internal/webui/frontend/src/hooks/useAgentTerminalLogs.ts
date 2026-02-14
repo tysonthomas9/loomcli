@@ -8,7 +8,7 @@ import {
 } from '@/api';
 import { DEFAULT_RECONNECT_CONFIG, startAutoReconnect } from '@/utils/reconnectBackoff';
 
-import type { LogChunk, LogStreamState } from './useLogStream';
+import type { LogChunk, LogStreamState } from './logTypes';
 
 export type AgentLogTransportMode = 'idle' | 'loading' | 'tmux' | 'archive';
 

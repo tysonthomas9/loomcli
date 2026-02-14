@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import {
   getTaskLogPhases,
-  getTaskLogStreamUrl,
+  getTaskLogContent,
   getAgentTerminalInfo,
   getAgentTerminalToken,
   getAgentTerminalWsUrl,
@@ -94,17 +94,46 @@ describe('logs API', () => {
     });
   });
 
-  describe('getTaskLogStreamUrl', () => {
-    it('returns correct URL without token', () => {
-      mockGetAuthToken.mockReturnValue(null);
-      const url = getTaskLogStreamUrl('beads-abc', 'planning');
-      expect(url).toBe('/api/tasks/beads-abc/logs/planning/stream');
+  describe('getTaskLogContent', () => {
+    it('returns log snapshot content on success', async () => {
+      mockGetAuthToken.mockReturnValue('test-token');
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            success: true,
+            data: { lines: ['a', 'b'], line_count: 2 },
+          }),
+      });
+
+      const content = await getTaskLogContent('beads-abc', 'planning', 25);
+      expect(content).toEqual({ lines: ['a', 'b'], lineCount: 2 });
+
+      const mockFn = global.fetch as ReturnType<typeof vi.fn>;
+      const [url, options] = mockFn.mock.calls[0] as [string, { headers: Record<string, string> }];
+      expect(url).toBe('/api/tasks/beads-abc/logs/planning?lines=25');
+      expect(options.headers.Authorization).toBe('Bearer test-token');
     });
 
-    it('appends token when available', () => {
-      mockGetAuthToken.mockReturnValue('my-token');
-      const url = getTaskLogStreamUrl('beads-abc', 'planning');
-      expect(url).toBe('/api/tasks/beads-abc/logs/planning/stream?token=my-token');
+    it('returns empty content for 404 responses', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+      });
+
+      const content = await getTaskLogContent('missing', 'implementation');
+      expect(content).toEqual({ lines: [], lineCount: 0 });
+    });
+
+    it('throws on non-404 error', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+      });
+
+      await expect(getTaskLogContent('beads-abc', 'planning')).rejects.toThrow(
+        'Failed to fetch task logs'
+      );
     });
   });
 

@@ -7,7 +7,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useRef, useEffect, useCallback, useState } from 'react';
 
-import type { LogChunk, LogStreamState } from '@/hooks/useLogStream';
+import type { LogChunk, LogStreamState } from '@/hooks/logTypes';
 
 import '@xterm/xterm/css/xterm.css';
 import styles from './LogViewer.module.css';
@@ -94,6 +94,7 @@ export function LogViewer({
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 5000,
+      smoothScrollDuration: 120,
       cursorBlink: false,
       cursorStyle: 'bar',
       cursorWidth: 0,
@@ -120,7 +121,9 @@ export function LogViewer({
     // Fit once immediately, then again after layout settles (panel slide-in/resize).
     runFit();
     const initialFitFrame = requestAnimationFrame(runFit);
-    const initialFitTimeout = setTimeout(runFit, 120);
+    const initialFitTimeoutA = setTimeout(runFit, 180);
+    const initialFitTimeoutB = setTimeout(runFit, 360);
+    const initialFitTimeoutC = setTimeout(runFit, 720);
 
     const inputDisposable = onTerminalData
       ? terminal.onData((data: string) => onTerminalData(data))
@@ -153,7 +156,9 @@ export function LogViewer({
 
     return () => {
       cancelAnimationFrame(initialFitFrame);
-      clearTimeout(initialFitTimeout);
+      clearTimeout(initialFitTimeoutA);
+      clearTimeout(initialFitTimeoutB);
+      clearTimeout(initialFitTimeoutC);
       clearTimeout(resizeTimer);
       observer.disconnect();
       scrollDisposable.dispose();
@@ -166,6 +171,25 @@ export function LogViewer({
     // onAutoScrollChange/onTerminalResize/onTerminalData excluded from deps — terminal is created once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refit when stream resets/reconnects to keep wrapping in sync with panel layout changes.
+  useEffect(() => {
+    const fitAddon = fitAddonRef.current;
+    const terminal = terminalRef.current;
+    if (!fitAddon || !terminal) return;
+
+    const runFit = () => {
+      fitAddon.fit();
+      onTerminalResize?.(terminal.cols, terminal.rows);
+    };
+
+    const frame = requestAnimationFrame(runFit);
+    const timeout = setTimeout(runFit, 80);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timeout);
+    };
+  }, [connectionState, onTerminalResize, resetVersion]);
 
   // Write new chunks to terminal incrementally
   useEffect(() => {

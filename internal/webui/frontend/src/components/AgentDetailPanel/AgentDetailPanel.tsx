@@ -147,6 +147,7 @@ export function AgentDetailPanel({
     resetVersion: logResetVersion,
     refresh: refreshLogs,
     resize: resizeLogs,
+    sendInput: sendLogInput,
   } = useAgentTerminalLogs({
     agentName,
     enabled: isOpen && activeTab === 'logs' && agentName !== null,
@@ -460,8 +461,10 @@ export function AgentDetailPanel({
                   connectionState={logConnectionState}
                   error={logError}
                   height="100%"
+                  autoScroll={logMode !== 'tmux'}
                   resetVersion={logResetVersion}
-                  {...(logMode === 'tmux' ? { onTerminalResize: resizeLogs } : {})}
+                  onTerminalResize={resizeLogs}
+                  {...(logMode === 'tmux' ? { onTerminalData: sendLogInput } : {})}
                 />
               </div>
             )}

@@ -12,6 +12,15 @@ interface LogPhaseResponse {
   data: { phases: string[] };
 }
 
+interface TaskLogContentResponse {
+  success: boolean;
+  data?: {
+    lines: string[];
+    line_count: number;
+  };
+  error?: string;
+}
+
 interface AgentTerminalInfoResponse {
   success: boolean;
   data?: {
@@ -39,16 +48,6 @@ interface AgentLogContentResponse {
 }
 
 /**
- * Append auth token to a URL as a query parameter if available.
- */
-function appendToken(url: string): string {
-  const token = getAuthToken();
-  if (!token) return url;
-  const sep = url.includes('?') ? '&' : '?';
-  return `${url}${sep}token=${encodeURIComponent(token)}`;
-}
-
-/**
  * Fetch available log phases for a task.
  * @param taskId The task ID (e.g., "beads-abc123")
  * @returns Array of available phases (e.g., ["planning", "implementation"])
@@ -72,6 +71,39 @@ export async function getTaskLogPhases(taskId: string): Promise<string[]> {
 
   const data: LogPhaseResponse = await response.json();
   return data.data.phases;
+}
+
+/**
+ * Fetch task log snapshot content for a single phase.
+ */
+export async function getTaskLogContent(
+  taskId: string,
+  phase: 'planning' | 'implementation',
+  lines = 500
+): Promise<{ lines: string[]; lineCount: number }> {
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(
+    `/api/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}?lines=${lines}`,
+    { headers }
+  );
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      return { lines: [], lineCount: 0 };
+    }
+    throw new Error('Failed to fetch task logs');
+  }
+
+  const data: TaskLogContentResponse = await response.json();
+  return {
+    lines: Array.isArray(data.data?.lines) ? data.data.lines : [],
+    lineCount: typeof data.data?.line_count === 'number' ? data.data.line_count : 0,
+  };
 }
 
 /**
@@ -130,14 +162,4 @@ export async function getAgentLogArchive(
     lines: Array.isArray(response.data.lines) ? response.data.lines : [],
     lineCount: typeof response.data.line_count === 'number' ? response.data.line_count : 0,
   };
-}
-
-/**
- * Get the SSE URL for task log streaming.
- * @param taskId The task ID (e.g., "beads-abc123")
- * @param phase The log phase ("planning" or "implementation")
- * @returns The SSE endpoint URL
- */
-export function getTaskLogStreamUrl(taskId: string, phase: string): string {
-  return appendToken(`/api/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}/stream`);
 }

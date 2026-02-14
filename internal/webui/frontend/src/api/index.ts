@@ -40,7 +40,7 @@ export type { BackendConfigData, AgentBackendOverride, BackendConfigPatchRequest
 // Log streaming API functions
 export {
   getTaskLogPhases,
-  getTaskLogStreamUrl,
+  getTaskLogContent,
   getAgentTerminalInfo,
   getAgentTerminalToken,
   getAgentTerminalWsUrl,

@@ -245,6 +245,12 @@ func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows u
 		return nil, fmt.Errorf("tmux session %q not found", tmuxSessionName)
 	}
 
+	// Mirror Talk-to-Lead behavior so wheel/input interactions are consistent.
+	mouseCmd := exec.Command(m.tmuxPath, "set-option", "-t", tmuxSessionName, "mouse", "on")
+	if err := mouseCmd.Run(); err != nil {
+		log.Printf("Warning: failed to enable mouse mode for session %q: %v", tmuxSessionName, err)
+	}
+
 	cmd, ptmx, err := m.tmuxAttach(tmuxSessionName)
 	if err != nil {
 		return nil, err

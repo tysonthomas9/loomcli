@@ -12,9 +12,8 @@ import {
   addDependency,
   removeDependency,
   getTaskLogPhases,
-  getTaskLogStreamUrl,
 } from '@/api';
-import { useLogStream } from '@/hooks';
+import { useTaskLogPolling } from '@/hooks';
 import type {
   Issue,
   IssueDetails,
@@ -288,32 +287,20 @@ function DefaultContent({
   const shouldConnectToLogs =
     isTaskType &&
     ((activeLogTab === 'planning' && !issue?.design) || activeLogTab === 'implementation');
-  const logStreamUrl =
-    issue && shouldConnectToLogs ? getTaskLogStreamUrl(issue.id, activeLogTab) : '';
+  const activeLogPhase: 'planning' | 'implementation' | null =
+    issue && shouldConnectToLogs ? (activeLogTab as 'planning' | 'implementation') : null;
 
-  // Log stream hook
+  // Task log snapshot polling hook
   const {
     chunks: logChunks,
     state: logConnectionState,
-    lastError: logError,
+    error: logError,
     resetVersion: logResetVersion,
-    connect: connectLogs,
-    disconnect: disconnectLogs,
-    clearChunks: clearLogChunks,
-  } = useLogStream({
-    url: logStreamUrl,
-    autoConnect: false,
+  } = useTaskLogPolling({
+    taskId: issue?.id ?? null,
+    phase: activeLogPhase,
+    enabled: Boolean(issue) && shouldConnectToLogs,
   });
-
-  // Connect/disconnect logs based on tab
-  useEffect(() => {
-    if (shouldConnectToLogs && logStreamUrl) {
-      clearLogChunks();
-      connectLogs();
-    } else {
-      disconnectLogs();
-    }
-  }, [shouldConnectToLogs, logStreamUrl, connectLogs, disconnectLogs, clearLogChunks]);
 
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);

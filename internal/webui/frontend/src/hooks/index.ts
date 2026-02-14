@@ -112,13 +112,9 @@ export type { UseRecentAssigneesReturn } from './useRecentAssignees';
 export { useBackendConfig } from './useBackendConfig';
 export type { UseBackendConfigReturn } from './useBackendConfig';
 
-export { useLogStream } from './useLogStream';
-export type {
-  UseLogStreamOptions,
-  UseLogStreamReturn,
-  LogChunk,
-  LogStreamState,
-} from './useLogStream';
+export { useTaskLogPolling } from './useTaskLogPolling';
+export type { UseTaskLogPollingOptions, UseTaskLogPollingReturn } from './useTaskLogPolling';
+export type { LogChunk, LogStreamState } from './logTypes';
 
 export { useAgentTerminalLogs } from './useAgentTerminalLogs';
 export type {

@@ -5,7 +5,7 @@ import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { LogChunk } from '@/hooks/useLogStream';
+import type { LogChunk } from '@/hooks/logTypes';
 
 import { LogViewer } from '../LogViewer';
 
