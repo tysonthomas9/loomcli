@@ -3,6 +3,7 @@
 loom
 loomcli
 *.test
+/logrouter
 tmp/
 
 # Frontend dependencies

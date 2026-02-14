@@ -128,3 +128,26 @@ redis.call('ZADD', KEYS[3], tonumber(ARGV[3]), ARGV[1])
 
 return {1, ''}
 `)
+
+// cleanupOwnerScript atomically checks task ownership and deletes only if it matches.
+// This prevents a TOCTOU race in the stale detector's cleanupWorker where a new worker
+// could claim the task between the GET and DEL operations.
+//
+// KEYS[1] = task owner key
+// ARGV[1] = expected_owner (worker ID)
+//
+// Returns:
+//
+//	1 if key deleted or didn't exist (safe to proceed)
+//	0 if key exists with a different owner (skip deletion)
+var cleanupOwnerScript = redis.NewScript(`
+local owner = redis.call('GET', KEYS[1])
+if not owner then
+    return 1
+end
+if owner == ARGV[1] then
+    redis.call('DEL', KEYS[1])
+    return 1
+end
+return 0
+`)

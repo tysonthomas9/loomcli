@@ -863,3 +863,111 @@ func TestGetStaleWorkers_ZeroThreshold(t *testing.T) {
 		t.Errorf("expected 2 stale entries with zero threshold, got %d", len(entries))
 	}
 }
+
+// --- DeleteTaskOwnerIfMatch (TOCTOU fix) tests ---
+
+func TestDeleteTaskOwnerIfMatch_MatchingOwner(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	mr.Set(taskOwnerKey("task-abc"), "worker-1")
+
+	deleted, err := client.DeleteTaskOwnerIfMatch(ctx, "task-abc", "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected true when owner matches")
+	}
+	if mr.Exists(taskOwnerKey("task-abc")) {
+		t.Error("task owner key should be deleted when owner matches")
+	}
+}
+
+func TestDeleteTaskOwnerIfMatch_DifferentOwner(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	mr.Set(taskOwnerKey("task-abc"), "worker-2")
+
+	deleted, err := client.DeleteTaskOwnerIfMatch(ctx, "task-abc", "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deleted {
+		t.Fatal("expected false when owner does not match")
+	}
+
+	// Key should still exist with the original owner
+	owner, err := mr.Get(taskOwnerKey("task-abc"))
+	if err != nil {
+		t.Fatalf("task owner key should still exist: %v", err)
+	}
+	if owner != "worker-2" {
+		t.Errorf("expected owner worker-2, got %s", owner)
+	}
+}
+
+func TestDeleteTaskOwnerIfMatch_NoKey(t *testing.T) {
+	client, _ := setupStaleTest(t)
+	ctx := context.Background()
+
+	// No key set — nonexistent key should return true (nothing to delete is success)
+	deleted, err := client.DeleteTaskOwnerIfMatch(ctx, "nonexistent-task", "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected true when key does not exist")
+	}
+}
+
+func TestCleanupWorker_AtomicOwnershipCheck(t *testing.T) {
+	client, mr := setupStaleTest(t)
+	ctx := context.Background()
+
+	cfg := StaleDetectorConfig{
+		LeaderKey: DefaultLeaderKey,
+	}
+	sd := NewStaleDetector(client, cfg, "server-1", nil)
+
+	// Set up worker-1 as stale with task-abc
+	mr.ZAdd(activeWorkersKey(), float64(time.Now().UnixMilli()), "worker-1")
+	mr.HSet(workerStateKey("worker-1"), "task_id", "task-abc", "state", "working")
+	mr.Set(taskOwnerKey("task-abc"), "worker-1")
+
+	// Simulate worker-2 claiming task-abc before cleanup runs (the race condition)
+	mr.Set(taskOwnerKey("task-abc"), "worker-2")
+
+	sw := StaleWorker{
+		WorkerID: "worker-1",
+		TaskID:   "task-abc",
+	}
+
+	err := sd.cleanupWorker(ctx, sw)
+	if err != nil {
+		t.Fatalf("cleanup failed: %v", err)
+	}
+
+	// Task-abc should still be owned by worker-2 (atomic check prevented deletion)
+	owner, err := mr.Get(taskOwnerKey("task-abc"))
+	if err != nil {
+		t.Fatalf("task owner key should still exist: %v", err)
+	}
+	if owner != "worker-2" {
+		t.Errorf("expected task owner to remain worker-2, got %s", owner)
+	}
+
+	// Worker-1's state should be cleaned up
+	if mr.Exists(workerStateKey("worker-1")) {
+		t.Error("worker-1 state should be deleted")
+	}
+
+	// Worker-1 should be removed from active workers ZSET
+	members, _ := mr.ZMembers(activeWorkersKey())
+	for _, m := range members {
+		if m == "worker-1" {
+			t.Error("worker-1 should be removed from active workers ZSET")
+		}
+	}
+}
