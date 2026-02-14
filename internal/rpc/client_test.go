@@ -666,6 +666,52 @@ func TestTryConnectWithTimeout_NegativeTimeout(t *testing.T) {
 	}
 }
 
+func TestTryConnectWithTimeout_DialFailureCleanup(t *testing.T) {
+	t.Parallel()
+
+	// Test lines 102-114 of client.go: socket exists but dial fails (daemon crashed),
+	// and lock is NOT held. Code should clean up stale socket and pid files.
+	beadsDir, err := os.MkdirTemp("/tmp", "rpc-dialfail-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(beadsDir) })
+
+	socketPath := filepath.Join(beadsDir, "bd.sock")
+
+	// Create a regular file as fake socket — causes dial to fail
+	if err := os.WriteFile(socketPath, []byte("not a real socket"), 0644); err != nil {
+		t.Fatalf("failed to create fake socket: %v", err)
+	}
+
+	// Create a stale daemon.pid with a non-running PID
+	pidFile := filepath.Join(beadsDir, "daemon.pid")
+	if err := os.WriteFile(pidFile, []byte("999999999"), 0644); err != nil {
+		t.Fatalf("failed to create pid file: %v", err)
+	}
+
+	// No daemon.lock file and PID is not running → TryDaemonLock returns running=false
+
+	client, err := TryConnectWithTimeout(socketPath, 100*time.Millisecond)
+	if err != nil {
+		t.Errorf("TryConnectWithTimeout() error: %v", err)
+	}
+	if client != nil {
+		client.Close()
+		t.Error("TryConnectWithTimeout() should return nil client for dial failure")
+	}
+
+	// Verify stale socket file was removed
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Error("stale socket file should be removed after dial failure with lock free")
+	}
+
+	// Verify stale pid file was removed by cleanupStaleDaemonArtifacts
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Error("stale daemon.pid should be removed after dial failure with lock free")
+	}
+}
+
 func TestClient_SetAuthToken(t *testing.T) {
 	t.Parallel()
 

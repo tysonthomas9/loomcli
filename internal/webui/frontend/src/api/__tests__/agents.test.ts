@@ -80,6 +80,54 @@ describe('fetchAgents', () => {
   });
 });
 
+describe('checkLoomHealth', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns true when health endpoint responds ok', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    });
+
+    const result = await checkLoomHealth();
+
+    expect(result).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toContain('/health');
+  });
+
+  it('returns false when health endpoint responds not-ok', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+    });
+
+    const result = await checkLoomHealth();
+
+    expect(result).toBe(false);
+  });
+
+  it('returns false on network error (error is swallowed)', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+    const result = await checkLoomHealth();
+
+    expect(result).toBe(false);
+  });
+
+  it('returns false on AbortError (timeout is swallowed)', async () => {
+    const abortError = new DOMException('The operation was aborted', 'AbortError');
+    mockFetch.mockRejectedValueOnce(abortError);
+
+    const result = await checkLoomHealth();
+
+    expect(result).toBe(false);
+  });
+});
+
 describe('fetchStatus', () => {
   beforeEach(() => {
     vi.clearAllMocks();

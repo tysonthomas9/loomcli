@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 )
 
@@ -868,5 +869,23 @@ func TestDeleteTaskOwnerIfMatch_ScriptError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cleanup owner script failed") {
 		t.Errorf("expected error to contain 'cleanup owner script failed', got: %v", err)
+	}
+}
+
+func TestClaimTask_LuaCompilationError(t *testing.T) {
+	client, _ := setupTest(t)
+	ctx := context.Background()
+
+	// Save original and replace with invalid Lua that triggers a compilation error
+	original := claimScript
+	claimScript = redis.NewScript("this is !!! invalid lua syntax")
+	t.Cleanup(func() { claimScript = original })
+
+	_, err := client.ClaimTask(ctx, "worker-1", "task-1", "Test", "spark")
+	if err == nil {
+		t.Fatal("expected error for Lua compilation failure")
+	}
+	if !strings.Contains(err.Error(), "claim script failed") {
+		t.Errorf("expected error to contain 'claim script failed', got: %v", err)
 	}
 }

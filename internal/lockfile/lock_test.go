@@ -3,6 +3,7 @@ package lockfile
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -122,6 +123,31 @@ func TestReadLockInfo(t *testing.T) {
 		}
 	})
 
+	t.Run("INT_MAX PID in JSON", func(t *testing.T) {
+		lockPath := filepath.Join(tmpDir, "daemon.lock")
+		lockInfo := &LockInfo{
+			PID:      math.MaxInt32,
+			Database: "/path/to/db",
+			Version:  "1.0.0",
+		}
+		data, err := json.Marshal(lockInfo)
+		if err != nil {
+			t.Fatalf("failed to marshal lock info: %v", err)
+		}
+		if err := os.WriteFile(lockPath, data, 0644); err != nil {
+			t.Fatalf("failed to write lock file: %v", err)
+		}
+
+		result, err := ReadLockInfo(tmpDir)
+		if err != nil {
+			t.Fatalf("ReadLockInfo failed: %v", err)
+		}
+
+		if result.PID != math.MaxInt32 {
+			t.Errorf("PID mismatch: got %d, want %d", result.PID, math.MaxInt32)
+		}
+	})
+
 	t.Run("zero PID in JSON", func(t *testing.T) {
 		// Documents that ReadLockInfo does not validate PID > 0
 		// (finding from code review loomcli-6fl.3)
@@ -207,6 +233,38 @@ func TestCheckPIDFile(t *testing.T) {
 		}
 		if pid != currentPID {
 			t.Errorf("expected pid=%d, got %d", currentPID, pid)
+		}
+	})
+
+	t.Run("PID at INT_MAX boundary", func(t *testing.T) {
+		pidFile := filepath.Join(tmpDir, "daemon.pid")
+		// math.MaxInt32 = 2147483647 — valid int, but no process runs at this PID
+		if err := os.WriteFile(pidFile, []byte("2147483647"), 0644); err != nil {
+			t.Fatalf("failed to write PID file: %v", err)
+		}
+
+		running, pid := checkPIDFile(tmpDir)
+		if running {
+			t.Error("expected running=false for PID at INT_MAX boundary")
+		}
+		if pid != 0 {
+			t.Errorf("expected pid=0, got %d", pid)
+		}
+	})
+
+	t.Run("PID overflow beyond int64", func(t *testing.T) {
+		pidFile := filepath.Join(tmpDir, "daemon.pid")
+		// Value exceeding int64 max causes strconv.Atoi to fail with overflow
+		if err := os.WriteFile(pidFile, []byte("99999999999999999999"), 0644); err != nil {
+			t.Fatalf("failed to write PID file: %v", err)
+		}
+
+		running, pid := checkPIDFile(tmpDir)
+		if running {
+			t.Error("expected running=false for PID overflow")
+		}
+		if pid != 0 {
+			t.Errorf("expected pid=0, got %d", pid)
 		}
 	})
 
@@ -417,6 +475,53 @@ func TestTryDaemonLock(t *testing.T) {
 		}
 	})
 
+	t.Run("fallback to PID file with INT_MAX PID", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		pidFile := filepath.Join(tmpDir, "daemon.pid")
+
+		// No lock file, PID file contains INT_MAX — no process at that PID
+		if err := os.WriteFile(pidFile, []byte("2147483647"), 0644); err != nil {
+			t.Fatalf("failed to write PID file: %v", err)
+		}
+
+		running, pid := TryDaemonLock(tmpDir)
+		if running {
+			t.Error("expected running=false for INT_MAX PID in fallback")
+		}
+		if pid != 0 {
+			t.Errorf("expected pid=0, got %d", pid)
+		}
+	})
+
+	t.Run("lock file with restricted permissions falls back to PID file", func(t *testing.T) {
+		if os.Getuid() == 0 {
+			t.Skip("requires non-root")
+		}
+
+		tmpDir := t.TempDir()
+		lockPath := filepath.Join(tmpDir, "daemon.lock")
+		pidFile := filepath.Join(tmpDir, "daemon.pid")
+
+		// Create lock file with mode 0000 so os.OpenFile(..., O_RDWR) fails
+		if err := os.WriteFile(lockPath, []byte("{}"), 0000); err != nil {
+			t.Fatalf("failed to write lock file: %v", err)
+		}
+
+		// PID file with current process PID
+		currentPID := os.Getpid()
+		if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", currentPID)), 0644); err != nil {
+			t.Fatalf("failed to write PID file: %v", err)
+		}
+
+		running, pid := TryDaemonLock(tmpDir)
+		if !running {
+			t.Error("expected running=true when permissions fallback to PID file")
+		}
+		if pid != currentPID {
+			t.Errorf("expected pid=%d from PID file fallback, got %d", currentPID, pid)
+		}
+	})
+
 	t.Run("empty lock file not locked", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		lockPath := filepath.Join(tmpDir, "daemon.lock")
@@ -553,6 +658,12 @@ func TestIsProcessRunning(t *testing.T) {
 	t.Run("very high PID is not running", func(t *testing.T) {
 		if IsProcessRunning(999999999) {
 			t.Error("expected PID 999999999 to not be running")
+		}
+	})
+
+	t.Run("PID at math.MaxInt32", func(t *testing.T) {
+		if isProcessRunning(math.MaxInt32) {
+			t.Errorf("expected PID %d (math.MaxInt32) to not be running", math.MaxInt32)
 		}
 	})
 
@@ -803,6 +914,127 @@ func TestConcurrentLockAccess(t *testing.T) {
 			if results[i] {
 				t.Errorf("probe %d: expected running=false when lock is not held", i)
 			}
+		}
+	})
+}
+
+func TestNFSLocking(t *testing.T) {
+	nfsPath := os.Getenv("LOCKFILE_TEST_NFS_PATH")
+	if nfsPath == "" {
+		t.Skip("LOCKFILE_TEST_NFS_PATH not set — skipping NFS integration tests")
+	}
+
+	t.Run("TryDaemonLock on NFS", func(t *testing.T) {
+		testDir := filepath.Join(nfsPath, "nfs_lock_test")
+		if err := os.MkdirAll(testDir, 0755); err != nil {
+			t.Fatalf("failed to create NFS test dir: %v", err)
+		}
+		defer os.RemoveAll(testDir)
+
+		lockPath := filepath.Join(testDir, "daemon.lock")
+		lockInfo := LockInfo{
+			PID:       os.Getpid(),
+			Database:  "/path/to/db",
+			Version:   "1.0.0",
+			StartedAt: time.Now(),
+		}
+		data, err := json.Marshal(lockInfo)
+		if err != nil {
+			t.Fatalf("failed to marshal lock info: %v", err)
+		}
+		if err := os.WriteFile(lockPath, data, 0644); err != nil {
+			t.Fatalf("failed to write lock file on NFS: %v", err)
+		}
+
+		// Hold flock, then probe
+		f, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open lock file on NFS: %v", err)
+		}
+		defer f.Close()
+
+		if err := FlockExclusiveBlocking(f); err != nil {
+			t.Logf("NFS flock acquisition failed (may be expected on NFS v2/v3): %v", err)
+			return
+		}
+		defer FlockUnlock(f)
+
+		running, pid := TryDaemonLock(testDir)
+		t.Logf("NFS TryDaemonLock result: running=%v, pid=%d", running, pid)
+		if !running {
+			t.Log("WARNING: flock may not work on this NFS mount — lock not detected as held")
+		}
+	})
+
+	t.Run("concurrent lock on NFS", func(t *testing.T) {
+		testDir := filepath.Join(nfsPath, "nfs_concurrent_test")
+		if err := os.MkdirAll(testDir, 0755); err != nil {
+			t.Fatalf("failed to create NFS test dir: %v", err)
+		}
+		defer os.RemoveAll(testDir)
+
+		lockPath := filepath.Join(testDir, "daemon.lock")
+		if err := os.WriteFile(lockPath, []byte("test"), 0644); err != nil {
+			t.Fatalf("failed to write lock file on NFS: %v", err)
+		}
+
+		// Acquire lock on first fd
+		f1, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open first fd on NFS: %v", err)
+		}
+		defer f1.Close()
+
+		if err := FlockExclusiveBlocking(f1); err != nil {
+			t.Logf("NFS flock acquisition failed: %v", err)
+			return
+		}
+		defer FlockUnlock(f1)
+
+		// Try non-blocking lock on second fd
+		f2, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open second fd on NFS: %v", err)
+		}
+		defer f2.Close()
+
+		err = flockExclusive(f2)
+		if err == errDaemonLocked {
+			t.Log("NFS flock exclusion works correctly — second lock attempt was blocked")
+		} else if err == nil {
+			t.Log("WARNING: NFS flock did NOT provide exclusion — second lock succeeded (known NFS v2/v3 limitation)")
+			FlockUnlock(f2)
+		} else {
+			t.Logf("NFS flock returned unexpected error: %v", err)
+		}
+	})
+
+	t.Run("FlockExclusiveBlocking on NFS", func(t *testing.T) {
+		testDir := filepath.Join(nfsPath, "nfs_blocking_test")
+		if err := os.MkdirAll(testDir, 0755); err != nil {
+			t.Fatalf("failed to create NFS test dir: %v", err)
+		}
+		defer os.RemoveAll(testDir)
+
+		lockPath := filepath.Join(testDir, "daemon.lock")
+		if err := os.WriteFile(lockPath, []byte("test"), 0644); err != nil {
+			t.Fatalf("failed to write lock file on NFS: %v", err)
+		}
+
+		f, err := os.OpenFile(lockPath, os.O_RDWR, 0644)
+		if err != nil {
+			t.Fatalf("failed to open lock file on NFS: %v", err)
+		}
+		defer f.Close()
+
+		if err := FlockExclusiveBlocking(f); err != nil {
+			t.Logf("FlockExclusiveBlocking failed on NFS (may be expected): %v", err)
+			return
+		}
+		t.Log("FlockExclusiveBlocking succeeded on NFS")
+
+		if err := FlockUnlock(f); err != nil {
+			t.Logf("FlockUnlock failed on NFS: %v", err)
 		}
 	})
 }

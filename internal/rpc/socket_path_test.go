@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -431,6 +432,62 @@ func TestEnsureSocketDir_MkdirNonExistError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to create socket directory") {
 		t.Errorf("error should contain 'failed to create socket directory', got: %v", err)
+	}
+}
+
+func TestEnsureSocketDir_ConcurrentMkdirRace(t *testing.T) {
+	// Test the race condition in lines 90-98 of socket_path.go where multiple
+	// goroutines call EnsureSocketDir concurrently for a non-existent directory.
+	// Exactly one goroutine creates it via Mkdir; others hit os.IsExist and
+	// fall through to re-stat and validate. All must succeed.
+	dirName := "beads-test-race-" + strings.ReplaceAll(t.Name(), "/", "-")
+	dirPath := filepath.Join("/tmp", dirName)
+	socketPath := filepath.Join(dirPath, "bd.sock")
+
+	// Ensure the directory does not exist before we start
+	os.RemoveAll(dirPath)
+	t.Cleanup(func() { os.RemoveAll(dirPath) })
+
+	const numGoroutines = 10
+	errs := make([]error, numGoroutines)
+	results := make([]string, numGoroutines)
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+	ready := make(chan struct{})
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			<-ready // Wait for all goroutines to be ready
+			results[idx], errs[idx] = EnsureSocketDir(socketPath)
+		}(i)
+	}
+
+	// Release all goroutines simultaneously to maximize race window
+	close(ready)
+	wg.Wait()
+
+	// All goroutines must succeed
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d: EnsureSocketDir() error: %v", i, err)
+		}
+		if results[i] != socketPath {
+			t.Errorf("goroutine %d: result = %q, want %q", i, results[i], socketPath)
+		}
+	}
+
+	// Verify the directory exists with correct permissions and ownership
+	fi, err := os.Lstat(dirPath)
+	if err != nil {
+		t.Fatalf("directory should exist after concurrent creation: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Fatal("path should be a directory")
+	}
+	if fi.Mode().Perm() != 0700 {
+		t.Errorf("directory permissions = %o, want 0700", fi.Mode().Perm())
 	}
 }
 
