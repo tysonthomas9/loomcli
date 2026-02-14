@@ -67,30 +67,22 @@ func handleAddComment(pool daemon.Pool) http.HandlerFunc {
 // handleAddCommentWithPool is the internal implementation that accepts an interface for testing.
 func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Extract issue ID from path parameter
 		issueID := r.PathValue("id")
 		if issueID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(CommentResponse{
+			respondJSON(w, http.StatusBadRequest, CommentResponse{
 				Success: false,
 				Error:   "missing issue ID",
-			}); err != nil {
-				log.Printf("Failed to encode comment response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Check pool availability
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(CommentResponse{
+			respondJSON(w, http.StatusServiceUnavailable, CommentResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode comment response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -98,38 +90,29 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 		var req CommentRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			log.Printf("Invalid request body in handleAddComment: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(CommentResponse{
+			respondJSON(w, http.StatusBadRequest, CommentResponse{
 				Success: false,
 				Error:   "invalid request body",
-			}); err != nil {
-				log.Printf("Failed to encode comment response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate text is not empty
 		text := strings.TrimSpace(req.Text)
 		if text == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(CommentResponse{
+			respondJSON(w, http.StatusBadRequest, CommentResponse{
 				Success: false,
 				Error:   "comment text is required",
-			}); err != nil {
-				log.Printf("Failed to encode comment response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate text length
 		if len(text) > maxCommentLength {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(CommentResponse{
+			respondJSON(w, http.StatusBadRequest, CommentResponse{
 				Success: false,
 				Error:   fmt.Sprintf("comment text too long (%d bytes, max %d)", len(text), maxCommentLength),
-			}); err != nil {
-				log.Printf("Failed to encode comment response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -144,13 +127,10 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 				status = http.StatusGatewayTimeout
 			}
 			log.Printf("Pool error in handleAddComment: %v", err)
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(CommentResponse{
+			respondJSON(w, status, CommentResponse{
 				Success: false,
 				Error:   "daemon not available",
-			}); err != nil {
-				log.Printf("Failed to encode comment response: %v", err)
-			}
+			})
 			return
 		}
 		defer pool.Put(client)
@@ -170,13 +150,10 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 				status = http.StatusNotFound
 			}
 			log.Printf("RPC error in handleAddComment: %v", err)
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(CommentResponse{
+			respondJSON(w, status, CommentResponse{
 				Success: false,
 				Error:   "internal server error",
-			}); err != nil {
-				log.Printf("Failed to encode comment response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -185,35 +162,26 @@ func handleAddCommentWithPool(pool commentConnectionGetter) http.HandlerFunc {
 			if strings.Contains(resp.Error, "not found") {
 				status = http.StatusNotFound
 			}
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(CommentResponse{
+			respondJSON(w, status, CommentResponse{
 				Success: false,
 				Error:   resp.Error,
-			}); err != nil {
-				log.Printf("Failed to encode comment response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Parse the created comment from response
 		var comment types.Comment
 		if err := json.Unmarshal(resp.Data, &comment); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(CommentResponse{
+			respondJSON(w, http.StatusInternalServerError, CommentResponse{
 				Success: false,
 				Error:   fmt.Sprintf("failed to parse comment: %v", err),
-			}); err != nil {
-				log.Printf("Failed to encode comment response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(CommentResponse{
+		respondJSON(w, http.StatusCreated, CommentResponse{
 			Success: true,
 			Data:    &comment,
-		}); err != nil {
-			log.Printf("Failed to encode comment response: %v", err)
-		}
+		})
 	}
 }

@@ -60,74 +60,6 @@ func (m *mockPool) Put(client issueGetter) {
 	}
 }
 
-// TestWriteErrorResponse tests the writeErrorResponse helper function
-func TestWriteErrorResponse(t *testing.T) {
-	tests := []struct {
-		name        string
-		status      int
-		message     string
-		wantStatus  int
-		wantMessage string
-	}{
-		{
-			name:        "bad request error",
-			status:      http.StatusBadRequest,
-			message:     "missing issue ID",
-			wantStatus:  http.StatusBadRequest,
-			wantMessage: "missing issue ID",
-		},
-		{
-			name:        "not found error",
-			status:      http.StatusNotFound,
-			message:     "issue not found: abc123",
-			wantStatus:  http.StatusNotFound,
-			wantMessage: "issue not found: abc123",
-		},
-		{
-			name:        "service unavailable error",
-			status:      http.StatusServiceUnavailable,
-			message:     "daemon not available",
-			wantStatus:  http.StatusServiceUnavailable,
-			wantMessage: "daemon not available",
-		},
-		{
-			name:        "internal server error",
-			status:      http.StatusInternalServerError,
-			message:     "database error",
-			wantStatus:  http.StatusInternalServerError,
-			wantMessage: "database error",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			writeErrorResponse(w, tt.status, tt.message)
-
-			// Check status code
-			if w.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
-			}
-
-			// Check Content-Type
-			contentType := w.Header().Get("Content-Type")
-			if contentType != "application/json" {
-				t.Errorf("Content-Type = %q, want %q", contentType, "application/json")
-			}
-
-			// Check response body
-			var response map[string]string
-			if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
-				t.Fatalf("failed to decode response: %v", err)
-			}
-
-			if response["error"] != tt.wantMessage {
-				t.Errorf("error = %q, want %q", response["error"], tt.wantMessage)
-			}
-		})
-	}
-}
-
 // TestHandleGetIssue_EmptyID tests that an empty issue ID returns 400 Bad Request
 func TestHandleGetIssue_EmptyID(t *testing.T) {
 	// Create a pool (won't be used since we fail early on empty ID)
@@ -243,44 +175,6 @@ func TestHandleGetIssue_ContextCancellation(t *testing.T) {
 	contentType := w.Header().Get("Content-Type")
 	if contentType != "application/json" {
 		t.Errorf("Content-Type = %q, want %q", contentType, "application/json")
-	}
-}
-
-// TestWriteErrorResponse_ContentTypeSet tests that Content-Type is set before WriteHeader
-func TestWriteErrorResponse_ContentTypeSet(t *testing.T) {
-	w := httptest.NewRecorder()
-	writeErrorResponse(w, http.StatusInternalServerError, "test error")
-
-	// Verify Content-Type header is present
-	contentType := w.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", contentType, "application/json")
-	}
-
-	// Verify the response is valid JSON
-	var response map[string]string
-	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
-		t.Fatalf("response is not valid JSON: %v", err)
-	}
-}
-
-// TestWriteErrorResponse_EmptyMessage tests handling of empty error message
-func TestWriteErrorResponse_EmptyMessage(t *testing.T) {
-	w := httptest.NewRecorder()
-	writeErrorResponse(w, http.StatusBadRequest, "")
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
-	}
-
-	var response map[string]string
-	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	// Empty message should still result in empty string in JSON
-	if response["error"] != "" {
-		t.Errorf("error = %q, want empty string", response["error"])
 	}
 }
 
@@ -8492,13 +8386,13 @@ func TestParseListParams_ContainsFieldsEmpty(t *testing.T) {
 // ===========================================================================
 
 // TestHandlerFileSplit_SharedHelpersFromIssues verifies that issue handlers
-// can call shared helpers from handlers.go (writeErrorResponse, writeIssuesError, splitAndTrim).
+// can call shared helpers from handlers.go (respondError, writeIssuesError, splitAndTrim).
 func TestHandlerFileSplit_SharedHelpersFromIssues(t *testing.T) {
 	// This test verifies the split didn't break cross-file references.
-	// handleGetIssueWithPool uses writeErrorResponse (from handlers.go).
+	// handleGetIssueWithPool uses respondError (from respond.go).
 	// handleListIssues uses writeIssuesError and splitAndTrim (from handlers.go).
 
-	// writeErrorResponse called from issue handler path (empty ID)
+	// respondError called from issue handler path (empty ID)
 	pool := &mockPool{
 		getFunc: func(ctx context.Context) (issueGetter, error) {
 			return &mockClient{}, nil

@@ -61,15 +61,15 @@ func (p *readyPoolAdapter) Put(client readyClient) {
 
 // SSEMetrics represents the runtime metrics for the SSE hub.
 type SSEMetrics struct {
-	ConnectedClients   int     `json:"connected_clients"`
-	DroppedMutations   int64   `json:"dropped_mutations"`
-	RetryQueueDepth    int     `json:"retry_queue_depth"`
-	UptimeSeconds      float64 `json:"uptime_seconds"`
-	FleetTimeoutsTotal int64   `json:"loom_fleet_timeouts_total,omitempty"`
-	FleetClaimsSuccess   int64 `json:"loom_fleet_claims_success,omitempty"`
-	FleetClaimsCollision int64 `json:"loom_fleet_claims_collision,omitempty"`
-	FleetClaimsTimeout   int64 `json:"loom_fleet_claims_timeout,omitempty"`
-	FleetClaimsTotal     int64 `json:"loom_fleet_claims_total,omitempty"`
+	ConnectedClients     int     `json:"connected_clients"`
+	DroppedMutations     int64   `json:"dropped_mutations"`
+	RetryQueueDepth      int     `json:"retry_queue_depth"`
+	UptimeSeconds        float64 `json:"uptime_seconds"`
+	FleetTimeoutsTotal   int64   `json:"loom_fleet_timeouts_total,omitempty"`
+	FleetClaimsSuccess   int64   `json:"loom_fleet_claims_success,omitempty"`
+	FleetClaimsCollision int64   `json:"loom_fleet_claims_collision,omitempty"`
+	FleetClaimsTimeout   int64   `json:"loom_fleet_claims_timeout,omitempty"`
+	FleetClaimsTotal     int64   `json:"loom_fleet_claims_total,omitempty"`
 }
 
 // MetricsResponse wraps the SSE hub metrics for JSON response.
@@ -90,29 +90,21 @@ func handleReady(pool daemon.Pool) http.HandlerFunc {
 // handleReadyWithPool is the internal implementation that accepts an interface for testing.
 func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(ReadyResponse{
+			respondJSON(w, http.StatusServiceUnavailable, ReadyResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode ready response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Parse query parameters into ReadyArgs
 		args, err := parseReadyParams(r)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(ReadyResponse{
+			respondJSON(w, http.StatusBadRequest, ReadyResponse{
 				Success: false,
 				Error:   err.Error(),
-			}); err != nil {
-				log.Printf("Failed to encode ready response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -127,13 +119,10 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 				status = http.StatusGatewayTimeout
 			}
 			log.Printf("Pool error in handleReady: %v", err)
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(ReadyResponse{
+			respondJSON(w, status, ReadyResponse{
 				Success: false,
 				Error:   "daemon not available",
-			}); err != nil {
-				log.Printf("Failed to encode ready response: %v", err)
-			}
+			})
 			return
 		}
 		defer pool.Put(client)
@@ -142,49 +131,37 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 		resp, err := client.Ready(args)
 		if err != nil {
 			log.Printf("RPC error in handleReady: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(ReadyResponse{
+			respondJSON(w, http.StatusInternalServerError, ReadyResponse{
 				Success: false,
 				Error:   "internal server error",
-			}); err != nil {
-				log.Printf("Failed to encode ready response: %v", err)
-			}
+			})
 			return
 		}
 
 		if !resp.Success {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(ReadyResponse{
+			respondJSON(w, http.StatusInternalServerError, ReadyResponse{
 				Success: false,
 				Error:   resp.Error,
-			}); err != nil {
-				log.Printf("Failed to encode ready response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Parse the issues from RPC response
 		var issues []*types.Issue
 		if err := json.Unmarshal(resp.Data, &issues); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(ReadyResponse{
+			respondJSON(w, http.StatusInternalServerError, ReadyResponse{
 				Success: false,
 				Error:   fmt.Sprintf("failed to parse ready issues: %v", err),
-			}); err != nil {
-				log.Printf("Failed to encode ready response: %v", err)
-			}
+			})
 			return
 		}
 
 		// If no issues, return empty response
 		if len(issues) == 0 {
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(ReadyResponse{
+			respondJSON(w, http.StatusOK, ReadyResponse{
 				Success: true,
 				Data:    []*ReadyIssueWithParent{},
-			}); err != nil {
-				log.Printf("Failed to encode ready response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -215,28 +192,21 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			issuesWithParent[i] = iwp
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(ReadyResponse{
+		respondJSON(w, http.StatusOK, ReadyResponse{
 			Success: true,
 			Data:    issuesWithParent,
-		}); err != nil {
-			log.Printf("Failed to encode ready response: %v", err)
-		}
+		})
 	}
 }
 
 // handleMetrics returns a handler that exposes SSE hub runtime metrics.
 func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 		if hub == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(MetricsResponse{
+			respondJSON(w, http.StatusServiceUnavailable, MetricsResponse{
 				Success: false,
 				Error:   "SSE hub not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode metrics response: %v", err)
-			}
+			})
 			return
 		}
 		metrics := &SSEMetrics{
@@ -255,13 +225,10 @@ func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer, claimMet
 			metrics.FleetClaimsTimeout = snap.Timeout
 			metrics.FleetClaimsTotal = snap.Total
 		}
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(MetricsResponse{
+		respondJSON(w, http.StatusOK, MetricsResponse{
 			Success: true,
 			Data:    metrics,
-		}); err != nil {
-			log.Printf("Failed to encode metrics response: %v", err)
-		}
+		})
 	}
 }
 

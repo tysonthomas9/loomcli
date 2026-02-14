@@ -13,11 +13,6 @@ const (
 	maxRequestBody = 1 << 20
 )
 
-// writeErrorResponse writes a JSON error response with the given status code and message.
-func writeErrorResponse(w http.ResponseWriter, status int, message string) {
-	respondError(w, status, message)
-}
-
 // writeIssuesError writes a JSON error response for the issues endpoint.
 func writeIssuesError(w http.ResponseWriter, status int, message, code string) {
 	respondJSON(w, status, IssuesResponse{Success: false, Error: message, Code: code})

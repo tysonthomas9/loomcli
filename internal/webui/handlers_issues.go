@@ -29,11 +29,11 @@ type IssueWithParent struct {
 // Returned when include_blocked=true is passed to /api/issues.
 type KanbanIssue struct {
 	*types.IssueWithCounts
-	Parent           *string           `json:"parent,omitempty"`
-	ParentTitle      *string           `json:"parent_title,omitempty"`
-	IsBlocked        bool              `json:"is_blocked"`
-	BlockedByCount   int               `json:"blocked_by_count"`
-	BlockedBy        []string          `json:"blocked_by,omitempty"`
+	Parent           *string            `json:"parent,omitempty"`
+	ParentTitle      *string            `json:"parent_title,omitempty"`
+	IsBlocked        bool               `json:"is_blocked"`
+	BlockedByCount   int                `json:"blocked_by_count"`
+	BlockedBy        []string           `json:"blocked_by,omitempty"`
 	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`
 }
 
@@ -249,7 +249,7 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 		// Extract issue ID from path parameter
 		issueID := r.PathValue("id")
 		if issueID == "" {
-			writeErrorResponse(w, http.StatusBadRequest, "missing issue ID")
+			respondError(w, http.StatusBadRequest, "missing issue ID")
 			return
 		}
 
@@ -259,7 +259,7 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 
 		client, err := pool.Get(ctx)
 		if err != nil {
-			writeErrorResponse(w, http.StatusServiceUnavailable, "daemon not available")
+			respondError(w, http.StatusServiceUnavailable, "daemon not available")
 			return
 		}
 		defer pool.Put(client)
@@ -269,31 +269,25 @@ func handleGetIssueWithPool(pool connectionGetter) http.HandlerFunc {
 		if err != nil {
 			// Check if it's a "not found" error
 			if strings.Contains(err.Error(), "not found") {
-				writeErrorResponse(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
+				respondError(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
 				return
 			}
 			log.Printf("RPC error in handleGetIssue for %s: %v", issueID, err)
-			writeErrorResponse(w, http.StatusInternalServerError, "internal server error")
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 
 		// Return the issue details wrapped in standard {success, data} envelope
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(IssuesResponse{
+		respondJSON(w, http.StatusOK, IssuesResponse{
 			Success: true,
 			Data:    resp.Data,
-		}); err != nil {
-			log.Printf("Failed to encode issue response: %v", err)
-		}
+		})
 	}
 }
 
 // handleListIssues returns a handler that lists issues from the daemon.
 func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		if pool == nil {
 			writeIssuesError(w, http.StatusServiceUnavailable, "connection pool not initialized", "POOL_NOT_INITIALIZED")
 			return
@@ -382,13 +376,10 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 				writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(IssuesResponse{
+			respondJSON(w, http.StatusOK, IssuesResponse{
 				Success: true,
 				Data:    data,
-			}); err != nil {
-				log.Printf("Failed to encode issues response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -449,13 +440,10 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 				writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(IssuesResponse{
+			respondJSON(w, http.StatusOK, IssuesResponse{
 				Success: true,
 				Data:    data,
-			}); err != nil {
-				log.Printf("Failed to encode issues response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -478,13 +466,10 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			writeIssuesError(w, http.StatusInternalServerError, "failed to encode response", "ENCODE_ERROR")
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(IssuesResponse{
+		respondJSON(w, http.StatusOK, IssuesResponse{
 			Success: true,
 			Data:    data,
-		}); err != nil {
-			log.Printf("Failed to encode issues response: %v", err)
-		}
+		})
 	}
 }
 
@@ -499,30 +484,22 @@ func handlePatchIssue(pool daemon.Pool) http.HandlerFunc {
 // handlePatchIssueWithPool is the internal implementation that accepts an interface for testing.
 func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Extract and validate issue ID from path
 		issueID := r.PathValue("id")
 		if issueID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
+			respondJSON(w, http.StatusBadRequest, PatchIssueResponse{
 				Success: false,
 				Error:   "missing issue ID in path",
-			}); err != nil {
-				log.Printf("Failed to encode patch response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Check pool availability
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
+			respondJSON(w, http.StatusServiceUnavailable, PatchIssueResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode patch response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -534,23 +511,17 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
-				w.WriteHeader(http.StatusRequestEntityTooLarge)
-				if err := json.NewEncoder(w).Encode(PatchIssueResponse{
+				respondJSON(w, http.StatusRequestEntityTooLarge, PatchIssueResponse{
 					Success: false,
 					Error:   "request body too large (max 1MB)",
-				}); err != nil {
-					log.Printf("Failed to encode patch response: %v", err)
-				}
+				})
 				return
 			}
 			log.Printf("Invalid request body in handlePatchIssue: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
+			respondJSON(w, http.StatusBadRequest, PatchIssueResponse{
 				Success: false,
 				Error:   "invalid request body",
-			}); err != nil {
-				log.Printf("Failed to encode patch response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -565,13 +536,10 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 				status = http.StatusGatewayTimeout
 			}
 			log.Printf("Pool error in handlePatchIssue: %v", err)
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
+			respondJSON(w, status, PatchIssueResponse{
 				Success: false,
 				Error:   "daemon not available",
-			}); err != nil {
-				log.Printf("Failed to encode patch response: %v", err)
-			}
+			})
 			return
 		}
 		defer pool.Put(client)
@@ -608,13 +576,10 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 				status = http.StatusNotFound
 			}
 			log.Printf("RPC error in handlePatchIssue for %s: %v", issueID, err)
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
+			respondJSON(w, status, PatchIssueResponse{
 				Success: false,
 				Error:   "internal server error",
-			}); err != nil {
-				log.Printf("Failed to encode patch response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -625,23 +590,17 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			} else if strings.Contains(resp.Error, "cannot update template") {
 				status = http.StatusConflict
 			}
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(PatchIssueResponse{
+			respondJSON(w, status, PatchIssueResponse{
 				Success: false,
 				Error:   resp.Error,
-			}); err != nil {
-				log.Printf("Failed to encode patch response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(PatchIssueResponse{
+		respondJSON(w, http.StatusOK, PatchIssueResponse{
 			Success: true,
 			Data:    map[string]string{"id": issueID, "status": "updated"},
-		}); err != nil {
-			log.Printf("Failed to encode patch response: %v", err)
-		}
+		})
 	}
 }
 
@@ -649,7 +608,6 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 func handleCreateIssue(pool daemon.Pool) http.HandlerFunc {
 	if pool == nil {
 		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
 			writeIssuesError(w, http.StatusServiceUnavailable, "connection pool not initialized", "POOL_NOT_INITIALIZED")
 		}
 	}
@@ -659,8 +617,6 @@ func handleCreateIssue(pool daemon.Pool) http.HandlerFunc {
 // handleCreateIssueWithPool is the internal implementation that accepts an interface for testing.
 func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Limit request body size to prevent DoS attacks
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 
@@ -719,13 +675,10 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 		}
 
 		// Return success with created issue
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(IssuesResponse{
+		respondJSON(w, http.StatusCreated, IssuesResponse{
 			Success: true,
 			Data:    resp.Data,
-		}); err != nil {
-			log.Printf("Failed to encode create response: %v", err)
-		}
+		})
 	}
 }
 
@@ -740,12 +693,10 @@ func handleCloseIssue(pool daemon.Pool) http.HandlerFunc {
 // handleCloseIssueWithPool is the internal implementation that accepts an interface for testing.
 func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Extract issue ID from path parameter
 		issueID := r.PathValue("id")
 		if issueID == "" {
-			writeErrorResponse(w, http.StatusBadRequest, "missing issue ID")
+			respondError(w, http.StatusBadRequest, "missing issue ID")
 			return
 		}
 
@@ -758,18 +709,18 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				var maxBytesErr *http.MaxBytesError
 				if errors.As(err, &maxBytesErr) {
-					writeErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
+					respondError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
 					return
 				}
 				log.Printf("Invalid request body in handleCloseIssue: %v", err)
-				writeErrorResponse(w, http.StatusBadRequest, "invalid request body")
+				respondError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
 		}
 
 		// Check pool availability
 		if pool == nil {
-			writeErrorResponse(w, http.StatusServiceUnavailable, "connection pool not initialized")
+			respondError(w, http.StatusServiceUnavailable, "connection pool not initialized")
 			return
 		}
 
@@ -783,7 +734,7 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			writeErrorResponse(w, status, "daemon not available")
+			respondError(w, status, "daemon not available")
 			return
 		}
 		defer pool.Put(client)
@@ -802,32 +753,29 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 		if err != nil {
 			// Check if it's a "not found" error
 			if strings.Contains(err.Error(), "not found") {
-				writeErrorResponse(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
+				respondError(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
 				return
 			}
 			// Check for "has open blockers" error (when force=false)
 			if strings.Contains(err.Error(), "blocker") {
-				writeErrorResponse(w, http.StatusConflict, err.Error())
+				respondError(w, http.StatusConflict, err.Error())
 				return
 			}
 			log.Printf("RPC error in handleCloseIssue for %s: %v", issueID, err)
-			writeErrorResponse(w, http.StatusInternalServerError, "internal server error")
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 
 		if !resp.Success {
-			writeErrorResponse(w, http.StatusInternalServerError, resp.Error)
+			respondError(w, http.StatusInternalServerError, resp.Error)
 			return
 		}
 
 		// Return success response with closed issue data
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(CloseResponse{
+		respondJSON(w, http.StatusOK, CloseResponse{
 			Success: true,
 			Data:    resp.Data,
-		}); err != nil {
-			log.Printf("Failed to encode close response: %v", err)
-		}
+		})
 	}
 }
 

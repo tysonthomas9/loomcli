@@ -156,29 +156,21 @@ func handleBlocked(pool daemon.Pool) http.HandlerFunc {
 // handleBlockedWithPool is the internal implementation that accepts an interface for testing.
 func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(BlockedResponse{
+			respondJSON(w, http.StatusServiceUnavailable, BlockedResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode blocked response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Parse query parameters into BlockedArgs
 		args, err := parseBlockedParams(r)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(BlockedResponse{
+			respondJSON(w, http.StatusBadRequest, BlockedResponse{
 				Success: false,
 				Error:   err.Error(),
-			}); err != nil {
-				log.Printf("Failed to encode blocked response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -193,13 +185,10 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 				status = http.StatusGatewayTimeout
 			}
 			log.Printf("Pool error in handleBlocked: %v", err)
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(BlockedResponse{
+			respondJSON(w, status, BlockedResponse{
 				Success: false,
 				Error:   "daemon not available",
-			}); err != nil {
-				log.Printf("Failed to encode blocked response: %v", err)
-			}
+			})
 			return
 		}
 		defer pool.Put(client)
@@ -208,47 +197,35 @@ func handleBlockedWithPool(pool blockedConnectionGetter) http.HandlerFunc {
 		resp, err := client.Blocked(args)
 		if err != nil {
 			log.Printf("RPC error in handleBlocked: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(BlockedResponse{
+			respondJSON(w, http.StatusInternalServerError, BlockedResponse{
 				Success: false,
 				Error:   "internal server error",
-			}); err != nil {
-				log.Printf("Failed to encode blocked response: %v", err)
-			}
+			})
 			return
 		}
 
 		if !resp.Success {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(BlockedResponse{
+			respondJSON(w, http.StatusInternalServerError, BlockedResponse{
 				Success: false,
 				Error:   resp.Error,
-			}); err != nil {
-				log.Printf("Failed to encode blocked response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Parse the blocked issues from RPC response
 		var issues []*types.BlockedIssue
 		if err := json.Unmarshal(resp.Data, &issues); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(BlockedResponse{
+			respondJSON(w, http.StatusInternalServerError, BlockedResponse{
 				Success: false,
 				Error:   fmt.Sprintf("failed to parse blocked issues: %v", err),
-			}); err != nil {
-				log.Printf("Failed to encode blocked response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(BlockedResponse{
+		respondJSON(w, http.StatusOK, BlockedResponse{
 			Success: true,
 			Data:    issues,
-		}); err != nil {
-			log.Printf("Failed to encode blocked response: %v", err)
-		}
+		})
 	}
 }
 
@@ -263,16 +240,11 @@ func handleGraph(pool daemon.Pool) http.HandlerFunc {
 // handleGraphWithPool is the internal implementation that accepts an interface for testing.
 func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(GraphResponse{
+			respondJSON(w, http.StatusServiceUnavailable, GraphResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode graph response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -282,13 +254,10 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 		// Validate status parameter
 		validStatuses := map[string]bool{"all": true, "open": true, "closed": true}
 		if !validStatuses[status] {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(GraphResponse{
+			respondJSON(w, http.StatusBadRequest, GraphResponse{
 				Success: false,
 				Error:   fmt.Sprintf("invalid status: %s (must be all, open, or closed)", status),
-			}); err != nil {
-				log.Printf("Failed to encode graph response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -303,13 +272,10 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 				httpStatus = http.StatusGatewayTimeout
 			}
 			log.Printf("Pool error in handleGraph: %v", err)
-			w.WriteHeader(httpStatus)
-			if err := json.NewEncoder(w).Encode(GraphResponse{
+			respondJSON(w, httpStatus, GraphResponse{
 				Success: false,
 				Error:   "daemon not available",
-			}); err != nil {
-				log.Printf("Failed to encode graph response: %v", err)
-			}
+			})
 			return
 		}
 		defer pool.Put(client)
@@ -332,13 +298,10 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 		result, err := client.GetGraphData(graphArgs)
 		if err != nil {
 			log.Printf("RPC error in handleGraph: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(GraphResponse{
+			respondJSON(w, http.StatusInternalServerError, GraphResponse{
 				Success: false,
 				Error:   "internal server error",
-			}); err != nil {
-				log.Printf("Failed to encode graph response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -365,13 +328,10 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 			})
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(GraphResponse{
+		respondJSON(w, http.StatusOK, GraphResponse{
 			Success: true,
 			Issues:  graphIssues,
-		}); err != nil {
-			log.Printf("Failed to encode graph response: %v", err)
-		}
+		})
 	}
 }
 
@@ -386,30 +346,22 @@ func handleAddDependency(pool daemon.Pool) http.HandlerFunc {
 // handleAddDependencyWithPool is the internal implementation that accepts an interface for testing.
 func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Extract issue ID from path parameter
 		issueID := r.PathValue("id")
 		if issueID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, http.StatusBadRequest, DependencyResponse{
 				Success: false,
 				Error:   "missing issue ID",
-			}); err != nil {
-				log.Printf("Failed to encode add dependency response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Check pool availability
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, http.StatusServiceUnavailable, DependencyResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode add dependency response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -421,47 +373,35 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
-				w.WriteHeader(http.StatusRequestEntityTooLarge)
-				if err := json.NewEncoder(w).Encode(DependencyResponse{
+				respondJSON(w, http.StatusRequestEntityTooLarge, DependencyResponse{
 					Success: false,
 					Error:   "request body too large (max 1MB)",
-				}); err != nil {
-					log.Printf("Failed to encode add dependency response: %v", err)
-				}
+				})
 				return
 			}
 			log.Printf("Invalid request body in handleAddDependency: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, http.StatusBadRequest, DependencyResponse{
 				Success: false,
 				Error:   "invalid request body",
-			}); err != nil {
-				log.Printf("Failed to encode add dependency response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate depends_on_id
 		if req.DependsOnID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, http.StatusBadRequest, DependencyResponse{
 				Success: false,
 				Error:   "depends_on_id is required",
-			}); err != nil {
-				log.Printf("Failed to encode add dependency response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Prevent self-dependency
 		if issueID == req.DependsOnID {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, http.StatusBadRequest, DependencyResponse{
 				Success: false,
 				Error:   "cannot add self-dependency",
-			}); err != nil {
-				log.Printf("Failed to encode add dependency response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -481,13 +421,10 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, status, DependencyResponse{
 				Success: false,
 				Error:   "daemon not available",
-			}); err != nil {
-				log.Printf("Failed to encode add dependency response: %v", err)
-			}
+			})
 			return
 		}
 		defer pool.Put(client)
@@ -510,13 +447,10 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 				status = http.StatusConflict
 			}
 			log.Printf("RPC error in handleAddDependency: %v", err)
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, status, DependencyResponse{
 				Success: false,
 				Error:   "internal server error",
-			}); err != nil {
-				log.Printf("Failed to encode add dependency response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -529,23 +463,17 @@ func handleAddDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFu
 			} else if strings.Contains(resp.Error, "already exists") {
 				status = http.StatusConflict
 			}
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, status, DependencyResponse{
 				Success: false,
 				Error:   resp.Error,
-			}); err != nil {
-				log.Printf("Failed to encode add dependency response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(DependencyResponse{
+		respondJSON(w, http.StatusOK, DependencyResponse{
 			Success: true,
 			Data:    nil,
-		}); err != nil {
-			log.Printf("Failed to encode add dependency response: %v", err)
-		}
+		})
 	}
 }
 
@@ -560,43 +488,32 @@ func handleRemoveDependency(pool daemon.Pool) http.HandlerFunc {
 // handleRemoveDependencyWithPool is the internal implementation that accepts an interface for testing.
 func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Extract issue ID and depId from path parameters
 		issueID := r.PathValue("id")
 		depID := r.PathValue("depId")
 
 		if issueID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, http.StatusBadRequest, DependencyResponse{
 				Success: false,
 				Error:   "missing issue ID",
-			}); err != nil {
-				log.Printf("Failed to encode remove dependency response: %v", err)
-			}
+			})
 			return
 		}
 
 		if depID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, http.StatusBadRequest, DependencyResponse{
 				Success: false,
 				Error:   "missing dependency ID",
-			}); err != nil {
-				log.Printf("Failed to encode remove dependency response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Check pool availability
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, http.StatusServiceUnavailable, DependencyResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode remove dependency response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -610,13 +527,10 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, status, DependencyResponse{
 				Success: false,
 				Error:   "daemon not available",
-			}); err != nil {
-				log.Printf("Failed to encode remove dependency response: %v", err)
-			}
+			})
 			return
 		}
 		defer pool.Put(client)
@@ -633,13 +547,10 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 				status = http.StatusNotFound
 			}
 			log.Printf("RPC error in handleRemoveDependency: %v", err)
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, status, DependencyResponse{
 				Success: false,
 				Error:   "internal server error",
-			}); err != nil {
-				log.Printf("Failed to encode remove dependency response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -648,23 +559,17 @@ func handleRemoveDependencyWithPool(pool dependencyConnectionGetter) http.Handle
 			if strings.Contains(resp.Error, "not found") {
 				status = http.StatusNotFound
 			}
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(DependencyResponse{
+			respondJSON(w, status, DependencyResponse{
 				Success: false,
 				Error:   resp.Error,
-			}); err != nil {
-				log.Printf("Failed to encode remove dependency response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(DependencyResponse{
+		respondJSON(w, http.StatusOK, DependencyResponse{
 			Success: true,
 			Data:    nil,
-		}); err != nil {
-			log.Printf("Failed to encode remove dependency response: %v", err)
-		}
+		})
 	}
 }
 

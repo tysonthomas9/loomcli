@@ -1,7 +1,6 @@
 package webui
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"regexp"
@@ -24,30 +23,22 @@ var validPhase = regexp.MustCompile(`^(planning|implementation)$`)
 // Response: {success: true, data: {lines: [...], lineCount: N}}
 func handleGetAgentLog() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Get agent name from path
 		agentName := r.PathValue("name")
 		if agentName == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "missing agent name",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate agent name
 		if !validAgentName.MatchString(agentName) {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "invalid agent name: must match [a-zA-Z0-9_-]+",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -66,25 +57,19 @@ func handleGetAgentLog() http.HandlerFunc {
 		logPath, err := getAgentLogPath(agentName)
 		if err != nil {
 			log.Printf("Agent log path error for %s: %v", agentName, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to resolve log path",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Check if file exists
 		if !fileExists(logPath) {
-			w.WriteHeader(http.StatusNotFound)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusNotFound, LogContentResponse{
 				Success: false,
 				Error:   "log file not found - agent may not be active",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -92,26 +77,20 @@ func handleGetAgentLog() http.HandlerFunc {
 		content, lineCount, err := readFileLastLines(logPath, lines)
 		if err != nil {
 			log.Printf("Failed to read agent log for %s: %v", agentName, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to read log file",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(LogContentResponse{
+		respondJSON(w, http.StatusOK, LogContentResponse{
 			Success: true,
 			Data: &LogContentData{
 				Lines:     content,
 				LineCount: lineCount + int64(len(content)) - 1,
 			},
-		}); err != nil {
-			log.Printf("Failed to encode log response: %v", err)
-		}
+		})
 	}
 }
 
@@ -124,27 +103,19 @@ func handleAgentLogStream() http.HandlerFunc {
 		// Get agent name from path
 		agentName := r.PathValue("name")
 		if agentName == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "missing agent name",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate agent name
 		if !validAgentName.MatchString(agentName) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "invalid agent name: must match [a-zA-Z0-9_-]+",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -152,27 +123,19 @@ func handleAgentLogStream() http.HandlerFunc {
 		logPath, err := getAgentLogPath(agentName)
 		if err != nil {
 			log.Printf("Agent log path error for %s: %v", agentName, err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to resolve log path",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Check if file exists
 		if !fileExists(logPath) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusNotFound, LogContentResponse{
 				Success: false,
 				Error:   "log file not found - agent may not be active",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -188,14 +151,10 @@ func handleAgentLogStream() http.HandlerFunc {
 		streamer, err := NewLogStreamerFixed(logPath)
 		if err != nil {
 			log.Printf("Log streamer error for agent %s: %v", agentName, err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to open log stream",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 		defer func() { _ = streamer.Close() }()
@@ -218,30 +177,22 @@ func handleAgentLogStream() http.HandlerFunc {
 // Response: {success: true, data: {phases: ["planning", "implementation"]}}
 func handleListTaskPhases() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Get task ID from path
 		taskID := r.PathValue("id")
 		if taskID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(TaskPhasesResponse{
+			respondJSON(w, http.StatusBadRequest, TaskPhasesResponse{
 				Success: false,
 				Error:   "missing task ID",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate task ID
 		if !validTaskID.MatchString(taskID) {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(TaskPhasesResponse{
+			respondJSON(w, http.StatusBadRequest, TaskPhasesResponse{
 				Success: false,
 				Error:   "invalid task ID: must match [a-zA-Z0-9_-]+",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -249,25 +200,19 @@ func handleListTaskPhases() http.HandlerFunc {
 		phases, err := listTaskPhases(taskID)
 		if err != nil {
 			log.Printf("Failed to list task phases for %s: %v", taskID, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(TaskPhasesResponse{
+			respondJSON(w, http.StatusInternalServerError, TaskPhasesResponse{
 				Success: false,
 				Error:   "failed to list task phases",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(TaskPhasesResponse{
+		respondJSON(w, http.StatusOK, TaskPhasesResponse{
 			Success: true,
 			Data: &TaskPhasesData{
 				Phases: phases,
 			},
-		}); err != nil {
-			log.Printf("Failed to encode log response: %v", err)
-		}
+		})
 	}
 }
 
@@ -277,55 +222,41 @@ func handleListTaskPhases() http.HandlerFunc {
 // Response: {success: true, data: {lines: [...], lineCount: N}}
 func handleGetTaskLog() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Get task ID from path
 		taskID := r.PathValue("id")
 		if taskID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "missing task ID",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate task ID
 		if !validTaskID.MatchString(taskID) {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "invalid task ID: must match [a-zA-Z0-9_-]+",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Get phase from path
 		phase := r.PathValue("phase")
 		if phase == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "missing phase",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate phase
 		if !validPhase.MatchString(phase) {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "invalid phase: must be 'planning' or 'implementation'",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -344,25 +275,19 @@ func handleGetTaskLog() http.HandlerFunc {
 		logPath, err := getTaskLogPath(taskID, phase)
 		if err != nil {
 			log.Printf("Task log path error for %s/%s: %v", taskID, phase, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to resolve log path",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Check if file exists
 		if !fileExists(logPath) {
-			w.WriteHeader(http.StatusNotFound)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusNotFound, LogContentResponse{
 				Success: false,
 				Error:   "log file not found - task phase may not have started",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -370,26 +295,20 @@ func handleGetTaskLog() http.HandlerFunc {
 		content, lineCount, err := readFileLastLines(logPath, lines)
 		if err != nil {
 			log.Printf("Failed to read task log for %s/%s: %v", taskID, phase, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to read log file",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(LogContentResponse{
+		respondJSON(w, http.StatusOK, LogContentResponse{
 			Success: true,
 			Data: &LogContentData{
 				Lines:     content,
 				LineCount: lineCount + int64(len(content)) - 1,
 			},
-		}); err != nil {
-			log.Printf("Failed to encode log response: %v", err)
-		}
+		})
 	}
 }
 
@@ -402,54 +321,38 @@ func handleTaskLogStream() http.HandlerFunc {
 		// Get task ID from path
 		taskID := r.PathValue("id")
 		if taskID == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "missing task ID",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate task ID
 		if !validTaskID.MatchString(taskID) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "invalid task ID: must match [a-zA-Z0-9_-]+",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Get phase from path
 		phase := r.PathValue("phase")
 		if phase == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "missing phase",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate phase
 		if !validPhase.MatchString(phase) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
 				Error:   "invalid phase: must be 'planning' or 'implementation'",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -457,27 +360,19 @@ func handleTaskLogStream() http.HandlerFunc {
 		logPath, err := getTaskLogPath(taskID, phase)
 		if err != nil {
 			log.Printf("Task log path error for %s/%s: %v", taskID, phase, err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to resolve log path",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Check if file exists
 		if !fileExists(logPath) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusNotFound, LogContentResponse{
 				Success: false,
 				Error:   "log file not found - task phase may not have started",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -493,14 +388,10 @@ func handleTaskLogStream() http.HandlerFunc {
 		streamer, err := NewLogStreamerFixed(logPath)
 		if err != nil {
 			log.Printf("Log streamer error for task %s/%s: %v", taskID, phase, err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(LogContentResponse{
+			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
 				Success: false,
 				Error:   "failed to open log stream",
-			}); err != nil {
-				log.Printf("Failed to encode log response: %v", err)
-			}
+			})
 			return
 		}
 		defer func() { _ = streamer.Close() }()

@@ -678,7 +678,7 @@ func TestContractEnvelope_ErrorResponses(t *testing.T) {
 			isPlainError:  false,
 		},
 
-		// --- Plain-style errors ({error: ...}) from writeErrorResponse ---
+		// --- Plain-style errors ({error: ...}) from respondError ---
 		{
 			name: "GET /api/issues/{id} not found (plain error)",
 			handler: handleGetIssueWithPool(&mockPool{

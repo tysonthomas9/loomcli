@@ -3,7 +3,6 @@ package webui
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -66,30 +65,19 @@ func handleTerminalToken(auth *terminalAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := r.URL.Query().Get("session")
 		if session == "" || !validTerminalSession.MatchString(session) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(map[string]string{"error": "invalid session"}); err != nil {
-				log.Printf("Failed to encode terminal response: %v", err)
-			}
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session"})
 			return
 		}
 
 		token, err := auth.GenerateToken(session)
 		if err != nil {
 			log.Printf("Failed to generate terminal token: %v", err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"}); err != nil {
-				log.Printf("Failed to encode terminal response: %v", err)
-			}
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		if err := json.NewEncoder(w).Encode(map[string]string{"token": token}); err != nil {
-			log.Printf("Failed to encode terminal response: %v", err)
-		}
+		respondJSON(w, http.StatusOK, map[string]string{"token": token})
 	}
 }
 
@@ -108,30 +96,19 @@ func handleTerminalRestart(manager *TerminalManager, pool daemon.Pool, auth *ter
 // handleTerminalRestartWithPool is the internal testable implementation.
 func handleTerminalRestartWithPool(manager *TerminalManager, configPool configConnectionGetter, auth *terminalAuth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "method not allowed"}); err != nil {
-				log.Printf("Failed to encode terminal response: %v", err)
-			}
+			respondJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
 			return
 		}
 
 		// Validate session parameter
 		session := r.URL.Query().Get("session")
 		if session == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "missing session parameter"}); err != nil {
-				log.Printf("Failed to encode terminal response: %v", err)
-			}
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "missing session parameter"})
 			return
 		}
 		if !validTerminalSession.MatchString(session) {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "invalid session name"}); err != nil {
-				log.Printf("Failed to encode terminal response: %v", err)
-			}
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid session name"})
 			return
 		}
 
@@ -139,19 +116,13 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 		if auth != nil {
 			token := r.URL.Query().Get("token")
 			if err := auth.ValidateToken(token, session); err != nil {
-				w.WriteHeader(http.StatusUnauthorized)
-				if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "terminal authentication failed"}); err != nil {
-					log.Printf("Failed to encode terminal response: %v", err)
-				}
+				respondJSON(w, http.StatusUnauthorized, map[string]interface{}{"success": false, "error": "terminal authentication failed"})
 				return
 			}
 		}
 
 		if manager == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "terminal manager not initialized"}); err != nil {
-				log.Printf("Failed to encode terminal response: %v", err)
-			}
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"success": false, "error": "terminal manager not initialized"})
 			return
 		}
 
@@ -167,13 +138,10 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 						b = "claude"
 					}
 					if !isValidBackend(b) {
-						w.WriteHeader(http.StatusBadRequest)
-						if err := json.NewEncoder(w).Encode(map[string]interface{}{
+						respondJSON(w, http.StatusBadRequest, map[string]interface{}{
 							"success": false,
 							"error":   fmt.Sprintf("invalid backend %q; valid: claude, codex, opencode", b),
-						}); err != nil {
-							log.Printf("Failed to encode terminal response: %v", err)
-						}
+						})
 						return
 					}
 					backend = b
@@ -186,10 +154,7 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 		_ = manager.KillSessionByName(session)
 		manager.SetDefaultCommand(backend)
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "backend": backend}); err != nil {
-			log.Printf("Failed to encode terminal response: %v", err)
-		}
+		respondJSON(w, http.StatusOK, map[string]interface{}{"success": true, "backend": backend})
 	}
 }
 
@@ -200,40 +165,28 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if manager is available
 		if manager == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 				"success": false,
 				"error":   "terminal manager not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode terminal error response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Parse and validate session parameter
 		session := r.URL.Query().Get("session")
 		if session == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
 				"success": false,
 				"error":   "missing session parameter",
-			}); err != nil {
-				log.Printf("Failed to encode terminal error response: %v", err)
-			}
+			})
 			return
 		}
 
 		if !validTerminalSession.MatchString(session) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
 				"success": false,
 				"error":   "invalid session name: must match [a-zA-Z0-9_-]+",
-			}); err != nil {
-				log.Printf("Failed to encode terminal error response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -241,14 +194,10 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 		if auth != nil {
 			token := r.URL.Query().Get("token")
 			if err := auth.ValidateToken(token, session); err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+				respondJSON(w, http.StatusUnauthorized, map[string]interface{}{
 					"success": false,
 					"error":   "terminal authentication failed",
-				}); encErr != nil {
-					log.Printf("Failed to encode terminal auth error response: %v", encErr)
-				}
+				})
 				log.Printf("Terminal auth failed for session %q: %v", session, err)
 				return
 			}
@@ -256,14 +205,10 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 
 		// Pre-upgrade check: reject before WebSocket upgrade if at session limit.
 		if manager.SessionCount() >= manager.MaxSessions() {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 				"success": false,
 				"error":   "maximum terminal sessions reached",
-			}); err != nil {
-				log.Printf("Failed to encode max sessions error response: %v", err)
-			}
+			})
 			return
 		}
 

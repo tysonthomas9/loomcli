@@ -53,52 +53,38 @@ func handleFleetRegister(store *fleet.Store, tokenCfg *TokenConfig, regCfg *Flee
 // handleFleetRegisterWithStore is the internal implementation that accepts an interface for testing.
 func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, regCfg *FleetRegisterConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Check store availability
 		if store == nil || tokenCfg == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			respondJSON(w, http.StatusServiceUnavailable, FleetRegisterResponse{
 				Success: false,
 				Error:   "fleet API not available",
-			}); err != nil {
-				log.Printf("Failed to encode fleet register response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate fleet API key
 		if regCfg == nil || regCfg.APIKey == "" {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			respondJSON(w, http.StatusServiceUnavailable, FleetRegisterResponse{
 				Success: false,
 				Error:   "fleet authentication not configured",
-			}); err != nil {
-				log.Printf("Failed to encode fleet register response: %v", err)
-			}
+			})
 			return
 		}
 
 		apiKeyHeader := r.Header.Get("X-Fleet-API-Key")
 		if apiKeyHeader == "" {
-			w.WriteHeader(http.StatusUnauthorized)
-			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			respondJSON(w, http.StatusUnauthorized, FleetRegisterResponse{
 				Success: false,
 				Error:   "missing X-Fleet-API-Key header",
-			}); err != nil {
-				log.Printf("Failed to encode fleet register response: %v", err)
-			}
+			})
 			return
 		}
 
 		if subtle.ConstantTimeCompare([]byte(apiKeyHeader), []byte(regCfg.APIKey)) != 1 {
-			w.WriteHeader(http.StatusUnauthorized)
-			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			respondJSON(w, http.StatusUnauthorized, FleetRegisterResponse{
 				Success: false,
 				Error:   "invalid API key",
-			}); err != nil {
-				log.Printf("Failed to encode fleet register response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -107,13 +93,10 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 			clientIP := extractClientIP(r)
 			allowed, _ := regCfg.RateLimiter.Allow(r.Context(), clientIP)
 			if !allowed {
-				w.WriteHeader(http.StatusTooManyRequests)
-				if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				respondJSON(w, http.StatusTooManyRequests, FleetRegisterResponse{
 					Success: false,
 					Error:   "rate limit exceeded",
-				}); err != nil {
-					log.Printf("Failed to encode fleet register response: %v", err)
-				}
+				})
 				return
 			}
 		}
@@ -124,46 +107,34 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
-				w.WriteHeader(http.StatusRequestEntityTooLarge)
-				if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+				respondJSON(w, http.StatusRequestEntityTooLarge, FleetRegisterResponse{
 					Success: false,
 					Error:   "request body too large (max 1MB)",
-				}); err != nil {
-					log.Printf("Failed to encode fleet register response: %v", err)
-				}
+				})
 				return
 			}
 			log.Printf("Invalid request body in handleFleetRegister: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			respondJSON(w, http.StatusBadRequest, FleetRegisterResponse{
 				Success: false,
 				Error:   "invalid request body",
-			}); err != nil {
-				log.Printf("Failed to encode fleet register response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate worker_id
 		if req.WorkerID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			respondJSON(w, http.StatusBadRequest, FleetRegisterResponse{
 				Success: false,
 				Error:   "worker_id is required",
-			}); err != nil {
-				log.Printf("Failed to encode fleet register response: %v", err)
-			}
+			})
 			return
 		}
 
 		if len(req.WorkerID) > maxWorkerIDLength {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			respondJSON(w, http.StatusBadRequest, FleetRegisterResponse{
 				Success: false,
 				Error:   fmt.Sprintf("worker_id exceeds maximum length of %d characters", maxWorkerIDLength),
-			}); err != nil {
-				log.Printf("Failed to encode fleet register response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -179,13 +150,10 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 
 		if err := store.RegisterWorker(ctx, worker); err != nil {
 			log.Printf("Failed to register worker %s: %v", req.WorkerID, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			respondJSON(w, http.StatusInternalServerError, FleetRegisterResponse{
 				Success: false,
 				Error:   "failed to register worker",
-			}); err != nil {
-				log.Printf("Failed to encode fleet register response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -193,24 +161,18 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 		token, err := GenerateWorkerToken(req.WorkerID, req.Repos, tokenCfg.SigningKey, tokenCfg.Expiry)
 		if err != nil {
 			log.Printf("Failed to generate token for worker %s: %v", req.WorkerID, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+			respondJSON(w, http.StatusInternalServerError, FleetRegisterResponse{
 				Success: false,
 				Error:   "failed to generate token",
-			}); err != nil {
-				log.Printf("Failed to encode fleet register response: %v", err)
-			}
+			})
 			return
 		}
 
 		log.Printf("Worker registered: %s", req.WorkerID)
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(FleetRegisterResponse{
+		respondJSON(w, http.StatusCreated, FleetRegisterResponse{
 			Success: true,
 			Token:   token,
-		}); err != nil {
-			log.Printf("Failed to encode fleet register response: %v", err)
-		}
+		})
 	}
 }
 
@@ -246,30 +208,22 @@ func handleFleetDone(store *fleet.Store) http.HandlerFunc {
 // handleFleetDoneWithStore is the internal implementation that accepts an interface for testing.
 func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Check store availability
 		if store == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+			respondJSON(w, http.StatusServiceUnavailable, FleetDoneResponse{
 				Success: false,
 				Error:   "fleet API not available",
-			}); err != nil {
-				log.Printf("Failed to encode fleet done response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Extract worker ID from path
 		workerID := r.PathValue("id")
 		if workerID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+			respondJSON(w, http.StatusBadRequest, FleetDoneResponse{
 				Success: false,
 				Error:   "missing worker ID",
-			}); err != nil {
-				log.Printf("Failed to encode fleet done response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -279,23 +233,17 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
-				w.WriteHeader(http.StatusRequestEntityTooLarge)
-				if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+				respondJSON(w, http.StatusRequestEntityTooLarge, FleetDoneResponse{
 					Success: false,
 					Error:   "request body too large (max 1MB)",
-				}); err != nil {
-					log.Printf("Failed to encode fleet done response: %v", err)
-				}
+				})
 				return
 			}
 			log.Printf("Invalid request body in handleFleetDone: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+			respondJSON(w, http.StatusBadRequest, FleetDoneResponse{
 				Success: false,
 				Error:   "invalid request body",
-			}); err != nil {
-				log.Printf("Failed to encode fleet done response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -306,23 +254,17 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		worker, err := store.GetWorker(ctx, workerID)
 		if err != nil {
 			log.Printf("Failed to get worker %s: %v", workerID, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to look up worker",
-			}); err != nil {
-				log.Printf("Failed to encode fleet done response: %v", err)
-			}
+			})
 			return
 		}
 		if worker == nil {
-			w.WriteHeader(http.StatusNotFound)
-			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+			respondJSON(w, http.StatusNotFound, FleetDoneResponse{
 				Success: false,
 				Error:   fmt.Sprintf("worker not found: %s", workerID),
-			}); err != nil {
-				log.Printf("Failed to encode fleet done response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -330,25 +272,19 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		claim, err := store.GetWorkerClaim(ctx, workerID)
 		if err != nil {
 			log.Printf("Failed to get worker claim for %s: %v", workerID, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to look up worker claim",
-			}); err != nil {
-				log.Printf("Failed to encode fleet done response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Idempotent: if worker has no claim, task was already completed
 		if claim == nil {
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+			respondJSON(w, http.StatusOK, FleetDoneResponse{
 				Success:  true,
 				WorkerID: workerID,
-			}); err != nil {
-				log.Printf("Failed to encode fleet done response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -365,26 +301,20 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		}
 		if err := store.RecordTaskResult(ctx, result); err != nil {
 			log.Printf("Failed to record task result for %s/%s: %v", workerID, taskID, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to record task result",
-			}); err != nil {
-				log.Printf("Failed to encode fleet done response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Release the claim
 		if err := store.ReleaseClaim(ctx, taskID); err != nil {
 			log.Printf("Failed to release claim for task %s: %v", taskID, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to release task claim",
-			}); err != nil {
-				log.Printf("Failed to encode fleet done response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -396,14 +326,11 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		}
 
 		log.Printf("Task completed: worker=%s task=%s success=%v", workerID, taskID, req.Success)
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(FleetDoneResponse{
+		respondJSON(w, http.StatusOK, FleetDoneResponse{
 			Success:  true,
 			TaskID:   taskID,
 			WorkerID: workerID,
-		}); err != nil {
-			log.Printf("Failed to encode fleet done response: %v", err)
-		}
+		})
 	}
 }
 
@@ -464,17 +391,12 @@ func handleFleetClaim(pool daemon.Pool, claimMetrics *fleet.ClaimMetrics) http.H
 // handleFleetClaimWithPool is the internal implementation that accepts an interface for testing.
 func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *fleet.ClaimMetrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Check pool availability
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+			respondJSON(w, http.StatusServiceUnavailable, FleetClaimResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode fleet claim response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -485,23 +407,17 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *fleet.Cla
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				var maxBytesErr *http.MaxBytesError
 				if errors.As(err, &maxBytesErr) {
-					w.WriteHeader(http.StatusRequestEntityTooLarge)
-					if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+					respondJSON(w, http.StatusRequestEntityTooLarge, FleetClaimResponse{
 						Success: false,
 						Error:   "request body too large (max 1MB)",
-					}); err != nil {
-						log.Printf("Failed to encode fleet claim response: %v", err)
-					}
+					})
 					return
 				}
 				log.Printf("Invalid request body in handleFleetClaim: %v", err)
-				w.WriteHeader(http.StatusBadRequest)
-				if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+				respondJSON(w, http.StatusBadRequest, FleetClaimResponse{
 					Success: false,
 					Error:   "invalid request body",
-				}); err != nil {
-					log.Printf("Failed to encode fleet claim response: %v", err)
-				}
+				})
 				return
 			}
 		}
@@ -517,13 +433,10 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *fleet.Cla
 				status = http.StatusGatewayTimeout
 			}
 			recordClaim(claimMetrics, fleet.ClaimResultTimeout)
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+			respondJSON(w, status, FleetClaimResponse{
 				Success: false,
 				Error:   "daemon not available",
-			}); err != nil {
-				log.Printf("Failed to encode fleet claim response: %v", err)
-			}
+			})
 			return
 		}
 		defer pool.Put(client)
@@ -548,37 +461,28 @@ func handleFleetClaimWithPool(pool fleetClaimPoolGetter, claimMetrics *fleet.Cla
 		resp, err := client.Ready(readyArgs)
 		if err != nil {
 			log.Printf("RPC error in handleFleetClaim (ready): %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+			respondJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 				Success: false,
 				Error:   "internal server error",
-			}); err != nil {
-				log.Printf("Failed to encode fleet claim response: %v", err)
-			}
+			})
 			return
 		}
 
 		if !resp.Success {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+			respondJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 				Success: false,
 				Error:   resp.Error,
-			}); err != nil {
-				log.Printf("Failed to encode fleet claim response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Parse ready issues
 		var issues []*types.Issue
 		if err := json.Unmarshal(resp.Data, &issues); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+			respondJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 				Success: false,
 				Error:   fmt.Sprintf("failed to parse ready issues: %v", err),
-			}); err != nil {
-				log.Printf("Failed to encode fleet claim response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -617,62 +521,47 @@ func claimSpecificIssue(w http.ResponseWriter, client fleetClaimClient, issueID 
 			status = http.StatusNotFound
 		}
 		log.Printf("RPC error in claimSpecificIssue for %s: %v", issueID, err)
-		w.WriteHeader(status)
-		if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+		respondJSON(w, status, FleetClaimResponse{
 			Success: false,
 			Error:   "internal server error",
-		}); err != nil {
-			log.Printf("Failed to encode fleet claim response: %v", err)
-		}
+		})
 		return
 	}
 
 	if !resp.Success {
 		if strings.Contains(resp.Error, "already claimed") {
 			recordClaim(claimMetrics, fleet.ClaimResultCollision)
-			w.WriteHeader(http.StatusConflict)
-			if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+			respondJSON(w, http.StatusConflict, FleetClaimResponse{
 				Success: false,
 				Error:   "task already claimed by another worker",
-			}); err != nil {
-				log.Printf("Failed to encode fleet claim response: %v", err)
-			}
+			})
 			return
 		}
-		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+		respondJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 			Success: false,
 			Error:   resp.Error,
-		}); err != nil {
-			log.Printf("Failed to encode fleet claim response: %v", err)
-		}
+		})
 		return
 	}
 
 	// Parse the updated issue from response
 	var issue types.Issue
 	if err := json.Unmarshal(resp.Data, &issue); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+		respondJSON(w, http.StatusInternalServerError, FleetClaimResponse{
 			Success: false,
 			Error:   fmt.Sprintf("failed to parse claimed issue: %v", err),
-		}); err != nil {
-			log.Printf("Failed to encode fleet claim response: %v", err)
-		}
+		})
 		return
 	}
 
 	recordClaim(claimMetrics, fleet.ClaimResultSuccess)
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+	respondJSON(w, http.StatusOK, FleetClaimResponse{
 		Success: true,
 		Payload: &types.WorkHandoffPayload{
 			Issue:  &issue,
 			Labels: issue.Labels,
 		},
-	}); err != nil {
-		log.Printf("Failed to encode fleet claim response: %v", err)
-	}
+	})
 }
 
 // tryClaimIssue attempts to claim an issue and writes the response if successful.
@@ -706,16 +595,13 @@ func tryClaimIssue(w http.ResponseWriter, client fleetClaimClient, issueID strin
 	}
 
 	recordClaim(claimMetrics, fleet.ClaimResultSuccess)
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(FleetClaimResponse{
+	respondJSON(w, http.StatusOK, FleetClaimResponse{
 		Success: true,
 		Payload: &types.WorkHandoffPayload{
 			Issue:  &issue,
 			Labels: issue.Labels,
 		},
-	}); err != nil {
-		log.Printf("Failed to encode fleet claim response: %v", err)
-	}
+	})
 	return true
 }
 
@@ -751,17 +637,12 @@ func handleFleetHeartbeat(store *fleet.Store) http.HandlerFunc {
 // handleFleetHeartbeatWithStore is the internal implementation that accepts an interface for testing.
 func handleFleetHeartbeatWithStore(store heartbeatStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		// Check store availability
 		if store == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+			respondJSON(w, http.StatusServiceUnavailable, HeartbeatResponse{
 				Success: false,
 				Error:   "fleet store not initialized",
-			}); err != nil {
-				log.Printf("Failed to encode heartbeat response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -771,46 +652,34 @@ func handleFleetHeartbeatWithStore(store heartbeatStore) http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
-				w.WriteHeader(http.StatusRequestEntityTooLarge)
-				if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+				respondJSON(w, http.StatusRequestEntityTooLarge, HeartbeatResponse{
 					Success: false,
 					Error:   "request body too large (max 1MB)",
-				}); err != nil {
-					log.Printf("Failed to encode heartbeat response: %v", err)
-				}
+				})
 				return
 			}
 			log.Printf("Invalid request body in handleFleetHeartbeat: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+			respondJSON(w, http.StatusBadRequest, HeartbeatResponse{
 				Success: false,
 				Error:   "invalid request body",
-			}); err != nil {
-				log.Printf("Failed to encode heartbeat response: %v", err)
-			}
+			})
 			return
 		}
 
 		// Validate worker_id
 		if req.WorkerID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+			respondJSON(w, http.StatusBadRequest, HeartbeatResponse{
 				Success: false,
 				Error:   "worker_id is required",
-			}); err != nil {
-				log.Printf("Failed to encode heartbeat response: %v", err)
-			}
+			})
 			return
 		}
 
 		if len(req.WorkerID) > maxWorkerIDLength {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+			respondJSON(w, http.StatusBadRequest, HeartbeatResponse{
 				Success: false,
 				Error:   fmt.Sprintf("worker_id exceeds maximum length of %d characters", maxWorkerIDLength),
-			}); err != nil {
-				log.Printf("Failed to encode heartbeat response: %v", err)
-			}
+			})
 			return
 		}
 
@@ -821,33 +690,24 @@ func handleFleetHeartbeatWithStore(store heartbeatStore) http.HandlerFunc {
 		lastHeartbeat, err := store.UpdateHeartbeat(ctx, req.WorkerID)
 		if err != nil {
 			if errors.Is(err, fleet.ErrWorkerNotFound) {
-				w.WriteHeader(http.StatusNotFound)
-				if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+				respondJSON(w, http.StatusNotFound, HeartbeatResponse{
 					Success: false,
 					Error:   "worker not found: " + req.WorkerID,
-				}); err != nil {
-					log.Printf("Failed to encode heartbeat response: %v", err)
-				}
+				})
 				return
 			}
 			log.Printf("Failed to update heartbeat for worker %s: %v", req.WorkerID, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+			respondJSON(w, http.StatusInternalServerError, HeartbeatResponse{
 				Success: false,
 				Error:   "failed to update heartbeat",
-			}); err != nil {
-				log.Printf("Failed to encode heartbeat response: %v", err)
-			}
+			})
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(HeartbeatResponse{
+		respondJSON(w, http.StatusOK, HeartbeatResponse{
 			Success:       true,
 			LastHeartbeat: lastHeartbeat.Format(time.RFC3339),
-		}); err != nil {
-			log.Printf("Failed to encode heartbeat response: %v", err)
-		}
+		})
 	}
 }
 

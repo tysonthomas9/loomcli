@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -101,11 +100,8 @@ func handleGetBackendConfig(pool daemon.Pool) http.HandlerFunc {
 // handleGetBackendConfigWithPool is the internal testable implementation.
 func handleGetBackendConfigWithPool(pool configConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			writeConfigError(w, "connection pool not initialized")
+			respondJSON(w, http.StatusServiceUnavailable, BackendConfigResponse{Success: false, Error: "connection pool not initialized"})
 			return
 		}
 
@@ -116,16 +112,14 @@ func handleGetBackendConfigWithPool(pool configConnectionGetter) http.HandlerFun
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			w.WriteHeader(status)
-			writeConfigError(w, "daemon not available")
+			respondJSON(w, status, BackendConfigResponse{Success: false, Error: "daemon not available"})
 			return
 		}
 
 		// Read loom.yaml
 		pf, err := loadProjectFile(wsPath)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			writeConfigError(w, fmt.Sprintf("failed to parse config: %v", err))
+			respondJSON(w, http.StatusInternalServerError, BackendConfigResponse{Success: false, Error: fmt.Sprintf("failed to parse config: %v", err)})
 			return
 		}
 
@@ -146,8 +140,7 @@ func handleGetBackendConfigWithPool(pool configConnectionGetter) http.HandlerFun
 			})
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(BackendConfigResponse{
+		respondJSON(w, http.StatusOK, BackendConfigResponse{
 			Success: true,
 			Data: &BackendConfigData{
 				Backend:   backend,
@@ -155,9 +148,7 @@ func handleGetBackendConfigWithPool(pool configConnectionGetter) http.HandlerFun
 				Available: validBackends,
 				Agents:    agents,
 			},
-		}); err != nil {
-			log.Printf("Failed to encode backend config response: %v", err)
-		}
+		})
 	}
 }
 
@@ -172,11 +163,8 @@ func handlePatchBackendConfig(pool daemon.Pool) http.HandlerFunc {
 // handlePatchBackendConfigWithPool is the internal testable implementation.
 func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
 		if pool == nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			writeConfigError(w, "connection pool not initialized")
+			respondJSON(w, http.StatusServiceUnavailable, BackendConfigResponse{Success: false, Error: "connection pool not initialized"})
 			return
 		}
 
@@ -186,18 +174,15 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
-				w.WriteHeader(http.StatusRequestEntityTooLarge)
-				writeConfigError(w, "request body too large")
+				respondJSON(w, http.StatusRequestEntityTooLarge, BackendConfigResponse{Success: false, Error: "request body too large"})
 				return
 			}
-			w.WriteHeader(http.StatusBadRequest)
-			writeConfigError(w, "invalid request body")
+			respondJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: "invalid request body"})
 			return
 		}
 
 		if !isValidBackend(req.Backend) {
-			w.WriteHeader(http.StatusBadRequest)
-			writeConfigError(w, fmt.Sprintf("invalid backend %q; valid options: claude, codex, opencode", req.Backend))
+			respondJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: fmt.Sprintf("invalid backend %q; valid options: claude, codex, opencode", req.Backend)})
 			return
 		}
 
@@ -208,16 +193,14 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			w.WriteHeader(status)
-			writeConfigError(w, "daemon not available")
+			respondJSON(w, status, BackendConfigResponse{Success: false, Error: "daemon not available"})
 			return
 		}
 
 		// Read existing config (or start fresh)
 		pf, err := loadProjectFile(wsPath)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			writeConfigError(w, fmt.Sprintf("failed to parse config: %v", err))
+			respondJSON(w, http.StatusInternalServerError, BackendConfigResponse{Success: false, Error: fmt.Sprintf("failed to parse config: %v", err)})
 			return
 		}
 
@@ -226,8 +209,7 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 
 		// Write back
 		if err := saveProjectFile(wsPath, pf); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			writeConfigError(w, "failed to save config")
+			respondJSON(w, http.StatusInternalServerError, BackendConfigResponse{Success: false, Error: "failed to save config"})
 			return
 		}
 
@@ -241,8 +223,7 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 			})
 		}
 
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(BackendConfigResponse{
+		respondJSON(w, http.StatusOK, BackendConfigResponse{
 			Success: true,
 			Data: &BackendConfigData{
 				Backend:   pf.Backend,
@@ -250,9 +231,7 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 				Available: validBackends,
 				Agents:    agents,
 			},
-		}); err != nil {
-			log.Printf("Failed to encode backend config response: %v", err)
-		}
+		})
 	}
 }
 
@@ -311,14 +290,4 @@ func saveProjectFile(dir string, pf *projectFile) error {
 	}
 	path := filepath.Join(dir, "loom.yaml")
 	return os.WriteFile(path, data, 0644)
-}
-
-// writeConfigError writes a JSON error response for config endpoints.
-func writeConfigError(w http.ResponseWriter, msg string) {
-	if err := json.NewEncoder(w).Encode(BackendConfigResponse{
-		Success: false,
-		Error:   msg,
-	}); err != nil {
-		log.Printf("Failed to encode backend config error response: %v", err)
-	}
 }
