@@ -8,7 +8,7 @@ all: build
 # Build the loom binary
 build: frontend
 	@echo "Building loom..."
-	go build -ldflags="-X main.Build=$$(git rev-parse --short HEAD)" -o loom ./cmd/loom
+	go build -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$(git rev-parse --short HEAD)" -o loom ./cmd/loom
 
 # Run all tests with coverage
 test:
@@ -23,9 +23,8 @@ lint:
 # Install loom to GOPATH/bin
 install: frontend
 	@echo "Installing loom to $$(go env GOPATH)/bin..."
-	@bash -c 'commit=$$(git rev-parse HEAD 2>/dev/null || echo ""); \
-		branch=$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo ""); \
-		go install -ldflags="-X main.Commit=$$commit -X main.Branch=$$branch" ./cmd/loom'
+	@bash -c 'build=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
+		go install -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$build" ./cmd/loom'
 
 # Clean build artifacts
 clean:
