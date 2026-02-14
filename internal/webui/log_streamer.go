@@ -3,6 +3,7 @@ package webui
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,11 +30,11 @@ const (
 	readChunkSize = 32 * 1024
 )
 
-// LogLinePayload represents a single log line for SSE.
-type LogLinePayload struct {
-	Line       string `json:"line"`
-	LineNumber int64  `json:"line_number"`
-	Timestamp  string `json:"timestamp"` // ISO8601 when line was read
+// LogChunkPayload represents a raw log byte chunk for SSE.
+type LogChunkPayload struct {
+	ChunkBase64 string `json:"chunk_b64"`
+	ByteOffset  int64  `json:"byte_offset"`
+	Timestamp   string `json:"timestamp"` // ISO8601 when chunk was read
 }
 
 // LogContentResponse is the response for log content endpoints.
@@ -65,8 +66,7 @@ type TaskPhasesData struct {
 type LogStreamer struct {
 	logFilePath string
 	watcher     *fsnotify.Watcher
-	currentLine int64 // Current line count in file
-	fileSize    int64 // Last known file size
+	currentSize int64 // Last byte offset consumed from file
 	mu          sync.Mutex
 }
 
@@ -218,8 +218,9 @@ func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string
 }
 
 // Stream starts SSE streaming to the ResponseWriter.
+// startOffset is the byte offset to begin replay from.
 // Blocks until context canceled or error.
-func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startLine int64) error {
+func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startOffset int64) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming unsupported")
@@ -246,33 +247,48 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startLi
 	}
 	defer file.Close()
 
-	// Count lines and position
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	lineNum := int64(0)
-	for scanner.Scan() {
+	stat, err := file.Stat()
+	if err != nil {
+		return err
+	}
+
+	if startOffset < 0 {
+		startOffset = 0
+	}
+	if startOffset > stat.Size() {
+		startOffset = stat.Size()
+	}
+
+	// Read initial content and emit existing entries from offset.
+	if _, err := file.Seek(startOffset, io.SeekStart); err != nil {
+		return err
+	}
+	reader := bufio.NewReaderSize(file, readChunkSize)
+	currentOffset := startOffset
+	buf := make([]byte, readChunkSize)
+	for {
 		// Check for cancellation periodically during large file scans
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		lineNum++
-		if lineNum >= startLine {
-			s.sendLogLine(w, flusher, scanner.Text(), lineNum)
+
+		nRead, readErr := reader.Read(buf)
+		if nRead > 0 {
+			currentOffset += int64(nRead)
+			s.sendLogChunk(w, flusher, buf[:nRead], currentOffset)
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return readErr
 		}
 	}
 	s.mu.Lock()
-	s.currentLine = lineNum
+	s.currentSize = currentOffset
 	s.mu.Unlock()
-
-	// Get initial file size
-	stat, err := file.Stat()
-	if err == nil {
-		s.mu.Lock()
-		s.fileSize = stat.Size()
-		s.mu.Unlock()
-	}
 
 	// Start streaming new lines
 	heartbeat := time.NewTicker(logHeartbeatInterval)
@@ -306,13 +322,12 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startLi
 
 		case <-debounce.C:
 			pendingRead = false
-			if err := s.readNewLines(w, flusher); err != nil {
+			if err := s.readNewChunks(w, flusher); err != nil {
 				// File might have been truncated or rotated
 				if err == errFileTruncated {
 					s.sendTruncatedEvent(w, flusher)
 					s.mu.Lock()
-					s.currentLine = 0
-					s.fileSize = 0
+					s.currentSize = 0
 					s.mu.Unlock()
 				}
 			}
@@ -334,8 +349,8 @@ func (s *LogStreamer) Stream(ctx context.Context, w http.ResponseWriter, startLi
 
 var errFileTruncated = fmt.Errorf("file truncated")
 
-// readNewLines reads any new lines from the file and sends them.
-func (s *LogStreamer) readNewLines(w http.ResponseWriter, flusher http.Flusher) error {
+// readNewChunks reads new bytes appended since the last read and emits them.
+func (s *LogStreamer) readNewChunks(w http.ResponseWriter, flusher http.Flusher) error {
 	logDir, dirErr := getLogDir()
 	if dirErr != nil {
 		return dirErr
@@ -353,45 +368,63 @@ func (s *LogStreamer) readNewLines(w http.ResponseWriter, flusher http.Flusher) 
 	}
 
 	s.mu.Lock()
-	if stat.Size() < s.fileSize {
+	if stat.Size() < s.currentSize {
 		s.mu.Unlock()
 		return errFileTruncated
 	}
-	currentLine := s.currentLine
+	currentSize := s.currentSize
 	s.mu.Unlock()
 
-	// Skip to current line
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	lineNum := int64(0)
-	for scanner.Scan() {
-		lineNum++
-		if lineNum > currentLine {
-			s.sendLogLine(w, flusher, scanner.Text(), lineNum)
+	if stat.Size() == currentSize {
+		return nil
+	}
+
+	if _, err := file.Seek(currentSize, io.SeekStart); err != nil {
+		return err
+	}
+
+	reader := bufio.NewReaderSize(file, readChunkSize)
+	newSize := currentSize
+	buf := make([]byte, readChunkSize)
+
+	for {
+		nRead, readErr := reader.Read(buf)
+		if nRead > 0 {
+			newSize += int64(nRead)
+			s.sendLogChunk(w, flusher, buf[:nRead], newSize)
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return readErr
 		}
 	}
 
 	s.mu.Lock()
-	s.currentLine = lineNum
-	s.fileSize = stat.Size()
+	s.currentSize = newSize
 	s.mu.Unlock()
 
-	return scanner.Err()
+	return nil
 }
 
-// sendLogLine sends a single log line as an SSE event.
-func (s *LogStreamer) sendLogLine(w http.ResponseWriter, flusher http.Flusher, line string, lineNum int64) {
-	payload := LogLinePayload{
-		Line:       line,
-		LineNumber: lineNum,
-		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+// sendLogChunk sends a raw log byte chunk as an SSE event.
+func (s *LogStreamer) sendLogChunk(w http.ResponseWriter, flusher http.Flusher, chunk []byte, byteOffset int64) {
+	if len(chunk) == 0 {
+		return
+	}
+
+	payload := LogChunkPayload{
+		ChunkBase64: base64.StdEncoding.EncodeToString(chunk),
+		ByteOffset:  byteOffset,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return
 	}
 	eventID := sseEventIDCounter.Add(1)
-	_, _ = fmt.Fprintf(w, "id: %d\nevent: log-line\ndata: %s\n\n", eventID, string(data))
+	_, _ = fmt.Fprintf(w, "id: %d\nevent: log-chunk\ndata: %s\n\n", eventID, string(data))
 	flusher.Flush()
 }
 

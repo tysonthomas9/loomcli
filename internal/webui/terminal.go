@@ -1,12 +1,15 @@
 package webui
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -213,6 +216,127 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 	}
 	m.sessions[connID] = session
 	return session, nil
+}
+
+// AttachExistingRaw attaches a PTY connection to an already-running tmux session
+// name without applying session prefix rewriting and without creating a new session.
+func (m *TerminalManager) AttachExistingRaw(tmuxSessionName string, cols, rows uint16) (*TerminalSession, error) {
+	if !validSessionName.MatchString(tmuxSessionName) {
+		return nil, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", tmuxSessionName)
+	}
+	if cols == 0 {
+		cols = m.defaultCols
+	}
+	if rows == 0 {
+		rows = m.defaultRows
+	}
+
+	connNum := m.connCounter.Add(1)
+	connID := fmt.Sprintf("%s:%d", tmuxSessionName, connNum)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
+		return nil, ErrMaxSessionsReached
+	}
+
+	if !m.tmuxHasSession(tmuxSessionName) {
+		return nil, fmt.Errorf("tmux session %q not found", tmuxSessionName)
+	}
+
+	cmd, ptmx, err := m.tmuxAttach(tmuxSessionName)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := pty.Setsize(ptmx, &pty.Winsize{Cols: cols, Rows: rows}); err != nil {
+		ptmx.Close()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("pty.Setsize: %w", err)
+	}
+
+	session := &TerminalSession{
+		ConnID: connID,
+		Name:   tmuxSessionName,
+		PTY:    ptmx,
+		cmd:    cmd,
+	}
+	m.sessions[connID] = session
+	return session, nil
+}
+
+type tmuxSessionMeta struct {
+	name    string
+	created int64
+}
+
+func (m *TerminalManager) listTmuxSessions() ([]tmuxSessionMeta, error) {
+	cmd := exec.Command(m.tmuxPath, "list-sessions", "-F", "#{session_name}\t#{session_created}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.ToLower(string(out))
+		// No tmux server/sessions is a normal state for archive fallback.
+		if strings.Contains(msg, "failed to connect to server") || strings.Contains(msg, "no server running") {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("tmux list-sessions failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	var sessions []tmuxSessionMeta
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		created, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+		if err != nil {
+			continue
+		}
+		name := strings.TrimSpace(parts[0])
+		if name == "" {
+			continue
+		}
+		sessions = append(sessions, tmuxSessionMeta{name: name, created: created})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
+// FindLatestAgentSession returns the newest tmux session matching the auto-mode
+// naming convention for an agent: loom-<role>-<agent>-<pid>.
+func (m *TerminalManager) FindLatestAgentSession(agentName string) (string, bool, error) {
+	if !validSessionName.MatchString(agentName) {
+		return "", false, fmt.Errorf("invalid agent name %q", agentName)
+	}
+
+	sessions, err := m.listTmuxSessions()
+	if err != nil {
+		return "", false, err
+	}
+	pattern := regexp.MustCompile(fmt.Sprintf(`^loom-[a-zA-Z0-9_-]+-%s-[0-9]+$`, regexp.QuoteMeta(agentName)))
+
+	var bestName string
+	var bestCreated int64
+	found := false
+	for _, session := range sessions {
+		if !pattern.MatchString(session.name) {
+			continue
+		}
+		if !found || session.created > bestCreated || (session.created == bestCreated && session.name > bestName) {
+			bestName = session.name
+			bestCreated = session.created
+			found = true
+		}
+	}
+	if !found {
+		return "", false, nil
+	}
+	return bestName, true, nil
 }
 
 // Resize changes the PTY and tmux window dimensions for a connection.

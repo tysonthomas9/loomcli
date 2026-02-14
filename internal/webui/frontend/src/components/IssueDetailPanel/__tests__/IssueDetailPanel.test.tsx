@@ -18,12 +18,13 @@ import { IssueDetailPanel } from '../IssueDetailPanel';
 const { mockGetTaskLogPhases, mockUseLogStream } = vi.hoisted(() => ({
   mockGetTaskLogPhases: vi.fn().mockResolvedValue([]),
   mockUseLogStream: vi.fn(() => ({
-    lines: [],
+    chunks: [],
     state: 'disconnected' as const,
     isConnected: false,
     reconnectAttempts: 0,
     lastError: null,
-    clearLines: vi.fn(),
+    resetVersion: 0,
+    clearChunks: vi.fn(),
     connect: vi.fn(),
     disconnect: vi.fn(),
   })),

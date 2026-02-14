@@ -7,7 +7,7 @@
   padding: var(--space-6);
   overflow: auto;
   height: 100%;
-  max-width: 720px;
+  max-width: 860px;
 }
 
 .pageTitle {
@@ -19,9 +19,9 @@
 
 /* Panel */
 .panel {
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: 12px;
   overflow: hidden;
   margin-bottom: var(--space-4);
 }
@@ -31,15 +31,14 @@
   align-items: center;
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border-light);
+  background: #ece9df;
 }
 
 .panelTitle {
-  font-size: var(--font-size-sm);
+  font-size: 0.95rem;
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .panelContent {
@@ -113,7 +112,7 @@
   font-family: var(--font-family-base);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-inverse);
-  background-color: var(--color-priority-3);
+  background-color: var(--color-status-open);
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;

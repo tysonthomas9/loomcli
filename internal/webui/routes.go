@@ -97,14 +97,16 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	if termManager != nil {
 		if termAuth != nil {
 			mux.HandleFunc("GET /api/terminal/token", handleTerminalToken(termAuth))
+			mux.HandleFunc("GET /api/agents/{name}/terminal/token", handleGetAgentTerminalToken(termAuth))
 		}
 		mux.HandleFunc("GET /api/terminal/ws", handleTerminalWS(termManager, defaultTerminalCmd, termAuth, allowedOrigins))
+		mux.HandleFunc("GET /api/agents/{name}/terminal/ws", handleAgentTerminalWS(termManager, termAuth, allowedOrigins))
+		mux.HandleFunc("GET /api/agents/{name}/terminal/info", handleGetAgentTerminalInfo(termManager))
 		mux.HandleFunc("POST /api/terminal/restart", handleTerminalRestart(termManager, pool, termAuth))
 	}
 
 	// Log streaming endpoints
 	mux.HandleFunc("GET /api/agents/{name}/logs", handleGetAgentLog())
-	mux.HandleFunc("GET /api/agents/{name}/logs/stream", handleAgentLogStream())
 	mux.HandleFunc("GET /api/tasks/{id}/logs", handleListTaskPhases())
 	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}", handleGetTaskLog())
 	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}/stream", handleTaskLogStream())

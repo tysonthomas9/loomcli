@@ -485,7 +485,7 @@ function App() {
           value={searchValue}
           onChange={setSearchValue}
           onClear={handleSearchClear}
-          placeholder="Search issues..."
+          placeholder="Search tasks..."
           size="md"
         />
       </div>
@@ -493,8 +493,11 @@ function App() {
         <FilterBar
           filters={filters}
           actions={filterActions}
-          groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-          onGroupByChange={filterActions.setGroupBy}
+          showPriority
+          showType
+          showLabels={false}
+          showGroupBy={false}
+          variant="header"
           showClear={false}
         />
       </div>
@@ -581,14 +584,16 @@ function App() {
       }
     >
       {activeView === 'kanban' && (
-        <SwimLaneBoard
-          issues={filteredIssues}
-          groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-          onDragEnd={handleDragEnd}
-          onIssueClick={handleIssueClick}
-          {...(blockedIssuesMap !== undefined && { blockedIssues: blockedIssuesMap })}
-          {...(filters.showBlocked !== undefined && { showBlocked: filters.showBlocked })}
-        />
+        <div className={styles.kanbanShell}>
+          <SwimLaneBoard
+            issues={filteredIssues}
+            groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
+            onDragEnd={handleDragEnd}
+            onIssueClick={handleIssueClick}
+            {...(blockedIssuesMap !== undefined && { blockedIssues: blockedIssuesMap })}
+            {...(filters.showBlocked !== undefined && { showBlocked: filters.showBlocked })}
+          />
+        </div>
       )}
       {activeView === 'table' && (
         <>

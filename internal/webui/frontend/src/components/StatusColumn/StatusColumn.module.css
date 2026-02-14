@@ -9,7 +9,7 @@
   min-width: 220px;
   flex: 1 0 220px;
   min-height: 0;
-  background-color: var(--color-column-bg);
+  background-color: #e8e5dc;
   border-radius: 0;
   overflow: hidden;
   border-right: 1px solid var(--color-border);
@@ -19,10 +19,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  background-color: var(--color-bg-secondary);
+  background-color: #ece9df;
 }
 
 .headerLabel {
@@ -88,8 +88,8 @@
 
 .title {
   margin: 0;
-  font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-size: 1rem;
+  font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--color-text);
   line-height: var(--line-height-tight);
@@ -100,13 +100,14 @@
 
 .count {
   flex-shrink: 0;
-  min-width: 20px;
-  height: 20px;
+  min-width: 22px;
+  height: 22px;
   padding: 0 8px;
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 600;
-  color: #5f6368;
-  background-color: #e5e5e5;
+  color: #6b7280;
+  background-color: #e4e1d9;
+  border: 1px solid var(--color-border-light);
   border-radius: var(--radius-full);
   text-align: center;
   display: inline-flex;
@@ -186,7 +187,7 @@
  * ================================= */
 
 .statusColumn[data-column-type='backlog'] {
-  background-color: var(--color-column-bg-muted);
+  background-color: #e3e0d6;
 }
 
 .statusColumn[data-column-type='backlog'] .header {
@@ -198,6 +199,5 @@
 }
 
 .statusColumn[data-column-type='backlog'] .count {
-  background-color: #e5e5e5;
+  background-color: #dedace;
 }
-

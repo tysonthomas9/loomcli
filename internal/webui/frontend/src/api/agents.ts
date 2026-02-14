@@ -14,6 +14,7 @@ import type {
   LoomSyncInfo,
   LoomStats,
 } from '@/types';
+import { getAuthToken } from './client';
 
 /**
  * Default loom server URL.
@@ -21,6 +22,17 @@ import type {
  */
 const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? '/api/loom';
 const LOOM_REQUEST_TIMEOUT_MS = 15000;
+
+function buildLoomHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+  const token = getAuthToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 async function fetchWithTimeout(
   input: RequestInfo,
@@ -44,9 +56,7 @@ async function fetchWithTimeout(
 export async function fetchAgents(): Promise<LoomAgentStatus[]> {
   const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/agents`, {
     method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
+    headers: buildLoomHeaders(),
   });
 
   if (!response.ok) {
@@ -64,9 +74,7 @@ export async function checkLoomHealth(): Promise<boolean> {
   try {
     const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/health`, {
       method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
+      headers: buildLoomHeaders(),
     });
     return response.ok;
   } catch {
@@ -93,9 +101,7 @@ export interface FetchStatusResult {
 export async function fetchStatus(): Promise<FetchStatusResult> {
   const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/status`, {
     method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
+    headers: buildLoomHeaders(),
   });
 
   if (!response.ok) {
@@ -120,9 +126,7 @@ export async function fetchStatus(): Promise<FetchStatusResult> {
 export async function fetchTasks(): Promise<LoomTaskLists> {
   const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/tasks`, {
     method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
+    headers: buildLoomHeaders(),
   });
 
   if (!response.ok) {

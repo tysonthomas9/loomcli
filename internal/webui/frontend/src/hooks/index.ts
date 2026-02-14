@@ -116,6 +116,13 @@ export { useLogStream } from './useLogStream';
 export type {
   UseLogStreamOptions,
   UseLogStreamReturn,
-  LogLine,
+  LogChunk,
   LogStreamState,
 } from './useLogStream';
+
+export { useAgentTerminalLogs } from './useAgentTerminalLogs';
+export type {
+  AgentLogTransportMode,
+  UseAgentTerminalLogsOptions,
+  UseAgentTerminalLogsReturn,
+} from './useAgentTerminalLogs';

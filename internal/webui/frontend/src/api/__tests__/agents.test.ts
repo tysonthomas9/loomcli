@@ -13,15 +13,28 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import type { LoomTaskLists } from '@/types';
 
-import { fetchAgents, fetchStatus, fetchTasks, checkLoomHealth, type FetchStatusResult } from '../agents';
+import { getAuthToken } from '../client';
+import {
+  fetchAgents,
+  fetchStatus,
+  fetchTasks,
+  checkLoomHealth,
+  type FetchStatusResult,
+} from '../agents';
+
+vi.mock('../client', () => ({
+  getAuthToken: vi.fn(),
+}));
 
 // Mock fetch for testing
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
+const mockGetAuthToken = vi.mocked(getAuthToken);
 
 describe('fetchAgents', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetAuthToken.mockReturnValue(null);
   });
 
   it('returns agents array on successful response', async () => {
@@ -78,6 +91,58 @@ describe('fetchAgents', () => {
 
     await expect(fetchAgents()).rejects.toThrow('Loom agents: 500 Internal Server Error');
   });
+
+  it('includes Authorization header when auth token is available', async () => {
+    mockGetAuthToken.mockReturnValue('test-token-123');
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ agents: [] }),
+    });
+
+    await fetchAgents();
+
+    const [, options] = mockFetch.mock.calls[0];
+    expect(options.headers).toEqual({
+      Accept: 'application/json',
+      Authorization: 'Bearer test-token-123',
+    });
+  });
+
+  it('omits Authorization header when auth token is not available', async () => {
+    mockGetAuthToken.mockReturnValue(null);
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ agents: [] }),
+    });
+
+    await fetchAgents();
+
+    const [, options] = mockFetch.mock.calls[0];
+    expect(options.headers).toEqual({
+      Accept: 'application/json',
+    });
+  });
+});
+
+describe('checkLoomHealth', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetAuthToken.mockReturnValue(null);
+  });
+
+  it('includes Authorization header when auth token is available', async () => {
+    mockGetAuthToken.mockReturnValue('health-token');
+    mockFetch.mockResolvedValueOnce({ ok: true });
+
+    const result = await checkLoomHealth();
+
+    expect(result).toBe(true);
+    const [, options] = mockFetch.mock.calls[0];
+    expect(options.headers).toEqual({
+      Accept: 'application/json',
+      Authorization: 'Bearer health-token',
+    });
+  });
 });
 
 describe('checkLoomHealth', () => {
@@ -131,6 +196,7 @@ describe('checkLoomHealth', () => {
 describe('fetchStatus', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetAuthToken.mockReturnValue(null);
     vi.useFakeTimers();
   });
 
@@ -339,6 +405,7 @@ describe('fetchStatus', () => {
 describe('fetchTasks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetAuthToken.mockReturnValue(null);
   });
 
   it('successfully fetches task lists from API', async () => {
@@ -638,6 +705,7 @@ describe('fetchWithTimeout via fetchAgents', () => {
 describe('API field consistency', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetAuthToken.mockReturnValue(null);
   });
 
   it('both fetchStatus and fetchTasks use consistent backlog field name', async () => {

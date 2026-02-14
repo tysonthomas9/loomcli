@@ -1,7 +1,6 @@
 /**
  * IssueCard component for Kanban board.
  * Displays a single issue as a card with title, ID, priority badge, and optional blocked indicator.
- * When in the Review column, shows Approve/Reject buttons that open the detail panel.
  */
 
 import { getAvatarColor, getStatusDotColor, getStatusLabel } from '@/components/AgentCard';
@@ -69,7 +68,6 @@ function getPriorityLevel(priority: number | undefined): 0 | 1 | 2 | 3 | 4 {
 /**
  * IssueCard displays a single issue in the Kanban board.
  * Shows title, ID, priority badge, and optional blocked indicator.
- * When in the Review column, shows Approve/Reject buttons that open the detail panel.
  */
 export function IssueCard({
   issue,
@@ -95,9 +93,6 @@ export function IssueCard({
   const assignedAgent = issue.assignee ? getAgentByName(issue.assignee) : undefined;
   const agentParsedStatus = assignedAgent ? parseLoomStatus(assignedAgent.status) : null;
 
-  // Show review action buttons in review column (they open the detail panel)
-  const showReviewActions = columnId === 'review' && onClick !== undefined;
-
   const rootClassName = className ? `${styles.issueCard} ${className}` : styles.issueCard;
 
   const handleClick = () => {
@@ -109,13 +104,6 @@ export function IssueCard({
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (onClick && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
-      onClick(issue);
-    }
-  };
-
-  const handleReviewButtonClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onClick) {
       onClick(issue);
     }
   };
@@ -200,28 +188,6 @@ export function IssueCard({
             agentParsedStatus && assignedAgent ? getStatusLabel(agentParsedStatus) : undefined
           }
         />
-      )}
-      {showReviewActions && (
-        <div className={styles.reviewActions}>
-          <button
-            type="button"
-            className={styles.approveButton}
-            onClick={handleReviewButtonClick}
-            aria-label="Approve"
-            data-testid="approve-button"
-          >
-            ✓ Approve
-          </button>
-          <button
-            type="button"
-            className={styles.rejectButton}
-            onClick={handleReviewButtonClick}
-            aria-label="Reject"
-            data-testid="reject-button"
-          >
-            ✗ Reject
-          </button>
-        </div>
       )}
     </article>
   );

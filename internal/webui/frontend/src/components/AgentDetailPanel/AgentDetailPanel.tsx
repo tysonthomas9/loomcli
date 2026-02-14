@@ -6,8 +6,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 
-import { getAgentLogStreamUrl } from '@/api';
-import { useLogStream } from '@/hooks';
+import { useAgentTerminalLogs } from '@/hooks';
 import type { LoomAgentStatus, LoomTaskInfo } from '@/types';
 import { parseLoomStatus } from '@/types';
 
@@ -140,29 +139,18 @@ export function AgentDetailPanel({
   const panelRef = useRef<HTMLElement>(null);
   const [activeTab, setActiveTab] = useState<TabType>('info');
 
-  // Log streaming - only connect when logs tab is active and panel is open
-  const shouldConnectLogs = isOpen && activeTab === 'logs' && agentName !== null;
-  const logStreamUrl = agentName ? getAgentLogStreamUrl(agentName) : '';
-
   const {
-    lines: logLines,
+    mode: logMode,
+    chunks: logChunks,
     state: logConnectionState,
-    lastError: logError,
-    connect: connectLogs,
-    disconnect: disconnectLogs,
-  } = useLogStream({
-    url: logStreamUrl,
-    autoConnect: false,
+    error: logError,
+    resetVersion: logResetVersion,
+    refresh: refreshLogs,
+    resize: resizeLogs,
+  } = useAgentTerminalLogs({
+    agentName,
+    enabled: isOpen && activeTab === 'logs' && agentName !== null,
   });
-
-  // Connect/disconnect logs based on tab and panel state
-  useEffect(() => {
-    if (shouldConnectLogs) {
-      connectLogs();
-    } else {
-      disconnectLogs();
-    }
-  }, [shouldConnectLogs, connectLogs, disconnectLogs]);
 
   // Reset to info tab when agent changes
   useEffect(() => {
@@ -447,11 +435,33 @@ export function AgentDetailPanel({
             ) : (
               /* Logs Tab */
               <div className={styles.logsContainer}>
+                <div className={styles.logsMetaRow}>
+                  <span className={styles.logsModeBadge} data-mode={logMode}>
+                    {logMode === 'tmux'
+                      ? 'Live (tmux)'
+                      : logMode === 'archive'
+                        ? 'Archive snapshot'
+                        : logMode === 'loading'
+                          ? 'Loading logs...'
+                          : 'Idle'}
+                  </span>
+                  {logMode === 'archive' && (
+                    <button
+                      type="button"
+                      className={styles.logsRefreshButton}
+                      onClick={refreshLogs}
+                    >
+                      Refresh
+                    </button>
+                  )}
+                </div>
                 <LogViewer
-                  lines={logLines}
+                  chunks={logChunks}
                   connectionState={logConnectionState}
                   error={logError}
                   height="100%"
+                  resetVersion={logResetVersion}
+                  {...(logMode === 'tmux' ? { onTerminalResize: resizeLogs } : {})}
                 />
               </div>
             )}

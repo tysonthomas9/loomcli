@@ -905,83 +905,26 @@ describe('IssueCard', () => {
     });
   });
 
-  describe('review actions (panel-opening buttons)', () => {
-    describe('button visibility', () => {
-      it('shows approve and reject buttons in review column when onClick is provided', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" onClick={vi.fn()} />);
+  describe('review column interactions', () => {
+    it('does not render inline approve/reject buttons in review column', () => {
+      const issue = createTestIssue();
+      render(<IssueCard issue={issue} columnId="review" onClick={vi.fn()} />);
 
-        expect(screen.getByTestId('approve-button')).toBeInTheDocument();
-        expect(screen.getByTestId('reject-button')).toBeInTheDocument();
-      });
-
-      it('does not show buttons when columnId is not "review"', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="in_progress" onClick={vi.fn()} />);
-
-        expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();
-      });
-
-      it('does not show buttons when onClick is not provided', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" />);
-
-        expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();
-      });
+      expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Approve')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Reject')).not.toBeInTheDocument();
     });
 
-    describe('approve button', () => {
-      it('calls onClick with issue when approve is clicked', () => {
-        const issue = createTestIssue({ id: 'approve-test-123' });
-        const onClick = vi.fn();
-        render(<IssueCard issue={issue} columnId="review" onClick={onClick} />);
+    it('still opens detail flow by clicking the review card', () => {
+      const issue = createTestIssue({ id: 'review-card-click-123' });
+      const onClick = vi.fn();
+      render(<IssueCard issue={issue} columnId="review" onClick={onClick} />);
 
-        fireEvent.click(screen.getByTestId('approve-button'));
+      fireEvent.click(screen.getByRole('button'));
 
-        expect(onClick).toHaveBeenCalledWith(issue);
-        expect(onClick).toHaveBeenCalledTimes(1);
-      });
-
-      it('has accessible aria-label', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" onClick={vi.fn()} />);
-
-        expect(screen.getByLabelText('Approve')).toBeInTheDocument();
-      });
-    });
-
-    describe('reject button', () => {
-      it('calls onClick with issue when reject is clicked (opens panel)', () => {
-        const issue = createTestIssue();
-        const onClick = vi.fn();
-        render(<IssueCard issue={issue} columnId="review" onClick={onClick} />);
-
-        fireEvent.click(screen.getByTestId('reject-button'));
-
-        expect(onClick).toHaveBeenCalledWith(issue);
-      });
-
-      it('has accessible aria-label', () => {
-        const issue = createTestIssue();
-        render(<IssueCard issue={issue} columnId="review" onClick={vi.fn()} />);
-
-        expect(screen.getByLabelText('Reject')).toBeInTheDocument();
-      });
-    });
-
-    describe('column-specific behavior', () => {
-      it.each(['open', 'in_progress', 'blocked', 'done', 'backlog'])(
-        'does not show action buttons for columnId="%s"',
-        (columnId) => {
-          const issue = createTestIssue();
-          render(<IssueCard issue={issue} columnId={columnId} onClick={vi.fn()} />);
-
-          expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument();
-          expect(screen.queryByTestId('reject-button')).not.toBeInTheDocument();
-        }
-      );
+      expect(onClick).toHaveBeenCalledWith(issue);
+      expect(onClick).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -38,4 +38,11 @@ export { getBackendConfig, updateBackendConfig } from './config';
 export type { BackendConfigData, AgentBackendOverride, BackendConfigPatchRequest } from './config';
 
 // Log streaming API functions
-export { getTaskLogPhases, getAgentLogStreamUrl, getTaskLogStreamUrl } from './logs';
+export {
+  getTaskLogPhases,
+  getTaskLogStreamUrl,
+  getAgentTerminalInfo,
+  getAgentTerminalToken,
+  getAgentTerminalWsUrl,
+  getAgentLogArchive,
+} from './logs';

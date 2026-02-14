@@ -102,6 +102,18 @@ export interface FilterBarProps {
   groupBy?: GroupByOption;
   /** Callback when group by changes */
   onGroupByChange?: (value: GroupByOption) => void;
+  /** Show priority filter (default: true) */
+  showPriority?: boolean;
+  /** Show type filter (default: true) */
+  showType?: boolean;
+  /** Show labels dropdown (default: true) */
+  showLabels?: boolean;
+  /** Show group-by selector (default: onGroupByChange is provided) */
+  showGroupBy?: boolean;
+  /** Visual variant */
+  variant?: 'header' | 'panel';
+  /** Testing id for the root element */
+  testId?: string;
 }
 
 /**
@@ -121,7 +133,15 @@ export function FilterBar({
   availableLabels,
   groupBy,
   onGroupByChange,
+  showPriority = true,
+  showType = true,
+  showLabels = true,
+  showGroupBy,
+  variant = 'panel',
+  testId = 'filter-bar',
 }: FilterBarProps): JSX.Element {
+  const shouldShowGroupBy = showGroupBy ?? onGroupByChange !== undefined;
+
   // Determine if clear button should be visible
   const hasActiveFilters = !isEmptyFilter(filters);
   const shouldShowClear = showClear ?? hasActiveFilters;
@@ -201,53 +221,59 @@ export function FilterBar({
     [onGroupByChange]
   );
 
-  const rootClassName = className ? `${styles.filterBar} ${className}` : styles.filterBar;
+  const rootClassName = [styles.filterBar, styles[variant], className]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <div className={rootClassName} data-testid="filter-bar">
+    <div className={rootClassName} data-testid={testId} data-variant={variant}>
       <div className={styles.filters}>
-        <div className={styles.filterGroup} data-filter="priority">
-          <label htmlFor="priority-filter" className={styles.label}>
-            Priority
-          </label>
-          <select
-            id="priority-filter"
-            className={styles.select}
-            value={filters.priority ?? ''}
-            onChange={handlePriorityChange}
-            aria-label="Filter by priority"
-            data-testid="priority-filter"
-          >
-            {PRIORITY_OPTIONS.map((option) => (
-              <option key={option.value ?? 'all'} value={option.value ?? ''}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {showPriority && (
+          <div className={styles.filterGroup} data-filter="priority">
+            <label htmlFor="priority-filter" className={styles.label}>
+              Priority
+            </label>
+            <select
+              id="priority-filter"
+              className={styles.select}
+              value={filters.priority ?? ''}
+              onChange={handlePriorityChange}
+              aria-label="Filter by priority"
+              data-testid="priority-filter"
+            >
+              {PRIORITY_OPTIONS.map((option) => (
+                <option key={option.value ?? 'all'} value={option.value ?? ''}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
-        <div className={styles.filterGroup} data-filter="type">
-          <label htmlFor="type-filter" className={styles.label}>
-            Type
-          </label>
-          <select
-            id="type-filter"
-            className={styles.select}
-            value={filters.type ?? ''}
-            onChange={handleTypeChange}
-            aria-label="Filter by type"
-            data-testid="type-filter"
-          >
-            {TYPE_OPTIONS.map((option) => (
-              <option key={option.value ?? 'all'} value={option.value ?? ''}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {showType && (
+          <div className={styles.filterGroup} data-filter="type">
+            <label htmlFor="type-filter" className={styles.label}>
+              Type
+            </label>
+            <select
+              id="type-filter"
+              className={styles.select}
+              value={filters.type ?? ''}
+              onChange={handleTypeChange}
+              aria-label="Filter by type"
+              data-testid="type-filter"
+            >
+              {TYPE_OPTIONS.map((option) => (
+                <option key={option.value ?? 'all'} value={option.value ?? ''}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Label filter dropdown */}
-        {availableLabels && availableLabels.length > 0 && (
+        {showLabels && availableLabels && availableLabels.length > 0 && (
           <div className={styles.filterGroup} ref={labelDropdownRef}>
             <span className={styles.label}>Labels</span>
             <div className={styles.dropdownContainer}>
@@ -295,7 +321,7 @@ export function FilterBar({
         )}
 
         {/* Group by dropdown */}
-        {onGroupByChange && (
+        {shouldShowGroupBy && onGroupByChange && (
           <div className={styles.filterGroup}>
             <label htmlFor="groupby-filter" className={styles.label}>
               Group by

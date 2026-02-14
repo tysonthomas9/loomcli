@@ -117,6 +117,16 @@ loom plan <worktree> --auto   OR   loom task <worktree> --auto
 
 See [API Reference](docs/api.md) for the WebUI HTTP API.
 
+## Development
+
+```bash
+make dev       # default: same as make dev-loom
+make dev-loom  # air + loom serve --dev + frontend dist auto-rebuild
+make dev-vite  # air + Vite (frontend at :3000 with HMR)
+```
+
+Use `make dev-loom` when validating the actual Loom-served UI on `http://localhost:8080`.
+
 ## Environment Variables
 
 - `LOOM_DEFAULT_BRANCH` - Default integration branch (default: main)

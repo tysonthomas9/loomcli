@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint clean install help frontend sync-beads update-beads gate hooks dev dev-check
+.PHONY: all build test test-integration test-all lint clean install help frontend sync-beads update-beads gate hooks dev dev-check dev-loom dev-vite
 
 # Default target
 all: build
@@ -88,8 +88,16 @@ dev-check:
 	@command -v node >/dev/null 2>&1 || { echo "Error: node not found. Install Node.js >= 20"; exit 1; }
 	@echo "All dev dependencies found."
 
-# Run dev environment (air + Vite hot-reload)
+# Run default dev environment (loom serve --dev + frontend dist watcher)
 dev: dev-check
+	@./scripts/run-web-ui-with-loom.sh
+
+# Run loom serve --dev with auto frontend dist rebuild + Go hot-restart
+dev-loom: dev-check
+	@./scripts/run-web-ui-with-loom.sh
+
+# Run Vite HMR workflow (frontend at :3000)
+dev-vite: dev-check
 	@./scripts/dev.sh
 
 # Show help
@@ -106,7 +114,9 @@ help:
 	@echo "  make update-beads - Pull latest beads + sync"
 	@echo "  make gate         - Quality gate (lint + build + vet + test)"
 	@echo "  make hooks        - Install git hooks (pre-push gate)"
-	@echo "  make dev          - Start dev environment (air + Vite hot-reload)"
+	@echo "  make dev          - Start default dev flow (same as make dev-loom)"
+	@echo "  make dev-loom     - Start loom serve --dev + frontend dist watcher"
+	@echo "  make dev-vite     - Start air + Vite hot-reload workflow"
 	@echo "  make dev-check    - Check dev dependencies (air, node)"
 	@echo "  make clean        - Remove build artifacts"
 	@echo "  make help         - Show this help message"

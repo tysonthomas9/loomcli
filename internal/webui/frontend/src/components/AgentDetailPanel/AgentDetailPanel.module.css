@@ -27,7 +27,7 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: clamp(480px, 40vw, 800px);
+  width: clamp(560px, 52vw, 960px);
   max-width: 100%;
   background-color: var(--color-bg);
   box-shadow: var(--shadow-lg);
@@ -226,6 +226,50 @@
   min-height: 0;
   padding: 16px 20px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logsMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.logsModeBadge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-subtle);
+}
+
+.logsModeBadge[data-mode='tmux'] {
+  color: var(--color-status-done, #22c55e);
+  border-color: color-mix(in srgb, var(--color-status-done, #22c55e) 35%, var(--color-border));
+}
+
+.logsModeBadge[data-mode='archive'] {
+  color: var(--color-text-muted);
+}
+
+.logsRefreshButton {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+
+.logsRefreshButton:hover {
+  background: var(--color-bg-hover);
 }
 
 /* ============= Content Sections ============= */

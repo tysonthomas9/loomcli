@@ -13,6 +13,7 @@
   height: 100%;
   min-height: 0;
   overflow: auto;
+  background: var(--color-bg-secondary);
 }
 
 /* connectionBanner class must exist for :has(.connectionBanner) selector to work */
@@ -28,9 +29,9 @@
 .panel {
   display: flex;
   flex-direction: column;
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: 12px;
   overflow: hidden;
   min-height: 0;
 }
@@ -42,15 +43,14 @@
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border-light);
   flex-shrink: 0;
+  background: #efece3;
 }
 
 .panelTitle {
-  font-size: var(--font-size-sm);
+  font-size: 0.95rem;
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .panelContent {

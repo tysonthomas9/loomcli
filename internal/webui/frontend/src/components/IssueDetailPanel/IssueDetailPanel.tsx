@@ -293,12 +293,13 @@ function DefaultContent({
 
   // Log stream hook
   const {
-    lines: logLines,
+    chunks: logChunks,
     state: logConnectionState,
     lastError: logError,
+    resetVersion: logResetVersion,
     connect: connectLogs,
     disconnect: disconnectLogs,
-    clearLines: clearLogLines,
+    clearChunks: clearLogChunks,
   } = useLogStream({
     url: logStreamUrl,
     autoConnect: false,
@@ -307,12 +308,12 @@ function DefaultContent({
   // Connect/disconnect logs based on tab
   useEffect(() => {
     if (shouldConnectToLogs && logStreamUrl) {
-      clearLogLines();
+      clearLogChunks();
       connectLogs();
     } else {
       disconnectLogs();
     }
-  }, [shouldConnectToLogs, logStreamUrl, connectLogs, disconnectLogs, clearLogLines]);
+  }, [shouldConnectToLogs, logStreamUrl, connectLogs, disconnectLogs, clearLogChunks]);
 
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);
@@ -672,10 +673,11 @@ function DefaultContent({
       shouldConnectToLogs ? (
         <div className={styles.logsContainer}>
           <LogViewer
-            lines={logLines}
+            chunks={logChunks}
             connectionState={logConnectionState}
             error={logError}
             height="100%"
+            resetVersion={logResetVersion}
           />
         </div>
       ) : (

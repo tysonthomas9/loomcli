@@ -19,18 +19,20 @@
 .headerControls {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   height: 100%;
+  min-width: 0;
 }
 
 .headerActions {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  justify-content: center;
+  width: 22px;
 }
 
 .searchWrapper {
-  width: 380px;
+  width: min(460px, 42vw);
   flex-shrink: 0;
 }
 
@@ -40,12 +42,29 @@
   flex-shrink: 0;
 }
 
+.kanbanShell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 @media (width <= 1024px) {
   .headerControls {
     gap: var(--space-3);
   }
 
   .searchWrapper {
-    width: 280px;
+    width: min(380px, 44vw);
+  }
+}
+
+@media (width <= 768px) {
+  .headerControls {
+    gap: var(--space-2);
+  }
+
+  .searchWrapper {
+    width: min(280px, 56vw);
   }
 }

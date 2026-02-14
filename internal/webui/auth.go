@@ -88,6 +88,9 @@ func isPublicRoute(method, path string) bool {
 	case path == "/api/terminal/ws":
 		// Terminal WebSocket uses its own one-time token auth (validated in handler)
 		return true
+	case strings.HasPrefix(path, "/api/agents/") && strings.HasSuffix(path, "/terminal/ws"):
+		// Agent terminal WebSocket uses one-time token auth (validated in handler)
+		return true
 	case !strings.HasPrefix(path, "/api/"):
 		// Frontend static files and SPA routes
 		return true

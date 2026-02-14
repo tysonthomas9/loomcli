@@ -14,40 +14,41 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .filterGroup {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   white-space: nowrap;
 }
 
-.filterGroup[data-filter='priority'],
-.filterGroup[data-filter='type'] {
-  display: none;
+.header .filterGroup[data-filter='priority'],
+.header .filterGroup[data-filter='type'] {
+  gap: var(--space-2);
 }
 
 .label {
   font-size: var(--font-size-xs);
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.6);
+  font-weight: 600;
+  color: var(--color-text-secondary);
 }
 
 .select {
-  height: 30px;
-  padding: 4px 8px;
+  height: 32px;
+  padding: 4px 10px;
   padding-right: var(--space-8);
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
-  color: var(--color-text-inverse);
-  background-color: rgba(255, 255, 255, 0.15);
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23999' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  color: var(--color-text-primary);
+  background-color: var(--color-bg);
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
   background-position: right var(--space-2) center;
   background-repeat: no-repeat;
   background-size: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   cursor: pointer;
   appearance: none;
   transition:
@@ -57,27 +58,27 @@
 }
 
 .select:hover {
-  border-color: rgba(255, 255, 255, 0.4);
-  background-color: rgba(255, 255, 255, 0.15);
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-hover);
 }
 
 .select:focus {
   outline: none;
-  border-color: rgba(255, 255, 255, 0.5);
-  background-color: rgba(255, 255, 255, 0.15);
-  box-shadow: none;
+  border-color: var(--color-primary);
+  background-color: var(--color-bg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
 }
 
 .clearButton {
-  height: 30px;
+  height: 32px;
   padding: 4px 10px;
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
-  color: rgba(255, 255, 255, 0.8);
-  background-color: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 9999px;
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition:
     color var(--transition-fast),
@@ -86,13 +87,13 @@
 }
 
 .clearButton:hover {
-  color: var(--color-text-inverse);
-  background-color: rgba(255, 255, 255, 0.3);
-  border-color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
 }
 
 .clearButton:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline: 2px solid var(--color-primary);
   outline-offset: 1px;
 }
 
@@ -106,14 +107,14 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: 30px;
+  height: 32px;
   padding: 4px 10px;
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
-  color: var(--color-text-inverse);
-  background-color: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 9999px;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition:
     border-color var(--transition-fast),
@@ -121,19 +122,19 @@
 }
 
 .dropdownTrigger:hover {
-  border-color: rgba(255, 255, 255, 0.4);
-  background-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-hover);
 }
 
 .dropdownTrigger:focus {
   outline: none;
-  border-color: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
 }
 
 .dropdownArrow {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
 }
 
 .dropdownMenu {
@@ -181,7 +182,7 @@
   align-items: center;
   gap: var(--space-2);
   font-size: var(--font-size-sm);
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
   white-space: nowrap; /* Prevent text wrapping */
@@ -197,6 +198,22 @@
 
 .checkboxLabel span {
   font-weight: var(--font-weight-medium);
+}
+
+.header {
+  gap: var(--space-2);
+}
+
+.header .label {
+  margin-right: 0;
+}
+
+.header .select {
+  min-width: 110px;
+}
+
+.panel .label {
+  color: var(--color-text-secondary);
 }
 
 /* Responsive: stack on smaller viewports */

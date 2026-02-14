@@ -258,14 +258,25 @@ vi.mock('@/hooks', () => ({
     clearRecentAssignees: vi.fn(),
   })),
   useLogStream: vi.fn(() => ({
-    lines: [],
+    chunks: [],
     state: 'disconnected' as const,
     isConnected: false,
     reconnectAttempts: 0,
     lastError: null,
-    clearLines: vi.fn(),
+    resetVersion: 0,
+    clearChunks: vi.fn(),
     connect: vi.fn(),
     disconnect: vi.fn(),
+  })),
+  useAgentTerminalLogs: vi.fn(() => ({
+    mode: 'idle' as const,
+    chunks: [],
+    state: 'disconnected' as const,
+    error: null,
+    resetVersion: 0,
+    refresh: vi.fn(),
+    resize: vi.fn(),
+    sendInput: vi.fn(),
   })),
 }));
 
@@ -918,7 +929,7 @@ describe('App', () => {
 
       // SearchInput should be rendered with the search input test id
       expect(screen.getByTestId('search-input')).toBeInTheDocument();
-      expect(screen.getByPlaceholderText('Search issues...')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Search tasks...')).toBeInTheDocument();
     });
 
     it('renders FilterBar in the navigation slot', () => {

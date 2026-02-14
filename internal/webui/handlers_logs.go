@@ -94,84 +94,6 @@ func handleGetAgentLog() http.HandlerFunc {
 	}
 }
 
-// handleAgentLogStream returns an SSE endpoint for real-time agent log streaming.
-// GET /api/agents/{name}/logs/stream
-// Query params: ?since=<line_number> for catch-up
-// Events: event: log-line, data: {line: "...", lineNumber: N}
-func handleAgentLogStream() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Get agent name from path
-		agentName := r.PathValue("name")
-		if agentName == "" {
-			respondJSON(w, http.StatusBadRequest, LogContentResponse{
-				Success: false,
-				Error:   "missing agent name",
-			})
-			return
-		}
-
-		// Validate agent name
-		if !validAgentName.MatchString(agentName) {
-			respondJSON(w, http.StatusBadRequest, LogContentResponse{
-				Success: false,
-				Error:   "invalid agent name: must match [a-zA-Z0-9_-]+",
-			})
-			return
-		}
-
-		// Get log file path
-		logPath, err := getAgentLogPath(agentName)
-		if err != nil {
-			log.Printf("Agent log path error for %s: %v", agentName, err)
-			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
-				Success: false,
-				Error:   "failed to resolve log path",
-			})
-			return
-		}
-
-		// Check if file exists
-		if !fileExists(logPath) {
-			respondJSON(w, http.StatusNotFound, LogContentResponse{
-				Success: false,
-				Error:   "log file not found - agent may not be active",
-			})
-			return
-		}
-
-		// Parse since parameter
-		var startLine int64 = 1
-		if since := r.URL.Query().Get("since"); since != "" {
-			if n, err := strconv.ParseInt(since, 10, 64); err == nil && n > 0 {
-				startLine = n
-			}
-		}
-
-		// Create log streamer
-		streamer, err := NewLogStreamerFixed(logPath)
-		if err != nil {
-			log.Printf("Log streamer error for agent %s: %v", agentName, err)
-			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
-				Success: false,
-				Error:   "failed to open log stream",
-			})
-			return
-		}
-		defer func() { _ = streamer.Close() }()
-
-		// Disable write timeout for this long-lived SSE connection
-		rc := http.NewResponseController(w)
-		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-			log.Printf("Agent log stream: failed to disable write deadline: %v", err)
-		}
-
-		// Stream logs (blocks until context canceled)
-		if err := streamer.Stream(r.Context(), w, startLine); err != nil {
-			log.Printf("Log stream error for agent %s: %v", agentName, err)
-		}
-	}
-}
-
 // handleListTaskPhases returns the available log phases for a task.
 // GET /api/tasks/{id}/logs
 // Response: {success: true, data: {phases: ["planning", "implementation"]}}
@@ -314,8 +236,8 @@ func handleGetTaskLog() http.HandlerFunc {
 
 // handleTaskLogStream returns an SSE endpoint for real-time task log streaming.
 // GET /api/tasks/{id}/logs/{phase}/stream
-// Query params: ?since=<line_number> for catch-up
-// Events: event: log-line, data: {line: "...", lineNumber: N}
+// Query params: ?since_bytes=<byte_offset> for catch-up
+// Events: event: log-chunk, data: {chunk_b64: "...", byte_offset: N}
 func handleTaskLogStream() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Get task ID from path
@@ -376,11 +298,11 @@ func handleTaskLogStream() http.HandlerFunc {
 			return
 		}
 
-		// Parse since parameter
-		var startLine int64 = 1
-		if since := r.URL.Query().Get("since"); since != "" {
+		// Parse since_bytes parameter
+		var startOffset int64
+		if since := r.URL.Query().Get("since_bytes"); since != "" {
 			if n, err := strconv.ParseInt(since, 10, 64); err == nil && n > 0 {
-				startLine = n
+				startOffset = n
 			}
 		}
 
@@ -403,7 +325,7 @@ func handleTaskLogStream() http.HandlerFunc {
 		}
 
 		// Stream logs (blocks until context canceled)
-		if err := streamer.Stream(r.Context(), w, startLine); err != nil {
+		if err := streamer.Stream(r.Context(), w, startOffset); err != nil {
 			log.Printf("Log stream error for task %s/%s: %v", taskID, phase, err)
 		}
 	}

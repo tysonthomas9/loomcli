@@ -10,9 +10,9 @@
 .sidebar {
   display: flex;
   flex-direction: column;
-  width: 240px;
-  min-width: 240px;
-  background: var(--color-bg);
+  width: 282px;
+  min-width: 282px;
+  background: var(--color-bg-card);
   border-right: 1px solid var(--color-border);
   transition:
     width 0.2s ease,
@@ -63,10 +63,10 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 0.75rem 1rem;
+  padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg);
-  font-size: 0.8rem;
+  background: var(--color-bg-card);
+  font-size: 0.95rem;
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -81,11 +81,12 @@
   min-width: 20px;
   text-align: center;
   font-size: 0.7rem;
-  color: #5f6368;
+  color: var(--color-text-secondary);
   font-weight: 600;
-  background: #e5e5e5;
+  background: var(--color-bg-tertiary);
   border-radius: 999px;
   padding: 2px 8px;
+  border: 1px solid var(--color-border-light);
 }
 
 .content {
@@ -130,16 +131,16 @@
 
 .loading,
 .empty {
-  padding: 1rem;
+  padding: 1rem 1.25rem;
   text-align: center;
   color: var(--color-text-tertiary);
   font-size: 0.875rem;
 }
 
 .footer {
-  padding: 0.75rem 1rem;
+  padding: 0.9rem 1.25rem;
   border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
+  background: var(--color-bg-card);
 }
 
 .timestamp {
@@ -167,16 +168,16 @@
 /* Work Queue Section */
 .workQueue {
   border-top: 1px solid var(--color-border);
-  background: var(--color-bg);
+  background: var(--color-bg-card);
 }
 
 .workQueueHeader {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.75rem 1rem;
+  gap: 0.5rem;
+  padding: 0.9rem 1.25rem;
   cursor: pointer;
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--color-text-secondary);
   user-select: none;
@@ -193,33 +194,31 @@
 }
 
 .workQueueContent {
-  padding: 0 1rem 0.75rem;
+  padding: 0 1.25rem 1rem;
 }
 
 .queueGrid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.4rem;
-  font-size: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem 1.4rem;
+  font-size: 0.75rem;
+  padding-top: var(--space-2);
 }
 
 .queueItem {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.3rem 0.4rem;
+  padding: 0.15rem 0;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  border: none;
   cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease;
+  text-align: left;
+  transition: color 0.15s ease;
 }
 
 .queueItem:hover:not(:disabled) {
-  background: var(--color-bg-secondary);
-  border-color: var(--color-border);
+  color: var(--color-text-primary);
 }
 
 .queueItem:focus-visible {
@@ -229,7 +228,7 @@
 
 .queueItem:disabled {
   cursor: default;
-  opacity: 0.6;
+  opacity: 0.85;
 }
 
 .queueLabel {
@@ -237,8 +236,9 @@
 }
 
 .queueCount {
-  font-weight: 600;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
 }
 
 .queueCount[data-highlight='true'] {
@@ -249,10 +249,10 @@
 .statsRow {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.65rem;
+  gap: 0.45rem;
+  font-size: 0.76rem;
   color: var(--color-text-secondary);
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.4rem;
 }
 
 .statItem {
@@ -279,9 +279,9 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.625rem;
+  font-size: 0.74rem;
   color: var(--color-text-tertiary);
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.4rem;
 }
 
 .syncOk {

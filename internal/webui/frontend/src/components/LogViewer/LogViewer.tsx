@@ -7,7 +7,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { useRef, useEffect, useCallback, useState } from 'react';
 
-import type { LogLine, LogStreamState } from '@/hooks/useLogStream';
+import type { LogChunk, LogStreamState } from '@/hooks/useLogStream';
 
 import '@xterm/xterm/css/xterm.css';
 import styles from './LogViewer.module.css';
@@ -16,8 +16,8 @@ import styles from './LogViewer.module.css';
  * Props for the LogViewer component.
  */
 export interface LogViewerProps {
-  /** Log lines to display */
-  lines: LogLine[];
+  /** Raw log chunks to display */
+  chunks: LogChunk[];
   /** Connection state for status indicator */
   connectionState: LogStreamState;
   /** Whether auto-scroll is enabled. Default: true */
@@ -32,6 +32,12 @@ export interface LogViewerProps {
   error?: string | null;
   /** Height constraint (e.g., "400px", "100%"). Default: "100%" */
   height?: string;
+  /** Incremented to force terminal reset (e.g. file truncation) */
+  resetVersion?: number;
+  /** Optional callback invoked when terminal dimensions change */
+  onTerminalResize?: (cols: number, rows: number) => void;
+  /** Optional callback to forward terminal data to the backend stream */
+  onTerminalData?: (data: string) => void;
 }
 
 /**
@@ -55,18 +61,22 @@ function getStatusInfo(state: LogStreamState): { label: string; color: string } 
  * LogViewer displays streaming logs using xterm.js for proper terminal rendering.
  */
 export function LogViewer({
-  lines,
+  chunks,
   connectionState,
   autoScroll: autoScrollProp = true,
   onAutoScrollChange,
   className,
   error,
   height = '100%',
+  resetVersion = 0,
+  onTerminalResize,
+  onTerminalData,
 }: LogViewerProps): JSX.Element {
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const lastWrittenIndexRef = useRef(0);
+  const lastResetVersionRef = useRef(resetVersion);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(autoScrollProp);
 
   // Sync autoScrollEnabled with prop
@@ -80,11 +90,10 @@ export function LogViewer({
     if (!container) return;
 
     const terminal = new Terminal({
-      disableStdin: true,
+      disableStdin: !onTerminalData,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 5000,
-      convertEol: true,
       cursorBlink: false,
       cursorStyle: 'bar',
       cursorWidth: 0,
@@ -102,6 +111,11 @@ export function LogViewer({
 
     terminal.open(container);
     fitAddon.fit();
+    onTerminalResize?.(terminal.cols, terminal.rows);
+
+    const inputDisposable = onTerminalData
+      ? terminal.onData((data: string) => onTerminalData(data))
+      : null;
 
     // Detect user scroll to disable auto-scroll
     terminal.onScroll(() => {
@@ -122,6 +136,9 @@ export function LogViewer({
       resizeTimer = setTimeout(() => {
         if (fitAddonRef.current) {
           fitAddonRef.current.fit();
+          if (terminalRef.current) {
+            onTerminalResize?.(terminalRef.current.cols, terminalRef.current.rows);
+          }
         }
       }, 100);
     });
@@ -133,40 +150,47 @@ export function LogViewer({
     return () => {
       clearTimeout(resizeTimer);
       observer.disconnect();
+      inputDisposable?.dispose();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
       lastWrittenIndexRef.current = 0;
     };
-    // onAutoScrollChange excluded from deps — we only want to create terminal once
+    // onAutoScrollChange/onTerminalResize/onTerminalData excluded from deps — terminal is created once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Write new lines to terminal incrementally
+  // Write new chunks to terminal incrementally
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal) return;
 
-    // Stream was reset (agent/task changed) — clear and rewrite
-    if (lines.length < lastWrittenIndexRef.current) {
-      terminal.clear();
+    if (resetVersion !== lastResetVersionRef.current) {
+      terminal.reset();
+      lastWrittenIndexRef.current = 0;
+      lastResetVersionRef.current = resetVersion;
+    }
+
+    // Stream was reset by replacing buffered chunks
+    if (chunks.length < lastWrittenIndexRef.current) {
+      terminal.reset();
       lastWrittenIndexRef.current = 0;
     }
 
-    // Write only new lines
-    for (let i = lastWrittenIndexRef.current; i < lines.length; i++) {
-      const logLine = lines[i];
-      if (logLine) {
-        terminal.write(logLine.line + '\n');
+    // Write only new chunks
+    for (let i = lastWrittenIndexRef.current; i < chunks.length; i++) {
+      const logChunk = chunks[i];
+      if (logChunk) {
+        terminal.write(logChunk.chunk);
       }
     }
-    lastWrittenIndexRef.current = lines.length;
+    lastWrittenIndexRef.current = chunks.length;
 
     // Auto-scroll to bottom
     if (autoScrollEnabled) {
       terminal.scrollToBottom();
     }
-  }, [lines, autoScrollEnabled]);
+  }, [chunks, autoScrollEnabled, resetVersion]);
 
   // Re-enable auto-scroll
   const handleScrollToBottom = useCallback(() => {

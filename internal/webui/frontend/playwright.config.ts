@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test"
 
 const isCI = !!process.env.CI
 const isIntegration = !!process.env.RUN_INTEGRATION_TESTS
+const isLocalIntegration = !!process.env.RUN_LOCAL_INTEGRATION_TESTS
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -52,6 +53,17 @@ export default defineConfig({
       timeout: 60000,
     },
     {
+      name: "local-integration",
+      testDir: "./tests/e2e/integration",
+      testMatch: "**/terminal-parity.integration.spec.ts",
+      testIgnore: isLocalIntegration ? undefined : "**/terminal-parity.integration.spec.ts",
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: "http://localhost:8080",
+      },
+      timeout: 60000,
+    },
+    {
       name: "api",
       testDir: "./tests/e2e/api",
       testMatch: "**/*.api.spec.ts",
@@ -65,7 +77,7 @@ export default defineConfig({
     },
   ],
 
-  webServer: isIntegration
+  webServer: isIntegration || isLocalIntegration
     ? undefined
     : {
         command: "npm run dev",
