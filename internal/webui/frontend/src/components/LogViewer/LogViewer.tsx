@@ -107,9 +107,14 @@ export function LogViewer({
   // Track previous buffer length for scroll position restoration after prepend
   const prevBufferLengthRef = useRef(0);
 
-  // Sync autoScrollEnabled with prop
+  // Re-sync auto-scroll only when the prop value actually changes (e.g. archive → tmux transition).
+  // Do NOT sync on mount — useState(autoScrollProp) handles the initial value.
+  const prevAutoScrollPropRef = useRef(autoScrollProp);
   useEffect(() => {
-    setAutoScrollEnabled(autoScrollProp);
+    if (autoScrollProp !== prevAutoScrollPropRef.current) {
+      setAutoScrollEnabled(autoScrollProp);
+      prevAutoScrollPropRef.current = autoScrollProp;
+    }
   }, [autoScrollProp]);
 
   // Create terminal on mount, destroy on unmount
