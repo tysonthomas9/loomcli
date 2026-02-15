@@ -212,7 +212,9 @@ export function LogViewer({
   }, []);
 
   // Refit when stream resets/reconnects to keep wrapping in sync with panel layout changes.
+  // Skip in static mode — archive content should keep its initial column width.
   useEffect(() => {
+    if (modeRef.current === 'static') return;
     const fitAddon = fitAddonRef.current;
     const terminal = terminalRef.current;
     if (!fitAddon || !terminal) return;
