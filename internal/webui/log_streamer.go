@@ -48,6 +48,7 @@ type LogContentResponse struct {
 type LogContentData struct {
 	Lines     []string `json:"lines"`
 	LineCount int64    `json:"line_count"`
+	StartLine int64    `json:"start_line"`
 }
 
 // TaskPhasesResponse is the response for listing task log phases.
@@ -98,13 +99,17 @@ func NewLogStreamerFixed(fp string) (*LogStreamer, error) {
 // ReadLastNLines reads the last N lines from the file.
 // Returns lines and the starting line number.
 func ReadLastNLines(filepath string, n int) ([]string, int64, error) {
-	return readLastNLinesFromFile(filepath, n, nil)
+	return readLastNLinesFromFile(filepath, n, nil, 0)
 }
 
 // readLastNLinesFromFile reads the last N lines using seek-from-end to avoid
 // loading the entire file into memory. If secureDir is non-nil,
 // uses openLogFileSecure to prevent symlink attacks.
-func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string, int64, error) {
+//
+// When beforeLine > 0, reads the last N lines that appear before the given
+// line number (i.e., lines ending at beforeLine-1). This enables paginated
+// backward scrolling through large log files.
+func readLastNLinesFromFile(filepath string, n int, secureDir *string, beforeLine int64) ([]string, int64, error) {
 	if n <= 0 {
 		n = logReadDefaultLines
 	}
@@ -135,11 +140,33 @@ func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string
 		return nil, 1, nil
 	}
 
+	// Determine effective end position for backward scan
+	effectiveEnd := fileSize
+	if beforeLine > 0 {
+		if beforeLine <= 1 {
+			// Nothing before line 1
+			return nil, 1, nil
+		}
+		offset, err := findLineByteOffset(file, beforeLine)
+		if err != nil {
+			return nil, 0, err
+		}
+		if offset < 0 {
+			// beforeLine exceeds total lines in file — nothing to return
+			return nil, beforeLine, nil
+		}
+		effectiveEnd = offset
+		if effectiveEnd == 0 {
+			// beforeLine is 1, nothing before it
+			return nil, 1, nil
+		}
+	}
+
 	// Phase 1: Backward scan to find byte offset of last N lines
 	readOffset := int64(0)
 	newlineCount := 0
 	buf := make([]byte, readChunkSize)
-	pos := fileSize
+	pos := effectiveEnd
 	firstChunk := true
 
 	for pos > 0 && newlineCount < n {
@@ -157,8 +184,8 @@ func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string
 		// Scan backward through the chunk
 		for i := nRead - 1; i >= 0; i-- {
 			if buf[i] == '\n' {
-				// Skip trailing newline at end of file
-				if firstChunk && pos+int64(i) == fileSize-1 {
+				// Skip trailing newline at end of range
+				if firstChunk && pos+int64(i) == effectiveEnd-1 {
 					firstChunk = false
 					continue
 				}
@@ -200,11 +227,12 @@ func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string
 		startLine = linesBeforeOffset + 1
 	}
 
-	// Phase 3: Read last N lines from readOffset using Scanner
+	// Phase 3: Read lines from readOffset to effectiveEnd using Scanner
 	if _, err := file.Seek(readOffset, io.SeekStart); err != nil {
 		return nil, 0, err
 	}
-	scanner := bufio.NewScanner(file)
+	reader := io.LimitReader(file, effectiveEnd-readOffset)
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	var lines []string
 	for scanner.Scan() {
@@ -215,6 +243,41 @@ func readLastNLinesFromFile(filepath string, n int, secureDir *string) ([]string
 	}
 
 	return lines, startLine, nil
+}
+
+// findLineByteOffset returns the byte offset where the given 1-based line
+// number starts in the file. Returns -1 if lineNum exceeds the total number
+// of lines in the file.
+func findLineByteOffset(file *os.File, lineNum int64) (int64, error) {
+	if lineNum <= 1 {
+		return 0, nil
+	}
+
+	buf := make([]byte, readChunkSize)
+	pos := int64(0)
+	nlCount := int64(0)
+	targetNL := lineNum - 1 // number of newlines before lineNum
+
+	for {
+		nRead, err := file.ReadAt(buf, pos)
+		if nRead > 0 {
+			for i := 0; i < nRead; i++ {
+				if buf[i] == '\n' {
+					nlCount++
+					if nlCount == targetNL {
+						return pos + int64(i) + 1, nil
+					}
+				}
+			}
+		}
+		pos += int64(nRead)
+		if err == io.EOF {
+			return -1, nil // lineNum exceeds total lines
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
 }
 
 // Stream starts SSE streaming to the ResponseWriter.
@@ -588,10 +651,11 @@ func fileExists(path string) bool {
 
 // readFileLastLines is a helper that handles the common log reading pattern.
 // It uses openLogFileSecure to prevent symlink TOCTOU attacks.
-func readFileLastLines(filepath string, lines int) ([]string, int64, error) {
+// When beforeLine > 0, reads lines ending before that line number.
+func readFileLastLines(filepath string, lines int, beforeLine int64) ([]string, int64, error) {
 	logDir, err := getLogDir()
 	if err != nil {
 		return nil, 0, err
 	}
-	return readLastNLinesFromFile(filepath, lines, &logDir)
+	return readLastNLinesFromFile(filepath, lines, &logDir, beforeLine)
 }

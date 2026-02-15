@@ -38,6 +38,14 @@ export interface LogViewerProps {
   onTerminalResize?: (cols: number, rows: number) => void;
   /** Optional callback to forward terminal data to the backend stream */
   onTerminalData?: (data: string) => void;
+  /** Terminal mode: 'interactive' resizes with container, 'static' fixes cols at initial fit. Default: 'interactive' */
+  mode?: 'interactive' | 'static';
+  /** Callback when user scrolls to the top of the buffer (for loading older content) */
+  onScrollToTop?: (() => void) | undefined;
+  /** Whether older content is currently being loaded */
+  isLoadingMore?: boolean;
+  /** Whether there is older content available to load */
+  hasMoreOlder?: boolean;
 }
 
 /**
@@ -71,6 +79,10 @@ export function LogViewer({
   resetVersion = 0,
   onTerminalResize,
   onTerminalData,
+  mode = 'interactive',
+  onScrollToTop,
+  isLoadingMore = false,
+  hasMoreOlder = false,
 }: LogViewerProps): JSX.Element {
   const terminalContainerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -78,6 +90,20 @@ export function LogViewer({
   const lastWrittenIndexRef = useRef(0);
   const lastResetVersionRef = useRef(resetVersion);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(autoScrollProp);
+  const modeRef = useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+
+  // Refs for scroll-to-top detection (stable across renders)
+  const scrollToTopTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const onScrollToTopRef = useRef(onScrollToTop);
+  useEffect(() => { onScrollToTopRef.current = onScrollToTop; }, [onScrollToTop]);
+  const hasMoreOlderRef = useRef(hasMoreOlder);
+  useEffect(() => { hasMoreOlderRef.current = hasMoreOlder; }, [hasMoreOlder]);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  useEffect(() => { isLoadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
+
+  // Track previous buffer length for scroll position restoration after prepend
+  const prevBufferLengthRef = useRef(0);
 
   // Sync autoScrollEnabled with prop
   useEffect(() => {
@@ -93,7 +119,7 @@ export function LogViewer({
       disableStdin: !onTerminalData,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      scrollback: 5000,
+      scrollback: 50000,
       smoothScrollDuration: 120,
       cursorBlink: false,
       cursorStyle: 'bar',
@@ -129,21 +155,32 @@ export function LogViewer({
       ? terminal.onData((data: string) => onTerminalData(data))
       : null;
 
-    // Detect user scroll to disable auto-scroll
+    // Detect user scroll for auto-scroll toggle and scroll-to-top detection
     const scrollDisposable = terminal.onScroll(() => {
       if (!terminalRef.current) return;
       const term = terminalRef.current;
       const buffer = term.buffer.active;
       const isAtBottom = buffer.viewportY >= buffer.baseY;
+
       if (!isAtBottom) {
         setAutoScrollEnabled(false);
         onAutoScrollChange?.(false);
       }
+
+      // Scroll-to-top detection for infinite scroll
+      const isAtTop = buffer.viewportY === 0;
+      if (isAtTop && hasMoreOlderRef.current && !isLoadingMoreRef.current) {
+        clearTimeout(scrollToTopTimerRef.current);
+        scrollToTopTimerRef.current = setTimeout(() => {
+          onScrollToTopRef.current?.();
+        }, 300);
+      }
     });
 
-    // ResizeObserver for dynamic sizing
+    // ResizeObserver for dynamic sizing (skipped in static mode to prevent re-wrapping)
     let resizeTimer: ReturnType<typeof setTimeout>;
     const observer = new ResizeObserver(() => {
+      if (modeRef.current === 'static') return;
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         runFit();
@@ -160,6 +197,7 @@ export function LogViewer({
       clearTimeout(initialFitTimeoutB);
       clearTimeout(initialFitTimeoutC);
       clearTimeout(resizeTimer);
+      clearTimeout(scrollToTopTimerRef.current);
       observer.disconnect();
       scrollDisposable.dispose();
       inputDisposable?.dispose();
@@ -197,6 +235,8 @@ export function LogViewer({
     if (!terminal) return;
 
     if (resetVersion !== lastResetVersionRef.current) {
+      // Capture previous buffer length before reset (for scroll position restoration)
+      prevBufferLengthRef.current = terminal.buffer.active.length;
       terminal.reset();
       lastWrittenIndexRef.current = 0;
       lastResetVersionRef.current = resetVersion;
@@ -204,6 +244,7 @@ export function LogViewer({
 
     // Stream was reset by replacing buffered chunks
     if (chunks.length < lastWrittenIndexRef.current) {
+      prevBufferLengthRef.current = terminal.buffer.active.length;
       terminal.reset();
       lastWrittenIndexRef.current = 0;
     }
@@ -217,9 +258,18 @@ export function LogViewer({
     }
     lastWrittenIndexRef.current = chunks.length;
 
-    // Auto-scroll to bottom
+    // After writing, check if we should restore scroll position (after prepend)
+    // or auto-scroll to bottom
     if (autoScrollEnabled) {
       terminal.scrollToBottom();
+    } else if (prevBufferLengthRef.current > 0) {
+      // Content was prepended — restore scroll position so the view doesn't jump
+      const newBufferLength = terminal.buffer.active.length;
+      const addedLines = newBufferLength - prevBufferLengthRef.current;
+      if (addedLines > 0) {
+        terminal.scrollLines(addedLines);
+      }
+      prevBufferLengthRef.current = 0;
     }
   }, [chunks, autoScrollEnabled, resetVersion]);
 
@@ -274,6 +324,11 @@ export function LogViewer({
           )}
         </div>
       </div>
+
+      {/* Loading older logs banner */}
+      {isLoadingMore && (
+        <div className={styles.loadingBanner}>Loading older logs...</div>
+      )}
 
       {/* Error banner */}
       {error && (

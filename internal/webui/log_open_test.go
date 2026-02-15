@@ -201,7 +201,7 @@ func TestReadLastNLinesFromFile_SecureOpen(t *testing.T) {
 
 	// Secure open with correct allowedDir succeeds
 	secureDir := tmpDir
-	lines, _, err := readLastNLinesFromFile(testFile, 10, &secureDir)
+	lines, _, err := readLastNLinesFromFile(testFile, 10, &secureDir, 0)
 	if err != nil {
 		t.Fatalf("readLastNLinesFromFile() error = %v", err)
 	}
@@ -221,7 +221,7 @@ func TestReadLastNLinesFromFile_SecureOpen(t *testing.T) {
 	}
 
 	// Secure open should reject the symlink (O_NOFOLLOW)
-	_, _, err = readLastNLinesFromFile(symlinkFile, 10, &secureDir)
+	_, _, err = readLastNLinesFromFile(symlinkFile, 10, &secureDir, 0)
 	if err == nil {
 		t.Fatal("readLastNLinesFromFile() should reject symlink")
 	}

@@ -7,6 +7,17 @@ import (
 	"strconv"
 )
 
+// parseBeforeLine extracts and validates the before_line query parameter.
+// Returns 0 if not present or invalid (meaning: read from EOF).
+func parseBeforeLine(r *http.Request) int64 {
+	if blParam := r.URL.Query().Get("before_line"); blParam != "" {
+		if bl, err := strconv.ParseInt(blParam, 10, 64); err == nil && bl > 0 {
+			return bl
+		}
+	}
+	return 0
+}
+
 // validAgentName matches alphanumeric characters, hyphens, and underscores.
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
@@ -72,8 +83,11 @@ func handleGetAgentLog() http.HandlerFunc {
 			return
 		}
 
+		// Parse before_line for pagination
+		beforeLine := parseBeforeLine(r)
+
 		// Read log content
-		content, lineCount, err := readFileLastLines(logPath, lines)
+		content, startLine, err := readFileLastLines(logPath, lines, beforeLine)
 		if err != nil {
 			log.Printf("Failed to read agent log for %s: %v", agentName, err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
@@ -87,7 +101,8 @@ func handleGetAgentLog() http.HandlerFunc {
 			Success: true,
 			Data: &LogContentData{
 				Lines:     content,
-				LineCount: lineCount + int64(len(content)) - 1,
+				LineCount: startLine + int64(len(content)) - 1,
+				StartLine: startLine,
 			},
 		})
 	}
@@ -212,8 +227,11 @@ func handleGetTaskLog() http.HandlerFunc {
 			return
 		}
 
+		// Parse before_line for pagination
+		beforeLine := parseBeforeLine(r)
+
 		// Read log content
-		content, lineCount, err := readFileLastLines(logPath, lines)
+		content, startLine, err := readFileLastLines(logPath, lines, beforeLine)
 		if err != nil {
 			log.Printf("Failed to read task log for %s/%s: %v", taskID, phase, err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
@@ -227,7 +245,8 @@ func handleGetTaskLog() http.HandlerFunc {
 			Success: true,
 			Data: &LogContentData{
 				Lines:     content,
-				LineCount: lineCount + int64(len(content)) - 1,
+				LineCount: startLine + int64(len(content)) - 1,
+				StartLine: startLine,
 			},
 		})
 	}

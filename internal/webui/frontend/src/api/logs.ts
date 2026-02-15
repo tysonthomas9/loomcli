@@ -43,6 +43,7 @@ interface AgentLogContentResponse {
   data?: {
     lines: string[];
     line_count: number;
+    start_line: number;
   };
   error?: string;
 }
@@ -147,19 +148,25 @@ export function getAgentTerminalWsUrl(agentName: string, token: string): string 
 
 /**
  * Read static archive log lines for an agent.
+ * When beforeLine is provided, reads lines ending before that line number
+ * (for paginated backward scrolling).
  */
 export async function getAgentLogArchive(
   agentName: string,
-  lines = 500
-): Promise<{ lines: string[]; lineCount: number }> {
-  const response = await get<AgentLogContentResponse>(
-    `/api/agents/${encodeURIComponent(agentName)}/logs?lines=${lines}`
-  );
+  lines = 500,
+  beforeLine?: number
+): Promise<{ lines: string[]; lineCount: number; startLine: number }> {
+  let url = `/api/agents/${encodeURIComponent(agentName)}/logs?lines=${lines}`;
+  if (beforeLine !== undefined) {
+    url += `&before_line=${beforeLine}`;
+  }
+  const response = await get<AgentLogContentResponse>(url);
   if (!response.success || !response.data) {
     throw new Error(response.error || 'Failed to fetch agent log archive');
   }
   return {
     lines: Array.isArray(response.data.lines) ? response.data.lines : [],
     lineCount: typeof response.data.line_count === 'number' ? response.data.line_count : 0,
+    startLine: typeof response.data.start_line === 'number' ? response.data.start_line : 1,
   };
 }

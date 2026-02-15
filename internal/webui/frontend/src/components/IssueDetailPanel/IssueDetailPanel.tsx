@@ -665,6 +665,7 @@ function DefaultContent({
             error={logError}
             height="100%"
             resetVersion={logResetVersion}
+            mode="static"
           />
         </div>
       ) : (

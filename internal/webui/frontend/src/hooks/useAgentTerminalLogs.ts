@@ -27,6 +27,12 @@ export interface UseAgentTerminalLogsReturn {
   refresh: () => void;
   resize: (cols: number, rows: number) => void;
   sendInput: (data: string) => void;
+  /** Load older log lines (for infinite scroll in archive mode). */
+  loadOlderLogs: () => void;
+  /** Whether there are older lines available to load. */
+  hasMoreLines: boolean;
+  /** Whether older lines are currently being fetched. */
+  isLoadingMore: boolean;
 }
 
 function clampTerminalSize(value: number, min: number, max: number): number {
@@ -53,12 +59,23 @@ export function useAgentTerminalLogs({
   const [error, setError] = useState<string | null>(null);
   const [resetVersion, setResetVersion] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const byteOffsetRef = useRef(0);
   const encoderRef = useRef(new TextEncoder());
   const pendingSizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const reconnectCancelRef = useRef<(() => void) | null>(null);
+
+  // Infinite scroll state — refs to avoid re-renders and stale closures
+  const allLinesRef = useRef<string[]>([]);
+  const oldestLineRef = useRef<number>(Infinity);
+  const agentNameRef = useRef(agentName);
+  useEffect(() => { agentNameRef.current = agentName; }, [agentName]);
+  const modeRef = useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+
+  const hasMoreLines = oldestLineRef.current > 1 && mode === 'archive';
 
   const resize = useCallback((cols: number, rows: number) => {
     const safeCols = clampTerminalSize(cols, 1, 500);
@@ -84,6 +101,67 @@ export function useAgentTerminalLogs({
     setReloadKey((prev) => prev + 1);
   }, []);
 
+  const loadOlderLogs = useCallback(async () => {
+    const currentAgent = agentNameRef.current;
+    if (
+      !currentAgent ||
+      modeRef.current !== 'archive' ||
+      isLoadingMore ||
+      oldestLineRef.current <= 1
+    ) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    try {
+      const archive = await getAgentLogArchive(
+        currentAgent,
+        archiveLines,
+        oldestLineRef.current
+      );
+
+      // Guard: agent may have changed while fetching
+      if (agentNameRef.current !== currentAgent || modeRef.current !== 'archive') {
+        return;
+      }
+
+      if (archive.lines.length === 0) {
+        // No more content — mark as at line 1
+        oldestLineRef.current = 1;
+        return;
+      }
+
+      // Prepend older lines
+      oldestLineRef.current = archive.startLine;
+      allLinesRef.current = [...archive.lines, ...allLinesRef.current];
+
+      // Rebuild chunks from accumulated lines
+      const text = allLinesRef.current.join('\n');
+      const normalized = text.length > 0 && !text.endsWith('\n') ? `${text}\n` : text;
+      const chunkBytes = encoderRef.current.encode(normalized);
+      byteOffsetRef.current = chunkBytes.length;
+
+      setChunks(
+        chunkBytes.length > 0
+          ? [
+              {
+                chunk: chunkBytes,
+                byteOffset: chunkBytes.length,
+                timestamp: new Date().toISOString(),
+              },
+            ]
+          : []
+      );
+      setResetVersion((prev) => prev + 1);
+    } catch (err) {
+      // Silently fail — user can try scrolling up again
+      const message = err instanceof Error ? err.message : 'Failed to load older logs';
+      setError(message);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [archiveLines, isLoadingMore]);
+
   useEffect(() => {
     reconnectCancelRef.current?.();
     reconnectCancelRef.current = null;
@@ -94,10 +172,13 @@ export function useAgentTerminalLogs({
         wsRef.current = null;
       }
       byteOffsetRef.current = 0;
+      allLinesRef.current = [];
+      oldestLineRef.current = Infinity;
       setChunks([]);
       setMode('idle');
       setState('disconnected');
       setError(null);
+      setIsLoadingMore(false);
       setResetVersion((prev) => prev + 1);
       return;
     }
@@ -117,10 +198,13 @@ export function useAgentTerminalLogs({
       reconnectCancelRef.current = null;
       byteOffsetRef.current = 0;
       pendingSizeRef.current = null;
+      allLinesRef.current = [];
+      oldestLineRef.current = Infinity;
       setChunks([]);
       setState('connecting');
       setMode('loading');
       setError(null);
+      setIsLoadingMore(false);
       setResetVersion((prev) => prev + 1);
 
       try {
@@ -131,7 +215,11 @@ export function useAgentTerminalLogs({
           const archive = await getAgentLogArchive(agentName, archiveLines);
           if (cancelled) return;
 
-          const text = (archive.lines ?? []).join('\n');
+          // Store lines for infinite scroll
+          allLinesRef.current = archive.lines ?? [];
+          oldestLineRef.current = archive.startLine;
+
+          const text = allLinesRef.current.join('\n');
           const normalized = text.length > 0 && !text.endsWith('\n') ? `${text}\n` : text;
           const chunkBytes = encoderRef.current.encode(normalized);
           byteOffsetRef.current = chunkBytes.length;
@@ -265,5 +353,8 @@ export function useAgentTerminalLogs({
     refresh,
     resize,
     sendInput,
+    loadOlderLogs,
+    hasMoreLines,
+    isLoadingMore,
   };
 }

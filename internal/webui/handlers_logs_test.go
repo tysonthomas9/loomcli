@@ -1332,3 +1332,388 @@ func TestHandleGetTaskLog_Success(t *testing.T) {
 		t.Error("expected non-empty lines")
 	}
 }
+
+// --- before_line pagination tests ---
+
+// TestReadLastNLines_BeforeLine tests reading N lines before a specific line number.
+func TestReadLastNLines_BeforeLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	// Create 200 lines: "line 1", "line 2", ..., "line 200"
+	var contentLines []string
+	for i := 1; i <= 200; i++ {
+		contentLines = append(contentLines, "line "+itoa(i))
+	}
+	content := strings.Join(contentLines, "\n") + "\n"
+	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// Read 50 lines before line 100 -> should get lines 50-99
+	lines, startLine, err := readLastNLinesFromFile(logFile, 50, nil, 100)
+	if err != nil {
+		t.Fatalf("readLastNLinesFromFile(beforeLine=100) error = %v", err)
+	}
+	if len(lines) != 50 {
+		t.Errorf("len(lines) = %d, want 50", len(lines))
+	}
+	if startLine != 50 {
+		t.Errorf("startLine = %d, want 50", startLine)
+	}
+	if len(lines) >= 1 && lines[0] != "line 50" {
+		t.Errorf("lines[0] = %q, want %q", lines[0], "line 50")
+	}
+	if len(lines) >= 50 && lines[49] != "line 99" {
+		t.Errorf("lines[49] = %q, want %q", lines[49], "line 99")
+	}
+}
+
+// TestReadLastNLines_BeforeLine_ClampedToStart tests that requesting more lines
+// than exist before the given line returns from line 1.
+func TestReadLastNLines_BeforeLine_ClampedToStart(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	var contentLines []string
+	for i := 1; i <= 200; i++ {
+		contentLines = append(contentLines, "line "+itoa(i))
+	}
+	content := strings.Join(contentLines, "\n") + "\n"
+	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// Request 50 lines before line 30 -> should get lines 1-29
+	lines, startLine, err := readLastNLinesFromFile(logFile, 50, nil, 30)
+	if err != nil {
+		t.Fatalf("readLastNLinesFromFile(beforeLine=30) error = %v", err)
+	}
+	if len(lines) != 29 {
+		t.Errorf("len(lines) = %d, want 29", len(lines))
+	}
+	if startLine != 1 {
+		t.Errorf("startLine = %d, want 1", startLine)
+	}
+	if len(lines) >= 1 && lines[0] != "line 1" {
+		t.Errorf("lines[0] = %q, want %q", lines[0], "line 1")
+	}
+	if len(lines) >= 29 && lines[28] != "line 29" {
+		t.Errorf("lines[28] = %q, want %q", lines[28], "line 29")
+	}
+}
+
+// TestReadLastNLines_BeforeLine_InvalidValues tests that beforeLine <= 0 is ignored.
+func TestReadLastNLines_BeforeLine_InvalidValues(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	var contentLines []string
+	for i := 1; i <= 50; i++ {
+		contentLines = append(contentLines, "line "+itoa(i))
+	}
+	content := strings.Join(contentLines, "\n") + "\n"
+	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// beforeLine=0 -> read from EOF (same as no beforeLine)
+	lines, startLine, err := readLastNLinesFromFile(logFile, 10, nil, 0)
+	if err != nil {
+		t.Fatalf("beforeLine=0 error = %v", err)
+	}
+	if len(lines) != 10 {
+		t.Errorf("beforeLine=0: len(lines) = %d, want 10", len(lines))
+	}
+	if startLine != 41 {
+		t.Errorf("beforeLine=0: startLine = %d, want 41", startLine)
+	}
+	if len(lines) >= 1 && lines[0] != "line 41" {
+		t.Errorf("beforeLine=0: lines[0] = %q, want %q", lines[0], "line 41")
+	}
+
+	// beforeLine=1 -> nothing before line 1
+	lines, startLine, err = readLastNLinesFromFile(logFile, 10, nil, 1)
+	if err != nil {
+		t.Fatalf("beforeLine=1 error = %v", err)
+	}
+	if len(lines) != 0 {
+		t.Errorf("beforeLine=1: len(lines) = %d, want 0", len(lines))
+	}
+}
+
+// TestReadLastNLines_BeforeLine_BeyondFile tests beforeLine beyond file length.
+func TestReadLastNLines_BeforeLine_BeyondFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	var contentLines []string
+	for i := 1; i <= 100; i++ {
+		contentLines = append(contentLines, "line "+itoa(i))
+	}
+	content := strings.Join(contentLines, "\n") + "\n"
+	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// beforeLine=99999 on a 100-line file -> nothing to return
+	lines, _, err := readLastNLinesFromFile(logFile, 50, nil, 99999)
+	if err != nil {
+		t.Fatalf("beforeLine=99999 error = %v", err)
+	}
+	if len(lines) != 0 {
+		t.Errorf("beforeLine=99999: len(lines) = %d, want 0", len(lines))
+	}
+}
+
+// TestReadLastNLines_BeforeLine_EmptyFile tests beforeLine on empty file.
+func TestReadLastNLines_BeforeLine_EmptyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "empty.log")
+	if err := os.WriteFile(logFile, []byte{}, 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	lines, startLine, err := readLastNLinesFromFile(logFile, 50, nil, 10)
+	if err != nil {
+		t.Fatalf("empty file error = %v", err)
+	}
+	if len(lines) != 0 {
+		t.Errorf("empty file: len(lines) = %d, want 0", len(lines))
+	}
+	if startLine != 1 {
+		t.Errorf("empty file: startLine = %d, want 1", startLine)
+	}
+}
+
+// TestReadLastNLines_BeforeLine_SingleLine tests beforeLine on a 1-line file.
+func TestReadLastNLines_BeforeLine_SingleLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "single.log")
+	if err := os.WriteFile(logFile, []byte("only line\n"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// beforeLine=2 -> should return line 1
+	lines, startLine, err := readLastNLinesFromFile(logFile, 50, nil, 2)
+	if err != nil {
+		t.Fatalf("single line, beforeLine=2 error = %v", err)
+	}
+	if len(lines) != 1 {
+		t.Errorf("len(lines) = %d, want 1", len(lines))
+	}
+	if startLine != 1 {
+		t.Errorf("startLine = %d, want 1", startLine)
+	}
+	if len(lines) >= 1 && lines[0] != "only line" {
+		t.Errorf("lines[0] = %q, want %q", lines[0], "only line")
+	}
+
+	// beforeLine=1 -> nothing before line 1
+	lines, _, err = readLastNLinesFromFile(logFile, 50, nil, 1)
+	if err != nil {
+		t.Fatalf("single line, beforeLine=1 error = %v", err)
+	}
+	if len(lines) != 0 {
+		t.Errorf("beforeLine=1: len(lines) = %d, want 0", len(lines))
+	}
+}
+
+// TestReadLastNLines_BeforeLine_ExactBoundary tests beforeLine=N+1 where N is the
+// number of lines requested (exact fit).
+func TestReadLastNLines_BeforeLine_ExactBoundary(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	var contentLines []string
+	for i := 1; i <= 100; i++ {
+		contentLines = append(contentLines, "line "+itoa(i))
+	}
+	content := strings.Join(contentLines, "\n") + "\n"
+	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	// Request 50 lines before line 51 -> should get lines 1-50
+	lines, startLine, err := readLastNLinesFromFile(logFile, 50, nil, 51)
+	if err != nil {
+		t.Fatalf("exact boundary error = %v", err)
+	}
+	if len(lines) != 50 {
+		t.Errorf("len(lines) = %d, want 50", len(lines))
+	}
+	if startLine != 1 {
+		t.Errorf("startLine = %d, want 1", startLine)
+	}
+	if len(lines) >= 1 && lines[0] != "line 1" {
+		t.Errorf("lines[0] = %q, want %q", lines[0], "line 1")
+	}
+	if len(lines) >= 50 && lines[49] != "line 50" {
+		t.Errorf("lines[49] = %q, want %q", lines[49], "line 50")
+	}
+}
+
+// TestHandleGetAgentLog_StartLineInResponse verifies start_line is in all responses.
+func TestHandleGetAgentLog_StartLineInResponse(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
+		t.Fatalf("failed to create agent log dir: %v", err)
+	}
+
+	testAgentName := "teststartline"
+	logPath := filepath.Join(agentLogDir, testAgentName+".log")
+	var logLines []string
+	for i := 1; i <= 50; i++ {
+		logLines = append(logLines, fmt.Sprintf("line %d", i))
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(logLines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write test log: %v", err)
+	}
+
+	handler := handleGetAgentLog()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{name}/logs", handler)
+
+	// Request last 10 lines (no before_line)
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+testAgentName+"/logs?lines=10", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp LogContentResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+	if resp.Data.StartLine != 41 {
+		t.Errorf("StartLine = %d, want 41", resp.Data.StartLine)
+	}
+	if resp.Data.LineCount != 50 {
+		t.Errorf("LineCount = %d, want 50", resp.Data.LineCount)
+	}
+}
+
+// TestHandleGetAgentLog_BeforeLine tests the before_line query parameter via the handler.
+func TestHandleGetAgentLog_BeforeLine(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	agentLogDir := filepath.Join(tmpHome, ".loom", "logs", "agents")
+	if err := os.MkdirAll(agentLogDir, 0o755); err != nil {
+		t.Fatalf("failed to create agent log dir: %v", err)
+	}
+
+	testAgentName := "testbeforeline"
+	logPath := filepath.Join(agentLogDir, testAgentName+".log")
+	var logLines []string
+	for i := 1; i <= 100; i++ {
+		logLines = append(logLines, fmt.Sprintf("line %d", i))
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(logLines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write test log: %v", err)
+	}
+
+	handler := handleGetAgentLog()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{name}/logs", handler)
+
+	// Request 20 lines before line 50 -> should get lines 30-49
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+testAgentName+"/logs?lines=20&before_line=50", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp LogContentResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+	if len(resp.Data.Lines) != 20 {
+		t.Errorf("len(Lines) = %d, want 20", len(resp.Data.Lines))
+	}
+	if resp.Data.StartLine != 30 {
+		t.Errorf("StartLine = %d, want 30", resp.Data.StartLine)
+	}
+	if resp.Data.LineCount != 49 {
+		t.Errorf("LineCount = %d, want 49", resp.Data.LineCount)
+	}
+	if len(resp.Data.Lines) >= 1 && resp.Data.Lines[0] != "line 30" {
+		t.Errorf("Lines[0] = %q, want %q", resp.Data.Lines[0], "line 30")
+	}
+	if len(resp.Data.Lines) >= 20 && resp.Data.Lines[19] != "line 49" {
+		t.Errorf("Lines[19] = %q, want %q", resp.Data.Lines[19], "line 49")
+	}
+}
+
+// TestHandleGetTaskLog_BeforeLine tests before_line works for task log endpoint.
+func TestHandleGetTaskLog_BeforeLine(t *testing.T) {
+	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	taskID := "testtaskbeforeline"
+	taskDir := filepath.Join(tmpHome, ".loom", "logs", "tasks", taskID)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatalf("failed to create task log dir: %v", err)
+	}
+
+	logPath := filepath.Join(taskDir, "planning.log")
+	var logLines []string
+	for i := 1; i <= 60; i++ {
+		logLines = append(logLines, fmt.Sprintf("plan step %d", i))
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(logLines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write planning log: %v", err)
+	}
+
+	handler := handleGetTaskLog()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}", handler)
+
+	// Request 10 lines before line 20 -> should get lines 10-19
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskID+"/logs/planning?lines=10&before_line=20", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp LogContentResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected Data to be non-nil")
+	}
+	if len(resp.Data.Lines) != 10 {
+		t.Errorf("len(Lines) = %d, want 10", len(resp.Data.Lines))
+	}
+	if resp.Data.StartLine != 10 {
+		t.Errorf("StartLine = %d, want 10", resp.Data.StartLine)
+	}
+	if len(resp.Data.Lines) >= 1 && resp.Data.Lines[0] != "plan step 10" {
+		t.Errorf("Lines[0] = %q, want %q", resp.Data.Lines[0], "plan step 10")
+	}
+}
