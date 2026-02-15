@@ -719,4 +719,228 @@ describe('SwimLane', () => {
       expect(screen.queryByLabelText(/Blocked by/)).not.toBeInTheDocument();
     });
   });
+
+  describe('card limiting', () => {
+    it('shows all cards when count is below cardLimit', () => {
+      const issues = Array.from({ length: 3 }, (_, i) =>
+        createMockIssue({
+          id: `issue-${i}`,
+          title: `Issue ${i}`,
+          status: 'open',
+        })
+      );
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={issues}
+          columns={defaultColumns}
+          cardLimit={5}
+        />
+      );
+
+      // All 3 issues should be visible
+      expect(screen.getByText('Issue 0')).toBeInTheDocument();
+      expect(screen.getByText('Issue 1')).toBeInTheDocument();
+      expect(screen.getByText('Issue 2')).toBeInTheDocument();
+
+      // No "Show all" button should appear
+      expect(screen.queryByText(/Show all/)).not.toBeInTheDocument();
+    });
+
+    it('limits cards and shows "Show all X" footer when count exceeds limit', () => {
+      const issues = Array.from({ length: 10 }, (_, i) =>
+        createMockIssue({
+          id: `issue-${i}`,
+          title: `Issue ${i}`,
+          status: 'open',
+        })
+      );
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={issues}
+          columns={defaultColumns}
+          cardLimit={5}
+        />
+      );
+
+      // First 5 issues should be visible
+      expect(screen.getByText('Issue 0')).toBeInTheDocument();
+      expect(screen.getByText('Issue 4')).toBeInTheDocument();
+
+      // Issues beyond limit should not be visible
+      expect(screen.queryByText('Issue 5')).not.toBeInTheDocument();
+      expect(screen.queryByText('Issue 9')).not.toBeInTheDocument();
+
+      // "Show all 10" button should appear
+      expect(screen.getByText('Show all 10')).toBeInTheDocument();
+    });
+
+    it('expands column to show all cards when "Show all" is clicked', () => {
+      const issues = Array.from({ length: 8 }, (_, i) =>
+        createMockIssue({
+          id: `issue-${i}`,
+          title: `Issue ${i}`,
+          status: 'open',
+        })
+      );
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={issues}
+          columns={defaultColumns}
+          cardLimit={5}
+        />
+      );
+
+      // Initially, only 5 cards should be visible
+      expect(screen.getByText('Issue 4')).toBeInTheDocument();
+      expect(screen.queryByText('Issue 5')).not.toBeInTheDocument();
+
+      // Click "Show all 8" button
+      const showAllButton = screen.getByText('Show all 8');
+      fireEvent.click(showAllButton);
+
+      // Now all 8 cards should be visible
+      expect(screen.getByText('Issue 5')).toBeInTheDocument();
+      expect(screen.getByText('Issue 7')).toBeInTheDocument();
+
+      // Button text should change to "Show fewer"
+      expect(screen.getByText('Show fewer')).toBeInTheDocument();
+    });
+
+    it('collapses column back to limited view when "Show fewer" is clicked', () => {
+      const issues = Array.from({ length: 8 }, (_, i) =>
+        createMockIssue({
+          id: `issue-${i}`,
+          title: `Issue ${i}`,
+          status: 'open',
+        })
+      );
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={issues}
+          columns={defaultColumns}
+          cardLimit={5}
+        />
+      );
+
+      // Expand the column
+      const showAllButton = screen.getByText('Show all 8');
+      fireEvent.click(showAllButton);
+
+      // All cards should be visible
+      expect(screen.getByText('Issue 7')).toBeInTheDocument();
+
+      // Click "Show fewer"
+      const showFewerButton = screen.getByText('Show fewer');
+      fireEvent.click(showFewerButton);
+
+      // Back to limited view
+      expect(screen.getByText('Issue 4')).toBeInTheDocument();
+      expect(screen.queryByText('Issue 5')).not.toBeInTheDocument();
+      expect(screen.getByText('Show all 8')).toBeInTheDocument();
+    });
+
+    it('uses default card limit of 5 when cardLimit prop not provided', () => {
+      const issues = Array.from({ length: 7 }, (_, i) =>
+        createMockIssue({
+          id: `issue-${i}`,
+          title: `Issue ${i}`,
+          status: 'open',
+        })
+      );
+
+      renderWithDndContext(
+        <SwimLane id="test-lane" title="Test Lane" issues={issues} columns={defaultColumns} />
+      );
+
+      // First 5 issues should be visible
+      expect(screen.getByText('Issue 4')).toBeInTheDocument();
+      expect(screen.queryByText('Issue 5')).not.toBeInTheDocument();
+
+      // "Show all 7" button should appear
+      expect(screen.getByText('Show all 7')).toBeInTheDocument();
+    });
+
+    it('handles multiple columns with different issue counts independently', () => {
+      const openIssues = Array.from({ length: 8 }, (_, i) =>
+        createMockIssue({
+          id: `open-${i}`,
+          title: `Open ${i}`,
+          status: 'open',
+        })
+      );
+      const progressIssues = Array.from({ length: 3 }, (_, i) =>
+        createMockIssue({
+          id: `progress-${i}`,
+          title: `Progress ${i}`,
+          status: 'in_progress',
+        })
+      );
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={[...openIssues, ...progressIssues]}
+          columns={defaultColumns}
+          cardLimit={5}
+        />
+      );
+
+      // Open column should have "Show all 8" button
+      const openColumn = screen.getByRole('region', { name: 'Open issues' });
+      expect(within(openColumn).getByText('Show all 8')).toBeInTheDocument();
+
+      // In Progress column should show all 3 issues with no footer
+      const progressColumn = screen.getByRole('region', { name: 'In Progress issues' });
+      expect(within(progressColumn).queryByText(/Show all/)).not.toBeInTheDocument();
+
+      // Expand open column
+      fireEvent.click(within(openColumn).getByText('Show all 8'));
+
+      // Open column should now show all issues
+      expect(screen.getByText('Open 7')).toBeInTheDocument();
+
+      // In Progress column should remain unchanged
+      expect(screen.getByText('Progress 2')).toBeInTheDocument();
+    });
+
+    it('respects custom cardLimit prop', () => {
+      const issues = Array.from({ length: 15 }, (_, i) =>
+        createMockIssue({
+          id: `issue-${i}`,
+          title: `Issue ${i}`,
+          status: 'open',
+        })
+      );
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={issues}
+          columns={defaultColumns}
+          cardLimit={10}
+        />
+      );
+
+      // First 10 issues should be visible
+      expect(screen.getByText('Issue 9')).toBeInTheDocument();
+      expect(screen.queryByText('Issue 10')).not.toBeInTheDocument();
+
+      // "Show all 15" button should appear
+      expect(screen.getByText('Show all 15')).toBeInTheDocument();
+    });
+  });
 });

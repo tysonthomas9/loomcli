@@ -93,8 +93,7 @@
   padding: var(--space-3);
   overflow-x: auto;
   --column-content-overflow: visible;
-  flex: 1; /* Fill available space from swimLane */
-  min-height: 0; /* Allow flex calculations to work */
+  flex: 0 0 auto; /* Size to content instead of filling space */
   opacity: 1;
   transition:
     opacity 0.15s ease-out,

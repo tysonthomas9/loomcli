@@ -235,7 +235,7 @@
 /* ============= Detail Content ============= */
 
 .detailContent {
-  padding: 0 var(--panel-padding-lg) var(--panel-padding-lg);
+  padding: 12px var(--panel-padding-lg) var(--panel-padding-lg);
   flex: 1;
 }
 
@@ -321,7 +321,7 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 14px var(--panel-padding-lg);
+  padding: 10px 0;
   background: none;
   border: none;
   cursor: pointer;
@@ -365,7 +365,7 @@
 }
 
 .collapsibleContent {
-  padding: 0 var(--panel-padding-lg) 24px;
+  padding: 0;
 }
 
 .badge {

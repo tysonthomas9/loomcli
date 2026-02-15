@@ -95,15 +95,17 @@ function CollapsibleSection({
 }
 
 /**
- * Blocking banner component - shows when issue has open dependencies.
+ * Blocking banner component - shows when issue is in blocked state with open dependencies.
  * Displays as a visual indicator (non-interactive).
  */
 interface BlockingBannerProps {
   openBlockerCount: number;
+  status: Status | undefined;
 }
 
-function BlockingBanner({ openBlockerCount }: BlockingBannerProps): JSX.Element | null {
-  if (openBlockerCount === 0) return null;
+function BlockingBanner({ openBlockerCount, status }: BlockingBannerProps): JSX.Element | null {
+  // Only show banner when status is 'blocked' AND there are open blockers
+  if (status !== 'blocked' || openBlockerCount === 0) return null;
 
   return (
     <div className={styles.blockingBanner} role="alert" data-testid="blocking-banner">
@@ -500,9 +502,11 @@ function DefaultContent({
   // Calculate open blocker count for banner
   const openBlockerCount = dependencies?.filter((d) => d.status !== 'closed').length ?? 0;
 
-  // Auto-collapse logic for Design/Notes (collapse if long)
+  // Auto-collapse logic for Design/Notes (collapse if long, but keep expanded for review items)
   const shouldCollapseDesign =
-    issue.design && (issue.design.length > 200 || issue.design.split('\n').length > 5);
+    !isReviewItem &&
+    issue.design &&
+    (issue.design.length > 200 || issue.design.split('\n').length > 5);
   const shouldCollapseNotes =
     issue.notes && (issue.notes.length > 200 || issue.notes.split('\n').length > 5);
 
@@ -610,7 +614,7 @@ function DefaultContent({
       )}
 
       {/* Blocking Banner */}
-      <BlockingBanner openBlockerCount={openBlockerCount} />
+      <BlockingBanner openBlockerCount={openBlockerCount} status={issue.status} />
 
       {/* Log Tab Bar (only for task-type issues with available phases) */}
       {isTaskType && (availablePhases.length > 0 || activeLogTab !== 'details') && (

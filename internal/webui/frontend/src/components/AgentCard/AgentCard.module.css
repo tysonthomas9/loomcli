@@ -121,10 +121,27 @@
   color: var(--color-status-error, #ef4444);
 }
 
+/* Commit counts container */
+.commitCounts {
+  display: flex;
+  flex-direction: row;
+  gap: 0.4rem;
+  align-items: center;
+}
+
 /* Commit count badge */
 .commitCount {
   font-size: 0.9rem;
   color: var(--color-success, #16a34a);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  flex-shrink: 0;
+}
+
+/* Behind count badge */
+.behindCount {
+  font-size: 0.9rem;
+  color: var(--color-warning, #f59e0b);
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono, ui-monospace, monospace);
   flex-shrink: 0;

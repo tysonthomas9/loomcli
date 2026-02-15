@@ -120,6 +120,8 @@ export interface SwimLaneBoardProps {
   sortLanesBy?: 'title' | 'count';
   /** Default collapsed state for new lanes (default: false) */
   defaultCollapsed?: boolean;
+  /** Maximum cards to show per column in swim lanes (default: 5) */
+  cardLimit?: number;
 }
 
 /**
@@ -140,6 +142,7 @@ export function SwimLaneBoard({
   showBlocked = true,
   sortLanesBy = 'title',
   defaultCollapsed = false,
+  cardLimit,
 }: SwimLaneBoardProps): JSX.Element {
   // Resolve columns: props.columns > props.statuses (legacy) > default
   // In swim lane mode (groupBy !== 'none'), include epics in columns so they appear in lanes
@@ -178,6 +181,7 @@ export function SwimLaneBoard({
     ...(onDragEnd !== undefined && { onDragEnd }),
     ...(className !== undefined && { className }),
     ...(blockedIssues !== undefined && { blockedIssues }),
+    ...(cardLimit !== undefined && { cardLimit }),
   };
 
   return <SwimLaneBoardContent {...contentProps} />;
@@ -198,6 +202,7 @@ function SwimLaneBoardContent({
   showBlocked,
   sortLanesBy,
   defaultCollapsed,
+  cardLimit,
 }: Omit<SwimLaneBoardProps, 'filters' | 'groupBy' | 'statuses'> & {
   groupBy: Exclude<GroupByField, 'none'>;
   columns: KanbanColumnConfig[];
@@ -391,6 +396,7 @@ function SwimLaneBoardContent({
             ...(onIssueClick !== undefined && { onIssueClick }),
             ...(blockedIssues !== undefined && { blockedIssues }),
             ...(showBlocked !== undefined && { showBlocked }),
+            ...(cardLimit !== undefined && { cardLimit }),
           };
           return <SwimLane key={lane.id} {...laneProps} />;
         })}

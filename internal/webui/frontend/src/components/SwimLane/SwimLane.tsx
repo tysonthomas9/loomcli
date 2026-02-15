@@ -4,7 +4,7 @@
  * Each swim lane represents a grouping (e.g., epic, assignee, priority).
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 import { DraggableIssueCard } from '@/components/DraggableIssueCard';
 import { EmptyColumn } from '@/components/EmptyColumn';
@@ -14,6 +14,12 @@ import { StatusColumn } from '@/components/StatusColumn';
 import type { Issue } from '@/types';
 
 import styles from './SwimLane.module.css';
+
+/**
+ * Maximum number of cards to show per column before collapsing.
+ * When there are more than this many cards, a "Show all X" footer appears.
+ */
+const DEFAULT_CARD_LIMIT = 5;
 
 /**
  * Props for the SwimLane component.
@@ -39,6 +45,8 @@ export interface SwimLaneProps {
   showBlocked?: boolean;
   /** Additional CSS class */
   className?: string;
+  /** Maximum cards to show per column (default: 5) */
+  cardLimit?: number;
 }
 
 /**
@@ -57,7 +65,24 @@ export function SwimLane({
   blockedIssues,
   showBlocked = true,
   className,
+  cardLimit = DEFAULT_CARD_LIMIT,
 }: SwimLaneProps): JSX.Element {
+  // Track which columns are expanded to show all cards
+  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
+
+  // Toggle expanded state for a column
+  const toggleColumnExpanded = (columnId: string): void => {
+    setExpandedColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(columnId)) {
+        next.delete(columnId);
+      } else {
+        next.add(columnId);
+      }
+      return next;
+    });
+  };
+
   // Filter issues based on blocked visibility
   const filteredIssues = useMemo(() => {
     if (showBlocked || !blockedIssues) return issues;
@@ -138,6 +163,27 @@ export function SwimLane({
           const isMutedColumn = isBacklogColumn || isBlockedColumn;
           const columnType = isBacklogColumn ? ('backlog' as const) : undefined;
 
+          // Determine if column should show limited cards
+          const isColumnExpanded = expandedColumns.has(col.id);
+          const hasMoreCards = colIssues.length > cardLimit;
+          const displayedIssues = isColumnExpanded ? colIssues : colIssues.slice(0, cardLimit);
+
+          // Build footer action if there are more cards to show
+          const footerAction = hasMoreCards ? (
+            <button
+              type="button"
+              onClick={() => toggleColumnExpanded(col.id)}
+              aria-label={
+                isColumnExpanded
+                  ? `Show fewer ${col.label} issues`
+                  : `Show all ${colIssues.length} ${col.label} issues`
+              }
+              data-testid={`toggle-column-${col.id}`}
+            >
+              {isColumnExpanded ? 'Show fewer' : `Show all ${colIssues.length}`}
+            </button>
+          ) : undefined;
+
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const isDropDisabled = isCollapsed || col.droppableDisabled === true;
           const statusColumnProps = {
@@ -147,6 +193,7 @@ export function SwimLane({
             ...(isDropDisabled && { droppableDisabled: true }),
             ...(columnClassName !== undefined && { className: columnClassName }),
             ...(columnType !== undefined && { columnType }),
+            ...(footerAction !== undefined && { footerAction }),
           };
 
           return (
@@ -154,7 +201,7 @@ export function SwimLane({
               {colIssues.length === 0 ? (
                 <EmptyColumn status={col.id} />
               ) : (
-                colIssues.map((issue) => {
+                displayedIssues.map((issue) => {
                   const blockedInfo = blockedIssues?.get(issue.id);
                   const cardProps = {
                     issue,
