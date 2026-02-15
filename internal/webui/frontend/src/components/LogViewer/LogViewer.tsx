@@ -106,6 +106,7 @@ export function LogViewer({
 
   // Track previous buffer length for scroll position restoration after prepend
   const prevBufferLengthRef = useRef(0);
+  const prevViewportYRef = useRef(0);
 
   // Re-sync auto-scroll only when the prop value actually changes (e.g. archive → tmux transition).
   // Do NOT sync on mount — useState(autoScrollProp) handles the initial value.
@@ -123,7 +124,7 @@ export function LogViewer({
     if (!container) return;
 
     const terminal = new Terminal({
-      disableStdin: !onTerminalData,
+      disableStdin: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 50000,
@@ -163,10 +164,6 @@ export function LogViewer({
     const initialFitTimeoutA = setTimeout(runFit, 180);
     const initialFitTimeoutB = setTimeout(runFit, 360);
     const initialFitTimeoutC = setTimeout(runFit, 720);
-
-    const inputDisposable = onTerminalData
-      ? terminal.onData((data: string) => onTerminalData(data))
-      : null;
 
     // Detect user scroll for auto-scroll toggle and scroll-to-top detection
     const scrollDisposable = terminal.onScroll(() => {
@@ -213,7 +210,6 @@ export function LogViewer({
       clearTimeout(scrollToTopTimerRef.current);
       observer.disconnect();
       scrollDisposable.dispose();
-      inputDisposable?.dispose();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -222,6 +218,21 @@ export function LogViewer({
     // onAutoScrollChange/onTerminalResize/onTerminalData excluded from deps — terminal is created once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Dynamic stdin & input handler — registers/unregisters onData listener when
+  // onTerminalData changes (e.g. loading → tmux transition). The terminal is
+  // created once with disableStdin:true; this effect enables input when needed.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+
+    terminal.options.disableStdin = !onTerminalData;
+
+    if (onTerminalData) {
+      const disposable = terminal.onData((data: string) => onTerminalData(data));
+      return () => { disposable.dispose(); };
+    }
+  }, [onTerminalData]);
 
   // Refit when stream resets/reconnects to keep wrapping in sync with panel layout changes.
   // Skip in static mode — archive content should keep its initial column width.
@@ -252,6 +263,7 @@ export function LogViewer({
     if (resetVersion !== lastResetVersionRef.current) {
       // Capture previous buffer length before reset (for scroll position restoration)
       prevBufferLengthRef.current = terminal.buffer.active.length;
+      prevViewportYRef.current = terminal.buffer.active.viewportY;
       terminal.reset();
       lastWrittenIndexRef.current = 0;
       lastResetVersionRef.current = resetVersion;
@@ -260,6 +272,7 @@ export function LogViewer({
     // Stream was reset by replacing buffered chunks
     if (chunks.length < lastWrittenIndexRef.current) {
       prevBufferLengthRef.current = terminal.buffer.active.length;
+      prevViewportYRef.current = terminal.buffer.active.viewportY;
       terminal.reset();
       lastWrittenIndexRef.current = 0;
     }
@@ -282,9 +295,14 @@ export function LogViewer({
       const newBufferLength = terminal.buffer.active.length;
       const addedLines = newBufferLength - prevBufferLengthRef.current;
       if (addedLines > 0) {
-        terminal.scrollLines(addedLines);
+        const targetViewportY = Math.max(
+          0,
+          Math.min(prevViewportYRef.current + addedLines, terminal.buffer.active.baseY)
+        );
+        terminal.scrollToLine(targetViewportY);
       }
       prevBufferLengthRef.current = 0;
+      prevViewportYRef.current = 0;
     }
   }, [chunks, resetVersion]);
 
@@ -340,10 +358,17 @@ export function LogViewer({
         </div>
       </div>
 
-      {/* Loading older logs banner */}
-      {isLoadingMore && (
-        <div className={styles.loadingBanner}>Loading older logs...</div>
-      )}
+      {/* Loading older logs banner (always mounted to avoid terminal height shifts) */}
+      <div
+        className={styles.loadingBanner}
+        data-visible={isLoadingMore ? 'true' : 'false'}
+        data-testid="loading-banner"
+        role="status"
+        aria-live="polite"
+        aria-hidden={!isLoadingMore}
+      >
+        Loading older logs...
+      </div>
 
       {/* Error banner */}
       {error && (
