@@ -2287,16 +2287,16 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 // ============================================================================
 
 // TestHasOpenBlockers is kept for backward compatibility but delegates to
-// HasOpenBlockersInReadyList (now in taskfilter.go). Comprehensive tests
-// are in taskfilter_test.go TestHasOpenBlockersInReadyList.
+// HasUnclosedBlockers (now in taskfilter.go). Comprehensive tests
+// are in taskfilter_test.go TestHasUnclosedBlockers.
 func TestHasOpenBlockers(t *testing.T) {
-	allIssues := []BdIssue{{ID: "T-0", Status: "open"}}
-	got := HasOpenBlockersInReadyList(
+	unclosedIDs := map[string]bool{"T-0": true}
+	got := HasUnclosedBlockers(
 		[]Dependency{{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"}},
-		allIssues,
+		unclosedIDs,
 	)
 	if !got {
-		t.Error("expected open blocker to be detected")
+		t.Error("expected unclosed blocker to be detected")
 	}
 }
 
@@ -3467,9 +3467,13 @@ func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				// Capture the full command args (name is first arg in slice)
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				// Capture only the first call (bd ready) args for parentID verification
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
@@ -3526,9 +3530,13 @@ func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				// Capture the full command args (name is first arg in slice)
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				// Capture only the first call (bd ready) args for parentID verification
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
@@ -3585,9 +3593,13 @@ func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				// Capture the full command args (name is first arg in slice)
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				// Capture only the first call (bd ready) args for parentID verification
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},
@@ -3644,8 +3656,12 @@ func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
@@ -3706,8 +3722,12 @@ func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
@@ -3768,8 +3788,12 @@ func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},

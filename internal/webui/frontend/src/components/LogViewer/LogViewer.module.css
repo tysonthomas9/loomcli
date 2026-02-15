@@ -101,13 +101,25 @@
 /* ============= Loading Banner ============= */
 
 .loadingBanner {
+  min-height: 28px;
   padding: 6px 12px;
-  background-color: rgba(59, 130, 246, 0.15);
-  border-bottom: 1px solid rgba(59, 130, 246, 0.3);
-  color: #93c5fd;
+  background-color: transparent;
+  border-bottom: 1px solid transparent;
+  color: transparent;
   font-size: var(--font-size-xs, 12px);
   flex-shrink: 0;
   text-align: center;
+  opacity: 0;
+  transition: opacity 0.12s ease-in-out;
+  user-select: none;
+  pointer-events: none;
+}
+
+.loadingBanner[data-visible='true'] {
+  background-color: rgba(59, 130, 246, 0.15);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+  opacity: 1;
 }
 
 /* ============= Error Banner ============= */

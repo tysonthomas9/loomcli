@@ -6,7 +6,7 @@ import {
   getAgentTerminalToken,
   getAgentTerminalWsUrl,
 } from '@/api';
-import { DEFAULT_RECONNECT_CONFIG, startAutoReconnect } from '@/utils/reconnectBackoff';
+import { calculateBackoffDelay, DEFAULT_RECONNECT_CONFIG } from '@/utils/reconnectBackoff';
 
 import type { LogChunk, LogStreamState } from './logTypes';
 
@@ -48,6 +48,8 @@ function buildResizeFrame(cols: number, rows: number): ArrayBuffer {
   return buf;
 }
 
+const ARCHIVE_RECHECK_INTERVAL_MS = 5000;
+
 export function useAgentTerminalLogs({
   agentName,
   enabled,
@@ -65,7 +67,12 @@ export function useAgentTerminalLogs({
   const byteOffsetRef = useRef(0);
   const encoderRef = useRef(new TextEncoder());
   const pendingSizeRef = useRef<{ cols: number; rows: number } | null>(null);
-  const reconnectCancelRef = useRef<(() => void) | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const archiveProbeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const archiveProbeInFlightRef = useRef(false);
+  const runIdRef = useRef(0);
+  const isLoadingMoreRef = useRef(false);
 
   // Infinite scroll state — refs to avoid re-renders and stale closures
   const allLinesRef = useRef<string[]>([]);
@@ -106,12 +113,13 @@ export function useAgentTerminalLogs({
     if (
       !currentAgent ||
       modeRef.current !== 'archive' ||
-      isLoadingMore ||
+      isLoadingMoreRef.current ||
       oldestLineRef.current <= 1
     ) {
       return;
     }
 
+    isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     try {
       const archive = await getAgentLogArchive(
@@ -158,32 +166,17 @@ export function useAgentTerminalLogs({
       const message = err instanceof Error ? err.message : 'Failed to load older logs';
       setError(message);
     } finally {
+      isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [archiveLines, isLoadingMore]);
+  }, [archiveLines]);
 
   useEffect(() => {
-    reconnectCancelRef.current?.();
-    reconnectCancelRef.current = null;
-
-    if (!enabled || !agentName) {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      byteOffsetRef.current = 0;
-      allLinesRef.current = [];
-      oldestLineRef.current = Infinity;
-      setChunks([]);
-      setMode('idle');
-      setState('disconnected');
-      setError(null);
-      setIsLoadingMore(false);
-      setResetVersion((prev) => prev + 1);
-      return;
-    }
-
+    runIdRef.current += 1;
+    const runId = runIdRef.current;
     let cancelled = false;
+
+    const isCurrentRun = () => !cancelled && runIdRef.current === runId;
 
     const closeSocket = () => {
       if (wsRef.current) {
@@ -192,10 +185,211 @@ export function useAgentTerminalLogs({
       }
     };
 
+    const stopReconnectTimer = () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+
+    const stopArchiveProbe = () => {
+      if (archiveProbeTimerRef.current) {
+        clearInterval(archiveProbeTimerRef.current);
+        archiveProbeTimerRef.current = null;
+      }
+      archiveProbeInFlightRef.current = false;
+    };
+
+    stopReconnectTimer();
+    stopArchiveProbe();
+
+    if (!enabled || !agentName) {
+      closeSocket();
+      reconnectAttemptRef.current = 0;
+      byteOffsetRef.current = 0;
+      allLinesRef.current = [];
+      oldestLineRef.current = Infinity;
+      setChunks([]);
+      setMode('idle');
+      setState('disconnected');
+      setError(null);
+      isLoadingMoreRef.current = false;
+      setIsLoadingMore(false);
+      setResetVersion((prev) => prev + 1);
+      return;
+    }
+
+    const connectTmux = async (): Promise<void> => {
+      if (!isCurrentRun()) return;
+      stopArchiveProbe();
+      closeSocket();
+      setMode('tmux');
+      setState('connecting');
+
+      try {
+        const token = await getAgentTerminalToken(agentName);
+        if (!isCurrentRun()) return;
+
+        const ws = new WebSocket(getAgentTerminalWsUrl(agentName, token));
+        ws.binaryType = 'arraybuffer';
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          if (!isCurrentRun() || wsRef.current !== ws) return;
+          reconnectAttemptRef.current = 0;
+          stopReconnectTimer();
+          setState('connected');
+          setError(null);
+          const pendingSize = pendingSizeRef.current;
+          if (pendingSize) {
+            ws.send(buildResizeFrame(pendingSize.cols, pendingSize.rows));
+          }
+        };
+
+        ws.onmessage = (event: MessageEvent) => {
+          if (!isCurrentRun() || wsRef.current !== ws) return;
+
+          let bytes: Uint8Array;
+          if (typeof event.data === 'string') {
+            bytes = encoderRef.current.encode(event.data);
+          } else if (event.data instanceof ArrayBuffer) {
+            bytes = new Uint8Array(event.data);
+          } else {
+            return;
+          }
+
+          byteOffsetRef.current += bytes.length;
+          const nextChunk: LogChunk = {
+            chunk: bytes,
+            byteOffset: byteOffsetRef.current,
+            timestamp: new Date().toISOString(),
+          };
+          setChunks((prev) => [...prev, nextChunk]);
+        };
+
+        ws.onerror = () => {
+          if (!isCurrentRun() || wsRef.current !== ws) return;
+          setError('Terminal stream error');
+        };
+
+        ws.onclose = () => {
+          if (!isCurrentRun() || wsRef.current !== ws) return;
+          wsRef.current = null;
+          setState('reconnecting');
+
+          const attempt = reconnectAttemptRef.current;
+          if (attempt >= DEFAULT_RECONNECT_CONFIG.maxAttempts) {
+            reconnectAttemptRef.current = 0;
+            void (async () => {
+              try {
+                const transport = await getAgentTerminalInfo(agentName);
+                if (!isCurrentRun()) return;
+
+                if (transport === 'archive') {
+                  const archive = await getAgentLogArchive(agentName, archiveLines);
+                  if (!isCurrentRun()) return;
+
+                  allLinesRef.current = archive.lines ?? [];
+                  oldestLineRef.current = archive.startLine;
+
+                  const text = allLinesRef.current.join('\n');
+                  const normalized = text.length > 0 && !text.endsWith('\n') ? `${text}\n` : text;
+                  const chunkBytes = encoderRef.current.encode(normalized);
+                  byteOffsetRef.current = chunkBytes.length;
+
+                  setChunks(
+                    chunkBytes.length > 0
+                      ? [
+                          {
+                            chunk: chunkBytes,
+                            byteOffset: chunkBytes.length,
+                            timestamp: new Date().toISOString(),
+                          },
+                        ]
+                      : []
+                  );
+                  setMode('archive');
+                  setState('connected');
+                  setResetVersion((prev) => prev + 1);
+
+                  if (!archiveProbeTimerRef.current) {
+                    archiveProbeTimerRef.current = setInterval(async () => {
+                      if (!isCurrentRun() || archiveProbeInFlightRef.current) return;
+                      archiveProbeInFlightRef.current = true;
+                      try {
+                        const probeTransport = await getAgentTerminalInfo(agentName);
+                        if (!isCurrentRun()) return;
+                        if (probeTransport === 'tmux') {
+                          stopArchiveProbe();
+                          reconnectAttemptRef.current = 0;
+                          void connectTmux();
+                        }
+                      } catch {
+                        // Keep archive mode active; probe again on next interval.
+                      } finally {
+                        archiveProbeInFlightRef.current = false;
+                      }
+                    }, ARCHIVE_RECHECK_INTERVAL_MS);
+                  }
+                  return;
+                }
+              } catch (err) {
+                if (!isCurrentRun()) return;
+                const message =
+                  err instanceof Error ? err.message : 'Failed to inspect terminal availability';
+                setError(message);
+              }
+
+              if (!isCurrentRun() || reconnectTimerRef.current) return;
+              reconnectTimerRef.current = setTimeout(() => {
+                reconnectTimerRef.current = null;
+                if (!isCurrentRun()) return;
+                reconnectAttemptRef.current = 1;
+                void connectTmux();
+              }, ARCHIVE_RECHECK_INTERVAL_MS);
+            })();
+            return;
+          }
+
+          if (reconnectTimerRef.current) {
+            return;
+          }
+
+          const delay = calculateBackoffDelay(attempt, DEFAULT_RECONNECT_CONFIG);
+          reconnectTimerRef.current = setTimeout(() => {
+            reconnectTimerRef.current = null;
+            if (!isCurrentRun()) return;
+            reconnectAttemptRef.current += 1;
+            void connectTmux();
+          }, delay);
+        };
+      } catch (connectErr) {
+        if (!isCurrentRun()) return;
+        const message =
+          connectErr instanceof Error ? connectErr.message : 'Failed to connect terminal';
+        setError(message);
+        setState('reconnecting');
+
+        if (reconnectTimerRef.current) {
+          return;
+        }
+
+        const attempt = reconnectAttemptRef.current;
+        const delay = calculateBackoffDelay(attempt, DEFAULT_RECONNECT_CONFIG);
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          if (!isCurrentRun()) return;
+          reconnectAttemptRef.current += 1;
+          void connectTmux();
+        }, delay);
+      }
+    };
+
     const start = async (): Promise<void> => {
       closeSocket();
-      reconnectCancelRef.current?.();
-      reconnectCancelRef.current = null;
+      stopReconnectTimer();
+      stopArchiveProbe();
+      reconnectAttemptRef.current = 0;
       byteOffsetRef.current = 0;
       pendingSizeRef.current = null;
       allLinesRef.current = [];
@@ -204,16 +398,17 @@ export function useAgentTerminalLogs({
       setState('connecting');
       setMode('loading');
       setError(null);
+      isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
       setResetVersion((prev) => prev + 1);
 
       try {
         const transport = await getAgentTerminalInfo(agentName);
-        if (cancelled) return;
+        if (!isCurrentRun()) return;
 
         if (transport === 'archive') {
           const archive = await getAgentLogArchive(agentName, archiveLines);
-          if (cancelled) return;
+          if (!isCurrentRun()) return;
 
           // Store lines for infinite scroll
           allLinesRef.current = archive.lines ?? [];
@@ -237,96 +432,31 @@ export function useAgentTerminalLogs({
           );
           setMode('archive');
           setState('connected');
+          if (!archiveProbeTimerRef.current) {
+            archiveProbeTimerRef.current = setInterval(async () => {
+              if (!isCurrentRun() || archiveProbeInFlightRef.current) return;
+              archiveProbeInFlightRef.current = true;
+              try {
+                const probeTransport = await getAgentTerminalInfo(agentName);
+                if (!isCurrentRun()) return;
+                if (probeTransport === 'tmux') {
+                  stopArchiveProbe();
+                  reconnectAttemptRef.current = 0;
+                  void connectTmux();
+                }
+              } catch {
+                // Keep archive mode active; probe again on next interval.
+              } finally {
+                archiveProbeInFlightRef.current = false;
+              }
+            }, ARCHIVE_RECHECK_INTERVAL_MS);
+          }
           return;
         }
 
-        const scheduleReconnect = () => {
-          if (reconnectCancelRef.current) {
-            return;
-          }
-          reconnectCancelRef.current = startAutoReconnect(
-            () => {
-              if (cancelled) {
-                return true;
-              }
-              void connectTmux();
-              return false;
-            },
-            () => {},
-            DEFAULT_RECONNECT_CONFIG
-          );
-        };
-
-        const connectTmux = async (): Promise<void> => {
-          try {
-            const token = await getAgentTerminalToken(agentName);
-            if (cancelled) return;
-
-            const ws = new WebSocket(getAgentTerminalWsUrl(agentName, token));
-            ws.binaryType = 'arraybuffer';
-            wsRef.current = ws;
-            setMode('tmux');
-
-            ws.onopen = () => {
-              if (cancelled) return;
-              reconnectCancelRef.current?.();
-              reconnectCancelRef.current = null;
-              setState('connected');
-              setError(null);
-              const pendingSize = pendingSizeRef.current;
-              if (pendingSize) {
-                ws.send(buildResizeFrame(pendingSize.cols, pendingSize.rows));
-              }
-            };
-
-            ws.onmessage = (event: MessageEvent) => {
-              if (cancelled) return;
-
-              let bytes: Uint8Array;
-              if (typeof event.data === 'string') {
-                bytes = encoderRef.current.encode(event.data);
-              } else if (event.data instanceof ArrayBuffer) {
-                bytes = new Uint8Array(event.data);
-              } else {
-                return;
-              }
-
-              byteOffsetRef.current += bytes.length;
-              const nextChunk: LogChunk = {
-                chunk: bytes,
-                byteOffset: byteOffsetRef.current,
-                timestamp: new Date().toISOString(),
-              };
-              setChunks((prev) => [...prev, nextChunk]);
-            };
-
-            ws.onerror = () => {
-              if (cancelled) return;
-              setError('Terminal stream error');
-            };
-
-            ws.onclose = () => {
-              if (cancelled) return;
-              wsRef.current = null;
-              setState('reconnecting');
-              setResetVersion((prev) => prev + 1);
-              setChunks([]);
-              byteOffsetRef.current = 0;
-              scheduleReconnect();
-            };
-          } catch (connectErr) {
-            if (cancelled) return;
-            const message =
-              connectErr instanceof Error ? connectErr.message : 'Failed to connect terminal';
-            setError(message);
-            setState('reconnecting');
-            scheduleReconnect();
-          }
-        };
-
         void connectTmux();
       } catch (err) {
-        if (cancelled) return;
+        if (!isCurrentRun()) return;
         const message = err instanceof Error ? err.message : 'Failed to load logs';
         setError(message);
         setState('disconnected');
@@ -338,8 +468,9 @@ export function useAgentTerminalLogs({
 
     return () => {
       cancelled = true;
-      reconnectCancelRef.current?.();
-      reconnectCancelRef.current = null;
+      isLoadingMoreRef.current = false;
+      stopReconnectTimer();
+      stopArchiveProbe();
       closeSocket();
     };
   }, [agentName, archiveLines, enabled, reloadKey]);

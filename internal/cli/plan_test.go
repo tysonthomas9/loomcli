@@ -27,6 +27,7 @@ func TestRunPlan_SingleTask_NoTasksAvailable(t *testing.T) {
 	// Mock bd ready returning empty array (no tasks)
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: "[]"},
+		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: "[]"},
 	})
 	mock.Install()
 
@@ -68,6 +69,7 @@ func TestRunPlan_SingleTask_Success(t *testing.T) {
 	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"task","title":"Test task"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -175,6 +177,7 @@ func TestRunPlan_SkipsEpics(t *testing.T) {
 	taskJSON := `[{"id":"bd-123","status":"open","issue_type":"epic","title":"Test epic"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -216,6 +219,7 @@ func TestRunPlan_SkipsInProgress(t *testing.T) {
 	taskJSON := `[{"id":"bd-123","status":"in_progress","issue_type":"task","title":"Test task"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -243,6 +247,7 @@ func TestHasAvailablePlanningTasks_Success(t *testing.T) {
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -260,6 +265,7 @@ func TestHasAvailablePlanningTasks_SkipsTasksWithDesign(t *testing.T) {
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan here"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -292,6 +298,7 @@ func TestGetAvailablePlanningTasks_Success(t *testing.T) {
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 
@@ -311,6 +318,7 @@ func TestGetAvailablePlanningTasks_ReturnsEmpty(t *testing.T) {
 	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan here"}]`
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
+		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
 	})
 	mock.Install()
 

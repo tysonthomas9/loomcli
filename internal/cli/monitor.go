@@ -606,6 +606,10 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 
 	wg.Wait()
 
+	// Build unclosed issue ID set from existing responses for accurate blocker filtering.
+	// A blocker is only resolved when closed — not when it moves to in_progress/review.
+	unclosedIDs := buildUnclosedIDsFromResponses(readyOutput, inProgressOutput, needReviewOutput, backlogOutput)
+
 	// Process ready tasks, split by workflow stage
 	// Note: bd ready returns tasks not blocked by dependencies (open, in_progress, review)
 	if readyErr == nil {
@@ -619,6 +623,9 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 					continue
 				}
 				if IsEpic(issue) {
+					continue
+				}
+				if HasUnclosedBlockers(issue.Dependencies, unclosedIDs) {
 					continue
 				}
 
@@ -831,6 +838,40 @@ func collectReadyTasksByPriority(readyLimit int) map[int]int {
 	}
 
 	return counts
+}
+
+// buildUnclosedIDsFromResponses builds a set of unclosed issue IDs from the
+// JSON responses already fetched by collectTaskStatus's parallel bd commands.
+// Issues from ready/in_progress/review are unclosed by definition; backlog
+// issues need a status check since bd blocked may include closed issues.
+func buildUnclosedIDsFromResponses(readyJSON, inProgressJSON, reviewJSON, backlogJSON string) map[string]bool {
+	unclosed := make(map[string]bool)
+
+	addAll := func(jsonStr string) {
+		var issues []BdIssue
+		if json.Unmarshal([]byte(jsonStr), &issues) == nil {
+			for _, issue := range issues {
+				unclosed[issue.ID] = true
+			}
+		}
+	}
+
+	// Ready, in_progress, and review issues are all unclosed by definition
+	addAll(readyJSON)
+	addAll(inProgressJSON)
+	addAll(reviewJSON)
+
+	// Backlog (blocked) issues need status filtering
+	var backlogIssues []BdIssue
+	if json.Unmarshal([]byte(backlogJSON), &backlogIssues) == nil {
+		for _, issue := range backlogIssues {
+			if issue.Status != "closed" {
+				unclosed[issue.ID] = true
+			}
+		}
+	}
+
+	return unclosed
 }
 
 func runBdCommand(args ...string) (string, error) {

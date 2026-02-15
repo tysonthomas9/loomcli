@@ -166,48 +166,52 @@ func TestIsWorkableTask(t *testing.T) {
 
 // --- Level 3: Agent predicates ---
 
-func TestHasOpenBlockersInReadyList(t *testing.T) {
-	// Reuse existing TestHasOpenBlockers cases with renamed function
+func TestHasUnclosedBlockers(t *testing.T) {
 	tests := []struct {
-		name      string
-		deps      []Dependency
-		allIssues []BdIssue
-		want      bool
+		name        string
+		deps        []Dependency
+		unclosedIDs map[string]bool
+		want        bool
 	}{
 		{"nil deps", nil, nil, false},
 		{"empty deps", []Dependency{}, nil, false},
 		{"only parent-child deps", []Dependency{
 			{Type: "parent-child", DependsOnID: "B-1"},
-		}, []BdIssue{{ID: "B-1"}}, false},
-		{"blocks dep with open blocker", []Dependency{
+		}, map[string]bool{"B-1": true}, false},
+		{"blocks dep with unclosed blocker", []Dependency{
 			{Type: "blocks", DependsOnID: "B-1"},
-		}, []BdIssue{{ID: "B-1"}}, true},
-		{"blocks dep not in ready list (resolved)", []Dependency{
+		}, map[string]bool{"B-1": true}, true},
+		{"blocks dep with closed blocker", []Dependency{
 			{Type: "blocks", DependsOnID: "B-1"},
-		}, []BdIssue{{ID: "B-2"}}, false},
-		{"mixed deps one open blocker", []Dependency{
+		}, map[string]bool{"B-2": true}, false},
+		{"blocker in_progress (unclosed)", []Dependency{
+			{Type: "blocks", DependsOnID: "B-1"},
+		}, map[string]bool{"B-1": true, "B-2": true}, true},
+		{"mixed deps one unclosed blocker", []Dependency{
 			{Type: "parent-child", DependsOnID: "B-1"},
 			{Type: "blocks", DependsOnID: "B-2"},
-		}, []BdIssue{{ID: "B-2"}}, true},
+		}, map[string]bool{"B-2": true}, true},
 		{"mixed deps resolved blocker", []Dependency{
 			{Type: "parent-child", DependsOnID: "B-1"},
 			{Type: "blocks", DependsOnID: "B-2"},
-		}, []BdIssue{{ID: "B-1"}}, false},
+		}, map[string]bool{"B-1": true}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := HasOpenBlockersInReadyList(tt.deps, tt.allIssues); got != tt.want {
-				t.Errorf("HasOpenBlockersInReadyList() = %v, want %v", got, tt.want)
+			if got := HasUnclosedBlockers(tt.deps, tt.unclosedIDs); got != tt.want {
+				t.Errorf("HasUnclosedBlockers() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestIsAvailableForPlanning(t *testing.T) {
-	allIssues := []BdIssue{
-		{ID: "T-1", Status: "open", IssueType: "task"},
-		{ID: "T-2", Status: "open", IssueType: "task", Design: "plan"},
-		{ID: "BLOCKER", Status: "open", IssueType: "task"},
+	// unclosedIDs represents all issues that are NOT closed
+	// (open, in_progress, review, blocked — anything except closed)
+	unclosedIDs := map[string]bool{
+		"T-1":     true, // open
+		"T-2":     true, // open (has design)
+		"BLOCKER": true, // open (unclosed blocker)
 	}
 
 	tests := []struct {
@@ -220,18 +224,18 @@ func TestIsAvailableForPlanning(t *testing.T) {
 		{"open task with design (ready to implement)", BdIssue{ID: "T-2", Status: "open", IssueType: "task", Design: "plan"}, false},
 		{"epic", BdIssue{ID: "E-1", Status: "open", IssueType: "epic"}, false},
 		{"in_progress", BdIssue{ID: "T-4", Status: "in_progress", IssueType: "task"}, false},
-		{"blocked by open issue", BdIssue{
+		{"blocked by unclosed issue", BdIssue{
 			ID: "T-5", Status: "open", IssueType: "task",
 			Dependencies: []Dependency{{Type: "blocks", DependsOnID: "BLOCKER"}},
 		}, false},
-		{"blocked by resolved issue", BdIssue{
+		{"blocked by closed issue", BdIssue{
 			ID: "T-6", Status: "open", IssueType: "task",
 			Dependencies: []Dependency{{Type: "blocks", DependsOnID: "RESOLVED"}},
 		}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsAvailableForPlanning(tt.issue, allIssues); got != tt.want {
+			if got := IsAvailableForPlanning(tt.issue, unclosedIDs); got != tt.want {
 				t.Errorf("IsAvailableForPlanning() = %v, want %v", got, tt.want)
 			}
 		})
@@ -239,9 +243,9 @@ func TestIsAvailableForPlanning(t *testing.T) {
 }
 
 func TestIsAvailableForImplementation(t *testing.T) {
-	allIssues := []BdIssue{
-		{ID: "T-1", Status: "open", IssueType: "task"},
-		{ID: "BLOCKER", Status: "open", IssueType: "task"},
+	unclosedIDs := map[string]bool{
+		"T-1":     true,
+		"BLOCKER": true,
 	}
 
 	tests := []struct {
@@ -260,7 +264,7 @@ func TestIsAvailableForImplementation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsAvailableForImplementation(tt.issue, allIssues); got != tt.want {
+			if got := IsAvailableForImplementation(tt.issue, unclosedIDs); got != tt.want {
 				t.Errorf("IsAvailableForImplementation() = %v, want %v", got, tt.want)
 			}
 		})
@@ -268,9 +272,9 @@ func TestIsAvailableForImplementation(t *testing.T) {
 }
 
 func TestIsAvailableForAny(t *testing.T) {
-	allIssues := []BdIssue{
-		{ID: "T-1", Status: "open", IssueType: "task"},
-		{ID: "BLOCKER", Status: "open", IssueType: "task"},
+	unclosedIDs := map[string]bool{
+		"T-1":     true,
+		"BLOCKER": true,
 	}
 
 	tests := []struct {
@@ -283,14 +287,14 @@ func TestIsAvailableForAny(t *testing.T) {
 		{"open task with needs-revision", BdIssue{ID: "T-3", Status: "open", IssueType: "task", Labels: []string{"needs-revision"}}, true},
 		{"epic", BdIssue{ID: "E-1", Status: "open", IssueType: "epic"}, false},
 		{"in_progress", BdIssue{ID: "T-4", Status: "in_progress", IssueType: "task"}, false},
-		{"blocked by open issue", BdIssue{
+		{"blocked by unclosed issue", BdIssue{
 			ID: "T-5", Status: "open", IssueType: "task",
 			Dependencies: []Dependency{{Type: "blocks", DependsOnID: "BLOCKER"}},
 		}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsAvailableForAny(tt.issue, allIssues); got != tt.want {
+			if got := IsAvailableForAny(tt.issue, unclosedIDs); got != tt.want {
 				t.Errorf("IsAvailableForAny() = %v, want %v", got, tt.want)
 			}
 		})

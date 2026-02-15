@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 // TestComputeBackoff_OverflowProtection tests that computeBackoff handles
@@ -989,7 +991,7 @@ func TestStopAgent_KillsProcessGroup(t *testing.T) {
 	}
 
 	// Verify the parent is dead
-	if IsProcessRunning(pid) {
+	if lockfile.IsProcessRunning(pid) {
 		t.Errorf("parent process %d is still running after stopAgent", pid)
 	}
 }

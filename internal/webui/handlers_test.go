@@ -7416,6 +7416,7 @@ func TestPoolAdapterPut_WrongType(t *testing.T) {
 type mockReadyClient struct {
 	readyFunc        func(args *rpc.ReadyArgs) (*rpc.Response, error)
 	getParentIDsFunc func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error)
+	listFunc         func(args *rpc.ListArgs) (*rpc.Response, error)
 }
 
 func (m *mockReadyClient) Ready(args *rpc.ReadyArgs) (*rpc.Response, error) {
@@ -7430,6 +7431,15 @@ func (m *mockReadyClient) GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.GetPare
 		return m.getParentIDsFunc(args)
 	}
 	return nil, errors.New("getParentIDsFunc not implemented")
+}
+
+func (m *mockReadyClient) List(args *rpc.ListArgs) (*rpc.Response, error) {
+	if m.listFunc != nil {
+		return m.listFunc(args)
+	}
+	// Default: return empty list (no issues = no unclosed blockers = no filtering)
+	data, _ := json.Marshal([]*types.Issue{})
+	return &rpc.Response{Success: true, Data: data}, nil
 }
 
 // mockReadyPool implements readyConnectionGetter for testing.
@@ -7810,6 +7820,169 @@ func TestHandleReadyWithPool_MalformedResponseData(t *testing.T) {
 	}
 }
 
+// --- handleReadyWithPool blocker filtering tests ---
+
+func TestHandleReadyWithPool_FiltersUnclosedBlockers(t *testing.T) {
+	// Issue A (blocker) is in_progress — issue B depends on A
+	issueA := &types.Issue{ID: "issue-a", Title: "Blocker", Status: types.StatusInProgress}
+	issueB := &types.Issue{
+		ID:    "issue-b",
+		Title: "Blocked by A",
+		Dependencies: []*types.Dependency{
+			{IssueID: "issue-b", DependsOnID: "issue-a", Type: types.DepBlocks},
+		},
+	}
+	issueC := &types.Issue{ID: "issue-c", Title: "No blockers"}
+
+	readyIssues := []*types.Issue{issueB, issueC}
+	readyJSON, _ := json.Marshal(readyIssues)
+
+	allIssues := []*types.Issue{issueA, issueB, issueC}
+	allJSON, _ := json.Marshal(allIssues)
+
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: readyJSON}, nil
+		},
+		getParentIDsFunc: func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error) {
+			return &rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}, nil
+		},
+		listFunc: func(args *rpc.ListArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: allJSON}, nil
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) { return client, nil },
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp ReadyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatal("expected Success to be true")
+	}
+	// issue-b should be filtered out (blocker issue-a is unclosed)
+	// issue-c should remain (no blockers)
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected 1 item after filtering, got %d", len(resp.Data))
+	}
+	if resp.Data[0].ID != "issue-c" {
+		t.Errorf("expected remaining issue to be 'issue-c', got %q", resp.Data[0].ID)
+	}
+}
+
+func TestHandleReadyWithPool_ClosedBlockerPassesThrough(t *testing.T) {
+	// Issue A (blocker) is closed — issue B should pass through
+	issueA := &types.Issue{ID: "issue-a", Title: "Closed Blocker", Status: types.StatusClosed}
+	issueB := &types.Issue{
+		ID:    "issue-b",
+		Title: "Was blocked by A",
+		Dependencies: []*types.Dependency{
+			{IssueID: "issue-b", DependsOnID: "issue-a", Type: types.DepBlocks},
+		},
+	}
+
+	readyIssues := []*types.Issue{issueB}
+	readyJSON, _ := json.Marshal(readyIssues)
+
+	allIssues := []*types.Issue{issueA, issueB}
+	allJSON, _ := json.Marshal(allIssues)
+
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: readyJSON}, nil
+		},
+		getParentIDsFunc: func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error) {
+			return &rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}, nil
+		},
+		listFunc: func(args *rpc.ListArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: allJSON}, nil
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) { return client, nil },
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp ReadyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatal("expected Success to be true")
+	}
+	// issue-b should pass through (blocker issue-a is closed)
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Data))
+	}
+	if resp.Data[0].ID != "issue-b" {
+		t.Errorf("expected issue 'issue-b', got %q", resp.Data[0].ID)
+	}
+}
+
+func TestHandleReadyWithPool_ListErrorNonFatal(t *testing.T) {
+	// If List() fails, filtering is skipped (non-fatal) — all issues returned
+	issues := []*types.Issue{{ID: "issue-1", Title: "Test"}}
+	issuesJSON, _ := json.Marshal(issues)
+
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: issuesJSON}, nil
+		},
+		getParentIDsFunc: func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error) {
+			return &rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}, nil
+		},
+		listFunc: func(args *rpc.ListArgs) (*rpc.Response, error) {
+			return nil, errors.New("list RPC failed")
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) { return client, nil },
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp ReadyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	// Should still return the issue (List failure is non-fatal)
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected 1 item (List error non-fatal), got %d", len(resp.Data))
+	}
+}
+
 // --- handleListIssues tests with mock server ---
 
 // startHandlersMockServer creates a Unix socket mock server for handler tests.
@@ -8057,11 +8230,25 @@ func TestHandleListIssues_MalformedData(t *testing.T) {
 
 // TestHandleListIssues_KanbanMode tests list with include_blocked=true (kanban mode).
 func TestHandleListIssues_KanbanMode(t *testing.T) {
+	// issue-1 is blocked by dep-1 and dep-2 (both unclosed)
 	issues := []*types.IssueWithCounts{
-		{Issue: &types.Issue{ID: "issue-1", Title: "Blocked Issue", Status: types.StatusOpen}},
+		{Issue: &types.Issue{
+			ID: "issue-1", Title: "Blocked Issue", Status: types.StatusOpen,
+			Dependencies: []*types.Dependency{
+				{IssueID: "issue-1", DependsOnID: "dep-1", Type: types.DepBlocks},
+				{IssueID: "issue-1", DependsOnID: "dep-2", Type: types.DepBlocks},
+			},
+		}},
 		{Issue: &types.Issue{ID: "issue-2", Title: "Free Issue", Status: types.StatusOpen}},
 	}
 	issuesJSON, _ := json.Marshal(issues)
+
+	// All issues including the blockers (for unfiltered list call)
+	allIssues := append(issues,
+		&types.IssueWithCounts{Issue: &types.Issue{ID: "dep-1", Title: "Dep 1", Status: types.StatusInProgress}},
+		&types.IssueWithCounts{Issue: &types.Issue{ID: "dep-2", Title: "Dep 2", Status: types.StatusReview}},
+	)
+	allJSON, _ := json.Marshal(allIssues)
 
 	blockedIssues := []*types.BlockedIssue{
 		{
@@ -8072,13 +8259,20 @@ func TestHandleListIssues_KanbanMode(t *testing.T) {
 	}
 	blockedJSON, _ := json.Marshal(blockedIssues)
 
+	listCallCount := 0
 	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
 		if resp, ok := defaultHealthPingHandler(req); ok {
 			return resp
 		}
 		switch req.Operation {
 		case "list":
-			return rpc.Response{Success: true, Data: issuesJSON}
+			listCallCount++
+			if listCallCount == 1 {
+				// First call: filtered list (user query)
+				return rpc.Response{Success: true, Data: issuesJSON}
+			}
+			// Second call: unfiltered list for blocker detection
+			return rpc.Response{Success: true, Data: allJSON}
 		case "get_parent_ids":
 			resp := rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}
 			data, _ := json.Marshal(resp)
@@ -8122,8 +8316,184 @@ func TestHandleListIssues_KanbanMode(t *testing.T) {
 	if kanbanItems[0].BlockedByCount != 2 {
 		t.Errorf("expected BlockedByCount=2, got %d", kanbanItems[0].BlockedByCount)
 	}
+	// Verify BlockedByDetails populated with title/priority
+	if len(kanbanItems[0].BlockedByDetails) != 2 {
+		t.Fatalf("expected 2 BlockedByDetails, got %d", len(kanbanItems[0].BlockedByDetails))
+	}
+	if kanbanItems[0].BlockedByDetails[0].Title != "Dep 1" {
+		t.Errorf("expected blocker title 'Dep 1', got %q", kanbanItems[0].BlockedByDetails[0].Title)
+	}
 	if kanbanItems[1].IsBlocked {
 		t.Error("expected issue-2 to not be blocked")
+	}
+}
+
+// TestHandleListIssues_KanbanUnclosedBlocker tests that issues with in_progress
+// blockers are marked as blocked even though the daemon doesn't flag them.
+func TestHandleListIssues_KanbanUnclosedBlocker(t *testing.T) {
+	// issue-b depends on issue-a (in_progress). Daemon doesn't flag it as blocked.
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{
+			ID: "issue-b", Title: "Depends on A", Status: types.StatusOpen,
+			Dependencies: []*types.Dependency{
+				{IssueID: "issue-b", DependsOnID: "issue-a", Type: types.DepBlocks},
+			},
+		}},
+		{Issue: &types.Issue{ID: "issue-c", Title: "No deps", Status: types.StatusOpen}},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	// All issues including the blocker
+	allIssues := append(issues,
+		&types.IssueWithCounts{Issue: &types.Issue{ID: "issue-a", Title: "Blocker In Progress", Status: types.StatusInProgress, Priority: 2}},
+	)
+	allJSON, _ := json.Marshal(allIssues)
+
+	listCallCount := 0
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			listCallCount++
+			if listCallCount == 1 {
+				return rpc.Response{Success: true, Data: issuesJSON}
+			}
+			return rpc.Response{Success: true, Data: allJSON}
+		case "get_parent_ids":
+			resp := rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}
+			data, _ := json.Marshal(resp)
+			return rpc.Response{Success: true, Data: data}
+		case "blocked":
+			// Daemon returns empty — doesn't flag issue-b as blocked
+			data, _ := json.Marshal([]*types.BlockedIssue{})
+			return rpc.Response{Success: true, Data: data}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?include_blocked=true", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	var kanbanItems []*KanbanIssue
+	if err := json.Unmarshal(resp.Data, &kanbanItems); err != nil {
+		t.Fatalf("failed to parse kanban items: %v", err)
+	}
+	if len(kanbanItems) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(kanbanItems))
+	}
+
+	// issue-b should be blocked (client-side detects unclosed blocker)
+	if !kanbanItems[0].IsBlocked {
+		t.Error("expected issue-b to be blocked (blocker issue-a is in_progress)")
+	}
+	if kanbanItems[0].BlockedByCount != 1 {
+		t.Errorf("expected BlockedByCount=1, got %d", kanbanItems[0].BlockedByCount)
+	}
+	if len(kanbanItems[0].BlockedBy) != 1 || kanbanItems[0].BlockedBy[0] != "issue-a" {
+		t.Errorf("expected BlockedBy=['issue-a'], got %v", kanbanItems[0].BlockedBy)
+	}
+	// Verify BlockedByDetails has title and priority
+	if len(kanbanItems[0].BlockedByDetails) != 1 {
+		t.Fatalf("expected 1 BlockedByDetails, got %d", len(kanbanItems[0].BlockedByDetails))
+	}
+	if kanbanItems[0].BlockedByDetails[0].Title != "Blocker In Progress" {
+		t.Errorf("expected blocker title 'Blocker In Progress', got %q", kanbanItems[0].BlockedByDetails[0].Title)
+	}
+	if kanbanItems[0].BlockedByDetails[0].Priority != 2 {
+		t.Errorf("expected blocker priority 2, got %d", kanbanItems[0].BlockedByDetails[0].Priority)
+	}
+
+	// issue-c should not be blocked
+	if kanbanItems[1].IsBlocked {
+		t.Error("expected issue-c to not be blocked")
+	}
+}
+
+// TestHandleListIssues_KanbanClosedBlockerPassesThrough tests that issues
+// with closed blockers are not marked as blocked.
+func TestHandleListIssues_KanbanClosedBlockerPassesThrough(t *testing.T) {
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{
+			ID: "issue-b", Title: "Was blocked", Status: types.StatusOpen,
+			Dependencies: []*types.Dependency{
+				{IssueID: "issue-b", DependsOnID: "issue-a", Type: types.DepBlocks},
+			},
+		}},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	// Blocker is closed
+	allIssues := append(issues,
+		&types.IssueWithCounts{Issue: &types.Issue{ID: "issue-a", Title: "Closed Blocker", Status: types.StatusClosed}},
+	)
+	allJSON, _ := json.Marshal(allIssues)
+
+	listCallCount := 0
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			listCallCount++
+			if listCallCount == 1 {
+				return rpc.Response{Success: true, Data: issuesJSON}
+			}
+			return rpc.Response{Success: true, Data: allJSON}
+		case "get_parent_ids":
+			resp := rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}
+			data, _ := json.Marshal(resp)
+			return rpc.Response{Success: true, Data: data}
+		case "blocked":
+			data, _ := json.Marshal([]*types.BlockedIssue{})
+			return rpc.Response{Success: true, Data: data}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?include_blocked=true", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	var kanbanItems []*KanbanIssue
+	if err := json.Unmarshal(resp.Data, &kanbanItems); err != nil {
+		t.Fatalf("failed to parse kanban items: %v", err)
+	}
+	if len(kanbanItems) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(kanbanItems))
+	}
+	// Blocker is closed — issue should not be blocked
+	if kanbanItems[0].IsBlocked {
+		t.Error("expected issue-b to NOT be blocked (blocker is closed)")
 	}
 }
 
