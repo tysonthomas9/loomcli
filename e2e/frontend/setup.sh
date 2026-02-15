@@ -77,7 +77,8 @@ cat > tsconfig.json <<'EOF'
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test"]
 }
 EOF
 
@@ -143,6 +144,11 @@ cat > src/App.tsx <<'EOF'
 export default function App() {
   return <div>Cortex</div>
 }
+EOF
+
+# Placeholder CSS module for App (agent will replace with real styles)
+cat > src/App.module.css <<'EOF'
+/* Placeholder — replaced by agent implementing TASK_APP */
 EOF
 
 # ============================================================
@@ -395,25 +401,15 @@ TASK_WORKQUEUE=$(bd create --title="Create WorkQueue stats panel" \
 # Section 8: Inter-Task Dependencies
 # ============================================================
 
-echo "==> Adding task dependencies"
-
-# TASK_DATA has no dependencies (foundation for everything)
-# Validate first dep succeeds to ensure bd dep add is working
-bd dep add "$TASK_HEADER" "$TASK_DATA" 2>/dev/null || { echo "FAIL: Could not add dependency"; exit 1; }
-bd dep add "$TASK_BOARD" "$TASK_DATA" 2>/dev/null || true
-bd dep add "$TASK_COLUMN" "$TASK_DATA" 2>/dev/null || true
-bd dep add "$TASK_COLUMN" "$TASK_BOARD" 2>/dev/null || true
-bd dep add "$TASK_CARD" "$TASK_DATA" 2>/dev/null || true
-bd dep add "$TASK_CARD" "$TASK_COLUMN" 2>/dev/null || true
-bd dep add "$TASK_AGENTLIST" "$TASK_DATA" 2>/dev/null || true
-bd dep add "$TASK_WORKQUEUE" "$TASK_DATA" 2>/dev/null || true
-bd dep add "$TASK_APP" "$TASK_DATA" 2>/dev/null || true
-bd dep add "$TASK_APP" "$TASK_HEADER" 2>/dev/null || true
-bd dep add "$TASK_APP" "$TASK_BOARD" 2>/dev/null || true
-bd dep add "$TASK_APP" "$TASK_COLUMN" 2>/dev/null || true
-bd dep add "$TASK_APP" "$TASK_CARD" 2>/dev/null || true
-bd dep add "$TASK_APP" "$TASK_AGENTLIST" 2>/dev/null || true
-bd dep add "$TASK_APP" "$TASK_WORKQUEUE" 2>/dev/null || true
+# NOTE: Dependencies are NOT added here. The daemon uses `bd ready` which respects
+# dependencies, blocking both planning AND implementation. Adding deps in setup
+# serializes the planning phase unnecessarily.
+#
+# Instead, deps are added by test-frontend-e2e.sh between Phase 2 (review) and
+# Phase 3 (implementation) so that:
+#   - Phase 1 (planning): all 8 tasks plannable in parallel
+#   - Phase 3 (implementation): TASK_APP waits for all others (it imports everything)
+echo "==> Skipping dependencies (added by test script before implementation)"
 
 # ============================================================
 # Section 9: Env File

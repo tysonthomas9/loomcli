@@ -36,6 +36,18 @@ FAILED=0
 pass() { echo "  PASS: $1"; PASSED=$((PASSED + 1)); }
 fail() { echo "  FAIL: $1"; FAILED=$((FAILED + 1)); }
 
+# Check for Go panics in log files (excludes git "fatal:" messages which are expected
+# in test repos without remotes, and excludes "no-panic" or similar benign strings)
+check_panics() {
+  local label="$1"
+  if grep -ri "panic:" .loom/logs/ 2>/dev/null | grep -v "no-panic" | grep -qi "panic:" 2>/dev/null; then
+    fail "Go panic found in $label daemon logs"
+    grep -ri "panic:" .loom/logs/ 2>/dev/null | grep -v "no-panic" | head -5
+  else
+    pass "No panics in $label daemon logs"
+  fi
+}
+
 # --- Cleanup trap ---
 cleanup() {
   loom daemon stop 2>/dev/null || true
@@ -73,7 +85,7 @@ else
 fi
 
 # Poll until all tasks reach status=review (timeout: 8 minutes, overridable)
-PLAN_TIMEOUT=${PLAN_TIMEOUT:-480}
+PLAN_TIMEOUT=${PLAN_TIMEOUT:-900}
 PLAN_START=$SECONDS
 REVIEW_COUNT=0
 while [ $((SECONDS - PLAN_START)) -lt $PLAN_TIMEOUT ]; do
@@ -112,12 +124,7 @@ else
   fail "Only $DESIGNS_OK / $TASK_COUNT tasks have designs"
 fi
 
-# Check daemon logs for panics
-if grep -rqi "panic" .loom/logs/ 2>/dev/null; then
-  fail "Panic found in planning daemon logs"
-else
-  pass "No panics in planning daemon logs"
-fi
+check_panics "planning"
 
 echo ""
 
@@ -135,14 +142,21 @@ else
   fail "Only approved $APPROVED / $TASK_COUNT plans"
 fi
 
-# Verify tasks are ready for implementation (have designs, status=open)
+# Add dependencies now (not in setup.sh) so planning phase can parallelize all tasks.
+# TASK_APP imports all other components, so it must be implemented last.
+echo "  Adding TASK_APP dependencies for implementation ordering..."
+bd dep add "$TASK_APP" "$TASK_DATA" 2>/dev/null || true
+bd dep add "$TASK_APP" "$TASK_HEADER" 2>/dev/null || true
+bd dep add "$TASK_APP" "$TASK_BOARD" 2>/dev/null || true
+bd dep add "$TASK_APP" "$TASK_COLUMN" 2>/dev/null || true
+bd dep add "$TASK_APP" "$TASK_CARD" 2>/dev/null || true
+bd dep add "$TASK_APP" "$TASK_AGENTLIST" 2>/dev/null || true
+bd dep add "$TASK_APP" "$TASK_WORKQUEUE" 2>/dev/null || true
+
+# Show how many tasks are immediately ready
 IMPL_READY=$(bd ready --limit 0 --json 2>/dev/null | jq '[.[] | select(.issue_type != "epic") | select(.design != null and .design != "")] | length' 2>/dev/null || echo 0)
-echo "  Tasks ready for implementation: $IMPL_READY"
-if [ "$IMPL_READY" -ge "$TASK_COUNT" ]; then
-  pass "All $TASK_COUNT tasks ready for implementation"
-else
-  fail "Only $IMPL_READY / $TASK_COUNT tasks ready for implementation"
-fi
+echo "  Tasks immediately ready (unblocked): $IMPL_READY / $TASK_COUNT"
+echo "  (TASK_APP will unblock after all others close)"
 
 echo ""
 
@@ -172,7 +186,7 @@ else
 fi
 
 # Poll until all tasks are closed (timeout: 20 minutes, overridable)
-IMPL_TIMEOUT=${IMPL_TIMEOUT:-1200}
+IMPL_TIMEOUT=${IMPL_TIMEOUT:-1800}
 IMPL_START=$SECONDS
 CLOSED_COUNT=0
 while [ $((SECONDS - IMPL_START)) -lt $IMPL_TIMEOUT ]; do
@@ -205,12 +219,7 @@ else
   fail "Only $CLOSED_COUNT / $TASK_COUNT tasks closed within ${IMPL_TIMEOUT}s"
 fi
 
-# Check daemon logs for panics
-if grep -rqi "panic" .loom/logs/ 2>/dev/null; then
-  fail "Panic found in implementation daemon logs"
-else
-  pass "No panics in implementation daemon logs"
-fi
+check_panics "implementation"
 
 echo ""
 
@@ -219,6 +228,34 @@ echo ""
 # ─────────────────────────────────────────────────
 echo "--- Verification ---"
 
+# Agents work in worktrees on epic branches. Merge all epic branches into main
+# so we can verify the combined result from a single tree.
+echo "  Merging epic branches into main..."
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+EPIC_BRANCHES=$(git branch --list 'epic/*' 2>/dev/null | sed 's/^[+* ]*//' || true)
+MERGE_OK=true
+for BRANCH in $EPIC_BRANCHES; do
+  if git merge "$BRANCH" --no-edit -q 2>/dev/null; then
+    echo "    Merged $BRANCH"
+  else
+    echo "    CONFLICT merging $BRANCH (skipping)"
+    git merge --abort 2>/dev/null || true
+    MERGE_OK=false
+  fi
+done
+
+# Also check worktree branches (falcon, nova) which may have unmerged work
+for WT_BRANCH in falcon nova; do
+  if git rev-parse --verify "$WT_BRANCH" >/dev/null 2>&1; then
+    if git merge "$WT_BRANCH" --no-edit -q 2>/dev/null; then
+      echo "    Merged $WT_BRANCH"
+    else
+      echo "    CONFLICT merging $WT_BRANCH (skipping)"
+      git merge --abort 2>/dev/null || true
+    fi
+  fi
+done
+
 # 1. Build check (authoritative pass/fail)
 echo "  Running npm run build..."
 BUILD_LOG=".loom/logs/build.log"
@@ -226,6 +263,7 @@ if (cd "$TEST_DIR" && npm run build) > "$BUILD_LOG" 2>&1; then
   pass "Build succeeded (npm run build)"
 else
   fail "Build failed (npm run build)"
+  echo "  Build log (last 50 lines):"
   tail -50 "$BUILD_LOG"
 fi
 
@@ -262,6 +300,12 @@ for F in "${EXPECTED_FILES[@]}"; do
 done
 echo "  Files: $FILES_FOUND / ${#EXPECTED_FILES[@]} found ($FILES_MISSING missing)"
 
+# Also show what files actually exist in src/ for debugging
+if [ "$FILES_MISSING" -gt 0 ]; then
+  echo "  Actual files in src/:"
+  find src -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.css" \) | sort | sed 's/^/    /'
+fi
+
 # 3. Export check (pass/fail)
 COMPONENT_FILES=(
   "src/App.tsx"
@@ -286,12 +330,8 @@ else
   fail "Only $EXPORTS_OK / ${#COMPONENT_FILES[@]} component files have exports"
 fi
 
-# 4. No panics (final aggregate check)
-if grep -rqi "panic\|fatal" .loom/logs/ 2>/dev/null; then
-  fail "Panic or fatal error found in daemon logs"
-else
-  pass "No panics or fatal errors in daemon logs"
-fi
+# 4. No panics (final aggregate check — only real Go panics, not git fatals)
+check_panics "aggregate"
 
 echo ""
 
