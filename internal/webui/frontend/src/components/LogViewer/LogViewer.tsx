@@ -107,6 +107,8 @@ export function LogViewer({
   // Track previous buffer length for scroll position restoration after prepend
   const prevBufferLengthRef = useRef(0);
   const prevViewportYRef = useRef(0);
+  // Suppress scroll-to-top detection immediately after a prepend reset to prevent re-trigger loops
+  const suppressTopDetectionRef = useRef(false);
 
   // Re-sync auto-scroll only when the prop value actually changes (e.g. archive → tmux transition).
   // Do NOT sync on mount — useState(autoScrollProp) handles the initial value.
@@ -179,7 +181,7 @@ export function LogViewer({
 
       // Scroll-to-top detection for infinite scroll
       const isAtTop = buffer.viewportY === 0;
-      if (isAtTop && hasMoreOlderRef.current && !isLoadingMoreRef.current) {
+      if (isAtTop && hasMoreOlderRef.current && !isLoadingMoreRef.current && !suppressTopDetectionRef.current) {
         clearTimeout(scrollToTopTimerRef.current);
         scrollToTopTimerRef.current = setTimeout(() => {
           onScrollToTopRef.current?.();
@@ -261,9 +263,10 @@ export function LogViewer({
     if (!terminal) return;
 
     if (resetVersion !== lastResetVersionRef.current) {
-      // Capture previous buffer length before reset (for scroll position restoration)
+      // Capture previous buffer state before reset (for scroll position restoration)
       prevBufferLengthRef.current = terminal.buffer.active.length;
       prevViewportYRef.current = terminal.buffer.active.viewportY;
+      suppressTopDetectionRef.current = true;
       terminal.reset();
       lastWrittenIndexRef.current = 0;
       lastResetVersionRef.current = resetVersion;
@@ -273,36 +276,49 @@ export function LogViewer({
     if (chunks.length < lastWrittenIndexRef.current) {
       prevBufferLengthRef.current = terminal.buffer.active.length;
       prevViewportYRef.current = terminal.buffer.active.viewportY;
+      suppressTopDetectionRef.current = true;
       terminal.reset();
       lastWrittenIndexRef.current = 0;
     }
 
-    // Write only new chunks
-    for (let i = lastWrittenIndexRef.current; i < chunks.length; i++) {
-      const logChunk = chunks[i];
-      if (logChunk) {
-        terminal.write(logChunk.chunk);
+    // Finalize scroll position after xterm processes all writes
+    const finalize = () => {
+      if (autoScrollRef.current) {
+        terminal.scrollToBottom();
+      } else if (prevBufferLengthRef.current > 0) {
+        // Content was prepended — restore scroll position so the view doesn't jump
+        const newBufferLength = terminal.buffer.active.length;
+        const addedLines = newBufferLength - prevBufferLengthRef.current;
+        if (addedLines > 0) {
+          const targetViewportY = Math.max(
+            0,
+            Math.min(prevViewportYRef.current + addedLines, terminal.buffer.active.baseY)
+          );
+          terminal.scrollToLine(targetViewportY);
+        }
+        prevBufferLengthRef.current = 0;
+        prevViewportYRef.current = 0;
       }
-    }
+      suppressTopDetectionRef.current = false;
+    };
+
+    // Write only new chunks, deferring finalization to the last write callback
+    const newChunks = chunks.slice(lastWrittenIndexRef.current);
     lastWrittenIndexRef.current = chunks.length;
 
-    // After writing, check if we should restore scroll position (after prepend)
-    // or auto-scroll to bottom. Use ref to avoid re-running effect on scroll toggle.
-    if (autoScrollRef.current) {
-      terminal.scrollToBottom();
-    } else if (prevBufferLengthRef.current > 0) {
-      // Content was prepended — restore scroll position so the view doesn't jump
-      const newBufferLength = terminal.buffer.active.length;
-      const addedLines = newBufferLength - prevBufferLengthRef.current;
-      if (addedLines > 0) {
-        const targetViewportY = Math.max(
-          0,
-          Math.min(prevViewportYRef.current + addedLines, terminal.buffer.active.baseY)
-        );
-        terminal.scrollToLine(targetViewportY);
+    if (newChunks.length === 0) {
+      finalize();
+    } else {
+      for (let i = 0; i < newChunks.length; i++) {
+        const logChunk = newChunks[i];
+        if (!logChunk) continue;
+        if (i === newChunks.length - 1) {
+          // Final chunk — restore after xterm processes it
+          terminal.write(logChunk.chunk, finalize);
+        } else {
+          terminal.write(logChunk.chunk);
+        }
       }
-      prevBufferLengthRef.current = 0;
-      prevViewportYRef.current = 0;
     }
   }, [chunks, resetVersion]);
 
