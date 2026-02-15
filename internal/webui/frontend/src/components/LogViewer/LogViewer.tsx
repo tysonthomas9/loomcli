@@ -90,6 +90,8 @@ export function LogViewer({
   const lastWrittenIndexRef = useRef(0);
   const lastResetVersionRef = useRef(resetVersion);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(autoScrollProp);
+  const autoScrollRef = useRef(autoScrollEnabled);
+  useEffect(() => { autoScrollRef.current = autoScrollEnabled; }, [autoScrollEnabled]);
   const modeRef = useRef(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
@@ -120,7 +122,6 @@ export function LogViewer({
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 50000,
-      smoothScrollDuration: 120,
       cursorBlink: false,
       cursorStyle: 'bar',
       cursorWidth: 0,
@@ -259,8 +260,8 @@ export function LogViewer({
     lastWrittenIndexRef.current = chunks.length;
 
     // After writing, check if we should restore scroll position (after prepend)
-    // or auto-scroll to bottom
-    if (autoScrollEnabled) {
+    // or auto-scroll to bottom. Use ref to avoid re-running effect on scroll toggle.
+    if (autoScrollRef.current) {
       terminal.scrollToBottom();
     } else if (prevBufferLengthRef.current > 0) {
       // Content was prepended — restore scroll position so the view doesn't jump
@@ -271,7 +272,7 @@ export function LogViewer({
       }
       prevBufferLengthRef.current = 0;
     }
-  }, [chunks, autoScrollEnabled, resetVersion]);
+  }, [chunks, resetVersion]);
 
   // Re-enable auto-scroll
   const handleScrollToBottom = useCallback(() => {
