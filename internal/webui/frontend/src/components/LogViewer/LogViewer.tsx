@@ -139,9 +139,16 @@ export function LogViewer({
 
     terminal.open(container);
 
+    // In static (archive) mode, cap rows so cursor-positioning sequences in
+    // tmux pipe-pane output always produce scrollback regardless of viewport height.
+    const STATIC_MAX_ROWS = 30;
+
     const runFit = () => {
       if (!fitAddonRef.current || !terminalRef.current) return;
       fitAddonRef.current.fit();
+      if (modeRef.current === 'static' && terminalRef.current.rows > STATIC_MAX_ROWS) {
+        terminalRef.current.resize(terminalRef.current.cols, STATIC_MAX_ROWS);
+      }
       onTerminalResize?.(terminalRef.current.cols, terminalRef.current.rows);
     };
 
