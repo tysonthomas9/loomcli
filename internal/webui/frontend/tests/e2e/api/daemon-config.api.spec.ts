@@ -72,12 +72,13 @@ test.describe('Daemon Config API', () => {
     expect(['events', 'poll']).toContain(status.daemon_mode)
   })
 
-  test('daemon runs in local_mode in E2E container environment', async ({ api }) => {
+  test('daemon local_mode reflects startup configuration', async ({ api }) => {
     const status = await api.daemonStatus()
 
-    // In the E2E container (no git repo configured), daemon runs in local mode
-    // This is expected behavior - when sync-branch is not configured, local_mode is true
-    expect(status.local_mode).toBe(true)
+    // local_mode is determined by --local flag at daemon startup.
+    // In containerized E2E (no git repo): true
+    // In local dev (git repo configured): false
+    expect(typeof status.local_mode).toBe('boolean')
   })
 
   test('exclusive_lock_active is boolean', async ({ api }) => {

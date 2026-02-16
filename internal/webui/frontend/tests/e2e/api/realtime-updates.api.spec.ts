@@ -10,6 +10,7 @@
  *   data: {"type":"create","issue_id":"bd-xxx",...}
  */
 
+import * as http from 'http'
 import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
 import { resolveApiKey } from '../integration/helpers'
 
@@ -50,64 +51,55 @@ interface MutationPayload {
 }
 
 /**
- * Simple SSE client using fetch and ReadableStream.
- * Collects events until abort signal or timeout.
+ * SSE client using Node.js http module for reliable incremental streaming.
+ * Node.js fetch() ReadableStream can buffer SSE chunks; http.get delivers
+ * data incrementally as the server flushes.
  */
 class SSEClient {
   private events: SSEEvent[] = []
-  private controller: AbortController
+  private req: http.ClientRequest | null = null
   private buffer = ''
-
-  constructor() {
-    this.controller = new AbortController()
-  }
 
   /**
    * Connect to SSE endpoint and start collecting events.
-   * @param since - Optional timestamp for catch-up
+   * Resolves once the HTTP response headers are received.
    */
   async connect(since?: number): Promise<void> {
     const params = new URLSearchParams()
     if (since != null) params.set('since', String(since))
     if (SSE_API_KEY) params.set('token', SSE_API_KEY)
     const qs = params.toString()
-    const url = qs ? `${SSE_ENDPOINT}?${qs}` : SSE_ENDPOINT
+    const url = new URL(qs ? `${SSE_ENDPOINT}?${qs}` : SSE_ENDPOINT)
 
-    const response = await fetch(url, {
-      headers: { 'Accept': 'text/event-stream' },
-      signal: this.controller.signal,
+    return new Promise<void>((resolve, reject) => {
+      this.req = http.get(
+        {
+          hostname: url.hostname,
+          port: url.port,
+          path: url.pathname + url.search,
+          headers: { Accept: 'text/event-stream' },
+        },
+        (res) => {
+          if (res.statusCode !== 200) {
+            reject(new Error(`SSE connection failed: ${res.statusCode}`))
+            return
+          }
+
+          res.setEncoding('utf8')
+          res.on('data', (chunk: string) => {
+            this.buffer += chunk
+            this.parseBuffer()
+          })
+          res.on('error', (err) => {
+            console.error('SSE read error:', err)
+          })
+
+          resolve()
+        },
+      )
+
+      this.req.on('error', reject)
     })
-
-    if (!response.ok) {
-      throw new Error(`SSE connection failed: ${response.status}`)
-    }
-
-    if (!response.body) {
-      throw new Error('No response body')
-    }
-
-    // Start reading stream in background
-    this.readStream(response.body)
-  }
-
-  private async readStream(body: ReadableStream<Uint8Array>): Promise<void> {
-    const reader = body.getReader()
-    const decoder = new TextDecoder()
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        this.buffer += decoder.decode(value, { stream: true })
-        this.parseBuffer()
-      }
-    } catch (err) {
-      // AbortError is expected on disconnect
-      if ((err as Error).name !== 'AbortError') {
-        console.error('SSE read error:', err)
-      }
-    }
   }
 
   private parseBuffer(): void {
@@ -136,7 +128,6 @@ class SSEClient {
             // Non-JSON data (e.g., connected event)
           }
         }
-        // Ignore comments (lines starting with :) and other fields
       }
 
       if (event.event || event.data) {
@@ -150,7 +141,7 @@ class SSEClient {
    */
   async waitForEvent(
     predicate: (event: SSEEvent) => boolean,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
   ): Promise<SSEEvent> {
     const start = Date.now()
 
@@ -158,39 +149,30 @@ class SSEClient {
       const found = this.events.find(predicate)
       if (found) return found
 
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise((resolve) => setTimeout(resolve, 100))
     }
 
     throw new Error(`Timeout waiting for SSE event after ${timeoutMs}ms`)
   }
 
-  /**
-   * Get all collected events.
-   */
   getEvents(): SSEEvent[] {
     return [...this.events]
   }
 
-  /**
-   * Get the last event ID received (for catch-up testing).
-   */
   getLastEventId(): string | undefined {
-    const lastWithId = [...this.events].reverse().find(e => e.id)
+    const lastWithId = [...this.events].reverse().find((e) => e.id)
     return lastWithId?.id
   }
 
-  /**
-   * Clear collected events.
-   */
   clearEvents(): void {
     this.events = []
   }
 
-  /**
-   * Disconnect from SSE stream.
-   */
   disconnect(): void {
-    this.controller.abort()
+    if (this.req) {
+      this.req.destroy()
+      this.req = null
+    }
   }
 }
 

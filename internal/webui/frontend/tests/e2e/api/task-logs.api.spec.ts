@@ -11,8 +11,6 @@ import { test, expect, isIntegrationEnabled, generateTestId } from './api-client
 // Skip if integration tests not enabled
 test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1')
 
-const BASE_URL = 'http://localhost:8081'
-
 interface TaskPhasesResponse {
   success: boolean
   data?: {
@@ -36,7 +34,7 @@ test.describe('Task Logs API', () => {
 
   test.describe('Phase Listing', () => {
     test('GET /api/tasks/:id/logs lists available phases', async ({ request }) => {
-      const response = await request.get(`${BASE_URL}/api/tasks/${testTaskId}/logs`)
+      const response = await request.get(`/api/tasks/${testTaskId}/logs`)
 
       expect(response.ok()).toBe(true)
 
@@ -53,7 +51,7 @@ test.describe('Task Logs API', () => {
 
     test('returns empty phases array for task with no logs', async ({ request }) => {
       const noLogsTaskId = `no-logs-${generateTestId()}`
-      const response = await request.get(`${BASE_URL}/api/tasks/${noLogsTaskId}/logs`)
+      const response = await request.get(`/api/tasks/${noLogsTaskId}/logs`)
 
       expect(response.ok()).toBe(true)
 
@@ -65,7 +63,7 @@ test.describe('Task Logs API', () => {
 
   test.describe('Snapshot Logs', () => {
     test('GET /api/tasks/:id/logs/:phase returns log snapshot', async ({ request }) => {
-      const response = await request.get(`${BASE_URL}/api/tasks/${testTaskId}/logs/planning`)
+      const response = await request.get(`/api/tasks/${testTaskId}/logs/planning`)
 
       if (response.ok()) {
         const body = (await response.json()) as LogContentResponse
@@ -81,7 +79,7 @@ test.describe('Task Logs API', () => {
     })
 
     test('phase endpoint supports ?lines=N parameter', async ({ request }) => {
-      const response = await request.get(`${BASE_URL}/api/tasks/${testTaskId}/logs/implementation?lines=50`)
+      const response = await request.get(`/api/tasks/${testTaskId}/logs/implementation?lines=50`)
 
       if (response.ok()) {
         const body = (await response.json()) as LogContentResponse
@@ -93,7 +91,7 @@ test.describe('Task Logs API', () => {
     })
 
     test('invalid phase name returns 400', async ({ request }) => {
-      const response = await request.get(`${BASE_URL}/api/tasks/${testTaskId}/logs/invalid-phase`)
+      const response = await request.get(`/api/tasks/${testTaskId}/logs/invalid-phase`)
 
       expect(response.status()).toBe(400)
       const body = (await response.json()) as LogContentResponse
@@ -105,7 +103,7 @@ test.describe('Task Logs API', () => {
   test.describe('Input Validation', () => {
     test('invalid task ID returns 400', async ({ request }) => {
       const response = await request.get(
-        `${BASE_URL}/api/tasks/${encodeURIComponent(invalidTaskId)}/logs`
+        `/api/tasks/${encodeURIComponent(invalidTaskId)}/logs`
       )
 
       expect(response.status()).toBe(400)
@@ -116,7 +114,7 @@ test.describe('Task Logs API', () => {
 
     test('invalid task ID on phase endpoint returns 400', async ({ request }) => {
       const response = await request.get(
-        `${BASE_URL}/api/tasks/${encodeURIComponent(invalidTaskId)}/logs/planning`
+        `/api/tasks/${encodeURIComponent(invalidTaskId)}/logs/planning`
       )
 
       expect(response.status()).toBe(400)

@@ -448,38 +448,40 @@ export class LoomApiClient {
 
   /** POST /api/issues - Create new issue */
   async createIssue(data: IssueCreateRequest): Promise<Issue> {
-    const response = await this.request.post(`${this.baseURL}/api/issues`, {
-      data,
+    return this.withRetry(async () => {
+      const response = await this.request.post(`${this.baseURL}/api/issues`, { data })
+      const result = await this.parseResponse<ApiResponse<Issue>>(response)
+      if (!result.success || !result.data) {
+        throw new Error(`Create issue failed: ${result.error}`)
+      }
+      return result.data
     })
-    const result = await this.parseResponse<ApiResponse<Issue>>(response)
-    if (!result.success || !result.data) {
-      throw new Error(`Create issue failed: ${result.error}`)
-    }
-    return result.data
   }
 
   /** PATCH /api/issues/{id} - Update issue (partial) */
   async updateIssue(id: string, data: IssuePatchRequest): Promise<{ id: string; status: string }> {
-    const response = await this.request.patch(`${this.baseURL}/api/issues/${id}`, {
-      data,
+    return this.withRetry(async () => {
+      const response = await this.request.patch(`${this.baseURL}/api/issues/${id}`, { data })
+      const result = await this.parseResponse<ApiResponse<{ id: string; status: string }>>(response)
+      if (!result.success || !result.data) {
+        throw new Error(`Update issue failed: ${result.error}`)
+      }
+      return result.data
     })
-    const result = await this.parseResponse<ApiResponse<{ id: string; status: string }>>(response)
-    if (!result.success || !result.data) {
-      throw new Error(`Update issue failed: ${result.error}`)
-    }
-    return result.data
   }
 
   /** POST /api/issues/{id}/close - Close an issue */
   async closeIssue(id: string, data?: CloseRequest): Promise<Issue> {
-    const response = await this.request.post(`${this.baseURL}/api/issues/${id}/close`, {
-      data: data || {},
+    return this.withRetry(async () => {
+      const response = await this.request.post(`${this.baseURL}/api/issues/${id}/close`, {
+        data: data || {},
+      })
+      const result = await this.parseResponse<ApiResponse<Issue>>(response)
+      if (!result.success || !result.data) {
+        throw new Error(`Close issue failed: ${result.error}`)
+      }
+      return result.data
     })
-    const result = await this.parseResponse<ApiResponse<Issue>>(response)
-    if (!result.success || !result.data) {
-      throw new Error(`Close issue failed: ${result.error}`)
-    }
-    return result.data
   }
 
   // ===========================================================================
@@ -488,14 +490,14 @@ export class LoomApiClient {
 
   /** POST /api/issues/{id}/comments - Add comment to issue */
   async addComment(id: string, data: AddCommentRequest): Promise<Comment> {
-    const response = await this.request.post(`${this.baseURL}/api/issues/${id}/comments`, {
-      data,
+    return this.withRetry(async () => {
+      const response = await this.request.post(`${this.baseURL}/api/issues/${id}/comments`, { data })
+      const result = await this.parseResponse<ApiResponse<Comment>>(response)
+      if (!result.success || !result.data) {
+        throw new Error(`Add comment failed: ${result.error}`)
+      }
+      return result.data
     })
-    const result = await this.parseResponse<ApiResponse<Comment>>(response)
-    if (!result.success || !result.data) {
-      throw new Error(`Add comment failed: ${result.error}`)
-    }
-    return result.data
   }
 
   // ===========================================================================
@@ -504,22 +506,24 @@ export class LoomApiClient {
 
   /** POST /api/issues/{id}/dependencies - Add dependency */
   async addDependency(id: string, data: AddDependencyRequest): Promise<void> {
-    const response = await this.request.post(`${this.baseURL}/api/issues/${id}/dependencies`, {
-      data,
+    return this.withRetry(async () => {
+      const response = await this.request.post(`${this.baseURL}/api/issues/${id}/dependencies`, { data })
+      const result = await this.parseResponse<ApiResponse<null>>(response)
+      if (!result.success) {
+        throw new Error(`Add dependency failed: ${result.error}`)
+      }
     })
-    const result = await this.parseResponse<ApiResponse<null>>(response)
-    if (!result.success) {
-      throw new Error(`Add dependency failed: ${result.error}`)
-    }
   }
 
   /** DELETE /api/issues/{id}/dependencies/{depId} - Remove dependency */
   async removeDependency(id: string, depId: string): Promise<void> {
-    const response = await this.request.delete(`${this.baseURL}/api/issues/${id}/dependencies/${depId}`)
-    const result = await this.parseResponse<ApiResponse<null>>(response)
-    if (!result.success) {
-      throw new Error(`Remove dependency failed: ${result.error}`)
-    }
+    return this.withRetry(async () => {
+      const response = await this.request.delete(`${this.baseURL}/api/issues/${id}/dependencies/${depId}`)
+      const result = await this.parseResponse<ApiResponse<null>>(response)
+      if (!result.success) {
+        throw new Error(`Remove dependency failed: ${result.error}`)
+      }
+    })
   }
 
   // ===========================================================================
@@ -568,15 +572,21 @@ export class LoomApiClient {
 
   /**
    * Close an issue, ignoring 404 errors (for cleanup in afterEach).
-   * Useful for test cleanup that should not fail if issue already gone.
+   * Retries on 429 rate limit errors up to 3 times.
    */
   async cleanupIssue(id: string): Promise<void> {
-    try {
-      await this.closeIssue(id, { force: true })
-    } catch (err) {
-      // Ignore 404 errors during cleanup
-      if (!String(err).includes('404') && !String(err).includes('not found')) {
-        console.warn(`Cleanup warning for ${id}:`, err)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await this.closeIssue(id, { force: true })
+        return
+      } catch (err) {
+        const msg = String(err)
+        if (msg.includes('404') || msg.includes('not found')) return
+        if (msg.includes('429') && attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 1500))
+          continue
+        }
+        if (attempt === 2) console.warn(`Cleanup warning for ${id}:`, err)
       }
     }
   }
@@ -599,6 +609,26 @@ export class LoomApiClient {
     } catch {
       throw new Error(`Failed to parse response: ${body}`)
     }
+  }
+
+  /**
+   * Execute a request function with automatic retry on 429 rate limit.
+   * Retries up to 3 times with exponential backoff.
+   */
+  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await fn()
+      } catch (err) {
+        if (String(err).includes('429') && attempt < 2) {
+          const delayMs = 1500 * (attempt + 1)
+          await new Promise(resolve => setTimeout(resolve, delayMs))
+          continue
+        }
+        throw err
+      }
+    }
+    throw new Error('Unreachable')
   }
 
   /** Build query string from params object */

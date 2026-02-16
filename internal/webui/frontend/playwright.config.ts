@@ -94,13 +94,14 @@ export default defineConfig({
       globalSetup: "./tests/e2e/global-setup.ts",
       globalTeardown: "./tests/e2e/integration/global-teardown.ts",
       timeout: 60000,
+      workers: 1,
     },
   ],
 
   webServer: isIntegration || isLocalIntegration
     ? undefined
     : {
-        command: "npm run dev",
+        command: "PLAYWRIGHT_TEST=1 npm run dev",
         url: "http://localhost:3000",
         reuseExistingServer: !isCI,
         timeout: 60000,
