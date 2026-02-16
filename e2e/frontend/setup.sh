@@ -18,19 +18,20 @@ if [ -d "$TEST_DIR" ]; then
   exit 1
 fi
 
-# Validate seed file exists and is valid JSONL
-SEED_FILE="$SCRIPT_DIR/seed-issues.jsonl"
-if [ ! -f "$SEED_FILE" ]; then
-  echo "FATAL: $SEED_FILE not found"
+# Validate seed file exists and convert pretty-printed JSON array to JSONL
+SEED_SRC="$SCRIPT_DIR/seed-issues.jsonl"
+if [ ! -f "$SEED_SRC" ]; then
+  echo "FATAL: $SEED_SRC not found"
   exit 1
 fi
-if [ ! -s "$SEED_FILE" ]; then
-  echo "FATAL: $SEED_FILE is empty"
+if [ ! -s "$SEED_SRC" ]; then
+  echo "FATAL: $SEED_SRC is empty"
   exit 1
 fi
-# Check first line parses as JSON
-if ! head -1 "$SEED_FILE" | python3 -c "import sys, json; json.loads(sys.stdin.read())" 2>/dev/null; then
-  echo "FATAL: $SEED_FILE is not valid JSONL (first line is not JSON)"
+# Compact JSON array to one-object-per-line JSONL for bd import
+SEED_FILE=$(mktemp)
+if ! python3 -c "import json,sys;[print(json.dumps(o,ensure_ascii=False))for o in json.load(open(sys.argv[1]))]" "$SEED_SRC" > "$SEED_FILE"; then
+  echo "FATAL: Failed to parse $SEED_SRC as JSON"
   exit 1
 fi
 
