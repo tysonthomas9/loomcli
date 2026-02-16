@@ -10,6 +10,11 @@ go install github.com/tysonthomas9/loomcli/...@latest
 ```
 This installs both `loom` and `loomcli` commands.
 
+### Quick Install (macOS/Linux)
+```bash
+curl -fsSL https://raw.githubusercontent.com/tysonthomas9/loomcli/main/scripts/install.sh | bash
+```
+
 ### npm
 ```bash
 npm install -g loomcli
