@@ -4943,4 +4943,3 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 		t.Errorf("Expected 3 Claude invocations, got %d", claudeInvocations)
 	}
 }
-

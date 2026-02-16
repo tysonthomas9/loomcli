@@ -44,7 +44,8 @@ func buildWorkspaceContextBlock(workspace *WorkspaceConfig) string {
 // If workspace is non-nil, workspace context is injected into the prompt.
 // If parentID is non-empty, the prompt scopes task discovery to that epic.
 // SYNC: The jq filters below must match taskfilter.go NeedsPlan() criteria:
-//   planning: design empty OR has "needs-revision" label
+//
+//	planning: design empty OR has "needs-revision" label
 func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig, parentID string) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
 
@@ -188,7 +189,8 @@ Your job was ONLY to create the plan. Implementation happens later.
 // If workspace is non-nil, workspace context is injected into the prompt.
 // If parentID is non-empty, the prompt scopes task discovery to that epic.
 // SYNC: The jq filters below must match taskfilter.go ReadyToImplement() criteria:
-//   implementation: design non-empty AND no "needs-revision" label
+//
+//	implementation: design non-empty AND no "needs-revision" label
 func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID string, backendName string) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
 
