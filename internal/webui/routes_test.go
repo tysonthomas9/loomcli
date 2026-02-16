@@ -1635,6 +1635,7 @@ func TestSetupRoutes_IssueEndpoints_MethodRestrictions(t *testing.T) {
 		{"GET /api/issues", http.MethodGet, "/api/issues", true},
 		{"POST /api/issues", http.MethodPost, "/api/issues", true},
 		{"DELETE /api/issues", http.MethodDelete, "/api/issues", false},
+		{"DELETE /api/issues/test-id", http.MethodDelete, "/api/issues/test-id", true},
 		{"GET /api/issues/test-id", http.MethodGet, "/api/issues/test-id", true},
 		{"PATCH /api/issues/test-id", http.MethodPatch, "/api/issues/test-id", true},
 		{"PUT /api/issues/test-id", http.MethodPut, "/api/issues/test-id", false},

@@ -794,6 +794,60 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 	}
 }
 
+// handleDeleteIssue returns a handler that permanently deletes an issue by ID.
+func handleDeleteIssue(pool daemon.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			respondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+
+		if pool == nil {
+			respondError(w, http.StatusServiceUnavailable, "connection pool not initialized")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		client, err := pool.Get(ctx)
+		if err != nil {
+			status := http.StatusServiceUnavailable
+			if errors.Is(err, context.DeadlineExceeded) {
+				status = http.StatusGatewayTimeout
+			}
+			respondError(w, status, "daemon not available")
+			return
+		}
+		defer pool.Put(client)
+
+		resp, err := client.Delete(&rpc.DeleteArgs{
+			IDs:   []string{issueID},
+			Force: true,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				respondError(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
+				return
+			}
+			log.Printf("RPC error in handleDeleteIssue for %s: %v", issueID, err)
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		if !resp.Success {
+			respondError(w, http.StatusInternalServerError, resp.Error)
+			return
+		}
+
+		respondJSON(w, http.StatusOK, map[string]any{
+			"success": true,
+			"data":    json.RawMessage(resp.Data),
+		})
+	}
+}
+
 // validateCreateRequest validates the required fields in a create request.
 func validateCreateRequest(req *IssueCreateRequest) error {
 	// Validate title

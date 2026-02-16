@@ -570,14 +570,22 @@ export class LoomApiClient {
   // Cleanup Helpers
   // ===========================================================================
 
+  /** DELETE /api/issues/{id} - Permanently delete an issue */
+  async deleteIssue(id: string): Promise<void> {
+    const response = await this.request.delete(`${this.baseURL}/api/issues/${id}`, {
+      headers: this.headers,
+    })
+    await this.parseResponse(response)
+  }
+
   /**
-   * Close an issue, ignoring 404 errors (for cleanup in afterEach).
+   * Delete an issue, ignoring 404 errors (for cleanup in afterEach).
    * Retries on 429 rate limit errors up to 3 times.
    */
   async cleanupIssue(id: string): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        await this.closeIssue(id, { force: true })
+        await this.deleteIssue(id)
         return
       } catch (err) {
         const msg = String(err)
