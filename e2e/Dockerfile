@@ -26,9 +26,9 @@ COPY . .
 COPY --from=frontend /app/internal/webui/frontend/dist/ ./internal/webui/frontend/dist/
 RUN go build -o /out/loom ./cmd/loom
 
-# Build bd CLI from vendored source (if available)
+# Build bd CLI from vendored source (separate go.mod)
 RUN if [ -f third_party/beads/cmd/bd/main.go ]; then \
-        go build -o /out/bd ./third_party/beads/cmd/bd; \
+        cd third_party/beads && go build -o /out/bd ./cmd/bd; \
     fi
 
 # ─── Stage 3: Runtime ────────────────────────────────────────────────────────
