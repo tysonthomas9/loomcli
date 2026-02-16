@@ -14,7 +14,7 @@ DAEMON_STARTED=""
 cleanup() {
     if [[ -n "$DAEMON_STARTED" ]]; then
         echo "[e2e] Stopping bd daemon..."
-        bd daemon stop 2>/dev/null || true
+        (cd "$REPO_ROOT" && bd daemon stop 2>/dev/null) || true
     fi
 }
 trap cleanup EXIT INT TERM
@@ -35,10 +35,15 @@ if [[ ! -d "$FRONTEND_DIR/dist" ]]; then
     (cd "$FRONTEND_DIR" && npm ci --prefer-offline && npm run build)
 fi
 
-# --- 3. Ensure .beads workspace exists (CI needs this) ---
-if [[ ! -d "$REPO_ROOT/.beads" ]]; then
-    echo "[e2e] Initializing .beads workspace..."
-    (cd "$REPO_ROOT" && bd init --local 2>/dev/null || true)
+# --- 3. Ensure .beads database exists (CI checkout has .beads/ but no .db) ---
+if ! compgen -G "$REPO_ROOT/.beads/*.db" >/dev/null 2>&1; then
+    echo "[e2e] Initializing beads database..."
+    (cd "$REPO_ROOT" && bd init --from-jsonl --skip-hooks --skip-merge-driver -q 2>&1) || {
+        # If --from-jsonl fails (no JSONL), try plain init
+        (cd "$REPO_ROOT" && bd init --skip-hooks --skip-merge-driver -q 2>&1) || {
+            echo "[e2e] WARNING: bd init failed — daemon may not work"
+        }
+    }
 fi
 
 # --- 4. Start bd daemon if not running ---
