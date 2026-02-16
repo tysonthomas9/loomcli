@@ -182,6 +182,10 @@ linters:
       - path: '_test\.go'
         linters:
           - funlen
+      # gocognit: Complex test functions with setup/assertions naturally exceed limits
+      - path: '_test\.go'
+        linters:
+          - gocognit
       # gosec: Various security checks relaxed in test files
       - path: '_test\.go'
         linters:

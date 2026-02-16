@@ -258,9 +258,10 @@ func TestE2E_SilenceDetectionAfterSignal(t *testing.T) {
 
 	sessionName := uniqueSessionName(t)
 
-	// Create session that outputs content, then signals completion, then outputs more
-	// The silence detection should capture all output after the signal
+	// Create session that waits before outputting so pipe-pane can be set up first.
+	// Without the initial sleep, BEFORE_SIGNAL would echo before pipe-pane is active.
 	script := fmt.Sprintf(`
+		sleep 1
 		echo 'BEFORE_SIGNAL'
 		sleep 0.5
 		touch %s
@@ -276,7 +277,7 @@ func TestE2E_SilenceDetectionAfterSignal(t *testing.T) {
 	}
 	defer cleanupTmuxSession(sessionName)
 
-	// Setup logging
+	// Setup logging immediately after session creation (before script's initial sleep ends)
 	quotedPath := shellQuote(logFile)
 	exec.Command("tmux", "pipe-pane", "-t", sessionName, "-o", "cat >> "+quotedPath).Run()
 
