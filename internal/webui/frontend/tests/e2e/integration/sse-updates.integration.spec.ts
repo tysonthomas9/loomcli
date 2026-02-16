@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test'
+import { generateTestId, createTestIssue, updateIssueStatus, closeTestIssue } from './helpers'
 
 /**
  * Integration tests for SSE live updates against real backend.
  *
  * These tests require:
- * - Podman Compose stack running (via global-setup)
+ * - A running loom serve instance (default http://localhost:8080)
  * - RUN_INTEGRATION_TESTS=1 environment variable
  *
  * Run with: RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration
@@ -16,72 +17,6 @@ test.skip(skipIntegration, 'Integration tests require RUN_INTEGRATION_TESTS=1')
 
 // Run tests serially to avoid data conflicts
 test.describe.configure({ mode: 'serial' })
-
-const BASE_URL = 'http://localhost:8081'
-
-/**
- * Generate unique ID for test isolation.
- */
-function generateTestId(): string {
-  return `test-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
-}
-
-/**
- * Create a test issue via the API.
- */
-async function createTestIssue(title: string, options?: { priority?: number }): Promise<string> {
-  const response = await fetch(`${BASE_URL}/api/issues`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      title,
-      issue_type: 'task',
-      priority: options?.priority ?? 2,
-    }),
-  })
-
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`Failed to create issue: ${response.status} - ${text}`)
-  }
-
-  const result = await response.json()
-  if (!result.success) {
-    throw new Error(`API error: ${result.error}`)
-  }
-
-  return result.data.id
-}
-
-/**
- * Update issue status via the API.
- */
-async function updateIssueStatus(id: string, status: string): Promise<void> {
-  const response = await fetch(`${BASE_URL}/api/issues/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status }),
-  })
-
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`Failed to update issue: ${response.status} - ${text}`)
-  }
-}
-
-/**
- * Close an issue via the API.
- */
-async function closeTestIssue(id: string): Promise<void> {
-  try {
-    const response = await fetch(`${BASE_URL}/api/issues/${id}/close`, { method: 'POST' })
-    if (!response.ok && response.status !== 404) {
-      console.warn(`Failed to close issue ${id}: ${response.status}`)
-    }
-  } catch {
-    // Ignore network errors during cleanup
-  }
-}
 
 test.describe('SSE Live Updates Integration', () => {
   const testIssueIds: string[] = []

@@ -14,6 +14,7 @@ interface E2EState {
   webUrl: string
   loomUrl: string
   composeDir: string
+  localMode?: boolean
 }
 
 async function globalTeardown(config: FullConfig): Promise<void> {
@@ -28,6 +29,17 @@ async function globalTeardown(config: FullConfig): Promise<void> {
     return
   }
 
+  // In local mode, skip Podman teardown (we didn't start containers)
+  if (state.localMode) {
+    console.log('Local server mode - skipping container teardown')
+    try {
+      await fs.unlink(STATE_FILE)
+    } catch {
+      // ignore
+    }
+    return
+  }
+
   console.log('Tearing down E2E integration environment...')
 
   // Stop Podman Compose stack and remove volumes
@@ -36,7 +48,7 @@ async function globalTeardown(config: FullConfig): Promise<void> {
     await exec('podman-compose -f compose.e2e.yml down -v --remove-orphans', {
       cwd: state.composeDir,
     })
-    console.log('✓ Containers stopped and volumes removed')
+    console.log('Containers stopped and volumes removed')
   } catch (err) {
     // Log but don't throw - we still want to clean up state file
     console.error('Warning: Failed to stop Podman Compose:', err)
@@ -45,7 +57,7 @@ async function globalTeardown(config: FullConfig): Promise<void> {
   // Always attempt to remove state file
   try {
     await fs.unlink(STATE_FILE)
-    console.log('✓ State file cleaned up')
+    console.log('State file cleaned up')
   } catch (err) {
     console.warn('Warning: Failed to delete state file:', err)
   }

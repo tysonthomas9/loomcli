@@ -11,6 +11,7 @@
  */
 
 import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
+import { resolveApiKey } from '../integration/helpers'
 
 // Skip if integration tests not enabled
 test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1')
@@ -18,8 +19,9 @@ test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1'
 // Serial mode: SSE tests create real-time state changes
 test.describe.configure({ mode: 'serial' })
 
-const BASE_URL = 'http://localhost:8081'
+const BASE_URL = process.env.LOOM_BASE_URL || 'http://localhost:8080'
 const SSE_ENDPOINT = `${BASE_URL}/api/events`
+const SSE_API_KEY = resolveApiKey()
 
 /**
  * SSE Event parsed from stream.
@@ -65,7 +67,11 @@ class SSEClient {
    * @param since - Optional timestamp for catch-up
    */
   async connect(since?: number): Promise<void> {
-    const url = since ? `${SSE_ENDPOINT}?since=${since}` : SSE_ENDPOINT
+    const params = new URLSearchParams()
+    if (since != null) params.set('since', String(since))
+    if (SSE_API_KEY) params.set('token', SSE_API_KEY)
+    const qs = params.toString()
+    const url = qs ? `${SSE_ENDPOINT}?${qs}` : SSE_ENDPOINT
 
     const response = await fetch(url, {
       headers: { 'Accept': 'text/event-stream' },

@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend clean install help frontend sync-beads update-beads gate hooks dev dev-check dev-loom dev-vite
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-integration clean install help frontend sync-beads update-beads gate hooks dev dev-check dev-loom dev-vite
 
 # Default target
 all: build
@@ -41,6 +41,22 @@ lint-frontend:
 test-frontend:
 	@echo "Running frontend unit tests..."
 	@cd $(FRONTEND_DIR) && npx vitest run
+
+# Run Playwright e2e tests — mocked chromium tests (no server needed)
+test-e2e:
+	@echo "Running Playwright e2e tests (mocked)..."
+	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
+	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium
+
+# Run Playwright API e2e tests against local loom serve
+test-e2e-api:
+	@echo "Running Playwright API e2e tests..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=api
+
+# Run Playwright integration e2e tests against local loom serve
+test-e2e-integration:
+	@echo "Running Playwright integration e2e tests..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration
 
 # Install loom to GOPATH/bin
 install: frontend
@@ -130,6 +146,9 @@ help:
 	@echo "  make lint              - Run Go linter (golangci-lint)"
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"
 	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
+	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
+	@echo "  make test-e2e-api      - Run Playwright API e2e tests (needs loom serve)"
+	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (needs loom serve)"
 	@echo "  make install - Install loom to GOPATH/bin"
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"

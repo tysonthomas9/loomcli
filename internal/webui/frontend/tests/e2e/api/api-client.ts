@@ -371,7 +371,7 @@ export interface DaemonStatusResponse {
 export class LoomApiClient {
   constructor(
     private request: APIRequestContext,
-    private baseURL: string = 'http://localhost:8081'
+    private baseURL: string = ''
   ) {}
 
   // ===========================================================================
@@ -638,8 +638,9 @@ interface ApiFixtures {
  *   })
  */
 export const test = base.extend<ApiFixtures>({
-  api: async ({ request }, use) => {
-    const api = new LoomApiClient(request, 'http://localhost:8081')
+  api: async ({ request, baseURL }, use) => {
+    const url = baseURL || process.env.LOOM_BASE_URL || 'http://localhost:8080'
+    const api = new LoomApiClient(request, url)
     await use(api)
   },
 })

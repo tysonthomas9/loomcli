@@ -1,8 +1,25 @@
+import * as fs from "fs"
+import * as path from "path"
+import * as os from "os"
 import { defineConfig, devices } from "@playwright/test"
 
 const isCI = !!process.env.CI
 const isIntegration = !!process.env.RUN_INTEGRATION_TESTS
 const isLocalIntegration = !!process.env.RUN_LOCAL_INTEGRATION_TESTS
+
+/** Resolve API key from env or key file for authenticated test projects. */
+function resolveApiKey(): string {
+  if (process.env.LOOM_API_KEY) return process.env.LOOM_API_KEY
+  try {
+    return fs.readFileSync(path.join(os.homedir(), ".loom", "webui-api-key"), "utf-8").trim()
+  } catch {
+    return ""
+  }
+}
+
+const apiKey = resolveApiKey()
+const apiBaseURL = process.env.LOOM_BASE_URL || "http://localhost:8080"
+const authHeaders: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -46,7 +63,8 @@ export default defineConfig({
       testMatch: "**/*.integration.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
-        baseURL: "http://localhost:8080",
+        baseURL: apiBaseURL,
+        extraHTTPHeaders: authHeaders,
       },
       globalSetup: "./tests/e2e/global-setup.ts",
       globalTeardown: "./tests/e2e/integration/global-teardown.ts",
@@ -59,7 +77,8 @@ export default defineConfig({
       testIgnore: isLocalIntegration ? undefined : "**/terminal-parity.integration.spec.ts",
       use: {
         ...devices["Desktop Chrome"],
-        baseURL: "http://localhost:8080",
+        baseURL: apiBaseURL,
+        extraHTTPHeaders: authHeaders,
       },
       timeout: 60000,
     },
@@ -69,7 +88,8 @@ export default defineConfig({
       testMatch: "**/*.api.spec.ts",
       testIgnore: isIntegration ? undefined : "**/*.api.spec.ts",
       use: {
-        baseURL: "http://localhost:8080",
+        baseURL: apiBaseURL,
+        extraHTTPHeaders: authHeaders,
       },
       globalSetup: "./tests/e2e/global-setup.ts",
       globalTeardown: "./tests/e2e/integration/global-teardown.ts",
