@@ -4741,6 +4741,9 @@ func TestStartTmuxSession_PipePaneAndFocusEvents(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
+
 	tmpDir := t.TempDir()
 	sessionName := fmt.Sprintf("loom-test-pipe-%d", os.Getpid())
 	logFile := filepath.Join(tmpDir, "test.log")
