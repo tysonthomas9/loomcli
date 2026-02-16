@@ -10,7 +10,7 @@
 
 import type { APIRequestContext } from '@playwright/test';
 
-import { expect, isIntegrationEnabled, test } from './api-client';
+import { expect, isIntegrationEnabled, resolvedApiBaseURL, test } from './api-client';
 
 const localIntegrationEnabled = !!process.env.RUN_LOCAL_INTEGRATION_TESTS;
 test.skip(
@@ -18,7 +18,7 @@ test.skip(
   'API E2E tests require RUN_INTEGRATION_TESTS=1 or RUN_LOCAL_INTEGRATION_TESTS=1'
 );
 
-const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:8080';
+const BASE_URL = resolvedApiBaseURL;
 
 interface LogContentResponse {
   success: boolean;
@@ -52,14 +52,19 @@ async function getAuthHeaders(
   request: APIRequestContext
 ): Promise<Record<string, string>> {
   if (!cachedAuthToken) {
-    const tokenResponse = await request.get(`${BASE_URL}/api/auth/token`);
-    expect(tokenResponse.status()).toBe(200);
-    const tokenBody = (await tokenResponse.json()) as { token?: string };
-    expect(typeof tokenBody.token).toBe('string');
-    expect((tokenBody.token ?? '').length).toBeGreaterThan(0);
-    cachedAuthToken = tokenBody.token ?? null;
+    try {
+      const tokenResponse = await request.get(`${BASE_URL}/api/auth/token`);
+      if (tokenResponse.ok()) {
+        const tokenBody = (await tokenResponse.json()) as { token?: string };
+        if (tokenBody.token) {
+          cachedAuthToken = tokenBody.token;
+        }
+      }
+    } catch {
+      // --no-auth mode: auth endpoint may not exist
+    }
   }
-  return { Authorization: `Bearer ${cachedAuthToken}` };
+  return cachedAuthToken ? { Authorization: `Bearer ${cachedAuthToken}` } : {};
 }
 
 test.describe('Agent Logs and Terminal Transport', () => {
