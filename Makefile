@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint clean install help frontend sync-beads update-beads gate hooks dev dev-check dev-loom dev-vite
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend clean install help frontend sync-beads update-beads gate hooks dev dev-check dev-loom dev-vite
 
 # Default target
 all: build
@@ -25,10 +25,22 @@ test-all:
 	@echo "Running all tests..."
 	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
 
-# Run linter
+# Run Go linter
 lint:
-	@echo "Running linter..."
+	@echo "Running Go linter..."
 	golangci-lint run --timeout=5m
+
+# Run frontend linter + typecheck
+lint-frontend:
+	@echo "Running frontend typecheck..."
+	@cd $(FRONTEND_DIR) && npm run typecheck
+	@echo "Running frontend ESLint..."
+	@cd $(FRONTEND_DIR) && npm run lint
+
+# Run frontend unit tests (vitest)
+test-frontend:
+	@echo "Running frontend unit tests..."
+	@cd $(FRONTEND_DIR) && npx vitest run
 
 # Install loom to GOPATH/bin
 install: frontend
@@ -67,13 +79,15 @@ update-beads:
 	git subtree pull --prefix=$(BEADS_PREFIX) $(BEADS_REMOTE) $(BEADS_BRANCH) --squash
 	$(MAKE) sync-beads
 
-# Quality gate — lint + build + vet + test (used by pre-push hook)
+# Quality gate — full lint + build + vet + test (used by pre-push hook)
 gate: frontend
 	@echo "=== Quality Gate ==="
 	@$(MAKE) lint
+	@$(MAKE) lint-frontend
 	@go build ./...
 	@go vet ./...
 	@go test -race -timeout 15m ./...
+	@$(MAKE) test-frontend
 	@echo "=== Quality Gate PASSED ==="
 
 # Install git hooks (pre-push quality gate + pre-commit checks, applies to all worktrees)
@@ -113,7 +127,9 @@ help:
 	@echo "  make test              - Run unit tests with coverage"
 	@echo "  make test-integration  - Run unit + integration tests"
 	@echo "  make test-all          - Run all tests (unit + integration + e2e)"
-	@echo "  make lint    - Run golangci-lint"
+	@echo "  make lint              - Run Go linter (golangci-lint)"
+	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"
+	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
 	@echo "  make install - Install loom to GOPATH/bin"
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"

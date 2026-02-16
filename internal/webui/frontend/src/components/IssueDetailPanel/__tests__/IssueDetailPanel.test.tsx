@@ -46,6 +46,7 @@ vi.mock('@/hooks', async (importOriginal) => {
 // Mock xterm.js (used by LogViewer)
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
+    options: Record<string, unknown> = { disableStdin: true };
     open = vi.fn();
     dispose = vi.fn();
     write = vi.fn();
@@ -53,6 +54,7 @@ vi.mock('@xterm/xterm', () => {
     loadAddon = vi.fn();
     scrollToBottom = vi.fn();
     onScroll = vi.fn(() => ({ dispose: vi.fn() }));
+    onData = vi.fn(() => ({ dispose: vi.fn() }));
     buffer = { active: { viewportY: 0, baseY: 0 } };
   }
   return { Terminal: MockTerminal };

@@ -162,8 +162,9 @@ export function useBlockedIssues(options?: UseBlockedIssuesOptions): UseBlockedI
       }
     };
 
-    // it has fetchInProgressRef guard preventing overlapping requests, and including it
-    // causes interval stacking when parentId changes (fetchData recreated → effect reruns)
+    // fetchData excluded: it has fetchInProgressRef guard preventing overlapping requests,
+    // and including it causes interval stacking when parentId changes (fetchData recreated → effect reruns)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, pollInterval, parentId, priority, type, assignee, limit]);
 
   return {

@@ -171,24 +171,24 @@ describe('logs API', () => {
     it('fetches static agent archive logs', async () => {
       mockGet.mockResolvedValue({
         success: true,
-        data: { lines: ['a', 'b'], line_count: 2 },
+        data: { lines: ['a', 'b'], line_count: 2, start_line: 1 },
       });
 
       const archive = await getAgentLogArchive('ember', 100);
 
-      expect(archive).toEqual({ lines: ['a', 'b'], lineCount: 2 });
+      expect(archive).toEqual({ lines: ['a', 'b'], lineCount: 2, startLine: 1 });
       expect(mockGet).toHaveBeenCalledWith('/api/agents/ember/logs?lines=100');
     });
 
     it('normalizes null archive payload fields', async () => {
       mockGet.mockResolvedValue({
         success: true,
-        data: { lines: null, line_count: null },
+        data: { lines: null, line_count: null, start_line: null },
       });
 
       const archive = await getAgentLogArchive('ember', 50);
 
-      expect(archive).toEqual({ lines: [], lineCount: 0 });
+      expect(archive).toEqual({ lines: [], lineCount: 0, startLine: 1 });
       expect(mockGet).toHaveBeenCalledWith('/api/agents/ember/logs?lines=50');
     });
   });

@@ -193,14 +193,14 @@ func TestMakeHelp_IncludesDevTargets(t *testing.T) {
 }
 
 // TestMakeDryRun_Dev verifies that `make -n dev` invokes the dev-check
-// prerequisite and then runs ./scripts/dev.sh.
+// prerequisite and then runs ./scripts/run-web-ui-with-loom.sh.
 func TestMakeDryRun_Dev(t *testing.T) {
 	t.Parallel()
 
 	out := runMake(t, "-n", "dev")
 
-	if !strings.Contains(out, "./scripts/dev.sh") {
-		t.Errorf("make -n dev should reference ./scripts/dev.sh\nOutput:\n%s", out)
+	if !strings.Contains(out, "./scripts/run-web-ui-with-loom.sh") {
+		t.Errorf("make -n dev should reference ./scripts/run-web-ui-with-loom.sh\nOutput:\n%s", out)
 	}
 }
 

@@ -27,7 +27,7 @@ const VALID_GROUP_BY_OPTIONS: ReadonlySet<string> = new Set([
 
 /**
  * Filter state for UI filtering.
- * Subset of IssueFilter relevant for client-side filtering.
+ * Client-side filter state for the kanban/swimlane views.
  */
 export interface FilterState {
   /** Priority filter (0-4), undefined for "all" */

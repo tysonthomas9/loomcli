@@ -1,8 +1,33 @@
 /**
  * Chrome Visual Testing Helpers
  *
- * Data attributes and expected states for manual Chrome browser automation testing.
- * Use these selectors with mcp__claude-in-chrome__ tools for consistent verification.
+ * Selectors and expected states for browser automation testing via MCP tools.
+ * Designed for use with the `mcp__claude-in-chrome__` MCP server, which enables
+ * Claude to interact with the running web UI in a real Chrome browser.
+ *
+ * ## When to use
+ * - Manual QA verification of visual states (connection status, priorities, etc.)
+ * - Automated browser tests driven by Claude via MCP
+ * - Debugging UI state by querying data attributes
+ *
+ * ## Example usage with MCP browser tools
+ * ```
+ * // Check connection status
+ * mcp__claude-in-chrome__querySelector('[data-state="connected"]')
+ *
+ * // Find all blocked issue cards
+ * mcp__claude-in-chrome__querySelectorAll('article[data-blocked="true"]')
+ *
+ * // Find issues in a specific column
+ * mcp__claude-in-chrome__querySelector('section[data-status="in_progress"]')
+ *
+ * // Check a P0 critical issue exists
+ * mcp__claude-in-chrome__querySelector('article[data-priority="0"]')
+ * ```
+ *
+ * ## Keeping in sync
+ * These selectors mirror data attributes set in the actual React components.
+ * If component data attributes change, update the corresponding selectors here.
  */
 
 /**

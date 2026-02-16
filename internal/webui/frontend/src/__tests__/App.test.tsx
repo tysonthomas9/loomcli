@@ -905,10 +905,9 @@ describe('App', () => {
 
       render(<App />);
 
-      // FilterBar should be rendered with its test id
+      // FilterBar should be rendered with its test id (priority/type hidden in header variant)
       expect(screen.getByTestId('filter-bar')).toBeInTheDocument();
-      expect(screen.getByTestId('priority-filter')).toBeInTheDocument();
-      expect(screen.getByTestId('type-filter')).toBeInTheDocument();
+      expect(screen.getByTestId('groupby-filter')).toBeInTheDocument();
     });
 
     it('renders filter navigation even in loading state', () => {

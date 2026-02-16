@@ -26,11 +26,13 @@ let lastFitAddonInstance: { fit: ReturnType<typeof vi.fn> } | null = null;
 
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
+    options: Record<string, unknown> = { disableStdin: true };
     buffer = { active: { viewportY: 0, baseY: 100, length: 0 } };
-    write = vi.fn((data: Uint8Array | string) => {
+    write = vi.fn((data: Uint8Array | string, callback?: () => void) => {
       const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
       const lineCount = text.split('\n').length - 1;
       this.buffer.active.length += Math.max(lineCount, 0);
+      if (callback) callback();
     });
     clear = vi.fn();
     reset = vi.fn(() => {
@@ -42,6 +44,7 @@ vi.mock('@xterm/xterm', () => {
     scrollToBottom = vi.fn();
     scrollToLine = vi.fn();
     onScroll = vi.fn(() => ({ dispose: vi.fn() }));
+    onData = vi.fn(() => ({ dispose: vi.fn() }));
 
     constructor() {
       lastTerminalInstance = this as unknown as typeof lastTerminalInstance;
@@ -102,7 +105,7 @@ describe('LogViewer', () => {
     const second = [...first, createChunk('\rdef', 7)];
     rerender(<LogViewer chunks={second} connectionState="connected" />);
     expect(lastTerminalInstance?.write).toHaveBeenCalledTimes(2);
-    expect(lastTerminalInstance?.write).toHaveBeenNthCalledWith(2, new TextEncoder().encode('\rdef'));
+    expect(lastTerminalInstance?.write).toHaveBeenNthCalledWith(2, new TextEncoder().encode('\rdef'), expect.any(Function));
   });
 
   it('resets terminal when resetVersion changes', () => {

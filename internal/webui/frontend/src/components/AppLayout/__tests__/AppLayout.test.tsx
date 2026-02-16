@@ -414,7 +414,7 @@ describe('AppLayout', () => {
     });
 
     it('title h1 has the title CSS module class', () => {
-      const { container } = render(
+      render(
         <AppLayout title="Cortex">
           <p>Content</p>
         </AppLayout>

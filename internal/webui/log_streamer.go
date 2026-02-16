@@ -91,11 +91,6 @@ func NewLogStreamer(fp string) (*LogStreamer, error) {
 	}, nil
 }
 
-// NewLogStreamerFixed is an alias for NewLogStreamer.
-func NewLogStreamerFixed(fp string) (*LogStreamer, error) {
-	return NewLogStreamer(fp)
-}
-
 // ReadLastNLines reads the last N lines from the file.
 // Returns lines and the starting line number.
 func ReadLastNLines(filepath string, n int) ([]string, int64, error) {
