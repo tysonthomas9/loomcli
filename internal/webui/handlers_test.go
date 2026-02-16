@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -8244,10 +8245,10 @@ func TestHandleListIssues_KanbanMode(t *testing.T) {
 	issuesJSON, _ := json.Marshal(issues)
 
 	// All issues including the blockers (for unfiltered list call)
-	allIssues := append(issues,
-		&types.IssueWithCounts{Issue: &types.Issue{ID: "dep-1", Title: "Dep 1", Status: types.StatusInProgress}},
-		&types.IssueWithCounts{Issue: &types.Issue{ID: "dep-2", Title: "Dep 2", Status: types.StatusReview}},
-	)
+	allIssues := slices.Concat(issues, []*types.IssueWithCounts{
+		{Issue: &types.Issue{ID: "dep-1", Title: "Dep 1", Status: types.StatusInProgress}},
+		{Issue: &types.Issue{ID: "dep-2", Title: "Dep 2", Status: types.StatusReview}},
+	})
 	allJSON, _ := json.Marshal(allIssues)
 
 	blockedIssues := []*types.BlockedIssue{
@@ -8344,9 +8345,9 @@ func TestHandleListIssues_KanbanUnclosedBlocker(t *testing.T) {
 	issuesJSON, _ := json.Marshal(issues)
 
 	// All issues including the blocker
-	allIssues := append(issues,
-		&types.IssueWithCounts{Issue: &types.Issue{ID: "issue-a", Title: "Blocker In Progress", Status: types.StatusInProgress, Priority: 2}},
-	)
+	allIssues := slices.Concat(issues, []*types.IssueWithCounts{
+		{Issue: &types.Issue{ID: "issue-a", Title: "Blocker In Progress", Status: types.StatusInProgress, Priority: 2}},
+	})
 	allJSON, _ := json.Marshal(allIssues)
 
 	listCallCount := 0
@@ -8439,9 +8440,9 @@ func TestHandleListIssues_KanbanClosedBlockerPassesThrough(t *testing.T) {
 	issuesJSON, _ := json.Marshal(issues)
 
 	// Blocker is closed
-	allIssues := append(issues,
-		&types.IssueWithCounts{Issue: &types.Issue{ID: "issue-a", Title: "Closed Blocker", Status: types.StatusClosed}},
-	)
+	allIssues := slices.Concat(issues, []*types.IssueWithCounts{
+		{Issue: &types.Issue{ID: "issue-a", Title: "Closed Blocker", Status: types.StatusClosed}},
+	})
 	allJSON, _ := json.Marshal(allIssues)
 
 	listCallCount := 0

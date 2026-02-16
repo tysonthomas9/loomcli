@@ -1433,7 +1433,7 @@ func TestReadLastNLines_BeforeLine_InvalidValues(t *testing.T) {
 	}
 
 	// beforeLine=1 -> nothing before line 1
-	lines, startLine, err = readLastNLinesFromFile(logFile, 10, nil, 1)
+	lines, _, err = readLastNLinesFromFile(logFile, 10, nil, 1)
 	if err != nil {
 		t.Fatalf("beforeLine=1 error = %v", err)
 	}

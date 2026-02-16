@@ -88,12 +88,12 @@ linters:
           - gosec
         text: "G302"
       # G304: File inclusion via variable - these are intentional file operations
-      - path: 'internal/(cli/(automode|lock|agent_cmd|config|daemon|daemon_cmd|daemon_config|monitor|workspace_cmd)|rpc/auth|webui/(auth|handlers_config|log_open_unix|log_streamer))\.go'
+      - path: 'internal/(cli/(automode|automode_tmux|lock|agent_cmd|config|daemon|daemon_cmd|daemon_config|monitor|workspace_cmd)|rpc/auth|webui/(auth|handlers_config|log_open_unix|log_streamer))\.go'
         linters:
           - gosec
         text: "G304"
       # G204: Subprocess launches are intentional for tmux, claude, bd, loom commands
-      - path: 'internal/(cli/(automode|recover|daemon)|kv/reconcile|webui/terminal)\.go'
+      - path: 'internal/(cli/(automode|automode_tmux|recover|daemon)|kv/reconcile|webui/terminal)\.go'
         linters:
           - gosec
         text: "G204"
@@ -107,7 +107,7 @@ linters:
           - gosec
         text: "G204"
       # G602: False positive - buf[0] access is after successful Read
-      - path: 'internal/cli/automode\.go'
+      - path: 'internal/cli/automode(_tmux)?\.go'
         linters:
           - gosec
         text: "G602"
@@ -128,6 +128,12 @@ linters:
           - gocognit
       # automode.go — tracked by loomcli-6yk.7
       - path: "internal/cli/automode\\.go"
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+      # automode_tmux.go — same patterns as automode.go
+      - path: "internal/cli/automode_tmux\\.go"
         linters:
           - funlen
           - cyclop
@@ -186,6 +192,10 @@ linters:
       - path: '_test\.go'
         linters:
           - gocognit
+      # cyclop: Table-driven tests with many sub-cases naturally exceed cyclomatic limits
+      - path: '_test\.go'
+        linters:
+          - cyclop
       # gosec: Various security checks relaxed in test files
       - path: '_test\.go'
         linters:
@@ -219,6 +229,10 @@ linters:
       - path: '_test\.go'
         linters:
           - errcheck
+      # ineffassign: Test functions often have intentionally unused intermediate assignments
+      - path: '_test\.go'
+        linters:
+          - ineffassign
       # unparam: Test helper functions commonly have consistent signatures
       - path: '_test\.go'
         linters:
@@ -337,7 +351,7 @@ linters:
           - staticcheck
         text: "SA4032"
       # SA1019: Deprecated websocket library - migration tracked separately
-      - path: 'internal/webui/handlers_terminal\.go'
+      - path: 'internal/webui/handlers_(agent_)?terminal\.go'
         linters:
           - staticcheck
         text: "SA1019"
@@ -354,6 +368,11 @@ linters:
         linters:
           - revive
         text: 'avoid meaningless package names'
+      # revive: var-naming — "debug" and "rpc" package names conflict with stdlib but are intentional
+      - path: 'internal/(debug|rpc)/'
+        linters:
+          - revive
+        text: 'avoid package names that conflict'
 
       # === unparam exclusions ===
 
@@ -363,7 +382,7 @@ linters:
           - unparam
         text: 'is unused'
       # unparam: Parameter kept for API flexibility
-      - path: 'cmd/logrouter/rotation\.go'
+      - path: '(cmd|internal)/logrouter/rotation\.go'
         linters:
           - unparam
         text: 'maxBackups'

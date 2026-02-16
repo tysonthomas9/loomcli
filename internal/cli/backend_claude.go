@@ -194,4 +194,3 @@ func displayStreamEvent(line string) {
 		fmt.Println()
 	}
 }
-
