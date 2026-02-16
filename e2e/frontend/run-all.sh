@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # run-all.sh — Run the frontend E2E test suite end-to-end.
 #
-# Usage: ./run-all.sh [test_dir] [--clean]
+# Usage: ./run-all.sh [test_dir] [--clean|--keep]
 #   test_dir defaults to /tmp/loom-frontend-e2e
-#   --clean  run teardown after test (default: keep test dir for inspection)
+#   --clean  run teardown after test
+#   --keep   keep test dir for inspection (default)
 #
 # This script:
 #   1. Runs setup.sh to create the test environment
@@ -22,6 +23,8 @@ KEEP=true
 for arg in "$@"; do
   case "$arg" in
     --clean) KEEP=false ;;
+    --keep)  KEEP=true ;;
+    --*)     echo "Unknown flag: $arg"; echo "Usage: $0 [test_dir] [--clean|--keep]"; exit 1 ;;
     *)       TEST_DIR="$arg" ;;
   esac
 done

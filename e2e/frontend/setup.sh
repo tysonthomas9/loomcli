@@ -2,7 +2,7 @@
 # setup.sh — Create an isolated test environment for the frontend E2E test.
 #
 # Initializes git+beads, creates worktrees, writes loom configs, and imports
-# seed issues from seed-issues.jsonl (2 epics + 13 tasks).
+# seed issues from seed-issues.yaml (2 epics + 13 tasks).
 #
 # Usage: ./setup.sh [test_dir]
 #   test_dir defaults to /tmp/loom-frontend-e2e
@@ -18,8 +18,8 @@ if [ -d "$TEST_DIR" ]; then
   exit 1
 fi
 
-# Validate seed file exists and convert pretty-printed JSON array to JSONL
-SEED_SRC="$SCRIPT_DIR/seed-issues.jsonl"
+# Validate seed YAML exists and convert to JSONL for bd import
+SEED_SRC="$SCRIPT_DIR/seed-issues.yaml"
 if [ ! -f "$SEED_SRC" ]; then
   echo "FATAL: $SEED_SRC not found"
   exit 1
@@ -28,10 +28,68 @@ if [ ! -s "$SEED_SRC" ]; then
   echo "FATAL: $SEED_SRC is empty"
   exit 1
 fi
-# Compact JSON array to one-object-per-line JSONL for bd import
+
+# Check PyYAML is available
+if ! python3 -c "import yaml" 2>/dev/null; then
+  echo "Installing PyYAML..."
+  pip3 install --quiet pyyaml
+fi
+
+# Convert YAML → JSONL, expanding $TEST_DIR and filling defaults
 SEED_FILE=$(mktemp)
-if ! python3 -c "import json,sys;[print(json.dumps(o,ensure_ascii=False))for o in json.load(open(sys.argv[1]))]" "$SEED_SRC" > "$SEED_FILE"; then
-  echo "FATAL: Failed to parse $SEED_SRC as JSON"
+if ! python3 -c "
+import yaml, json, sys, datetime
+
+yaml_path = sys.argv[1]
+test_dir = sys.argv[2]
+
+with open(yaml_path) as f:
+    data = yaml.safe_load(f)
+
+defaults = data['defaults']
+now = datetime.datetime.now().astimezone().isoformat()
+prefix = 'loom-seed-gen-'
+
+for epic in data.get('epics', []):
+    obj = {
+        'id': prefix + epic['id'],
+        'title': epic['title'],
+        'status': defaults['status'],
+        'priority': epic['priority'],
+        'issue_type': 'epic',
+        'owner': defaults['owner'],
+        'created_at': now,
+        'created_by': defaults['created_by'],
+        'updated_at': now,
+    }
+    print(json.dumps(obj, ensure_ascii=False))
+
+for task in data.get('tasks', []):
+    full_id = prefix + task['id']
+    parent_prefix = task['id'].rsplit('.', 1)[0]
+    parent_id = prefix + parent_prefix
+    desc = task.get('description', '').replace('\$TEST_DIR', test_dir)
+    obj = {
+        'id': full_id,
+        'title': task['title'],
+        'status': defaults['status'],
+        'priority': task['priority'],
+        'issue_type': 'task',
+        'description': desc,
+        'owner': defaults['owner'],
+        'created_at': now,
+        'created_by': defaults['created_by'],
+        'updated_at': now,
+        'dependencies': [{
+            'issue_id': full_id,
+            'depends_on_id': parent_id,
+            'type': 'parent-child',
+            'created_at': now,
+        }],
+    }
+    print(json.dumps(obj, ensure_ascii=False))
+" "$SEED_SRC" "$TEST_DIR" > "$SEED_FILE"; then
+  echo "FATAL: Failed to convert $SEED_SRC to JSONL"
   exit 1
 fi
 
@@ -131,9 +189,9 @@ TASK_COUNT=$(bd list --json 2>/dev/null | jq '[.[] | select(.issue_type != "epic
 EPIC_COUNT=$((ISSUE_COUNT - TASK_COUNT))
 echo "  Imported $EPIC_COUNT epics + $TASK_COUNT tasks"
 
-SEED_LINES=$(wc -l < "$SEED_FILE" | tr -d ' ')
-if [ "$ISSUE_COUNT" -lt "$SEED_LINES" ]; then
-  echo "WARN: Imported $ISSUE_COUNT issues but seed has $SEED_LINES lines"
+EXPECTED_LINES=$(wc -l < "$SEED_FILE" | tr -d ' ')
+if [ "$ISSUE_COUNT" -lt "$EXPECTED_LINES" ]; then
+  echo "WARN: Imported $ISSUE_COUNT issues but JSONL has $EXPECTED_LINES lines"
 fi
 if [ "$ISSUE_COUNT" -eq 0 ]; then
   echo "FATAL: No issues imported"
@@ -250,7 +308,7 @@ bd sync 2>/dev/null || true
 echo ""
 echo "==> Test environment ready at $TEST_DIR"
 echo ""
-echo "  Issues: $EPIC_COUNT epics + $TASK_COUNT tasks (from seed-issues.jsonl)"
+echo "  Issues: $EPIC_COUNT epics + $TASK_COUNT tasks (from seed-issues.yaml)"
 echo ""
 echo "  Slug map:"
 while IFS='=' read -r slug id; do
