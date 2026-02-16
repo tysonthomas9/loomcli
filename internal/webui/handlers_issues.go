@@ -843,7 +843,7 @@ func handleDeleteIssue(pool daemon.Pool) http.HandlerFunc {
 
 		respondJSON(w, http.StatusOK, map[string]any{
 			"success": true,
-			"data":    json.RawMessage(resp.Data),
+			"data":    resp.Data,
 		})
 	}
 }
