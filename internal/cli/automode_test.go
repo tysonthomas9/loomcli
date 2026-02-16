@@ -11,6 +11,23 @@ import (
 	"time"
 )
 
+// setTmuxRemainOnExit sets remain-on-exit globally so tmux panes stay alive
+// even when the loom command exits (loom is not installed in CI environments).
+// The original setting is restored via t.Cleanup.
+func setTmuxRemainOnExit(t *testing.T) {
+	t.Helper()
+	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
+	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
+	t.Cleanup(func() {
+		val := strings.TrimSpace(string(origRemain))
+		if val == "" || val == "off" {
+			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
+		} else {
+			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
+		}
+	})
+}
+
 func TestHasAvailablePlanningTasks(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2050,6 +2067,9 @@ func TestStartTmuxSession_Success(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
+
 	t.Cleanup(func() {
 		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
 	})
@@ -2070,6 +2090,9 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 	if exec.Command("tmux", "-V").Run() != nil {
 		t.Skip("tmux not available")
 	}
+
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
 
 	tmpDir := t.TempDir()
 	sessionName := fmt.Sprintf("loom-test-kill-%d", os.Getpid())
@@ -2113,6 +2136,9 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 	if exec.Command("tmux", "-V").Run() != nil {
 		t.Skip("tmux not available")
 	}
+
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
 
 	// Create a temp dir whose name contains shell metacharacters
 	baseDir := t.TempDir()
@@ -4671,6 +4697,9 @@ func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
+
 	tmpDir := t.TempDir()
 	sessionName := fmt.Sprintf("loom-test-dims-%d", os.Getpid())
 	logFile := filepath.Join(tmpDir, "test.log")
@@ -4689,6 +4718,9 @@ func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
+
+	// Give tmux a moment to set up
+	time.Sleep(300 * time.Millisecond)
 
 	// Query the window dimensions from the created tmux session
 	out, err := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_width} #{window_height}").Output()

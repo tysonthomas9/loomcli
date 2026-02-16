@@ -165,6 +165,10 @@ linters:
         linters: [funlen, gocognit]
       - path: "internal/webui/handlers_terminal\\.go"
         linters: [funlen, gocognit]
+      - path: "internal/webui/handlers_agent_terminal\\.go"
+        linters: [funlen]
+      - path: "internal/cli/monitor_display\\.go"
+        linters: [funlen]
       - path: "internal/webui/log_streamer\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/server\\.go"
@@ -174,6 +178,10 @@ linters:
 
       # === Test file relaxations (matching beads patterns) ===
 
+      # funlen: Table-driven tests naturally exceed function length limits
+      - path: '_test\.go'
+        linters:
+          - funlen
       # gosec: Various security checks relaxed in test files
       - path: '_test\.go'
         linters:
@@ -240,6 +248,14 @@ linters:
 
       # errcheck: Close() on custom types in cleanup/defer paths
       - path: 'cmd/logrouter/'
+        linters:
+          - errcheck
+        text: '\.Close'
+      - path: 'internal/cli/logrouter_cmd\.go'
+        linters:
+          - errcheck
+        text: '\.Close'
+      - path: 'internal/logrouter/watcher\.go'
         linters:
           - errcheck
         text: '\.Close'
