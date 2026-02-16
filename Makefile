@@ -123,6 +123,7 @@ hooks:
 	@chmod +x .git/hooks/pre-push
 	@echo "Pre-push hook installed (applies to all worktrees)"
 	@command -v pre-commit >/dev/null 2>&1 || { echo "Error: pre-commit not found. Install: brew install pre-commit"; exit 1; }
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "Error: golangci-lint not found. Install: brew install golangci-lint"; exit 1; }
 	@pre-commit install
 	@echo "Pre-commit hooks installed"
 
