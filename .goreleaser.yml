@@ -16,13 +16,9 @@ builds:
     goos:
       - linux
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
     ldflags:
       - -s -w
       - -X github.com/tysonthomas9/loomcli/internal/cli.Version={{.Version}}
@@ -31,9 +27,6 @@ builds:
 archives:
   - format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format_overrides:
-      - goos: windows
-        format: zip
     files:
       - LICENSE
       - README.md
@@ -65,7 +58,7 @@ release:
   header: |
     ## loom v{{.Version}}
 
-    Pre-compiled binaries for Linux, macOS (Intel & Apple Silicon), and Windows.
+    Pre-compiled binaries for Linux and macOS (Intel & Apple Silicon).
 
     ### Installation
 
