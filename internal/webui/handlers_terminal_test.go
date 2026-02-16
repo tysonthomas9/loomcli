@@ -20,6 +20,19 @@ import (
 	"nhooyr.io/websocket"
 )
 
+func TestNewTerminalManager_NoTmux(t *testing.T) {
+	orig := lookPathTmux
+	lookPathTmux = func(file string) (string, error) {
+		return "", exec.ErrNotFound
+	}
+	t.Cleanup(func() { lookPathTmux = orig })
+
+	_, err := NewTerminalManager("bash", "test", 0)
+	if !errors.Is(err, ErrTmuxNotFound) {
+		t.Errorf("expected ErrTmuxNotFound, got: %v", err)
+	}
+}
+
 // TestHandleTerminalWS_NilManagerWithSession tests nil manager with session param returns 503.
 // The nil manager check happens before parameter validation.
 func TestHandleTerminalWS_NilManagerWithSession(t *testing.T) {

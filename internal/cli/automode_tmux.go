@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-// IsTmuxAvailable checks if tmux is installed and available
-func IsTmuxAvailable() bool {
+// IsTmuxAvailable checks if tmux is installed and available.
+// It is a variable so tests can override it.
+var IsTmuxAvailable = func() bool {
 	return exec.Command("tmux", "-V").Run() == nil
 }
 

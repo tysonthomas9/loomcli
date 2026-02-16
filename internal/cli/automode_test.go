@@ -464,11 +464,24 @@ func TestShellQuote(t *testing.T) {
 }
 
 func TestIsTmuxAvailable(t *testing.T) {
-	// This test checks the actual system - tmux may or may not be installed
-	// We just verify the function doesn't panic and returns a bool
-	result := IsTmuxAvailable()
-	// Result is either true or false depending on system
-	t.Logf("IsTmuxAvailable() = %v", result)
+	t.Run("reflects_system_state", func(t *testing.T) {
+		result := IsTmuxAvailable()
+		_, lookupErr := exec.LookPath("tmux")
+		expected := lookupErr == nil
+		if result != expected {
+			t.Errorf("IsTmuxAvailable()=%v but LookPath err=%v", result, lookupErr)
+		}
+	})
+
+	t.Run("false_when_overridden", func(t *testing.T) {
+		orig := IsTmuxAvailable
+		IsTmuxAvailable = func() bool { return false }
+		t.Cleanup(func() { IsTmuxAvailable = orig })
+
+		if IsTmuxAvailable() {
+			t.Error("expected false when overridden")
+		}
+	})
 }
 
 func TestGetTerminalSize(t *testing.T) {
@@ -1472,6 +1485,70 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 
 	if claudeInvocations != 3 {
 		t.Errorf("Claude was invoked %d times, want 3", claudeInvocations)
+	}
+}
+
+func TestRunAutoModeLoop_WithoutTmux(t *testing.T) {
+	// Verify RunAutoModeLoop works when tmux is unavailable (JSON streaming fallback).
+	orig := IsTmuxAvailable
+	IsTmuxAvailable = func() bool { return false }
+	t.Cleanup(func() { IsTmuxAvailable = orig })
+
+	if IsTmuxAvailable() {
+		t.Fatal("IsTmuxAvailable should be false")
+	}
+
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	claudeInvocations := 0
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeInvocations++
+		UpdateLockTask(workDir, fmt.Sprintf("mock-%d", claudeInvocations), "Mock Task")
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     2,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - completed without tmux
+	case <-time.After(10 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit after max tasks (without tmux)")
+	}
+
+	if claudeInvocations != 2 {
+		t.Errorf("Claude was invoked %d times, want 2", claudeInvocations)
 	}
 }
 
