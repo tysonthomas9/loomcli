@@ -693,6 +693,17 @@ export { expect }
 export const isIntegrationEnabled = !!process.env.RUN_INTEGRATION_TESTS
 
 /**
+ * Resolved API base URL matching Playwright config logic.
+ * Self-contained mode uses a dedicated port; local mode uses 8080 or LOOM_BASE_URL.
+ */
+const _isLocalServer = !!process.env.LOOM_LOCAL_SERVER
+const _selfContainedPort = 8090
+export const resolvedApiBaseURL =
+  isIntegrationEnabled && !_isLocalServer
+    ? `http://localhost:${_selfContainedPort}`
+    : process.env.LOOM_BASE_URL || 'http://localhost:8080'
+
+/**
  * Generate unique test ID for test isolation.
  * Format: test-<timestamp>-<random>
  */

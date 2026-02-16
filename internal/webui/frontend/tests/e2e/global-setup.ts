@@ -24,7 +24,7 @@ async function waitForHealth(url: string): Promise<void> {
     try {
       const response = await fetch(url)
       if (response.ok) {
-        console.log(`✓ ${url} is healthy`)
+        console.log(`Health check passed: ${url}`)
         return
       }
       lastError = new Error(`HTTP ${response.status}`)
@@ -64,9 +64,23 @@ async function globalSetup(config: FullConfig): Promise<void> {
     return
   }
 
+  // webServer mode (Playwright manages server lifecycle) — no Podman needed.
+  // Just write state file so teardown doesn't error.
+  if (!process.env.PODMAN_COMPOSE) {
+    console.log('webServer mode — Playwright manages server lifecycle')
+    await fs.writeFile(STATE_FILE, JSON.stringify({
+      startedAt: new Date().toISOString(),
+      webUrl: baseURL,
+      loomUrl: baseURL,
+      composeDir: COMPOSE_DIR,
+      localMode: true,
+    }, null, 2))
+    return
+  }
+
+  // Podman Compose mode (container-based integration tests)
   console.log('Starting E2E integration environment...')
 
-  // Start Podman Compose stack
   console.log('Starting Podman Compose stack...')
   try {
     await exec('podman-compose -f compose.e2e.yml up -d --build', {

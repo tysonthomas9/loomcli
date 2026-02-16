@@ -11,7 +11,7 @@
  */
 
 import * as http from 'http'
-import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
+import { test, expect, isIntegrationEnabled, generateTestId, resolvedApiBaseURL } from './api-client'
 import { resolveApiKey } from '../integration/helpers'
 
 // Skip if integration tests not enabled
@@ -20,8 +20,7 @@ test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1'
 // Serial mode: SSE tests create real-time state changes
 test.describe.configure({ mode: 'serial' })
 
-const BASE_URL = process.env.LOOM_BASE_URL || 'http://localhost:8080'
-const SSE_ENDPOINT = `${BASE_URL}/api/events`
+const SSE_ENDPOINT = `${resolvedApiBaseURL}/api/events`
 const SSE_API_KEY = resolveApiKey()
 
 /**

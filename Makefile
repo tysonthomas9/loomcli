@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-integration clean install help frontend sync-beads update-beads gate hooks dev dev-check dev-loom dev-vite
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install help frontend sync-beads update-beads gate gate-e2e hooks dev dev-check dev-loom dev-vite
 
 # Default target
 all: build
@@ -48,9 +48,14 @@ test-e2e:
 	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
 	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium
 
-# Run Playwright API e2e tests against local loom serve
+# Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
 test-e2e-api:
-	@echo "Running Playwright API e2e tests..."
+	@echo "Running Playwright API e2e tests (self-contained)..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=api
+
+# Run Playwright API e2e tests against already-running loom serve
+test-e2e-api-local:
+	@echo "Running Playwright API e2e tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=api
 
 # Run Playwright integration e2e tests against local loom serve
@@ -106,6 +111,12 @@ gate: frontend
 	@$(MAKE) test-frontend
 	@echo "=== Quality Gate PASSED ==="
 
+# Extended quality gate — gate + self-contained e2e tests
+gate-e2e: gate
+	@echo "=== E2E Gate ==="
+	@$(MAKE) test-e2e-api
+	@echo "=== E2E Gate PASSED ==="
+
 # Install git hooks (pre-push quality gate + pre-commit checks, applies to all worktrees)
 hooks:
 	@cp scripts/hooks/pre-push .git/hooks/pre-push
@@ -147,13 +158,15 @@ help:
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"
 	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
-	@echo "  make test-e2e-api      - Run Playwright API e2e tests (needs loom serve)"
+	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
+	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
 	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (needs loom serve)"
 	@echo "  make install - Install loom to GOPATH/bin"
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
 	@echo "  make update-beads - Pull latest beads + sync"
 	@echo "  make gate         - Quality gate (lint + build + vet + test)"
+	@echo "  make gate-e2e     - Quality gate + self-contained e2e tests"
 	@echo "  make hooks        - Install git hooks (pre-push gate)"
 	@echo "  make dev          - Start default dev flow (same as make dev-loom)"
 	@echo "  make dev-loom     - Start loom serve --dev + frontend dist watcher"
