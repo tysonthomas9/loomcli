@@ -6,7 +6,7 @@
 all: build
 
 # Build the loom binary
-build: frontend
+build: frontend .git/hooks/pre-push
 	@echo "Building loom..."
 	go build -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$(git rev-parse --short HEAD)" -o loom ./cmd/loom
 
@@ -64,7 +64,7 @@ test-e2e-integration:
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration
 
 # Install loom to GOPATH/bin
-install: frontend
+install: frontend .git/hooks/pre-push
 	@echo "Installing loom to $$(go env GOPATH)/bin..."
 	@bash -c 'build=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
 		go install -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$build" ./cmd/loom'
@@ -122,12 +122,13 @@ hooks:
 	@cp scripts/hooks/pre-push .git/hooks/pre-push
 	@chmod +x .git/hooks/pre-push
 	@echo "Pre-push hook installed (applies to all worktrees)"
-	@if command -v pre-commit >/dev/null 2>&1; then \
-		pre-commit install; \
-		echo "Pre-commit hooks installed"; \
-	else \
-		echo "Tip: install pre-commit for additional checks: pip install pre-commit"; \
-	fi
+	@command -v pre-commit >/dev/null 2>&1 || { echo "Error: pre-commit not found. Install: brew install pre-commit"; exit 1; }
+	@pre-commit install
+	@echo "Pre-commit hooks installed"
+
+# Ensure hooks are installed (runs once — skips if pre-push hook already exists)
+.git/hooks/pre-push: scripts/hooks/pre-push
+	@$(MAKE) hooks
 
 # Check dev dependencies
 dev-check:
@@ -136,7 +137,7 @@ dev-check:
 	@echo "All dev dependencies found."
 
 # Run default dev environment (loom serve --dev + frontend dist watcher)
-dev: dev-check
+dev: dev-check .git/hooks/pre-push
 	@./scripts/run-web-ui-with-loom.sh
 
 # Run loom serve --dev with auto frontend dist rebuild + Go hot-restart
