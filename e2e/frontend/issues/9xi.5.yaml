@@ -1,0 +1,30 @@
+id: 9xi.5
+title: Set up ESLint and pre-commit quality check script
+priority: 2
+description: |-
+  Set up code quality tooling and a pre-commit check script for the cortex-kanban project.
+
+  1. Install ESLint with TypeScript and React support as dev dependencies:
+     - eslint
+     - @eslint/js
+     - typescript-eslint
+     - eslint-plugin-react-hooks
+     - eslint-plugin-react-refresh
+
+  2. Create eslint.config.js using the flat config format:
+     - Extend @eslint/js recommended and typescript-eslint recommended
+     - Add react-hooks plugin with recommended rules
+     - Add react-refresh plugin with warn on non-component exports
+     - Set files pattern to ["src/**/*.{ts,tsx}"]
+     - Ignore dist/ and node_modules/
+
+  3. Add npm scripts:
+     - "lint": "eslint src/"
+     - "lint:fix": "eslint src/ --fix"
+     - "quality-check": "npm run lint && tsc --noEmit && npm test"
+
+  4. Create scripts/pre-commit.sh — a shell script that runs the quality-check npm script. It should be executable (chmod +x) and exit non-zero if any check fails. Include a comment explaining it can be symlinked as .git/hooks/pre-commit.
+
+  5. Verify all existing source code passes the lint check (npm run lint should exit 0). Fix any lint errors found in existing code.
+
+  Do NOT set up husky or modify .git/hooks directly — just provide the standalone script.

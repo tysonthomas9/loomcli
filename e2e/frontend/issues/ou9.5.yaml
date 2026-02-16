@@ -1,0 +1,21 @@
+id: ou9.5
+title: Implement AgentList sidebar with agent cards
+priority: 2
+description: |-
+  Create src/components/AgentList/AgentList.tsx, src/components/AgentList/AgentList.module.css, src/components/AgentCard/AgentCard.tsx, and src/components/AgentCard/AgentCard.module.css.
+
+  ## Visual Design Reference
+  Read these screenshots to match the visual design:
+  - Read $TEST_DIR/designs/sidebar.png — full sidebar showing agent list and work queue
+  - Read $TEST_DIR/designs/agent-card.png — close-up of a single agent card
+  - Read $TEST_DIR/designs/full-page.png — overall page layout for context
+
+  Design reference URL (supplementary): https://designs.magicpath.ai/v1/friendly-cliff-4837
+
+  The sidebar contains a list of agent cards below an "Agents" header with a count badge. Each agent card shows an avatar circle (colored with the agent's color, white initial letter), the agent name and role, commit count on the right side (green "+N" format), and a status indicator. A small status dot appears on the avatar indicating the agent's current state (working, ready, error, idle).
+
+  AgentList props: AgentListProps { agents: Agent[]; onAgentClick?: (agent: Agent) => void; }. Render header "Agents" with count badge, then list of AgentCard components.
+
+  AgentCard props: AgentCardProps { agent: Agent; onClick?: () => void; }. Card layout: horizontal row with avatar, info section (name + role), and right-side stats (commit count + status text). Status dot colors: ready=gray, working=yellow/amber, error=red, idle=gray.
+
+  Export default function AgentList and export default function AgentCard from their respective files.

@@ -1,0 +1,24 @@
+id: ou9.3
+title: Create IssueCard with priority badges and agent info
+priority: 2
+description: |-
+  Create src/components/IssueCard/IssueCard.tsx and src/components/IssueCard/IssueCard.module.css.
+
+  ## Visual Design Reference
+  Read these screenshots to match the visual design:
+  - Read $TEST_DIR/designs/issue-card.png — detailed issue card styling
+  - Read $TEST_DIR/designs/full-page.png — cards in the context of columns
+
+  Design reference URL (supplementary): https://designs.magicpath.ai/v1/friendly-cliff-4837
+
+  Issue cards are white rounded rectangles with a subtle shadow. Each card shows: the issue ID and priority badge in the top row, then the issue title below.
+
+  Props: IssueCardProps { issue: Issue; agent?: Agent; onClick?: () => void; }. Card displays: issue ID (monospace, muted) and priority badge (top row, spaced apart), title below.
+
+  Priority badge colors: P0=red, P1=orange, P2=amber/yellow, P3=blue, P4=gray. All with white text, small rounded badge style.
+
+  Conditional agent section: if issue.status==="in_progress" and agent exists, show a small agent avatar circle (colored with agent.color, white initial) + agent name + activity text (italic, muted). If issue.status==="review" and agent exists, show same agent info plus "Approve" and "Reject" action buttons (Approve in green, Reject in red).
+
+  Card has hover effect (slightly more prominent shadow). Card is clickable (cursor pointer).
+
+  Export default function IssueCard.

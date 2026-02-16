@@ -1,0 +1,44 @@
+id: ou9.7
+title: Create Agent Detail Panel modal for agent cards
+priority: 2
+description: |-
+  Create src/components/AgentDetailPanel/AgentDetailPanel.tsx and src/components/AgentDetailPanel/AgentDetailPanel.module.css.
+
+  ## Visual Design Reference
+  Read these screenshots to match the visual design:
+  - Read $TEST_DIR/designs/agent-detail-panel.png — the agent detail modal panel
+  - Read $TEST_DIR/designs/full-page.png — overall layout context
+
+  Design reference URL (supplementary): https://designs.magicpath.ai/v1/friendly-cliff-4837
+
+  This is a slide-in modal panel that opens from the right side when the user clicks an AgentCard. It displays detailed agent information.
+
+  Props: AgentDetailPanelProps { agent: Agent; onClose: () => void; }
+
+  Layout — Modal with backdrop overlay:
+  - Backdrop covers the full screen with a semi-transparent dark overlay.
+  - Panel slides in from the right side, taking up about 420px width and full height, with a white background.
+
+  Header section:
+  - Close button (X) in the top-right corner.
+  - Agent avatar (larger circle with agent color and white initial letter).
+  - Agent name prominently displayed next to avatar.
+  - Status badge pill next to name. If agent.status==="working", show yellow indicator + "Has Changes". If "error", red + "Error". If "ready", green + "Ready".
+  - Below: worktree path text "webui/{agent.id}".
+
+  Tab switcher:
+  - Two tabs: "Info" and "Logs". Horizontal row with bottom border.
+  - Active tab has bold text with a bottom border accent. Inactive tab is muted.
+  - Use useState to track active tab, default "Info".
+
+  Info tab contents (sections with uppercase labels):
+  1. CURRENT TASK: If agent has changes, show "Implementing current task". Otherwise "No active task".
+  2. COMMIT STATUS: Green badge showing "+{agent.commitCount} ahead". Below: list of 2-3 mock commit messages.
+  3. CHANGES: Show "M .agent.lock" with M in orange/amber.
+  4. AGENT INFO: Key-value display with Branch (agent.id) and Status (agent.statusText).
+
+  Logs tab: Show "No logs available" centered.
+
+  Integration: Parent manages "activeAgent" state. When AgentCard clicked, set activeAgent. Render AgentDetailPanel when activeAgent is set.
+
+  Export default function AgentDetailPanel.

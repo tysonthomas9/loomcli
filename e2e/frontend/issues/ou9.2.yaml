@@ -1,0 +1,20 @@
+id: ou9.2
+title: Implement KanbanColumn with header and card list
+priority: 2
+description: |-
+  Create src/components/KanbanColumn/KanbanColumn.tsx and src/components/KanbanColumn/KanbanColumn.module.css.
+
+  ## Visual Design Reference
+  Read these screenshots to match the visual design:
+  - Read $TEST_DIR/designs/column-header.png — column header styling detail
+  - Read $TEST_DIR/designs/full-page.png — columns in context of the full board
+
+  Design reference URL (supplementary): https://designs.magicpath.ai/v1/friendly-cliff-4837
+
+  Each kanban column is a fixed-width vertical container with a rounded background. The header shows the column title and issue count badge. Below is a scrollable list of issue cards.
+
+  Props: KanbanColumnProps { title: string; issues: Issue[]; onIssueClick?: (issue: Issue) => void; }. Import IssueCard and getAgentById from mockData. Render column header (title + count badge) and scrollable card list. For each issue, look up agent via getAgentById(issue.assignedAgent).
+
+  Column styling: Fixed width (~240px), rounded corners, light warm-gray background. The Backlog column should have a slightly darker background to visually distinguish it. Header has the column title (small uppercase text with letter spacing) and a rounded count badge. Card list is a vertical stack with gap and vertical scroll.
+
+  Export default function KanbanColumn.

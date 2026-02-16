@@ -1,0 +1,52 @@
+id: ou9.4
+title: Create Task Detail Panel modal for issue cards
+priority: 2
+description: |-
+  Create src/components/TaskDetailPanel/TaskDetailPanel.tsx and src/components/TaskDetailPanel/TaskDetailPanel.module.css.
+
+  ## Visual Design Reference
+  Read these screenshots to match the visual design:
+  - Read $TEST_DIR/designs/task-detail-panel.png — the task detail modal
+  - Read $TEST_DIR/designs/full-page.png — overall layout context
+
+  Design reference URL (supplementary): https://designs.magicpath.ai/v1/friendly-cliff-4837
+
+  This is a centered modal that opens when the user clicks an IssueCard. It displays detailed task/issue information.
+
+  Props: TaskDetailPanelProps { issue: Issue; onClose: () => void; blockedByIssues?: Issue[]; }
+
+  Layout — Centered modal with backdrop overlay:
+  - Backdrop covers full screen with semi-transparent dark overlay.
+  - Panel is centered, approximately 640px wide, with rounded corners and white background. Max height limited with vertical scroll.
+
+  Header row:
+  - Issue ID in monospace.
+  - Priority badge (same colors as IssueCard: P0=red, P1=orange, P2=amber, P3=blue, P4=gray with white text).
+  - Status badge: uppercase text with colored background (backlog=gray, open=green, blocked=red, in_progress=amber, review=blue, done=muted gray).
+  - Close button (X) right-aligned.
+
+  Title: Large bold text below the header row.
+
+  Assignee + Owner row (two columns):
+  - ASSIGNEE (uppercase label): If issue.assignedAgent, show agent avatar + name + status. Otherwise show placeholder avatar + "Unassigned" + "No status set".
+  - OWNER (uppercase label): Show "tysonthomas9@noreply.github.com" (hardcoded mock).
+
+  DESCRIPTION section (uppercase label):
+  - Show a paragraph of descriptive text. Use a generic placeholder: "Task description will appear here when provided."
+
+  BLOCKED BY section (only if blockedByIssues has items):
+  - Label: "BLOCKED BY ({count})".
+  - Each blocker: styled row with red/pink background, lock icon, blocker issue ID badge, and blocker title.
+
+  DESIGN section:
+  - Collapsible "Summary" accordion with chevron toggle. Content: mock design text "Implementation plan will appear here after planning phase."
+
+  ACTIVITY section:
+  - "No comments yet" placeholder.
+  - Comment textarea input and "Post Comment" button (green).
+
+  Click backdrop or press Escape to close.
+
+  Integration: Parent manages "selectedIssue" state. When IssueCard clicked, set selectedIssue. Render TaskDetailPanel when selectedIssue is set. For blockedByIssues, filter issues to find blockers for "blocked" status issues.
+
+  Export default function TaskDetailPanel.

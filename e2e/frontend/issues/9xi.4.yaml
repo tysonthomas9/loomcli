@@ -1,0 +1,24 @@
+id: 9xi.4
+title: Create App shell component with layout and filter state
+priority: 2
+description: |-
+  Create src/App.tsx (replace the scaffold placeholder) and src/App.module.css.
+
+  ## Visual Design Reference
+  Read these screenshots to match the visual design:
+  - Read $TEST_DIR/designs/full-page.png — the overall app layout showing sidebar, header, and kanban board
+
+  Design reference URL (supplementary): https://designs.magicpath.ai/v1/friendly-cliff-4837
+
+  Import and render Header, AgentList, WorkQueue, KanbanBoard, AgentDetailPanel, and TaskDetailPanel components. Import mock data from ./data/mockData (agents, issues, workQueueStats).
+
+  Manage filter state with useState hooks (searchQuery string, priorityFilter string|null, typeFilter string|null). Filter the issues array by matching search query against title, priority against priorityFilter, and issueType against typeFilter before passing to KanbanBoard.
+
+  Manage detail panel state:
+  - selectedAgent (Agent|null) — when set, render AgentDetailPanel as a modal. Set when an AgentCard is clicked, cleared on close.
+  - selectedIssue (Issue|null) — when set, render TaskDetailPanel as a modal. Set when an IssueCard is clicked, cleared on close.
+  Pass onAgentClick callback down through AgentList to AgentCard. Pass onIssueClick callback down through KanbanBoard to KanbanColumn to IssueCard.
+
+  Layout: Full viewport height. Header spans full width at top. Below that a horizontal flex layout: left sidebar (~280px wide, with warm-gray background matching the design and a right border) containing AgentList and WorkQueue, and main content area (fills remaining space, with overflow handling) containing KanbanBoard. Render AgentDetailPanel and TaskDetailPanel conditionally at root level (they are modals with their own positioning).
+
+  Export default function App.

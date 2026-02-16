@@ -1,0 +1,19 @@
+id: ou9.1
+title: Create KanbanBoard container with horizontal scroll layout
+priority: 1
+description: |-
+  Create src/components/KanbanBoard/KanbanBoard.tsx and src/components/KanbanBoard/KanbanBoard.module.css.
+
+  ## Visual Design Reference
+  Read these screenshots to match the visual design:
+  - Read $TEST_DIR/designs/full-page.png — shows the full kanban board layout with columns
+
+  Design reference URL (supplementary): https://designs.magicpath.ai/v1/friendly-cliff-4837
+
+  The kanban board is a horizontal scrolling container that holds 6 status columns side by side. It fills the main content area to the right of the sidebar.
+
+  Props: KanbanBoardProps { issues: Issue[]; onIssueClick?: (issue: Issue) => void; }. Import KanbanColumn. Define column config array: [{key:"backlog",title:"Backlog"},{key:"open",title:"Open"},{key:"blocked",title:"Blocked"},{key:"in_progress",title:"In Progress"},{key:"review",title:"Needs Review"},{key:"done",title:"Done"}]. Filter issues by status for each column. Render KanbanColumn for each.
+
+  Layout: Horizontal flex row with gap between columns, horizontal overflow scroll, padded, columns aligned to top.
+
+  Export default function KanbanBoard.

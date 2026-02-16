@@ -1,0 +1,34 @@
+id: 9xi.6
+title: Create Playwright visual tests for the rendered app
+priority: 2
+description: |-
+  Set up Playwright end-to-end visual tests for the cortex-kanban application.
+
+  1. Install @playwright/test as a dev dependency.
+
+  2. Create playwright.config.ts:
+     - Use chromium only (projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }])
+     - Set webServer to run "npm run preview" on port 4173 (Vite preview default)
+     - Set baseURL to http://localhost:4173
+     - Set testDir to "e2e"
+     - Set retries to 0
+     - Set timeout to 30000
+
+  3. Create e2e/app.spec.ts with these test cases:
+     a. "renders header with Cortex title" — navigate to /, verify h1 contains "Cortex"
+     b. "renders all six kanban columns" — verify column headers: Backlog, Open, Blocked, In Progress, Needs Review, Done
+     c. "renders issue cards with priority badges" — verify at least one P0, P1, P2, P3 badge is visible
+     d. "renders agent list in sidebar" — verify "Agents" heading and at least 3 agent names (Cobalt, Falcon, Nova) are visible
+     e. "renders work queue stats" — verify "Work Queue" heading and stat labels (Backlog, Open, Blocked) are visible
+     f. "search filters issue cards" — type "database" in the search input, verify the URGENT database issue is visible and the WebSocket issue is not
+     g. "full page screenshot" — take a full-page screenshot saved to e2e/screenshots/full-page.png
+
+  4. Add npm scripts:
+     - "test:e2e": "playwright test"
+     - "test:e2e:headed": "playwright test --headed"
+
+  5. Add e2e/screenshots/ to .gitignore (or create .gitignore if it does not exist).
+
+  6. Run npx playwright install chromium to install the browser binary, then verify all tests pass with npm run test:e2e.
+
+  Important: build the app first (npm run build) before running visual tests, since Vite preview serves from dist/.

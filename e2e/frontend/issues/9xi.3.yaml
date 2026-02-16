@@ -1,0 +1,23 @@
+id: 9xi.3
+title: Implement Header component with search and filter dropdowns
+priority: 2
+description: |-
+  Create src/components/Header/Header.tsx and src/components/Header/Header.module.css.
+
+  ## Visual Design Reference
+  Read these screenshots to match the visual design:
+  - Read $TEST_DIR/designs/header-bar.png — the top header bar
+  - Read $TEST_DIR/designs/full-page.png — overall layout context
+
+  Design reference URL (supplementary): https://designs.magicpath.ai/v1/friendly-cliff-4837
+
+  The header is a horizontal bar at the top of the page with a white background and bottom border. It contains: the app title "Cortex" on the left, a search input in the center, and filter dropdowns on the right.
+
+  Props interface HeaderProps: onSearch(query: string) => void, onFilterPriority(p: string | null) => void, onFilterType(t: string | null) => void.
+
+  Layout: Horizontal flex row spanning the full width.
+  - Left: h1 "Cortex" as the app title.
+  - Center: text input with placeholder "Search tasks..." — styled as a rounded input field with a subtle background.
+  - Right: two select dropdowns — Priority (options: All priorities, P0, P1, P2, P3, P4) and Type (options: All types, task, bug, feature). Styled as bordered select elements.
+
+  Export default function Header.

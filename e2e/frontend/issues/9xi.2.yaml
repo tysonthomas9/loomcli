@@ -1,0 +1,23 @@
+id: 9xi.2
+title: Create mock data module with TypeScript types
+priority: 1
+description: |-
+  Create src/data/mockData.ts.
+
+  Export interfaces:
+  - Agent { id:string; name:string; role:string; status:"ready"|"working"|"error"|"idle"; avatar:string; color:string; commitCount:number; statusText:string; }
+  - Issue { id:string; title:string; priority:"P0"|"P1"|"P2"|"P3"|"P4"; status:"backlog"|"open"|"blocked"|"in_progress"|"review"|"done"; assignedAgent?:string; agentActivity?:string; issueType:"task"|"bug"|"feature"; }
+  - WorkQueueStats { backlog:number; open:number; blocked:number; inProgress:number; needsReview:number; done:number; }
+
+  Export const agents: Agent[] with 6 agents:
+  - cobalt (Developer, working, #7c8aab, 366, "2 changes")
+  - dev1 (Developer, working, #e8955a, 381, "1 changes")
+  - ember (QA, error, #b589b0, 371, "Error")
+  - falcon (Developer, working, #7bab8a, 366, "2 changes")
+  - nova (Architecture, ready, #6b9dad, 366, "Ready")
+  - zephyr (Developer, ready, #7c8aab, 366, "Ready")
+
+  Export const issues: Issue[] with 20 issues distributed: 6 backlog, 3 open, 3 blocked, 3 in_progress (assigned to falcon/cobalt/dev1 with activity strings), 2 review (assigned to ember/nova with activity strings), 3 done. Use realistic task titles: "URGENT: Database migration failure in production" (P0, backlog), "Convert web UI to server-initiated push" (P2, backlog), etc.
+
+  Export const workQueueStats matching the distribution.
+  Export a helper function getAgentById(id:string):Agent|undefined.

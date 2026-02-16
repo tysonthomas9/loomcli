@@ -1,0 +1,32 @@
+id: 9xi.1
+title: Initialize React+Vite+TypeScript project scaffold
+priority: 0
+description: |-
+  Initialize the cortex-kanban project as a React 18 + Vite + TypeScript application.
+
+  Create the following project scaffold files:
+
+  1. package.json — name "cortex-kanban", type "module".
+     Dependencies: react ^18, react-dom ^18.
+     Dev dependencies: @types/react, @types/react-dom, @vitejs/plugin-react, typescript ^5, vite ^5, vitest, @testing-library/react, @testing-library/jest-dom, jsdom.
+     Scripts: "dev": "vite", "build": "tsc && vite build", "preview": "vite preview", "test": "vitest run".
+
+  2. tsconfig.json — target ES2020, jsx react-jsx, strict mode, module ESNext, moduleResolution bundler, noEmit true, include ["src"].
+
+  3. vite.config.ts — import and use @vitejs/plugin-react.
+
+  4. index.html — standard Vite entry point loading /src/main.tsx, title "Cortex Kanban".
+
+  5. src/vite-env.d.ts — Vite client types reference.
+
+  6. src/main.tsx — import App from ./App and render into #root with React.StrictMode. Import ./index.css for global styles.
+
+  7. src/index.css — CSS reset (box-sizing border-box on all elements, body margin/padding 0), body font-family system stack (-apple-system, BlinkMacSystemFont, Segoe UI, etc.), background #f5f3ee, color #1a1a1a.
+
+  8. src/App.tsx — placeholder component: export default function App() returning <div>Cortex</div>.
+
+  9. src/App.module.css — empty placeholder CSS module file.
+
+  10. Create empty directories: src/components, src/data.
+
+  After creating all files, run npm install and verify the build succeeds (npm run build). The project must compile cleanly with no errors.

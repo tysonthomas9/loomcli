@@ -1,0 +1,22 @@
+id: ou9.6
+title: Create WorkQueue stats panel
+priority: 2
+description: |-
+  Create src/components/WorkQueue/WorkQueue.tsx and src/components/WorkQueue/WorkQueue.module.css.
+
+  ## Visual Design Reference
+  Read these screenshots to match the visual design:
+  - Read $TEST_DIR/designs/sidebar.png — shows work queue panel below the agent list
+  - Read $TEST_DIR/designs/full-page.png — overall layout context
+
+  Design reference URL (supplementary): https://designs.magicpath.ai/v1/friendly-cliff-4837
+
+  The Work Queue panel sits at the bottom of the sidebar. It has a collapsible header "Work Queue" with a chevron toggle. When expanded, it shows a 2-column grid of status labels and their counts (Backlog, Open, Blocked, In Progress, Needs Review, Done). Below the grid is a summary line showing open/closed counts and completion percentage.
+
+  Props: WorkQueueProps { stats: WorkQueueStats; }. Use useState for collapsed/expanded state, default expanded.
+
+  Grid layout: 2-column grid with status labels on the left and counts on the right. Status labels: Backlog, Open, Blocked, In Progress, Needs Review, Done — mapped to stats fields.
+
+  Below grid: summary line — calculate total = sum of all stats, closed = stats.done, openCount = total - closed, percentage = Math.round(closed/total*100). Render: "{openCount} open - {closed} closed - {percentage}%".
+
+  Export default function WorkQueue.
