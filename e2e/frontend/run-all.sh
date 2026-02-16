@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 # run-all.sh — Run the frontend E2E test suite end-to-end.
 #
-# Usage: ./run-all.sh [test_dir] [--keep]
+# Usage: ./run-all.sh [test_dir] [--clean]
 #   test_dir defaults to /tmp/loom-frontend-e2e
-#   --keep   skip teardown after test (for debugging)
+#   --clean  run teardown after test (default: keep test dir for inspection)
 #
 # This script:
 #   1. Runs setup.sh to create the test environment
 #   2. Sources the test environment variables
 #   3. Runs test-frontend-e2e.sh (3-phase daemon test)
-#   4. Runs teardown.sh to clean up (unless --keep)
+#   4. Keeps test dir for inspection (use --clean to teardown)
 #   5. Reports pass/fail with elapsed time
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEST_DIR="/tmp/loom-frontend-e2e"
-KEEP=false
+KEEP=true
 
 # Parse arguments
 for arg in "$@"; do
   case "$arg" in
-    --keep) KEEP=true ;;
-    *)      TEST_DIR="$arg" ;;
+    --clean) KEEP=false ;;
+    *)       TEST_DIR="$arg" ;;
   esac
 done
 
@@ -65,6 +65,15 @@ echo "  [${SECONDS}s] Setup complete"
 
 # --- Source environment ---
 export TEST_DIR
+if [ ! -f "$TEST_DIR/test-env.sh" ]; then
+  echo "FATAL: test-env.sh not found at $TEST_DIR/test-env.sh"
+  echo "  Setup may have failed silently. Check setup output above."
+  exit 1
+fi
+if [ ! -s "$TEST_DIR/test-env.sh" ]; then
+  echo "FATAL: test-env.sh is empty at $TEST_DIR/test-env.sh"
+  exit 1
+fi
 source "$TEST_DIR/test-env.sh"
 
 # --- Run test ---

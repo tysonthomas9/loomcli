@@ -662,7 +662,7 @@ func TestIsProcessRunning(t *testing.T) {
 	})
 
 	t.Run("PID at math.MaxInt32", func(t *testing.T) {
-		if isProcessRunning(math.MaxInt32) {
+		if IsProcessRunning(math.MaxInt32) {
 			t.Errorf("expected PID %d (math.MaxInt32) to not be running", math.MaxInt32)
 		}
 	})
