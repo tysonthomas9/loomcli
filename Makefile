@@ -76,11 +76,17 @@ gate: frontend
 	@go test -race -timeout 15m ./...
 	@echo "=== Quality Gate PASSED ==="
 
-# Install git hooks (pre-push quality gate, applies to all worktrees)
+# Install git hooks (pre-push quality gate + pre-commit checks, applies to all worktrees)
 hooks:
 	@cp scripts/hooks/pre-push .git/hooks/pre-push
 	@chmod +x .git/hooks/pre-push
 	@echo "Pre-push hook installed (applies to all worktrees)"
+	@if command -v pre-commit >/dev/null 2>&1; then \
+		pre-commit install; \
+		echo "Pre-commit hooks installed"; \
+	else \
+		echo "Tip: install pre-commit for additional checks: pip install pre-commit"; \
+	fi
 
 # Check dev dependencies
 dev-check:

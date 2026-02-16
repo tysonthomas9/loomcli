@@ -21,6 +21,7 @@ type AutoModeOptions struct {
 	ParentID        string                                // Epic ID to scope task discovery to (empty = all tasks)
 	CustomPromptGen func(string, *WorkspaceConfig) string // Custom prompt generator (overrides AgentType selection)
 	CustomTaskCheck func() (bool, error)                  // Custom task availability check (overrides AgentType selection)
+	BackoffBase     time.Duration                         // Base backoff duration for no-progress retries (default 30s)
 }
 
 // AutoModeState tracks the current state of auto mode execution
@@ -77,6 +78,10 @@ func agentClaimedTask(worktreePath string) bool {
 
 // RunAutoModeLoop runs the auto mode loop for either plan or task agents
 func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
+	if opts.BackoffBase == 0 {
+		opts.BackoffBase = 30 * time.Second
+	}
+
 	state := &AutoModeState{
 		LastTaskTime:  time.Now(),
 		IdleStartTime: time.Now(),
@@ -247,10 +252,10 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 				break
 			}
 
-			// Exponential backoff: 30s, 60s, 120s (capped)
-			backoff := time.Duration(30<<(state.ConsecutiveNoProgress-1)) * time.Second
-			if backoff > 120*time.Second {
-				backoff = 120 * time.Second
+			// Exponential backoff: base, 2*base, 4*base (capped at 4*base)
+			backoff := opts.BackoffBase << (state.ConsecutiveNoProgress - 1)
+			if cap := 4 * opts.BackoffBase; backoff > cap {
+				backoff = cap
 			}
 			fmt.Printf("[auto] Backing off for %s before retry...\n", backoff)
 			fmt.Println("")

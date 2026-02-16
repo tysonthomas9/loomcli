@@ -5,7 +5,6 @@
 
 export * from './AppLayout';
 export * from './EmptyColumn';
-export * from './EmptyState';
 export * from './IssueCard';
 export * from './DraggableIssueCard';
 export * from './IssueDetailPanel';
@@ -30,7 +29,6 @@ export * from './GraphLegend';
 // GraphView is NOT exported here - it's lazy loaded in App.tsx
 // SettingsView is NOT exported here - it's lazy loaded in App.tsx
 // Import directly from '@/components/GraphView' if needed
-export * from './GraphViewContainer';
 export * from './NodeTooltip';
 export * from './ViewSwitcher';
 export * from './SwimLane';
@@ -41,7 +39,6 @@ export * from './AgentsSidebar';
 export * from './NavRail';
 export * from './TaskDrawer';
 export * from './Toast';
-export * from './StatsHeader';
 export * from './AssigneePrompt';
 export * from './TalkToLeadButton';
 export * from './TerminalPanel';

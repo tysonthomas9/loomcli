@@ -4876,6 +4876,7 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -4887,7 +4888,7 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 	select {
 	case <-done:
 		// Good - should have exited after 3 consecutive no-progress sessions
-	case <-time.After(120 * time.Second):
+	case <-time.After(30 * time.Second):
 		close(shutdown)
 		t.Fatal("RunAutoModeLoop did not exit after 3 consecutive no-progress sessions")
 	}
