@@ -3371,19 +3371,7 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	// Set remain-on-exit globally so the pane stays alive even when the loom
-	// command exits (loom doesn't exist in test env, so the command fails quickly).
-	// Save and restore the original setting.
-	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
-	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
-	t.Cleanup(func() {
-		val := strings.TrimSpace(string(origRemain))
-		if val == "" || val == "off" {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
-		} else {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
-		}
-	})
+	setTmuxRemainOnExit(t)
 
 	err := startTmuxSession(sessionName, opts, logFile)
 	if err != nil {
@@ -3439,17 +3427,7 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	// Set remain-on-exit globally so the pane stays alive
-	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
-	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
-	t.Cleanup(func() {
-		val := strings.TrimSpace(string(origRemain))
-		if val == "" || val == "off" {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
-		} else {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
-		}
-	})
+	setTmuxRemainOnExit(t)
 
 	err := startTmuxSession(sessionName, opts, logFile)
 	if err != nil {
@@ -3908,17 +3886,7 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 				ParentID:     tt.parentID,
 			}
 
-			// Set remain-on-exit globally so the pane stays alive
-			origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
-			exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
-			t.Cleanup(func() {
-				val := strings.TrimSpace(string(origRemain))
-				if val == "" || val == "off" {
-					exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
-				} else {
-					exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
-				}
-			})
+			setTmuxRemainOnExit(t)
 
 			err := startTmuxSession(sessionName, opts, logFile)
 			if err != nil {
