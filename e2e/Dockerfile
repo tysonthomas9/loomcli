@@ -6,22 +6,7 @@
 
 ARG GO_VERSION=1.25.6
 
-# ─── Stage 1: Build Go binaries ──────────────────────────────────────────────
-FROM golang:${GO_VERSION}-bookworm AS builder
-
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-RUN go build -o /out/loom ./cmd/loom
-
-# Build bd CLI from vendored source (if available)
-RUN if [ -f third_party/beads/cmd/bd/main.go ]; then \
-        go build -o /out/bd ./third_party/beads/cmd/bd; \
-    fi
-
-# ─── Stage 2: Build frontend ─────────────────────────────────────────────────
+# ─── Stage 1: Build frontend ─────────────────────────────────────────────────
 FROM node:20-bookworm-slim AS frontend
 
 WORKDIR /app/internal/webui/frontend
@@ -29,6 +14,22 @@ COPY internal/webui/frontend/package*.json ./
 RUN npm ci
 COPY internal/webui/frontend/ .
 RUN npm run build
+
+# ─── Stage 2: Build Go binaries (needs frontend/dist for go:embed) ───────────
+FROM golang:${GO_VERSION}-bookworm AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+COPY --from=frontend /app/internal/webui/frontend/dist/ ./internal/webui/frontend/dist/
+RUN go build -o /out/loom ./cmd/loom
+
+# Build bd CLI from vendored source (if available)
+RUN if [ -f third_party/beads/cmd/bd/main.go ]; then \
+        go build -o /out/bd ./third_party/beads/cmd/bd; \
+    fi
 
 # ─── Stage 3: Runtime ────────────────────────────────────────────────────────
 FROM golang:${GO_VERSION}-bookworm AS runtime
