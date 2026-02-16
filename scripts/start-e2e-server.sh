@@ -2,19 +2,23 @@
 # start-e2e-server.sh — Build loom, start daemon, exec loom serve for Playwright e2e tests.
 # Designed to be invoked by Playwright's webServer config.
 # Playwright kills this process when tests finish; trap cleans up the daemon.
+#
+# Uses an isolated beads workspace (tmp/e2e-workspace/) so tests never
+# touch the repository's real .beads/ database.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRONTEND_DIR="$REPO_ROOT/internal/webui/frontend"
 LOOM_BIN="$REPO_ROOT/tmp/loom-e2e"
+E2E_WORKSPACE="$REPO_ROOT/tmp/e2e-workspace"
 
 DAEMON_STARTED=""
 
 cleanup() {
     if [[ -n "$DAEMON_STARTED" ]]; then
         echo "[e2e] Stopping bd daemon..."
-        (cd "$REPO_ROOT" && bd daemon stop 2>/dev/null) || true
+        (cd "$E2E_WORKSPACE" && bd daemon stop 2>/dev/null) || true
     fi
 }
 trap cleanup EXIT INT TERM
@@ -35,29 +39,34 @@ if [[ ! -d "$FRONTEND_DIR/dist" ]]; then
     (cd "$FRONTEND_DIR" && npm ci --prefer-offline && npm run build)
 fi
 
-# --- 3. Ensure .beads database exists (CI checkout has .beads/ but no .db) ---
-if ! compgen -G "$REPO_ROOT/.beads/*.db" >/dev/null 2>&1; then
-    echo "[e2e] Initializing beads database..."
-    (cd "$REPO_ROOT" && bd init --from-jsonl --skip-hooks --skip-merge-driver -q 2>&1) || {
-        # If --from-jsonl fails (no JSONL), try plain init
-        (cd "$REPO_ROOT" && bd init --skip-hooks --skip-merge-driver -q 2>&1) || {
-            echo "[e2e] WARNING: bd init failed — daemon may not work"
-        }
-    }
+# --- 3. Create isolated workspace for E2E tests ---
+# Fresh workspace each run so tests start with a clean database.
+rm -rf "$E2E_WORKSPACE"
+mkdir -p "$E2E_WORKSPACE"
+(cd "$E2E_WORKSPACE" && git init -q && bd init --prefix loomcli --skip-hooks --skip-merge-driver -q)
+echo "[e2e] Created isolated workspace: $E2E_WORKSPACE"
+
+# --- 4. Start bd daemon in isolated workspace ---
+(cd "$E2E_WORKSPACE" && bd daemon start)
+DAEMON_STARTED=1
+
+# --- 5. Wait for daemon socket and exec loom serve ---
+E2E_SOCKET="$E2E_WORKSPACE/.beads/bd.sock"
+for i in $(seq 1 10); do
+    [[ -S "$E2E_SOCKET" ]] && break
+    sleep 0.5
+done
+if [[ ! -S "$E2E_SOCKET" ]]; then
+    echo "[e2e] ERROR: Daemon socket not found at $E2E_SOCKET"
+    exit 1
 fi
 
-# --- 4. Start bd daemon if not running ---
-if ! bd daemon status >/dev/null 2>&1; then
-    echo "[e2e] Starting bd daemon..."
-    (cd "$REPO_ROOT" && bd daemon start)
-    DAEMON_STARTED=1
-fi
-
-# --- 5. Exec loom serve from repo root (daemon socket auto-detect needs cwd) ---
-# E2E_PORT controls the WebUI port (where tests send requests).
-# The Loom API port is offset +1 from the WebUI port.
 WEBUI_PORT="${E2E_PORT:-8080}"
 API_PORT=$((WEBUI_PORT + 1))
-cd "$REPO_ROOT"
 echo "[e2e] Starting loom serve --no-auth (webui :${WEBUI_PORT}, api :${API_PORT})..."
-exec "$LOOM_BIN" serve --no-auth --webui-port "${WEBUI_PORT}" --port "${API_PORT}"
+# Run from E2E workspace so the Loom API server also discovers the isolated daemon.
+cd "$E2E_WORKSPACE"
+exec "$LOOM_BIN" serve --no-auth \
+    --webui-socket "$E2E_SOCKET" \
+    --webui-port "${WEBUI_PORT}" \
+    --port "${API_PORT}"
