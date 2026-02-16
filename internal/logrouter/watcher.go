@@ -14,12 +14,12 @@ import (
 
 // AgentLockInfo represents the structure of the .agent.lock file.
 type AgentLockInfo struct {
-	PID           int    `json:"pid"`
-	Command       string `json:"command"`
-	AgentName     string `json:"agent_name"`
-	TaskID        string `json:"task_id"`
-	TaskTitle     string `json:"task_title"`
-	State         string `json:"state"`
+	PID       int    `json:"pid"`
+	Command   string `json:"command"`
+	AgentName string `json:"agent_name"`
+	TaskID    string `json:"task_id"`
+	TaskTitle string `json:"task_title"`
+	State     string `json:"state"`
 }
 
 // LockWatcher watches for changes to the agent lock file and updates the router.
