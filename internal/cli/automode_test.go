@@ -13,9 +13,22 @@ import (
 
 // setTmuxRemainOnExit sets remain-on-exit globally so tmux panes stay alive
 // even when the loom command exits (loom is not installed in CI environments).
-// The original setting is restored via t.Cleanup.
+// It starts a keepalive tmux session if no server is running (the tmux server
+// exits when the last session is destroyed, so we need our own).
+// The original setting and keepalive session are cleaned up via t.Cleanup.
 func setTmuxRemainOnExit(t *testing.T) {
 	t.Helper()
+
+	// Ensure a tmux server is running. If no server exists, "tmux set -g" fails silently.
+	// Start a keepalive session that sleeps - this guarantees a server for our global setting.
+	keepalive := fmt.Sprintf("loom-test-keepalive-%d", os.Getpid())
+	if err := exec.Command("tmux", "has-session", "-t", keepalive).Run(); err != nil {
+		exec.Command("tmux", "new-session", "-d", "-s", keepalive, "sleep", "300").Run()
+		t.Cleanup(func() {
+			exec.Command("tmux", "kill-session", "-t", keepalive).Run()
+		})
+	}
+
 	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
 	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
 	t.Cleanup(func() {
