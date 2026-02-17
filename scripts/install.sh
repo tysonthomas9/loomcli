@@ -97,6 +97,13 @@ main() {
     info "Extracting..."
     tar -xzf "${tmpdir}/${archive}" -C "${tmpdir}"
 
+    # macOS Gatekeeper kills unsigned binaries downloaded from the internet.
+    # Ad-hoc sign so the kernel allows execution.
+    if [ "$os" = "darwin" ] && command -v codesign &>/dev/null; then
+        info "Code-signing binary for macOS..."
+        codesign -s - --force "${tmpdir}/${BINARY}" 2>/dev/null || true
+    fi
+
     info "Installing to ${INSTALL_DIR}..."
     if [ ! -d "$INSTALL_DIR" ]; then
         mkdir -p "$INSTALL_DIR" 2>/dev/null || sudo mkdir -p "$INSTALL_DIR"
