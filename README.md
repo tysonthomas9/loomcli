@@ -32,8 +32,8 @@ Download from [Releases](https://github.com/tysonthomas9/loomcli/releases).
 ## Quick Start
 
 ```bash
-# 1. Install beads (issue tracker)
-go install github.com/steveyegge/beads/cmd/bd@latest
+# 1. Install beads (issue tracker) from vendored source
+make install-bd
 
 # 2. Initialize your project
 loom init
@@ -295,6 +295,10 @@ Use `make dev-loom` when validating the actual Loom-served UI on `http://localho
 | `LOOM_SERVER_PORT` | `8081` | Loom API server port |
 | `LOOM_BIND_ADDR` | `127.0.0.1` | Server bind address |
 | `LOOM_WEBUI_API_KEY` | _(auto)_ | WebUI authentication API key |
+
+## Credits
+
+Loom uses [beads](https://github.com/steveyegge/beads) by Steve Yegge as its issue tracker. A compatible version is vendored at `third_party/beads/`.
 
 ## License
 

@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install help frontend sync-beads update-beads gate gate-e2e hooks dev dev-check dev-loom dev-vite
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend sync-beads update-beads gate gate-e2e hooks dev dev-check dev-loom dev-vite
 
 # Default target
 all: build
@@ -68,6 +68,12 @@ install: frontend .git/hooks/pre-push
 	@echo "Installing loom to $$(go env GOPATH)/bin..."
 	@bash -c 'build=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
 		go install -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$build" ./cmd/loom'
+	@$(MAKE) install-bd
+
+# Install bd (beads CLI) from vendored source
+install-bd:
+	@echo "Installing bd (beads CLI) from vendored source..."
+	cd third_party/beads && go install ./cmd/bd/
 
 # Clean build artifacts
 clean:
@@ -163,7 +169,8 @@ help:
 	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
 	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (needs loom serve)"
-	@echo "  make install - Install loom to GOPATH/bin"
+	@echo "  make install    - Install loom + bd to GOPATH/bin"
+	@echo "  make install-bd - Install bd (beads CLI) from vendored source"
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
 	@echo "  make update-beads - Pull latest beads + sync"

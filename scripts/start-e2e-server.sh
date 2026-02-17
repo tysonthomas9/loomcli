@@ -43,7 +43,7 @@ fi
 # Fresh workspace each run so tests start with a clean database.
 rm -rf "$E2E_WORKSPACE"
 mkdir -p "$E2E_WORKSPACE"
-(cd "$E2E_WORKSPACE" && git init -q && bd init --prefix loomcli --skip-hooks --skip-merge-driver -q)
+(cd "$E2E_WORKSPACE" && git init -q && bd init --prefix loomcli --skip-hooks -q)
 echo "[e2e] Created isolated workspace: $E2E_WORKSPACE"
 
 # --- 4. Start bd daemon in isolated workspace ---
