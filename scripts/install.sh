@@ -5,12 +5,16 @@ set -euo pipefail
 # Usage: curl -fsSL https://raw.githubusercontent.com/tysonthomas9/loomcli/main/scripts/install.sh | bash
 #
 # Environment variables:
-#   INSTALL_DIR  - Where to install the binary (default: /usr/local/bin)
+#   INSTALL_DIR  - Where to install the binary (default: ~/.local/bin on macOS, /usr/local/bin on Linux)
 #   VERSION      - Specific version to install (default: latest)
 
 REPO="tysonthomas9/loomcli"
 BINARY="loom"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+DEFAULT_INSTALL_DIR="$HOME/.local/bin"
+if [ "$(uname -s)" = "Linux" ]; then
+    DEFAULT_INSTALL_DIR="/usr/local/bin"
+fi
+INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 
 info() { printf "\033[1;34m==>\033[0m %s\n" "$1"; }
 error() { printf "\033[1;31mError:\033[0m %s\n" "$1" >&2; exit 1; }
@@ -97,16 +101,6 @@ main() {
     info "Extracting..."
     tar -xzf "${tmpdir}/${archive}" -C "${tmpdir}"
 
-    # macOS: cross-compiled Go binaries have a linker-signed ad-hoc signature
-    # that macOS 13+ rejects. Re-sign with a proper ad-hoc signature as fallback
-    # (release binaries built on macos-latest should already be valid).
-    if [ "$os" = "darwin" ] && command -v codesign &>/dev/null; then
-        info "Code-signing binary for macOS..."
-        if ! codesign -s - --force "${tmpdir}/${BINARY}"; then
-            error "codesign failed. Install from source instead: go install github.com/tysonthomas9/loomcli/cmd/loom@${tag}"
-        fi
-    fi
-
     info "Installing to ${INSTALL_DIR}..."
     if [ ! -d "$INSTALL_DIR" ]; then
         mkdir -p "$INSTALL_DIR" 2>/dev/null || sudo mkdir -p "$INSTALL_DIR"
@@ -126,6 +120,12 @@ main() {
     else
         printf "\033[1;33mWarning:\033[0m Binary installed but 'loom --version' returned non-zero.\n"
         printf "  Installed to: %s\n" "${INSTALL_DIR}/${BINARY}"
+    fi
+
+    # Remind user to add install dir to PATH if needed
+    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
+        printf "\n\033[1;33mNote:\033[0m %s is not in your PATH. Add it with:\n" "$INSTALL_DIR"
+        printf "  export PATH=\"%s:\$PATH\"\n" "$INSTALL_DIR"
     fi
 }
 
