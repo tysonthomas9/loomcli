@@ -220,9 +220,11 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Printf("WARNING: Server bound to %s — exposed to network. Ensure this is intentional.", serveBindAddr)
 	}
 
-	// Resolve backend name for terminal sessions
+	// Resolve backend name for terminal sessions.
+	// ResolveBackendName() checks: flag > env > project-local loom.yaml > global config > default.
 	resolvedBackend := ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
+	terminalCmd := fmt.Sprintf("loom lead --backend %s", resolvedBackend)
 
 	// Start webui server in goroutine (unless --no-webui)
 	webuiErr := make(chan error, 1)
@@ -236,7 +238,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				BindAddress:    serveBindAddr,
 				SocketPath:     serveWebUISocket,
 				LoomServerURL:  fmt.Sprintf("http://localhost:%d", servePort),
-				TerminalCmd:    resolvedBackend,
+				TerminalCmd:    terminalCmd,
 				FleetEnabled:   serveRedisAddr != "",
 				FleetRedis:     fleetRedisConfig,
 				FleetJWTKey:    fleetJWTKey,

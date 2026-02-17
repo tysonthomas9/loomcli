@@ -599,7 +599,7 @@ func TestHandleTerminalWS_AuthNoToken(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "", ta, nil)
+	handler := handleTerminalWS(manager, ta, nil)
 
 	// Request with valid session but no token
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=auth-test", nil)
@@ -639,7 +639,7 @@ func TestHandleTerminalWS_AuthInvalidToken(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "", ta, nil)
+	handler := handleTerminalWS(manager, ta, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=auth-test&token=bogus.token", nil)
 	w := httptest.NewRecorder()
@@ -667,7 +667,7 @@ func TestHandleTerminalWS_AuthValidToken(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "", ta, nil)
+	handler := handleTerminalWS(manager, ta, nil)
 
 	session := "auth-valid"
 	token, err := ta.GenerateToken(session)
@@ -711,7 +711,7 @@ func TestHandleTerminalWS_AuthNilPassesThrough(t *testing.T) {
 	defer manager.Shutdown()
 
 	// auth=nil means no token auth required
-	handler := handleTerminalWS(manager, "", nil, nil)
+	handler := handleTerminalWS(manager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=no-auth", nil)
 	w := httptest.NewRecorder()
@@ -739,7 +739,7 @@ func TestHandleTerminalWS_AuthReusedTokenFails(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "", ta, nil)
+	handler := handleTerminalWS(manager, ta, nil)
 
 	session := "reuse-ws"
 	token, err := ta.GenerateToken(session)

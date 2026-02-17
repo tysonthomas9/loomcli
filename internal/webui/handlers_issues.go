@@ -389,12 +389,22 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			issueIDs[i] = iwc.Issue.ID
 		}
 
-		// Get parent info for all issues
-		parentResp, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs})
-		if err != nil {
-			// Non-fatal: log and continue without parent info
-			log.Printf("Failed to get parent IDs: %v", err)
-			parentResp = &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
+		// Get parent info for all issues (batched to stay within RPC limit of 1000)
+		parentResp := &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
+		const parentBatchSize = 1000
+		for i := 0; i < len(issueIDs); i += parentBatchSize {
+			end := i + parentBatchSize
+			if end > len(issueIDs) {
+				end = len(issueIDs)
+			}
+			batch, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs[i:end]})
+			if err != nil {
+				log.Printf("Failed to get parent IDs (batch %d-%d): %v", i, end, err)
+				continue
+			}
+			for k, v := range batch.Parents {
+				parentResp.Parents[k] = v
+			}
 		}
 
 		if kp.IncludeBlocked {

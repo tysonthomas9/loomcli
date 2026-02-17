@@ -51,8 +51,8 @@ func originHosts(origins []string) []string {
 // handleTerminalWS returns a WebSocket handler for terminal relay.
 // It upgrades HTTP connections to WebSocket, bridges them to tmux sessions
 // via the TerminalManager, and handles bidirectional binary data relay
-// plus an in-band resize protocol. The server-configured defaultCmd is
-// always used as the terminal command.
+// plus an in-band resize protocol. The manager's current default command
+// is used for new terminal sessions.
 //
 // allowedOrigins is a list of full origin URLs (e.g. "http://localhost:3000")
 // whose host portions are used as OriginPatterns for the WebSocket upgrade.
@@ -149,16 +149,19 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 			}
 		}
 
+		// Build the full terminal command with the lead agent prompt
+		termCmd := fmt.Sprintf("loom lead --backend %s", backend)
+
 		// Kill existing session first, then update command. This ordering ensures
 		// racing Attach calls either get killed or use the new backend.
 		_ = manager.KillSessionByName(session)
-		manager.SetDefaultCommand(backend)
+		manager.SetDefaultCommand(termCmd)
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{"success": true, "backend": backend})
 	}
 }
 
-func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *terminalAuth, allowedOrigins []string) http.HandlerFunc {
+func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string) http.HandlerFunc {
 	// Compute origin host patterns once at construction time.
 	patterns := originHosts(allowedOrigins)
 
@@ -241,7 +244,7 @@ func handleTerminalWS(manager *TerminalManager, defaultCmd string, auth *termina
 
 		// Attach to terminal session with default 80x24 size
 		// (frontend sends resize immediately after connect)
-		termSession, err := manager.Attach(session, defaultCmd, 80, 24)
+		termSession, err := manager.Attach(session, "", 80, 24)
 		if err != nil {
 			if errors.Is(err, ErrMaxSessionsReached) {
 				log.Printf("Terminal session limit reached for %q", session)

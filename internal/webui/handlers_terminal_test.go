@@ -36,7 +36,7 @@ func TestNewTerminalManager_NoTmux(t *testing.T) {
 // TestHandleTerminalWS_NilManagerWithSession tests nil manager with session param returns 503.
 // The nil manager check happens before parameter validation.
 func TestHandleTerminalWS_NilManagerWithSession(t *testing.T) {
-	handler := handleTerminalWS(nil, "", nil, nil)
+	handler := handleTerminalWS(nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	w := httptest.NewRecorder()
@@ -50,7 +50,7 @@ func TestHandleTerminalWS_NilManagerWithSession(t *testing.T) {
 
 // TestHandleTerminalWS_NilManager tests that nil manager returns 503.
 func TestHandleTerminalWS_NilManager(t *testing.T) {
-	handler := handleTerminalWS(nil, "", nil, nil)
+	handler := handleTerminalWS(nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	w := httptest.NewRecorder()
@@ -92,7 +92,7 @@ func TestHandleTerminalWS_MissingSessionWithManager(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "", nil, nil)
+	handler := handleTerminalWS(manager, nil, nil)
 
 	// Create request without session parameter
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws", nil)
@@ -129,7 +129,7 @@ func TestHandleTerminalWS_InvalidSessionName(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "", nil, nil)
+	handler := handleTerminalWS(manager, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -182,7 +182,7 @@ func TestHandleTerminalWS_ValidSessionNames(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "", nil, nil)
+	handler := handleTerminalWS(manager, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -233,7 +233,7 @@ func TestHandleTerminalWS_WebSocketUpgrade(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "", nil, nil)
+	handler := handleTerminalWS(manager, nil, nil)
 
 	// Create a test server for WebSocket testing
 	server := httptest.NewServer(handler)
@@ -278,7 +278,8 @@ func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
 
 	// Use "bash" as the known defaultCmd so we can verify it later.
 	defaultCmd := "bash"
-	handler := handleTerminalWS(manager, defaultCmd, nil, nil)
+	manager.SetDefaultCommand(defaultCmd)
+	handler := handleTerminalWS(manager, nil, nil)
 
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -1190,7 +1191,7 @@ func TestTerminalWebSocket_E2E(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, "", nil, nil)
+	handler := handleTerminalWS(manager, nil, nil)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -1415,7 +1416,7 @@ func TestHandleTerminalWS_MaxSessionsReached(t *testing.T) {
 		t.Fatalf("Attach() error: %v", err)
 	}
 
-	handler := handleTerminalWS(manager, "", nil, nil)
+	handler := handleTerminalWS(manager, nil, nil)
 
 	// Send a plain HTTP request — it should be rejected before WebSocket upgrade.
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=another", nil)
@@ -1484,9 +1485,9 @@ func TestHandleTerminalRestart_Success(t *testing.T) {
 		t.Errorf("expected backend %q, got %q", "codex", resp["backend"])
 	}
 
-	// Verify manager's default command was updated
-	if got := manager.DefaultCommand(); got != "codex" {
-		t.Errorf("expected manager default command to be %q, got %q", "codex", got)
+	// Verify manager's default command was updated to loom lead with backend
+	if got := manager.DefaultCommand(); got != "loom lead --backend codex" {
+		t.Errorf("expected manager default command to be %q, got %q", "loom lead --backend codex", got)
 	}
 }
 
@@ -1528,9 +1529,9 @@ func TestHandleTerminalRestart_DefaultBackend(t *testing.T) {
 		t.Errorf("expected backend %q, got %q", "claude", resp["backend"])
 	}
 
-	// Verify manager's default command was updated to claude
-	if got := manager.DefaultCommand(); got != "claude" {
-		t.Errorf("expected manager default command to be %q, got %q", "claude", got)
+	// Verify manager's default command was updated to loom lead with claude backend
+	if got := manager.DefaultCommand(); got != "loom lead --backend claude" {
+		t.Errorf("expected manager default command to be %q, got %q", "loom lead --backend claude", got)
 	}
 }
 
@@ -1690,7 +1691,7 @@ func TestHandleTerminalWS_OriginValidation(t *testing.T) {
 			}
 			defer manager.Shutdown()
 
-			handler := handleTerminalWS(manager, "", nil, tt.allowedOrigins)
+			handler := handleTerminalWS(manager, nil, tt.allowedOrigins)
 			server := httptest.NewServer(handler)
 			defer server.Close()
 

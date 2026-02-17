@@ -196,10 +196,9 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	}
 	loomCmd := fmt.Sprintf("%sloom %s %s --daemon-mode", termPrefix, shellQuote(opts.AgentType), shellQuote(opts.WorktreePath))
 
-	// Propagate backend selection to subprocess
-	if resolved := GetBackendName(); resolved != "claude" {
-		loomCmd += fmt.Sprintf(" --backend %s", shellQuote(resolved))
-	}
+	// Always propagate backend to subprocess so the tmux-spawned process
+	// (which runs the installed binary) uses the same backend as the parent.
+	loomCmd += fmt.Sprintf(" --backend %s", shellQuote(GetBackendName()))
 
 	// Propagate parent ID filter to subprocess
 	if opts.ParentID != "" {

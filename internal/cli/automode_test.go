@@ -3524,9 +3524,9 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 	if !strings.Contains(paneCmd, "TERM=dumb") {
 		t.Errorf("Claude backend should have TERM=dumb prefix, got: %s", paneCmd)
 	}
-	// Command should NOT contain --backend flag (claude is default)
-	if strings.Contains(paneCmd, "--backend") {
-		t.Errorf("Claude backend should NOT have --backend flag, got: %s", paneCmd)
+	// Command should always contain --backend flag (explicitly propagated to subprocess)
+	if !strings.Contains(paneCmd, "--backend") {
+		t.Errorf("Command should contain --backend flag, got: %s", paneCmd)
 	}
 	// Command should contain --daemon-mode
 	if !strings.Contains(paneCmd, "--daemon-mode") {

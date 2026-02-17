@@ -175,7 +175,7 @@
   /* ===========================
    * Panel Layout Tokens
    * =========================== */
-  --panel-width-max: 600px;
+  --panel-width-max: 840px;
   --panel-shadow-strong: 0 25px 50px -12px rgb(0 0 0 / 25%);
   --panel-padding-sm: 1rem; /* 16px */
   --panel-padding-md: 1.5rem; /* 24px */
