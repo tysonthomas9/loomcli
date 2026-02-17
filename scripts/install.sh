@@ -97,11 +97,14 @@ main() {
     info "Extracting..."
     tar -xzf "${tmpdir}/${archive}" -C "${tmpdir}"
 
-    # macOS Gatekeeper kills unsigned binaries downloaded from the internet.
-    # Ad-hoc sign so the kernel allows execution.
+    # macOS: cross-compiled Go binaries have a linker-signed ad-hoc signature
+    # that macOS 13+ rejects. Re-sign with a proper ad-hoc signature as fallback
+    # (release binaries built on macos-latest should already be valid).
     if [ "$os" = "darwin" ] && command -v codesign &>/dev/null; then
         info "Code-signing binary for macOS..."
-        codesign -s - --force "${tmpdir}/${BINARY}" 2>/dev/null || true
+        if ! codesign -s - --force "${tmpdir}/${BINARY}"; then
+            error "codesign failed. Install from source instead: go install github.com/tysonthomas9/loomcli/cmd/loom@${tag}"
+        fi
     fi
 
     info "Installing to ${INSTALL_DIR}..."
