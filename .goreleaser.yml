@@ -3,9 +3,6 @@
 
 version: 2
 
-partial:
-  by: goos
-
 before:
   hooks:
     - go mod tidy

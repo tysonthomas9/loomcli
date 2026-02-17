@@ -9,28 +9,10 @@ permissions:
   contents: write
 
 jobs:
-  build-frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Build frontend
-        run: cd internal/webui/frontend && npm ci && npm run build
-
-      - name: Upload frontend dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-dist
-          path: internal/webui/frontend/dist/
-
-  goreleaser-darwin:
-    needs: build-frontend
+  goreleaser:
+    # macOS runner so darwin binaries get valid linker signatures.
+    # Cross-compiled darwin binaries from Linux are SIGKILL'd by
+    # Gatekeeper on macOS 13+ (golang/go#63584).
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -43,95 +25,19 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Download frontend dist
-        uses: actions/download-artifact@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          name: frontend-dist
-          path: internal/webui/frontend/dist/
+          node-version: '20'
 
-      - name: Run GoReleaser (darwin)
+      - name: Build frontend
+        run: cd internal/webui/frontend && npm ci && npm run build
+
+      - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean --split
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GGOOS: darwin
-
-      - name: Upload darwin dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-darwin
-          path: dist/
-
-  goreleaser-linux:
-    needs: build-frontend
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - name: Download frontend dist
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: internal/webui/frontend/dist/
-
-      - name: Run GoReleaser (linux)
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: release --clean --split
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GGOOS: linux
-
-      - name: Upload linux dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-linux
-          path: dist/
-
-  goreleaser-merge:
-    needs: [goreleaser-darwin, goreleaser-linux]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - name: Download darwin dist
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-darwin
-          path: dist/
-
-      - name: Download linux dist
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-linux
-          path: dist/
-
-      - name: Merge and publish release
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: continue --merge
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
