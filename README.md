@@ -32,14 +32,20 @@ Download from [Releases](https://github.com/tysonthomas9/loomcli/releases).
 ## Quick Start
 
 ```bash
-# 1. Install beads (issue tracker) from vendored source
+# 1. Install beads (issue tracker)
+#    From source:
 make install-bd
+#    Or via beads install script:
+curl -sSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
 
 # 2. Initialize your project
 loom init
 
 # 3. Create tasks
 bd create --title="Add login feature" --type=feature --priority=2
+bd create --title="Fix checkout crash on empty cart" --type=bug --priority=1
+bd create --title="Refactor auth middleware" --type=task --priority=3
+bd create --title="User onboarding flow" --type=epic --priority=2
 
 # 4. Run agents
 loom plan falcon              # Planning agent creates designs
