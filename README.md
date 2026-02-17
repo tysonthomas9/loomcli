@@ -33,7 +33,7 @@ Download from [Releases](https://github.com/tysonthomas9/loomcli/releases).
 
 ```bash
 # 1. Install beads (issue tracker)
-go install github.com/bounteous/beads/cmd/bd@latest
+go install github.com/steveyegge/beads/cmd/bd@latest
 
 # 2. Initialize your project
 loom init

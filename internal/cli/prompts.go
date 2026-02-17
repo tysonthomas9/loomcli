@@ -775,7 +775,7 @@ If the user needs to set up a new project for loom:
 
 **Prerequisites**:
 - Git repository
-- Beads CLI installed: 'go install github.com/bounteous/beads/cmd/bd@latest'
+- Beads CLI installed: 'go install github.com/steveyegge/beads/cmd/bd@latest'
 
 **Setup Steps**:
 1. Initialize beads: 'bd init' (creates .beads/ directory)

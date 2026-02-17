@@ -24,7 +24,7 @@ Manage Claude Code agents working in parallel across git worktrees.
 
 GETTING STARTED
   1. Install beads CLI (issue tracker):
-     go install github.com/bounteous/beads/cmd/bd@latest
+     go install github.com/steveyegge/beads/cmd/bd@latest
 
   2. Initialize beads in your project:
      bd init
