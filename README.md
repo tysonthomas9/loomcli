@@ -32,11 +32,8 @@ Download from [Releases](https://github.com/tysonthomas9/loomcli/releases).
 ## Quick Start
 
 ```bash
-# 1. Install beads (issue tracker)
-#    From source:
+# 1. Install beads (issue tracker) from vendored source
 make install-bd
-#    Or via beads install script:
-curl -sSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
 
 # 2. Initialize your project
 loom init
