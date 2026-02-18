@@ -105,21 +105,39 @@ main() {
     if [ ! -d "$INSTALL_DIR" ]; then
         mkdir -p "$INSTALL_DIR" 2>/dev/null || sudo mkdir -p "$INSTALL_DIR"
     fi
-    if [ -w "$INSTALL_DIR" ]; then
-        cp "${tmpdir}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-        chmod +x "${INSTALL_DIR}/${BINARY}"
-    else
-        info "Elevated permissions required to install to ${INSTALL_DIR}"
-        sudo cp "${tmpdir}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-        sudo chmod +x "${INSTALL_DIR}/${BINARY}"
-    fi
+
+    # Install both loom and bd (beads CLI) binaries
+    for bin in loom bd; do
+        if [ ! -f "${tmpdir}/${bin}" ]; then
+            if [ "$bin" = "bd" ]; then
+                printf "\033[1;33mNote:\033[0m bd binary not found in archive (older release). Install from source: make install-bd\n"
+                continue
+            fi
+            error "${bin} binary not found in archive"
+        fi
+        if [ -w "$INSTALL_DIR" ]; then
+            cp "${tmpdir}/${bin}" "${INSTALL_DIR}/${bin}"
+            chmod +x "${INSTALL_DIR}/${bin}"
+        else
+            info "Elevated permissions required to install to ${INSTALL_DIR}"
+            sudo cp "${tmpdir}/${bin}" "${INSTALL_DIR}/${bin}"
+            sudo chmod +x "${INSTALL_DIR}/${bin}"
+        fi
+    done
 
     info "Verifying installation..."
-    if "${INSTALL_DIR}/${BINARY}" --version &>/dev/null; then
-        printf "\033[1;32mSuccess!\033[0m loom %s installed to %s\n" "$tag" "${INSTALL_DIR}/${BINARY}"
+    if "${INSTALL_DIR}/loom" --version &>/dev/null; then
+        printf "\033[1;32mSuccess!\033[0m loom %s installed to %s\n" "$tag" "${INSTALL_DIR}/loom"
     else
         printf "\033[1;33mWarning:\033[0m Binary installed but 'loom --version' returned non-zero.\n"
-        printf "  Installed to: %s\n" "${INSTALL_DIR}/${BINARY}"
+        printf "  Installed to: %s\n" "${INSTALL_DIR}/loom"
+    fi
+    if [ -f "${INSTALL_DIR}/bd" ]; then
+        if "${INSTALL_DIR}/bd" --version &>/dev/null; then
+            printf "\033[1;32mSuccess!\033[0m bd (beads CLI) installed to %s\n" "${INSTALL_DIR}/bd"
+        else
+            printf "\033[1;33mWarning:\033[0m bd installed but 'bd --version' returned non-zero.\n"
+        fi
     fi
 
     # Remind user to add install dir to PATH if needed

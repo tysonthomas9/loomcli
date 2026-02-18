@@ -32,10 +32,7 @@ Download from [Releases](https://github.com/tysonthomas9/loomcli/releases).
 ## Quick Start
 
 ```bash
-# 1. Install beads (issue tracker) from vendored source
-make install-bd
-
-# 2. Initialize your project
+# 1. Initialize your project (bd is included with the loom install)
 loom init
 
 # 3. Create tasks

@@ -23,6 +23,20 @@ builds:
       - -s -w
       - -X github.com/tysonthomas9/loomcli/internal/cli.Version={{.Version}}
       - -X github.com/tysonthomas9/loomcli/internal/cli.Build={{.ShortCommit}}
+  - id: bd
+    dir: third_party/beads
+    main: ./cmd/bd
+    binary: bd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
 
 archives:
   - format: tar.gz
