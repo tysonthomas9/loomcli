@@ -16,19 +16,6 @@ On macOS, installs to `~/.local/bin`. Add to your PATH if needed:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-### Go
-```bash
-go install github.com/tysonthomas9/loomcli/cmd/loom@latest
-```
-
-### npm
-```bash
-npm install -g loomcli
-```
-
-### Pre-built binaries
-Download from [Releases](https://github.com/tysonthomas9/loomcli/releases).
-
 ## Quick Start
 
 ```bash
@@ -46,6 +33,29 @@ loom plan falcon              # Planning agent creates designs
 loom lead                     # Review and approve plans
 loom task falcon              # Implementation agent builds it
 ```
+
+## Web UI
+
+`loom serve` starts a web UI for managing agents and tasks through your browser.
+
+```bash
+loom serve                    # http://localhost:8080
+loom serve --auth             # Enable API authentication
+loom serve --bind 0.0.0.0    # All interfaces
+```
+
+**Views:**
+- **Kanban** — drag-and-drop swim-lane board grouped by status, priority, or type
+- **Table** — sortable issue list with bulk actions
+- **Graph** — visual dependency graph (React Flow)
+- **Monitor** — multi-agent operator dashboard with project health and agent activity
+- **Settings** — backend configuration per-project and per-agent
+
+**Features:**
+- **Talk to Lead** — built-in terminal running `loom lead` (xterm.js + tmux via WebSocket)
+- **Real-time updates** — SSE pushes mutations to all connected browsers
+- **Per-agent terminals** — attach to live agent tmux sessions
+- **Authentication** — auto-generated API key (enable with `--auth`)
 
 ## Commands
 
@@ -106,29 +116,6 @@ loom serve                    # Web UI at http://localhost:8080
 loom daemon                   # Start daemon (reads loom.yaml)
 loom daemon status            # Check daemon status
 ```
-
-## Web UI
-
-`loom serve` starts a web UI for managing agents and tasks through your browser.
-
-```bash
-loom serve                    # http://localhost:8080
-loom serve --auth             # Enable API authentication
-loom serve --bind 0.0.0.0    # All interfaces
-```
-
-**Views:**
-- **Kanban** — drag-and-drop swim-lane board grouped by status, priority, or type
-- **Table** — sortable issue list with bulk actions
-- **Graph** — visual dependency graph (React Flow)
-- **Monitor** — multi-agent operator dashboard with project health and agent activity
-- **Settings** — backend configuration per-project and per-agent
-
-**Features:**
-- **Talk to Lead** — built-in terminal running `loom lead` (xterm.js + tmux via WebSocket)
-- **Real-time updates** — SSE pushes mutations to all connected browsers
-- **Per-agent terminals** — attach to live agent tmux sessions
-- **Authentication** — auto-generated API key (enable with `--auth`)
 
 ## Auto Mode
 

@@ -106,6 +106,17 @@ main() {
         mkdir -p "$INSTALL_DIR" 2>/dev/null || sudo mkdir -p "$INSTALL_DIR"
     fi
 
+    # Remove old loom and bd binaries to avoid stale/quarantined files
+    for bin in loom bd; do
+        if [ -f "${INSTALL_DIR}/${bin}" ]; then
+            if [ -w "$INSTALL_DIR" ]; then
+                rm -f "${INSTALL_DIR}/${bin}"
+            else
+                sudo rm -f "${INSTALL_DIR}/${bin}"
+            fi
+        fi
+    done
+
     # Install both loom and bd (beads CLI) binaries
     for bin in loom bd; do
         if [ ! -f "${tmpdir}/${bin}" ]; then

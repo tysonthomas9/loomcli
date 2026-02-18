@@ -81,10 +81,5 @@ release:
     curl -fsSL https://raw.githubusercontent.com/tysonthomas9/loomcli/main/scripts/install.sh | bash
     ```
 
-    **Go Install:**
-    ```bash
-    go install github.com/tysonthomas9/loomcli@latest
-    ```
-
     **Manual Install:**
     Download the appropriate binary for your platform below, extract it, and place it in your PATH.
