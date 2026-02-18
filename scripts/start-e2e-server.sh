@@ -63,10 +63,10 @@ fi
 
 WEBUI_PORT="${E2E_PORT:-8080}"
 API_PORT=$((WEBUI_PORT + 1))
-echo "[e2e] Starting loom serve --no-auth (webui :${WEBUI_PORT}, api :${API_PORT})..."
+echo "[e2e] Starting loom serve (webui :${WEBUI_PORT}, api :${API_PORT})..."
 # Run from E2E workspace so the Loom API server also discovers the isolated daemon.
 cd "$E2E_WORKSPACE"
-exec "$LOOM_BIN" serve --no-auth \
+exec "$LOOM_BIN" serve \
     --webui-socket "$E2E_SOCKET" \
     --webui-port "${WEBUI_PORT}" \
     --port "${API_PORT}"

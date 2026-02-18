@@ -8,14 +8,14 @@ const isIntegration = !!process.env.RUN_INTEGRATION_TESTS
 const isLocalIntegration = !!process.env.RUN_LOCAL_INTEGRATION_TESTS
 const isLocalServer = !!process.env.LOOM_LOCAL_SERVER
 
-// Self-contained mode: Playwright starts loom serve --no-auth on a dedicated port.
+// Self-contained mode: Playwright starts loom serve on a dedicated port (auth disabled by default).
 // Uses port 8090 to avoid conflict with dev server on 8080.
 const isSelfContained = isIntegration && !isLocalServer
 const selfContainedPort = 8090
 
 /** Resolve API key from env or key file for authenticated test projects. */
 function resolveApiKey(): string {
-  // Self-contained mode uses --no-auth, no key needed
+  // Self-contained mode has auth disabled by default, no key needed
   if (isSelfContained) return ""
   if (process.env.LOOM_API_KEY) return process.env.LOOM_API_KEY
   try {

@@ -61,7 +61,7 @@ async function getAuthHeaders(
         }
       }
     } catch {
-      // --no-auth mode: auth endpoint may not exist
+      // auth disabled: auth endpoint may not exist
     }
   }
   return cachedAuthToken ? { Authorization: `Bearer ${cachedAuthToken}` } : {};

@@ -112,8 +112,8 @@ loom daemon status            # Check daemon status
 `loom serve` starts a web UI for managing agents and tasks through your browser.
 
 ```bash
-loom serve                    # http://localhost:8080 (auth enabled)
-loom serve --no-auth          # Disable authentication (local dev)
+loom serve                    # http://localhost:8080
+loom serve --auth             # Enable API authentication
 loom serve --bind 0.0.0.0    # All interfaces
 ```
 
@@ -128,7 +128,7 @@ loom serve --bind 0.0.0.0    # All interfaces
 - **Talk to Lead** — built-in terminal running `loom lead` (xterm.js + tmux via WebSocket)
 - **Real-time updates** — SSE pushes mutations to all connected browsers
 - **Per-agent terminals** — attach to live agent tmux sessions
-- **Authentication** — auto-generated API key (disable with `--no-auth`)
+- **Authentication** — auto-generated API key (enable with `--auth`)
 
 ## Auto Mode
 

@@ -145,6 +145,17 @@ main() {
         printf "\n\033[1;33mNote:\033[0m %s is not in your PATH. Add it with:\n" "$INSTALL_DIR"
         printf "  export PATH=\"%s:\$PATH\"\n" "$INSTALL_DIR"
     fi
+
+    # Warn if another bd is found earlier in PATH (e.g. official beads v0.52+, which is incompatible)
+    if [ -f "${INSTALL_DIR}/bd" ]; then
+        local other_bd
+        other_bd=$(command -v bd 2>/dev/null || true)
+        if [ -n "$other_bd" ] && [ "$other_bd" != "${INSTALL_DIR}/bd" ]; then
+            printf "\n\033[1;33mWarning:\033[0m Another bd found at %s (takes precedence over %s/bd).\n" "$other_bd" "$INSTALL_DIR"
+            printf "  Loom requires the bundled bd. Ensure %s appears before %s in your PATH,\n" "$INSTALL_DIR" "$(dirname "$other_bd")"
+            printf "  or remove the other bd: rm %s\n" "$other_bd"
+        fi
+    fi
 }
 
 main

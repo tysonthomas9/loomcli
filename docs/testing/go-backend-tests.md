@@ -315,7 +315,7 @@ The WebUI package has **35 test files** including subdirectories for fleet and d
 |---|---|
 | API key validation | Correct keys pass, invalid keys rejected |
 | Token generation | JWT token creation with proper claims |
-| Auth bypass | `--no-auth` flag disables authentication |
+| Auth toggle | `--auth` flag enables authentication |
 | Header parsing | Authorization header extraction |
 
 **Why**: Auth is the security boundary. Bypass bugs expose the API.
