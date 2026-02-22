@@ -1,3 +1,5 @@
+//go:build linux || darwin
+
 package cli
 
 import (
@@ -8,7 +10,8 @@ import (
 	"os/exec"
 	"sync/atomic"
 	"syscall"
-	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // CodexBackend implements the Backend interface for the OpenAI Codex CLI.
@@ -46,13 +49,10 @@ func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	return cmd
 }
 
-// isTerminal reports whether f is connected to a terminal (TTY)
-// using the TIOCGWINSZ ioctl, which only succeeds on real terminals.
+// isTerminal reports whether f is connected to a terminal (TTY).
 func isTerminal(f *os.File) bool {
-	// struct winsize: rows, cols, xpixel, ypixel
-	var ws [4]uint16
-	_, _, err := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws[0]))) //nolint:gosec // G103: deliberate unsafe for TIOCGWINSZ ioctl
-	return err == 0
+	_, err := unix.IoctlGetTermios(int(f.Fd()), ioctlReadTermios)
+	return err == nil
 }
 
 func defaultCodexInvoker(workDir, prompt, agentName string) error {
