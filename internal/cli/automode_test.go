@@ -523,10 +523,15 @@ func TestListenForAttachKey_ShutdownSignal(t *testing.T) {
 	attachChan := make(chan struct{}, 1)
 	shutdown := make(chan struct{})
 
+	r, _, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+
 	// Start the listener
 	done := make(chan struct{})
 	go func() {
-		listenForAttachKey(attachChan, shutdown)
+		listenForAttachKey(r, attachChan, shutdown)
 		close(done)
 	}()
 
@@ -542,6 +547,87 @@ func TestListenForAttachKey_ShutdownSignal(t *testing.T) {
 		// Good - listener exited
 	case <-time.After(500 * time.Millisecond):
 		t.Error("listenForAttachKey did not exit after shutdown signal")
+	}
+}
+
+func TestListenForAttachKey_EscapeSequences(t *testing.T) {
+	tests := []struct {
+		name string
+		// input is the byte sequence to write to stdin
+		input []byte
+	}{
+		{
+			name:  "CSI focus in (3 bytes)",
+			input: []byte{0x1b, '[', 'I'},
+		},
+		{
+			name:  "CSI focus out (3 bytes)",
+			input: []byte{0x1b, '[', 'O'},
+		},
+		{
+			name:  "CSI bracketed paste start (6 bytes)",
+			input: []byte{0x1b, '[', '2', '0', '0', '~'},
+		},
+		{
+			name:  "CSI bracketed paste end (6 bytes)",
+			input: []byte{0x1b, '[', '2', '0', '1', '~'},
+		},
+		{
+			name:  "SS3 sequence (ESC O P)",
+			input: []byte{0x1b, 'O', 'P'},
+		},
+		{
+			name:  "SS2 sequence (ESC N A)",
+			input: []byte{0x1b, 'N', 'A'},
+		},
+		{
+			name:  "plain ESC + letter",
+			input: []byte{0x1b, 'a'},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("os.Pipe: %v", err)
+			}
+			t.Cleanup(func() { r.Close(); w.Close() })
+
+			attachChan := make(chan struct{}, 1)
+			shutdown := make(chan struct{})
+
+			go listenForAttachKey(r, attachChan, shutdown)
+
+			// Write the escape sequence — should NOT trigger attach
+			if _, err := w.Write(tt.input); err != nil {
+				t.Fatalf("write escape seq: %v", err)
+			}
+
+			// Give the goroutine time to drain the sequence
+			time.Sleep(50 * time.Millisecond)
+
+			select {
+			case <-attachChan:
+				t.Errorf("escape sequence %q triggered attach", tt.input)
+			default:
+				// Good — no spurious attach
+			}
+
+			// Now write Enter — should trigger attach
+			if _, err := w.Write([]byte{'\n'}); err != nil {
+				t.Fatalf("write enter: %v", err)
+			}
+
+			select {
+			case <-attachChan:
+				// Good — Enter was recognized
+			case <-time.After(500 * time.Millisecond):
+				t.Error("Enter after escape sequence did not trigger attach")
+			}
+
+			close(shutdown)
+		})
 	}
 }
 

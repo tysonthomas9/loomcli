@@ -1,10 +1,10 @@
 {
-  "pid": 19676,
+  "pid": 54359,
   "command": "task",
-  "started_at": "2026-02-11T15:50:18.620889-08:00",
-  "agent_name": "falcon",
-  "task_id": "loomcli-1wf1",
-  "task_title": "Add tests for frontend api/issues.ts untested functions",
-  "task_started_at": "2026-02-11T15:50:43.006698-08:00",
+  "started_at": "2026-02-21T23:37:18.072327-08:00",
+  "agent_name": "ember",
+  "task_id": "loomcli-6yt5y.10",
+  "task_title": "automode_tmux: fix escape sequence drain to handle long sequences",
+  "task_started_at": "2026-02-21T23:37:31.620724-08:00",
   "state": "active"
 }

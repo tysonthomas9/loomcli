@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,7 +77,7 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 
 	// Start non-blocking input listener
 	attachChan := make(chan struct{}, 1)
-	go listenForAttachKey(attachChan, shutdown)
+	go listenForAttachKey(os.Stdin, attachChan, shutdown)
 
 	taskCount := 0
 	consecutiveNoProgress := 0
@@ -478,9 +479,9 @@ func streamRemainingLogContent(logFile string, lastOffset *int64) {
 	}
 }
 
-// listenForAttachKey listens for Enter key in a separate goroutine
-// Uses blocking reads but the goroutine exits when process terminates
-func listenForAttachKey(attachChan chan struct{}, shutdown chan struct{}) {
+// listenForAttachKey listens for Enter key in a separate goroutine.
+// Uses blocking reads but the goroutine exits when the reader closes.
+func listenForAttachKey(input io.Reader, attachChan chan struct{}, shutdown chan struct{}) {
 	// Use a channel to signal when a key is read
 	keyChan := make(chan byte, 1)
 
@@ -488,14 +489,36 @@ func listenForAttachKey(attachChan chan struct{}, shutdown chan struct{}) {
 	go func() {
 		buf := make([]byte, 1)
 		for {
-			n, err := os.Stdin.Read(buf)
+			n, err := input.Read(buf)
 			if err != nil || n == 0 {
 				return
 			}
-			// Filter escape sequences (e.g., focus events ^[[I ^[[O)
-			if buf[0] == '\x1b' {
-				// Drain the rest of the escape sequence
-				_, _ = os.Stdin.Read(make([]byte, 2))
+			// Filter escape sequences by parsing their structure.
+			// Handles CSI (ESC [), SS2 (ESC N), SS3 (ESC O), and plain ESC+byte.
+			if buf[0] == 0x1b {
+				next := make([]byte, 1)
+				n2, err2 := input.Read(next)
+				if err2 != nil || n2 == 0 {
+					continue
+				}
+				switch {
+				case next[0] == 0x5b: // "[" — CSI: ESC [ (params) (final byte 0x40-0x7E)
+					drain := make([]byte, 1)
+					for i := 0; i < 32; i++ { // safety cap
+						nd, derr := input.Read(drain)
+						if derr != nil || nd == 0 {
+							break
+						}
+						if drain[0] >= 0x40 && drain[0] <= 0x7E {
+							break
+						}
+					}
+				case next[0] == 0x4f || next[0] == 0x4e: // "O" (SS3) or "N" (SS2): one more byte
+					if _, err := input.Read(make([]byte, 1)); err != nil {
+						return
+					}
+					// default: ESC + single byte — already consumed
+				}
 				continue
 			}
 			select {
