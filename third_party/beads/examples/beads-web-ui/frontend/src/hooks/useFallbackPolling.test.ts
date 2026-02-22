@@ -928,5 +928,47 @@ describe('useFallbackPolling', () => {
 
       expect(onPoll).toHaveBeenCalledTimes(2);
     });
+
+    it('changing activationThreshold while reconnecting clears old timers', async () => {
+      const onPoll = vi.fn().mockResolvedValue(undefined);
+      const { result, rerender } = renderHook(
+        ({ activationThreshold }) =>
+          useFallbackPolling({
+            wsState: 'reconnecting',
+            onPoll,
+            activationThreshold,
+            pollInterval: 2000,
+          }),
+        { initialProps: { activationThreshold: 5000 } }
+      );
+
+      // Countdown started
+      expect(result.current.timeUntilActive).toBe(5000);
+
+      // Advance partway through activation threshold
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      expect(result.current.timeUntilActive).toBe(3000);
+      expect(result.current.isActive).toBe(false);
+
+      // Change activationThreshold — effect re-runs, re-enters the
+      // reconnecting && !isActive branch. Without clearTimers(), the old
+      // activation timer (3000ms remaining) would leak alongside the new one.
+      rerender({ activationThreshold: 4000 });
+
+      // New countdown should start with new threshold
+      expect(result.current.timeUntilActive).toBe(4000);
+
+      // Advance past new threshold — should get exactly ONE activation
+      await act(async () => {
+        vi.advanceTimersByTime(4100);
+        await Promise.resolve();
+      });
+
+      expect(result.current.isActive).toBe(true);
+      expect(onPoll).toHaveBeenCalledTimes(1);
+    });
   });
 });

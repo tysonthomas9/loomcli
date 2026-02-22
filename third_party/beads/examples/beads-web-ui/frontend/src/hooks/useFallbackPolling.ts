@@ -139,6 +139,8 @@ export function useFallbackPolling(options: UseFallbackPollingOptions): UseFallb
       setIsActive(false);
       setTimeUntilActive(null);
     } else if (wsState === 'reconnecting' && !isActive) {
+      // Clear any existing timers before creating new ones (prevents leaks on re-entry)
+      clearTimers();
       // Start countdown to activation
       activationStartRef.current = Date.now();
       setTimeUntilActive(activationThreshold);
