@@ -218,7 +218,7 @@ describe('AgentCard', () => {
       expect(screen.getByText('+3')).toBeInTheDocument();
     });
 
-    it('shows correct title tooltip for commit count', () => {
+    it('shows correct title tooltip for commit count when only ahead', () => {
       render(<AgentCard agent={makeAgent({ ahead: 5 })} />);
 
       expect(screen.getByTitle('5 commits ahead')).toBeInTheDocument();
@@ -235,6 +235,46 @@ describe('AgentCard', () => {
 
       expect(screen.getByText('+1')).toBeInTheDocument();
       expect(screen.getByTitle('1 commits ahead')).toBeInTheDocument();
+    });
+  });
+
+  describe('behind count', () => {
+    it('shows -N when agent.behind > 0', () => {
+      render(<AgentCard agent={makeAgent({ behind: 3 })} />);
+
+      expect(screen.getByText('-3')).toBeInTheDocument();
+    });
+
+    it('shows correct title tooltip for behind count when only behind', () => {
+      render(<AgentCard agent={makeAgent({ behind: 5 })} />);
+
+      expect(screen.getByTitle('5 commits behind')).toBeInTheDocument();
+    });
+
+    it('does not show behind count when behind is 0', () => {
+      render(<AgentCard agent={makeAgent({ behind: 0 })} />);
+
+      expect(screen.queryByText(/^-\d+/)).not.toBeInTheDocument();
+    });
+
+    it('shows -1 for single commit behind', () => {
+      render(<AgentCard agent={makeAgent({ behind: 1 })} />);
+
+      expect(screen.getByText('-1')).toBeInTheDocument();
+      expect(screen.getByTitle('1 commits behind')).toBeInTheDocument();
+    });
+
+    it('shows both ahead and behind counts side by side when both > 0', () => {
+      render(<AgentCard agent={makeAgent({ ahead: 3, behind: 2 })} />);
+
+      expect(screen.getByText('+3')).toBeInTheDocument();
+      expect(screen.getByText('-2')).toBeInTheDocument();
+    });
+
+    it('shows combined tooltip when both ahead and behind', () => {
+      render(<AgentCard agent={makeAgent({ ahead: 4, behind: 7 })} />);
+
+      expect(screen.getByTitle('4 commits ahead and 7 commits behind')).toBeInTheDocument();
     });
   });
 

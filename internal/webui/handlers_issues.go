@@ -389,12 +389,22 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			issueIDs[i] = iwc.Issue.ID
 		}
 
-		// Get parent info for all issues
-		parentResp, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs})
-		if err != nil {
-			// Non-fatal: log and continue without parent info
-			log.Printf("Failed to get parent IDs: %v", err)
-			parentResp = &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
+		// Get parent info for all issues (batched to stay within RPC limit of 1000)
+		parentResp := &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
+		const parentBatchSize = 1000
+		for i := 0; i < len(issueIDs); i += parentBatchSize {
+			end := i + parentBatchSize
+			if end > len(issueIDs) {
+				end = len(issueIDs)
+			}
+			batch, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs[i:end]})
+			if err != nil {
+				log.Printf("Failed to get parent IDs (batch %d-%d): %v", i, end, err)
+				continue
+			}
+			for k, v := range batch.Parents {
+				parentResp.Parents[k] = v
+			}
 		}
 
 		if kp.IncludeBlocked {
@@ -415,6 +425,11 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 				}
 			}
 
+			// Fetch unfiltered issue list for accurate blocker detection.
+			// The daemon's Blocked() RPC considers in_progress/review as resolved,
+			// but blockers should only clear when closed.
+			unclosedIDs, issueMap := fetchUnclosedIDSetAndMap(client)
+
 			// Build KanbanIssue response with blocked info merged
 			kanbanIssues := make([]*KanbanIssue, len(issuesWithCounts))
 			for i, iwc := range issuesWithCounts {
@@ -425,7 +440,17 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 					ki.Parent = &parentInfo.ParentID
 					ki.ParentTitle = &parentInfo.ParentTitle
 				}
-				if bi, ok := blockedMap[iwc.Issue.ID]; ok {
+				// Client-side blocker check is authoritative (considers only closed
+				// blockers as resolved). Falls back to daemon data on error.
+				if unclosedIDs != nil {
+					refs := getUnclosedBlockerRefs(iwc.Issue.Dependencies, unclosedIDs, issueMap)
+					if len(refs) > 0 {
+						ki.IsBlocked = true
+						ki.BlockedByCount = len(refs)
+						ki.BlockedBy = extractBlockerIDs(refs)
+						ki.BlockedByDetails = refs
+					}
+				} else if bi, ok := blockedMap[iwc.Issue.ID]; ok {
 					ki.IsBlocked = true
 					ki.BlockedByCount = bi.BlockedByCount
 					ki.BlockedBy = bi.BlockedBy
@@ -779,6 +804,60 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 	}
 }
 
+// handleDeleteIssue returns a handler that permanently deletes an issue by ID.
+func handleDeleteIssue(pool daemon.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			respondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+
+		if pool == nil {
+			respondError(w, http.StatusServiceUnavailable, "connection pool not initialized")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		client, err := pool.Get(ctx)
+		if err != nil {
+			status := http.StatusServiceUnavailable
+			if errors.Is(err, context.DeadlineExceeded) {
+				status = http.StatusGatewayTimeout
+			}
+			respondError(w, status, "daemon not available")
+			return
+		}
+		defer pool.Put(client)
+
+		resp, err := client.Delete(&rpc.DeleteArgs{
+			IDs:   []string{issueID},
+			Force: true,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				respondError(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
+				return
+			}
+			log.Printf("RPC error in handleDeleteIssue for %s: %v", issueID, err)
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		if !resp.Success {
+			respondError(w, http.StatusInternalServerError, resp.Error)
+			return
+		}
+
+		respondJSON(w, http.StatusOK, map[string]any{
+			"success": true,
+			"data":    resp.Data,
+		})
+	}
+}
+
 // validateCreateRequest validates the required fields in a create request.
 func validateCreateRequest(req *IssueCreateRequest) error {
 	// Validate title
@@ -953,4 +1032,63 @@ func parseKanbanParams(r *http.Request) (*kanbanParams, error) {
 	}
 
 	return params, nil
+}
+
+// fetchUnclosedIDSetAndMap fetches all issues via client.List and returns:
+//   - unclosedIDs: set of issue IDs with status != closed
+//   - issueMap: lookup map for populating blocker details (title, priority)
+//
+// Returns nil, nil on error (non-fatal — caller falls back to daemon data).
+func fetchUnclosedIDSetAndMap(client *rpc.Client) (map[string]bool, map[string]*types.IssueWithCounts) {
+	resp, err := client.List(&rpc.ListArgs{Limit: MaxListLimit})
+	if err != nil {
+		log.Printf("Failed to fetch issues for blocker detection: %v", err)
+		return nil, nil
+	}
+	if !resp.Success {
+		log.Printf("List RPC failed for blocker detection: %s", resp.Error)
+		return nil, nil
+	}
+
+	var allIssues []*types.IssueWithCounts
+	if err := json.Unmarshal(resp.Data, &allIssues); err != nil {
+		log.Printf("Failed to parse issues for blocker detection: %v", err)
+		return nil, nil
+	}
+
+	unclosedIDs := make(map[string]bool, len(allIssues))
+	issueMap := make(map[string]*types.IssueWithCounts, len(allIssues))
+	for _, iwc := range allIssues {
+		issueMap[iwc.Issue.ID] = iwc
+		if iwc.Issue.Status != types.StatusClosed {
+			unclosedIDs[iwc.Issue.ID] = true
+		}
+	}
+	return unclosedIDs, issueMap
+}
+
+// getUnclosedBlockerRefs returns BlockerRef entries for each "blocks" dependency
+// that points to an unclosed issue. Populates title/priority from issueMap.
+func getUnclosedBlockerRefs(deps []*types.Dependency, unclosedIDs map[string]bool, issueMap map[string]*types.IssueWithCounts) []types.BlockerRef {
+	var refs []types.BlockerRef
+	for _, dep := range deps {
+		if dep.Type == types.DepBlocks && unclosedIDs[dep.DependsOnID] {
+			ref := types.BlockerRef{ID: dep.DependsOnID}
+			if blocker, ok := issueMap[dep.DependsOnID]; ok {
+				ref.Title = blocker.Issue.Title
+				ref.Priority = blocker.Issue.Priority
+			}
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+// extractBlockerIDs extracts issue IDs from a slice of BlockerRefs.
+func extractBlockerIDs(refs []types.BlockerRef) []string {
+	ids := make([]string, len(refs))
+	for i, ref := range refs {
+		ids[i] = ref.ID
+	}
+	return ids
 }

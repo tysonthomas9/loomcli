@@ -15,7 +15,7 @@
 }
 
 .overlay.open {
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgb(0 0 0 / 32%);
   visibility: visible;
   transition:
     background-color var(--transition-slow),
@@ -27,10 +27,10 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: clamp(480px, 40vw, 800px);
-  max-width: 100%;
-  background-color: var(--color-bg);
-  box-shadow: var(--shadow-lg);
+  width: min(100%, var(--panel-width-max));
+  max-width: var(--panel-width-max);
+  background-color: var(--color-panel-bg);
+  box-shadow: var(--panel-shadow-strong);
   transform: translateX(100%);
   transition: transform var(--transition-slow);
   display: flex;
@@ -52,6 +52,7 @@
   overflow: hidden auto;
   display: flex;
   flex-direction: column;
+  background: var(--color-panel-bg);
 }
 
 /* ============= Sticky Header Wrapper ============= */
@@ -60,8 +61,8 @@
   position: sticky;
   top: 0;
   z-index: 10;
-  background: var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel-bg);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 /* Focus styles for the panel */
@@ -147,17 +148,17 @@
 .metadataBar {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--color-border);
-  font-size: var(--font-size-sm);
+  gap: 10px;
+  padding: 10px var(--panel-padding-md);
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 12px;
 }
 
 .metadataItem {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
 }
 
 .metadataItem svg {
@@ -171,8 +172,8 @@
 .reviewActionBar {
   display: flex;
   gap: 8px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 12px var(--panel-padding-md);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .reviewApproveButton,
@@ -218,11 +219,11 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 20px;
+  padding: 10px var(--panel-padding-md);
   background: var(--color-danger-bg);
   color: var(--color-danger);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .blockingBanner svg {
@@ -234,7 +235,7 @@
 /* ============= Detail Content ============= */
 
 .detailContent {
-  padding: 0 20px 16px;
+  padding: 12px var(--panel-padding-lg) var(--panel-padding-lg);
   flex: 1;
 }
 
@@ -243,7 +244,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 /* ============= Log Tab Bar ============= */
@@ -251,8 +252,8 @@
 .logTabBar {
   display: flex;
   gap: 0;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
   flex-shrink: 0;
 }
 
@@ -261,8 +262,8 @@
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  font-size: var(--font-size-sm, 13px);
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
   transition:
@@ -280,8 +281,8 @@
 }
 
 .logTab.activeLogTab {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
+  color: #111827;
+  border-bottom-color: #111827;
 }
 
 /* ============= Logs Container ============= */
@@ -306,12 +307,13 @@
 .scrollableContent {
   flex: 1;
   overflow: hidden auto;
+  background: var(--color-panel-bg);
 }
 
 /* ============= Collapsible Sections ============= */
 
 .collapsibleSection {
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .collapsibleHeader {
@@ -319,7 +321,7 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 12px 20px;
+  padding: 10px 0;
   background: none;
   border: none;
   cursor: pointer;
@@ -337,11 +339,11 @@
 }
 
 .collapsibleTitle {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--color-text);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
 }
 
 .collapsibleCount {
@@ -363,7 +365,7 @@
 }
 
 .collapsibleContent {
-  padding: 0 20px 16px;
+  padding: 0;
 }
 
 .badge {
@@ -390,20 +392,24 @@
 
 /* Sections */
 .section {
-  margin-bottom: 20px;
+  margin-bottom: 28px;
+}
+
+.section:last-child {
+  margin-bottom: 0;
 }
 
 .sectionTitle {
-  font-size: var(--font-sm);
-  font-weight: 600;
-  color: var(--color-text);
-  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  margin: 0 0 16px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
 }
 
 .description {
-  font-size: var(--font-sm);
+  font-size: 14px;
   color: var(--color-text-secondary);
   line-height: 1.6;
   margin: 0;
@@ -454,9 +460,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--color-border);
-  font-size: var(--font-sm);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 14px;
 }
 
 .dependencyItem:last-child {
@@ -501,7 +507,7 @@
 /* Notes */
 
 .notes {
-  font-size: var(--font-sm);
+  font-size: 14px;
   color: var(--color-text-secondary);
   line-height: 1.6;
   margin: 0;

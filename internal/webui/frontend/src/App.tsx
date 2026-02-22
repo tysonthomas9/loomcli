@@ -493,10 +493,12 @@ function App() {
         <FilterBar
           filters={filters}
           actions={filterActions}
-          showPriority
-          showType
+          showPriority={false}
+          showType={false}
           showLabels={false}
-          showGroupBy={false}
+          showGroupBy={true}
+          groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
+          onGroupByChange={filterActions.setGroupBy}
           variant="header"
           showClear={false}
         />

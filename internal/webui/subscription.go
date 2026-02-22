@@ -389,4 +389,3 @@ func isUnknownOperationError(err error) bool {
 	return len(errStr) > 0 &&
 		(strings.Contains(errStr, "unknown operation") || strings.Contains(errStr, "unsupported"))
 }
-

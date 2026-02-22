@@ -1,12 +1,12 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint clean install help frontend sync-beads update-beads gate hooks dev dev-check dev-loom dev-vite
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend sync-beads update-beads gate gate-e2e hooks dev dev-check dev-loom dev-vite
 
 # Default target
 all: build
 
 # Build the loom binary
-build: frontend
+build: frontend .git/hooks/pre-push
 	@echo "Building loom..."
 	go build -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$(git rev-parse --short HEAD)" -o loom ./cmd/loom
 
@@ -25,16 +25,55 @@ test-all:
 	@echo "Running all tests..."
 	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
 
-# Run linter
+# Run Go linter
 lint:
-	@echo "Running linter..."
+	@echo "Running Go linter..."
 	golangci-lint run --timeout=5m
 
+# Run frontend linter + typecheck
+lint-frontend:
+	@echo "Running frontend typecheck..."
+	@cd $(FRONTEND_DIR) && npm run typecheck
+	@echo "Running frontend ESLint..."
+	@cd $(FRONTEND_DIR) && npm run lint
+
+# Run frontend unit tests (vitest)
+test-frontend:
+	@echo "Running frontend unit tests..."
+	@cd $(FRONTEND_DIR) && npx vitest run
+
+# Run Playwright e2e tests — mocked chromium tests (no server needed)
+test-e2e:
+	@echo "Running Playwright e2e tests (mocked)..."
+	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
+	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium
+
+# Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
+test-e2e-api:
+	@echo "Running Playwright API e2e tests (self-contained)..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=api
+
+# Run Playwright API e2e tests against already-running loom serve
+test-e2e-api-local:
+	@echo "Running Playwright API e2e tests (local server)..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=api
+
+# Run Playwright integration e2e tests against local loom serve
+test-e2e-integration:
+	@echo "Running Playwright integration e2e tests..."
+	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration
+
 # Install loom to GOPATH/bin
-install: frontend
+install: frontend .git/hooks/pre-push
 	@echo "Installing loom to $$(go env GOPATH)/bin..."
 	@bash -c 'build=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
 		go install -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$build" ./cmd/loom'
+	@$(MAKE) install-bd
+
+# Install bd (beads CLI) from vendored source
+install-bd:
+	@echo "Installing bd (beads CLI) from vendored source..."
+	cd third_party/beads && go install ./cmd/bd/
 
 # Clean build artifacts
 clean:
@@ -67,20 +106,36 @@ update-beads:
 	git subtree pull --prefix=$(BEADS_PREFIX) $(BEADS_REMOTE) $(BEADS_BRANCH) --squash
 	$(MAKE) sync-beads
 
-# Quality gate — lint + build + vet + test (used by pre-push hook)
+# Quality gate — full lint + build + vet + test (used by pre-push hook)
 gate: frontend
 	@echo "=== Quality Gate ==="
 	@$(MAKE) lint
+	@$(MAKE) lint-frontend
 	@go build ./...
 	@go vet ./...
 	@go test -race -timeout 15m ./...
+	@$(MAKE) test-frontend
 	@echo "=== Quality Gate PASSED ==="
 
-# Install git hooks (pre-push quality gate, applies to all worktrees)
+# Extended quality gate — gate + self-contained e2e tests
+gate-e2e: gate
+	@echo "=== E2E Gate ==="
+	@$(MAKE) test-e2e-api
+	@echo "=== E2E Gate PASSED ==="
+
+# Install git hooks (pre-push quality gate + pre-commit checks, applies to all worktrees)
 hooks:
 	@cp scripts/hooks/pre-push .git/hooks/pre-push
 	@chmod +x .git/hooks/pre-push
 	@echo "Pre-push hook installed (applies to all worktrees)"
+	@command -v pre-commit >/dev/null 2>&1 || { echo "Error: pre-commit not found. Install: brew install pre-commit"; exit 1; }
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "Error: golangci-lint not found. Install: brew install golangci-lint"; exit 1; }
+	@pre-commit install
+	@echo "Pre-commit hooks installed"
+
+# Ensure hooks are installed (runs once — skips if pre-push hook already exists)
+.git/hooks/pre-push: scripts/hooks/pre-push
+	@$(MAKE) hooks
 
 # Check dev dependencies
 dev-check:
@@ -89,7 +144,7 @@ dev-check:
 	@echo "All dev dependencies found."
 
 # Run default dev environment (loom serve --dev + frontend dist watcher)
-dev: dev-check
+dev: dev-check .git/hooks/pre-push
 	@./scripts/run-web-ui-with-loom.sh
 
 # Run loom serve --dev with auto frontend dist rebuild + Go hot-restart
@@ -107,12 +162,20 @@ help:
 	@echo "  make test              - Run unit tests with coverage"
 	@echo "  make test-integration  - Run unit + integration tests"
 	@echo "  make test-all          - Run all tests (unit + integration + e2e)"
-	@echo "  make lint    - Run golangci-lint"
-	@echo "  make install - Install loom to GOPATH/bin"
+	@echo "  make lint              - Run Go linter (golangci-lint)"
+	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"
+	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
+	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
+	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
+	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
+	@echo "  make test-e2e-integration - Run Playwright integration e2e tests (needs loom serve)"
+	@echo "  make install    - Install loom + bd to GOPATH/bin"
+	@echo "  make install-bd - Install bd (beads CLI) from vendored source"
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
 	@echo "  make update-beads - Pull latest beads + sync"
 	@echo "  make gate         - Quality gate (lint + build + vet + test)"
+	@echo "  make gate-e2e     - Quality gate + self-contained e2e tests"
 	@echo "  make hooks        - Install git hooks (pre-push gate)"
 	@echo "  make dev          - Start default dev flow (same as make dev-loom)"
 	@echo "  make dev-loom     - Start loom serve --dev + frontend dist watcher"

@@ -36,6 +36,7 @@ type ReadyResponse struct {
 type readyClient interface {
 	Ready(args *rpc.ReadyArgs) (*rpc.Response, error)
 	GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error)
+	List(args *rpc.ListArgs) (*rpc.Response, error)
 }
 
 // readyConnectionGetter is an internal interface for testing ready handler pool operations.
@@ -156,6 +157,11 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			return
 		}
 
+		// Filter out issues with unclosed blockers.
+		// bd ready considers in_progress blockers as "resolved" but we require
+		// blockers to be closed before dependents become available.
+		issues = filterUnclosedBlockers(client, issues)
+
 		// If no issues, return empty response
 		if len(issues) == 0 {
 			respondJSON(w, http.StatusOK, ReadyResponse{
@@ -230,6 +236,53 @@ func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer, claimMet
 			Data:    metrics,
 		})
 	}
+}
+
+// filterUnclosedBlockers removes issues whose blocking dependencies are not yet closed.
+// It fetches all issues via client.List() to build the unclosed set.
+// On error, returns the original list unfiltered (non-fatal).
+func filterUnclosedBlockers(client readyClient, issues []*types.Issue) []*types.Issue {
+	listResp, err := client.List(&rpc.ListArgs{Limit: 500})
+	if err != nil {
+		log.Printf("Failed to fetch issue list for blocker filtering: %v", err)
+		return issues
+	}
+	if !listResp.Success {
+		log.Printf("List RPC failed for blocker filtering: %s", listResp.Error)
+		return issues
+	}
+
+	var allIssues []*types.Issue
+	if err := json.Unmarshal(listResp.Data, &allIssues); err != nil {
+		log.Printf("Failed to parse issue list for blocker filtering: %v", err)
+		return issues
+	}
+
+	unclosedIDs := make(map[string]bool, len(allIssues))
+	for _, issue := range allIssues {
+		if issue.Status != types.StatusClosed {
+			unclosedIDs[issue.ID] = true
+		}
+	}
+
+	filtered := make([]*types.Issue, 0, len(issues))
+	for _, issue := range issues {
+		if !hasUnclosedBlockersTyped(issue.Dependencies, unclosedIDs) {
+			filtered = append(filtered, issue)
+		}
+	}
+	return filtered
+}
+
+// hasUnclosedBlockersTyped returns true if any "blocks" dependency points to
+// an issue that is still unclosed. Uses types.Dependency (pointer slice).
+func hasUnclosedBlockersTyped(deps []*types.Dependency, unclosedIDs map[string]bool) bool {
+	for _, dep := range deps {
+		if dep.Type == types.DepBlocks && unclosedIDs[dep.DependsOnID] {
+			return true
+		}
+	}
+	return false
 }
 
 // parseReadyParams parses query parameters into rpc.ReadyArgs.

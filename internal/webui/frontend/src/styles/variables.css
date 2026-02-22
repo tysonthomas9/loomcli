@@ -90,6 +90,7 @@
   --color-bg-hover: #ece9e1; /* warm hover */
   --color-bg-active: #e3dfd6; /* warm active */
   --color-surface-subtle: #efede7; /* warm muted surface */
+  --color-bg-subtle: var(--color-surface-subtle);
   --color-border: var(--line-color);
   --color-border-light: #d8d3c8;
   --color-border-hover: #b8c0cb; /* muted blue-gray for hover states */
@@ -102,6 +103,8 @@
   --color-highlight: #fef08a; /* yellow-200 */
   --color-focus: #3b82f6; /* blue-500, focus ring color */
   --color-bg-primary: var(--bg-card); /* alias for --color-bg */
+  --color-panel-bg: #ffffff;
+  --color-primary-hover: #1d4ed8;
 
   /* ===========================
    * Colors - Skeleton Loading
@@ -130,6 +133,7 @@
   --font-family-mono:
     ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
+  --font-mono: var(--font-family-mono);
 
   /* ===========================
    * Typography - Font Sizes
@@ -140,6 +144,9 @@
   --font-size-lg: 1.125rem; /* 18px */
   --font-size-xl: 1.25rem; /* 20px */
   --font-size-2xl: 1.5rem; /* 24px */
+  --font-xs: var(--font-size-xs);
+  --font-sm: var(--font-size-sm);
+  --font-lg: var(--font-size-lg);
 
   /* ===========================
    * Typography - Font Weights
@@ -164,6 +171,15 @@
   --radius-lg: 0.5rem; /* 8px */
   --radius-xl: 0.75rem; /* 12px */
   --radius-full: 9999px;
+
+  /* ===========================
+   * Panel Layout Tokens
+   * =========================== */
+  --panel-width-max: 840px;
+  --panel-shadow-strong: 0 25px 50px -12px rgb(0 0 0 / 25%);
+  --panel-padding-sm: 1rem; /* 16px */
+  --panel-padding-md: 1.5rem; /* 24px */
+  --panel-padding-lg: 2rem; /* 32px */
 
   /* ===========================
    * Shadows

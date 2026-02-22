@@ -73,7 +73,7 @@ func listBackendsLocked() []string {
 }
 
 // ResolveBackendName returns the backend name using the precedence chain:
-// --backend flag > LOOM_BACKEND env > config file > default ("claude").
+// --backend flag > LOOM_BACKEND env > project-local loom.yaml > global config > default ("claude").
 func ResolveBackendName() string {
 	// 1. --backend flag (highest priority)
 	if backendFlag != "" {
@@ -83,12 +83,17 @@ func ResolveBackendName() string {
 	if env := os.Getenv("LOOM_BACKEND"); env != "" {
 		return env
 	}
-	// 3. Config file backend setting
+	// 3. Project-local loom.yaml — use GetBeadsDir() so workspace mode
+	// resolves to workspace root, legacy mode uses CWD
+	if pf, err := LoadProjectFile(GetBeadsDir()); err == nil && pf != nil && pf.Backend != "" {
+		return pf.Backend
+	}
+	// 4. Global config file backend setting
 	cfg, err := LoadConfig()
 	if err == nil && cfg != nil && cfg.Backend != "" {
 		return cfg.Backend
 	}
-	// 4. Default
+	// 5. Default
 	return "claude"
 }
 

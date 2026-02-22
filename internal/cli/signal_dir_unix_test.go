@@ -122,4 +122,3 @@ func TestValidateSignalDir_RejectsNonexistent(t *testing.T) {
 		t.Fatal("validateSignalDir should reject nonexistent paths")
 	}
 }
-

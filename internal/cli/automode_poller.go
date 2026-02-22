@@ -66,22 +66,49 @@ func fetchReadyIssues(parentID string) ([]BdIssue, error) {
 	return issues, nil
 }
 
+// fetchUnclosedIssueIDs returns IDs of all issues that are NOT closed.
+// Used for accurate blocker checking — a blocker is resolved only when closed,
+// not when it merely moves to in_progress or review.
+func fetchUnclosedIssueIDs() (map[string]bool, error) {
+	args := []string{"bd", "list", "--json", "--limit", "500"}
+	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
+	if result.Err != nil {
+		return nil, fmt.Errorf("failed to list issues: %w", result.Err)
+	}
+
+	var issues []BdIssue
+	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
+		return nil, fmt.Errorf("failed to parse issue list: %w", err)
+	}
+	ids := make(map[string]bool, len(issues))
+	for _, issue := range issues {
+		if issue.Status != "closed" {
+			ids[issue.ID] = true
+		}
+	}
+	return ids, nil
+}
+
 // GetAvailablePlanningTasks returns tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
 // When parentID is non-empty, only tasks under that epic are returned.
 func GetAvailablePlanningTasks(parentID string) ([]BdIssue, error) {
-	issues, err := fetchReadyIssues(parentID)
+	candidates, err := fetchReadyIssues(parentID)
+	if err != nil {
+		return nil, err
+	}
+	unclosedIDs, err := fetchUnclosedIssueIDs()
 	if err != nil {
 		return nil, err
 	}
 
-	var candidates []BdIssue
-	for _, issue := range issues {
-		if IsAvailableForPlanning(issue, issues) {
-			candidates = append(candidates, issue)
+	var result []BdIssue
+	for _, issue := range candidates {
+		if IsAvailableForPlanning(issue, unclosedIDs) {
+			result = append(result, issue)
 		}
 	}
-	return candidates, nil
+	return result, nil
 }
 
 // HasAvailablePlanningTasks checks if there are tasks that need planning
@@ -98,18 +125,22 @@ func HasAvailablePlanningTasks(parentID string) (bool, error) {
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
 // When parentID is non-empty, only tasks under that epic are returned.
 func GetAvailableImplementationTasks(parentID string) ([]BdIssue, error) {
-	issues, err := fetchReadyIssues(parentID)
+	candidates, err := fetchReadyIssues(parentID)
+	if err != nil {
+		return nil, err
+	}
+	unclosedIDs, err := fetchUnclosedIssueIDs()
 	if err != nil {
 		return nil, err
 	}
 
-	var candidates []BdIssue
-	for _, issue := range issues {
-		if IsAvailableForImplementation(issue, issues) {
-			candidates = append(candidates, issue)
+	var result []BdIssue
+	for _, issue := range candidates {
+		if IsAvailableForImplementation(issue, unclosedIDs) {
+			result = append(result, issue)
 		}
 	}
-	return candidates, nil
+	return result, nil
 }
 
 // HasAvailableImplementationTasks checks if there are tasks ready for implementation
@@ -126,18 +157,22 @@ func HasAvailableImplementationTasks(parentID string) (bool, error) {
 // Used by custom roles with task_filter=any.
 // When parentID is non-empty, only tasks under that epic are returned.
 func GetAnyAvailableTasks(parentID string) ([]BdIssue, error) {
-	issues, err := fetchReadyIssues(parentID)
+	candidates, err := fetchReadyIssues(parentID)
+	if err != nil {
+		return nil, err
+	}
+	unclosedIDs, err := fetchUnclosedIssueIDs()
 	if err != nil {
 		return nil, err
 	}
 
-	var candidates []BdIssue
-	for _, issue := range issues {
-		if IsAvailableForAny(issue, issues) {
-			candidates = append(candidates, issue)
+	var result []BdIssue
+	for _, issue := range candidates {
+		if IsAvailableForAny(issue, unclosedIDs) {
+			result = append(result, issue)
 		}
 	}
-	return candidates, nil
+	return result, nil
 }
 
 // HasAnyAvailableTasks checks if there are any ready tasks regardless of design status.

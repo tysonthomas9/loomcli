@@ -884,7 +884,7 @@ func TestGenerateFleetPlanningPrompt_TaskIDSubstitutionCount(t *testing.T) {
 
 func TestGenerateFleetTaskPrompt_TaskIDSubstitutionCount(t *testing.T) {
 	taskID := "UNIQUE-TASK-XYZ-12345"
-	prompt := GenerateFleetTaskPrompt("agent", taskID, nil)
+	prompt := GenerateFleetTaskPrompt("agent", taskID, nil, "")
 	count := strings.Count(prompt, taskID)
 	if count != 4 {
 		t.Errorf("expected taskID to appear 4 times, got %d", count)

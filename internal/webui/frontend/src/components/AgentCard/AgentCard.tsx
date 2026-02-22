@@ -167,10 +167,20 @@ export function AgentCard({ agent, taskTitle, className, onClick }: AgentCardPro
       </div>
 
       <div className={styles.meta}>
-        {agent.ahead > 0 && (
-          <span className={styles.commitCount} title={`${agent.ahead} commits ahead`}>
-            +{agent.ahead}
-          </span>
+        {(agent.ahead > 0 || agent.behind > 0) && (
+          <div
+            className={styles.commitCounts}
+            title={
+              agent.ahead > 0 && agent.behind > 0
+                ? `${agent.ahead} commits ahead and ${agent.behind} commits behind`
+                : agent.ahead > 0
+                  ? `${agent.ahead} commits ahead`
+                  : `${agent.behind} commits behind`
+            }
+          >
+            {agent.ahead > 0 && <span className={styles.commitCount}>+{agent.ahead}</span>}
+            {agent.behind > 0 && <span className={styles.behindCount}>-{agent.behind}</span>}
+          </div>
         )}
         <span
           className={styles.statusLine}

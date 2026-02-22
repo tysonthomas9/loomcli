@@ -4,17 +4,14 @@
  * Story 11: As an operator, I want to monitor agent status via loom.
  * Tests loom proxy endpoints used by MonitorDashboard Agent Sidebar.
  *
- * Prerequisites:
- * - loomcli-5d0 (API test infrastructure)
- * - Loom service running in E2E stack
+ * The WebUI server proxies /api/loom/* to the Loom API server,
+ * stripping the /api/loom prefix (e.g. /api/loom/health -> /health).
  */
 
 import { test, expect, isIntegrationEnabled, generateTestId } from './api-client'
 
 // Skip if integration tests not enabled
 test.skip(!isIntegrationEnabled, 'API E2E tests require RUN_INTEGRATION_TESTS=1')
-
-const LOOM_PROXY_BASE = 'http://localhost:8081/api/loom'
 
 // Serial mode: integration test creates issues that affect loom state
 test.describe.configure({ mode: 'serial' })
@@ -32,10 +29,10 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Health Endpoint', () => {
-    test('GET /api/loom/health returns ok', async () => {
-      const response = await fetch(`${LOOM_PROXY_BASE}/health`)
+    test('GET /api/loom/health returns ok', async ({ request }) => {
+      const response = await request.get('/api/loom/health')
 
-      expect(response.ok).toBe(true)
+      expect(response.ok()).toBe(true)
 
       const body = await response.json()
 
@@ -45,10 +42,10 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Agents Endpoint', () => {
-    test('GET /api/loom/api/agents returns agent list', async () => {
-      const response = await fetch(`${LOOM_PROXY_BASE}/api/agents`)
+    test('GET /api/loom/api/agents returns agent list', async ({ request }) => {
+      const response = await request.get('/api/loom/api/agents')
 
-      expect(response.ok).toBe(true)
+      expect(response.ok()).toBe(true)
 
       const body = await response.json()
 
@@ -64,10 +61,10 @@ test.describe('Agent Monitoring (Loom)', () => {
       expect(typeof body.timestamp).toBe('string')
     })
 
-    test('agent data includes name, branch, status fields', async () => {
-      const response = await fetch(`${LOOM_PROXY_BASE}/api/agents`)
+    test('agent data includes name, branch, status fields', async ({ request }) => {
+      const response = await request.get('/api/loom/api/agents')
 
-      expect(response.ok).toBe(true)
+      expect(response.ok()).toBe(true)
 
       const body = await response.json()
 
@@ -97,10 +94,10 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Status Endpoint', () => {
-    test('GET /api/loom/api/status returns system overview', async () => {
-      const response = await fetch(`${LOOM_PROXY_BASE}/api/status`)
+    test('GET /api/loom/api/status returns system overview', async ({ request }) => {
+      const response = await request.get('/api/loom/api/status')
 
-      expect(response.ok).toBe(true)
+      expect(response.ok()).toBe(true)
 
       const body = await response.json()
 
@@ -123,10 +120,10 @@ test.describe('Agent Monitoring (Loom)', () => {
       expect(typeof body.stats.completion).toBe('number')
     })
 
-    test('status includes task counts by workflow state', async () => {
-      const response = await fetch(`${LOOM_PROXY_BASE}/api/status`)
+    test('status includes task counts by workflow state', async ({ request }) => {
+      const response = await request.get('/api/loom/api/status')
 
-      expect(response.ok).toBe(true)
+      expect(response.ok()).toBe(true)
 
       const body = await response.json()
 
@@ -158,10 +155,10 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Tasks Endpoint', () => {
-    test('GET /api/loom/api/tasks returns task distribution', async () => {
-      const response = await fetch(`${LOOM_PROXY_BASE}/api/tasks`)
+    test('GET /api/loom/api/tasks returns task distribution', async ({ request }) => {
+      const response = await request.get('/api/loom/api/tasks')
 
-      expect(response.ok).toBe(true)
+      expect(response.ok()).toBe(true)
 
       const body = await response.json()
 
@@ -196,10 +193,10 @@ test.describe('Agent Monitoring (Loom)', () => {
   })
 
   test.describe('Loom Integration', () => {
-    test('loom reflects issue changes from loom daemon', async ({ api }) => {
+    test('loom reflects issue changes from loom daemon', async ({ api, request }) => {
       // Capture initial stats from loom
-      const initialStatus = await fetch(`${LOOM_PROXY_BASE}/api/status`)
-      const initialBody = await initialStatus.json()
+      const initialResponse = await request.get('/api/loom/api/status')
+      const initialBody = await initialResponse.json()
       const initialTotal = initialBody.stats.total
 
       // Create a new issue via loom API using api fixture
@@ -214,7 +211,7 @@ test.describe('Agent Monitoring (Loom)', () => {
       // Wait for loom to sync with loom daemon
       // Loom polls periodically, so we need to retry
       await expect(async () => {
-        const response = await fetch(`${LOOM_PROXY_BASE}/api/status`)
+        const response = await request.get('/api/loom/api/status')
         const body = await response.json()
 
         // Total should increase by 1

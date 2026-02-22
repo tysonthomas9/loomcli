@@ -4,7 +4,7 @@
  */
 
 .dependencySection {
-  margin-bottom: 20px;
+  margin-bottom: 28px;
 }
 
 /* ============= Header ============= */
@@ -13,16 +13,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  padding: 10px 0;
+  margin-bottom: 16px;
 }
 
 .sectionTitle {
-  font-size: var(--font-sm);
-  font-weight: 600;
-  color: var(--color-text);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
   margin: 0;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
 }
 
 .addButton {
@@ -30,12 +31,12 @@
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  font-size: var(--font-xs);
-  font-weight: 500;
-  color: var(--color-primary);
-  background: none;
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: #fff;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
   cursor: pointer;
   transition:
     background-color var(--transition-fast),
@@ -43,8 +44,8 @@
 }
 
 .addButton:hover:not(:disabled) {
-  background-color: var(--color-primary);
-  color: white;
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
 .addButton:disabled {
@@ -72,11 +73,11 @@
 .input {
   width: 100%;
   padding: 8px 12px;
-  font-size: var(--font-sm);
+  font-size: 14px;
   font-family: inherit;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background-color: var(--color-bg);
+  border-radius: 8px;
+  background-color: #fff;
   color: var(--color-text);
   outline: none;
   transition:
@@ -102,13 +103,13 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .cancelButton {
   padding: 6px 12px;
-  font-size: var(--font-xs);
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--color-text-secondary);
   background: none;
   border: 1px solid var(--color-border);
@@ -131,8 +132,8 @@
 
 .confirmButton {
   padding: 6px 12px;
-  font-size: var(--font-xs);
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   color: white;
   background-color: var(--color-primary);
   border: 1px solid var(--color-primary);
@@ -162,9 +163,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--color-border);
-  font-size: var(--font-sm);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 14px;
 }
 
 .dependencyItem:last-child {
@@ -177,7 +178,7 @@
 
 .dependencyId {
   font-family: var(--font-mono);
-  font-size: var(--font-xs);
+  font-size: 11px;
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
@@ -191,7 +192,7 @@
 }
 
 .dependencyType {
-  font-size: var(--font-xs);
+  font-size: 11px;
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
@@ -237,7 +238,7 @@
 /* ============= Empty State ============= */
 
 .emptyMessage {
-  font-size: var(--font-sm);
+  font-size: 13px;
   color: var(--color-text-muted);
   margin: 0;
   padding: 8px 0;

@@ -37,7 +37,7 @@ test.describe('Issue Lifecycle', () => {
       createdIssueIds.push(created.id)
 
       // Verify created issue fields
-      expect(created.id).toMatch(/^bd-[a-z0-9]+$/)
+      expect(created.id).toMatch(/^[a-z]+-[a-z0-9]+$/)
       expect(created.title).toBe(title)
       expect(created.issue_type).toBe('bug')
       expect(created.priority).toBe(1)
@@ -275,7 +275,7 @@ test.describe('Issue Lifecycle', () => {
   test.describe('Validation Errors', () => {
     test('reject: missing title returns 400', async ({ request }) => {
       // Attempt to create issue without title using raw request
-      const response = await request.post('http://localhost:8081/api/issues', {
+      const response = await request.post('/api/issues', {
         data: {
           title: '', // Empty title
           issue_type: 'task',
@@ -300,7 +300,7 @@ test.describe('Issue Lifecycle', () => {
       createdIssueIds.push(created.id)
 
       // Try to update with invalid status using raw request
-      const response = await request.patch(`http://localhost:8081/api/issues/${created.id}`, {
+      const response = await request.patch(`/api/issues/${created.id}`, {
         data: {
           status: 'invalid_status',
         },

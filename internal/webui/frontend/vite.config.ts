@@ -39,17 +39,20 @@ export default defineConfig(({ mode }) => ({
     port: 3000,
     // Fail fast if port is in use (ensures proxy aligns with Go backend)
     strictPort: true,
-    // Proxy API calls to Go backend during development
-    proxy: {
-      "/api": {
-        target: "http://localhost:8080",
-        changeOrigin: true,
-      },
-      "/health": {
-        target: "http://localhost:8080",
-        changeOrigin: true,
-      },
-    },
+    // Proxy API calls to Go backend during development.
+    // Disabled during Playwright tests so page.route() mocks can intercept requests.
+    proxy: process.env.PLAYWRIGHT_TEST
+      ? undefined
+      : {
+          "/api": {
+            target: "http://localhost:8080",
+            changeOrigin: true,
+          },
+          "/health": {
+            target: "http://localhost:8080",
+            changeOrigin: true,
+          },
+        },
   },
 
   preview: {

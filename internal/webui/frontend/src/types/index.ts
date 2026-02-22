@@ -134,7 +134,7 @@ export type {
 export type { Statistics, EpicStatus } from './statistics';
 
 // Filter types
-export type { SortPolicy, IssueFilter, WorkFilter, StaleFilter } from './filter';
+export type { SortPolicy, WorkFilter } from './filter';
 export { SortPolicyHybrid, SortPolicyPriority, SortPolicyOldest } from './filter';
 
 // API types

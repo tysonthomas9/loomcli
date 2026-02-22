@@ -45,8 +45,8 @@
 .kanbanShell {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
+  flex: 0 0 auto; /* Size to content instead of filling space */
+  overflow: visible; /* Let parent handle scrolling */
 }
 
 @media (width <= 1024px) {

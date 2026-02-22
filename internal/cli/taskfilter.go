@@ -57,21 +57,14 @@ func IsWorkableTask(issue BdIssue) bool {
 	return IsOpen(issue) && !IsEpic(issue)
 }
 
-// --- Level 3: Agent predicates (with context from full issue list) ---
+// --- Level 3: Agent predicates (with context from unclosed issue set) ---
 
-// HasOpenBlockersInReadyList returns true if any dependency is a blocking
-// relationship where the blocker is still unresolved.
-//
-// IMPORTANT: allIssues must come from "bd ready" which only returns open/ready
-// issues. A blocker NOT in the list is assumed resolved (closed/tombstone).
-// Only blockers present and still open block work.
-func HasOpenBlockersInReadyList(deps []Dependency, allIssues []BdIssue) bool {
-	openIDs := make(map[string]bool, len(allIssues))
-	for _, issue := range allIssues {
-		openIDs[issue.ID] = true
-	}
+// HasUnclosedBlockers returns true if any blocking dependency is still unclosed.
+// unclosedIDs is a set of issue IDs that have NOT been closed yet.
+// A blocker is only considered resolved when its issue is closed.
+func HasUnclosedBlockers(deps []Dependency, unclosedIDs map[string]bool) bool {
 	for _, dep := range deps {
-		if dep.Type == "blocks" && openIDs[dep.DependsOnID] {
+		if dep.Type == "blocks" && unclosedIDs[dep.DependsOnID] {
 			return true
 		}
 	}
@@ -79,24 +72,24 @@ func HasOpenBlockersInReadyList(deps []Dependency, allIssues []BdIssue) bool {
 }
 
 // IsAvailableForPlanning returns true if the issue should be picked up by a
-// planning agent: workable, no open blockers, and needs a plan.
-func IsAvailableForPlanning(issue BdIssue, allIssues []BdIssue) bool {
+// planning agent: workable, no unclosed blockers, and needs a plan.
+func IsAvailableForPlanning(issue BdIssue, unclosedIDs map[string]bool) bool {
 	return IsWorkableTask(issue) &&
-		!HasOpenBlockersInReadyList(issue.Dependencies, allIssues) &&
+		!HasUnclosedBlockers(issue.Dependencies, unclosedIDs) &&
 		NeedsPlan(issue)
 }
 
 // IsAvailableForImplementation returns true if the issue should be picked up by
-// an implementation agent: workable, no open blockers, and has an approved design.
-func IsAvailableForImplementation(issue BdIssue, allIssues []BdIssue) bool {
+// an implementation agent: workable, no unclosed blockers, and has an approved design.
+func IsAvailableForImplementation(issue BdIssue, unclosedIDs map[string]bool) bool {
 	return IsWorkableTask(issue) &&
-		!HasOpenBlockersInReadyList(issue.Dependencies, allIssues) &&
+		!HasUnclosedBlockers(issue.Dependencies, unclosedIDs) &&
 		ReadyToImplement(issue)
 }
 
 // IsAvailableForAny returns true if the issue can be picked up by any agent
-// regardless of design status: workable and no open blockers.
-func IsAvailableForAny(issue BdIssue, allIssues []BdIssue) bool {
+// regardless of design status: workable and no unclosed blockers.
+func IsAvailableForAny(issue BdIssue, unclosedIDs map[string]bool) bool {
 	return IsWorkableTask(issue) &&
-		!HasOpenBlockersInReadyList(issue.Dependencies, allIssues)
+		!HasUnclosedBlockers(issue.Dependencies, unclosedIDs)
 }

@@ -339,7 +339,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, config.TerminalCmd, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.

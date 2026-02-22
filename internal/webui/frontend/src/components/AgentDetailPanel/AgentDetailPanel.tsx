@@ -235,82 +235,95 @@ export function AgentDetailPanel({
       >
         {agent && parsed ? (
           <>
-            {/* Sticky Header */}
-            <div className={styles.stickyHeaderWrapper}>
-              <div
-                className={styles.agentAvatar}
-                style={{
-                  backgroundColor: getAvatarColor(agent.name),
-                  color: shouldUseWhiteText(getAvatarColor(agent.name)) ? '#fff' : '#1f2937',
-                }}
-              >
-                {agent.name.charAt(0).toUpperCase()}
+            <div className={styles.stickyTop}>
+              {/* Sticky Header */}
+              <div className={styles.stickyHeaderWrapper}>
+                <div
+                  className={styles.agentAvatar}
+                  style={{
+                    backgroundColor: getAvatarColor(agent.name),
+                    color: shouldUseWhiteText(getAvatarColor(agent.name)) ? '#fff' : '#1f2937',
+                  }}
+                >
+                  {agent.name.charAt(0).toUpperCase()}
+                </div>
+                <div className={styles.headerInfo}>
+                  <h2 className={styles.agentName}>{agent.name}</h2>
+                  <div className={styles.statusRow}>
+                    <span
+                      className={styles.statusDot}
+                      style={{ backgroundColor: getStatusDotColor(parsed.type) }}
+                      data-active={isActive}
+                      aria-hidden="true"
+                    />
+                    <span className={styles.statusLabel}>
+                      {getStatusLabel(parsed.type)}
+                      {parsed.duration && ` (${parsed.duration})`}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={styles.closeButton}
+                  onClick={onClose}
+                  aria-label="Close panel"
+                >
+                  <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M4 4l8 8M12 4l-8 8"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
               </div>
-              <div className={styles.headerInfo}>
-                <h2 className={styles.agentName}>{agent.name}</h2>
-                <div className={styles.statusRow}>
-                  <span
-                    className={styles.statusDot}
-                    style={{ backgroundColor: getStatusDotColor(parsed.type) }}
-                    data-active={isActive}
-                    aria-hidden="true"
-                  />
-                  <span className={styles.statusLabel}>
-                    {getStatusLabel(parsed.type)}
-                    {parsed.duration && ` (${parsed.duration})`}
+
+              {/* Metadata Bar (hide when branch matches agent name to avoid duplicate label) */}
+              {agent.branch && agent.branch !== agent.name && (
+                <div className={styles.metadataBar}>
+                  <span className={styles.metadataItem}>
+                    <span className={styles.branchName}>{agent.branch}</span>
                   </span>
                 </div>
+              )}
+
+              {/* Tab Bar */}
+              <div className={styles.tabBar} role="tablist" aria-label="Agent detail tabs">
+                <button
+                  type="button"
+                  className={`${styles.tab} ${activeTab === 'info' ? styles.activeTab : ''}`}
+                  onClick={() => setActiveTab('info')}
+                  aria-selected={activeTab === 'info'}
+                  role="tab"
+                  id="agent-panel-tab-info"
+                  aria-controls="agent-panel-tabpanel-info"
+                >
+                  Info
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.tab} ${activeTab === 'logs' ? styles.activeTab : ''}`}
+                  onClick={() => setActiveTab('logs')}
+                  aria-selected={activeTab === 'logs'}
+                  role="tab"
+                  id="agent-panel-tab-logs"
+                  aria-controls="agent-panel-tabpanel-logs"
+                >
+                  Logs
+                </button>
               </div>
-              <button
-                type="button"
-                className={styles.closeButton}
-                onClick={onClose}
-                aria-label="Close panel"
-              >
-                <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
-                  <path
-                    d="M4 4l8 8M12 4l-8 8"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            {/* Metadata Bar */}
-            <div className={styles.metadataBar}>
-              <span className={styles.metadataItem}>
-                <span className={styles.branchName}>{agent.branch}</span>
-              </span>
-            </div>
-
-            {/* Tab Bar */}
-            <div className={styles.tabBar}>
-              <button
-                type="button"
-                className={`${styles.tab} ${activeTab === 'info' ? styles.activeTab : ''}`}
-                onClick={() => setActiveTab('info')}
-                aria-selected={activeTab === 'info'}
-                role="tab"
-              >
-                Info
-              </button>
-              <button
-                type="button"
-                className={`${styles.tab} ${activeTab === 'logs' ? styles.activeTab : ''}`}
-                onClick={() => setActiveTab('logs')}
-                aria-selected={activeTab === 'logs'}
-                role="tab"
-              >
-                Logs
-              </button>
             </div>
 
             {/* Tab Content */}
             {activeTab === 'info' ? (
               /* Info Tab - Scrollable Content */
-              <div className={styles.scrollableContent}>
+              <div
+                className={styles.scrollableContent}
+                id="agent-panel-tabpanel-info"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-info"
+              >
                 {/* Current Task Section */}
                 <div className={styles.section}>
                   <h3 className={styles.sectionTitle}>Current Task</h3>
@@ -438,7 +451,12 @@ export function AgentDetailPanel({
               </div>
             ) : (
               /* Logs Tab */
-              <div className={styles.logsContainer}>
+              <div
+                className={styles.logsContainer}
+                id="agent-panel-tabpanel-logs"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-logs"
+              >
                 <div className={styles.logsMetaRow}>
                   <span className={styles.logsModeBadge} data-mode={logMode}>
                     {logMode === 'tmux'

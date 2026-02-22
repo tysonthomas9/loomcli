@@ -8,7 +8,7 @@ let authToken: string | null = null;
 export type AuthState = 'initializing' | 'authenticated' | 'disabled' | 'failed';
 let authState: AuthState = 'initializing';
 type AuthStateListener = { callback: (state: AuthState) => void; active: boolean };
-let authStateListeners: AuthStateListener[] = [];
+const authStateListeners: AuthStateListener[] = [];
 
 // Promise deduplication for concurrent re-auth attempts
 let pendingAuthPromise: Promise<void> | null = null;

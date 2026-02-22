@@ -5,7 +5,7 @@
  * (generateTestId, waitFor, isIntegrationEnabled) without requiring
  * a running Playwright context or Podman Compose stack.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 // Mock @playwright/test so importing api-client.ts does not fail in vitest.
 // The LoomApiClient class itself depends on Playwright's APIRequestContext,

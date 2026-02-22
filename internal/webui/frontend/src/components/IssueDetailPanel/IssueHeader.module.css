@@ -4,7 +4,7 @@
  */
 
 .issueHeader {
-  padding: 16px 20px 12px;
+  padding: 0 var(--panel-padding-md) var(--panel-padding-md);
 }
 
 /* Sticky mode - no bottom border, handled by wrapper */
@@ -15,8 +15,11 @@
 .topRow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 10px;
+  min-height: 64px;
+  margin: 0 calc(var(--panel-padding-md) * -1) 20px;
+  padding: 0 var(--panel-padding-md);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 /* Priority badge in header */
@@ -24,14 +27,17 @@
   display: inline-flex;
   align-items: center;
   padding: 2px 6px;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
+  border-radius: 4px;
   background-color: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
   cursor: pointer;
-  border: none;
-  transition: background-color var(--transition-fast);
+  border: 1px solid var(--color-border-light);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .priorityBadge:hover {
@@ -40,37 +46,41 @@
 
 .priorityBadge[data-priority='0'],
 .priorityBadge[data-priority='1'] {
-  background-color: var(--color-danger-bg);
-  color: var(--color-danger);
+  background-color: var(--color-priority-0);
+  color: #fff;
+  border-color: transparent;
 }
 
 .priorityBadge[data-priority='0']:hover,
 .priorityBadge[data-priority='1']:hover {
-  background-color: #fecaca;
+  background-color: color-mix(in srgb, var(--color-priority-0) 88%, black);
 }
 
 .priorityBadge[data-priority='2'] {
   background-color: var(--color-warning-bg);
-  color: var(--color-warning);
+  color: var(--color-text);
 }
 
 .priorityBadge[data-priority='2']:hover {
-  background-color: #fde68a;
+  background-color: color-mix(in srgb, var(--color-warning-bg) 88%, black);
 }
 
 .issueId {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
   font-family: var(--font-family-mono);
+  line-height: 1;
 }
 
 .statusBadge {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
   background-color: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
 }
@@ -155,11 +165,15 @@
   outline-offset: 2px;
 }
 
+.fullscreenButton + .closeButton {
+  margin-left: 0;
+}
+
 .title {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text);
+  font-size: 24px;
+  font-weight: 700;
+  color: #111827;
   margin: 0;
-  line-height: var(--line-height-tight);
+  line-height: 1.25;
   word-break: break-word;
 }

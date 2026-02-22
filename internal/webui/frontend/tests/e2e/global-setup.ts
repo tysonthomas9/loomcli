@@ -24,7 +24,7 @@ async function waitForHealth(url: string): Promise<void> {
     try {
       const response = await fetch(url)
       if (response.ok) {
-        console.log(`✓ ${url} is healthy`)
+        console.log(`Health check passed: ${url}`)
         return
       }
       lastError = new Error(`HTTP ${response.status}`)
@@ -44,9 +44,43 @@ async function globalSetup(config: FullConfig): Promise<void> {
     return
   }
 
+  const localServer = !!process.env.LOOM_LOCAL_SERVER
+  const baseURL = process.env.LOOM_BASE_URL || 'http://localhost:8080'
+
+  if (localServer) {
+    // Local mode: just health-check the running loom serve instance
+    console.log(`Checking local server at ${baseURL}...`)
+    await waitForHealth(`${baseURL}/health`)
+
+    await fs.writeFile(STATE_FILE, JSON.stringify({
+      startedAt: new Date().toISOString(),
+      webUrl: baseURL,
+      loomUrl: baseURL,
+      composeDir: COMPOSE_DIR,
+      localMode: true,
+    }, null, 2))
+
+    console.log('Local server is healthy - E2E environment ready!')
+    return
+  }
+
+  // webServer mode (Playwright manages server lifecycle) — no Podman needed.
+  // Just write state file so teardown doesn't error.
+  if (!process.env.PODMAN_COMPOSE) {
+    console.log('webServer mode — Playwright manages server lifecycle')
+    await fs.writeFile(STATE_FILE, JSON.stringify({
+      startedAt: new Date().toISOString(),
+      webUrl: baseURL,
+      loomUrl: baseURL,
+      composeDir: COMPOSE_DIR,
+      localMode: true,
+    }, null, 2))
+    return
+  }
+
+  // Podman Compose mode (container-based integration tests)
   console.log('Starting E2E integration environment...')
 
-  // Start Podman Compose stack
   console.log('Starting Podman Compose stack...')
   try {
     await exec('podman-compose -f compose.e2e.yml up -d --build', {
@@ -71,6 +105,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
     webUrl: 'http://localhost:8081',
     loomUrl: 'http://localhost:9000',
     composeDir: COMPOSE_DIR,
+    localMode: false,
   }, null, 2))
 
   console.log('E2E environment ready!')

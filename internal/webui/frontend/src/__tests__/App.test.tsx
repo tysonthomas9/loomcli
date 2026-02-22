@@ -202,36 +202,11 @@ vi.mock('@/hooks', () => ({
     count: 0,
     hasSelection: false,
   })),
-  useFilteredSelection: vi.fn(() => ({
-    selectedIds: new Set<string>(),
-    isSelected: vi.fn(() => false),
-    toggle: vi.fn(),
-    selectAll: vi.fn(),
-    deselectAll: vi.fn(),
-    clear: vi.fn(),
-    count: 0,
-    hasSelection: false,
-    isAllSelected: false,
-    isIndeterminate: false,
-    selectFiltered: vi.fn(),
-  })),
   useBulkClose: vi.fn(() => ({
     closeSelected: vi.fn(),
     isClosing: false,
     error: null,
   })),
-  useBulkPriority: vi.fn(() => ({
-    setPriority: vi.fn(),
-    isUpdating: false,
-    error: null,
-  })),
-  PRIORITY_OPTIONS: [
-    { value: 0, label: 'Critical', icon: '!!!' },
-    { value: 1, label: 'High', icon: '!!' },
-    { value: 2, label: 'Medium', icon: '!' },
-    { value: 3, label: 'Low', icon: '' },
-    { value: 4, label: 'None', icon: '' },
-  ],
   useGraphData: vi.fn(() => ({
     nodes: [],
     edges: [],
@@ -246,12 +221,6 @@ vi.mock('@/hooks', () => ({
   useAgents: mockUseAgents,
   useAgentContext: mockUseAgentContext,
   AgentProvider: ({ children }: { children: React.ReactNode }) => children,
-  useStats: vi.fn(() => ({
-    data: { open: 0, in_progress: 0, ready: 0, closed: 0 },
-    loading: false,
-    error: null,
-    refetch: vi.fn(),
-  })),
   useRecentAssignees: vi.fn(() => ({
     recentAssignees: [],
     addRecentAssignee: vi.fn(),
@@ -936,10 +905,9 @@ describe('App', () => {
 
       render(<App />);
 
-      // FilterBar should be rendered with its test id
+      // FilterBar should be rendered with its test id (priority/type hidden in header variant)
       expect(screen.getByTestId('filter-bar')).toBeInTheDocument();
-      expect(screen.getByTestId('priority-filter')).toBeInTheDocument();
-      expect(screen.getByTestId('type-filter')).toBeInTheDocument();
+      expect(screen.getByTestId('groupby-filter')).toBeInTheDocument();
     });
 
     it('renders filter navigation even in loading state', () => {

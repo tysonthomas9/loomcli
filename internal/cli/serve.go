@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -36,7 +37,7 @@ var (
 	serveRedisPassword string
 	serveAPIKey        string
 	serveFleetAPIKey   string
-	serveNoAuth        bool
+	serveAuth          bool
 	serveHSTS          bool
 	serveDev           bool
 	serveDevFrontDir   string
@@ -129,7 +130,7 @@ func init() {
 	defaultFleetAPIKey := os.Getenv("LOOM_FLEET_API_KEY")
 	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", defaultFleetAPIKey, "API key for fleet worker registration (required for fleet register endpoint)")
 
-	serveCmd.Flags().BoolVar(&serveNoAuth, "no-auth", false, "Disable WebUI API authentication (not recommended)")
+	serveCmd.Flags().BoolVar(&serveAuth, "auth", false, "Enable WebUI API authentication")
 	serveCmd.Flags().BoolVar(&serveHSTS, "hsts", false, "Enable HSTS header (use when behind TLS-terminating proxy)")
 	serveCmd.Flags().BoolVar(&serveDev, "dev", false, "Development mode: serve frontend from disk, enable CORS for Vite dev server")
 	serveCmd.Flags().StringVar(&serveDevFrontDir, "dev-frontend-dir", "", "Frontend directory to serve in dev mode (default: internal/webui/frontend/dist)")
@@ -138,6 +139,12 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) {
+	// Check tmux is installed (required for terminal relay)
+	if _, err := exec.LookPath("tmux"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: tmux is required but not found in PATH.\nInstall it with: brew install tmux (macOS) or apt install tmux (Linux)\n")
+		os.Exit(1)
+	}
+
 	// Cache collectMonitorData results to avoid redundant shell-outs from
 	// concurrent API requests. The frontend polls 3 endpoints every 5s;
 	// without this cache each poll cycle spawns ~60-90 subprocesses.
@@ -220,15 +227,17 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Printf("WARNING: Server bound to %s — exposed to network. Ensure this is intentional.", serveBindAddr)
 	}
 
-	// Resolve backend name for terminal sessions
+	// Resolve backend name for terminal sessions.
+	// ResolveBackendName() checks: flag > env > project-local loom.yaml > global config > default.
 	resolvedBackend := ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
+	terminalCmd := fmt.Sprintf("loom lead --backend %s", resolvedBackend)
 
 	// Start webui server in goroutine (unless --no-webui)
 	webuiErr := make(chan error, 1)
 	if !serveNoWebUI {
-		if serveNoAuth {
-			log.Printf("WARNING: WebUI API authentication is disabled (--no-auth)")
+		if !serveAuth {
+			log.Printf("WebUI API authentication is disabled (enable with --auth)")
 		}
 		go func() {
 			cfg := webui.ServerConfig{
@@ -236,13 +245,13 @@ func runServe(cmd *cobra.Command, args []string) {
 				BindAddress:    serveBindAddr,
 				SocketPath:     serveWebUISocket,
 				LoomServerURL:  fmt.Sprintf("http://localhost:%d", servePort),
-				TerminalCmd:    resolvedBackend,
+				TerminalCmd:    terminalCmd,
 				FleetEnabled:   serveRedisAddr != "",
 				FleetRedis:     fleetRedisConfig,
 				FleetJWTKey:    fleetJWTKey,
 				FleetAPIKey:    serveFleetAPIKey,
 				APIKey:         serveAPIKey,
-				AuthEnabled:    !serveNoAuth,
+				AuthEnabled:    serveAuth,
 				HSTSEnabled:    serveHSTS,
 				DevMode:        serveDev,
 				DevFrontendDir: serveDevFrontDir,

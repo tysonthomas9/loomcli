@@ -736,6 +736,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 	t.Run("tasks without design need planning", func(t *testing.T) {
 		mock := NewFlexibleCommandMock(t)
 		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: LoadFixture(t, "bd_ready_planning.json")})
+		mock.AddStub("bd", []string{"list"}, CommandResult{Stdout: "[]"})
 		mock.Install()
 
 		hasTasks, err := HasAvailablePlanningTasks("")
@@ -751,6 +752,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 	t.Run("tasks with design ready for implementation", func(t *testing.T) {
 		mock := NewFlexibleCommandMock(t)
 		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: LoadFixture(t, "bd_ready_implementation.json")})
+		mock.AddStub("bd", []string{"list"}, CommandResult{Stdout: "[]"})
 		mock.Install()
 
 		hasTasks, err := HasAvailableImplementationTasks("")
@@ -819,6 +821,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		]`
 		mock := NewFlexibleCommandMock(t)
 		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: needsRevisionJSON})
+		mock.AddStub("bd", []string{"list"}, CommandResult{Stdout: "[]"})
 		mock.Install()
 
 		hasTasks, err := HasAvailablePlanningTasks("")
@@ -837,6 +840,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		]`
 		mock := NewFlexibleCommandMock(t)
 		mock.AddStub("bd", []string{"ready"}, CommandResult{Stdout: epicJSON})
+		mock.AddStub("bd", []string{"list"}, CommandResult{Stdout: "[]"})
 		mock.Install()
 
 		hasTasks, err := HasAvailableImplementationTasks("")

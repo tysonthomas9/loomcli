@@ -11,6 +11,36 @@ import (
 	"time"
 )
 
+// setTmuxRemainOnExit sets remain-on-exit globally so tmux panes stay alive
+// even when the loom command exits (loom is not installed in CI environments).
+// It starts a keepalive tmux session if no server is running (the tmux server
+// exits when the last session is destroyed, so we need our own).
+// The original setting and keepalive session are cleaned up via t.Cleanup.
+func setTmuxRemainOnExit(t *testing.T) {
+	t.Helper()
+
+	// Ensure a tmux server is running. If no server exists, "tmux set -g" fails silently.
+	// Start a keepalive session that sleeps - this guarantees a server for our global setting.
+	keepalive := fmt.Sprintf("loom-test-keepalive-%d", os.Getpid())
+	if err := exec.Command("tmux", "has-session", "-t", keepalive).Run(); err != nil {
+		exec.Command("tmux", "new-session", "-d", "-s", keepalive, "sleep", "300").Run()
+		t.Cleanup(func() {
+			exec.Command("tmux", "kill-session", "-t", keepalive).Run()
+		})
+	}
+
+	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
+	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
+	t.Cleanup(func() {
+		val := strings.TrimSpace(string(origRemain))
+		if val == "" || val == "off" {
+			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
+		} else {
+			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
+		}
+	})
+}
+
 func TestHasAvailablePlanningTasks(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -434,11 +464,24 @@ func TestShellQuote(t *testing.T) {
 }
 
 func TestIsTmuxAvailable(t *testing.T) {
-	// This test checks the actual system - tmux may or may not be installed
-	// We just verify the function doesn't panic and returns a bool
-	result := IsTmuxAvailable()
-	// Result is either true or false depending on system
-	t.Logf("IsTmuxAvailable() = %v", result)
+	t.Run("reflects_system_state", func(t *testing.T) {
+		result := IsTmuxAvailable()
+		_, lookupErr := exec.LookPath("tmux")
+		expected := lookupErr == nil
+		if result != expected {
+			t.Errorf("IsTmuxAvailable()=%v but LookPath err=%v", result, lookupErr)
+		}
+	})
+
+	t.Run("false_when_overridden", func(t *testing.T) {
+		orig := IsTmuxAvailable
+		IsTmuxAvailable = func() bool { return false }
+		t.Cleanup(func() { IsTmuxAvailable = orig })
+
+		if IsTmuxAvailable() {
+			t.Error("expected false when overridden")
+		}
+	})
 }
 
 func TestGetTerminalSize(t *testing.T) {
@@ -1445,6 +1488,70 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 	}
 }
 
+func TestRunAutoModeLoop_WithoutTmux(t *testing.T) {
+	// Verify RunAutoModeLoop works when tmux is unavailable (JSON streaming fallback).
+	orig := IsTmuxAvailable
+	IsTmuxAvailable = func() bool { return false }
+	t.Cleanup(func() { IsTmuxAvailable = orig })
+
+	if IsTmuxAvailable() {
+		t.Fatal("IsTmuxAvailable should be false")
+	}
+
+	oldExec := execCommand
+	oldClaude := claudeNonInteractiveInvoker
+	t.Cleanup(func() {
+		execCommand = oldExec
+		claudeNonInteractiveInvoker = oldClaude
+	})
+
+	tmpDir := t.TempDir()
+	setupLockFile(t, tmpDir)
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		return CommandResult{
+			Stdout: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task", Status: "open", Design: "Design"},
+			}),
+		}
+	}
+
+	claudeInvocations := 0
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+		claudeInvocations++
+		UpdateLockTask(workDir, fmt.Sprintf("mock-%d", claudeInvocations), "Mock Task")
+		return nil
+	}
+
+	shutdown := make(chan struct{})
+	opts := AutoModeOptions{
+		Interval:     1,
+		MaxTasks:     2,
+		IdleTimeout:  0,
+		AgentType:    "task",
+		AgentName:    "test",
+		WorktreePath: tmpDir,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		RunAutoModeLoop(opts, shutdown)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good - completed without tmux
+	case <-time.After(10 * time.Second):
+		close(shutdown)
+		t.Fatal("RunAutoModeLoop did not exit after max tasks (without tmux)")
+	}
+
+	if claudeInvocations != 2 {
+		t.Errorf("Claude was invoked %d times, want 2", claudeInvocations)
+	}
+}
+
 func TestRunAutoModeLoop_GracefulShutdownNoTasks(t *testing.T) {
 	// This test verifies graceful shutdown when no tasks are available.
 	// Note: Testing actual IdleTimeout would require waiting 1+ minutes,
@@ -2050,6 +2157,9 @@ func TestStartTmuxSession_Success(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
+
 	t.Cleanup(func() {
 		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
 	})
@@ -2070,6 +2180,9 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 	if exec.Command("tmux", "-V").Run() != nil {
 		t.Skip("tmux not available")
 	}
+
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
 
 	tmpDir := t.TempDir()
 	sessionName := fmt.Sprintf("loom-test-kill-%d", os.Getpid())
@@ -2113,6 +2226,9 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 	if exec.Command("tmux", "-V").Run() != nil {
 		t.Skip("tmux not available")
 	}
+
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
 
 	// Create a temp dir whose name contains shell metacharacters
 	baseDir := t.TempDir()
@@ -2287,16 +2403,16 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 // ============================================================================
 
 // TestHasOpenBlockers is kept for backward compatibility but delegates to
-// HasOpenBlockersInReadyList (now in taskfilter.go). Comprehensive tests
-// are in taskfilter_test.go TestHasOpenBlockersInReadyList.
+// HasUnclosedBlockers (now in taskfilter.go). Comprehensive tests
+// are in taskfilter_test.go TestHasUnclosedBlockers.
 func TestHasOpenBlockers(t *testing.T) {
-	allIssues := []BdIssue{{ID: "T-0", Status: "open"}}
-	got := HasOpenBlockersInReadyList(
+	unclosedIDs := map[string]bool{"T-0": true}
+	got := HasUnclosedBlockers(
 		[]Dependency{{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"}},
-		allIssues,
+		unclosedIDs,
 	)
 	if !got {
-		t.Error("expected open blocker to be detected")
+		t.Error("expected unclosed blocker to be detected")
 	}
 }
 
@@ -3332,19 +3448,7 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	// Set remain-on-exit globally so the pane stays alive even when the loom
-	// command exits (loom doesn't exist in test env, so the command fails quickly).
-	// Save and restore the original setting.
-	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
-	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
-	t.Cleanup(func() {
-		val := strings.TrimSpace(string(origRemain))
-		if val == "" || val == "off" {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
-		} else {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
-		}
-	})
+	setTmuxRemainOnExit(t)
 
 	err := startTmuxSession(sessionName, opts, logFile)
 	if err != nil {
@@ -3400,17 +3504,7 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	// Set remain-on-exit globally so the pane stays alive
-	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
-	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
-	t.Cleanup(func() {
-		val := strings.TrimSpace(string(origRemain))
-		if val == "" || val == "off" {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
-		} else {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
-		}
-	})
+	setTmuxRemainOnExit(t)
 
 	err := startTmuxSession(sessionName, opts, logFile)
 	if err != nil {
@@ -3430,9 +3524,9 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 	if !strings.Contains(paneCmd, "TERM=dumb") {
 		t.Errorf("Claude backend should have TERM=dumb prefix, got: %s", paneCmd)
 	}
-	// Command should NOT contain --backend flag (claude is default)
-	if strings.Contains(paneCmd, "--backend") {
-		t.Errorf("Claude backend should NOT have --backend flag, got: %s", paneCmd)
+	// Command should always contain --backend flag (explicitly propagated to subprocess)
+	if !strings.Contains(paneCmd, "--backend") {
+		t.Errorf("Command should contain --backend flag, got: %s", paneCmd)
 	}
 	// Command should contain --daemon-mode
 	if !strings.Contains(paneCmd, "--daemon-mode") {
@@ -3467,9 +3561,13 @@ func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				// Capture the full command args (name is first arg in slice)
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				// Capture only the first call (bd ready) args for parentID verification
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
@@ -3526,9 +3624,13 @@ func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				// Capture the full command args (name is first arg in slice)
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				// Capture only the first call (bd ready) args for parentID verification
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
@@ -3585,9 +3687,13 @@ func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				// Capture the full command args (name is first arg in slice)
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				// Capture only the first call (bd ready) args for parentID verification
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},
@@ -3644,8 +3750,12 @@ func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
@@ -3706,8 +3816,12 @@ func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
@@ -3768,8 +3882,12 @@ func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				return CommandResult{
 					Stdout: mustJSON([]BdIssue{
 						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},
@@ -3845,17 +3963,7 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 				ParentID:     tt.parentID,
 			}
 
-			// Set remain-on-exit globally so the pane stays alive
-			origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
-			exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
-			t.Cleanup(func() {
-				val := strings.TrimSpace(string(origRemain))
-				if val == "" || val == "off" {
-					exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
-				} else {
-					exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
-				}
-			})
+			setTmuxRemainOnExit(t)
 
 			err := startTmuxSession(sessionName, opts, logFile)
 			if err != nil {
@@ -4647,6 +4755,9 @@ func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
+
 	tmpDir := t.TempDir()
 	sessionName := fmt.Sprintf("loom-test-dims-%d", os.Getpid())
 	logFile := filepath.Join(tmpDir, "test.log")
@@ -4665,6 +4776,9 @@ func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("startTmuxSession failed: %v", err)
 	}
+
+	// Give tmux a moment to set up
+	time.Sleep(300 * time.Millisecond)
 
 	// Query the window dimensions from the created tmux session
 	out, err := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_width} #{window_height}").Output()
@@ -4703,6 +4817,9 @@ func TestStartTmuxSession_PipePaneAndFocusEvents(t *testing.T) {
 	if !IsTmuxAvailable() {
 		t.Skip("tmux not available")
 	}
+
+	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
+	setTmuxRemainOnExit(t)
 
 	tmpDir := t.TempDir()
 	sessionName := fmt.Sprintf("loom-test-pipe-%d", os.Getpid())
@@ -4852,6 +4969,7 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
+		BackoffBase:  10 * time.Millisecond,
 	}
 
 	done := make(chan struct{})
@@ -4863,7 +4981,7 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 	select {
 	case <-done:
 		// Good - should have exited after 3 consecutive no-progress sessions
-	case <-time.After(120 * time.Second):
+	case <-time.After(30 * time.Second):
 		close(shutdown)
 		t.Fatal("RunAutoModeLoop did not exit after 3 consecutive no-progress sessions")
 	}
@@ -4873,4 +4991,3 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 		t.Errorf("Expected 3 Claude invocations, got %d", claudeInvocations)
 	}
 }
-

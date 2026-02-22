@@ -46,6 +46,7 @@ vi.mock('@/hooks', async (importOriginal) => {
 // Mock xterm.js (used by LogViewer)
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
+    options: Record<string, unknown> = { disableStdin: true };
     open = vi.fn();
     dispose = vi.fn();
     write = vi.fn();
@@ -53,6 +54,7 @@ vi.mock('@xterm/xterm', () => {
     loadAddon = vi.fn();
     scrollToBottom = vi.fn();
     onScroll = vi.fn(() => ({ dispose: vi.fn() }));
+    onData = vi.fn(() => ({ dispose: vi.fn() }));
     buffer = { active: { viewportY: 0, baseY: 0 } };
   }
   return { Terminal: MockTerminal };
@@ -446,8 +448,9 @@ describe('IssueDetailPanel', () => {
   });
 
   describe('BlockingBanner', () => {
-    it('shows blocking banner when issue has open dependencies', () => {
+    it('shows blocking banner when issue status is blocked and has open dependencies', () => {
       const mockIssue = createTestIssueDetails({
+        status: 'blocked',
         dependencies: [
           createTestDependency({ id: 'dep-1', status: 'open' }),
           createTestDependency({ id: 'dep-2', status: 'open' }),
@@ -461,6 +464,7 @@ describe('IssueDetailPanel', () => {
 
     it('shows singular text when blocked by 1 issue', () => {
       const mockIssue = createTestIssueDetails({
+        status: 'blocked',
         dependencies: [createTestDependency({ id: 'dep-1', status: 'open' })],
       });
       render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
@@ -468,8 +472,21 @@ describe('IssueDetailPanel', () => {
       expect(banner).toHaveTextContent('Blocked by 1 issue');
     });
 
+    it('does not show banner when status is not blocked even with open dependencies', () => {
+      const mockIssue = createTestIssueDetails({
+        status: 'open',
+        dependencies: [
+          createTestDependency({ id: 'dep-1', status: 'open' }),
+          createTestDependency({ id: 'dep-2', status: 'open' }),
+        ],
+      });
+      render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
+      expect(screen.queryByTestId('blocking-banner')).not.toBeInTheDocument();
+    });
+
     it('does not show banner when all dependencies are closed', () => {
       const mockIssue = createTestIssueDetails({
+        status: 'blocked',
         dependencies: [
           createTestDependency({ id: 'dep-1', status: 'closed' }),
           createTestDependency({ id: 'dep-2', status: 'closed' }),
@@ -481,6 +498,7 @@ describe('IssueDetailPanel', () => {
 
     it('does not show banner when no dependencies', () => {
       const mockIssue = createTestIssueDetails({
+        status: 'blocked',
         dependencies: [],
       });
       render(<IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />);
@@ -489,6 +507,7 @@ describe('IssueDetailPanel', () => {
 
     it('counts only open dependencies (excludes closed)', () => {
       const mockIssue = createTestIssueDetails({
+        status: 'blocked',
         dependencies: [
           createTestDependency({ id: 'dep-1', status: 'open' }),
           createTestDependency({ id: 'dep-2', status: 'closed' }),

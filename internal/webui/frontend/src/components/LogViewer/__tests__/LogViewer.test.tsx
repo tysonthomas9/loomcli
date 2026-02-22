@@ -17,23 +17,34 @@ let lastTerminalInstance: {
   dispose: ReturnType<typeof vi.fn>;
   loadAddon: ReturnType<typeof vi.fn>;
   scrollToBottom: ReturnType<typeof vi.fn>;
+  scrollToLine: ReturnType<typeof vi.fn>;
   onScroll: ReturnType<typeof vi.fn>;
-  buffer: { active: { viewportY: number; baseY: number } };
+  buffer: { active: { viewportY: number; baseY: number; length: number } };
 } | null = null;
 
 let lastFitAddonInstance: { fit: ReturnType<typeof vi.fn> } | null = null;
 
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
-    write = vi.fn();
+    options: Record<string, unknown> = { disableStdin: true };
+    buffer = { active: { viewportY: 0, baseY: 100, length: 0 } };
+    write = vi.fn((data: Uint8Array | string, callback?: () => void) => {
+      const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
+      const lineCount = text.split('\n').length - 1;
+      this.buffer.active.length += Math.max(lineCount, 0);
+      if (callback) callback();
+    });
     clear = vi.fn();
-    reset = vi.fn();
+    reset = vi.fn(() => {
+      this.buffer.active.length = 0;
+    });
     open = vi.fn();
     dispose = vi.fn();
     loadAddon = vi.fn();
     scrollToBottom = vi.fn();
+    scrollToLine = vi.fn();
     onScroll = vi.fn(() => ({ dispose: vi.fn() }));
-    buffer = { active: { viewportY: 0, baseY: 0 } };
+    onData = vi.fn(() => ({ dispose: vi.fn() }));
 
     constructor() {
       lastTerminalInstance = this as unknown as typeof lastTerminalInstance;
@@ -94,7 +105,7 @@ describe('LogViewer', () => {
     const second = [...first, createChunk('\rdef', 7)];
     rerender(<LogViewer chunks={second} connectionState="connected" />);
     expect(lastTerminalInstance?.write).toHaveBeenCalledTimes(2);
-    expect(lastTerminalInstance?.write).toHaveBeenNthCalledWith(2, new TextEncoder().encode('\rdef'));
+    expect(lastTerminalInstance?.write).toHaveBeenNthCalledWith(2, new TextEncoder().encode('\rdef'), expect.any(Function));
   });
 
   it('resets terminal when resetVersion changes', () => {
@@ -111,5 +122,46 @@ describe('LogViewer', () => {
     render(<LogViewer chunks={[]} connectionState="connected" />);
     expect(lastTerminalInstance?.loadAddon).toHaveBeenCalledWith(lastFitAddonInstance);
     expect(lastFitAddonInstance?.fit).toHaveBeenCalled();
+  });
+
+  it('keeps loading banner mounted and only toggles visibility', () => {
+    const { rerender } = render(
+      <LogViewer chunks={[]} connectionState="connected" isLoadingMore={false} />
+    );
+
+    const banner = screen.getByTestId('loading-banner');
+    expect(banner).toHaveAttribute('data-visible', 'false');
+
+    rerender(<LogViewer chunks={[]} connectionState="connected" isLoadingMore />);
+    expect(screen.getByTestId('loading-banner')).toBe(banner);
+    expect(banner).toHaveAttribute('data-visible', 'true');
+  });
+
+  it('restores viewport anchor after prepend when auto-scroll is disabled', () => {
+    const { rerender } = render(
+      <LogViewer
+        chunks={[createChunk('line-1\nline-2\n', 12)]}
+        connectionState="connected"
+        autoScroll={false}
+        resetVersion={0}
+      />
+    );
+
+    expect(lastTerminalInstance?.buffer.active.length).toBe(2);
+    if (lastTerminalInstance) {
+      lastTerminalInstance.buffer.active.viewportY = 4;
+    }
+
+    rerender(
+      <LogViewer
+        chunks={[createChunk('old-1\nold-2\nline-1\nline-2\n', 24)]}
+        connectionState="connected"
+        autoScroll={false}
+        resetVersion={1}
+      />
+    );
+
+    expect(lastTerminalInstance?.scrollToLine).toHaveBeenCalledWith(6);
+    expect(lastTerminalInstance?.scrollToBottom).not.toHaveBeenCalled();
   });
 });

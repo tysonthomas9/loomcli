@@ -150,8 +150,13 @@ func TestMapTaskFilter_WithParentID(t *testing.T) {
 			defer func() { execCommand = oldExec }()
 
 			var capturedArgs []string
+			callCount := 0
 			execCommand = func(dir, name string, args ...string) CommandResult {
-				capturedArgs = append([]string{name}, args...)
+				callCount++
+				// Capture only the first call (bd ready) args for parentID verification
+				if callCount == 1 {
+					capturedArgs = append([]string{name}, args...)
+				}
 				// Return appropriate mock data based on filter
 				var mockIssue BdIssue
 				if tt.filter == "needs_design" {
@@ -208,12 +213,14 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 	oldExec := execCommand
 	defer func() { execCommand = oldExec }()
 
-	callCount := 0
-	var allCapturedArgs [][]string
+	var readyCapturedArgs [][]string
 
 	execCommand = func(dir, name string, args ...string) CommandResult {
-		callCount++
-		allCapturedArgs = append(allCapturedArgs, append([]string{name}, args...))
+		fullArgs := append([]string{name}, args...)
+		// Only capture bd ready calls (not bd list calls used for unclosed issue checking)
+		if len(args) > 0 && args[0] == "ready" {
+			readyCapturedArgs = append(readyCapturedArgs, fullArgs)
+		}
 		return CommandResult{
 			Stdout: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task", Status: "open", Design: ""},
@@ -236,14 +243,14 @@ func TestMapTaskFilter_ParentIDCapturedInClosure(t *testing.T) {
 		}
 	}
 
-	// Verify the function was called 3 times
-	if callCount != 3 {
-		t.Errorf("Expected 3 calls to execCommand, got %d", callCount)
+	// Verify bd ready was called 3 times (once per taskCheckFn call)
+	if len(readyCapturedArgs) != 3 {
+		t.Errorf("Expected 3 bd ready calls, got %d", len(readyCapturedArgs))
 	}
 
-	// Verify all calls included the parentID
+	// Verify all bd ready calls included the parentID
 	expectedArgs := []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-555"}
-	for i, capturedArgs := range allCapturedArgs {
+	for i, capturedArgs := range readyCapturedArgs {
 		if len(capturedArgs) != len(expectedArgs) {
 			t.Errorf("Call %d: args length = %d, want %d", i, len(capturedArgs), len(expectedArgs))
 			continue

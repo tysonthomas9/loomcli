@@ -36,33 +36,11 @@ export type {
 export { useSelection } from './useSelection';
 export type { UseSelectionOptions, UseSelectionReturn } from './useSelection';
 
-export { useFilteredSelection } from './useFilteredSelection';
-export type {
-  UseFilteredSelectionOptions,
-  UseFilteredSelectionReturn,
-} from './useFilteredSelection';
-
 export { useBulkClose } from './useBulkClose';
 export type { UseBulkCloseOptions, UseBulkCloseReturn } from './useBulkClose';
 
 export { useIssues } from './useIssues';
 export type { UseIssuesOptions, UseIssuesReturn } from './useIssues';
-
-export { useOptimisticStatusUpdate } from './useOptimisticStatusUpdate';
-export type {
-  UseOptimisticStatusUpdateOptions,
-  UseOptimisticStatusUpdateReturn,
-} from './useOptimisticStatusUpdate';
-
-export { useFallbackPolling } from './useFallbackPolling';
-export type { UseFallbackPollingOptions, UseFallbackPollingReturn } from './useFallbackPolling';
-
-export { useBulkPriority, PRIORITY_OPTIONS } from './useBulkPriority';
-export type {
-  UseBulkPriorityOptions,
-  UseBulkPriorityReturn,
-  PriorityOption,
-} from './useBulkPriority';
 
 export { useGraphData } from './useGraphData';
 export type { UseGraphDataOptions, UseGraphDataReturn } from './useGraphData';
@@ -102,9 +80,6 @@ export type {
   ToastContextValue,
   ToastProviderProps,
 } from './useToast';
-
-export { useStats } from './useStats';
-export type { UseStatsOptions, UseStatsResult } from './useStats';
 
 export { useRecentAssignees } from './useRecentAssignees';
 export type { UseRecentAssigneesReturn } from './useRecentAssignees';

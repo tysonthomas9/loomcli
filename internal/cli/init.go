@@ -226,8 +226,8 @@ func checkPrerequisites() bool {
 	if result.Err != nil {
 		fmt.Println("✗ bd (beads CLI) not found")
 		fmt.Println("")
-		fmt.Println("  Please install beads CLI:")
-		fmt.Println("    go install github.com/bounteous/beads/cmd/bd@latest")
+		fmt.Println("  Please install beads CLI from the vendored source:")
+		fmt.Println("    make install-bd")
 		return false
 	}
 	fmt.Println("✓ bd (beads CLI) found")

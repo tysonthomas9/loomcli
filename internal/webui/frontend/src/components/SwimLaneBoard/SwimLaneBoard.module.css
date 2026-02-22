@@ -8,9 +8,8 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: 0;
-  overflow: hidden auto;
-  flex: 1; /* Fill available space from parent flex container */
-  min-height: 0;
+  overflow: visible; /* Let parent handle scrolling */
+  flex: 0 0 auto; /* Size to content, let parent scroll */
 }
 
 /**

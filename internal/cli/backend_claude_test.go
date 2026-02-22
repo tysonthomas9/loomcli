@@ -224,67 +224,6 @@ func TestDisplayStreamEvent_ToolUse_OtherTool(t *testing.T) {
 	}
 }
 
-func TestInvokeClaude_MockInvoker(t *testing.T) {
-	recorder := SetupMockClaudeInvoker(t, nil)
-
-	err := InvokeClaude("/test/workdir", "test prompt", "test-agent")
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 invocation, got %d", len(recorder.Invocations))
-	}
-
-	inv := recorder.Invocations[0]
-	if inv.WorkDir != "/test/workdir" {
-		t.Errorf("expected workDir '/test/workdir', got %q", inv.WorkDir)
-	}
-	if inv.Prompt != "test prompt" {
-		t.Errorf("expected prompt 'test prompt', got %q", inv.Prompt)
-	}
-	if inv.AgentName != "test-agent" {
-		t.Errorf("expected agentName 'test-agent', got %q", inv.AgentName)
-	}
-}
-
-func TestInvokeClaude_MockInvokerError(t *testing.T) {
-	expectedErr := errors.New("claude invocation failed")
-	SetupMockClaudeInvoker(t, expectedErr)
-
-	err := InvokeClaude("/test/workdir", "test prompt", "")
-	if err != expectedErr {
-		t.Errorf("expected error %v, got %v", expectedErr, err)
-	}
-}
-
-func TestInvokeClaudeForConflicts_MockInvoker(t *testing.T) {
-	recorder := SetupMockClaudeInvoker(t, nil)
-
-	conflicts := []string{"file1.go", "file2.go"}
-	err := InvokeClaudeForConflicts("/test/workdir", "feature-branch", "main", conflicts)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if len(recorder.Invocations) != 1 {
-		t.Fatalf("expected 1 invocation, got %d", len(recorder.Invocations))
-	}
-
-	inv := recorder.Invocations[0]
-	if inv.WorkDir != "/test/workdir" {
-		t.Errorf("expected workDir '/test/workdir', got %q", inv.WorkDir)
-	}
-	// Prompt should contain conflict resolution content
-	if !strings.Contains(inv.Prompt, "conflict") && !strings.Contains(inv.Prompt, "merge") {
-		t.Errorf("expected prompt to contain conflict resolution content, got %q", inv.Prompt)
-	}
-	// AgentName should be empty for conflict resolution
-	if inv.AgentName != "" {
-		t.Errorf("expected empty agentName for conflicts, got %q", inv.AgentName)
-	}
-}
-
 func TestClaudeBackendName(t *testing.T) {
 	b := &ClaudeBackend{}
 	if got := b.Name(); got != "claude" {

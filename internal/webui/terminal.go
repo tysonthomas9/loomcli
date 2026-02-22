@@ -19,6 +19,10 @@ import (
 // ErrTmuxNotFound is returned when tmux binary is not in PATH.
 var ErrTmuxNotFound = errors.New("tmux binary not found in PATH")
 
+// lookPathTmux is the function used to locate the tmux binary.
+// It is a variable so tests can override it.
+var lookPathTmux = exec.LookPath
+
 // ErrMaxSessionsReached is returned when the maximum number of concurrent
 // terminal sessions has been reached.
 var ErrMaxSessionsReached = errors.New("maximum terminal sessions reached")
@@ -86,7 +90,7 @@ type TerminalManager struct {
 // sessions when multiple server instances share the same tmux server.
 // maxSessions limits concurrent connections; 0 means use defaultMaxTerminalSessions.
 func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (*TerminalManager, error) {
-	tmuxPath, err := exec.LookPath("tmux")
+	tmuxPath, err := lookPathTmux("tmux")
 	if err != nil {
 		return nil, ErrTmuxNotFound
 	}
