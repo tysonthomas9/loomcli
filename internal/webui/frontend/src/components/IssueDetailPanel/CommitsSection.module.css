@@ -1,0 +1,92 @@
+/**
+ * CommitsSection component styles.
+ */
+
+/* Section container */
+.section {
+  margin-bottom: 28px;
+}
+
+.sectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  margin: 0 0 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Commit list */
+.commitList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Individual commit item */
+.commitItem {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.commitItem:last-child {
+  border-bottom: none;
+}
+
+/* Top row: SHA + timestamp */
+.commitHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.commitSha {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.commitTime {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* Commit message */
+.commitSubject {
+  font-size: 13px;
+  color: var(--color-text);
+  line-height: 1.4;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Bottom row: author + worktree */
+.commitMeta {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.commitAuthor {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.commitWorktree {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Empty state */
+.emptyState {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+  text-align: center;
+  padding: 12px 0;
+}

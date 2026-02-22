@@ -21,6 +21,7 @@ export {
   addDependency,
   removeDependency,
   addComment,
+  getIssueCommits,
 } from './issues';
 export type {
   CreateIssueRequest,

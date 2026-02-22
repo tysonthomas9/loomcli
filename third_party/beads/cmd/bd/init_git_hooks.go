@@ -26,12 +26,14 @@ func hooksInstalled() bool {
 	}
 	preCommit := filepath.Join(hooksDir, "pre-commit")
 	postMerge := filepath.Join(hooksDir, "post-merge")
+	postCommit := filepath.Join(hooksDir, "post-commit")
 
-	// Check if both hooks exist
+	// Check if all hooks exist
 	_, err1 := os.Stat(preCommit)
 	_, err2 := os.Stat(postMerge)
+	_, err3 := os.Stat(postCommit)
 
-	if err1 != nil || err2 != nil {
+	if err1 != nil || err2 != nil || err3 != nil {
 		return false
 	}
 
@@ -48,21 +50,21 @@ func hooksInstalled() bool {
 		return false
 	}
 
-	// Verify hooks are executable
-	preCommitInfo, err := os.Stat(preCommit)
-	if err != nil {
+	// #nosec G304 - controlled path from git directory
+	postCommitContent, err := os.ReadFile(postCommit)
+	if err != nil || !strings.Contains(string(postCommitContent), "bd (beads) post-commit hook") {
 		return false
-	}
-	if preCommitInfo.Mode().Perm()&0111 == 0 {
-		return false // Not executable
 	}
 
-	postMergeInfo, err := os.Stat(postMerge)
-	if err != nil {
-		return false
-	}
-	if postMergeInfo.Mode().Perm()&0111 == 0 {
-		return false // Not executable
+	// Verify hooks are executable
+	for _, hookPath := range []string{preCommit, postMerge, postCommit} {
+		info, err := os.Stat(hookPath)
+		if err != nil {
+			return false
+		}
+		if info.Mode().Perm()&0111 == 0 {
+			return false // Not executable
+		}
 	}
 
 	return true
@@ -87,6 +89,7 @@ func detectExistingHooks() []hookInfo {
 	hooks := []hookInfo{
 		{name: "pre-commit", path: filepath.Join(hooksDir, "pre-commit")},
 		{name: "post-merge", path: filepath.Join(hooksDir, "post-merge")},
+		{name: "post-commit", path: filepath.Join(hooksDir, "post-commit")},
 		{name: "pre-push", path: filepath.Join(hooksDir, "pre-push")},
 	}
 
@@ -203,6 +206,10 @@ func installGitHooks() error {
 	postMergePath := filepath.Join(hooksDir, "post-merge")
 	postMergeContent := buildPostMergeHook(chainHooks, existingHooks)
 
+	// post-commit hook (commit tracking)
+	postCommitPath := filepath.Join(hooksDir, "post-commit")
+	postCommitContent := buildPostCommitHook(chainHooks, existingHooks)
+
 	// Write pre-commit hook (executable scripts need 0700)
 	// #nosec G306 - git hooks must be executable
 	if err := os.WriteFile(preCommitPath, []byte(preCommitContent), 0700); err != nil {
@@ -213,6 +220,12 @@ func installGitHooks() error {
 	// #nosec G306 - git hooks must be executable
 	if err := os.WriteFile(postMergePath, []byte(postMergeContent), 0700); err != nil {
 		return fmt.Errorf("failed to write post-merge hook: %w", err)
+	}
+
+	// Write post-commit hook (executable scripts need 0700)
+	// #nosec G306 - git hooks must be executable
+	if err := os.WriteFile(postCommitPath, []byte(postCommitContent), 0700); err != nil {
+		return fmt.Errorf("failed to write post-commit hook: %w", err)
 	}
 
 	if chainHooks {
@@ -401,6 +414,82 @@ if ! bd import -i "$BEADS_DIR/issues.jsonl" >/dev/null 2>&1; then
     echo "Warning: Failed to import bd changes after merge" >&2
     echo "Run 'bd import -i $BEADS_DIR/issues.jsonl' manually to see the error" >&2
 fi
+
+exit 0
+`
+}
+
+// buildPostCommitHook generates the post-commit hook content.
+// This hook records commit-to-task associations in .beads/commits.jsonl.
+func buildPostCommitHook(chainHooks bool, existingHooks []hookInfo) string {
+	if chainHooks {
+		// Find existing post-commit hook (already renamed to .old by caller)
+		var existingPostCommit string
+		for _, hook := range existingHooks {
+			if hook.name == "post-commit" && hook.exists && !hook.isBdHook {
+				existingPostCommit = hook.path + ".old"
+				break
+			}
+		}
+
+		return `#!/bin/sh
+#
+# bd (beads) post-commit hook (chained)
+#
+# This hook chains bd commit tracking with your existing post-commit hook.
+
+# Run existing hook first
+if [ -x "` + existingPostCommit + `" ]; then
+    "` + existingPostCommit + `" "$@"
+fi
+
+` + postCommitHookBody()
+	}
+
+	return `#!/bin/sh
+#
+# bd (beads) post-commit hook
+#
+# This hook records commit-to-task associations in .beads/commits.jsonl.
+# It reads the agent lock file or commit message trailers to determine
+# which task a commit belongs to.
+
+` + postCommitHookBody()
+}
+
+// postCommitHookBody returns the common post-commit hook logic.
+func postCommitHookBody() string {
+	return `# Check if bd is available
+if ! command -v bd >/dev/null 2>&1; then
+    exit 0
+fi
+
+# Get the commit SHA that was just created
+COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null)
+if [ -z "$COMMIT_SHA" ]; then
+    exit 0
+fi
+
+# Try to find task ID from agent lock file
+TASK_ID=""
+WORKTREE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -n "$WORKTREE_ROOT" ] && [ -f "$WORKTREE_ROOT/.agent.lock" ]; then
+    # Extract task_id from JSON lock file (simple grep, no jq dependency)
+    TASK_ID=$(grep -o '"task_id"[[:space:]]*:[[:space:]]*"[^"]*"' "$WORKTREE_ROOT/.agent.lock" 2>/dev/null | head -1 | sed 's/.*"task_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+fi
+
+# Fall back to commit message trailer: Task-ID: <id>
+if [ -z "$TASK_ID" ]; then
+    TASK_ID=$(git log -1 --format=%B "$COMMIT_SHA" 2>/dev/null | grep -i "^Task-ID:" | head -1 | sed 's/^[Tt]ask-[Ii][Dd]:[[:space:]]*//')
+fi
+
+# If no task ID found, nothing to record
+if [ -z "$TASK_ID" ]; then
+    exit 0
+fi
+
+# Record the commit association (bd commit-record never fails the hook)
+bd commit-record "$COMMIT_SHA" "$TASK_ID" 2>/dev/null || true
 
 exit 0
 `

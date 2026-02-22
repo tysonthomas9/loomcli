@@ -28,6 +28,7 @@ import { getReviewType } from '@/utils/issueCategory';
 
 import { CommentForm } from './CommentForm';
 import { CommentsSection } from './CommentsSection';
+import { CommitsSection } from './CommitsSection';
 import { DependencySection } from './DependencySection';
 import { EditableDescription } from './EditableDescription';
 import { IssueHeader } from './IssueHeader';
@@ -730,6 +731,9 @@ function DefaultContent({
                     </section>
                   )}
 
+                  {/* Commits */}
+                  <CommitsSection issueId={issue.id} />
+
                   {/* Comments */}
                   <CommentsSection comments={localComments} />
                   <CommentForm issueId={issue.id} onCommentAdded={handleCommentAdded} />
@@ -839,6 +843,9 @@ function DefaultContent({
                   <ul className={styles.dependencyList}>{dependents.map(renderDependencyItem)}</ul>
                 </section>
               )}
+
+              {/* Commits */}
+              <CommitsSection issueId={issue.id} />
 
               {/* Comments */}
               <CommentsSection comments={localComments} />

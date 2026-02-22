@@ -126,6 +126,7 @@ export type {
   BlockedIssue,
   TreeNode,
   MoleculeProgressStats,
+  CommitRecord,
   GraphDependency,
   GraphIssue,
 } from './issue';

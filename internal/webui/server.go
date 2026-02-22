@@ -335,11 +335,20 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
+	// Discover beads directory for commit tracking
+	var beadsDir string
+	if cwd, err := getCwd(); err == nil {
+		if dir, err := daemon.FindBeadsDir(cwd); err == nil {
+			beadsDir = dir
+			log.Printf("Beads directory: %s", beadsDir)
+		}
+	}
+
 	// Create HTTP server
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, beadsDir)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.

@@ -14,6 +14,7 @@ import type {
   Status,
   DependencyType,
   Comment,
+  CommitRecord,
 } from '@/types';
 
 import { get, post, patch, del, ApiError } from './client';
@@ -393,6 +394,23 @@ export async function addComment(issueId: string, text: string): Promise<Comment
   const response = await post<ApiResult<Comment>>(
     `/api/issues/${encodeURIComponent(issueId)}/comments`,
     { text }
+  );
+  return unwrap(response);
+}
+
+// ============= COMMIT OPERATIONS =============
+
+/**
+ * Get commits associated with an issue.
+ */
+export async function getIssueCommits(issueId: string, limit?: number): Promise<CommitRecord[]> {
+  const params: Record<string, unknown> = {};
+  if (limit !== undefined) {
+    params.limit = limit;
+  }
+  const query = buildQueryString(params);
+  const response = await get<ApiResult<CommitRecord[]>>(
+    `/api/issues/${encodeURIComponent(issueId)}/commits${query}`
   );
   return unwrap(response);
 }

@@ -213,6 +213,19 @@ export interface TreeNode extends Issue {
 }
 
 /**
+ * Commit record associated with a task.
+ * Maps to Go commits.Record from /api/issues/{id}/commits.
+ */
+export interface CommitRecord {
+  task_id: string;
+  sha: string;
+  subject: string;
+  author: string;
+  timestamp: ISODateString;
+  worktree?: string;
+}
+
+/**
  * Molecule progress statistics.
  * Maps to Go types.MoleculeProgressStats.
  */
