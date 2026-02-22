@@ -1,0 +1,45 @@
+/**
+ * EpicProgress component styles.
+ * Compact progress bar for swim lane headers.
+ */
+
+.epicProgress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.progressBar {
+  width: 80px;
+  height: 6px;
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background-color: var(--color-success);
+  border-radius: var(--radius-full);
+  transition: width var(--transition-normal);
+}
+
+.progressLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.readyBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-success);
+  background-color: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}

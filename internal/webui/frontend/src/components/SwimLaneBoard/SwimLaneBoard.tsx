@@ -25,6 +25,7 @@ import { DEFAULT_COLUMNS, createColumns } from '@/components/KanbanBoard/columnC
 import type { KanbanColumnConfig } from '@/components/KanbanBoard/types';
 import { formatStatusLabel } from '@/components/StatusColumn/utils';
 import { SwimLane } from '@/components/SwimLane';
+import { useEpicStatus } from '@/hooks/useEpicStatus';
 import type { FilterState } from '@/hooks/useFilterState';
 import type { Issue, Status } from '@/types';
 
@@ -207,6 +208,9 @@ function SwimLaneBoardContent({
   groupBy: Exclude<GroupByField, 'none'>;
   columns: KanbanColumnConfig[];
 }): JSX.Element {
+  // Fetch epic completion statuses when grouping by epic
+  const { epicStatuses } = useEpicStatus(groupBy === 'epic');
+
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
   // Track lanes that have been toggled from their default state.
@@ -385,6 +389,16 @@ function SwimLaneBoardContent({
           </div>
         )}
         {lanes.map((lane) => {
+          // Look up epic status for this lane when grouping by epic.
+          // Lane ID format is "lane-epic-<parentId>" (see groupingUtils getLaneId).
+          const EPIC_LANE_PREFIX = 'lane-epic-';
+          const rawEpicId =
+            groupBy === 'epic' && lane.id.startsWith(EPIC_LANE_PREFIX)
+              ? lane.id.slice(EPIC_LANE_PREFIX.length)
+              : undefined;
+          const epicId = rawEpicId && rawEpicId !== '__ungrouped__' ? rawEpicId : undefined;
+          const epicStatus = epicId ? epicStatuses.get(epicId) : undefined;
+
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const laneProps = {
             id: lane.id,
@@ -397,6 +411,7 @@ function SwimLaneBoardContent({
             ...(blockedIssues !== undefined && { blockedIssues }),
             ...(showBlocked !== undefined && { showBlocked }),
             ...(cardLimit !== undefined && { cardLimit }),
+            ...(epicStatus !== undefined && { epicStatus }),
           };
           return <SwimLane key={lane.id} {...laneProps} />;
         })}

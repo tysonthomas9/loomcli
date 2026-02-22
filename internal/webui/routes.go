@@ -77,6 +77,9 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		}
 	}
 
+	// Epic status endpoint for completion progress
+	mux.HandleFunc("GET /api/epics/status", handleGetEpicStatus(pool))
+
 	// Ready endpoint for issues ready to work on
 	mux.HandleFunc("GET /api/ready", handleReady(pool))
 

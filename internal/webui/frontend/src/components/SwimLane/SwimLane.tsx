@@ -8,10 +8,11 @@ import { useMemo, useState } from 'react';
 
 import { DraggableIssueCard } from '@/components/DraggableIssueCard';
 import { EmptyColumn } from '@/components/EmptyColumn';
+import { EpicProgress } from '@/components/EpicProgress';
 import type { BlockedInfo } from '@/components/KanbanBoard';
 import type { KanbanColumnConfig } from '@/components/KanbanBoard/types';
 import { StatusColumn } from '@/components/StatusColumn';
-import type { Issue } from '@/types';
+import type { Issue, EpicStatus } from '@/types';
 
 import styles from './SwimLane.module.css';
 
@@ -43,6 +44,8 @@ export interface SwimLaneProps {
   blockedIssues?: Map<string, BlockedInfo>;
   /** Whether to show blocked issues */
   showBlocked?: boolean;
+  /** Epic completion status for this lane (when grouping by epic) */
+  epicStatus?: EpicStatus;
   /** Additional CSS class */
   className?: string;
   /** Maximum cards to show per column (default: 5) */
@@ -64,6 +67,7 @@ export function SwimLane({
   onIssueClick,
   blockedIssues,
   showBlocked = true,
+  epicStatus,
   className,
   cardLimit = DEFAULT_CARD_LIMIT,
 }: SwimLaneProps): JSX.Element {
@@ -143,6 +147,13 @@ export function SwimLane({
           </svg>
         </button>
         <h3 className={styles.laneTitle}>{title}</h3>
+        {epicStatus && (
+          <EpicProgress
+            totalChildren={epicStatus.total_children}
+            closedChildren={epicStatus.closed_children}
+            eligibleForClose={epicStatus.eligible_for_close}
+          />
+        )}
         <span className={styles.laneCount} aria-label={`${filteredIssues.length} issues`}>
           {filteredIssues.length}
         </span>

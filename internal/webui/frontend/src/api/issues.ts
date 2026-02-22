@@ -8,6 +8,7 @@ import type {
   IssueDetails,
   BlockedIssue,
   Statistics,
+  EpicStatus,
   WorkFilter,
   Priority,
   IssueType,
@@ -118,6 +119,15 @@ export async function getReadyIssues(options?: WorkFilter): Promise<Issue[]> {
  */
 export async function getStats(): Promise<Statistics> {
   const response = await get<ApiResult<Statistics>>('/api/stats');
+  return unwrap(response);
+}
+
+/**
+ * Get epic completion statuses for all epics.
+ */
+export async function getEpicStatuses(signal?: AbortSignal): Promise<EpicStatus[]> {
+  const options = signal ? { signal } : undefined;
+  const response = await get<ApiResult<EpicStatus[]>>('/api/epics/status', options);
   return unwrap(response);
 }
 
