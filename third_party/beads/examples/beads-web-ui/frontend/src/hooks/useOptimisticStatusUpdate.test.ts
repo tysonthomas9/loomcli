@@ -44,9 +44,16 @@ describe('useOptimisticStatusUpdate', () => {
   let mockSetIssues: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    mockIssues = new Map();
-    mockSetIssues = vi.fn();
     vi.clearAllMocks();
+    mockIssues = new Map();
+    // Default implementation invokes functional updaters so snapshot side-effects run
+    mockSetIssues = vi.fn(
+      (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+        if (typeof arg === 'function') {
+          arg(mockIssues);
+        }
+      }
+    );
   });
 
   afterEach(() => {
@@ -106,7 +113,10 @@ describe('useOptimisticStatusUpdate', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalled();
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const updater = mockSetIssues.mock.calls[0][0] as (
+        prev: Map<string, Issue>
+      ) => Map<string, Issue>;
+      const newIssuesMap = updater(mockIssues);
       expect(newIssuesMap.get('issue-1')?.status).toBe('in_progress');
     });
 
@@ -180,7 +190,10 @@ describe('useOptimisticStatusUpdate', () => {
         await result.current.updateIssueStatus('issue-1', 'in_progress', 'open');
       });
 
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const updater = mockSetIssues.mock.calls[0][0] as (
+        prev: Map<string, Issue>
+      ) => Map<string, Issue>;
+      const newIssuesMap = updater(mockIssues);
       const updatedIssue = newIssuesMap.get('issue-1');
       expect(updatedIssue?.updated_at).not.toBe('2025-01-01T00:00:00Z');
     });
@@ -242,10 +255,12 @@ describe('useOptimisticStatusUpdate', () => {
       });
       mockIssues.set('issue-1', existingIssue);
 
-      // Mock setIssues to update the internal state
-      mockSetIssues.mockImplementation((newMap: Map<string, Issue>) => {
-        mockIssues = newMap;
-      });
+      // Mock setIssues to update the internal state (handles functional updaters)
+      mockSetIssues.mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          mockIssues = typeof arg === 'function' ? arg(mockIssues) : arg;
+        }
+      );
 
       vi.mocked(api.updateIssue).mockRejectedValue(new api.ApiError(500, 'Internal Server Error'));
 
@@ -273,9 +288,11 @@ describe('useOptimisticStatusUpdate', () => {
       });
       mockIssues.set('issue-1', existingIssue);
 
-      mockSetIssues.mockImplementation((newMap: Map<string, Issue>) => {
-        mockIssues = newMap;
-      });
+      mockSetIssues.mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          mockIssues = typeof arg === 'function' ? arg(mockIssues) : arg;
+        }
+      );
 
       vi.mocked(api.updateIssue).mockRejectedValue(new api.ApiError(500, 'Internal Server Error'));
 
@@ -302,9 +319,11 @@ describe('useOptimisticStatusUpdate', () => {
       });
       mockIssues.set('issue-1', existingIssue);
 
-      mockSetIssues.mockImplementation((newMap: Map<string, Issue>) => {
-        mockIssues = newMap;
-      });
+      mockSetIssues.mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          mockIssues = typeof arg === 'function' ? arg(mockIssues) : arg;
+        }
+      );
 
       vi.mocked(api.updateIssue).mockRejectedValue(new api.ApiError(404, 'Not Found'));
 
@@ -336,9 +355,11 @@ describe('useOptimisticStatusUpdate', () => {
       });
       mockIssues.set('issue-1', existingIssue);
 
-      mockSetIssues.mockImplementation((newMap: Map<string, Issue>) => {
-        mockIssues = newMap;
-      });
+      mockSetIssues.mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          mockIssues = typeof arg === 'function' ? arg(mockIssues) : arg;
+        }
+      );
 
       vi.mocked(api.updateIssue).mockRejectedValue(new api.ApiError(409, 'Conflict'));
 
@@ -370,9 +391,11 @@ describe('useOptimisticStatusUpdate', () => {
       });
       mockIssues.set('issue-1', existingIssue);
 
-      mockSetIssues.mockImplementation((newMap: Map<string, Issue>) => {
-        mockIssues = newMap;
-      });
+      mockSetIssues.mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          mockIssues = typeof arg === 'function' ? arg(mockIssues) : arg;
+        }
+      );
 
       vi.mocked(api.updateIssue).mockRejectedValue(new api.ApiError(0, 'Network error'));
 
@@ -404,9 +427,11 @@ describe('useOptimisticStatusUpdate', () => {
       });
       mockIssues.set('issue-1', existingIssue);
 
-      mockSetIssues.mockImplementation((newMap: Map<string, Issue>) => {
-        mockIssues = newMap;
-      });
+      mockSetIssues.mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          mockIssues = typeof arg === 'function' ? arg(mockIssues) : arg;
+        }
+      );
 
       vi.mocked(api.updateIssue).mockRejectedValue(new Error('Something went wrong'));
 
@@ -438,9 +463,11 @@ describe('useOptimisticStatusUpdate', () => {
       });
       mockIssues.set('issue-1', existingIssue);
 
-      mockSetIssues.mockImplementation((newMap: Map<string, Issue>) => {
-        mockIssues = newMap;
-      });
+      mockSetIssues.mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          mockIssues = typeof arg === 'function' ? arg(mockIssues) : arg;
+        }
+      );
 
       vi.mocked(api.updateIssue).mockRejectedValue('string error');
 
@@ -543,9 +570,11 @@ describe('useOptimisticStatusUpdate', () => {
       });
       mockIssues.set('issue-1', existingIssue);
 
-      mockSetIssues.mockImplementation((newMap: Map<string, Issue>) => {
-        mockIssues = newMap;
-      });
+      mockSetIssues.mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          mockIssues = typeof arg === 'function' ? arg(mockIssues) : arg;
+        }
+      );
 
       vi.mocked(api.updateIssue).mockRejectedValue(new api.ApiError(500, 'Internal Server Error'));
 
@@ -692,9 +721,13 @@ describe('useOptimisticStatusUpdate', () => {
         await result.current.updateIssueStatus('non-existent', 'in_progress', 'open');
       });
 
-      // Should not call API or setIssues
+      // Should not call API; setIssues is called with a no-op updater (returns prev)
       expect(api.updateIssue).not.toHaveBeenCalled();
-      expect(mockSetIssues).not.toHaveBeenCalled();
+      expect(mockSetIssues).toHaveBeenCalledTimes(1);
+      const updater = mockSetIssues.mock.calls[0][0] as (
+        prev: Map<string, Issue>
+      ) => Map<string, Issue>;
+      expect(updater(mockIssues)).toBe(mockIssues);
     });
 
     it('callbacks are optional and do not throw when not provided', async () => {
@@ -729,9 +762,11 @@ describe('useOptimisticStatusUpdate', () => {
       });
       mockIssues.set('issue-1', existingIssue);
 
-      mockSetIssues.mockImplementation((newMap: Map<string, Issue>) => {
-        mockIssues = newMap;
-      });
+      mockSetIssues.mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          mockIssues = typeof arg === 'function' ? arg(mockIssues) : arg;
+        }
+      );
 
       vi.mocked(api.updateIssue).mockRejectedValue(new api.ApiError(500, 'Internal Server Error'));
 
@@ -799,7 +834,10 @@ describe('useOptimisticStatusUpdate', () => {
         await result.current.updateIssueStatus('issue-1', 'in_progress', 'open');
       });
 
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      const updater = mockSetIssues.mock.calls[0][0] as (
+        prev: Map<string, Issue>
+      ) => Map<string, Issue>;
+      const newIssuesMap = updater(mockIssues);
       expect(newIssuesMap).not.toBe(mockIssues);
     });
   });

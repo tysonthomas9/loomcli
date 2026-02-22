@@ -138,31 +138,29 @@ export function useOptimisticStatusUpdate(
     (issueId: string, newStatus: Status, oldStatus: Status): IssueSnapshot | null => {
       let snapshot: IssueSnapshot | null = null;
 
-      // Read current issue from the issues prop (synchronous, called immediately)
-      const issue = issues.get(issueId);
-      if (!issue) return null;
+      setIssues((prev) => {
+        const issue = prev.get(issueId);
+        if (!issue) return prev;
 
-      // Create snapshot for rollback
-      snapshot = {
-        issue: { ...issue },
-        oldStatus,
-        newStatus,
-      };
+        snapshot = {
+          issue: { ...issue },
+          oldStatus,
+          newStatus,
+        };
 
-      // Apply optimistic update using immer
-      const updatedIssue = produce(issue, (draft) => {
-        draft.status = newStatus;
-        draft.updated_at = new Date().toISOString();
+        const updatedIssue = produce(issue, (draft) => {
+          draft.status = newStatus;
+          draft.updated_at = new Date().toISOString();
+        });
+
+        const next = new Map(prev);
+        next.set(issueId, updatedIssue);
+        return next;
       });
-
-      // Update state with new issue
-      const newIssues = new Map(issues);
-      newIssues.set(issueId, updatedIssue);
-      setIssues(newIssues);
 
       return snapshot;
     },
-    [issues, setIssues]
+    [setIssues]
   );
 
   /**
