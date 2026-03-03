@@ -49,12 +49,13 @@ func (p *adaptivePoller) hadNoActivity() {
 
 // fetchReadyIssues runs "bd ready --json" and returns the parsed issues.
 // When parentID is non-empty, filters to tasks under that epic.
+// It routes through the package-level defaultDeps.BD runner.
 func fetchReadyIssues(parentID string) ([]BdIssue, error) {
-	args := []string{"bd", "ready", "--json", "--limit", "100"}
+	args := []string{"ready", "--json", "--limit", "100"}
 	if parentID != "" {
 		args = append(args, "--parent", parentID)
 	}
-	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
+	result := defaultDeps.BD.Run(GetBeadsDir(), args...)
 	if result.Err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
@@ -69,9 +70,9 @@ func fetchReadyIssues(parentID string) ([]BdIssue, error) {
 // fetchUnclosedIssueIDs returns IDs of all issues that are NOT closed.
 // Used for accurate blocker checking — a blocker is resolved only when closed,
 // not when it merely moves to in_progress or review.
+// It routes through the package-level defaultDeps.BD runner.
 func fetchUnclosedIssueIDs() (map[string]bool, error) {
-	args := []string{"bd", "list", "--json", "--limit", "500"}
-	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
+	result := defaultDeps.BD.Run(GetBeadsDir(), "list", "--json", "--limit", "500")
 	if result.Err != nil {
 		return nil, fmt.Errorf("failed to list issues: %w", result.Err)
 	}

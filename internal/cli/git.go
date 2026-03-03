@@ -17,9 +17,11 @@ func validateGitRef(name string) error {
 	return nil
 }
 
-// RunGitCommand executes a git command in the specified directory
+// RunGitCommand executes a git command in the specified directory.
+// It routes through the package-level defaultDeps.Git runner, which
+// delegates to execCommand for backward compatibility.
 func RunGitCommand(dir string, args ...string) (string, error) {
-	result := execCommand(dir, "git", args...)
+	result := defaultDeps.Git.Run(dir, args...)
 	if result.Err != nil {
 		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), result.Stderr)
 	}
@@ -40,9 +42,10 @@ func defaultRunGitWithOutput(dir string, args ...string) error {
 	return cmd.Run()
 }
 
-// RunGitCommandWithOutput executes a git command and streams output to stdout/stderr
+// RunGitCommandWithOutput executes a git command and streams output to stdout/stderr.
+// It routes through the package-level defaultDeps.Git runner.
 func RunGitCommandWithOutput(dir string, args ...string) error {
-	return runGitWithOutputFunc(dir, args...)
+	return defaultDeps.Git.RunWithOutput(dir, args...)
 }
 
 // GitFetch fetches from origin
