@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend sync-beads update-beads gate gate-e2e hooks dev dev-check dev-loom dev-vite
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend sync-beads update-beads gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc
 
 # Default target
 all: build
@@ -29,6 +29,10 @@ test-all:
 lint:
 	@echo "Running Go linter..."
 	golangci-lint run --timeout=5m
+
+# Check Go file LOC limits
+check-loc:
+	@./scripts/check-loc.sh 500
 
 # Run frontend linter + typecheck
 lint-frontend:
@@ -110,6 +114,7 @@ update-beads:
 gate: frontend
 	@echo "=== Quality Gate ==="
 	@$(MAKE) lint
+	@$(MAKE) check-loc
 	@$(MAKE) lint-frontend
 	@go build ./...
 	@go vet ./...
