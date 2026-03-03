@@ -279,6 +279,9 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		// 4.5. Classify error and detect NoWork (before recovery clears lock file)
 		d.classifyAgentExit(ap, exitCode)
 
+		// 4.7. Checkpoint management (save on error, clear on success)
+		d.handleAgentCheckpoint(ap, exitCode)
+
 		// 5. Post-mortem recovery (exit-code-aware)
 		if err := d.recoverAgent(ap, exitCode); err != nil {
 			log.Printf("[daemon] Agent %s: post-mortem recovery failed: %v", ap.entry.Worktree, err)
@@ -635,6 +638,53 @@ func (d *Daemon) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		ap.lastError = nil
 		ap.lastNoWork = false
 		ap.mu.Unlock()
+	}
+}
+
+// handleAgentCheckpoint saves a checkpoint on non-zero exit (before recovery clears the
+// worktree) or clears the checkpoint on successful exit.
+func (d *Daemon) handleAgentCheckpoint(ap *AgentProcess, exitCode int) {
+	if exitCode == 0 {
+		lockDir := ResolveLockDir(ap.worktreePath)
+		if err := ClearCheckpoint(lockDir); err != nil {
+			log.Printf("[daemon] Agent %s: failed to clear checkpoint: %v", ap.entry.Worktree, err)
+		}
+		return
+	}
+	d.saveAgentCheckpoint(ap, exitCode)
+}
+
+// saveAgentCheckpoint captures the current worktree diff and agent state into a
+// checkpoint file. Called when an agent exits non-zero before recovery clears the worktree.
+func (d *Daemon) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
+	lockInfo, _, _ := CheckLock(ap.worktreePath)
+	if lockInfo == nil || lockInfo.TaskID == "" {
+		return
+	}
+
+	diff := captureGitDiff(ap.worktreePath, maxDiffBytes)
+	errClass := ""
+	ap.mu.Lock()
+	if ap.lastError != nil {
+		errClass = ap.lastError.Class.String()
+	}
+	epicID := ap.assignedEpicID
+	ap.mu.Unlock()
+
+	cp := &Checkpoint{
+		AgentName:  lockInfo.AgentName,
+		TaskID:     lockInfo.TaskID,
+		EpicID:     epicID,
+		GitDiff:    diff,
+		ExitCode:   exitCode,
+		ErrorClass: errClass,
+		Timestamp:  time.Now(),
+	}
+	lockDir := ResolveLockDir(ap.worktreePath)
+	if err := SaveCheckpoint(lockDir, cp); err != nil {
+		log.Printf("[daemon] Agent %s: failed to save checkpoint: %v", ap.entry.Worktree, err)
+	} else {
+		log.Printf("[daemon] Agent %s: saved checkpoint for task %s", ap.entry.Worktree, lockInfo.TaskID)
 	}
 }
 

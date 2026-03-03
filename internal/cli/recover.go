@@ -168,13 +168,15 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 		// 4. Handle orphaned task from lock
 		if lockInfo.TaskID != "" {
 			if exitCode == 0 {
-				fmt.Printf("[recover] Agent %s exited cleanly (code 0), checking task %s\n",
+				// Clean exit: trust the agent updated task status correctly.
+				// Do NOT reset — the agent may have set status to review/closed.
+				fmt.Printf("[recover] Agent %s exited cleanly (code 0), trusting agent's task status for %s\n",
 					agentName, lockInfo.TaskID)
 			} else {
 				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
 					agentName, exitCode, lockInfo.TaskID)
+				resetTask(lockInfo.TaskID)
 			}
-			resetTask(lockInfo.TaskID)
 		}
 	}
 
