@@ -37,6 +37,9 @@ export type { FetchStatusResult } from './agents';
 export { getBackendConfig, updateBackendConfig } from './config';
 export type { BackendConfigData, AgentBackendOverride, BackendConfigPatchRequest } from './config';
 
+// Usage API functions (loom server)
+export { fetchUsage } from './usage';
+
 // Log streaming API functions
 export {
   getTaskLogPhases,

@@ -97,3 +97,6 @@ export type {
   UseAgentTerminalLogsOptions,
   UseAgentTerminalLogsReturn,
 } from './useAgentTerminalLogs';
+
+export { useUsage } from './useUsage';
+export type { UseUsageOptions, UseUsageResult } from './useUsage';

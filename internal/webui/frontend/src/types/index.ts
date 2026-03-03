@@ -179,6 +179,16 @@ export {
   isBurnedMutation,
 } from './mutation';
 
+// Usage types
+export type {
+  UsageSession,
+  UsageAgentSummary,
+  UsageBackendSummary,
+  UsageDailyCost,
+  UsageResponse,
+  UsageParams,
+} from './usage';
+
 // Graph types (React Flow)
 export type {
   IssueNodeData,
