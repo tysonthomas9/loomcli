@@ -50,28 +50,28 @@ type MetadataProvider interface {
 
 // HealthStatus describes the health and readiness of a backend.
 type HealthStatus struct {
-	Healthy   bool
-	Installed bool
-	Version   string
-	APIKeySet bool
-	Message   string
+	Healthy   bool   `json:"healthy"`
+	Installed bool   `json:"installed"`
+	Version   string `json:"version"`
+	APIKeySet bool   `json:"api_key_set"`
+	Message   string `json:"message"`
 }
 
 // BackendOption describes a single configurable option for a backend.
 type BackendOption struct {
-	Key          string
-	Description  string
-	Default      string
-	CurrentValue string
+	Key          string `json:"key"`
+	Description  string `json:"description"`
+	Default      string `json:"default"`
+	CurrentValue string `json:"current_value"`
 }
 
 // BackendMeta contains descriptive metadata about a backend.
 type BackendMeta struct {
-	DisplayName string
-	Version     string
-	Description string
-	URL         string
-	BinaryName  string
+	DisplayName string `json:"display_name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+	BinaryName  string `json:"binary_name"`
 }
 
 // BackendCapabilities reports which optional interfaces a Backend implements.
