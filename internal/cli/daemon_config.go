@@ -42,10 +42,11 @@ type RoleConfig struct {
 
 // AgentEntry defines a single agent assignment.
 type AgentEntry struct {
-	Worktree string `yaml:"worktree"`
-	Role     string `yaml:"role"`
-	Auto     bool   `yaml:"auto,omitempty"`
-	Backend  string `yaml:"backend,omitempty"`
+	Worktree         string   `yaml:"worktree"`
+	Role             string   `yaml:"role"`
+	Auto             bool     `yaml:"auto,omitempty"`
+	Backend          string   `yaml:"backend,omitempty"`
+	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
 }
 
 // ProjectFile represents the project-local loom.yaml.
@@ -150,25 +151,35 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		dc.Agents = projectFile.Agents
 	}
 
-	// Validate agent entries
-	for i, a := range dc.Agents {
-		if a.Worktree == "" {
-			return nil, fmt.Errorf("agent[%d]: worktree is required", i)
-		}
-		if a.Role == "" {
-			return nil, fmt.Errorf("agent[%d]: role is required", i)
-		}
-	}
-
-	// Validate max_agents
-	if dc.Daemon.MaxAgents != nil && *dc.Daemon.MaxAgents < 0 {
-		return nil, fmt.Errorf("max_agents must be non-negative, got %d", *dc.Daemon.MaxAgents)
-	}
-	if dc.Daemon.MaxAgents != nil && *dc.Daemon.MaxAgents > 0 && len(dc.Agents) > *dc.Daemon.MaxAgents {
-		return nil, fmt.Errorf("too many agents configured: %d exceeds max_agents limit of %d", len(dc.Agents), *dc.Daemon.MaxAgents)
+	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents); err != nil {
+		return nil, err
 	}
 
 	return dc, nil
+}
+
+// validateAgents checks that agent entries and max_agents limits are valid.
+func validateAgents(agents []AgentEntry, maxAgents *int) error {
+	for i, a := range agents {
+		if a.Worktree == "" {
+			return fmt.Errorf("agent[%d]: worktree is required", i)
+		}
+		if a.Role == "" {
+			return fmt.Errorf("agent[%d]: role is required", i)
+		}
+		for j, fb := range a.FallbackBackends {
+			if fb == "" {
+				return fmt.Errorf("agent[%d]: fallback_backends[%d] is empty", i, j)
+			}
+		}
+	}
+	if maxAgents != nil && *maxAgents < 0 {
+		return fmt.Errorf("max_agents must be non-negative, got %d", *maxAgents)
+	}
+	if maxAgents != nil && *maxAgents > 0 && len(agents) > *maxAgents {
+		return fmt.Errorf("too many agents configured: %d exceeds max_agents limit of %d", len(agents), *maxAgents)
+	}
+	return nil
 }
 
 // overlayDaemonSettings applies explicitly-set values from src onto dst.

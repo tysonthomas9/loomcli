@@ -35,7 +35,9 @@ type AgentProcess struct {
 	rateRetryCount int                  // consecutive rate-limit retries (separate from restartCount)
 	lastNoWork     bool                 // true if last exit was due to no claimable tasks
 
-	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError
+	currentBackendIdx int // 0=primary, 1+=fallback index into entry.FallbackBackends
+
+	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx
 }
 
 // SupervisedAgentStatus is a snapshot of a supervised agent's state for external inspection.
@@ -50,6 +52,7 @@ type SupervisedAgentStatus struct {
 	LastExit       time.Time
 	LastExitCode   int
 	AssignedEpicID string
+	CurrentBackend string // effective backend (includes failover state)
 }
 
 // Daemon coordinates multiple supervised agents.
@@ -310,6 +313,13 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		default:
 		}
 
+		// 7.5. Check for backend failover (before restart decision)
+		if d.tryFallbackBackend(ap) {
+			log.Printf("[daemon] Agent %s: backend failover triggered, retrying with %s",
+				ap.entry.Worktree, d.getEffectiveBackend(ap))
+			continue
+		}
+
 		// 8. Restart decision
 		if !d.shouldRestart(ap) {
 			log.Printf("[daemon] Agent %s: max restarts exceeded, stopping supervisor", ap.entry.Worktree)
@@ -359,16 +369,95 @@ func (d *Daemon) handleRestartAfterError(ap *AgentProcess) bool {
 	}
 }
 
+// getEffectiveBackend returns the backend name for the agent's current failover position.
+// Index 0 = primary (ap.entry.Backend or d.config.Backend), index 1+ = FallbackBackends[idx-1].
+func (d *Daemon) getEffectiveBackend(ap *AgentProcess) string {
+	ap.mu.Lock()
+	idx := ap.currentBackendIdx
+	ap.mu.Unlock()
+
+	if idx == 0 {
+		b := ap.entry.Backend
+		if b == "" && d.config != nil {
+			b = d.config.Backend
+		}
+		return b
+	}
+
+	fbIdx := idx - 1
+	if fbIdx < len(ap.entry.FallbackBackends) {
+		return ap.entry.FallbackBackends[fbIdx]
+	}
+
+	// Beyond fallback list — return primary (caller should have prevented this)
+	b := ap.entry.Backend
+	if b == "" && d.config != nil {
+		b = d.config.Backend
+	}
+	return b
+}
+
+// tryFallbackBackend checks if the agent should fail over to the next backend.
+// Returns true if failover was triggered (caller should skip normal restart counting).
+// Returns false if no failover is needed or all backends are exhausted.
+func (d *Daemon) tryFallbackBackend(ap *AgentProcess) bool {
+	ap.mu.Lock()
+	lastErr := ap.lastError
+	rateCount := ap.rateRetryCount
+	currentIdx := ap.currentBackendIdx
+	numFallbacks := len(ap.entry.FallbackBackends)
+
+	if lastErr == nil || numFallbacks == 0 {
+		ap.mu.Unlock()
+		return false
+	}
+
+	// Determine if failover should trigger
+	shouldFailover := false
+	switch {
+	case lastErr.Class == agenterr.ModelNotFound:
+		shouldFailover = true
+	case lastErr.Class == agenterr.RateLimited && rateCount > 3:
+		shouldFailover = true
+	}
+
+	if !shouldFailover {
+		ap.mu.Unlock()
+		return false
+	}
+
+	// Check if there's a next backend to try
+	totalBackends := 1 + numFallbacks
+	nextIdx := currentIdx + 1
+	if nextIdx >= totalBackends {
+		worktree := ap.entry.Worktree
+		ap.mu.Unlock()
+		log.Printf("[daemon] Agent %s: all backends exhausted (tried %d), no more fallbacks",
+			worktree, totalBackends)
+		return false
+	}
+
+	// Switch to next backend (still holding the lock — no TOCTOU gap)
+	ap.currentBackendIdx = nextIdx
+	ap.restartCount = 0
+	ap.rateRetryCount = 0
+	ap.mu.Unlock()
+
+	// Resolve backend name outside the lock for logging (getEffectiveBackend acquires ap.mu)
+	nextBackend := d.getEffectiveBackend(ap)
+	log.Printf("[daemon] Agent %s: failing over from backend index %d to %d (%s)",
+		ap.entry.Worktree, currentIdx, nextIdx, nextBackend)
+
+	return true
+}
+
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess.
 // Extracted from spawnAgent for testability. Does not start the process.
 func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 	var cmd *exec.Cmd
 
-	// Resolve backend for this agent: per-agent > project > global > default
-	agentBackend := ap.entry.Backend
-	if agentBackend == "" {
-		agentBackend = d.config.Backend
-	}
+	// Resolve backend using failover-aware resolution
+	agentBackend := d.getEffectiveBackend(ap)
 
 	if builtInRoles[ap.entry.Role] {
 		// Built-in role: loom <role> <worktree> --auto --daemon-mode
@@ -412,10 +501,12 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 
 // spawnAgent starts the subprocess for an agent.
 func (d *Daemon) spawnAgent(ap *AgentProcess) error {
+	// Build command before acquiring the lock because buildCommand calls
+	// getEffectiveBackend which also acquires ap.mu (non-reentrant mutex).
+	cmd := d.buildCommand(ap)
+
 	ap.mu.Lock()
 	defer ap.mu.Unlock()
-
-	cmd := d.buildCommand(ap)
 
 	// Set up log files if log directory is configured
 	if d.config.Daemon.LogDir != "" {
@@ -559,10 +650,13 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	if ap.lastExitCode == 0 && time.Since(ap.lastStart) > time.Minute {
 		ap.restartCount = 0
 		ap.rateRetryCount = 0
+		ap.currentBackendIdx = 0 // reset to primary backend
 		return true
 	}
 
-	// NoWork: no claimable tasks — always restart, never count toward max_retries
+	// NoWork: no claimable tasks — always restart, never count toward max_retries.
+	// Preserve currentBackendIdx: NoWork is about task availability, not backend health.
+	// If the agent failed over to a fallback backend, it should stay on that backend.
 	if ap.lastError != nil && ap.lastError.Class == agenterr.NoWork {
 		ap.restartCount = 0
 		ap.rateRetryCount = 0
@@ -863,6 +957,8 @@ func (d *Daemon) Agents() []SupervisedAgentStatus {
 			AssignedEpicID: ap.assignedEpicID,
 		}
 		ap.mu.Unlock()
+		// Resolve backend name outside the lock (getEffectiveBackend acquires ap.mu)
+		result[i].CurrentBackend = d.getEffectiveBackend(ap)
 	}
 	return result
 }

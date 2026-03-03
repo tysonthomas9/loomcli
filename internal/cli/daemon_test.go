@@ -787,6 +787,30 @@ func TestShouldRestart(t *testing.T) {
 		}
 	})
 
+	t.Run("NoWork on fallback backend preserves currentBackendIdx", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan", FallbackBackends: []string{"codex"}}},
+			nil,
+		)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			currentBackendIdx: 1, // already on fallback backend
+			restartCount:      1,
+			lastExitCode:      0,
+			lastStart:         time.Now().Add(-10 * time.Second),
+			lastError:         &agenterr.AgentError{Class: agenterr.NoWork, Message: "no claimable tasks"},
+		}
+
+		result := daemon.shouldRestart(ap)
+		if !result {
+			t.Error("shouldRestart() = false, want true for NoWork")
+		}
+		if ap.currentBackendIdx != 1 {
+			t.Errorf("currentBackendIdx = %d, want 1 (NoWork should not reset failover state)", ap.currentBackendIdx)
+		}
+	})
+
 	t.Run("nil lastError counts toward retries normally", func(t *testing.T) {
 		config := makeDaemonConfig(
 			[]AgentEntry{{Worktree: "test", Role: "plan"}},
@@ -1361,4 +1385,338 @@ func TestGetNoWorkBackoff(t *testing.T) {
 			t.Errorf("getNoWorkBackoff() = %d, want 45", got)
 		}
 	})
+}
+
+func TestGetEffectiveBackend(t *testing.T) {
+	t.Run("index 0 returns primary backend", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		config.Backend = "global"
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Backend: "claude", FallbackBackends: []string{"codex", "opencode"}},
+			currentBackendIdx: 0,
+		}
+
+		got := daemon.getEffectiveBackend(ap)
+		if got != "claude" {
+			t.Errorf("getEffectiveBackend() = %q, want %q", got, "claude")
+		}
+	})
+
+	t.Run("index 0 falls back to config backend", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		config.Backend = "codex"
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Backend: "", FallbackBackends: []string{"opencode"}},
+			currentBackendIdx: 0,
+		}
+
+		got := daemon.getEffectiveBackend(ap)
+		if got != "codex" {
+			t.Errorf("getEffectiveBackend() = %q, want %q", got, "codex")
+		}
+	})
+
+	t.Run("index 1 returns first fallback", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Backend: "claude", FallbackBackends: []string{"codex", "opencode"}},
+			currentBackendIdx: 1,
+		}
+
+		got := daemon.getEffectiveBackend(ap)
+		if got != "codex" {
+			t.Errorf("getEffectiveBackend() = %q, want %q", got, "codex")
+		}
+	})
+
+	t.Run("index 2 returns second fallback", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Backend: "claude", FallbackBackends: []string{"codex", "opencode"}},
+			currentBackendIdx: 2,
+		}
+
+		got := daemon.getEffectiveBackend(ap)
+		if got != "opencode" {
+			t.Errorf("getEffectiveBackend() = %q, want %q", got, "opencode")
+		}
+	})
+
+	t.Run("index beyond fallbacks returns primary", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Backend: "claude", FallbackBackends: []string{"codex"}},
+			currentBackendIdx: 5,
+		}
+
+		got := daemon.getEffectiveBackend(ap)
+		if got != "claude" {
+			t.Errorf("getEffectiveBackend() = %q, want %q (should return primary when beyond fallbacks)", got, "claude")
+		}
+	})
+}
+
+func TestTryFallbackBackend(t *testing.T) {
+	t.Run("ModelNotFound triggers immediate failover", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Worktree: "test", Backend: "claude", FallbackBackends: []string{"codex"}},
+			currentBackendIdx: 0,
+			restartCount:      2,
+			rateRetryCount:    1,
+			lastError:         &agenterr.AgentError{Class: agenterr.ModelNotFound, Message: "model not found"},
+		}
+
+		result := daemon.tryFallbackBackend(ap)
+		if !result {
+			t.Error("tryFallbackBackend() = false, want true for ModelNotFound")
+		}
+		if ap.currentBackendIdx != 1 {
+			t.Errorf("currentBackendIdx = %d, want 1", ap.currentBackendIdx)
+		}
+		if ap.restartCount != 0 {
+			t.Errorf("restartCount = %d, want 0 (should be reset)", ap.restartCount)
+		}
+		if ap.rateRetryCount != 0 {
+			t.Errorf("rateRetryCount = %d, want 0 (should be reset)", ap.rateRetryCount)
+		}
+	})
+
+	t.Run("RateLimited with rateRetryCount <= 3 does not trigger failover", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
+			currentBackendIdx: 0,
+			rateRetryCount:    2,
+			lastError:         &agenterr.AgentError{Class: agenterr.RateLimited, Message: "rate limited"},
+		}
+
+		result := daemon.tryFallbackBackend(ap)
+		if result {
+			t.Error("tryFallbackBackend() = true, want false for RateLimited with count <= 3")
+		}
+		if ap.currentBackendIdx != 0 {
+			t.Errorf("currentBackendIdx = %d, want 0 (unchanged)", ap.currentBackendIdx)
+		}
+	})
+
+	t.Run("RateLimited with rateRetryCount > 3 triggers failover", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
+			currentBackendIdx: 0,
+			rateRetryCount:    4,
+			lastError:         &agenterr.AgentError{Class: agenterr.RateLimited, Message: "rate limited"},
+		}
+
+		result := daemon.tryFallbackBackend(ap)
+		if !result {
+			t.Error("tryFallbackBackend() = false, want true for RateLimited with count > 3")
+		}
+		if ap.currentBackendIdx != 1 {
+			t.Errorf("currentBackendIdx = %d, want 1", ap.currentBackendIdx)
+		}
+	})
+
+	t.Run("no fallback backends configured returns false", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:     AgentEntry{Worktree: "test"},
+			lastError: &agenterr.AgentError{Class: agenterr.ModelNotFound, Message: "model not found"},
+		}
+
+		result := daemon.tryFallbackBackend(ap)
+		if result {
+			t.Error("tryFallbackBackend() = true, want false (no fallback backends)")
+		}
+	})
+
+	t.Run("all backends exhausted returns false", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Worktree: "test", FallbackBackends: []string{"codex", "opencode"}},
+			currentBackendIdx: 2, // already on last fallback (total 3 backends)
+			lastError:         &agenterr.AgentError{Class: agenterr.ModelNotFound, Message: "model not found"},
+		}
+
+		result := daemon.tryFallbackBackend(ap)
+		if result {
+			t.Error("tryFallbackBackend() = true, want false (all backends exhausted)")
+		}
+	})
+
+	t.Run("AuthFailure does not trigger failover", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:     AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
+			lastError: &agenterr.AgentError{Class: agenterr.AuthFailure, Message: "invalid API key"},
+		}
+
+		result := daemon.tryFallbackBackend(ap)
+		if result {
+			t.Error("tryFallbackBackend() = true, want false for AuthFailure")
+		}
+	})
+
+	t.Run("Transient does not trigger failover", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:     AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
+			lastError: &agenterr.AgentError{Class: agenterr.Transient, Message: "server error"},
+		}
+
+		result := daemon.tryFallbackBackend(ap)
+		if result {
+			t.Error("tryFallbackBackend() = true, want false for Transient")
+		}
+	})
+
+	t.Run("nil lastError returns false", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:     AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
+			lastError: nil,
+		}
+
+		result := daemon.tryFallbackBackend(ap)
+		if result {
+			t.Error("tryFallbackBackend() = true, want false for nil lastError")
+		}
+	})
+
+	t.Run("failover resets restartCount and rateRetryCount", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:             AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
+			currentBackendIdx: 0,
+			restartCount:      5,
+			rateRetryCount:    3,
+			lastError:         &agenterr.AgentError{Class: agenterr.ModelNotFound, Message: "not found"},
+		}
+
+		daemon.tryFallbackBackend(ap)
+
+		if ap.restartCount != 0 {
+			t.Errorf("restartCount = %d, want 0 (should be reset on failover)", ap.restartCount)
+		}
+		if ap.rateRetryCount != 0 {
+			t.Errorf("rateRetryCount = %d, want 0 (should be reset on failover)", ap.rateRetryCount)
+		}
+	})
+}
+
+func TestShouldRestart_ResetsBackendOnSuccess(t *testing.T) {
+	config := makeDaemonConfig(
+		[]AgentEntry{{Worktree: "test", Role: "plan"}},
+		nil,
+	)
+	config.Daemon.RestartPolicy.MaxRetries = intPtr(3)
+	daemon := &Daemon{config: config}
+
+	ap := &AgentProcess{
+		restartCount:      1,
+		rateRetryCount:    2,
+		currentBackendIdx: 2, // on second fallback
+		lastExitCode:      0,
+		lastStart:         time.Now().Add(-2 * time.Minute),
+	}
+
+	result := daemon.shouldRestart(ap)
+	if !result {
+		t.Error("shouldRestart() = false, want true for successful long run")
+	}
+	if ap.currentBackendIdx != 0 {
+		t.Errorf("currentBackendIdx = %d, want 0 (should reset to primary on success)", ap.currentBackendIdx)
+	}
+}
+
+func TestBuildCommand_UsesEffectiveBackend(t *testing.T) {
+	config := makeDaemonConfig(nil, nil)
+	config.Backend = "claude"
+	daemon := &Daemon{config: config}
+
+	t.Run("uses primary backend at index 0", func(t *testing.T) {
+		ap := &AgentProcess{
+			entry:             AgentEntry{Worktree: "test", Role: "plan", Backend: "claude", FallbackBackends: []string{"codex"}},
+			worktreePath:      "/tmp/test",
+			currentBackendIdx: 0,
+		}
+
+		cmd := daemon.buildCommand(ap)
+		args := strings.Join(cmd.Args, " ")
+		if !strings.Contains(args, "--backend claude") {
+			t.Errorf("buildCommand args = %q, want to contain '--backend claude'", args)
+		}
+	})
+
+	t.Run("uses fallback backend at index 1", func(t *testing.T) {
+		ap := &AgentProcess{
+			entry:             AgentEntry{Worktree: "test", Role: "plan", Backend: "claude", FallbackBackends: []string{"codex"}},
+			worktreePath:      "/tmp/test",
+			currentBackendIdx: 1,
+		}
+
+		cmd := daemon.buildCommand(ap)
+		args := strings.Join(cmd.Args, " ")
+		if !strings.Contains(args, "--backend codex") {
+			t.Errorf("buildCommand args = %q, want to contain '--backend codex'", args)
+		}
+	})
+}
+
+func TestAgents_IncludesCurrentBackend(t *testing.T) {
+	config := makeDaemonConfig(nil, nil)
+	config.Backend = "claude"
+	daemon := &Daemon{
+		config: config,
+		agents: []*AgentProcess{
+			{
+				entry:             AgentEntry{Worktree: "alpha", Role: "plan", Backend: "claude", FallbackBackends: []string{"codex"}},
+				worktreePath:      "/path/alpha",
+				currentBackendIdx: 0,
+			},
+			{
+				entry:             AgentEntry{Worktree: "beta", Role: "task", Backend: "claude", FallbackBackends: []string{"codex", "opencode"}},
+				worktreePath:      "/path/beta",
+				currentBackendIdx: 2,
+			},
+		},
+	}
+
+	statuses := daemon.Agents()
+
+	if statuses[0].CurrentBackend != "claude" {
+		t.Errorf("statuses[0].CurrentBackend = %q, want %q", statuses[0].CurrentBackend, "claude")
+	}
+	if statuses[1].CurrentBackend != "opencode" {
+		t.Errorf("statuses[1].CurrentBackend = %q, want %q", statuses[1].CurrentBackend, "opencode")
+	}
 }
