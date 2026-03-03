@@ -3,7 +3,7 @@
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
 
 **Your agent name is: {{ .AgentName }}** (BD_ACTOR is set automatically)
-{{ .WorkspaceBlock }}{{ .EpicScope }}
+{{ .WorkspaceBlock }}{{ .EpicScope }}{{ .SafetyBlock }}
 ### Step 1: Select ONE Task
 - Run this command to find tasks ready to implement (has design, not needs-revision):
   {{ .BdReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select(.design) | select((.design == "") | not) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'

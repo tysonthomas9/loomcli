@@ -449,6 +449,55 @@ func TestGenerateTaskPrompt_BackendAware(t *testing.T) {
 	}
 }
 
+func TestBuildSafetyGuardrailsBlock(t *testing.T) {
+	block := buildSafetyGuardrailsBlock()
+
+	if block == "" {
+		t.Fatal("expected non-empty safety block")
+	}
+
+	wantPhrases := []string{
+		"Multi-Agent Safety Rules",
+		"Only modify files directly related",
+		"git stash",
+		"git checkout main",
+		"git clean",
+		"force-push",
+		"reset --hard",
+		"encounter files/changes from another agent",
+		"Commit only your changes",
+		"unexpected state",
+		"Do not switch branches",
+		"worktree branch",
+	}
+
+	for _, phrase := range wantPhrases {
+		if !strings.Contains(block, phrase) {
+			t.Errorf("safety block missing phrase: %q", phrase)
+		}
+	}
+}
+
+func TestAllPromptsContainSafetyRules(t *testing.T) {
+	prompts := map[string]string{
+		"planning":            GeneratePlanningPrompt("test", nil, ""),
+		"task":                GenerateTaskPrompt("test", nil, "", "claude"),
+		"fleet_planning":      GenerateFleetPlanningPrompt("test", "bd-test.1", nil),
+		"fleet_task":          GenerateFleetTaskPrompt("test", "bd-test.1", nil, "claude"),
+		"conflict_resolution": GenerateConflictResolutionPrompt("feature", "main", []string{"file.go"}),
+		"lead":                GenerateLeadPrompt(),
+	}
+
+	for name, prompt := range prompts {
+		if !strings.Contains(prompt, "Multi-Agent Safety Rules") {
+			t.Errorf("%s prompt missing 'Multi-Agent Safety Rules' section", name)
+		}
+		if !strings.Contains(prompt, "Do not switch branches") {
+			t.Errorf("%s prompt missing safety rule about branch switching", name)
+		}
+	}
+}
+
 func TestBuildWorkspaceContextBlock_NilWorkspace(t *testing.T) {
 	result := buildWorkspaceContextBlock(nil)
 	if result != "" {
@@ -1019,6 +1068,7 @@ func TestAllTemplatesRender(t *testing.T) {
 		AgentName:       "testAgent",
 		WorkspaceBlock:  "workspace block content",
 		EpicScope:       "epic scope content",
+		SafetyBlock:     "safety block content",
 		BdReadyJSON:     "bd ready --parent epic-123 --limit 50 --json",
 		BdReadyFallback: "bd ready --parent epic-123 --limit 50",
 		TaskID:          "task-456",

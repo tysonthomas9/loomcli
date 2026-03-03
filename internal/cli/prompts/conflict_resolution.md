@@ -1,7 +1,7 @@
 ## WORKFLOW: Resolve Merge Conflicts
 
 You are resolving merge conflicts for: {{ .SourceBranch }} -> {{ .TargetBranch }}
-
+{{ .SafetyBlock }}
 ### Conflicted Files
 The following files have conflicts:
 {{ .ConflictList }}

@@ -19,6 +19,7 @@ type promptTemplateData struct {
 	AgentName       string
 	WorkspaceBlock  string
 	EpicScope       string
+	SafetyBlock     string
 	BdReadyJSON     string
 	BdReadyFallback string
 	TaskID          string
@@ -114,6 +115,25 @@ func buildWorkspaceContextBlock(workspace *WorkspaceConfig) string {
 	return sb.String()
 }
 
+// buildSafetyGuardrailsBlock returns the multi-agent safety rules section.
+// These rules prevent agents from interfering with each other when running
+// in parallel across worktrees.
+func buildSafetyGuardrailsBlock() string {
+	return `
+### Multi-Agent Safety Rules
+
+You are running in a parallel multi-agent environment. Follow these rules strictly:
+
+- **Only modify files directly related to your assigned task** — do not touch files outside your task scope
+- **Never run** ` + "`git stash`" + `, ` + "`git checkout main`" + `, or ` + "`git clean`" + ` outside your assigned worktree
+- **Never force-push or reset --hard** without explicit instruction from the user
+- **If you encounter files/changes from another agent**, leave them alone — do not modify, revert, or clean them up
+- **Commit only your changes** — do not stage unrelated modifications with ` + "`git add -A`" + ` or ` + "`git add .`" + `; use specific file paths
+- **If your worktree has unexpected state**, report it (via bd notes or loom complete) rather than cleaning it up
+- **Do not switch branches** — you are confined to your assigned worktree branch
+`
+}
+
 // buildTestStep returns the backend-aware test step content.
 func buildTestStep(backendName string) string {
 	if backendName == "claude" {
@@ -163,6 +183,7 @@ func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig, parent
 		AgentName:       agentName,
 		WorkspaceBlock:  buildWorkspaceContextBlock(workspace),
 		EpicScope:       epicScope,
+		SafetyBlock:     buildSafetyGuardrailsBlock(),
 		BdReadyJSON:     bdReadyJSON,
 		BdReadyFallback: bdReadyFallback,
 	})
@@ -188,6 +209,7 @@ func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID s
 		AgentName:       agentName,
 		WorkspaceBlock:  buildWorkspaceContextBlock(workspace),
 		EpicScope:       epicScope,
+		SafetyBlock:     buildSafetyGuardrailsBlock(),
 		BdReadyJSON:     bdReadyJSON,
 		BdReadyFallback: bdReadyFallback,
 		TestStep:        buildTestStep(backendName),
@@ -201,6 +223,7 @@ func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *WorkspaceC
 	return renderPrompt("fleet_planning", promptTemplateData{
 		AgentName:      agentName,
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
+		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
 	})
 }
@@ -211,6 +234,7 @@ func GenerateFleetTaskPrompt(agentName, taskID string, workspace *WorkspaceConfi
 	return renderPrompt("fleet_task", promptTemplateData{
 		AgentName:      agentName,
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
+		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
 		TestStep:       buildTestStep(backendName),
 		ReviewStep:     buildReviewStep(backendName),
@@ -226,6 +250,7 @@ func GenerateConflictResolutionPrompt(sourceBranch, targetBranch string, conflic
 // pushRef is used in the "git push origin <pushRef>" command (e.g., "main" or "HEAD:main").
 func generateConflictResolutionPromptWithPush(sourceBranch, targetBranch string, conflicts []string, pushRef string) string {
 	return renderPrompt("conflict_resolution", promptTemplateData{
+		SafetyBlock:  buildSafetyGuardrailsBlock(),
 		SourceBranch: sourceBranch,
 		TargetBranch: targetBranch,
 		ConflictList: strings.Join(conflicts, "\n"),
@@ -235,5 +260,7 @@ func generateConflictResolutionPromptWithPush(sourceBranch, targetBranch string,
 
 // GenerateLeadPrompt creates the prompt for the interactive lead/manager mode
 func GenerateLeadPrompt() string {
-	return renderPrompt("lead", promptTemplateData{})
+	return renderPrompt("lead", promptTemplateData{
+		SafetyBlock: buildSafetyGuardrailsBlock(),
+	})
 }
