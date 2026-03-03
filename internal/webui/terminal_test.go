@@ -26,13 +26,13 @@ func skipIfNoTmux(t *testing.T) {
 // killTmuxSession is a cleanup helper that kills a tmux session by name.
 func killTmuxSession(t *testing.T, name string) {
 	t.Helper()
-	cmd := exec.Command("tmux", "kill-session", "-t", name)
-	_ = cmd.Run() // ignore error if session doesn't exist
+	cmd := exec.Command("tmux", "kill-session", "-t", name) //nolint:norawexec
+	_ = cmd.Run()                                           // ignore error if session doesn't exist
 }
 
 // tmuxSessionExists checks whether a tmux session with the given name exists.
 func tmuxSessionExists(name string) bool {
-	cmd := exec.Command("tmux", "has-session", "-t", name)
+	cmd := exec.Command("tmux", "has-session", "-t", name) //nolint:norawexec
 	return cmd.Run() == nil
 }
 
