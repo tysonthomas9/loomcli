@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend sync-beads update-beads gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend sync-beads update-beads gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc test-coverage test-frontend-coverage
 
 # Default target
 all: build
@@ -29,6 +29,15 @@ test-all:
 lint:
 	@echo "Running Go linter..."
 	golangci-lint run --timeout=5m
+
+# Run Go tests with coverage threshold enforcement
+test-coverage: test
+	@./scripts/check-coverage.sh
+
+# Run frontend tests with coverage threshold enforcement
+test-frontend-coverage:
+	@echo "Running frontend tests with coverage..."
+	@cd $(FRONTEND_DIR) && npm run test:coverage
 
 # Check Go file LOC limits
 check-loc:
@@ -167,6 +176,8 @@ help:
 	@echo "  make test              - Run unit tests with coverage"
 	@echo "  make test-integration  - Run unit + integration tests"
 	@echo "  make test-all          - Run all tests (unit + integration + e2e)"
+	@echo "  make test-coverage     - Run Go tests with coverage threshold"
+	@echo "  make test-frontend-coverage - Run frontend tests with coverage threshold"
 	@echo "  make lint              - Run Go linter (golangci-lint)"
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"
 	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
