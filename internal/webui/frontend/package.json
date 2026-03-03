@@ -13,6 +13,7 @@
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
     "check:loc": "node scripts/check-loc.mjs",
+    "check:no-raw-fetch": "node scripts/check-no-raw-fetch.mjs",
     "test": "vitest run && playwright test",
     "test:unit": "vitest run",
     "test:watch": "vitest",
