@@ -88,12 +88,12 @@ linters:
           - gosec
         text: "G302"
       # G304: File inclusion via variable - these are intentional file operations
-      - path: 'internal/(cli/(automode|automode_tmux|lock|agent_cmd|config|daemon|daemon_cmd|daemon_config|monitor|workspace_cmd)|rpc/auth|webui/(auth|handlers_config|log_open_unix|log_streamer))\.go'
+      - path: 'internal/(cli/(automode|automode_tmux|lock|agent_cmd|config|daemon|daemon_cmd|daemon_config|daemon_supervisor|monitor|workspace_cmd)|rpc/auth|webui/(auth|handlers_config|log_open_unix|log_streamer))\.go'
         linters:
           - gosec
         text: "G304"
       # G204: Subprocess launches are intentional for tmux, claude, bd, loom commands
-      - path: 'internal/(cli/(automode|automode_tmux|recover|daemon)|kv/reconcile|webui/terminal)\.go'
+      - path: 'internal/(cli/(automode|automode_tmux|recover|daemon|daemon_supervisor)|kv/reconcile|webui/terminal)\.go'
         linters:
           - gosec
         text: "G204"
@@ -102,7 +102,7 @@ linters:
           - gosec
         text: "G306"
       # G204: Subprocess launches for AI agent backends and daemon
-      - path: 'internal/cli/(backend_claude|backend_codex|backend_opencode|daemon)\.go'
+      - path: 'internal/cli/(backend_claude|backend_codex|backend_opencode|daemon|daemon_supervisor)\.go'
         linters:
           - gosec
         text: "G204"
@@ -149,7 +149,7 @@ linters:
         linters: [funlen]
       - path: "internal/cli/daemon_cmd\\.go"
         linters: [funlen, cyclop]
-      - path: "internal/cli/daemon\\.go"
+      - path: "internal/cli/daemon(_supervisor)?\\.go"
         linters: [cyclop, gocognit]
       - path: "internal/cli/prompts\\.go"
         linters: [funlen]
