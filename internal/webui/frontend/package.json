@@ -16,6 +16,7 @@
     "check:no-raw-fetch": "node scripts/check-no-raw-fetch.mjs",
     "test": "vitest run && playwright test",
     "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
