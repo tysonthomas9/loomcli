@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"io"
+	"os/exec"
+	"strings"
 )
 
 // StreamingBackend is an optional interface that backends can implement to
@@ -90,6 +92,18 @@ type BackendCapabilities struct {
 	Health    HealthCheckableBackend
 	Config    ConfigurableBackend
 	Meta      MetadataProvider
+}
+
+// detectBinaryVersion runs "<binary> --version" and returns the first line of
+// output trimmed of whitespace. Returns "" if the binary is not found or the
+// command fails.
+func detectBinaryVersion(binary string) string {
+	out, err := exec.Command(binary, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	line := strings.SplitN(string(out), "\n", 2)[0]
+	return strings.TrimSpace(line)
 }
 
 // InspectCapabilities performs type assertions on b to discover which optional

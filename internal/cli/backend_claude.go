@@ -2,11 +2,13 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync/atomic"
 	"syscall"
 )
@@ -22,6 +24,154 @@ func (c *ClaudeBackend) InvokeInteractive(workDir, prompt, agentName string) err
 
 func (c *ClaudeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
 	return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
+}
+
+// Meta returns descriptive metadata about the Claude backend.
+func (c *ClaudeBackend) Meta() BackendMeta {
+	version := detectBinaryVersion("claude")
+	return BackendMeta{
+		DisplayName: "Claude",
+		Version:     version,
+		Description: "Anthropic Claude Code CLI",
+		URL:         "https://docs.anthropic.com/en/docs/claude-code",
+		BinaryName:  "claude",
+	}
+}
+
+// HealthCheck reports the installation and readiness status of the Claude backend.
+func (c *ClaudeBackend) HealthCheck() HealthStatus {
+	var hs HealthStatus
+	var issues []string
+
+	if _, err := exec.LookPath("claude"); err == nil {
+		hs.Installed = true
+		hs.Version = detectBinaryVersion("claude")
+	} else {
+		issues = append(issues, "claude binary not found on PATH")
+	}
+
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		hs.APIKeySet = true
+	} else {
+		issues = append(issues, "ANTHROPIC_API_KEY not set")
+	}
+
+	hs.Healthy = hs.Installed && hs.APIKeySet
+	if len(issues) > 0 {
+		hs.Message = strings.Join(issues, "; ")
+	} else {
+		hs.Message = "ready"
+	}
+	return hs
+}
+
+// InvokeStreaming starts a Claude agent session and returns a streaming reader
+// of JSON events. The caller is responsible for closing the returned ReadCloser,
+// which also terminates the subprocess.
+func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, agentName string) (io.ReadCloser, error) {
+	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
+		"--dangerously-skip-permissions")
+	cmd.Dir = workDir
+	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
+	if agentName != "" {
+		env = append(env, "BD_ACTOR="+agentName)
+	}
+	cmd.Env = env
+
+	// Pass prompt via stdin pipe
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pipe: %w", err)
+	}
+	if _, err := io.WriteString(w, prompt); err != nil {
+		w.Close()
+		r.Close()
+		return nil, fmt.Errorf("failed to write prompt to stdin: %w", err)
+	}
+	w.Close()
+	cmd.Stdin = r
+	cmd.Stderr = os.Stderr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		r.Close()
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		r.Close()
+		return nil, fmt.Errorf("failed to start claude: %w", err)
+	}
+
+	// Monitor context cancellation
+	var exited atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			if !exited.Load() {
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+			}
+		case <-done:
+		}
+	}()
+
+	return &streamReadCloser{
+		ReadCloser: stdout,
+		cmd:        cmd,
+		stdinPipe:  r,
+		exited:     &exited,
+		done:       done,
+	}, nil
+}
+
+// streamReadCloser wraps a stdout pipe and ensures the subprocess is cleaned up on Close.
+type streamReadCloser struct {
+	io.ReadCloser
+	cmd       *exec.Cmd
+	stdinPipe *os.File
+	exited    *atomic.Bool
+	done      chan struct{}
+}
+
+func (s *streamReadCloser) Close() error {
+	readErr := s.ReadCloser.Close()
+	// Mark exited before Wait so the context goroutine won't SIGTERM a reused PID.
+	s.exited.Store(true)
+	waitErr := s.cmd.Wait()
+	// Guard against double-close.
+	select {
+	case <-s.done:
+	default:
+		close(s.done)
+	}
+	s.stdinPipe.Close()
+	if readErr != nil {
+		return readErr
+	}
+	return waitErr
+}
+
+// ContinueSession resumes an interactive Claude session by session ID.
+func (c *ClaudeBackend) ContinueSession(workDir, sessionID, agentName string) error {
+	cmd := exec.Command("claude", "--resume", "--session-id", sessionID,
+		"--dangerously-skip-permissions")
+	cmd.Dir = workDir
+	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
+	if agentName != "" {
+		env = append(env, "BD_ACTOR="+agentName)
+	}
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// LastSessionID returns the most recent session ID. Returns "" because Claude
+// CLI manages sessions internally without exposing a listing API.
+func (c *ClaudeBackend) LastSessionID(_ string) string {
+	return ""
 }
 
 func init() {
