@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"unsafe"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // CodexBackend implements the Backend interface for the OpenAI Codex CLI.
@@ -136,12 +139,16 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 		}
 	}()
 
-	// Pipe stdout directly to os.Stdout (no JSON parsing)
+	// Parse stdout lines: display and collect usage if available
 	scanner := bufio.NewScanner(stdout)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
 	for scanner.Scan() {
-		fmt.Println(scanner.Text())
+		line := scanner.Text()
+		fmt.Println(line)
+		if activeUsageCollector != nil {
+			collectCodexStreamUsage(line, activeUsageCollector)
+		}
 	}
 
 	runErr := cmd.Wait()
@@ -153,4 +160,29 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 
 func init() {
 	RegisterBackend(&CodexBackend{})
+}
+
+// codexUsageEvent is the minimal structure for Codex --json output
+// that contains a usage object (emitted on turn.completed events).
+type codexUsageEvent struct {
+	Type  string `json:"type"`
+	Usage *struct {
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
+	} `json:"usage,omitempty"`
+}
+
+// collectCodexStreamUsage is best-effort: Codex emits turn.completed events
+// with a usage object when running with --json. If the line doesn't contain
+// usage data, it's silently ignored.
+func collectCodexStreamUsage(line string, collector *usage.Collector) {
+	var event codexUsageEvent
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return
+	}
+	if event.Usage == nil {
+		return
+	}
+	// No message-level dedup needed for Codex (one usage per turn)
+	collector.Accumulate("", event.Usage.InputTokens, event.Usage.OutputTokens, 0, 0)
 }

@@ -2,12 +2,15 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"sync/atomic"
 	"syscall"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // OpenCodeBackend implements the Backend interface for the OpenCode CLI.
@@ -107,12 +110,16 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 		}
 	}()
 
-	// Pipe stdout directly to os.Stdout (no JSON parsing)
+	// Parse stdout lines: display and collect usage if available
 	scanner := bufio.NewScanner(stdout)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
 	for scanner.Scan() {
-		fmt.Println(scanner.Text())
+		line := scanner.Text()
+		fmt.Println(line)
+		if activeUsageCollector != nil {
+			collectOpenCodeStreamUsage(line, activeUsageCollector)
+		}
 	}
 
 	runErr := cmd.Wait()
@@ -124,4 +131,26 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 
 func init() {
 	RegisterBackend(&OpenCodeBackend{})
+}
+
+// openCodeUsageEvent is the minimal structure for OpenCode --format json output.
+// Best-effort: we look for a usage object with input_tokens/output_tokens.
+type openCodeUsageEvent struct {
+	Usage *struct {
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
+	} `json:"usage,omitempty"`
+}
+
+// collectOpenCodeStreamUsage is best-effort: parse JSON lines for a usage field.
+// If no usage data is found, the call is a no-op.
+func collectOpenCodeStreamUsage(line string, collector *usage.Collector) {
+	var event openCodeUsageEvent
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return
+	}
+	if event.Usage == nil {
+		return
+	}
+	collector.Accumulate("", event.Usage.InputTokens, event.Usage.OutputTokens, 0, 0)
 }

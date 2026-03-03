@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"sync/atomic"
 	"syscall"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // ClaudeBackend implements the Backend interface for the Claude CLI.
@@ -30,6 +32,11 @@ func init() {
 
 // debugStreamParsing enables verbose output for JSON parsing errors
 var debugStreamParsing = os.Getenv("LOOM_DEBUG_STREAM") != ""
+
+// activeUsageCollector is set by the automode loop before each invocation
+// and cleared after. The scanner loop reads it during stream parsing.
+// Access is sequential (set → invoke blocks → clear) so no mutex is needed.
+var activeUsageCollector *usage.Collector
 
 // claudeInvoker is the function used to invoke Claude (mockable for tests)
 var claudeInvoker = defaultClaudeInvoker
@@ -124,7 +131,11 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	buf := make([]byte, 0, 1024*1024) // 1MB buffer for large tool results
 	scanner.Buffer(buf, 10*1024*1024)
 	for scanner.Scan() {
-		displayStreamEvent(scanner.Text())
+		line := scanner.Text()
+		displayStreamEvent(line)
+		if activeUsageCollector != nil {
+			collectClaudeStreamUsage(line, activeUsageCollector)
+		}
 	}
 
 	runErr := cmd.Wait()
@@ -134,21 +145,36 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	return runErr
 }
 
-// StreamEvent represents a Claude stream-json event
+// StreamEvent represents a Claude stream-json event.
+// Claude emits usage in message_start (initial) and message_delta (cumulative final).
 type StreamEvent struct {
 	Type    string        `json:"type"`
+	Subtype string        `json:"subtype,omitempty"` // e.g. "message_start", "message_delta"
 	Message *EventMessage `json:"message,omitempty"`
+	Usage   *StreamUsage  `json:"usage,omitempty"` // top-level usage on message_delta events
 }
 
+// EventMessage holds the message body from a Claude stream event.
 type EventMessage struct {
+	ID      string         `json:"id,omitempty"`
 	Content []ContentBlock `json:"content,omitempty"`
+	Usage   *StreamUsage   `json:"usage,omitempty"` // usage nested in message on message_start events
 }
 
+// ContentBlock represents a single content block in a Claude message.
 type ContentBlock struct {
 	Type  string                 `json:"type"`
 	Text  string                 `json:"text,omitempty"`
 	Name  string                 `json:"name,omitempty"`
 	Input map[string]interface{} `json:"input,omitempty"`
+}
+
+// StreamUsage holds token counts from Claude streaming events.
+type StreamUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 }
 
 // displayStreamEvent parses JSON event and displays relevant content
@@ -192,5 +218,42 @@ func displayStreamEvent(line string) {
 		}
 	case "result":
 		fmt.Println()
+	}
+}
+
+// collectClaudeStreamUsage extracts token usage from a Claude stream-json line
+// and feeds it to the collector. Claude emits usage in two places:
+//   - message_start events: message.usage (initial input tokens)
+//   - message_delta events: top-level usage (cumulative final output tokens)
+//
+// We use message_delta usage (cumulative final) when available, falling back
+// to message.usage from message_start. Deduplication is by message ID.
+func collectClaudeStreamUsage(line string, collector *usage.Collector) {
+	var event StreamEvent
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return
+	}
+
+	// Extract message ID for dedup
+	var messageID string
+	if event.Message != nil {
+		messageID = event.Message.ID
+	}
+
+	// Prefer top-level usage (message_delta — cumulative final)
+	if event.Usage != nil {
+		collector.Accumulate(messageID,
+			event.Usage.InputTokens,
+			event.Usage.OutputTokens,
+			event.Usage.CacheReadInputTokens,
+			event.Usage.CacheCreationInputTokens,
+		)
+		return
+	}
+
+	// Fall back to message.usage (message_start — initial)
+	if event.Message != nil && event.Message.Usage != nil {
+		u := event.Message.Usage
+		collector.Accumulate(messageID, u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
 	}
 }

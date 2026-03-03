@@ -4,6 +4,9 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 func TestCodexBackendName(t *testing.T) {
@@ -264,5 +267,42 @@ func TestCodexBackend_DispatchViaNonInteractive(t *testing.T) {
 	}
 	if gotShutdown == nil {
 		t.Error("expected shutdown channel to be passed, got nil")
+	}
+}
+
+func TestCollectCodexStreamUsage_TurnCompleted(t *testing.T) {
+	c := usage.NewCollector("codex", "test")
+
+	line := `{"type":"turn.completed","usage":{"input_tokens":1000,"output_tokens":500}}`
+	collectCodexStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 1000 {
+		t.Errorf("InputTokens = %d, want 1000", su.InputTokens)
+	}
+	if su.OutputTokens != 500 {
+		t.Errorf("OutputTokens = %d, want 500", su.OutputTokens)
+	}
+}
+
+func TestCollectCodexStreamUsage_NoUsage(t *testing.T) {
+	c := usage.NewCollector("codex", "test")
+
+	line := `{"type":"message","content":"hello"}`
+	collectCodexStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 0 {
+		t.Errorf("InputTokens = %d, want 0", su.InputTokens)
+	}
+}
+
+func TestCollectCodexStreamUsage_InvalidJSON(t *testing.T) {
+	c := usage.NewCollector("codex", "test")
+	collectCodexStreamUsage("not json", c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 0 {
+		t.Errorf("InputTokens = %d, want 0", su.InputTokens)
 	}
 }

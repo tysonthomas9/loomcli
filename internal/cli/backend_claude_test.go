@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 func TestDisplayStreamEvent_TextBlock(t *testing.T) {
@@ -407,5 +409,98 @@ func TestShutdownRace_SignalDuringRun(t *testing.T) {
 		exited.Store(true)
 		close(done)
 		t.Fatal("timed out waiting for process to be terminated by SIGTERM")
+	}
+}
+
+func TestCollectClaudeStreamUsage_MessageStart(t *testing.T) {
+	c := usage.NewCollector("claude", "test")
+
+	// message_start event with usage nested in message
+	line := `{"type":"message_start","message":{"id":"msg-123","usage":{"input_tokens":500,"output_tokens":0,"cache_read_input_tokens":100,"cache_creation_input_tokens":50}}}`
+	collectClaudeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 500 {
+		t.Errorf("InputTokens = %d, want 500", su.InputTokens)
+	}
+	if su.CacheReadTokens != 100 {
+		t.Errorf("CacheReadTokens = %d, want 100", su.CacheReadTokens)
+	}
+	if su.CacheWriteTokens != 50 {
+		t.Errorf("CacheWriteTokens = %d, want 50", su.CacheWriteTokens)
+	}
+}
+
+func TestCollectClaudeStreamUsage_MessageDelta(t *testing.T) {
+	c := usage.NewCollector("claude", "test")
+
+	// message_delta event with top-level usage (cumulative final)
+	line := `{"type":"message_delta","message":{"id":"msg-456"},"usage":{"input_tokens":1000,"output_tokens":300,"cache_read_input_tokens":200,"cache_creation_input_tokens":0}}`
+	collectClaudeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 1000 {
+		t.Errorf("InputTokens = %d, want 1000", su.InputTokens)
+	}
+	if su.OutputTokens != 300 {
+		t.Errorf("OutputTokens = %d, want 300", su.OutputTokens)
+	}
+}
+
+func TestCollectClaudeStreamUsage_Dedup(t *testing.T) {
+	c := usage.NewCollector("claude", "test")
+
+	// Same message ID in both message_start and message_delta
+	// Only the first should be counted (dedup by message ID)
+	line1 := `{"type":"message_start","message":{"id":"msg-789","usage":{"input_tokens":500,"output_tokens":0}}}`
+	line2 := `{"type":"message_delta","message":{"id":"msg-789"},"usage":{"input_tokens":500,"output_tokens":200}}`
+	collectClaudeStreamUsage(line1, c)
+	collectClaudeStreamUsage(line2, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	// Only first occurrence counted
+	if su.InputTokens != 500 {
+		t.Errorf("InputTokens = %d, want 500 (dedup)", su.InputTokens)
+	}
+}
+
+func TestCollectClaudeStreamUsage_InvalidJSON(t *testing.T) {
+	c := usage.NewCollector("claude", "test")
+
+	// Should not panic on invalid JSON
+	collectClaudeStreamUsage("not json at all", c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 0 {
+		t.Errorf("InputTokens = %d, want 0 after invalid JSON", su.InputTokens)
+	}
+}
+
+func TestCollectClaudeStreamUsage_NoUsage(t *testing.T) {
+	c := usage.NewCollector("claude", "test")
+
+	// assistant event with no usage field
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`
+	collectClaudeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 0 {
+		t.Errorf("InputTokens = %d, want 0 (no usage in event)", su.InputTokens)
+	}
+}
+
+func TestCollectClaudeStreamUsage_TopLevelUsagePreferred(t *testing.T) {
+	c := usage.NewCollector("claude", "test")
+
+	// Event with both top-level usage AND message.usage — top-level should be preferred
+	line := `{"type":"message_delta","message":{"id":"msg-abc","usage":{"input_tokens":100,"output_tokens":10}},"usage":{"input_tokens":500,"output_tokens":200}}`
+	collectClaudeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 500 {
+		t.Errorf("InputTokens = %d, want 500 (top-level usage preferred)", su.InputTokens)
+	}
+	if su.OutputTokens != 200 {
+		t.Errorf("OutputTokens = %d, want 200 (top-level usage preferred)", su.OutputTokens)
 	}
 }

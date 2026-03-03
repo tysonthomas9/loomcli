@@ -1,13 +1,17 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // AutoModeOptions holds configuration for auto mode
@@ -117,6 +121,12 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
+	// Initialize usage store (non-fatal if it fails)
+	usageStore, usageErr := usage.NewStore(GetBeadsDir())
+	if usageErr != nil {
+		fmt.Printf("[auto] Warning: usage tracking disabled: %v\n", usageErr)
+	}
+
 	for {
 		// Set idle state at loop start
 		if err := UpdateLockState(opts.WorktreePath, StateIdle); err != nil {
@@ -195,7 +205,19 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := generatePrompt(opts.AgentName, workspace)
+
+		// Set up usage collector before invocation
+		backendName := GetBackendName()
+		collector := usage.NewCollector(backendName, opts.AgentName)
+		activeUsageCollector = collector
+		startedAt := time.Now()
+
 		err = InvokeAgentNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown)
+
+		// Clear collector and record usage
+		activeUsageCollector = nil
+		endedAt := time.Now()
+		recordSessionUsage(usageStore, collector, opts.WorktreePath, opts.ParentID, startedAt, endedAt, err)
 
 		// Return to idle state after agent finishes
 		if updateErr := UpdateLockState(opts.WorktreePath, StateIdle); updateErr != nil {
@@ -298,4 +320,34 @@ func formatTimeout(timeout int) string {
 		return "none"
 	}
 	return fmt.Sprintf("%dm", timeout)
+}
+
+// recordSessionUsage finalizes the usage collector and appends the record to the store.
+// Failures are logged but do not interrupt the auto mode loop.
+func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktreePath, parentID string, startedAt, endedAt time.Time, invokeErr error) {
+	if store == nil || collector == nil {
+		return
+	}
+
+	// Derive exit code from error
+	exitCode := 0
+	if invokeErr != nil {
+		exitCode = 1
+		var exitErr *exec.ExitError
+		if errors.As(invokeErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+
+	// Read task/epic context from lock file
+	var taskID, epicID string
+	if info, err := ReadLockFile(worktreePath); err == nil && info != nil {
+		taskID = info.TaskID
+	}
+	epicID = parentID
+
+	record := collector.Finalize(taskID, epicID, startedAt, endedAt, exitCode)
+	if err := store.Append(record); err != nil {
+		log.Printf("[auto] Warning: failed to record usage: %v", err)
+	}
 }
