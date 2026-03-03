@@ -44,6 +44,12 @@
 # If not set, bd sync will require you to run 'bd config set sync.branch <branch>'.
 sync-branch: "beads-sync"
 
+# Sync settings
+sync:
+  # Mode: git-portable (default), realtime, dolt-native, belt-and-suspenders
+  # realtime exports JSONL on every database mutation
+  mode: "realtime"
+
 # Multi-repo configuration (experimental - bd-307)
 # Allows hydrating from multiple repositories and routing writes to the correct JSONL
 # repos:
