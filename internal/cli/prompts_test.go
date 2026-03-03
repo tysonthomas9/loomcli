@@ -935,6 +935,115 @@ func TestGenerateConflictResolutionPrompt_EmptyBranchNames(t *testing.T) {
 	}
 }
 
+func TestRenderPrompt_EmbeddedTemplate(t *testing.T) {
+	// Verify each embedded template renders without errors
+	templates := []struct {
+		name string
+		data promptTemplateData
+	}{
+		{"planning", promptTemplateData{AgentName: "test", BdReadyJSON: "bd ready --limit 50 --json", BdReadyFallback: "bd ready --limit 50"}},
+		{"task", promptTemplateData{AgentName: "test", BdReadyJSON: "bd ready --limit 50 --json", BdReadyFallback: "bd ready --limit 50", TestStep: "test step", ReviewStep: "review step"}},
+		{"fleet_planning", promptTemplateData{AgentName: "test", TaskID: "bd-test.1"}},
+		{"fleet_task", promptTemplateData{AgentName: "test", TaskID: "bd-test.1", TestStep: "test step", ReviewStep: "review step"}},
+		{"conflict_resolution", promptTemplateData{SourceBranch: "feature", TargetBranch: "main", ConflictList: "file.go", PushRef: "main"}},
+		{"lead", promptTemplateData{}},
+	}
+
+	for _, tc := range templates {
+		t.Run(tc.name, func(t *testing.T) {
+			result := renderPrompt(tc.name, tc.data)
+			if result == "" {
+				t.Errorf("renderPrompt(%q) returned empty string", tc.name)
+			}
+		})
+	}
+}
+
+func TestRenderPrompt_ProjectOverride(t *testing.T) {
+	// Create temp override directory
+	overrideDir := filepath.Join(t.TempDir(), "project")
+	promptDir := filepath.Join(overrideDir, "loom-prompts")
+	if err := os.MkdirAll(promptDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	overrideContent := "Custom override: {{ .AgentName }} is here"
+	if err := os.WriteFile(filepath.Join(promptDir, "planning.md"), []byte(overrideContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Point override dir to the temp project directory
+	promptOverrideDir = overrideDir
+	t.Cleanup(func() { promptOverrideDir = "" })
+
+	result := renderPrompt("planning", promptTemplateData{AgentName: "falcon"})
+	if !strings.Contains(result, "Custom override: falcon is here") {
+		t.Errorf("expected override content, got: %s", result)
+	}
+}
+
+func TestRenderPrompt_InvalidOverrideFallback(t *testing.T) {
+	// Create temp override directory with invalid template
+	overrideDir := filepath.Join(t.TempDir(), "project")
+	promptDir := filepath.Join(overrideDir, "loom-prompts")
+	if err := os.MkdirAll(promptDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Invalid template syntax
+	if err := os.WriteFile(filepath.Join(promptDir, "lead.md"), []byte("{{ .Invalid {{ broken"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	promptOverrideDir = overrideDir
+	t.Cleanup(func() { promptOverrideDir = "" })
+
+	// Should fall back to embedded default
+	result := renderPrompt("lead", promptTemplateData{})
+	if !strings.Contains(result, "INTERACTIVE MODE: Project Lead") {
+		t.Errorf("expected fallback to embedded template, got: %s", result[:100])
+	}
+}
+
+func TestRenderPrompt_OverrideNotFound(t *testing.T) {
+	// When no override exists, embedded template is used
+	result := renderPrompt("lead", promptTemplateData{})
+	if !strings.Contains(result, "INTERACTIVE MODE: Project Lead") {
+		t.Error("expected embedded template content when no override exists")
+	}
+}
+
+func TestAllTemplatesRender(t *testing.T) {
+	// Verify all 6 templates parse and render with fully-populated data
+	data := promptTemplateData{
+		AgentName:       "testAgent",
+		WorkspaceBlock:  "workspace block content",
+		EpicScope:       "epic scope content",
+		BdReadyJSON:     "bd ready --parent epic-123 --limit 50 --json",
+		BdReadyFallback: "bd ready --parent epic-123 --limit 50",
+		TaskID:          "task-456",
+		TestStep:        "### Step 5: Write Tests\n- test content",
+		ReviewStep:      "### Step 6: Code Review\n- review content",
+		SourceBranch:    "feature/test",
+		TargetBranch:    "main",
+		ConflictList:    "file1.go\nfile2.go",
+		PushRef:         "HEAD:main",
+	}
+
+	templates := []string{"planning", "task", "fleet_planning", "fleet_task", "conflict_resolution", "lead"}
+	for _, name := range templates {
+		t.Run(name, func(t *testing.T) {
+			result := renderPrompt(name, data)
+			if result == "" {
+				t.Errorf("template %q rendered empty", name)
+			}
+			if len(result) < 100 {
+				t.Errorf("template %q rendered suspiciously short (%d chars)", name, len(result))
+			}
+		})
+	}
+}
+
 func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 	// Create a temp empty directory and point LOOM_CONFIG_DIR to it
 	tmpDir := t.TempDir()
