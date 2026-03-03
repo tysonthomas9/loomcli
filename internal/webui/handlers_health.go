@@ -5,59 +5,44 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
-	"strconv"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
-// ReadyIssueWithParent extends Issue with parent info for /api/ready.
-// This enables epic swimlane grouping in the Kanban view.
-type ReadyIssueWithParent struct {
-	*types.Issue
-	Parent      *string `json:"parent,omitempty"`       // Parent issue ID (null for root-level issues)
-	ParentTitle *string `json:"parent_title,omitempty"` // Parent issue title for display
+// CircuitBreakerStatus represents the circuit breaker state in health responses.
+type CircuitBreakerStatus struct {
+	State           string    `json:"state"`
+	FailureCount    int       `json:"failure_count"`
+	LastStateChange time.Time `json:"last_state_change"`
 }
 
-// ReadyResponse wraps the ready issues data for JSON response.
-type ReadyResponse struct {
-	Success bool                    `json:"success"`
-	Data    []*ReadyIssueWithParent `json:"data,omitempty"`
-	Error   string                  `json:"error,omitempty"`
+// HealthStatus represents the detailed health status of the API.
+type HealthStatus struct {
+	Status         string                `json:"status"`                    // "ok", "degraded", "unhealthy"
+	Daemon         DaemonStatus          `json:"daemon"`                    // Daemon connection status
+	Pool           *daemon.PoolStats     `json:"pool,omitempty"`            // Connection pool stats
+	CircuitBreaker *CircuitBreakerStatus `json:"circuit_breaker,omitempty"` // Circuit breaker state
 }
 
-// readyClient is an internal interface for testing ready issue operations.
-// The production code uses *rpc.Client which implements this interface.
-type readyClient interface {
-	Ready(args *rpc.ReadyArgs) (*rpc.Response, error)
-	GetParentIDs(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error)
-	List(args *rpc.ListArgs) (*rpc.Response, error)
+// breakerStater is an optional interface for pools that have a circuit breaker.
+type breakerStater interface {
+	BreakerState() circuitbreaker.State
+	BreakerStats() circuitbreaker.BreakerStats
 }
 
-// readyConnectionGetter is an internal interface for testing ready handler pool operations.
-type readyConnectionGetter interface {
-	Get(ctx context.Context) (readyClient, error)
-	Put(client readyClient)
-}
-
-// readyPoolAdapter wraps daemon.Pool to implement readyConnectionGetter.
-type readyPoolAdapter struct {
-	pool daemon.Pool
-}
-
-func (p *readyPoolAdapter) Get(ctx context.Context) (readyClient, error) {
-	return p.pool.Get(ctx)
-}
-
-func (p *readyPoolAdapter) Put(client readyClient) {
-	if c, ok := client.(*rpc.Client); ok {
-		p.pool.Put(c)
-	}
+// DaemonStatus represents the daemon connection status.
+type DaemonStatus struct {
+	Connected bool    `json:"connected"`         // Whether we can connect to daemon
+	Status    string  `json:"status,omitempty"`  // Daemon health status if connected
+	Uptime    float64 `json:"uptime,omitempty"`  // Daemon uptime in seconds if connected
+	Version   string  `json:"version,omitempty"` // Daemon version if connected
+	Error     string  `json:"error,omitempty"`   // Error message if not connected
 }
 
 // SSEMetrics represents the runtime metrics for the SSE hub.
@@ -80,37 +65,142 @@ type MetricsResponse struct {
 	Error   string      `json:"error,omitempty"`
 }
 
-// handleReady returns issues ready to work on (open/in_progress with no blockers).
-func handleReady(pool daemon.Pool) http.HandlerFunc {
-	if pool == nil {
-		return handleReadyWithPool(nil)
-	}
-	return handleReadyWithPool(&readyPoolAdapter{pool: pool})
+// StatsResponse wraps the statistics data for JSON response.
+type StatsResponse struct {
+	Success bool              `json:"success"`
+	Data    *types.Statistics `json:"data,omitempty"`
+	Error   string            `json:"error,omitempty"`
 }
 
-// handleReadyWithPool is the internal implementation that accepts an interface for testing.
-func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
+// statsClient is an internal interface for testing stats operations.
+// The production code uses *rpc.Client which implements this interface.
+type statsClient interface {
+	Stats() (*rpc.Response, error)
+}
+
+// statsConnectionGetter is an internal interface for testing stats handler pool operations.
+type statsConnectionGetter interface {
+	Get(ctx context.Context) (statsClient, error)
+	Put(client statsClient)
+}
+
+// statsPoolAdapter wraps daemon.Pool to implement statsConnectionGetter.
+type statsPoolAdapter struct {
+	pool daemon.Pool
+}
+
+func (p *statsPoolAdapter) Get(ctx context.Context) (statsClient, error) {
+	return p.pool.Get(ctx)
+}
+
+func (p *statsPoolAdapter) Put(client statsClient) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Put(c)
+	}
+}
+
+// DaemonStatusResponse wraps the daemon status for JSON response.
+type DaemonStatusResponse struct {
+	Success bool                `json:"success"`
+	Data    *rpc.StatusResponse `json:"data,omitempty"`
+	Error   string              `json:"error,omitempty"`
+}
+
+// handleHealth returns a simple health check response.
+// This is for load balancers and basic monitoring - it doesn't check daemon connectivity.
+func handleHealth(pool daemon.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
+// handleAPIHealth returns a detailed health check including daemon connectivity.
+func handleAPIHealth(pool daemon.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status := HealthStatus{
+			Status: "ok",
+			Daemon: DaemonStatus{
+				Connected: false,
+			},
+		}
+
+		// Check daemon connection if pool is available
+		if pool != nil {
+			poolStats := pool.Stats()
+			status.Pool = &poolStats
+
+			// Include circuit breaker state if available
+			if bs, ok := pool.(breakerStater); ok {
+				stats := bs.BreakerStats()
+				status.CircuitBreaker = &CircuitBreakerStatus{
+					State:           stats.State.String(),
+					FailureCount:    stats.ConsecutiveFail,
+					LastStateChange: stats.LastStateChange,
+				}
+			}
+
+			// Try to get a connection and check daemon health
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			defer cancel()
+
+			client, err := pool.Get(ctx)
+			if err != nil {
+				status.Status = "degraded"
+				status.Daemon.Error = err.Error()
+			} else {
+				defer pool.Put(client)
+
+				// Get daemon health
+				health, err := client.Health()
+				if err != nil {
+					status.Status = "degraded"
+					status.Daemon.Error = err.Error()
+				} else {
+					status.Daemon.Connected = true
+					status.Daemon.Status = health.Status
+					status.Daemon.Uptime = health.Uptime
+					status.Daemon.Version = health.Version
+
+					if health.Status == "unhealthy" {
+						status.Status = "degraded"
+						status.Daemon.Error = health.Error
+					}
+				}
+			}
+		} else {
+			status.Status = "degraded"
+			status.Daemon.Error = "connection pool not initialized"
+		}
+
+		httpStatus := http.StatusOK
+		if status.Status != "ok" {
+			httpStatus = http.StatusServiceUnavailable
+		}
+		respondJSON(w, httpStatus, status)
+	}
+}
+
+// handleStats returns project statistics from the daemon.
+func handleStats(pool daemon.Pool) http.HandlerFunc {
+	if pool == nil {
+		return handleStatsWithPool(nil)
+	}
+	return handleStatsWithPool(&statsPoolAdapter{pool: pool})
+}
+
+// handleStatsWithPool is the internal implementation that accepts an interface for testing.
+func handleStatsWithPool(pool statsConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if pool == nil {
-			respondJSON(w, http.StatusServiceUnavailable, ReadyResponse{
+			respondJSON(w, http.StatusServiceUnavailable, StatsResponse{
 				Success: false,
 				Error:   "connection pool not initialized",
 			})
 			return
 		}
 
-		// Parse query parameters into ReadyArgs
-		args, err := parseReadyParams(r)
-		if err != nil {
-			respondJSON(w, http.StatusBadRequest, ReadyResponse{
-				Success: false,
-				Error:   err.Error(),
-			})
-			return
-		}
-
-		// Acquire connection with 5-second timeout
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		// Acquire connection with timeout
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
 		client, err := pool.Get(ctx)
@@ -119,89 +209,40 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			log.Printf("Pool error in handleReady: %v", err)
-			respondJSON(w, status, ReadyResponse{
-				Success: false,
-				Error:   "daemon not available",
-			})
+			respondJSON(w, status, StatsResponse{Success: false, Error: err.Error()})
 			return
 		}
 		defer pool.Put(client)
 
-		// Execute Ready RPC call
-		resp, err := client.Ready(args)
+		// Execute Stats RPC call
+		resp, err := client.Stats()
 		if err != nil {
-			log.Printf("RPC error in handleReady: %v", err)
-			respondJSON(w, http.StatusInternalServerError, ReadyResponse{
+			respondJSON(w, http.StatusInternalServerError, StatsResponse{
 				Success: false,
-				Error:   "internal server error",
+				Error:   fmt.Sprintf("rpc error: %v", err),
 			})
 			return
 		}
 
 		if !resp.Success {
-			respondJSON(w, http.StatusInternalServerError, ReadyResponse{
+			respondJSON(w, http.StatusInternalServerError, StatsResponse{
 				Success: false,
 				Error:   resp.Error,
 			})
 			return
 		}
 
-		// Parse the issues from RPC response
-		var issues []*types.Issue
-		if err := json.Unmarshal(resp.Data, &issues); err != nil {
-			respondJSON(w, http.StatusInternalServerError, ReadyResponse{
+		// Parse the statistics from RPC response
+		var stats types.Statistics
+		if err := json.Unmarshal(resp.Data, &stats); err != nil {
+			respondJSON(w, http.StatusInternalServerError, StatsResponse{
 				Success: false,
-				Error:   fmt.Sprintf("failed to parse ready issues: %v", err),
+				Error:   fmt.Sprintf("failed to parse stats: %v", err),
 			})
 			return
 		}
 
-		// Filter out issues with unclosed blockers.
-		// bd ready considers in_progress blockers as "resolved" but we require
-		// blockers to be closed before dependents become available.
-		issues = filterUnclosedBlockers(client, issues)
-
-		// If no issues, return empty response
-		if len(issues) == 0 {
-			respondJSON(w, http.StatusOK, ReadyResponse{
-				Success: true,
-				Data:    []*ReadyIssueWithParent{},
-			})
-			return
-		}
-
-		// Extract issue IDs for parent lookup
-		issueIDs := make([]string, len(issues))
-		for i, issue := range issues {
-			issueIDs[i] = issue.ID
-		}
-
-		// Get parent info for all issues
-		parentResp, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs})
-		if err != nil {
-			// Non-fatal: log and continue without parent info
-			log.Printf("Failed to get parent IDs for ready issues: %v", err)
-			parentResp = &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
-		}
-
-		// Build response with parent info
-		issuesWithParent := make([]*ReadyIssueWithParent, len(issues))
-		for i, issue := range issues {
-			iwp := &ReadyIssueWithParent{
-				Issue: issue,
-			}
-			if parentInfo, ok := parentResp.Parents[issue.ID]; ok {
-				iwp.Parent = &parentInfo.ParentID
-				iwp.ParentTitle = &parentInfo.ParentTitle
-			}
-			issuesWithParent[i] = iwp
-		}
-
-		respondJSON(w, http.StatusOK, ReadyResponse{
-			Success: true,
-			Data:    issuesWithParent,
-		})
+		respondJSON(w, http.StatusOK, StatsResponse{Success: true, Data: &stats})
 	}
 }
 
@@ -238,131 +279,43 @@ func handleMetrics(hub *SSEHub, timeoutEnforcer *fleet.TimeoutEnforcer, claimMet
 	}
 }
 
-// filterUnclosedBlockers removes issues whose blocking dependencies are not yet closed.
-// It fetches all issues via client.List() to build the unclosed set.
-// On error, returns the original list unfiltered (non-fatal).
-func filterUnclosedBlockers(client readyClient, issues []*types.Issue) []*types.Issue {
-	listResp, err := client.List(&rpc.ListArgs{Limit: 500})
-	if err != nil {
-		log.Printf("Failed to fetch issue list for blocker filtering: %v", err)
-		return issues
-	}
-	if !listResp.Success {
-		log.Printf("List RPC failed for blocker filtering: %s", listResp.Error)
-		return issues
-	}
-
-	var allIssues []*types.Issue
-	if err := json.Unmarshal(listResp.Data, &allIssues); err != nil {
-		log.Printf("Failed to parse issue list for blocker filtering: %v", err)
-		return issues
-	}
-
-	unclosedIDs := make(map[string]bool, len(allIssues))
-	for _, issue := range allIssues {
-		if issue.Status != types.StatusClosed {
-			unclosedIDs[issue.ID] = true
+// handleDaemonStatus returns the daemon's runtime configuration.
+// This includes auto-commit, auto-push, auto-pull, local-mode, sync-interval, and daemon-mode.
+func handleDaemonStatus(pool daemon.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if pool == nil {
+			respondJSON(w, http.StatusServiceUnavailable, DaemonStatusResponse{
+				Success: false,
+				Error:   "connection pool not initialized",
+			})
+			return
 		}
-	}
 
-	filtered := make([]*types.Issue, 0, len(issues))
-	for _, issue := range issues {
-		if !hasUnclosedBlockersTyped(issue.Dependencies, unclosedIDs) {
-			filtered = append(filtered, issue)
-		}
-	}
-	return filtered
-}
+		// Acquire connection with timeout
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
 
-// hasUnclosedBlockersTyped returns true if any "blocks" dependency points to
-// an issue that is still unclosed. Uses types.Dependency (pointer slice).
-func hasUnclosedBlockersTyped(deps []*types.Dependency, unclosedIDs map[string]bool) bool {
-	for _, dep := range deps {
-		if dep.Type == types.DepBlocks && unclosedIDs[dep.DependsOnID] {
-			return true
-		}
-	}
-	return false
-}
-
-// parseReadyParams parses query parameters into rpc.ReadyArgs.
-func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
-	args := &rpc.ReadyArgs{}
-	q := r.URL.Query()
-
-	// String parameters
-	if v := q.Get("assignee"); v != "" {
-		args.Assignee = v
-	}
-	if v := q.Get("type"); v != "" {
-		args.Type = v
-	}
-	if v := q.Get("parent_id"); v != "" {
-		args.ParentID = v
-	}
-	if v := q.Get("mol_type"); v != "" {
-		// Validate mol_type
-		molType := types.MolType(v)
-		if !molType.IsValid() {
-			return nil, fmt.Errorf("invalid mol_type: %s (must be swarm, patrol, or work)", v)
-		}
-		args.MolType = v
-	}
-
-	// Sort policy
-	if v := q.Get("sort"); v != "" {
-		sortPolicy := types.SortPolicy(v)
-		if !sortPolicy.IsValid() {
-			return nil, fmt.Errorf("invalid sort policy: %s (must be hybrid, priority, or oldest)", v)
-		}
-		args.SortPolicy = v
-	}
-
-	// Boolean parameters
-	if v := q.Get("unassigned"); v != "" {
-		b, err := strconv.ParseBool(v)
+		client, err := pool.Get(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("invalid unassigned value: %s (must be true or false)", v)
+			status := http.StatusServiceUnavailable
+			if errors.Is(err, context.DeadlineExceeded) {
+				status = http.StatusGatewayTimeout
+			}
+			respondJSON(w, status, DaemonStatusResponse{Success: false, Error: err.Error()})
+			return
 		}
-		args.Unassigned = b
-	}
-	if v := q.Get("include_deferred"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return nil, fmt.Errorf("invalid include_deferred value: %s (must be true or false)", v)
-		}
-		args.IncludeDeferred = b
-	}
+		defer pool.Put(client)
 
-	// Integer parameters
-	if v := q.Get("priority"); v != "" {
-		p, err := strconv.Atoi(v)
+		// Get daemon status
+		daemonStatus, err := client.Status()
 		if err != nil {
-			return nil, fmt.Errorf("invalid priority value: %s (must be an integer 0-4)", v)
+			respondJSON(w, http.StatusInternalServerError, DaemonStatusResponse{
+				Success: false,
+				Error:   fmt.Sprintf("rpc error: %v", err),
+			})
+			return
 		}
-		if p < 0 || p > 4 {
-			return nil, fmt.Errorf("priority must be between 0 and 4 (got %d)", p)
-		}
-		args.Priority = &p
-	}
-	if v := q.Get("limit"); v != "" {
-		l, err := strconv.Atoi(v)
-		if err != nil {
-			return nil, fmt.Errorf("invalid limit value: %s (must be a non-negative integer)", v)
-		}
-		if l < 0 {
-			return nil, fmt.Errorf("limit must be non-negative (got %d)", l)
-		}
-		args.Limit = l
-	}
 
-	// Array parameters (comma-separated)
-	if v := q.Get("labels"); v != "" {
-		args.Labels = splitAndTrim(v)
+		respondJSON(w, http.StatusOK, DaemonStatusResponse{Success: true, Data: daemonStatus})
 	}
-	if v := q.Get("labels_any"); v != "" {
-		args.LabelsAny = splitAndTrim(v)
-	}
-
-	return args, nil
 }
