@@ -162,6 +162,11 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		return nil, fmt.Errorf("too many agents configured: %d exceeds max_agents limit of %d", len(dc.Agents), *dc.Daemon.MaxAgents)
 	}
 
+	// Run comprehensive validation
+	if vr := ValidateProjectConfig(dc, projectDir); vr.HasErrors() {
+		return nil, fmt.Errorf("%s", vr.FormatIssues())
+	}
+
 	return dc, nil
 }
 

@@ -92,6 +92,12 @@ func LoadConfig() (*LoomConfig, error) {
 			}
 		}
 	}
+
+	// Run comprehensive validation (warnings only — don't block on path checks)
+	if vr := ValidateGlobalConfig(&cfg); vr.HasErrors() {
+		return nil, fmt.Errorf("%s", vr.FormatIssues())
+	}
+
 	return &cfg, nil
 }
 
