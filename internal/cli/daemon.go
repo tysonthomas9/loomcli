@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -367,11 +368,15 @@ func (d *Daemon) handleRestartAfterError(ap *AgentProcess) bool {
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess.
 // Extracted from spawnAgent for testability. Does not start the process.
+// Caller must hold ap.mu (reads ap.assignedEpicID).
 func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 	var cmd *exec.Cmd
 
-	// Resolve backend for this agent: per-agent > project > global > default
+	// Resolve backend for this agent: per-agent > per-role > project > global > default
 	agentBackend := ap.entry.Backend
+	if agentBackend == "" {
+		agentBackend = ap.roleConfig.Backend
+	}
 	if agentBackend == "" {
 		agentBackend = d.config.Backend
 	}
@@ -412,6 +417,17 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
 	)
+
+	// Propagate role constraints as env vars for the subprocess
+	if len(ap.roleConfig.AllowedTools) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ALLOWED_TOOLS=%s", strings.Join(ap.roleConfig.AllowedTools, ",")))
+	}
+	if len(ap.roleConfig.DeniedTools) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_DENIED_TOOLS=%s", strings.Join(ap.roleConfig.DeniedTools, ",")))
+	}
+	if ap.roleConfig.ReadOnly {
+		cmd.Env = append(cmd.Env, "LOOM_READ_ONLY=1")
+	}
 
 	return cmd
 }
