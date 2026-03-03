@@ -59,7 +59,7 @@ func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig, parent
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
-	return fmt.Sprintf(`## WORKFLOW: Planning Task (Design Only - No Implementation)
+	prompt := fmt.Sprintf(`## WORKFLOW: Planning Task (Design Only - No Implementation)
 
 You are a disciplined software architect. Your job is to CREATE PLANS, not implement them.
 Follow this workflow EXACTLY for ONE task.
@@ -183,6 +183,11 @@ You have completed ONE planning task. The human will:
 
 Your job was ONLY to create the plan. Implementation happens later.
 `, agentName, wsBlock, epicScope, bdReadyJSON, bdReadyFallback)
+
+	if preamble := ReadOnlyPreamble(); preamble != "" {
+		prompt = preamble + "\n\n" + prompt
+	}
+	return prompt
 }
 
 // GenerateTaskPrompt creates the prompt for the implementation agent.
@@ -227,7 +232,7 @@ func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID s
 - Document and fix all issues found`
 	}
 
-	return fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)
+	prompt := fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)
 
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
 
@@ -330,13 +335,18 @@ After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
 
 You have completed ONE task through the full workflow. The human will run you again for the next task.
 `, agentName, wsBlock, epicScope, bdReadyJSON, bdReadyFallback, agentName, testStep, reviewStep)
+
+	if preamble := ReadOnlyPreamble(); preamble != "" {
+		prompt = preamble + "\n\n" + prompt
+	}
+	return prompt
 }
 
 // GenerateFleetPlanningPrompt creates the prompt for a fleet planning agent with a pre-assigned task.
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
 func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *WorkspaceConfig) string {
 	wsBlock := buildWorkspaceContextBlock(workspace)
-	return fmt.Sprintf(`## WORKFLOW: Planning Task (Design Only - No Implementation)
+	prompt := fmt.Sprintf(`## WORKFLOW: Planning Task (Design Only - No Implementation)
 
 You are a disciplined software architect. Your job is to CREATE PLANS, not implement them.
 Follow this workflow EXACTLY for ONE task.
@@ -456,6 +466,11 @@ You have completed ONE planning task. The human will:
 
 Your job was ONLY to create the plan. Implementation happens later.
 `, agentName, wsBlock, taskID, taskID, taskID, agentName, taskID, taskID, taskID)
+
+	if preamble := ReadOnlyPreamble(); preamble != "" {
+		prompt = preamble + "\n\n" + prompt
+	}
+	return prompt
 }
 
 // GenerateFleetTaskPrompt creates the prompt for a fleet implementation agent with a pre-assigned task.
@@ -486,7 +501,7 @@ func GenerateFleetTaskPrompt(agentName, taskID string, workspace *WorkspaceConfi
 - Document and fix all issues found`
 	}
 
-	return fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)
+	prompt := fmt.Sprintf(`## WORKFLOW: Implementation Task (Code, Test, Commit)
 
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
 
@@ -583,6 +598,11 @@ After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
 
 You have completed ONE task through the full workflow. The human will run you again for the next task.
 `, agentName, wsBlock, taskID, taskID, taskID, agentName, taskID, testStep, reviewStep)
+
+	if preamble := ReadOnlyPreamble(); preamble != "" {
+		prompt = preamble + "\n\n" + prompt
+	}
+	return prompt
 }
 
 // GenerateConflictResolutionPrompt creates the prompt for merge conflict resolution

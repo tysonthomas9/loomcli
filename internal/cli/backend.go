@@ -105,6 +105,23 @@ func ResolveAndSetBackend() error {
 	return SetBackend(name)
 }
 
+// IsRegistered reports whether a backend with the given name exists in the registry.
+func IsRegistered(name string) bool {
+	backendMu.RLock()
+	defer backendMu.RUnlock()
+	_, ok := backends[name]
+	return ok
+}
+
+// GetBackendByName returns the registered backend with the given name.
+// Returns nil, false if no backend is registered with that name.
+func GetBackendByName(name string) (Backend, bool) {
+	backendMu.RLock()
+	defer backendMu.RUnlock()
+	b, ok := backends[name]
+	return b, ok
+}
+
 // ValidBackendNames returns a formatted string of valid backend names for help text.
 func ValidBackendNames() string {
 	return strings.Join(ListBackends(), ", ")

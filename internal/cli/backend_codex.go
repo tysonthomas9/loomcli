@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -149,6 +150,45 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	close(done)        // Signal goroutine to exit
 	r.Close()
 	return runErr
+}
+
+// Meta returns descriptive metadata about the Codex backend.
+func (c *CodexBackend) Meta() BackendMeta {
+	version := detectBinaryVersion("codex")
+	return BackendMeta{
+		DisplayName: "Codex",
+		Version:     version,
+		Description: "OpenAI Codex CLI",
+		URL:         "https://github.com/openai/codex",
+		BinaryName:  "codex",
+	}
+}
+
+// HealthCheck reports the installation and readiness status of the Codex backend.
+func (c *CodexBackend) HealthCheck() HealthStatus {
+	var hs HealthStatus
+	var issues []string
+
+	if _, err := exec.LookPath("codex"); err == nil {
+		hs.Installed = true
+		hs.Version = detectBinaryVersion("codex")
+	} else {
+		issues = append(issues, "codex binary not found on PATH")
+	}
+
+	if os.Getenv("OPENAI_API_KEY") != "" {
+		hs.APIKeySet = true
+	} else {
+		issues = append(issues, "OPENAI_API_KEY not set")
+	}
+
+	hs.Healthy = hs.Installed && hs.APIKeySet
+	if len(issues) > 0 {
+		hs.Message = strings.Join(issues, "; ")
+	} else {
+		hs.Message = "ready"
+	}
+	return hs
 }
 
 func init() {
