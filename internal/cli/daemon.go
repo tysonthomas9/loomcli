@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -30,7 +31,11 @@ type AgentProcess struct {
 	lastExitCode   int       // exit code from last run
 	assignedEpicID string    // epic this agent is currently assigned to (empty = non-epic mode)
 
-	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID
+	lastError      *agenterr.AgentError // classified error from most recent exit (nil on clean exit)
+	rateRetryCount int                  // consecutive rate-limit retries (separate from restartCount)
+	lastNoWork     bool                 // true if last exit was due to no claimable tasks
+
+	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError
 }
 
 // SupervisedAgentStatus is a snapshot of a supervised agent's state for external inspection.
@@ -268,13 +273,8 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		// 4. Wait for exit
 		exitCode := d.waitForAgent(ap)
 
-		// Log exit with task details from lock file (before recovery clears it)
-		if lockInfo, _, _ := CheckLock(ap.worktreePath); lockInfo != nil && lockInfo.TaskID != "" {
-			log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
-				ap.entry.Worktree, exitCode, lockInfo.TaskID, lockInfo.TaskTitle)
-		} else {
-			log.Printf("[daemon] Agent %s: exited with code %d", ap.entry.Worktree, exitCode)
-		}
+		// 4.5. Classify error and detect NoWork (before recovery clears lock file)
+		d.classifyAgentExit(ap, exitCode)
 
 		// 5. Post-mortem recovery (exit-code-aware)
 		if err := d.recoverAgent(ap, exitCode); err != nil {
@@ -318,7 +318,10 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 9. Backoff sleep (interruptible)
 		backoff := d.computeBackoff(ap)
-		log.Printf("[daemon] Agent %s: waiting %v before restart (attempt %d)", ap.entry.Worktree, backoff, ap.restartCount)
+		ap.mu.Lock()
+		count := ap.restartCount
+		ap.mu.Unlock()
+		log.Printf("[daemon] Agent %s: waiting %v before restart (attempt %d)", ap.entry.Worktree, backoff, count)
 
 		select {
 		case <-time.After(backoff):
@@ -497,44 +500,149 @@ func (d *Daemon) recoverAgent(ap *AgentProcess, exitCode int) error {
 	return RecoverWorktree(ap.worktreePath, ap.entry.Worktree, exitCode)
 }
 
-// shouldRestart determines if agent should restart based on backoff policy.
+// classifyAgentExit reads the lock file (before recovery clears it) and classifies
+// the agent's exit into an error class. Sets ap.lastError and ap.lastNoWork.
+func (d *Daemon) classifyAgentExit(ap *AgentProcess, exitCode int) {
+	// Read lock info before recovery clears it (for logging and NoWork detection)
+	lockInfo, _, _ := CheckLock(ap.worktreePath)
+	if lockInfo != nil && lockInfo.TaskID != "" {
+		log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
+			ap.entry.Worktree, exitCode, lockInfo.TaskID, lockInfo.TaskTitle)
+	} else {
+		log.Printf("[daemon] Agent %s: exited with code %d", ap.entry.Worktree, exitCode)
+	}
+
+	// Resolve backend for classification
+	ap.mu.Lock()
+	backend := ap.entry.Backend
+	logPath := ap.logFilePath
+	ap.mu.Unlock()
+	if backend == "" {
+		backend = d.config.Backend
+	}
+
+	if exitCode == 0 && (lockInfo == nil || lockInfo.TaskID == "") {
+		// No work available — exit 0 with no task claimed
+		ap.mu.Lock()
+		ap.lastError = &agenterr.AgentError{
+			Class:   agenterr.NoWork,
+			Message: "no claimable tasks",
+			Backend: backend,
+		}
+		ap.lastNoWork = true
+		ap.mu.Unlock()
+		log.Printf("[daemon] Agent %s: no work available (idle)", ap.entry.Worktree)
+	} else if exitCode != 0 {
+		ae := agenterr.ClassifyFromLog(logPath, exitCode, backend)
+		ap.mu.Lock()
+		ap.lastError = ae
+		ap.lastNoWork = false
+		ap.mu.Unlock()
+		log.Printf("[daemon] Agent %s: classified error: %v", ap.entry.Worktree, ae)
+	} else {
+		ap.mu.Lock()
+		ap.lastError = nil
+		ap.lastNoWork = false
+		ap.mu.Unlock()
+	}
+}
+
+// shouldRestart determines if agent should restart based on backoff policy
+// and the classified error from the most recent exit.
 func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	maxRetries := d.getMaxRetries()
 
 	ap.mu.Lock()
 	defer ap.mu.Unlock()
 
-	// Successful run (exit 0, ran for >1 minute) resets counter
+	// Successful run (exit 0, ran for >1 minute) resets all counters
 	if ap.lastExitCode == 0 && time.Since(ap.lastStart) > time.Minute {
 		ap.restartCount = 0
+		ap.rateRetryCount = 0
 		return true
 	}
 
+	// NoWork: no claimable tasks — always restart, never count toward max_retries
+	if ap.lastError != nil && ap.lastError.Class == agenterr.NoWork {
+		ap.restartCount = 0
+		ap.rateRetryCount = 0
+		return true
+	}
+
+	// Fatal errors: stop immediately, no retries
+	if ap.lastError != nil && ap.lastError.IsFatal() {
+		log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
+			ap.entry.Worktree, ap.lastError.Class)
+		return false
+	}
+
+	// Rate-limited: unlimited retries (don't count toward max_retries)
+	if ap.lastError != nil && ap.lastError.Class == agenterr.RateLimited && d.getRateLimitNoCount() {
+		ap.rateRetryCount++
+		log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
+			ap.entry.Worktree, ap.rateRetryCount)
+		return true
+	}
+
+	// All other errors: count toward max_retries
 	ap.restartCount++
+	ap.rateRetryCount = 0 // reset rate counter on non-rate error
 	return ap.restartCount <= maxRetries
 }
 
 // computeBackoff returns the sleep duration before next restart.
+// Uses error-class-specific initial values and caps.
 func (d *Daemon) computeBackoff(ap *AgentProcess) time.Duration {
-	initial := d.getBackoffInitial()
 	maxBackoff := d.getBackoffMax()
 
 	ap.mu.Lock()
+	lastErr := ap.lastError
 	count := ap.restartCount
+	rateCount := ap.rateRetryCount
 	ap.mu.Unlock()
 
-	// Cap count to prevent integer overflow in bit shift (max safe shift is 30 for 32-bit result)
-	if count > 30 {
-		count = 30
+	// NoWork: fixed interval, no exponential growth
+	if lastErr != nil && lastErr.Class == agenterr.NoWork {
+		return time.Duration(d.getNoWorkBackoff()) * time.Second
 	}
 
-	// Exponential: initial * 2^restartCount
-	backoffSec := initial * (1 << count)
-	if backoffSec > maxBackoff || backoffSec < 0 { // check for overflow (negative)
+	// Select initial backoff and retry count based on error class
+	var initial int
+	var retryN int
+	if lastErr != nil && lastErr.Class == agenterr.RateLimited {
+		initial = d.getRateLimitBackoff()
+		retryN = rateCount
+		maxBackoff = d.getRateLimitMaxWait()
+	} else if lastErr != nil && lastErr.Class == agenterr.Timeout {
+		initial = d.getTimeoutBackoff()
+		retryN = count
+	} else {
+		initial = d.getBackoffInitial()
+		retryN = count
+	}
+
+	// Cap count to prevent integer overflow in bit shift
+	if retryN > 30 {
+		retryN = 30
+	}
+
+	// Exponential: initial * 2^retryN
+	backoffSec := initial * (1 << retryN)
+	if backoffSec > maxBackoff || backoffSec < 0 {
 		backoffSec = maxBackoff
 	}
 
-	return time.Duration(backoffSec) * time.Second
+	backoff := time.Duration(backoffSec) * time.Second
+
+	// For rate limits, respect server Retry-After hint if larger
+	if lastErr != nil && lastErr.Class == agenterr.RateLimited && lastErr.RetryAfter > backoff {
+		backoff = lastErr.RetryAfter
+		if backoff > time.Duration(maxBackoff)*time.Second {
+			backoff = time.Duration(maxBackoff) * time.Second
+		}
+	}
+
+	return backoff
 }
 
 // Helper functions to safely access RestartPolicy fields with defaults.
@@ -564,6 +672,48 @@ func (d *Daemon) getOutputTimeout() int {
 		return *d.config.Daemon.RestartPolicy.OutputTimeout
 	}
 	return 900 // default: 15 minutes
+}
+
+func (d *Daemon) getRateLimitBackoff() int {
+	if d.config.Daemon.RestartPolicy.RateLimitBackoff != nil {
+		return *d.config.Daemon.RestartPolicy.RateLimitBackoff
+	}
+	return 30 // default seconds
+}
+
+func (d *Daemon) getRateLimitMaxWait() int {
+	if d.config.Daemon.RestartPolicy.RateLimitMaxWait != nil {
+		return *d.config.Daemon.RestartPolicy.RateLimitMaxWait
+	}
+	return 300 // default seconds
+}
+
+func (d *Daemon) getRateLimitNoCount() bool {
+	if d.config.Daemon.RestartPolicy.RateLimitNoCount != nil {
+		return *d.config.Daemon.RestartPolicy.RateLimitNoCount
+	}
+	return true // default: rate-limit retries don't count toward max_retries
+}
+
+func (d *Daemon) getTimeoutBackoff() int {
+	if d.config.Daemon.RestartPolicy.TimeoutBackoff != nil {
+		return *d.config.Daemon.RestartPolicy.TimeoutBackoff
+	}
+	return 5 // default seconds
+}
+
+func (d *Daemon) getNoWorkBackoff() int {
+	if d.config.Daemon.RestartPolicy.NoWorkBackoff != nil {
+		return *d.config.Daemon.RestartPolicy.NoWorkBackoff
+	}
+	return 30 // default seconds
+}
+
+func (d *Daemon) getIdlePollInterval() int {
+	if d.config.Daemon.RestartPolicy.IdlePollInterval != nil {
+		return *d.config.Daemon.RestartPolicy.IdlePollInterval
+	}
+	return 30 // default seconds
 }
 
 // stopAgent sends SIGTERM then SIGKILL to a single agent and its entire process group.

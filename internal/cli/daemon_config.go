@@ -20,10 +20,16 @@ type DaemonSettings struct {
 
 // RestartPolicy defines how the daemon restarts failed agents.
 type RestartPolicy struct {
-	MaxRetries     *int `yaml:"max_retries,omitempty"`
-	BackoffInitial *int `yaml:"backoff_initial,omitempty"` // seconds
-	BackoffMax     *int `yaml:"backoff_max,omitempty"`     // seconds
-	OutputTimeout  *int `yaml:"output_timeout,omitempty"`  // seconds; kill agent after this long with no output (0 = disabled)
+	MaxRetries       *int  `yaml:"max_retries,omitempty"`
+	BackoffInitial   *int  `yaml:"backoff_initial,omitempty"`     // seconds
+	BackoffMax       *int  `yaml:"backoff_max,omitempty"`         // seconds
+	OutputTimeout    *int  `yaml:"output_timeout,omitempty"`      // seconds; kill agent after this long with no output (0 = disabled)
+	RateLimitBackoff *int  `yaml:"rate_limit_backoff,omitempty"`  // seconds (default 30)
+	RateLimitMaxWait *int  `yaml:"rate_limit_max_wait,omitempty"` // seconds (default 300)
+	RateLimitNoCount *bool `yaml:"rate_limit_no_count,omitempty"` // default true: rate-limit retries don't count toward max_retries
+	TimeoutBackoff   *int  `yaml:"timeout_backoff,omitempty"`     // seconds (default 5)
+	NoWorkBackoff    *int  `yaml:"no_work_backoff,omitempty"`     // seconds (default 30); fixed interval when no tasks available
+	IdlePollInterval *int  `yaml:"idle_poll_interval,omitempty"`  // seconds (default 30); polling interval for task availability
 }
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
@@ -185,12 +191,31 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	if src.RestartPolicy.OutputTimeout != nil {
 		dst.RestartPolicy.OutputTimeout = src.RestartPolicy.OutputTimeout
 	}
+	if src.RestartPolicy.RateLimitBackoff != nil {
+		dst.RestartPolicy.RateLimitBackoff = src.RestartPolicy.RateLimitBackoff
+	}
+	if src.RestartPolicy.RateLimitMaxWait != nil {
+		dst.RestartPolicy.RateLimitMaxWait = src.RestartPolicy.RateLimitMaxWait
+	}
+	if src.RestartPolicy.RateLimitNoCount != nil {
+		dst.RestartPolicy.RateLimitNoCount = src.RestartPolicy.RateLimitNoCount
+	}
+	if src.RestartPolicy.TimeoutBackoff != nil {
+		dst.RestartPolicy.TimeoutBackoff = src.RestartPolicy.TimeoutBackoff
+	}
+	if src.RestartPolicy.NoWorkBackoff != nil {
+		dst.RestartPolicy.NoWorkBackoff = src.RestartPolicy.NoWorkBackoff
+	}
+	if src.RestartPolicy.IdlePollInterval != nil {
+		dst.RestartPolicy.IdlePollInterval = src.RestartPolicy.IdlePollInterval
+	}
 	if src.MaxAgents != nil {
 		dst.MaxAgents = src.MaxAgents
 	}
 }
 
-func intPtr(v int) *int { return &v }
+func intPtr(v int) *int    { return &v }
+func boolPtr(v bool) *bool { return &v }
 
 // ResolveRole looks up a role by name in the merged config.
 // Returns the RoleConfig and true if found, zero value and false if not.

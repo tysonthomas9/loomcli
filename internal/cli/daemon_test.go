@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 )
 
 // requireIntPtrD is a test helper to check pointer int values in daemon tests.
@@ -343,6 +345,124 @@ func TestComputeBackoff(t *testing.T) {
 			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
 		}
 	})
+
+	t.Run("rate limited uses rate_limit_backoff as initial", func(t *testing.T) {
+		ap := &AgentProcess{
+			rateRetryCount: 0,
+			lastError:      &agenterr.AgentError{Class: agenterr.RateLimited},
+		}
+		backoff := daemon.computeBackoff(ap)
+
+		// default rate_limit_backoff=30 * 2^0 = 30s
+		want := 30 * time.Second
+		if backoff != want {
+			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		}
+	})
+
+	t.Run("rate limited respects RetryAfter hint", func(t *testing.T) {
+		ap := &AgentProcess{
+			rateRetryCount: 0,
+			lastError: &agenterr.AgentError{
+				Class:      agenterr.RateLimited,
+				RetryAfter: 60 * time.Second,
+			},
+		}
+		backoff := daemon.computeBackoff(ap)
+
+		// RetryAfter (60s) > computed (30s), so use RetryAfter
+		want := 60 * time.Second
+		if backoff != want {
+			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		}
+	})
+
+	t.Run("rate limited RetryAfter capped at rate_limit_max_wait", func(t *testing.T) {
+		ap := &AgentProcess{
+			rateRetryCount: 0,
+			lastError: &agenterr.AgentError{
+				Class:      agenterr.RateLimited,
+				RetryAfter: 600 * time.Second, // 10 minutes
+			},
+		}
+		backoff := daemon.computeBackoff(ap)
+
+		// Default rate_limit_max_wait=300s, so cap at 300s
+		want := 300 * time.Second
+		if backoff != want {
+			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		}
+	})
+
+	t.Run("rate limited exponential growth", func(t *testing.T) {
+		ap := &AgentProcess{
+			rateRetryCount: 2,
+			lastError:      &agenterr.AgentError{Class: agenterr.RateLimited},
+		}
+		backoff := daemon.computeBackoff(ap)
+
+		// 30 * 2^2 = 120s
+		want := 120 * time.Second
+		if backoff != want {
+			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		}
+	})
+
+	t.Run("timeout uses timeout_backoff as initial", func(t *testing.T) {
+		ap := &AgentProcess{
+			restartCount: 0,
+			lastError:    &agenterr.AgentError{Class: agenterr.Timeout},
+		}
+		backoff := daemon.computeBackoff(ap)
+
+		// default timeout_backoff=5 * 2^0 = 5s
+		want := 5 * time.Second
+		if backoff != want {
+			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		}
+	})
+
+	t.Run("transient uses standard backoff_initial", func(t *testing.T) {
+		ap := &AgentProcess{
+			restartCount: 0,
+			lastError:    &agenterr.AgentError{Class: agenterr.Transient},
+		}
+		backoff := daemon.computeBackoff(ap)
+
+		// default backoff_initial=2 * 2^0 = 2s
+		want := 2 * time.Second
+		if backoff != want {
+			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		}
+	})
+
+	t.Run("nil lastError uses standard backoff", func(t *testing.T) {
+		ap := &AgentProcess{
+			restartCount: 1,
+			lastError:    nil,
+		}
+		backoff := daemon.computeBackoff(ap)
+
+		// standard: 2 * 2^1 = 4s
+		want := 4 * time.Second
+		if backoff != want {
+			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		}
+	})
+
+	t.Run("NoWork uses fixed no_work_backoff", func(t *testing.T) {
+		ap := &AgentProcess{
+			restartCount: 5, // should be irrelevant
+			lastError:    &agenterr.AgentError{Class: agenterr.NoWork},
+		}
+		backoff := daemon.computeBackoff(ap)
+
+		// default no_work_backoff=30s (fixed, no exponential)
+		want := 30 * time.Second
+		if backoff != want {
+			t.Errorf("computeBackoff() = %v, want %v", backoff, want)
+		}
+	})
 }
 
 func TestShouldRestart(t *testing.T) {
@@ -482,6 +602,238 @@ func TestShouldRestart(t *testing.T) {
 		// After increment, count becomes 1 which exceeds maxRetries of 0
 		if result {
 			t.Error("shouldRestart() = true, want false (maxRetries=0)")
+		}
+	})
+
+	t.Run("fatal error (AuthFailure) stops immediately", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.MaxRetries = intPtr(3)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:        AgentEntry{Worktree: "test"},
+			restartCount: 0,
+			lastExitCode: 1,
+			lastStart:    time.Now().Add(-2 * time.Minute),
+			lastError:    &agenterr.AgentError{Class: agenterr.AuthFailure, Message: "invalid API key"},
+		}
+
+		result := daemon.shouldRestart(ap)
+		if result {
+			t.Error("shouldRestart() = true, want false for AuthFailure (fatal)")
+		}
+		if ap.restartCount != 0 {
+			t.Errorf("restartCount = %d, want 0 (should not be incremented for fatal)", ap.restartCount)
+		}
+	})
+
+	t.Run("fatal error (BillingError) stops immediately", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.MaxRetries = intPtr(3)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:        AgentEntry{Worktree: "test"},
+			restartCount: 0,
+			lastExitCode: 1,
+			lastStart:    time.Now().Add(-2 * time.Minute),
+			lastError:    &agenterr.AgentError{Class: agenterr.BillingError, Message: "payment required"},
+		}
+
+		result := daemon.shouldRestart(ap)
+		if result {
+			t.Error("shouldRestart() = true, want false for BillingError (fatal)")
+		}
+	})
+
+	t.Run("rate limited with no_count=true does not count toward retries", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.MaxRetries = intPtr(3)
+		// RateLimitNoCount defaults to true (nil)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:        AgentEntry{Worktree: "test"},
+			restartCount: 2,
+			lastExitCode: 1,
+			lastStart:    time.Now().Add(-2 * time.Minute),
+			lastError:    &agenterr.AgentError{Class: agenterr.RateLimited, Message: "rate limited"},
+		}
+
+		result := daemon.shouldRestart(ap)
+		if !result {
+			t.Error("shouldRestart() = false, want true for RateLimited with no_count=true")
+		}
+		if ap.restartCount != 2 {
+			t.Errorf("restartCount = %d, want 2 (should be unchanged for rate-limited)", ap.restartCount)
+		}
+		if ap.rateRetryCount != 1 {
+			t.Errorf("rateRetryCount = %d, want 1", ap.rateRetryCount)
+		}
+	})
+
+	t.Run("rate limited with no_count=false counts normally", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.MaxRetries = intPtr(3)
+		config.Daemon.RestartPolicy.RateLimitNoCount = boolPtr(false)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:        AgentEntry{Worktree: "test"},
+			restartCount: 2,
+			lastExitCode: 1,
+			lastStart:    time.Now().Add(-2 * time.Minute),
+			lastError:    &agenterr.AgentError{Class: agenterr.RateLimited, Message: "rate limited"},
+		}
+
+		result := daemon.shouldRestart(ap)
+		if !result {
+			t.Error("shouldRestart() = false, want true (count 3 <= maxRetries 3)")
+		}
+		if ap.restartCount != 3 {
+			t.Errorf("restartCount = %d, want 3 (should be incremented for rate-limited with no_count=false)", ap.restartCount)
+		}
+	})
+
+	t.Run("successful run resets rateRetryCount", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.MaxRetries = intPtr(3)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			restartCount:   2,
+			rateRetryCount: 5,
+			lastExitCode:   0,
+			lastStart:      time.Now().Add(-2 * time.Minute),
+		}
+
+		result := daemon.shouldRestart(ap)
+		if !result {
+			t.Error("shouldRestart() = false, want true for successful long run")
+		}
+		if ap.restartCount != 0 {
+			t.Errorf("restartCount = %d, want 0 (should be reset)", ap.restartCount)
+		}
+		if ap.rateRetryCount != 0 {
+			t.Errorf("rateRetryCount = %d, want 0 (should be reset)", ap.rateRetryCount)
+		}
+	})
+
+	t.Run("timeout error counts toward retries", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.MaxRetries = intPtr(3)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:        AgentEntry{Worktree: "test"},
+			restartCount: 1,
+			lastExitCode: 137,
+			lastStart:    time.Now().Add(-2 * time.Minute),
+			lastError:    &agenterr.AgentError{Class: agenterr.Timeout, Message: "connection timed out"},
+		}
+
+		result := daemon.shouldRestart(ap)
+		if !result {
+			t.Error("shouldRestart() = false, want true")
+		}
+		if ap.restartCount != 2 {
+			t.Errorf("restartCount = %d, want 2", ap.restartCount)
+		}
+	})
+
+	t.Run("NoWork does not count toward retries and always restarts", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.MaxRetries = intPtr(0) // even with 0 retries allowed
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			restartCount:   3,
+			rateRetryCount: 2,
+			lastExitCode:   0,
+			lastStart:      time.Now().Add(-10 * time.Second), // short run
+			lastError:      &agenterr.AgentError{Class: agenterr.NoWork, Message: "no claimable tasks"},
+		}
+
+		result := daemon.shouldRestart(ap)
+		if !result {
+			t.Error("shouldRestart() = false, want true for NoWork (always restart)")
+		}
+		if ap.restartCount != 0 {
+			t.Errorf("restartCount = %d, want 0 (should be reset for NoWork)", ap.restartCount)
+		}
+		if ap.rateRetryCount != 0 {
+			t.Errorf("rateRetryCount = %d, want 0 (should be reset for NoWork)", ap.rateRetryCount)
+		}
+	})
+
+	t.Run("nil lastError counts toward retries normally", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.MaxRetries = intPtr(3)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			restartCount: 1,
+			lastExitCode: 1,
+			lastStart:    time.Now().Add(-2 * time.Minute),
+			lastError:    nil, // no classification available
+		}
+
+		result := daemon.shouldRestart(ap)
+		if !result {
+			t.Error("shouldRestart() = false, want true")
+		}
+		if ap.restartCount != 2 {
+			t.Errorf("restartCount = %d, want 2", ap.restartCount)
+		}
+	})
+
+	t.Run("non-rate error resets rateRetryCount", func(t *testing.T) {
+		config := makeDaemonConfig(
+			[]AgentEntry{{Worktree: "test", Role: "plan"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.MaxRetries = intPtr(3)
+		daemon := &Daemon{config: config}
+
+		ap := &AgentProcess{
+			entry:          AgentEntry{Worktree: "test"},
+			restartCount:   1,
+			rateRetryCount: 5,
+			lastExitCode:   1,
+			lastStart:      time.Now().Add(-2 * time.Minute),
+			lastError:      &agenterr.AgentError{Class: agenterr.Transient, Message: "server error"},
+		}
+
+		result := daemon.shouldRestart(ap)
+		if !result {
+			t.Error("shouldRestart() = false, want true")
+		}
+		if ap.rateRetryCount != 0 {
+			t.Errorf("rateRetryCount = %d, want 0 (should be reset on non-rate error)", ap.rateRetryCount)
 		}
 	})
 }
@@ -912,6 +1264,101 @@ func TestCheckAgentHealth_Watchdog(t *testing.T) {
 		ap.mu.Unlock()
 		if pid != 99999999 {
 			t.Errorf("pid = %d, want 99999999 (should use lastStart, not stale log mtime)", pid)
+		}
+	})
+}
+
+func TestGetRateLimitBackoff(t *testing.T) {
+	t.Run("returns default when not configured", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+		if got := daemon.getRateLimitBackoff(); got != 30 {
+			t.Errorf("getRateLimitBackoff() = %d, want 30", got)
+		}
+	})
+
+	t.Run("returns configured value", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		config.Daemon.RestartPolicy.RateLimitBackoff = intPtr(60)
+		daemon := &Daemon{config: config}
+		if got := daemon.getRateLimitBackoff(); got != 60 {
+			t.Errorf("getRateLimitBackoff() = %d, want 60", got)
+		}
+	})
+}
+
+func TestGetRateLimitMaxWait(t *testing.T) {
+	t.Run("returns default when not configured", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+		if got := daemon.getRateLimitMaxWait(); got != 300 {
+			t.Errorf("getRateLimitMaxWait() = %d, want 300", got)
+		}
+	})
+
+	t.Run("returns configured value", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		config.Daemon.RestartPolicy.RateLimitMaxWait = intPtr(600)
+		daemon := &Daemon{config: config}
+		if got := daemon.getRateLimitMaxWait(); got != 600 {
+			t.Errorf("getRateLimitMaxWait() = %d, want 600", got)
+		}
+	})
+}
+
+func TestGetRateLimitNoCount(t *testing.T) {
+	t.Run("returns default true when not configured", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+		if got := daemon.getRateLimitNoCount(); !got {
+			t.Errorf("getRateLimitNoCount() = %v, want true", got)
+		}
+	})
+
+	t.Run("returns false when configured", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		config.Daemon.RestartPolicy.RateLimitNoCount = boolPtr(false)
+		daemon := &Daemon{config: config}
+		if got := daemon.getRateLimitNoCount(); got {
+			t.Errorf("getRateLimitNoCount() = %v, want false", got)
+		}
+	})
+}
+
+func TestGetTimeoutBackoff(t *testing.T) {
+	t.Run("returns default when not configured", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+		if got := daemon.getTimeoutBackoff(); got != 5 {
+			t.Errorf("getTimeoutBackoff() = %d, want 5", got)
+		}
+	})
+
+	t.Run("returns configured value", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		config.Daemon.RestartPolicy.TimeoutBackoff = intPtr(10)
+		daemon := &Daemon{config: config}
+		if got := daemon.getTimeoutBackoff(); got != 10 {
+			t.Errorf("getTimeoutBackoff() = %d, want 10", got)
+		}
+	})
+}
+
+func TestGetNoWorkBackoff(t *testing.T) {
+	t.Run("returns default when not configured", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		daemon := &Daemon{config: config}
+		if got := daemon.getNoWorkBackoff(); got != 30 {
+			t.Errorf("getNoWorkBackoff() = %d, want 30", got)
+		}
+	})
+
+	t.Run("returns configured value", func(t *testing.T) {
+		config := makeDaemonConfig(nil, nil)
+		config.Daemon.RestartPolicy.NoWorkBackoff = intPtr(45)
+		daemon := &Daemon{config: config}
+		if got := daemon.getNoWorkBackoff(); got != 45 {
+			t.Errorf("getNoWorkBackoff() = %d, want 45", got)
 		}
 	})
 }
