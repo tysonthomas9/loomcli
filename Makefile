@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend sync-beads update-beads gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc check-no-raw-exec test-coverage test-frontend-coverage
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend sync-beads update-beads check gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc check-no-raw-exec test-coverage test-frontend-coverage
 
 # Default target
 all: build
@@ -124,17 +124,37 @@ update-beads:
 	git subtree pull --prefix=$(BEADS_PREFIX) $(BEADS_REMOTE) $(BEADS_BRANCH) --squash
 	$(MAKE) sync-beads
 
-# Quality gate — full lint + build + vet + test (used by pre-push hook)
-gate: frontend
-	@echo "=== Quality Gate ==="
-	@$(MAKE) lint
-	@$(MAKE) check-loc
-	@$(MAKE) lint-frontend
-	@go build ./...
+# Unified quality gate - the CI gate. If 'make check' passes, code is shippable.
+check: frontend
+	@echo "=== [1/12] Go: format check ==="
+	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
+	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
+	@echo "=== [2/12] Go: vet ==="
 	@go vet ./...
+	@echo "=== [3/12] Go: build ==="
+	@go build ./...
+	@echo "=== [4/12] Go: lint (golangci-lint + depguard) ==="
+	@golangci-lint run --timeout=5m
+	@echo "=== [5/12] Go: LOC check ==="
+	@./scripts/check-loc.sh 500
+	@echo "=== [6/12] Go: exec.Command guard ==="
+	@./scripts/check-no-raw-exec.sh
+	@echo "=== [7/12] Go: test with race detector ==="
 	@go test -race -timeout 15m ./...
-	@$(MAKE) test-frontend
-	@echo "=== Quality Gate PASSED ==="
+	@echo "=== [8/12] Frontend: format check ==="
+	@cd $(FRONTEND_DIR) && npm run format:check
+	@echo "=== [9/12] Frontend: typecheck ==="
+	@cd $(FRONTEND_DIR) && npm run typecheck
+	@echo "=== [10/12] Frontend: eslint ==="
+	@cd $(FRONTEND_DIR) && npm run lint
+	@echo "=== [11/12] Frontend: architectural checks ==="
+	@cd $(FRONTEND_DIR) && npm run check:arch
+	@echo "=== [12/12] Frontend: unit tests ==="
+	@cd $(FRONTEND_DIR) && npm run test:unit
+	@echo "=== All quality gates PASSED ==="
+
+# Backward-compatible alias for 'make check'
+gate: check
 
 # Extended quality gate — gate + self-contained e2e tests
 gate-e2e: gate
@@ -196,7 +216,8 @@ help:
 	@echo "  make frontend  - Build frontend (requires Node.js >= 20)"
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
 	@echo "  make update-beads - Pull latest beads + sync"
-	@echo "  make gate         - Quality gate (lint + build + vet + test)"
+	@echo "  make check        - Unified quality gate (all 12 checks)"
+	@echo "  make gate         - Alias for make check"
 	@echo "  make gate-e2e     - Quality gate + self-contained e2e tests"
 	@echo "  make hooks        - Install git hooks (pre-push gate)"
 	@echo "  make dev          - Start default dev flow (same as make dev-loom)"
