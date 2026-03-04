@@ -365,7 +365,7 @@ func TestExternalBackend_Meta_ParsesJSON(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `#!/bin/sh
-echo '{"DisplayName":"TestPlugin","Version":"1.0.0","Description":"A test plugin","URL":"https://example.com","BinaryName":"loom-backend-testplugin"}'
+echo '{"display_name":"TestPlugin","version":"1.0.0","description":"A test plugin","url":"https://example.com","binary_name":"loom-backend-testplugin"}'
 `
 	binPath := filepath.Join(dir, "loom-backend-testplugin")
 	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
