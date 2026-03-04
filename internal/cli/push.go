@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -250,41 +249,17 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 	}
 
 	// Stash local changes if working tree is dirty
-	stashed, stashErr := GitStash(repoPath)
-	if stashErr != nil {
-		return fmt.Errorf("stashing changes: %v", stashErr)
+	stashCleanup, err := stashIfDirty(repoPath)
+	if err != nil {
+		return fmt.Errorf("stashing changes: %v", err)
 	}
-	// Ensure we pop stash at end (even on error)
-	if stashed {
-		defer func() {
-			if err := GitStashPop(repoPath); err != nil {
-				// Check if stash pop caused conflicts
-				hasConflicts, _ := HasUnmergedFiles(repoPath)
-				if hasConflicts {
-					fmt.Println("⚠ Warning: Stash pop caused conflicts. Resolve manually with 'git stash show -p | git apply'")
-				} else {
-					fmt.Fprintf(os.Stderr, "Warning: failed to restore stashed changes: %v\n", err)
-				}
-			}
-		}()
-	}
+	defer stashCleanup()
 
-	// Save current branch so we can restore it after the operation
-	origBranch, _ := GetCurrentBranch(repoPath)
-	defer func() {
-		if origBranch != "" {
-			_ = GitCheckout(repoPath, origBranch)
-		}
-	}()
-
-	// Checkout target branch — if it's checked out in another worktree, git
-	// will fail and we fall back to the detached HEAD approach. This avoids a
-	// TOCTOU race where the worktree state could change between a pre-check
-	// and the checkout.
-	if err := GitCheckout(repoPath, targetBranch); err != nil {
-		errStr := err.Error()
-		if strings.Contains(errStr, "already used by worktree") ||
-			strings.Contains(errStr, "already checked out") {
+	// Checkout target branch, with deferred restore of original branch
+	restoreBranch, err := checkoutTarget(repoPath, targetBranch)
+	defer restoreBranch()
+	if err != nil {
+		if isWorktreeConflictErr(err) {
 			fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
 			fmt.Println("⚠ Using detached HEAD approach")
 			return pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote)
@@ -305,28 +280,15 @@ func pushBranchInRepo(repoPath, sourceBranch, targetBranch, remote string) error
 	}
 
 	// Attempt merge
-	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
-	if err := GitMerge(repoPath, sourceBranch, mergeMsg); err != nil {
-		// Check for conflicts
-		conflicts, conflictErr := GetConflictedFiles(repoPath)
-		if conflictErr != nil || len(conflicts) == 0 {
-			return fmt.Errorf("merge failed: %v", err)
+	conflicts, mergeErr := mergeSource(repoPath, sourceBranch, targetBranch)
+	if mergeErr != nil {
+		if len(conflicts) > 0 {
+			if err := resolveConflictsWithAgent(repoPath, sourceBranch, targetBranch, conflicts); err != nil {
+				return fmt.Errorf("resolving conflicts: %v", err)
+			}
+			return nil
 		}
-
-		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
-		fmt.Println("")
-		fmt.Println("Conflicted files:")
-		for _, f := range conflicts {
-			fmt.Printf("  - %s\n", f)
-		}
-		fmt.Println("")
-
-		// Launch Claude for conflict resolution
-		if err := InvokeAgentForConflicts(repoPath, sourceBranch, targetBranch, conflicts); err != nil {
-			return fmt.Errorf("resolving conflicts: %v", err)
-		}
-		return nil
+		return mergeErr
 	}
 
 	fmt.Println("✓ Push completed successfully (no conflicts)")
@@ -374,29 +336,16 @@ func pushBranchInRepoDetached(repoPath, sourceBranch, targetBranch, remote strin
 	}()
 
 	// Attempt merge
-	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
-	if err := GitMerge(repoPath, sourceBranch, mergeMsg); err != nil {
-		// Check for conflicts
-		conflicts, conflictErr := GetConflictedFiles(repoPath)
-		if conflictErr != nil || len(conflicts) == 0 {
-			return fmt.Errorf("merge failed: %v", err)
+	conflicts, mergeErr := mergeSource(repoPath, sourceBranch, targetBranch)
+	if mergeErr != nil {
+		if len(conflicts) > 0 {
+			pushRef := fmt.Sprintf("HEAD:%s", targetBranch)
+			if err := resolveConflictsDetached(repoPath, sourceBranch, targetBranch, conflicts, pushRef); err != nil {
+				return fmt.Errorf("resolving conflicts: %v", err)
+			}
+			return nil
 		}
-
-		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
-		fmt.Println("")
-		fmt.Println("Conflicted files:")
-		for _, f := range conflicts {
-			fmt.Printf("  - %s\n", f)
-		}
-		fmt.Println("")
-
-		// Launch Claude with push command using refspec for detached approach
-		prompt := generateConflictResolutionPromptWithPush(sourceBranch, targetBranch, conflicts, fmt.Sprintf("HEAD:%s", targetBranch))
-		if err := InvokeAgent(repoPath, prompt, ""); err != nil {
-			return fmt.Errorf("resolving conflicts: %v", err)
-		}
-		return nil
+		return mergeErr
 	}
 
 	fmt.Println("✓ Push completed successfully (no conflicts)")
@@ -471,38 +420,18 @@ func pushBranch(sourceBranch, targetBranch string) {
 	}
 
 	// Stash local changes if working tree is dirty
-	stashed, stashErr := GitStash(scriptDir)
-	if stashErr != nil {
-		fmt.Fprintf(os.Stderr, "Error stashing: %v\n", stashErr)
+	stashCleanup, err := stashIfDirty(scriptDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error stashing: %v\n", err)
 		return
 	}
-	if stashed {
-		defer func() {
-			if err := GitStashPop(scriptDir); err != nil {
-				hasConflicts, _ := HasUnmergedFiles(scriptDir)
-				if hasConflicts {
-					fmt.Println("⚠ Warning: Stash pop caused conflicts. Resolve manually with 'git stash show -p | git apply'")
-				} else {
-					fmt.Fprintf(os.Stderr, "Warning: failed to restore stashed changes: %v\n", err)
-				}
-			}
-		}()
-	}
+	defer stashCleanup()
 
-	// Save current branch so we can restore it after the operation
-	origBranch, _ := GetCurrentBranch(scriptDir)
-	defer func() {
-		if origBranch != "" {
-			_ = GitCheckout(scriptDir, origBranch)
-		}
-	}()
-
-	// Checkout target branch — if it's checked out in another worktree, git
-	// will fail and we fall back to the detached HEAD approach.
-	if err := GitCheckout(scriptDir, targetBranch); err != nil {
-		errStr := err.Error()
-		if strings.Contains(errStr, "already used by worktree") ||
-			strings.Contains(errStr, "already checked out") {
+	// Checkout target branch, with deferred restore of original branch
+	restoreBranch, err := checkoutTarget(scriptDir, targetBranch)
+	defer restoreBranch()
+	if err != nil {
+		if isWorktreeConflictErr(err) {
 			fmt.Printf("⚠ Target branch %s is checked out in another worktree\n", targetBranch)
 			fmt.Println("⚠ Using detached HEAD approach")
 			if err := pushBranchDetached(scriptDir, sourceBranch, targetBranch); err != nil {
@@ -528,29 +457,15 @@ func pushBranch(sourceBranch, targetBranch string) {
 	}
 
 	// Attempt merge
-	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
-	if err := GitMerge(scriptDir, sourceBranch, mergeMsg); err != nil {
-		// Check for conflicts
-		conflicts, conflictErr := GetConflictedFiles(scriptDir)
-		if conflictErr != nil || len(conflicts) == 0 {
-			fmt.Fprintf(os.Stderr, "Push failed: %v\n", err)
+	conflicts, mergeErr := mergeSource(scriptDir, sourceBranch, targetBranch)
+	if mergeErr != nil {
+		if len(conflicts) > 0 {
+			if err := resolveConflictsWithAgent(scriptDir, sourceBranch, targetBranch, conflicts); err != nil {
+				fmt.Fprintf(os.Stderr, "Error resolving conflicts: %v\n", err)
+			}
 			return
 		}
-
-		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
-		fmt.Println("")
-		fmt.Println("Conflicted files:")
-		for _, f := range conflicts {
-			fmt.Printf("  - %s\n", f)
-		}
-		fmt.Println("")
-
-		// Launch Claude for conflict resolution
-		if err := InvokeAgentForConflicts(scriptDir, sourceBranch, targetBranch, conflicts); err != nil {
-			fmt.Fprintf(os.Stderr, "Error resolving conflicts: %v\n", err)
-			return
-		}
+		fmt.Fprintf(os.Stderr, "Push failed: %v\n", mergeErr)
 		return
 	}
 
@@ -598,29 +513,16 @@ func pushBranchDetached(scriptDir, sourceBranch, targetBranch string) error {
 	}()
 
 	// Attempt merge
-	mergeMsg := fmt.Sprintf("Merge %s into %s\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>", sourceBranch, targetBranch)
-	if err := GitMerge(scriptDir, sourceBranch, mergeMsg); err != nil {
-		// Check for conflicts
-		conflicts, conflictErr := GetConflictedFiles(scriptDir)
-		if conflictErr != nil || len(conflicts) == 0 {
-			return fmt.Errorf("merge failed: %v", err)
+	conflicts, mergeErr := mergeSource(scriptDir, sourceBranch, targetBranch)
+	if mergeErr != nil {
+		if len(conflicts) > 0 {
+			pushRef := fmt.Sprintf("HEAD:%s", targetBranch)
+			if err := resolveConflictsDetached(scriptDir, sourceBranch, targetBranch, conflicts, pushRef); err != nil {
+				return fmt.Errorf("resolving conflicts: %v", err)
+			}
+			return nil
 		}
-
-		fmt.Println("")
-		fmt.Println("⚠ Merge conflicts detected. Launching AI agent to resolve...")
-		fmt.Println("")
-		fmt.Println("Conflicted files:")
-		for _, f := range conflicts {
-			fmt.Printf("  - %s\n", f)
-		}
-		fmt.Println("")
-
-		// Launch Claude with push command using refspec for detached approach
-		prompt := generateConflictResolutionPromptWithPush(sourceBranch, targetBranch, conflicts, fmt.Sprintf("HEAD:%s", targetBranch))
-		if err := InvokeAgent(scriptDir, prompt, ""); err != nil {
-			return fmt.Errorf("resolving conflicts: %v", err)
-		}
-		return nil
+		return mergeErr
 	}
 
 	fmt.Println("✓ Push completed successfully (no conflicts)")

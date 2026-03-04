@@ -99,9 +99,15 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&worktreesFlag, "worktrees", "w", "", "Override worktrees directory (takes precedence over LOOM_WORKTREES_DIR)")
 	rootCmd.PersistentFlags().StringVar(&backendFlag, "backend", "", "AI backend CLI to use (claude, codex, opencode). Env: LOOM_BACKEND")
 
-	// Resolve and set active backend before any subcommand runs
+	// Resolve and set active backend before any subcommand runs,
+	// then inject the Deps container into the command context.
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		return ResolveAndSetBackend()
+		if err := ResolveAndSetBackend(); err != nil {
+			return err
+		}
+		deps := DefaultDeps()
+		cmd.SetContext(WithDeps(cmd.Context(), deps))
+		return nil
 	}
 
 	// Add command groups for organized help
