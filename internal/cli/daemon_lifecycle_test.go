@@ -176,7 +176,7 @@ func TestStopAgent_ProcessAlreadyExited(t *testing.T) {
 	d := &Daemon{config: &DaemonConfig{}}
 
 	// Spawn a short-lived process and wait for it to finish
-	cmd := exec.Command("true") //nolint:norawexec
+	cmd := exec.Command("true")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start test process: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestStopAgent_GracefulShutdown(t *testing.T) {
 	d := &Daemon{config: &DaemonConfig{}}
 
 	// Spawn a process that exits on SIGTERM (sleep responds to SIGTERM)
-	cmd := exec.Command("sleep", "60") //nolint:norawexec
+	cmd := exec.Command("sleep", "60")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestStopAgent_ForcedKill(t *testing.T) {
 	d := &Daemon{config: &DaemonConfig{}}
 
 	// Spawn a process that ignores SIGTERM
-	cmd := exec.Command("bash", "-c", `trap "" TERM; sleep 60`) //nolint:norawexec
+	cmd := exec.Command("bash", "-c", `trap "" TERM; sleep 60`)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start trap process: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestStopAgent_ForcedKill(t *testing.T) {
 func TestWaitForAgent_SuccessfulExit(t *testing.T) {
 	d := &Daemon{config: &DaemonConfig{}}
 
-	cmd := exec.Command("true") //nolint:norawexec
+	cmd := exec.Command("true")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestWaitForAgent_SuccessfulExit(t *testing.T) {
 func TestWaitForAgent_FailedExit(t *testing.T) {
 	d := &Daemon{config: &DaemonConfig{}}
 
-	cmd := exec.Command("bash", "-c", "exit 1") //nolint:norawexec
+	cmd := exec.Command("bash", "-c", "exit 1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestWaitForAgent_ClosesLogFile(t *testing.T) {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
 
-	cmd := exec.Command("true") //nolint:norawexec
+	cmd := exec.Command("true")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start: %v", err)
 	}
@@ -776,7 +776,7 @@ func TestSuperviseAgent_ShutdownBeforeSpawn(t *testing.T) {
 func TestWaitForAgent_SignaledExit(t *testing.T) {
 	d := &Daemon{config: &DaemonConfig{}}
 
-	cmd := exec.Command("sleep", "60") //nolint:norawexec
+	cmd := exec.Command("sleep", "60")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep: %v", err)
 	}
@@ -946,7 +946,7 @@ func TestStopAgent_KillsProcessGroup(t *testing.T) {
 	// Spawn a bash process that creates a child in the same process group.
 	// The child (sleep) would survive a simple kill of the parent without
 	// process group kill semantics.
-	cmd := exec.Command("bash", "-c", "sleep 60 & wait") //nolint:norawexec
+	cmd := exec.Command("bash", "-c", "sleep 60 & wait")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start bash: %v", err)
@@ -1001,7 +1001,7 @@ func TestStopAgent_KillsProcessGroup(t *testing.T) {
 func TestStopAgent_ConcurrentWithWaitForAgent(t *testing.T) {
 	d := &Daemon{config: &DaemonConfig{}}
 
-	cmd := exec.Command("sleep", "5") //nolint:norawexec
+	cmd := exec.Command("sleep", "5")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep: %v", err)
@@ -1103,7 +1103,7 @@ func TestCheckAgentHealth_StaleLockWithLiveProcess(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Start a real process to use as the agent's live PID
-	liveCmd := exec.Command("sleep", "60") //nolint:norawexec
+	liveCmd := exec.Command("sleep", "60")
 	if err := liveCmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep: %v", err)
 	}
@@ -1166,7 +1166,7 @@ func TestCheckAgentHealth_ValidLockWithLiveProcess(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Start a real process
-	liveCmd := exec.Command("sleep", "60") //nolint:norawexec
+	liveCmd := exec.Command("sleep", "60")
 	if err := liveCmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep: %v", err)
 	}

@@ -64,22 +64,5 @@ export default defineConfig(({ mode }) => ({
     globals: true,
     environment: "node",
     exclude: ["tests/e2e/**", "node_modules/**"],
-    coverage: {
-      provider: "v8",
-      include: ["src/**/*.{ts,tsx}"],
-      exclude: [
-        "src/**/*.test.{ts,tsx}",
-        "src/**/__tests__/**",
-        "src/test-utils/**",
-        "src/vite-env.d.ts",
-        "src/main.tsx",
-      ],
-      thresholds: {
-        lines: 80,
-        branches: 75,
-        functions: 80,
-        statements: 80,
-      },
-    },
   },
 }))

@@ -590,7 +590,7 @@ func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
 
 func TestKillProcess_Success(t *testing.T) {
 	// Start a sleep process in its own process group (as the daemon does)
-	cmd := exec.Command("sleep", "60") //nolint:norawexec
+	cmd := exec.Command("sleep", "60")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep process: %v", err)
@@ -635,7 +635,7 @@ func TestKillProcess_NonExistentPid(t *testing.T) {
 
 func TestKillProcess_AlreadyDead(t *testing.T) {
 	// Start and immediately kill a process to get a dead PID
-	cmd := exec.Command("sleep", "60") //nolint:norawexec
+	cmd := exec.Command("sleep", "60")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start sleep process: %v", err)
@@ -656,7 +656,7 @@ func TestKillProcess_AlreadyDead(t *testing.T) {
 func TestKillProcess_WithChildProcesses(t *testing.T) {
 	// Start a process that spawns children, all in their own process group.
 	// killProcess should terminate the entire group.
-	cmd := exec.Command("bash", "-c", "sleep 60 & sleep 60 & wait") //nolint:norawexec
+	cmd := exec.Command("bash", "-c", "sleep 60 & sleep 60 & wait")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start bash process: %v", err)

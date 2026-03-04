@@ -300,7 +300,7 @@ func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify the tmux session exists.
-	listOut, err := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", "#{session_name}").CombinedOutput() //nolint:norawexec
+	listOut, err := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", "#{session_name}").CombinedOutput()
 	if err != nil {
 		t.Fatalf("tmux list-sessions failed: %v\n%s", err, listOut)
 	}
@@ -311,7 +311,7 @@ func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
 	// Check the pane's current command. If the injected command "echo" had been
 	// used, the pane would run "echo INJECTED" (pane_current_command = "echo").
 	// With the default "bash", the pane_current_command should be "bash".
-	paneCmd, err := exec.CommandContext(ctx, "tmux", "display-message", "-t", "cmd-inject-test", "-p", "#{pane_current_command}").CombinedOutput() //nolint:norawexec
+	paneCmd, err := exec.CommandContext(ctx, "tmux", "display-message", "-t", "cmd-inject-test", "-p", "#{pane_current_command}").CombinedOutput()
 	if err != nil {
 		t.Fatalf("tmux display-message failed: %v\n%s", err, paneCmd)
 	}

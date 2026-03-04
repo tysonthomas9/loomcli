@@ -300,7 +300,7 @@ func TestShutdownRace_NoSignalAfterExit(t *testing.T) {
 	t.Helper()
 
 	// "true" exits immediately with status 0.
-	cmd := exec.Command("true") //nolint:norawexec
+	cmd := exec.Command("true")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start process: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestShutdownRace_SignalDuringRun(t *testing.T) {
 	t.Helper()
 
 	// "sleep 60" will run until killed.
-	cmd := exec.Command("sleep", "60") //nolint:norawexec
+	cmd := exec.Command("sleep", "60")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start process: %v", err)
 	}

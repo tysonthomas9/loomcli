@@ -29,7 +29,7 @@ func TestBackendStdinNonInteractivePipePattern(t *testing.T) {
 	w.Close()
 
 	// The helper prints its args, then reads all of stdin.
-	cmd := exec.Command("/bin/sh", "-c", `echo "ARGS:$@"; cat`, "--") //nolint:norawexec
+	cmd := exec.Command("/bin/sh", "-c", `echo "ARGS:$@"; cat`, "--")
 	cmd.Stdin = r
 
 	out, err := cmd.Output()
@@ -93,7 +93,7 @@ func TestBackendStdinSpecialCharacters(t *testing.T) {
 	// interpreted by a shell: quotes, backticks, dollar signs, newlines.
 	prompt := `He said "hello $USER" and ran $(rm -rf /) with ` + "`backticks`" + "\nand newlines"
 
-	cmd := exec.Command("/bin/sh", "-c", "cat") //nolint:norawexec
+	cmd := exec.Command("/bin/sh", "-c", "cat")
 	cmd.Stdin = strings.NewReader(prompt)
 
 	out, err := cmd.Output()
