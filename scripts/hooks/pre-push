@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 echo "[pre-push] Running quality gate..."
-make gate
+make check
