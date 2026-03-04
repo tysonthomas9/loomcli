@@ -103,20 +103,68 @@ func handlePatchIssue(pool daemon.Pool) http.HandlerFunc {
 	return handlePatchIssueWithPool(&patchPoolAdapter{pool: pool})
 }
 
+// validatePatchRequest extracts the issue ID and parses the JSON body from an HTTP request.
+func validatePatchRequest(w http.ResponseWriter, r *http.Request) (string, *PatchIssueRequest, bool) {
+	issueID := r.PathValue("id")
+	if issueID == "" {
+		respondJSON(w, http.StatusBadRequest, PatchIssueResponse{
+			Success: false,
+			Error:   "missing issue ID in path",
+		})
+		return "", nil, false
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+
+	var req PatchIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			respondJSON(w, http.StatusRequestEntityTooLarge, PatchIssueResponse{
+				Success: false,
+				Error:   "request body too large (max 1MB)",
+			})
+			return "", nil, false
+		}
+		log.Printf("Invalid request body in handlePatchIssue: %v", err)
+		respondJSON(w, http.StatusBadRequest, PatchIssueResponse{
+			Success: false,
+			Error:   "invalid request body",
+		})
+		return "", nil, false
+	}
+
+	return issueID, &req, true
+}
+
+// patchRequestToUpdateArgs converts a PatchIssueRequest into rpc.UpdateArgs.
+func patchRequestToUpdateArgs(issueID string, req *PatchIssueRequest) *rpc.UpdateArgs {
+	return &rpc.UpdateArgs{
+		ID:                 issueID,
+		Title:              req.Title,
+		Description:        req.Description,
+		Status:             req.Status,
+		Priority:           req.Priority,
+		Assignee:           req.Assignee,
+		Design:             req.Design,
+		AcceptanceCriteria: req.AcceptanceCriteria,
+		Notes:              req.Notes,
+		ExternalRef:        req.ExternalRef,
+		EstimatedMinutes:   req.EstimatedMinutes,
+		IssueType:          req.IssueType,
+		AddLabels:          req.AddLabels,
+		RemoveLabels:       req.RemoveLabels,
+		SetLabels:          req.SetLabels,
+		Pinned:             req.Pinned,
+		Parent:             req.Parent,
+		DueAt:              req.DueAt,
+		DeferUntil:         req.DeferUntil,
+	}
+}
+
 // handlePatchIssueWithPool is the internal implementation that accepts an interface for testing.
 func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Extract and validate issue ID from path
-		issueID := r.PathValue("id")
-		if issueID == "" {
-			respondJSON(w, http.StatusBadRequest, PatchIssueResponse{
-				Success: false,
-				Error:   "missing issue ID in path",
-			})
-			return
-		}
-
-		// Check pool availability
 		if pool == nil {
 			respondJSON(w, http.StatusServiceUnavailable, PatchIssueResponse{
 				Success: false,
@@ -125,29 +173,11 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			return
 		}
 
-		// Limit request body size to prevent DoS attacks
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
-
-		// Parse request body
-		var req PatchIssueRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				respondJSON(w, http.StatusRequestEntityTooLarge, PatchIssueResponse{
-					Success: false,
-					Error:   "request body too large (max 1MB)",
-				})
-				return
-			}
-			log.Printf("Invalid request body in handlePatchIssue: %v", err)
-			respondJSON(w, http.StatusBadRequest, PatchIssueResponse{
-				Success: false,
-				Error:   "invalid request body",
-			})
+		issueID, req, ok := validatePatchRequest(w, r)
+		if !ok {
 			return
 		}
 
-		// Acquire connection with timeout
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
@@ -166,35 +196,10 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 		}
 		defer pool.Put(client)
 
-		// Build UpdateArgs from request
-		updateArgs := &rpc.UpdateArgs{
-			ID:                 issueID,
-			Title:              req.Title,
-			Description:        req.Description,
-			Status:             req.Status,
-			Priority:           req.Priority,
-			Assignee:           req.Assignee,
-			Design:             req.Design,
-			AcceptanceCriteria: req.AcceptanceCriteria,
-			Notes:              req.Notes,
-			ExternalRef:        req.ExternalRef,
-			EstimatedMinutes:   req.EstimatedMinutes,
-			IssueType:          req.IssueType,
-			AddLabels:          req.AddLabels,
-			RemoveLabels:       req.RemoveLabels,
-			SetLabels:          req.SetLabels,
-			Pinned:             req.Pinned,
-			Parent:             req.Parent,
-			DueAt:              req.DueAt,
-			DeferUntil:         req.DeferUntil,
-		}
-
-		// Execute update
-		resp, err := client.Update(updateArgs)
+		resp, err := client.Update(patchRequestToUpdateArgs(issueID, req))
 		if err != nil {
-			errMsg := err.Error()
 			status := http.StatusInternalServerError
-			if strings.Contains(errMsg, "not found") {
+			if strings.Contains(err.Error(), "not found") {
 				status = http.StatusNotFound
 			}
 			log.Printf("RPC error in handlePatchIssue for %s: %v", issueID, err)

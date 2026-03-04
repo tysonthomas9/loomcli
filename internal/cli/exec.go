@@ -19,7 +19,7 @@ type commandExecutor func(dir, name string, args ...string) CommandResult
 var execCommand commandExecutor = defaultExecCommand
 
 func defaultExecCommand(dir, name string, args ...string) CommandResult {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) //nolint:gosec // G204 — caller controls command name
 	cmd.Dir = dir
 
 	var stdout, stderr bytes.Buffer

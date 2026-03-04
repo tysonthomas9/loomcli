@@ -5,6 +5,7 @@ package rpc
 import (
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -17,6 +18,7 @@ func dialRPC(socketPath string, timeout time.Duration) (net.Conn, error) {
 }
 
 func endpointExists(socketPath string) bool {
-	_, err := os.Stat(socketPath)
+	cleanPath := filepath.Clean(socketPath)
+	_, err := os.Stat(cleanPath)
 	return err == nil
 }

@@ -29,7 +29,7 @@ var codexPatterns = []struct {
 
 var codexRetryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
 
-func classifyCodex(logTail string, exitCode int) *classifyResult {
+func classifyCodex(logTail string) *classifyResult {
 	if logTail == "" {
 		return nil
 	}

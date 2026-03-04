@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"os"
 	"os/exec"
@@ -311,7 +312,8 @@ func displayStreamEvent(line string) {
 			if len(truncated) > 100 {
 				truncated = truncated[:100] + "..."
 			}
-			fmt.Fprintf(os.Stderr, "[debug] JSON parse failed: %v (line: %s)\n", err, truncated)
+			safeLine := html.EscapeString(truncated)
+			fmt.Fprintf(os.Stderr, "[debug] JSON parse failed: %v (line: %s)\n", err, safeLine)
 		}
 		return
 	}
