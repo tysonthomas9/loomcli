@@ -6,7 +6,7 @@
 .dashboard {
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: auto minmax(200px, 1fr) minmax(300px, 1fr);
+  grid-template-rows: auto minmax(200px, 1fr) minmax(300px, 1fr) minmax(200px, auto);
   gap: var(--space-4);
   padding: var(--space-4);
   width: 100%;
@@ -22,7 +22,12 @@
 
 /* When no banner, panels fill available rows */
 .dashboard:not(:has(.connectionBanner)) {
-  grid-template-rows: 1fr 1fr;
+  grid-template-rows: 1fr 1fr minmax(200px, auto);
+}
+
+/* Usage panel */
+.usagePanel {
+  min-height: 200px;
 }
 
 /* Panel base styles */
@@ -110,13 +115,13 @@
 /* Mobile: Adjust spacing */
 @media (width <= 768px) {
   .dashboard {
-    grid-template-rows: auto repeat(2, minmax(250px, auto));
+    grid-template-rows: auto repeat(3, minmax(250px, auto));
     gap: var(--space-3);
     padding: var(--space-3);
   }
 
   .dashboard:not(:has(.connectionBanner)) {
-    grid-template-rows: repeat(2, minmax(250px, auto));
+    grid-template-rows: repeat(3, minmax(250px, auto));
   }
 
   .placeholder {

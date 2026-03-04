@@ -4,6 +4,9 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 func TestOpenCodeBackendName(t *testing.T) {
@@ -218,5 +221,42 @@ func TestOpenCodeBackendInvokeNonInteractive(t *testing.T) {
 	}
 	if gotShutdown == nil {
 		t.Error("expected shutdown channel to be passed, got nil")
+	}
+}
+
+func TestCollectOpenCodeStreamUsage_WithUsage(t *testing.T) {
+	c := usage.NewCollector("opencode", "test")
+
+	line := `{"usage":{"input_tokens":800,"output_tokens":400}}`
+	collectOpenCodeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 800 {
+		t.Errorf("InputTokens = %d, want 800", su.InputTokens)
+	}
+	if su.OutputTokens != 400 {
+		t.Errorf("OutputTokens = %d, want 400", su.OutputTokens)
+	}
+}
+
+func TestCollectOpenCodeStreamUsage_NoUsage(t *testing.T) {
+	c := usage.NewCollector("opencode", "test")
+
+	line := `{"type":"message","content":"hello"}`
+	collectOpenCodeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 0 {
+		t.Errorf("InputTokens = %d, want 0", su.InputTokens)
+	}
+}
+
+func TestCollectOpenCodeStreamUsage_InvalidJSON(t *testing.T) {
+	c := usage.NewCollector("opencode", "test")
+	collectOpenCodeStreamUsage("not json", c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 0 {
+		t.Errorf("InputTokens = %d, want 0", su.InputTokens)
 	}
 }

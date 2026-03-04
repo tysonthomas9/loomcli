@@ -615,6 +615,82 @@ agents:
 	})
 }
 
+func TestFallbackBackends(t *testing.T) {
+	t.Run("fallback_backends parsed from YAML", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		projectDir := t.TempDir()
+		localYAML := `agents:
+  - worktree: falcon
+    role: plan
+    backend: claude
+    fallback_backends: [codex, opencode]
+`
+		if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		dc, err := LoadDaemonConfig(projectDir)
+		if err != nil {
+			t.Fatalf("LoadDaemonConfig() error = %v", err)
+		}
+		if len(dc.Agents) != 1 {
+			t.Fatalf("len(Agents) = %d, want 1", len(dc.Agents))
+		}
+		fb := dc.Agents[0].FallbackBackends
+		if len(fb) != 2 {
+			t.Fatalf("len(FallbackBackends) = %d, want 2", len(fb))
+		}
+		if fb[0] != "codex" {
+			t.Errorf("FallbackBackends[0] = %q, want %q", fb[0], "codex")
+		}
+		if fb[1] != "opencode" {
+			t.Errorf("FallbackBackends[1] = %q, want %q", fb[1], "opencode")
+		}
+	})
+
+	t.Run("empty fallback_backends omitted", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		projectDir := t.TempDir()
+		localYAML := `agents:
+  - worktree: falcon
+    role: plan
+    backend: claude
+`
+		if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		dc, err := LoadDaemonConfig(projectDir)
+		if err != nil {
+			t.Fatalf("LoadDaemonConfig() error = %v", err)
+		}
+		if dc.Agents[0].FallbackBackends != nil {
+			t.Errorf("FallbackBackends = %v, want nil", dc.Agents[0].FallbackBackends)
+		}
+	})
+
+	t.Run("empty string in fallback_backends rejected", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		projectDir := t.TempDir()
+		localYAML := `agents:
+  - worktree: falcon
+    role: plan
+    fallback_backends: [""]
+`
+		if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := LoadDaemonConfig(projectDir)
+		if err == nil {
+			t.Fatal("expected error for empty fallback backend")
+		}
+		if !strings.Contains(err.Error(), "fallback_backends[0] is empty") {
+			t.Errorf("error = %q, want contains 'fallback_backends[0] is empty'", err.Error())
+		}
+	})
+}
+
 func TestResolveDaemonStatePath_DefaultConfig(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	projectDir := t.TempDir()

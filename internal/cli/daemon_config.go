@@ -20,10 +20,16 @@ type DaemonSettings struct {
 
 // RestartPolicy defines how the daemon restarts failed agents.
 type RestartPolicy struct {
-	MaxRetries     *int `yaml:"max_retries,omitempty"`
-	BackoffInitial *int `yaml:"backoff_initial,omitempty"` // seconds
-	BackoffMax     *int `yaml:"backoff_max,omitempty"`     // seconds
-	OutputTimeout  *int `yaml:"output_timeout,omitempty"`  // seconds; kill agent after this long with no output (0 = disabled)
+	MaxRetries       *int  `yaml:"max_retries,omitempty"`
+	BackoffInitial   *int  `yaml:"backoff_initial,omitempty"`     // seconds
+	BackoffMax       *int  `yaml:"backoff_max,omitempty"`         // seconds
+	OutputTimeout    *int  `yaml:"output_timeout,omitempty"`      // seconds; kill agent after this long with no output (0 = disabled)
+	RateLimitBackoff *int  `yaml:"rate_limit_backoff,omitempty"`  // seconds (default 30)
+	RateLimitMaxWait *int  `yaml:"rate_limit_max_wait,omitempty"` // seconds (default 300)
+	RateLimitNoCount *bool `yaml:"rate_limit_no_count,omitempty"` // default true: rate-limit retries don't count toward max_retries
+	TimeoutBackoff   *int  `yaml:"timeout_backoff,omitempty"`     // seconds (default 5)
+	NoWorkBackoff    *int  `yaml:"no_work_backoff,omitempty"`     // seconds (default 30); fixed interval when no tasks available
+	IdlePollInterval *int  `yaml:"idle_poll_interval,omitempty"`  // seconds (default 30); polling interval for task availability
 }
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
@@ -44,11 +50,12 @@ type RoleConfig struct {
 
 // AgentEntry defines a single agent assignment.
 type AgentEntry struct {
-	Worktree     string   `yaml:"worktree"`
-	Role         string   `yaml:"role"`
-	Auto         bool     `yaml:"auto,omitempty"`
-	Backend      string   `yaml:"backend,omitempty"`
-	PathPatterns []string `yaml:"path_patterns,omitempty"`
+	Worktree         string   `yaml:"worktree"`
+	Role             string   `yaml:"role"`
+	Auto             bool     `yaml:"auto,omitempty"`
+	Backend          string   `yaml:"backend,omitempty"`
+	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
+	PathPatterns     []string `yaml:"path_patterns,omitempty"`
 }
 
 // ProjectFile represents the project-local loom.yaml.
@@ -153,22 +160,8 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		dc.Agents = projectFile.Agents
 	}
 
-	// Validate agent entries
-	for i, a := range dc.Agents {
-		if a.Worktree == "" {
-			return nil, fmt.Errorf("agent[%d]: worktree is required", i)
-		}
-		if a.Role == "" {
-			return nil, fmt.Errorf("agent[%d]: role is required", i)
-		}
-	}
-
-	// Validate max_agents
-	if dc.Daemon.MaxAgents != nil && *dc.Daemon.MaxAgents < 0 {
-		return nil, fmt.Errorf("max_agents must be non-negative, got %d", *dc.Daemon.MaxAgents)
-	}
-	if dc.Daemon.MaxAgents != nil && *dc.Daemon.MaxAgents > 0 && len(dc.Agents) > *dc.Daemon.MaxAgents {
-		return nil, fmt.Errorf("too many agents configured: %d exceeds max_agents limit of %d", len(dc.Agents), *dc.Daemon.MaxAgents)
+	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents); err != nil {
+		return nil, err
 	}
 
 	// Run comprehensive validation
@@ -177,6 +170,30 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 	}
 
 	return dc, nil
+}
+
+// validateAgents checks that agent entries and max_agents limits are valid.
+func validateAgents(agents []AgentEntry, maxAgents *int) error {
+	for i, a := range agents {
+		if a.Worktree == "" {
+			return fmt.Errorf("agent[%d]: worktree is required", i)
+		}
+		if a.Role == "" {
+			return fmt.Errorf("agent[%d]: role is required", i)
+		}
+		for j, fb := range a.FallbackBackends {
+			if fb == "" {
+				return fmt.Errorf("agent[%d]: fallback_backends[%d] is empty", i, j)
+			}
+		}
+	}
+	if maxAgents != nil && *maxAgents < 0 {
+		return fmt.Errorf("max_agents must be non-negative, got %d", *maxAgents)
+	}
+	if maxAgents != nil && *maxAgents > 0 && len(agents) > *maxAgents {
+		return fmt.Errorf("too many agents configured: %d exceeds max_agents limit of %d", len(agents), *maxAgents)
+	}
+	return nil
 }
 
 // overlayDaemonSettings applies explicitly-set values from src onto dst.
@@ -199,12 +216,31 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	if src.RestartPolicy.OutputTimeout != nil {
 		dst.RestartPolicy.OutputTimeout = src.RestartPolicy.OutputTimeout
 	}
+	if src.RestartPolicy.RateLimitBackoff != nil {
+		dst.RestartPolicy.RateLimitBackoff = src.RestartPolicy.RateLimitBackoff
+	}
+	if src.RestartPolicy.RateLimitMaxWait != nil {
+		dst.RestartPolicy.RateLimitMaxWait = src.RestartPolicy.RateLimitMaxWait
+	}
+	if src.RestartPolicy.RateLimitNoCount != nil {
+		dst.RestartPolicy.RateLimitNoCount = src.RestartPolicy.RateLimitNoCount
+	}
+	if src.RestartPolicy.TimeoutBackoff != nil {
+		dst.RestartPolicy.TimeoutBackoff = src.RestartPolicy.TimeoutBackoff
+	}
+	if src.RestartPolicy.NoWorkBackoff != nil {
+		dst.RestartPolicy.NoWorkBackoff = src.RestartPolicy.NoWorkBackoff
+	}
+	if src.RestartPolicy.IdlePollInterval != nil {
+		dst.RestartPolicy.IdlePollInterval = src.RestartPolicy.IdlePollInterval
+	}
 	if src.MaxAgents != nil {
 		dst.MaxAgents = src.MaxAgents
 	}
 }
 
-func intPtr(v int) *int { return &v }
+func intPtr(v int) *int    { return &v }
+func boolPtr(v bool) *bool { return &v }
 
 // ResolveRole looks up a role by name in the merged config.
 // Returns the RoleConfig and true if found, zero value and false if not.

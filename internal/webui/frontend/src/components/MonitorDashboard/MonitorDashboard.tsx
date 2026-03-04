@@ -3,8 +3,11 @@
  *
  * Renders a single-column vertical stack containing:
  * - Project Health Panel (top)
- * - Agent Activity Panel (bottom)
+ * - Agent Activity Panel (middle)
+ * - Usage Panel (bottom, lazy-loaded)
  */
+
+import { lazy, Suspense } from 'react';
 
 import type { ViewMode } from '@/components/ViewSwitcher';
 import { useAgents, useBlockedIssues } from '@/hooks';
@@ -14,6 +17,10 @@ import { AgentActivityPanel } from './AgentActivityPanel';
 import { ConnectionBanner } from './ConnectionBanner';
 import styles from './MonitorDashboard.module.css';
 import { ProjectHealthPanel } from './ProjectHealthPanel';
+
+const UsageDashboard = lazy(() =>
+  import('@/components/UsageDashboard').then((m) => ({ default: m.UsageDashboard }))
+);
 
 /**
  * Props for the MonitorDashboard component.
@@ -133,6 +140,23 @@ export function MonitorDashboard({
             onAgentClick={handleAgentClick}
             onRetry={retryNow}
           />
+        </div>
+      </section>
+
+      {/* Bottom: Usage */}
+      <section
+        className={`${styles.panel} ${styles.usagePanel}`}
+        aria-labelledby="usage-heading"
+      >
+        <header className={styles.panelHeader}>
+          <h2 id="usage-heading" className={styles.panelTitle}>
+            Usage
+          </h2>
+        </header>
+        <div className={styles.panelContent}>
+          <Suspense fallback={<div>Loading usage...</div>}>
+            <UsageDashboard />
+          </Suspense>
         </div>
       </section>
     </div>

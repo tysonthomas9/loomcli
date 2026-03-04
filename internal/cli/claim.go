@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -52,6 +53,13 @@ func runClaim(cmd *cobra.Command, args []string) {
 	if err := UpdateLockTask(cwd, taskID, taskTitle); err != nil {
 		fmt.Fprintf(os.Stderr, "Error updating lock: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Clear stale checkpoint if it's for a different task
+	lockDir := ResolveLockDir(cwd)
+	if cp, err := LoadCheckpoint(lockDir); err == nil && cp != nil && cp.TaskID != taskID {
+		log.Printf("[claim] Clearing stale checkpoint (was for task %s, now claiming %s)", cp.TaskID, taskID)
+		_ = ClearCheckpoint(lockDir)
 	}
 
 	fmt.Printf("Claimed task: %s\n", taskID)

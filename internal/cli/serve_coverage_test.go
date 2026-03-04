@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 func TestCorsMiddleware_DefaultOrigin(t *testing.T) {
@@ -149,6 +153,185 @@ func TestWriteJSON_Coverage(t *testing.T) {
 	body := rr.Body.String()
 	if body == "" {
 		t.Error("response body should not be empty")
+	}
+}
+
+func TestHandleUsage_NoStore(t *testing.T) {
+	orig := usageStoreInstance
+	usageStoreInstance = nil
+	t.Cleanup(func() { usageStoreInstance = orig })
+
+	req := httptest.NewRequest("GET", "/api/usage", nil)
+	rr := httptest.NewRecorder()
+	handleUsage(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", rr.Code)
+	}
+}
+
+func TestHandleUsage_EmptyStore(t *testing.T) {
+	dir := t.TempDir()
+	store, err := usage.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	orig := usageStoreInstance
+	usageStoreInstance = store
+	t.Cleanup(func() { usageStoreInstance = orig })
+
+	req := httptest.NewRequest("GET", "/api/usage", nil)
+	rr := httptest.NewRecorder()
+	handleUsage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+
+	var resp UsageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if resp.SessionCount != 0 {
+		t.Errorf("expected 0 sessions, got %d", resp.SessionCount)
+	}
+	if len(resp.Sessions) != 0 {
+		t.Errorf("expected empty sessions, got %d", len(resp.Sessions))
+	}
+}
+
+func TestHandleUsage_WithData(t *testing.T) {
+	dir := t.TempDir()
+	store, err := usage.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	rec := usage.SessionUsage{
+		AgentName:        "nova",
+		Backend:          "claude",
+		TaskID:           "kv31p.4",
+		InputTokens:      100000,
+		OutputTokens:     50000,
+		CacheReadTokens:  10000,
+		CacheWriteTokens: 5000,
+		EstimatedCostUSD: 1.50,
+		StartedAt:        now.Add(-10 * time.Minute),
+		EndedAt:          now,
+		ExitCode:         0,
+	}
+	if err := store.Append(rec); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := usageStoreInstance
+	usageStoreInstance = store
+	t.Cleanup(func() { usageStoreInstance = orig })
+
+	req := httptest.NewRequest("GET", "/api/usage", nil)
+	rr := httptest.NewRecorder()
+	handleUsage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+
+	var resp UsageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if resp.SessionCount != 1 {
+		t.Errorf("SessionCount = %d, want 1", resp.SessionCount)
+	}
+	if resp.TotalInputTokens != 100000 {
+		t.Errorf("TotalInputTokens = %d, want 100000", resp.TotalInputTokens)
+	}
+	if resp.TotalCost != 1.50 {
+		t.Errorf("TotalCost = %f, want 1.50", resp.TotalCost)
+	}
+	if len(resp.ByAgent) != 1 || resp.ByAgent[0].Name != "nova" {
+		t.Errorf("ByAgent unexpected: %+v", resp.ByAgent)
+	}
+}
+
+func TestHandleUsage_QueryFilters(t *testing.T) {
+	dir := t.TempDir()
+	store, err := usage.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	recs := []usage.SessionUsage{
+		{AgentName: "nova", Backend: "claude", EstimatedCostUSD: 1.0, StartedAt: now, EndedAt: now},
+		{AgentName: "falcon", Backend: "codex", EstimatedCostUSD: 2.0, StartedAt: now, EndedAt: now},
+	}
+	for _, r := range recs {
+		if err := store.Append(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	orig := usageStoreInstance
+	usageStoreInstance = store
+	t.Cleanup(func() { usageStoreInstance = orig })
+
+	// Filter by agent
+	req := httptest.NewRequest("GET", "/api/usage?agent=nova", nil)
+	rr := httptest.NewRecorder()
+	handleUsage(rr, req)
+
+	var resp UsageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	if resp.SessionCount != 1 {
+		t.Errorf("filtered SessionCount = %d, want 1", resp.SessionCount)
+	}
+	if resp.TotalCost != 1.0 {
+		t.Errorf("filtered TotalCost = %f, want 1.0", resp.TotalCost)
+	}
+}
+
+func TestHandleUsage_InvalidDate(t *testing.T) {
+	dir := t.TempDir()
+	store, err := usage.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	orig := usageStoreInstance
+	usageStoreInstance = store
+	t.Cleanup(func() { usageStoreInstance = orig })
+
+	req := httptest.NewRequest("GET", "/api/usage?since=not-a-date", nil)
+	rr := httptest.NewRecorder()
+	handleUsage(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid date, got %d", rr.Code)
+	}
+}
+
+func TestHandleUsage_InvalidUntilDate(t *testing.T) {
+	dir := t.TempDir()
+	store, err := usage.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	orig := usageStoreInstance
+	usageStoreInstance = store
+	t.Cleanup(func() { usageStoreInstance = orig })
+
+	req := httptest.NewRequest("GET", "/api/usage?until=invalid", nil)
+	rr := httptest.NewRecorder()
+	handleUsage(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid until date, got %d", rr.Code)
 	}
 }
 

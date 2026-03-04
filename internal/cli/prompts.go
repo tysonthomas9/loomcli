@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 )
 
 //go:embed prompts/*.md
@@ -179,7 +180,7 @@ func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig, parent
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
-	return renderPrompt("planning", promptTemplateData{
+	prompt := renderPrompt("planning", promptTemplateData{
 		AgentName:       agentName,
 		WorkspaceBlock:  buildWorkspaceContextBlock(workspace),
 		EpicScope:       epicScope,
@@ -187,6 +188,15 @@ func GeneratePlanningPrompt(agentName string, workspace *WorkspaceConfig, parent
 		BdReadyJSON:     bdReadyJSON,
 		BdReadyFallback: bdReadyFallback,
 	})
+
+	// Inject checkpoint context if available
+	if wtPath := os.Getenv("LOOM_WORKTREE_PATH"); wtPath != "" {
+		lockDir := ResolveLockDir(wtPath)
+		if cp, err := LoadCheckpoint(lockDir); err == nil && cp != nil {
+			prompt = injectCheckpointContext(prompt, cp)
+		}
+	}
+	return prompt
 }
 
 // GenerateTaskPrompt creates the prompt for the implementation agent.
@@ -205,7 +215,7 @@ func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID s
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
-	return renderPrompt("task", promptTemplateData{
+	prompt := renderPrompt("task", promptTemplateData{
 		AgentName:       agentName,
 		WorkspaceBlock:  buildWorkspaceContextBlock(workspace),
 		EpicScope:       epicScope,
@@ -215,6 +225,15 @@ func GenerateTaskPrompt(agentName string, workspace *WorkspaceConfig, parentID s
 		TestStep:        buildTestStep(backendName),
 		ReviewStep:      buildReviewStep(backendName),
 	})
+
+	// Inject checkpoint context if available
+	if wtPath := os.Getenv("LOOM_WORKTREE_PATH"); wtPath != "" {
+		lockDir := ResolveLockDir(wtPath)
+		if cp, err := LoadCheckpoint(lockDir); err == nil && cp != nil {
+			prompt = injectCheckpointContext(prompt, cp)
+		}
+	}
+	return prompt
 }
 
 // GenerateFleetPlanningPrompt creates the prompt for a fleet planning agent with a pre-assigned task.
@@ -263,4 +282,31 @@ func GenerateLeadPrompt() string {
 	return renderPrompt("lead", promptTemplateData{
 		SafetyBlock: buildSafetyGuardrailsBlock(),
 	})
+}
+
+// injectCheckpointContext inserts a "PREVIOUS ATTEMPT CONTEXT" section into the prompt.
+// It places the block before "### Step 1:" if found, otherwise appends to the end.
+func injectCheckpointContext(prompt string, cp *Checkpoint) string {
+	var sb strings.Builder
+	sb.WriteString("\n\n## PREVIOUS ATTEMPT CONTEXT\n\n")
+	sb.WriteString(fmt.Sprintf("A previous attempt on task **%s** exited with code %d", cp.TaskID, cp.ExitCode))
+	if cp.ErrorClass != "" {
+		sb.WriteString(fmt.Sprintf(" (error: %s)", cp.ErrorClass))
+	}
+	sb.WriteString(fmt.Sprintf(" at %s.\n\n", cp.Timestamp.Format(time.RFC3339)))
+	if cp.GitDiff != "" {
+		sb.WriteString("The previous attempt made these uncommitted changes:\n```diff\n")
+		sb.WriteString(cp.GitDiff)
+		sb.WriteString("\n```\n\n")
+	} else {
+		sb.WriteString("The previous attempt made no uncommitted changes.\n\n")
+	}
+	sb.WriteString("**Instructions**: Review the previous changes. If they look correct and complete, continue from where they left off. If they look wrong or incomplete, start fresh. Do NOT blindly re-apply the diff — use it as context to understand what was attempted.\n")
+
+	// Inject before "### Step 1:" if found
+	idx := strings.Index(prompt, "### Step 1:")
+	if idx > 0 {
+		return prompt[:idx] + sb.String() + "\n" + prompt[idx:]
+	}
+	return prompt + sb.String()
 }

@@ -18,16 +18,17 @@ import (
 
 // DaemonAgentStatus represents the status of a single supervised agent
 type DaemonAgentStatus struct {
-	Worktree     string    `json:"worktree"`
-	Role         string    `json:"role"`
-	PID          int       `json:"pid"`
-	Status       string    `json:"status"` // "running", "starting", "stopped", "failed"
-	TaskID       string    `json:"task_id,omitempty"`
-	EpicID       string    `json:"epic_id,omitempty"`
-	RestartCount int       `json:"restart_count"`
-	LastStart    time.Time `json:"last_start,omitempty"`
-	LastExit     time.Time `json:"last_exit,omitempty"`
-	LastExitCode int       `json:"last_exit_code,omitempty"`
+	Worktree       string    `json:"worktree"`
+	Role           string    `json:"role"`
+	PID            int       `json:"pid"`
+	Status         string    `json:"status"` // "running", "starting", "stopped", "failed"
+	TaskID         string    `json:"task_id,omitempty"`
+	EpicID         string    `json:"epic_id,omitempty"`
+	CurrentBackend string    `json:"current_backend,omitempty"`
+	RestartCount   int       `json:"restart_count"`
+	LastStart      time.Time `json:"last_start,omitempty"`
+	LastExit       time.Time `json:"last_exit,omitempty"`
+	LastExitCode   int       `json:"last_exit_code,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json
@@ -474,15 +475,16 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 
 	for i, ap := range agents {
 		state.Agents[i] = DaemonAgentStatus{
-			Worktree:     ap.Worktree,
-			Role:         ap.Role,
-			PID:          ap.PID,
-			Status:       computeAgentStatus(ap),
-			EpicID:       ap.AssignedEpicID,
-			RestartCount: ap.RestartCount,
-			LastStart:    ap.LastStart,
-			LastExit:     ap.LastExit,
-			LastExitCode: ap.LastExitCode,
+			Worktree:       ap.Worktree,
+			Role:           ap.Role,
+			PID:            ap.PID,
+			Status:         computeAgentStatus(ap),
+			EpicID:         ap.AssignedEpicID,
+			CurrentBackend: ap.CurrentBackend,
+			RestartCount:   ap.RestartCount,
+			LastStart:      ap.LastStart,
+			LastExit:       ap.LastExit,
+			LastExitCode:   ap.LastExitCode,
 		}
 	}
 
