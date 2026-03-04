@@ -3,6 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -372,7 +373,10 @@ func writeSSEEvent(w http.ResponseWriter, mutation *MutationPayload) {
 		return
 	}
 
-	_, _ = fmt.Fprintf(w, "id: %d\nevent: mutation\ndata: %s\n\n", eventID, string(data))
+	// Write SSE frame as a single formatted string.
+	// json.Marshal output is safe (no unescaped newlines).
+	frame := fmt.Sprintf("id: %d\nevent: mutation\ndata: %s\n\n", eventID, data)
+	_, _ = io.WriteString(w, frame)
 }
 
 // rpcMutationToPayload converts an RPC mutation event to a payload.

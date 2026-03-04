@@ -16,7 +16,7 @@ const apiKeyLength = 32 // 32 bytes = 64 hex characters
 
 // AuthConfig holds configuration for the authentication middleware.
 type AuthConfig struct {
-	APIKey  string // Pre-shared API key for bearer token auth
+	APIKey  string `json:"-"` // Pre-shared API key for bearer token auth
 	Enabled bool   // Whether authentication is enabled
 }
 

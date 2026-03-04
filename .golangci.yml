@@ -22,6 +22,16 @@ linters:
     - unparam
 
   settings:
+    gosec:
+      excludes:
+        # Disable SSA taint-analysis rules whose sanitizer recognition is broken
+        # in the current gosec version. The AST-based equivalents (G204, G304)
+        # provide the same coverage and correctly recognize filepath.Clean etc.
+        - G702 # Command injection — duplicate of G204, no sanitizer works
+        - G703 # Path traversal — duplicate of G304, filepath.Clean not recognized
+        - G704 # SSRF — no stdlib sanitizer exists
+        - G705 # XSS — html.EscapeString not recognized; flags non-HTML writes
+        - G706 # Log injection — strconv.Quote not recognized
     gocritic:
       disabled-tags:
         - experimental

@@ -42,7 +42,7 @@ func connectSSE(t *testing.T, serverURL string, headers map[string]string) *sseT
 	}
 
 	client := &http.Client{Timeout: 0} // No timeout for SSE
-	resp, err := client.Do(req)
+	resp, err := client.Do(req)        //nolint:gosec // G704 — test hits local httptest server
 	if err != nil {
 		t.Fatalf("failed to connect to SSE endpoint: %v", err)
 	}

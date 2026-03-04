@@ -33,7 +33,7 @@ type outputCommandExecutor func(dir string, args ...string) error
 var runGitWithOutputFunc outputCommandExecutor = defaultRunGitWithOutput
 
 func defaultRunGitWithOutput(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:gosec // G204 — args from internal callers
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -48,7 +48,7 @@ type ServerConfig struct {
 	FleetRedis          *fleet.RedisConfig
 	FleetJWTKey         []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
 	FleetAPIKey         string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	APIKey              string // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
+	APIKey              string `json:"-"` // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
 	AuthEnabled         bool   // Whether API authentication is enabled (default: true)
 	HSTSEnabled         bool   // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
 	LoomServerURL       string // Default target URL for the loom API proxy (set by 'loom serve')

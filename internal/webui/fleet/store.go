@@ -50,7 +50,7 @@ func workerRegistrationKey(workerID string) string {
 // RedisConfig holds connection parameters for the Redis instance.
 type RedisConfig struct {
 	Address  string `yaml:"address"`
-	Password string `yaml:"password"`
+	Password string `json:"-" yaml:"password"`
 	DB       int    `yaml:"db"`
 	PoolSize int    `yaml:"pool_size"`
 }
