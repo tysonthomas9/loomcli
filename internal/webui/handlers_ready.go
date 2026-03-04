@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -67,6 +66,63 @@ func handleReady(pool daemon.Pool) http.HandlerFunc {
 	return handleReadyWithPool(&readyPoolAdapter{pool: pool})
 }
 
+// executeReadyRPC acquires a connection, calls Ready, and returns filtered issues.
+func executeReadyRPC(ctx context.Context, pool readyConnectionGetter, args *rpc.ReadyArgs) (readyClient, []*types.Issue, int, error) {
+	client, err := pool.Get(ctx)
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+		return nil, nil, status, err
+	}
+
+	resp, err := client.Ready(args)
+	if err != nil {
+		pool.Put(client)
+		return nil, nil, http.StatusInternalServerError, fmt.Errorf("RPC error: %w", err)
+	}
+
+	if !resp.Success {
+		pool.Put(client)
+		return nil, nil, http.StatusInternalServerError, fmt.Errorf("%s", resp.Error)
+	}
+
+	var issues []*types.Issue
+	if err := json.Unmarshal(resp.Data, &issues); err != nil {
+		pool.Put(client)
+		return nil, nil, http.StatusInternalServerError, fmt.Errorf("failed to parse ready issues: %w", err)
+	}
+
+	issues = filterUnclosedBlockers(client, issues)
+	return client, issues, 0, nil
+}
+
+// buildReadyResponse enriches issues with parent info for the response.
+func buildReadyResponse(client readyClient, issues []*types.Issue) []*ReadyIssueWithParent {
+	issueIDs := make([]string, len(issues))
+	for i, issue := range issues {
+		issueIDs[i] = issue.ID
+	}
+
+	parentResp, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs})
+	if err != nil {
+		log.Printf("Failed to get parent IDs for ready issues: %v", err)
+		parentResp = &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
+	}
+
+	result := make([]*ReadyIssueWithParent, len(issues))
+	for i, issue := range issues {
+		iwp := &ReadyIssueWithParent{Issue: issue}
+		if parentInfo, ok := parentResp.Parents[issue.ID]; ok {
+			iwp.Parent = &parentInfo.ParentID
+			iwp.ParentTitle = &parentInfo.ParentTitle
+		}
+		result[i] = iwp
+	}
+	return result
+}
+
 // handleReadyWithPool is the internal implementation that accepts an interface for testing.
 func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +134,6 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			return
 		}
 
-		// Parse query parameters into ReadyArgs
 		args, err := parseReadyParams(r)
 		if err != nil {
 			respondJSON(w, http.StatusBadRequest, ReadyResponse{
@@ -88,60 +143,20 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			return
 		}
 
-		// Acquire connection with 5-second timeout
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		client, err := pool.Get(ctx)
+		client, issues, status, err := executeReadyRPC(ctx, pool, args)
 		if err != nil {
-			status := http.StatusServiceUnavailable
-			if errors.Is(err, context.DeadlineExceeded) {
-				status = http.StatusGatewayTimeout
-			}
-			log.Printf("Pool error in handleReady: %v", err)
+			log.Printf("handleReady error: %v", err)
 			respondJSON(w, status, ReadyResponse{
 				Success: false,
-				Error:   "daemon not available",
+				Error:   err.Error(),
 			})
 			return
 		}
 		defer pool.Put(client)
 
-		// Execute Ready RPC call
-		resp, err := client.Ready(args)
-		if err != nil {
-			log.Printf("RPC error in handleReady: %v", err)
-			respondJSON(w, http.StatusInternalServerError, ReadyResponse{
-				Success: false,
-				Error:   "internal server error",
-			})
-			return
-		}
-
-		if !resp.Success {
-			respondJSON(w, http.StatusInternalServerError, ReadyResponse{
-				Success: false,
-				Error:   resp.Error,
-			})
-			return
-		}
-
-		// Parse the issues from RPC response
-		var issues []*types.Issue
-		if err := json.Unmarshal(resp.Data, &issues); err != nil {
-			respondJSON(w, http.StatusInternalServerError, ReadyResponse{
-				Success: false,
-				Error:   fmt.Sprintf("failed to parse ready issues: %v", err),
-			})
-			return
-		}
-
-		// Filter out issues with unclosed blockers.
-		// bd ready considers in_progress blockers as "resolved" but we require
-		// blockers to be closed before dependents become available.
-		issues = filterUnclosedBlockers(client, issues)
-
-		// If no issues, return empty response
 		if len(issues) == 0 {
 			respondJSON(w, http.StatusOK, ReadyResponse{
 				Success: true,
@@ -150,36 +165,9 @@ func handleReadyWithPool(pool readyConnectionGetter) http.HandlerFunc {
 			return
 		}
 
-		// Extract issue IDs for parent lookup
-		issueIDs := make([]string, len(issues))
-		for i, issue := range issues {
-			issueIDs[i] = issue.ID
-		}
-
-		// Get parent info for all issues
-		parentResp, err := client.GetParentIDs(&rpc.GetParentIDsArgs{IssueIDs: issueIDs})
-		if err != nil {
-			// Non-fatal: log and continue without parent info
-			log.Printf("Failed to get parent IDs for ready issues: %v", err)
-			parentResp = &rpc.GetParentIDsResponse{Parents: make(map[string]*rpc.ParentInfo)}
-		}
-
-		// Build response with parent info
-		issuesWithParent := make([]*ReadyIssueWithParent, len(issues))
-		for i, issue := range issues {
-			iwp := &ReadyIssueWithParent{
-				Issue: issue,
-			}
-			if parentInfo, ok := parentResp.Parents[issue.ID]; ok {
-				iwp.Parent = &parentInfo.ParentID
-				iwp.ParentTitle = &parentInfo.ParentTitle
-			}
-			issuesWithParent[i] = iwp
-		}
-
 		respondJSON(w, http.StatusOK, ReadyResponse{
 			Success: true,
-			Data:    issuesWithParent,
+			Data:    buildReadyResponse(client, issues),
 		})
 	}
 }
@@ -237,78 +225,55 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 	q := r.URL.Query()
 
 	// String parameters
-	if v := q.Get("assignee"); v != "" {
-		args.Assignee = v
-	}
-	if v := q.Get("type"); v != "" {
-		args.Type = v
-	}
-	if v := q.Get("parent_id"); v != "" {
-		args.ParentID = v
-	}
-	if v := q.Get("mol_type"); v != "" {
-		// Validate mol_type
-		molType := types.MolType(v)
-		if !molType.IsValid() {
+	args.Assignee = parseStringParam(q, "assignee")
+	args.Type = parseStringParam(q, "type")
+	args.ParentID = parseStringParam(q, "parent_id")
+
+	// Validated string parameters
+	if v := parseStringParam(q, "mol_type"); v != "" {
+		if !types.MolType(v).IsValid() {
 			return nil, fmt.Errorf("invalid mol_type: %s (must be swarm, patrol, or work)", v)
 		}
 		args.MolType = v
 	}
-
-	// Sort policy
-	if v := q.Get("sort"); v != "" {
-		sortPolicy := types.SortPolicy(v)
-		if !sortPolicy.IsValid() {
+	if v := parseStringParam(q, "sort"); v != "" {
+		if !types.SortPolicy(v).IsValid() {
 			return nil, fmt.Errorf("invalid sort policy: %s (must be hybrid, priority, or oldest)", v)
 		}
 		args.SortPolicy = v
 	}
 
 	// Boolean parameters
-	if v := q.Get("unassigned"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return nil, fmt.Errorf("invalid unassigned value: %s (must be true or false)", v)
-		}
-		args.Unassigned = b
+	var err error
+	if args.Unassigned, err = parseBoolParam(q, "unassigned"); err != nil {
+		return nil, err
 	}
-	if v := q.Get("include_deferred"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return nil, fmt.Errorf("invalid include_deferred value: %s (must be true or false)", v)
-		}
-		args.IncludeDeferred = b
+	if args.IncludeDeferred, err = parseBoolParam(q, "include_deferred"); err != nil {
+		return nil, err
 	}
 
 	// Integer parameters
-	if v := q.Get("priority"); v != "" {
-		p, err := strconv.Atoi(v)
-		if err != nil {
-			return nil, fmt.Errorf("invalid priority value: %s (must be an integer 0-4)", v)
-		}
-		if p < 0 || p > 4 {
-			return nil, fmt.Errorf("priority must be between 0 and 4 (got %d)", p)
-		}
-		args.Priority = &p
+	if args.Priority, err = parseIntParam(q, "priority"); err != nil {
+		return nil, err
 	}
-	if v := q.Get("limit"); v != "" {
-		l, err := strconv.Atoi(v)
-		if err != nil {
-			return nil, fmt.Errorf("invalid limit value: %s (must be a non-negative integer)", v)
-		}
-		if l < 0 {
-			return nil, fmt.Errorf("limit must be non-negative (got %d)", l)
-		}
-		args.Limit = l
+	if args.Priority != nil && (*args.Priority < 0 || *args.Priority > 4) {
+		return nil, fmt.Errorf("priority must be between 0 and 4 (got %d)", *args.Priority)
 	}
 
-	// Array parameters (comma-separated)
-	if v := q.Get("labels"); v != "" {
-		args.Labels = splitAndTrim(v)
+	limitPtr, err := parseIntParam(q, "limit")
+	if err != nil {
+		return nil, err
 	}
-	if v := q.Get("labels_any"); v != "" {
-		args.LabelsAny = splitAndTrim(v)
+	if limitPtr != nil {
+		if *limitPtr < 0 {
+			return nil, fmt.Errorf("limit must be non-negative (got %d)", *limitPtr)
+		}
+		args.Limit = *limitPtr
 	}
+
+	// Array parameters
+	args.Labels = parseArrayParam(q, "labels")
+	args.LabelsAny = parseArrayParam(q, "labels_any")
 
 	return args, nil
 }

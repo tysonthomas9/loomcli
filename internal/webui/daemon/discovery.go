@@ -36,7 +36,8 @@ func DiscoverSocketPathFromEnv() (string, error) {
 	// Check for explicit socket path in environment
 	if socketPath := os.Getenv("BEADS_SOCKET"); socketPath != "" {
 		// Validate the path exists
-		if _, err := os.Stat(socketPath); err != nil {
+		cleanSocket := filepath.Clean(socketPath)
+		if _, err := os.Stat(cleanSocket); err != nil {
 			if os.IsNotExist(err) {
 				return "", ErrDaemonNotRunning
 			}

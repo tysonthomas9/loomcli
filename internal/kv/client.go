@@ -61,6 +61,17 @@ func (c *Client) SetCircuitBreaker(b *circuitbreaker.Breaker) {
 	c.breaker = b
 }
 
+// Ping checks connectivity to the Redis server.
+func (c *Client) Ping(ctx context.Context) error {
+	fn := func() error {
+		return c.rdb.Ping(ctx).Err()
+	}
+	if c.breaker != nil {
+		return c.breaker.Execute(fn)
+	}
+	return fn()
+}
+
 // Close closes the underlying Redis connection.
 func (c *Client) Close() error {
 	return c.rdb.Close()

@@ -322,7 +322,7 @@ func TestRunListShowsDefaultBranch(t *testing.T) {
 // straightforward because runList calls os.Exit(1) on error. Proper testing
 // would require either:
 // 1. Refactoring runList to return an error instead of calling os.Exit
-// 2. Using exec.Command to run the test binary as a subprocess
+// 2. Using exec.Command to run the test binary as a subprocess //nolint:norawexec
 // The DiscoverWorktrees function properly returns an error which is tested
 // in worktree_test.go, so the core error path is covered.
 

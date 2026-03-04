@@ -283,7 +283,7 @@ func renderUsageTable(records []usage.SessionUsage, f usage.Filter) {
 				truncateToWidth(rec.Backend, 8),
 				truncateToWidth(taskID, 12),
 				padRight(formatCost(rec.EstimatedCostUSD), 7),
-				padRight(formatDuration(duration), 4),
+				padRight(formatUsageDuration(duration), 4),
 				rec.ExitCode)
 			sb.WriteString(renderBoxLine(line))
 		}
@@ -383,7 +383,7 @@ func formatCost(cost float64) string {
 }
 
 // formatDuration formats a duration as a short string (e.g., "12m", "1h5m").
-func formatDuration(d time.Duration) string {
+func formatUsageDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}

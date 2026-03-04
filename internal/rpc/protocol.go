@@ -66,7 +66,7 @@ type Request struct {
 	Cwd           string          `json:"cwd,omitempty"`            // Working directory for database discovery
 	ClientVersion string          `json:"client_version,omitempty"` // Client version for compatibility checks
 	ExpectedDB    string          `json:"expected_db,omitempty"`    // Expected database path for validation (absolute)
-	AuthToken     string          `json:"auth_token,omitempty"`     // Shared-secret authentication token
+	AuthToken     string          `json:"auth_token,omitempty"`     //nolint:gosec // G117 — must serialize for RPC wire protocol
 }
 
 // Response represents an RPC response from daemon to client
@@ -464,7 +464,7 @@ type CompactArgs struct {
 	DryRun    bool   `json:"dry_run"`
 	Force     bool   `json:"force"`
 	All       bool   `json:"all"`
-	APIKey    string `json:"api_key,omitempty"`
+	APIKey    string `json:"api_key,omitempty"` //nolint:gosec // G117 — must serialize for RPC wire protocol
 	Workers   int    `json:"workers,omitempty"`
 	BatchSize int    `json:"batch_size,omitempty"`
 }

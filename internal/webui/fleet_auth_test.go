@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,7 +32,8 @@ func echoClaimsHandler() http.Handler {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(claims.WorkerID))
+		safeID := html.EscapeString(claims.WorkerID)
+		w.Write([]byte(safeID))
 	})
 }
 

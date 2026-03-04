@@ -49,12 +49,13 @@ func (p *adaptivePoller) hadNoActivity() {
 
 // fetchReadyIssues runs "bd ready --json" and returns the parsed issues.
 // When parentID is non-empty, filters to tasks under that epic.
+// It routes through the package-level defaultDeps.BD runner.
 func fetchReadyIssues(parentID string) ([]BdIssue, error) {
-	args := []string{"bd", "ready", "--json", "--limit", "100"}
+	args := []string{"ready", "--json", "--limit", "100"}
 	if parentID != "" {
 		args = append(args, "--parent", parentID)
 	}
-	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
+	result := defaultDeps.BD.Run(GetBeadsDir(), args...)
 	if result.Err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
 	}
@@ -69,9 +70,9 @@ func fetchReadyIssues(parentID string) ([]BdIssue, error) {
 // fetchUnclosedIssueIDs returns IDs of all issues that are NOT closed.
 // Used for accurate blocker checking — a blocker is resolved only when closed,
 // not when it merely moves to in_progress or review.
+// It routes through the package-level defaultDeps.BD runner.
 func fetchUnclosedIssueIDs() (map[string]bool, error) {
-	args := []string{"bd", "list", "--json", "--limit", "500"}
-	result := execCommand(GetBeadsDir(), args[0], args[1:]...)
+	result := defaultDeps.BD.Run(GetBeadsDir(), "list", "--json", "--limit", "500")
 	if result.Err != nil {
 		return nil, fmt.Errorf("failed to list issues: %w", result.Err)
 	}
@@ -183,4 +184,32 @@ func HasAnyAvailableTasks(parentID string) (bool, error) {
 		return false, err
 	}
 	return len(tasks) > 0, nil
+}
+
+// BuildRouterTaskCheck creates a CustomTaskCheck function that uses the task router's
+// SelectBestTask instead of the generic Has*Tasks functions. Returns nil if the role
+// has no routing constraints (Skills, PathPatterns, MaxPriority all unset), signaling
+// the caller to use default task checking.
+//
+// Wire-up: The daemon passes routing constraints as env vars; the subprocess (loom agent)
+// reconstructs the RoleConfig and calls this function when setting up AutoModeOptions.
+// Consumer-side integration is tracked separately.
+func BuildRouterTaskCheck(rc RoleConfig, ae AgentEntry, parentID string) func() (bool, error) {
+	constraints := MergeRoleConstraints(rc, ae)
+	// If no routing fields are set, return nil to use defaults
+	if len(constraints.Skills) == 0 && len(constraints.PathPatterns) == 0 && constraints.MaxPriority == nil {
+		return nil
+	}
+	return func() (bool, error) {
+		issues, err := fetchReadyIssues(parentID)
+		if err != nil {
+			return false, err
+		}
+		unclosedIDs, err := fetchUnclosedIssueIDs()
+		if err != nil {
+			return false, err
+		}
+		match := SelectBestTask(issues, constraints, unclosedIDs)
+		return match != nil, nil
+	}
 }

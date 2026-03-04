@@ -72,7 +72,7 @@ func TestFormatCost(t *testing.T) {
 	}
 }
 
-func TestFormatDuration(t *testing.T) {
+func TestFormatUsageDuration(t *testing.T) {
 	tests := []struct {
 		input    time.Duration
 		expected string
@@ -85,9 +85,9 @@ func TestFormatDuration(t *testing.T) {
 		{2*time.Hour + 5*time.Minute, "2h5m"},
 	}
 	for _, tt := range tests {
-		got := formatDuration(tt.input)
+		got := formatUsageDuration(tt.input)
 		if got != tt.expected {
-			t.Errorf("formatDuration(%v) = %q, want %q", tt.input, got, tt.expected)
+			t.Errorf("formatUsageDuration(%v) = %q, want %q", tt.input, got, tt.expected)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -67,7 +68,8 @@ type Daemon struct {
 	shutdownOnce sync.Once      // protects shutdown channel from double-close
 	wg           sync.WaitGroup // tracks superviseAgent goroutines
 
-	epicAssigner *EpicAssigner // manages epic-to-worktree assignments
+	epicAssigner *EpicAssigner       // manages epic-to-worktree assignments
+	concurrency  *ConcurrencyTracker // enforces per-role concurrency limits
 }
 
 // builtInRoles defines the built-in role names that use loom <role> command.
@@ -90,6 +92,7 @@ func NewDaemon(config *DaemonConfig, projectDir string) (*Daemon, error) {
 		projectDir:   projectDir,
 		agents:       make([]*AgentProcess, 0, len(config.Agents)),
 		epicAssigner: NewEpicAssigner(),
+		concurrency:  NewConcurrencyTracker(config.Roles),
 	}
 
 	for i, entry := range config.Agents {
@@ -210,6 +213,9 @@ func (d *Daemon) Stop() {
 	d.shutdownOnce.Do(func() {
 		close(d.shutdown)
 	})
+
+	// Unblock any agents waiting for concurrency slots
+	d.concurrency.Close()
 
 	// Stop all agent processes
 	for _, ap := range d.agents {
@@ -381,6 +387,9 @@ func (d *Daemon) getEffectiveBackend(ap *AgentProcess) string {
 
 	if idx == 0 {
 		b := ap.entry.Backend
+		if b == "" {
+			b = ap.roleConfig.Backend
+		}
 		if b == "" && d.config != nil {
 			b = d.config.Backend
 		}
@@ -498,6 +507,17 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
 	)
+
+	// Propagate role constraints as env vars for the subprocess
+	if len(ap.roleConfig.AllowedTools) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ALLOWED_TOOLS=%s", strings.Join(ap.roleConfig.AllowedTools, ",")))
+	}
+	if len(ap.roleConfig.DeniedTools) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_DENIED_TOOLS=%s", strings.Join(ap.roleConfig.DeniedTools, ",")))
+	}
+	if ap.roleConfig.ReadOnly {
+		cmd.Env = append(cmd.Env, "LOOM_READ_ONLY=1")
+	}
 
 	return cmd
 }

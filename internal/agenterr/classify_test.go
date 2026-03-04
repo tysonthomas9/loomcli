@@ -96,7 +96,7 @@ func TestClassifyClaude(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyClaude(tt.log, tt.exitCode)
+			result := classifyClaude(tt.log)
 			if tt.wantClass == Unknown && tt.log == "" {
 				if result != nil {
 					t.Errorf("expected nil for empty log, got %v", result)
@@ -193,7 +193,7 @@ func TestClassifyCodex(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyCodex(tt.log, tt.exitCode)
+			result := classifyCodex(tt.log)
 			if tt.wantClass == Unknown && result == nil {
 				return
 			}
@@ -269,7 +269,7 @@ func TestClassifyOpenCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyOpenCode(tt.log, tt.exitCode)
+			result := classifyOpenCode(tt.log)
 			if tt.wantClass == Unknown && result == nil {
 				return
 			}
@@ -467,7 +467,7 @@ func TestReadLogTail(t *testing.T) {
 			t.Fatalf("write log: %v", err)
 		}
 
-		got, err := readLogTail(path, 100, 64*1024)
+		got, err := readLogTail(path, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -488,7 +488,7 @@ func TestReadLogTail(t *testing.T) {
 			t.Fatalf("write log: %v", err)
 		}
 
-		got, err := readLogTail(path, 10, 64*1024)
+		got, err := readLogTail(path, 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -500,7 +500,7 @@ func TestReadLogTail(t *testing.T) {
 
 	t.Run("nonexistent file", func(t *testing.T) {
 		t.Parallel()
-		got, err := readLogTail("/nonexistent", 100, 64*1024)
+		got, err := readLogTail("/nonexistent", 100)
 		if err == nil {
 			t.Error("expected error for nonexistent file")
 		}
@@ -517,7 +517,7 @@ func TestReadLogTail(t *testing.T) {
 			t.Fatalf("write log: %v", err)
 		}
 
-		got, err := readLogTail(path, 100, 64*1024)
+		got, err := readLogTail(path, 100)
 		if err != nil {
 			t.Fatal(err)
 		}

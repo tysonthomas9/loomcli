@@ -6,7 +6,7 @@
 #   2. Transitions to Epic B and completes task B1 (epic branch switch)
 #   3. Falls back to non-epic mode and completes standalone task S
 #
-# This exercises handleEpicTransition() in daemon_exhaust.go end-to-end.
+# This exercises handleEpicTransition() in daemon_epic.go end-to-end.
 
 set -euo pipefail
 

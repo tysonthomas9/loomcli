@@ -34,10 +34,18 @@ type RestartPolicy struct {
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
 type RoleConfig struct {
-	Description string `yaml:"description,omitempty"`
-	PromptFile  string `yaml:"prompt_file,omitempty"`
-	Model       string `yaml:"model,omitempty"`
-	TaskFilter  string `yaml:"task_filter,omitempty"`
+	Description    string   `yaml:"description,omitempty"`
+	PromptFile     string   `yaml:"prompt_file,omitempty"`
+	Model          string   `yaml:"model,omitempty"`
+	TaskFilter     string   `yaml:"task_filter,omitempty"`
+	Backend        string   `yaml:"backend,omitempty"`
+	PathPatterns   []string `yaml:"path_patterns,omitempty"`
+	Skills         []string `yaml:"skills,omitempty"`
+	MaxPriority    *int     `yaml:"max_priority,omitempty"`
+	MaxConcurrency *int     `yaml:"max_concurrency,omitempty"`
+	ReadOnly       bool     `yaml:"read_only,omitempty"`
+	AllowedTools   []string `yaml:"allowed_tools,omitempty"`
+	DeniedTools    []string `yaml:"denied_tools,omitempty"`
 }
 
 // AgentEntry defines a single agent assignment.
@@ -47,6 +55,7 @@ type AgentEntry struct {
 	Auto             bool     `yaml:"auto,omitempty"`
 	Backend          string   `yaml:"backend,omitempty"`
 	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
+	PathPatterns     []string `yaml:"path_patterns,omitempty"`
 }
 
 // ProjectFile represents the project-local loom.yaml.
@@ -153,6 +162,11 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 
 	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents); err != nil {
 		return nil, err
+	}
+
+	// Run comprehensive validation
+	if vr := ValidateProjectConfig(dc, projectDir); vr.HasErrors() {
+		return nil, fmt.Errorf("%s", vr.FormatIssues())
 	}
 
 	return dc, nil

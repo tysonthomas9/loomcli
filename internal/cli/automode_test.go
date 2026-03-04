@@ -22,21 +22,21 @@ func setTmuxRemainOnExit(t *testing.T) {
 	// Ensure a tmux server is running. If no server exists, "tmux set -g" fails silently.
 	// Start a keepalive session that sleeps - this guarantees a server for our global setting.
 	keepalive := fmt.Sprintf("loom-test-keepalive-%d", os.Getpid())
-	if err := exec.Command("tmux", "has-session", "-t", keepalive).Run(); err != nil {
-		exec.Command("tmux", "new-session", "-d", "-s", keepalive, "sleep", "300").Run()
+	if err := exec.Command("tmux", "has-session", "-t", keepalive).Run(); err != nil { //nolint:norawexec
+		exec.Command("tmux", "new-session", "-d", "-s", keepalive, "sleep", "300").Run() //nolint:norawexec
 		t.Cleanup(func() {
-			exec.Command("tmux", "kill-session", "-t", keepalive).Run()
+			exec.Command("tmux", "kill-session", "-t", keepalive).Run() //nolint:norawexec
 		})
 	}
 
-	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output()
-	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()
+	origRemain, _ := exec.Command("tmux", "show", "-gv", "remain-on-exit").Output() //nolint:norawexec
+	exec.Command("tmux", "set", "-g", "remain-on-exit", "on").Run()                 //nolint:norawexec
 	t.Cleanup(func() {
 		val := strings.TrimSpace(string(origRemain))
 		if val == "" || val == "off" {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run()
+			exec.Command("tmux", "set", "-g", "remain-on-exit", "off").Run() //nolint:norawexec
 		} else {
-			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run()
+			exec.Command("tmux", "set", "-g", "remain-on-exit", val).Run() //nolint:norawexec
 		}
 	})
 }
@@ -572,7 +572,7 @@ func waitForFile(path string, timeout time.Duration) bool {
 
 func TestCleanupTmuxSession_SendsCtrlC(t *testing.T) {
 	// Skip if tmux is not available
-	if exec.Command("tmux", "-V").Run() != nil {
+	if exec.Command("tmux", "-V").Run() != nil { //nolint:norawexec
 		t.Skip("tmux not available")
 	}
 
@@ -584,7 +584,7 @@ func TestCleanupTmuxSession_SendsCtrlC(t *testing.T) {
 	trapScript := fmt.Sprintf(`trap 'echo received > %s; exit 0' INT; sleep 30`, signalFile)
 
 	// Create tmux session running the trap script
-	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sh", "-c", trapScript).Run()
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sh", "-c", trapScript).Run() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
@@ -601,10 +601,10 @@ func TestCleanupTmuxSession_SendsCtrlC(t *testing.T) {
 	}
 
 	// Verify session is actually gone
-	if exec.Command("tmux", "has-session", "-t", sessionName).Run() == nil {
+	if exec.Command("tmux", "has-session", "-t", sessionName).Run() == nil { //nolint:norawexec
 		t.Error("Session still exists after cleanup")
 		// Clean up manually
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	}
 }
 
@@ -2105,7 +2105,7 @@ func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
 
 func TestGetPaneState_ParsesCorrectly(t *testing.T) {
 	// Skip if tmux is not available
-	if exec.Command("tmux", "-V").Run() != nil {
+	if exec.Command("tmux", "-V").Run() != nil { //nolint:norawexec
 		t.Skip("tmux not available")
 	}
 
@@ -2113,12 +2113,12 @@ func TestGetPaneState_ParsesCorrectly(t *testing.T) {
 	sessionName := fmt.Sprintf("loom-test-panestate-%d", os.Getpid())
 
 	// Create session with a command that sleeps briefly (enough time to query)
-	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "5").Run()
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "5").Run() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("Failed to create test session: %v", err)
 	}
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	// Give session time to start
@@ -2143,7 +2143,7 @@ func TestGetPaneState_ParsesCorrectly(t *testing.T) {
 
 func TestStartTmuxSession_Success(t *testing.T) {
 	// Skip if tmux is not available
-	if exec.Command("tmux", "-V").Run() != nil {
+	if exec.Command("tmux", "-V").Run() != nil { //nolint:norawexec
 		t.Skip("tmux not available")
 	}
 
@@ -2161,7 +2161,7 @@ func TestStartTmuxSession_Success(t *testing.T) {
 	setTmuxRemainOnExit(t)
 
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	err := startTmuxSession(sessionName, opts, logFile)
@@ -2177,7 +2177,7 @@ func TestStartTmuxSession_Success(t *testing.T) {
 
 func TestStartTmuxSession_KillsExisting(t *testing.T) {
 	// Skip if tmux is not available
-	if exec.Command("tmux", "-V").Run() != nil {
+	if exec.Command("tmux", "-V").Run() != nil { //nolint:norawexec
 		t.Skip("tmux not available")
 	}
 
@@ -2189,13 +2189,13 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 	logFile := filepath.Join(tmpDir, "test.log")
 
 	// Create an existing session with the same name
-	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60").Run()
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60").Run() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("Failed to create initial session: %v", err)
 	}
 
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	// Verify initial session exists
@@ -2223,7 +2223,7 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 
 func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 	// Skip if tmux is not available
-	if exec.Command("tmux", "-V").Run() != nil {
+	if exec.Command("tmux", "-V").Run() != nil { //nolint:norawexec
 		t.Skip("tmux not available")
 	}
 
@@ -2247,7 +2247,7 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	err := startTmuxSession(sessionName, opts, logFile)
@@ -2261,7 +2261,7 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 	}
 
 	// Retrieve the command string that tmux used to start the pane
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output()
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("failed to get pane start command: %v", err)
 	}
@@ -3439,7 +3439,7 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 	sessionName := fmt.Sprintf("loom-test-codex-%d", os.Getpid())
 	// Clean up tmux session after test
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	opts := AutoModeOptions{
@@ -3459,7 +3459,7 @@ func TestStartTmuxSession_CodexBackend_NoTermDumb(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Capture the tmux pane start command
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output()
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("failed to get tmux pane start command: %v", err)
 	}
@@ -3495,7 +3495,7 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 
 	sessionName := fmt.Sprintf("loom-test-claude-%d", os.Getpid())
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	opts := AutoModeOptions{
@@ -3514,7 +3514,7 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 	// Give tmux a moment to set up
 	time.Sleep(300 * time.Millisecond)
 
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output()
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("failed to get tmux pane start command: %v", err)
 	}
@@ -3953,7 +3953,7 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 			sessionName := fmt.Sprintf("loom-test-parent-%d-%d", os.Getpid(), time.Now().UnixNano())
 			// Clean up tmux session after test
 			t.Cleanup(func() {
-				exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+				exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 			})
 
 			opts := AutoModeOptions{
@@ -3973,7 +3973,7 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 			// Give tmux a moment to set up
 			time.Sleep(300 * time.Millisecond)
 
-			out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output()
+			out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_start_command}").Output() //nolint:norawexec
 			if err != nil {
 				t.Fatalf("failed to get tmux pane start command: %v", err)
 			}
@@ -4355,11 +4355,11 @@ func TestStreamUntilExit_ShutdownDuringStream(t *testing.T) {
 
 	sessionName := fmt.Sprintf("loom-test-stream-shutdown-%d", os.Getpid())
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	// Create a long-running tmux session
-	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep 300").Run()
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep 300").Run() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("failed to create tmux session: %v", err)
 	}
@@ -4407,11 +4407,11 @@ func TestStreamUntilExit_SessionExitDetection(t *testing.T) {
 
 	sessionName := fmt.Sprintf("loom-test-stream-exit-%d", os.Getpid())
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	// Create a tmux session with a short-lived command
-	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "echo done && sleep 0.5").Run()
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "echo done && sleep 0.5").Run() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("failed to create tmux session: %v", err)
 	}
@@ -4453,11 +4453,11 @@ func TestStreamUntilExit_SignalFileDetection(t *testing.T) {
 
 	sessionName := fmt.Sprintf("loom-test-stream-signal-%d", os.Getpid())
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	// Create a long-running tmux session
-	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep 300").Run()
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep 300").Run() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("failed to create tmux session: %v", err)
 	}
@@ -4763,7 +4763,7 @@ func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
 	logFile := filepath.Join(tmpDir, "test.log")
 
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	opts := AutoModeOptions{
@@ -4781,7 +4781,7 @@ func TestStartTmuxSession_PassesTerminalDimensions(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Query the window dimensions from the created tmux session
-	out, err := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_width} #{window_height}").Output()
+	out, err := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_width} #{window_height}").Output() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("failed to get window dimensions: %v", err)
 	}
@@ -4826,7 +4826,7 @@ func TestStartTmuxSession_PipePaneAndFocusEvents(t *testing.T) {
 	logFile := filepath.Join(tmpDir, "test.log")
 
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	opts := AutoModeOptions{
@@ -4841,7 +4841,7 @@ func TestStartTmuxSession_PipePaneAndFocusEvents(t *testing.T) {
 	}
 
 	// Verify focus-events is off (prevents ^[[I and ^[[O in output)
-	out, err := exec.Command("tmux", "show-options", "-t", sessionName, "focus-events").Output()
+	out, err := exec.Command("tmux", "show-options", "-t", sessionName, "focus-events").Output() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("failed to query focus-events: %v", err)
 	}
@@ -4863,17 +4863,17 @@ func TestStreamUntilExit_ZombieSessionCleanup(t *testing.T) {
 
 	sessionName := fmt.Sprintf("loom-test-zombie-%d", os.Getpid())
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
 	})
 
 	// Create a tmux session with a short-lived command. Use "sleep 2" to give
 	// us time to set remain-on-exit before the command exits.
-	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep 2").Run()
+	err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep 2").Run() //nolint:norawexec
 	if err != nil {
 		t.Fatalf("failed to create tmux session: %v", err)
 	}
 	// Set remain-on-exit BEFORE the command exits so session becomes zombie
-	if setErr := exec.Command("tmux", "set", "-t", sessionName, "remain-on-exit", "on").Run(); setErr != nil {
+	if setErr := exec.Command("tmux", "set", "-t", sessionName, "remain-on-exit", "on").Run(); setErr != nil { //nolint:norawexec
 		t.Fatalf("failed to set remain-on-exit: %v", setErr)
 	}
 

@@ -129,6 +129,38 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	return runErr
 }
 
+// Meta returns descriptive metadata about the OpenCode backend.
+func (o *OpenCodeBackend) Meta() BackendMeta {
+	version := detectBinaryVersion("opencode")
+	return BackendMeta{
+		DisplayName: "OpenCode",
+		Version:     version,
+		Description: "OpenCode CLI",
+		URL:         "https://github.com/opencode-ai/opencode",
+		BinaryName:  "opencode",
+	}
+}
+
+// HealthCheck reports the installation and readiness status of the OpenCode backend.
+func (o *OpenCodeBackend) HealthCheck() HealthStatus {
+	var hs HealthStatus
+
+	if _, err := exec.LookPath("opencode"); err == nil {
+		hs.Installed = true
+		hs.Version = detectBinaryVersion("opencode")
+	} else {
+		hs.Message = "opencode binary not found on PATH"
+		return hs
+	}
+
+	// OpenCode supports multiple providers, so no single API key to check.
+	hs.Healthy = hs.Installed
+	if hs.Healthy {
+		hs.Message = "ready"
+	}
+	return hs
+}
+
 func init() {
 	RegisterBackend(&OpenCodeBackend{})
 }

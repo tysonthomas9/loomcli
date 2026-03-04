@@ -27,7 +27,7 @@ var openCodePatterns = []struct {
 
 var openCodeRetryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
 
-func classifyOpenCode(logTail string, exitCode int) *classifyResult {
+func classifyOpenCode(logTail string) *classifyResult {
 	if logTail == "" {
 		return nil
 	}
