@@ -26,7 +26,7 @@ func repoRoot(t *testing.T) string {
 // and returns combined stdout+stderr. It fails the test on non-zero exit.
 func runMake(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("make", args...)
+	cmd := exec.Command("make", args...) //nolint:norawexec
 	cmd.Dir = repoRoot(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -232,7 +232,7 @@ func TestMakeDevCheckFailsWithoutAir(t *testing.T) {
 
 	// Run make dev-check with a PATH that excludes air.
 	// We set PATH to only include system essentials so air won't be found.
-	cmd := exec.Command("make", "dev-check")
+	cmd := exec.Command("make", "dev-check") //nolint:norawexec
 	cmd.Dir = repoRoot(t)
 	// Use a minimal PATH that has make but likely not air
 	cmd.Env = append(os.Environ(), "PATH=/usr/bin:/bin")
