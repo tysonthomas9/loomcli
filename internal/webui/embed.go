@@ -133,7 +133,8 @@ func devFrontendHandler(dir string) http.Handler {
 			return
 		}
 
-		_, err = os.Stat(filePath)
+		cleanFile := filepath.Clean(filePath)
+		_, err = os.Stat(cleanFile)
 		if err != nil {
 			// File doesn't exist - serve index.html for SPA routing
 			r.URL.Path = "/"

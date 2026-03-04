@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -14,90 +12,60 @@ import (
 
 // parseListParams extracts ListArgs from HTTP query parameters.
 func parseListParams(r *http.Request) (*rpc.ListArgs, error) {
-	query := r.URL.Query()
+	q := r.URL.Query()
 	args := &rpc.ListArgs{}
 
-	// Basic filters
-	if v := query.Get("status"); v != "" {
-		args.Status = v
-	}
-	if v := query.Get("type"); v != "" {
-		args.IssueType = v
-	}
-	if v := query.Get("assignee"); v != "" {
-		args.Assignee = v
-	}
-	if v := query.Get("q"); v != "" {
-		args.Query = v
-	}
+	// Basic string filters
+	args.Status = parseStringParam(q, "status")
+	args.IssueType = parseStringParam(q, "type")
+	args.Assignee = parseStringParam(q, "assignee")
+	args.Query = parseStringParam(q, "q")
 
-	// Priority (integer)
-	if v := query.Get("priority"); v != "" {
-		if priority, err := strconv.Atoi(v); err == nil {
-			args.Priority = &priority
-		}
-	}
+	// Priority (integer, silently ignore invalid values)
+	args.Priority, _ = parseIntParam(q, "priority")
 
 	// Labels (comma-separated)
-	if v := query.Get("labels"); v != "" {
-		args.Labels = splitAndTrim(v)
-	}
+	args.Labels = parseArrayParam(q, "labels")
 
-	// Limit (capped at MaxListLimit to prevent DoS)
-	if v := query.Get("limit"); v != "" {
-		if limit, err := strconv.Atoi(v); err == nil && limit > 0 {
-			if limit > MaxListLimit {
-				limit = MaxListLimit
-			}
-			args.Limit = limit
+	// Limit (capped at MaxListLimit to prevent DoS, silently ignore invalid)
+	limitPtr, _ := parseIntParam(q, "limit")
+	if limitPtr != nil && *limitPtr > 0 {
+		limit := *limitPtr
+		if limit > MaxListLimit {
+			limit = MaxListLimit
 		}
+		args.Limit = limit
 	}
 
 	// Pattern matching
-	if v := query.Get("title_contains"); v != "" {
-		args.TitleContains = v
-	}
-	if v := query.Get("description_contains"); v != "" {
-		args.DescriptionContains = v
-	}
-	if v := query.Get("notes_contains"); v != "" {
-		args.NotesContains = v
-	}
+	args.TitleContains = parseStringParam(q, "title_contains")
+	args.DescriptionContains = parseStringParam(q, "description_contains")
+	args.NotesContains = parseStringParam(q, "notes_contains")
 
 	// Date ranges (validated as RFC3339 or date-only)
-	dateParams := []struct {
-		param string
-		dest  *string
-	}{
-		{"created_after", &args.CreatedAfter},
-		{"created_before", &args.CreatedBefore},
-		{"updated_after", &args.UpdatedAfter},
-		{"updated_before", &args.UpdatedBefore},
+	dateKeys := []string{"created_after", "created_before", "updated_after", "updated_before"}
+	dates, err := parseDateParams(q, dateKeys)
+	if err != nil {
+		return nil, err
 	}
-	for _, dp := range dateParams {
-		if v := query.Get(dp.param); v != "" {
-			if _, err := time.Parse(time.RFC3339, v); err != nil {
-				if _, err2 := time.Parse("2006-01-02", v); err2 != nil {
-					return nil, fmt.Errorf("invalid %s: expected RFC3339 format (e.g., 2024-01-15T00:00:00Z) or date (2024-01-15)", dp.param)
-				}
-			}
-			*dp.dest = v
-		}
-	}
+	args.CreatedAfter = dates["created_after"]
+	args.CreatedBefore = dates["created_before"]
+	args.UpdatedAfter = dates["updated_after"]
+	args.UpdatedBefore = dates["updated_before"]
 
 	// Empty/null checks
-	if v := query.Get("empty_description"); v == "true" {
+	if parseStringParam(q, "empty_description") == "true" {
 		args.EmptyDescription = true
 	}
-	if v := query.Get("no_assignee"); v == "true" {
+	if parseStringParam(q, "no_assignee") == "true" {
 		args.NoAssignee = true
 	}
-	if v := query.Get("no_labels"); v == "true" {
+	if parseStringParam(q, "no_labels") == "true" {
 		args.NoLabels = true
 	}
 
 	// Pinned filtering
-	if v := query.Get("pinned"); v != "" {
+	if v := parseStringParam(q, "pinned"); v != "" {
 		pinned := v == "true"
 		args.Pinned = &pinned
 	}

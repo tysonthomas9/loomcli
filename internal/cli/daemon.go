@@ -56,7 +56,8 @@ type Daemon struct {
 	shutdownOnce sync.Once      // protects shutdown channel from double-close
 	wg           sync.WaitGroup // tracks superviseAgent goroutines
 
-	epicAssigner *EpicAssigner // manages epic-to-worktree assignments
+	epicAssigner *EpicAssigner       // manages epic-to-worktree assignments
+	concurrency  *ConcurrencyTracker // enforces per-role concurrency limits
 }
 
 // builtInRoles defines the built-in role names that use loom <role> command.
@@ -79,6 +80,7 @@ func NewDaemon(config *DaemonConfig, projectDir string) (*Daemon, error) {
 		projectDir:   projectDir,
 		agents:       make([]*AgentProcess, 0, len(config.Agents)),
 		epicAssigner: NewEpicAssigner(),
+		concurrency:  NewConcurrencyTracker(config.Roles),
 	}
 
 	for i, entry := range config.Agents {
@@ -199,6 +201,9 @@ func (d *Daemon) Stop() {
 	d.shutdownOnce.Do(func() {
 		close(d.shutdown)
 	})
+
+	// Unblock any agents waiting for concurrency slots
+	d.concurrency.Close()
 
 	// Stop all agent processes
 	for _, ap := range d.agents {

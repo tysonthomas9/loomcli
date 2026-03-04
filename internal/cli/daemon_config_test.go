@@ -3,8 +3,11 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func requireIntPtr(t *testing.T, name string, got *int, want int) {
@@ -668,5 +671,373 @@ func TestResolveDaemonStatePath_InvalidConfig(t *testing.T) {
 	want := filepath.Join(projectDir, ".loom", "daemon-agents.json")
 	if got != want {
 		t.Errorf("ResolveDaemonStatePath() = %q, want %q (fallback on invalid config)", got, want)
+	}
+}
+
+func TestRoleConfig_YAMLRoundtrip(t *testing.T) {
+	original := RoleConfig{
+		Description:    "reviewer",
+		PromptFile:     "prompts/review.md",
+		Model:          "claude-sonnet-4-20250514",
+		TaskFilter:     "has_design",
+		Backend:        "openai",
+		PathPatterns:   []string{"internal/**", "*.go"},
+		Skills:         []string{"review", "security"},
+		MaxPriority:    intPtr(2),
+		MaxConcurrency: intPtr(3),
+		ReadOnly:       true,
+		AllowedTools:   []string{"read", "grep"},
+		DeniedTools:    []string{"bash"},
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var decoded RoleConfig
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded.Description != original.Description {
+		t.Errorf("Description = %q, want %q", decoded.Description, original.Description)
+	}
+	if decoded.PromptFile != original.PromptFile {
+		t.Errorf("PromptFile = %q, want %q", decoded.PromptFile, original.PromptFile)
+	}
+	if decoded.Model != original.Model {
+		t.Errorf("Model = %q, want %q", decoded.Model, original.Model)
+	}
+	if decoded.TaskFilter != original.TaskFilter {
+		t.Errorf("TaskFilter = %q, want %q", decoded.TaskFilter, original.TaskFilter)
+	}
+	if decoded.Backend != original.Backend {
+		t.Errorf("Backend = %q, want %q", decoded.Backend, original.Backend)
+	}
+	if !reflect.DeepEqual(decoded.PathPatterns, original.PathPatterns) {
+		t.Errorf("PathPatterns = %v, want %v", decoded.PathPatterns, original.PathPatterns)
+	}
+	if !reflect.DeepEqual(decoded.Skills, original.Skills) {
+		t.Errorf("Skills = %v, want %v", decoded.Skills, original.Skills)
+	}
+	requireIntPtr(t, "MaxPriority", decoded.MaxPriority, 2)
+	requireIntPtr(t, "MaxConcurrency", decoded.MaxConcurrency, 3)
+	if decoded.ReadOnly != true {
+		t.Errorf("ReadOnly = %v, want true", decoded.ReadOnly)
+	}
+	if !reflect.DeepEqual(decoded.AllowedTools, original.AllowedTools) {
+		t.Errorf("AllowedTools = %v, want %v", decoded.AllowedTools, original.AllowedTools)
+	}
+	if !reflect.DeepEqual(decoded.DeniedTools, original.DeniedTools) {
+		t.Errorf("DeniedTools = %v, want %v", decoded.DeniedTools, original.DeniedTools)
+	}
+}
+
+func TestRoleConfig_YAMLRoundtrip_Minimal(t *testing.T) {
+	original := RoleConfig{
+		Description: "basic role",
+		PromptFile:  "prompts/basic.md",
+		Model:       "claude-sonnet-4-20250514",
+		TaskFilter:  "open",
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var decoded RoleConfig
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded.Description != original.Description {
+		t.Errorf("Description = %q, want %q", decoded.Description, original.Description)
+	}
+	if decoded.Backend != "" {
+		t.Errorf("Backend = %q, want empty", decoded.Backend)
+	}
+	if decoded.PathPatterns != nil {
+		t.Errorf("PathPatterns = %v, want nil", decoded.PathPatterns)
+	}
+	if decoded.Skills != nil {
+		t.Errorf("Skills = %v, want nil", decoded.Skills)
+	}
+	if decoded.MaxPriority != nil {
+		t.Errorf("MaxPriority = %v, want nil", decoded.MaxPriority)
+	}
+	if decoded.MaxConcurrency != nil {
+		t.Errorf("MaxConcurrency = %v, want nil", decoded.MaxConcurrency)
+	}
+	if decoded.ReadOnly != false {
+		t.Errorf("ReadOnly = %v, want false", decoded.ReadOnly)
+	}
+	if decoded.AllowedTools != nil {
+		t.Errorf("AllowedTools = %v, want nil", decoded.AllowedTools)
+	}
+	if decoded.DeniedTools != nil {
+		t.Errorf("DeniedTools = %v, want nil", decoded.DeniedTools)
+	}
+}
+
+func TestAgentEntry_YAMLRoundtrip(t *testing.T) {
+	original := AgentEntry{
+		Worktree:     "falcon",
+		Role:         "plan",
+		Auto:         true,
+		Backend:      "anthropic",
+		PathPatterns: []string{"cmd/**", "internal/cli/**"},
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var decoded AgentEntry
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded.Worktree != original.Worktree {
+		t.Errorf("Worktree = %q, want %q", decoded.Worktree, original.Worktree)
+	}
+	if decoded.Role != original.Role {
+		t.Errorf("Role = %q, want %q", decoded.Role, original.Role)
+	}
+	if decoded.Auto != original.Auto {
+		t.Errorf("Auto = %v, want %v", decoded.Auto, original.Auto)
+	}
+	if decoded.Backend != original.Backend {
+		t.Errorf("Backend = %q, want %q", decoded.Backend, original.Backend)
+	}
+	if !reflect.DeepEqual(decoded.PathPatterns, original.PathPatterns) {
+		t.Errorf("PathPatterns = %v, want %v", decoded.PathPatterns, original.PathPatterns)
+	}
+}
+
+func TestAgentEntry_YAMLRoundtrip_Minimal(t *testing.T) {
+	original := AgentEntry{
+		Worktree: "nova",
+		Role:     "task",
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var decoded AgentEntry
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded.Worktree != original.Worktree {
+		t.Errorf("Worktree = %q, want %q", decoded.Worktree, original.Worktree)
+	}
+	if decoded.Role != original.Role {
+		t.Errorf("Role = %q, want %q", decoded.Role, original.Role)
+	}
+	if decoded.PathPatterns != nil {
+		t.Errorf("PathPatterns = %v, want nil", decoded.PathPatterns)
+	}
+}
+
+func TestLoadProjectFile_WithNewRoleFields(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `roles:
+  reviewer:
+    description: Code reviewer
+    prompt_file: prompts/reviewer.md
+    model: claude-sonnet-4-20250514
+    task_filter: has_design
+    backend: openai
+    path_patterns:
+      - "internal/**"
+      - "*.go"
+    skills:
+      - review
+      - security
+    max_priority: 2
+    max_concurrency: 3
+    read_only: true
+    allowed_tools:
+      - read
+      - grep
+    denied_tools:
+      - bash
+agents:
+  - worktree: falcon
+    role: reviewer
+    path_patterns:
+      - "cmd/**"
+`
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	pf, err := LoadProjectFile(dir)
+	if err != nil {
+		t.Fatalf("LoadProjectFile() error = %v", err)
+	}
+	if pf == nil {
+		t.Fatal("LoadProjectFile() returned nil")
+	}
+
+	rc := pf.Roles["reviewer"]
+	if rc.Description != "Code reviewer" {
+		t.Errorf("Description = %q", rc.Description)
+	}
+	if rc.Backend != "openai" {
+		t.Errorf("Backend = %q, want %q", rc.Backend, "openai")
+	}
+	if !reflect.DeepEqual(rc.PathPatterns, []string{"internal/**", "*.go"}) {
+		t.Errorf("PathPatterns = %v", rc.PathPatterns)
+	}
+	if !reflect.DeepEqual(rc.Skills, []string{"review", "security"}) {
+		t.Errorf("Skills = %v", rc.Skills)
+	}
+	requireIntPtr(t, "MaxPriority", rc.MaxPriority, 2)
+	requireIntPtr(t, "MaxConcurrency", rc.MaxConcurrency, 3)
+	if !rc.ReadOnly {
+		t.Error("ReadOnly = false, want true")
+	}
+	if !reflect.DeepEqual(rc.AllowedTools, []string{"read", "grep"}) {
+		t.Errorf("AllowedTools = %v", rc.AllowedTools)
+	}
+	if !reflect.DeepEqual(rc.DeniedTools, []string{"bash"}) {
+		t.Errorf("DeniedTools = %v", rc.DeniedTools)
+	}
+
+	// Verify agent PathPatterns
+	if len(pf.Agents) != 1 {
+		t.Fatalf("len(Agents) = %d, want 1", len(pf.Agents))
+	}
+	if !reflect.DeepEqual(pf.Agents[0].PathPatterns, []string{"cmd/**"}) {
+		t.Errorf("Agent PathPatterns = %v", pf.Agents[0].PathPatterns)
+	}
+}
+
+func TestLoadDaemonConfig_NewRoleFieldsPreserved(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	globalYAML := `roles:
+  plan:
+    description: Global planner
+    max_priority: 1
+    skills:
+      - planning
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(globalYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := t.TempDir()
+	localYAML := `roles:
+  plan:
+    description: Local planner
+    backend: anthropic
+    max_concurrency: 2
+    read_only: true
+    path_patterns:
+      - "docs/**"
+agents:
+  - worktree: alpha
+    role: plan
+`
+	if err := os.WriteFile(filepath.Join(projectDir, "loom.yaml"), []byte(localYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dc, err := LoadDaemonConfig(projectDir)
+	if err != nil {
+		t.Fatalf("LoadDaemonConfig() error = %v", err)
+	}
+
+	rc := dc.Roles["plan"]
+	// Local replaces entire role entry, so global fields are gone
+	if rc.Description != "Local planner" {
+		t.Errorf("Description = %q, want %q", rc.Description, "Local planner")
+	}
+	if rc.Backend != "anthropic" {
+		t.Errorf("Backend = %q, want %q", rc.Backend, "anthropic")
+	}
+	requireIntPtr(t, "MaxConcurrency", rc.MaxConcurrency, 2)
+	if !rc.ReadOnly {
+		t.Error("ReadOnly = false, want true")
+	}
+	if !reflect.DeepEqual(rc.PathPatterns, []string{"docs/**"}) {
+		t.Errorf("PathPatterns = %v", rc.PathPatterns)
+	}
+	// Global-only fields should be gone since local replaces entire entry
+	if rc.MaxPriority != nil {
+		t.Errorf("MaxPriority = %v, want nil (local replaced entire entry)", rc.MaxPriority)
+	}
+	if rc.Skills != nil {
+		t.Errorf("Skills = %v, want nil (local replaced entire entry)", rc.Skills)
+	}
+}
+
+func TestLoadProjectFile_BackwardCompatibility(t *testing.T) {
+	dir := t.TempDir()
+	// Config using only original fields — no new fields present
+	yamlContent := `roles:
+  plan:
+    description: Planning agent
+    prompt_file: prompts/plan.md
+    model: claude-sonnet-4-20250514
+    task_filter: open
+agents:
+  - worktree: falcon
+    role: plan
+    auto: true
+    backend: claude
+`
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	pf, err := LoadProjectFile(dir)
+	if err != nil {
+		t.Fatalf("LoadProjectFile() error = %v", err)
+	}
+	if pf == nil {
+		t.Fatal("LoadProjectFile() returned nil")
+	}
+
+	rc := pf.Roles["plan"]
+	if rc.Description != "Planning agent" {
+		t.Errorf("Description = %q", rc.Description)
+	}
+	// All new fields should be zero values
+	if rc.Backend != "" {
+		t.Errorf("Backend = %q, want empty", rc.Backend)
+	}
+	if rc.PathPatterns != nil {
+		t.Errorf("PathPatterns = %v, want nil", rc.PathPatterns)
+	}
+	if rc.Skills != nil {
+		t.Errorf("Skills = %v, want nil", rc.Skills)
+	}
+	if rc.MaxPriority != nil {
+		t.Errorf("MaxPriority = %v, want nil", rc.MaxPriority)
+	}
+	if rc.MaxConcurrency != nil {
+		t.Errorf("MaxConcurrency = %v, want nil", rc.MaxConcurrency)
+	}
+	if rc.ReadOnly {
+		t.Error("ReadOnly = true, want false")
+	}
+	if rc.AllowedTools != nil {
+		t.Errorf("AllowedTools = %v, want nil", rc.AllowedTools)
+	}
+	if rc.DeniedTools != nil {
+		t.Errorf("DeniedTools = %v, want nil", rc.DeniedTools)
+	}
+
+	// Agent PathPatterns should be nil
+	if pf.Agents[0].PathPatterns != nil {
+		t.Errorf("Agent PathPatterns = %v, want nil", pf.Agents[0].PathPatterns)
 	}
 }

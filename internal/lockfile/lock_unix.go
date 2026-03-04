@@ -14,9 +14,25 @@ var errDaemonLocked = errors.New("daemon lock already held by another process")
 // ErrLocked is returned by TryLockExclusive when the lock is already held.
 var ErrLocked = errDaemonLocked
 
+// flockFd calls unix.Flock via RawConn to avoid uintptr-to-int conversion.
+func flockFd(f *os.File, how int) error {
+	rawConn, err := f.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var flockErr error
+	err = rawConn.Control(func(fd uintptr) {
+		flockErr = unix.Flock(int(fd), how) //nolint:gosec // G115 — inside RawConn.Control callback; fd is valid
+	})
+	if err != nil {
+		return err
+	}
+	return flockErr
+}
+
 // flockExclusive acquires an exclusive non-blocking lock on the file
 func flockExclusive(f *os.File) error {
-	err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	err := flockFd(f, unix.LOCK_EX|unix.LOCK_NB)
 	if err == unix.EWOULDBLOCK {
 		return errDaemonLocked
 	}
@@ -32,10 +48,10 @@ func TryLockExclusive(f *os.File) error {
 // FlockExclusiveBlocking acquires an exclusive blocking lock on the file.
 // This will wait until the lock is available.
 func FlockExclusiveBlocking(f *os.File) error {
-	return unix.Flock(int(f.Fd()), unix.LOCK_EX)
+	return flockFd(f, unix.LOCK_EX)
 }
 
 // FlockUnlock releases a lock on the file.
 func FlockUnlock(f *os.File) error {
-	return unix.Flock(int(f.Fd()), unix.LOCK_UN)
+	return flockFd(f, unix.LOCK_UN)
 }

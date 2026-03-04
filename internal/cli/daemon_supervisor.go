@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,8 +57,15 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			continue
 		}
 
+		// 2.5. Acquire concurrency slot for role
+		if !d.concurrency.Acquire(ap.entry.Role) {
+			log.Printf("[daemon] Agent %s: shutdown during concurrency wait", ap.entry.Worktree)
+			return
+		}
+
 		// 3. Spawn subprocess
 		if err := d.spawnAgent(ap); err != nil {
+			d.concurrency.Release(ap.entry.Role)
 			log.Printf("[daemon] Agent %s: spawn failed: %v", ap.entry.Worktree, err)
 			if !d.handleRestartAfterError(ap) {
 				return
@@ -68,13 +76,10 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		// 4. Wait for exit
 		exitCode := d.waitForAgent(ap)
 
-		// Log exit with task details from lock file (before recovery clears it)
-		if lockInfo, _, _ := CheckLock(ap.worktreePath); lockInfo != nil && lockInfo.TaskID != "" {
-			log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
-				ap.entry.Worktree, exitCode, lockInfo.TaskID, lockInfo.TaskTitle)
-		} else {
-			log.Printf("[daemon] Agent %s: exited with code %d", ap.entry.Worktree, exitCode)
-		}
+		// 4.5. Release concurrency slot now that the process has exited
+		d.concurrency.Release(ap.entry.Role)
+
+		d.logAgentExit(ap, exitCode)
 
 		// 5. Post-mortem recovery (exit-code-aware)
 		if err := d.recoverAgent(ap, exitCode); err != nil {
@@ -156,13 +161,27 @@ func (d *Daemon) handleRestartAfterError(ap *AgentProcess) bool {
 	}
 }
 
+// logAgentExit logs the agent exit with task details from the lock file.
+func (d *Daemon) logAgentExit(ap *AgentProcess, exitCode int) {
+	if lockInfo, _, _ := CheckLock(ap.worktreePath); lockInfo != nil && lockInfo.TaskID != "" {
+		log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
+			ap.entry.Worktree, exitCode, lockInfo.TaskID, lockInfo.TaskTitle)
+	} else {
+		log.Printf("[daemon] Agent %s: exited with code %d", ap.entry.Worktree, exitCode)
+	}
+}
+
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess.
 // Extracted from spawnAgent for testability. Does not start the process.
+// Caller must hold ap.mu (reads ap.assignedEpicID).
 func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 	var cmd *exec.Cmd
 
-	// Resolve backend for this agent: per-agent > project > global > default
+	// Resolve backend for this agent: per-agent > per-role > project > global > default
 	agentBackend := ap.entry.Backend
+	if agentBackend == "" {
+		agentBackend = ap.roleConfig.Backend
+	}
 	if agentBackend == "" {
 		agentBackend = d.config.Backend
 	}
@@ -203,6 +222,17 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
 	)
+
+	// Propagate role constraints as env vars for the subprocess
+	if len(ap.roleConfig.AllowedTools) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ALLOWED_TOOLS=%s", strings.Join(ap.roleConfig.AllowedTools, ",")))
+	}
+	if len(ap.roleConfig.DeniedTools) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_DENIED_TOOLS=%s", strings.Join(ap.roleConfig.DeniedTools, ",")))
+	}
+	if ap.roleConfig.ReadOnly {
+		cmd.Env = append(cmd.Env, "LOOM_READ_ONLY=1")
+	}
 
 	return cmd
 }

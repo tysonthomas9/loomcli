@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 
 // FleetRegisterConfig holds configuration for fleet worker registration authentication.
 type FleetRegisterConfig struct {
-	APIKey      string            // Pre-shared API key for fleet registration
+	APIKey      string            `json:"-"` // Pre-shared API key for fleet registration
 	RateLimiter *FleetRateLimiter // Optional rate limiter (nil = no rate limiting)
 }
 
@@ -253,7 +254,8 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		// Validate worker exists
 		worker, err := store.GetWorker(ctx, workerID)
 		if err != nil {
-			log.Printf("Failed to get worker %s: %v", workerID, err)
+			safeID := strconv.Quote(workerID)
+			log.Printf("Failed to get worker %s: %v", safeID, err)
 			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to look up worker",
@@ -271,7 +273,8 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 		// Look up worker's current claim
 		claim, err := store.GetWorkerClaim(ctx, workerID)
 		if err != nil {
-			log.Printf("Failed to get worker claim for %s: %v", workerID, err)
+			safeID := strconv.Quote(workerID)
+			log.Printf("Failed to get worker claim for %s: %v", safeID, err)
 			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to look up worker claim",
@@ -300,7 +303,8 @@ func handleFleetDoneWithStore(store fleetDoneStore) http.HandlerFunc {
 			CompletedAt: time.Now(),
 		}
 		if err := store.RecordTaskResult(ctx, result); err != nil {
-			log.Printf("Failed to record task result for %s/%s: %v", workerID, taskID, err)
+			safeWorker, safeTask := strconv.Quote(workerID), strconv.Quote(taskID)
+			log.Printf("Failed to record task result for %s/%s: %v", safeWorker, safeTask, err)
 			respondJSON(w, http.StatusInternalServerError, FleetDoneResponse{
 				Success: false,
 				Error:   "failed to record task result",

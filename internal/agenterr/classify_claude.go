@@ -30,7 +30,7 @@ var claudePatterns = []struct {
 
 var claudeRetryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
 
-func classifyClaude(logTail string, exitCode int) *classifyResult {
+func classifyClaude(logTail string) *classifyResult {
 	if logTail == "" {
 		return nil
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -19,23 +20,23 @@ type classifyResult struct {
 func ClassifyFromLog(logPath string, exitCode int, backend string) *AgentError {
 	now := time.Now()
 
-	logTail, _ := readLogTail(logPath, 100, 64*1024)
+	logTail, _ := readLogTail(logPath, 100)
 
 	var result *classifyResult
 	switch backend {
 	case "claude":
-		result = classifyClaude(logTail, exitCode)
+		result = classifyClaude(logTail)
 	case "codex":
-		result = classifyCodex(logTail, exitCode)
+		result = classifyCodex(logTail)
 	case "opencode":
-		result = classifyOpenCode(logTail, exitCode)
+		result = classifyOpenCode(logTail)
 	}
 
 	if result == nil {
 		class := classifyByExitCode(exitCode)
 		result = &classifyResult{
 			Class:   class,
-			Message: classifyByExitCodeMessage(exitCode, class),
+			Message: classifyByExitCodeMessage(class),
 		}
 	}
 
@@ -50,10 +51,13 @@ func ClassifyFromLog(logPath string, exitCode int, backend string) *AgentError {
 	}
 }
 
+// maxLogTailBytes is the maximum number of bytes to read from the end of a log file.
+const maxLogTailBytes int64 = 64 * 1024
+
 // readLogTail reads the last maxLines lines from a file, reading at most
-// maxBytes from the end. Returns empty string on any error.
-func readLogTail(path string, maxLines int, maxBytes int64) (string, error) {
-	f, err := os.Open(path)
+// maxLogTailBytes from the end. Returns empty string on any error.
+func readLogTail(path string, maxLines int) (string, error) {
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +73,7 @@ func readLogTail(path string, maxLines int, maxBytes int64) (string, error) {
 		return "", nil
 	}
 
-	readSize := maxBytes
+	readSize := maxLogTailBytes
 	if size < readSize {
 		readSize = size
 	}
@@ -109,7 +113,7 @@ func classifyByExitCode(exitCode int) ErrorClass {
 	}
 }
 
-func classifyByExitCodeMessage(exitCode int, class ErrorClass) string {
+func classifyByExitCodeMessage(class ErrorClass) string {
 	switch class {
 	case Timeout:
 		return "process killed by signal 9 (SIGKILL)"
