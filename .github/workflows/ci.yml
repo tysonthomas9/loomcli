@@ -6,24 +6,51 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # Cross-platform test matrix
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        include:
-          # Linux: full test suite with coverage
-          - os: ubuntu-latest
-            coverage: true
-            test-flags: '-v -race -coverprofile=coverage.out'
-          # macOS: full test suite, no coverage (faster)
-          - os: macos-latest
-            coverage: false
-            test-flags: '-v -race'
+  # Single quality gate — runs the same 12-step check as local dev
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          install-only: true
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@loomcli.test"
+
+      - name: Install frontend dependencies
+        run: cd internal/webui/frontend && npm ci
+
+      - name: make check
+        run: make check
+
+  # Coverage reporting (separate from quality gate)
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -45,38 +72,24 @@ jobs:
       - name: Build frontend
         run: cd internal/webui/frontend && npm ci && npm run build
 
-      - name: Build
-        run: go build -v ./...
-
-      - name: Test
-        run: go test ${{ matrix.test-flags }} -tags=integration ./...
+      - name: Run tests with coverage
+        run: go test -race -coverprofile=coverage.out -tags=integration -timeout 15m ./...
 
       - name: Check coverage threshold
-        if: matrix.coverage
-        run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          MIN_COVERAGE=42
-          WARN_COVERAGE=55
-          echo "Coverage: $COVERAGE%"
-          if (( $(echo "$COVERAGE < $MIN_COVERAGE" | bc -l) )); then
-            echo "Coverage is below ${MIN_COVERAGE}% threshold"
-            exit 1
-          elif (( $(echo "$COVERAGE < $WARN_COVERAGE" | bc -l) )); then
-            echo "Coverage is below ${WARN_COVERAGE}% (warning threshold)"
-          else
-            echo "Coverage meets threshold"
-          fi
+        run: ./scripts/check-coverage.sh coverage.out 70
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
-        if: matrix.coverage && success()
+        if: success()
         with:
           file: ./coverage.out
           fail_ci_if_error: false
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
+  # Cross-platform verification (lightweight — Go tests only)
+  test-macos:
+    name: Test (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -90,11 +103,13 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Configure Git
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@loomcli.test"
+
       - name: Build frontend
         run: cd internal/webui/frontend && npm ci && npm run build
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          args: --timeout=5m
+      - name: Test
+        run: go test -v -race -timeout 15m ./...
