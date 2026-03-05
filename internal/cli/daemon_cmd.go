@@ -529,7 +529,9 @@ func computeAgentStatus(ap SupervisedAgentStatus, maxRetries int) string {
 	return "stopped"
 }
 
-// printDryRunInfo displays what would happen in dry-run mode
+// printDryRunInfo displays what would happen in dry-run mode.
+// NOTE: If DaemonSettings gains secret fields (RedisURL, APIKey, JWTKey),
+// their values should be masked via SecretResolver.MaskSecrets() before printing.
 func printDryRunInfo(config *DaemonConfig, pidFile, logDir, stateFile string) {
 	fmt.Println("DRY RUN - No daemon will be started")
 	fmt.Println("")

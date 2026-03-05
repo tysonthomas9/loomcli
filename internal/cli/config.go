@@ -86,6 +86,12 @@ func LoadConfig() (*LoomConfig, error) {
 		return nil, fmt.Errorf("expanding env vars in %s: %w", path, err)
 	}
 
+	resolver := NewSecretResolver()
+	data, err = ResolveSecretsInBytes(data, resolver)
+	if err != nil {
+		return nil, fmt.Errorf("resolving secrets in %s: %w", path, err)
+	}
+
 	var cfg LoomConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config %s: %w", path, err)

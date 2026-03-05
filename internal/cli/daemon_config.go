@@ -103,6 +103,12 @@ func LoadProjectFile(dir string) (*ProjectFile, error) {
 		return nil, fmt.Errorf("expanding env vars in %s: %w", path, err)
 	}
 
+	resolver := NewSecretResolver()
+	data, err = ResolveSecretsInBytes(data, resolver)
+	if err != nil {
+		return nil, fmt.Errorf("resolving secrets in %s: %w", path, err)
+	}
+
 	var pf ProjectFile
 	if err := yaml.Unmarshal(data, &pf); err != nil {
 		return nil, fmt.Errorf("parsing project file %s: %w", path, err)
