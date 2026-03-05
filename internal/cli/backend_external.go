@@ -255,5 +255,8 @@ func DiscoverExternalBackends() {
 }
 
 func init() {
+	if os.Getenv("LOOM_NO_EXTERNAL_BACKENDS") != "" {
+		return
+	}
 	DiscoverExternalBackends()
 }

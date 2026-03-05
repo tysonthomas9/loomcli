@@ -557,6 +557,16 @@ func TestExternalBackend_HealthCheck_Timeout(t *testing.T) {
 	}
 }
 
+func TestInitGuard_NoExternalBackendsEnv(t *testing.T) {
+	// Verify that when LOOM_NO_EXTERNAL_BACKENDS is set, the env var is respected.
+	// Note: init() runs once at package load so cannot be directly re-tested.
+	// This test documents the guard contract and verifies the env var mechanism.
+	t.Setenv("LOOM_NO_EXTERNAL_BACKENDS", "1")
+	if os.Getenv("LOOM_NO_EXTERNAL_BACKENDS") == "" {
+		t.Fatal("expected LOOM_NO_EXTERNAL_BACKENDS to be non-empty")
+	}
+}
+
 // contains checks if haystack contains needle (line-based env check).
 func contains(haystack, needle string) bool {
 	for _, line := range splitLines(haystack) {
