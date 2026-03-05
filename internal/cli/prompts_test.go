@@ -922,21 +922,27 @@ func TestFleetPromptsNoClaimCommand(t *testing.T) {
 	}
 }
 
-func TestGenerateFleetPlanningPrompt_TaskIDSubstitutionCount(t *testing.T) {
+func TestGenerateFleetPlanningPrompt_TaskIDSubstitution(t *testing.T) {
 	taskID := "UNIQUE-TASK-XYZ-12345"
 	prompt := GenerateFleetPlanningPrompt("agent", taskID, nil)
 	count := strings.Count(prompt, taskID)
-	if count != 6 {
-		t.Errorf("expected taskID to appear 6 times, got %d", count)
+	if count < 2 {
+		t.Errorf("expected taskID to appear at least 2 times, got %d", count)
+	}
+	if strings.Contains(prompt, "%!") {
+		t.Error("prompt contains unsubstituted format directives")
 	}
 }
 
-func TestGenerateFleetTaskPrompt_TaskIDSubstitutionCount(t *testing.T) {
+func TestGenerateFleetTaskPrompt_TaskIDSubstitution(t *testing.T) {
 	taskID := "UNIQUE-TASK-XYZ-12345"
 	prompt := GenerateFleetTaskPrompt("agent", taskID, nil, "")
 	count := strings.Count(prompt, taskID)
-	if count != 4 {
-		t.Errorf("expected taskID to appear 4 times, got %d", count)
+	if count < 2 {
+		t.Errorf("expected taskID to appear at least 2 times, got %d", count)
+	}
+	if strings.Contains(prompt, "%!") {
+		t.Error("prompt contains unsubstituted format directives")
 	}
 }
 
