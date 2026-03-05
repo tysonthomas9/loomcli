@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unicode/utf8"
 )
 
 //go:embed prompts/*.md
@@ -320,4 +321,16 @@ func ReadOnlyPreamble() string {
 		return readOnlyPreamble
 	}
 	return ""
+}
+
+// truncateUTF8Safe truncates s to at most max bytes without splitting a
+// multi-byte UTF-8 character, appending a truncation marker if shortened.
+func truncateUTF8Safe(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max] + "\n... [truncated]"
 }
