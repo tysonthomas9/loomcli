@@ -133,7 +133,7 @@ check: frontend
 	@go vet ./...
 	@echo "=== [3/12] Go: build ==="
 	@go build ./...
-	@echo "=== [4/12] Go: lint (golangci-lint + depguard) ==="
+	@echo "=== [4/12] Go: lint (golangci-lint) ==="
 	@golangci-lint run --timeout=5m
 	@echo "=== [5/12] Go: LOC check ==="
 	@./scripts/check-loc.sh 500
