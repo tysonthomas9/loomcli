@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend sync-beads update-beads check gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc check-no-raw-exec test-coverage test-frontend-coverage
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc check-no-raw-exec test-coverage test-frontend-coverage
 
 # Default target
 all: build
@@ -113,6 +113,10 @@ frontend:
 	@echo "Building frontend..."
 	cd $(FRONTEND_DIR) && npm install && npm run build
 
+# Ensure frontend dist exists for go:embed (skip rebuild if already present)
+frontend-ensure:
+	@if [ ! -d $(FRONTEND_DIR)/dist ]; then echo "frontend/dist missing — building..."; $(MAKE) frontend; fi
+
 # Sync beads library packages (rewrite imports from vendored copy)
 sync-beads:
 	@echo "Syncing beads library packages..."
@@ -124,33 +128,41 @@ update-beads:
 	git subtree pull --prefix=$(BEADS_PREFIX) $(BEADS_REMOTE) $(BEADS_BRANCH) --squash
 	$(MAKE) sync-beads
 
-# Unified quality gate - the CI gate. If 'make check' passes, code is shippable.
-check: frontend
-	@echo "=== [1/12] Go: format check ==="
+# Go-only quality gate (skips frontend rebuild if dist/ exists)
+check-go: frontend-ensure
+	@echo "=== [1/7] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
-	@echo "=== [2/12] Go: vet ==="
+	@echo "=== [2/7] Go: vet ==="
 	@go vet ./...
-	@echo "=== [3/12] Go: build ==="
+	@echo "=== [3/7] Go: build ==="
 	@go build ./...
-	@echo "=== [4/12] Go: lint (golangci-lint) ==="
+	@echo "=== [4/7] Go: lint (golangci-lint + depguard) ==="
 	@golangci-lint run --timeout=5m
-	@echo "=== [5/12] Go: LOC check ==="
+	@echo "=== [5/7] Go: LOC check ==="
 	@./scripts/check-loc.sh 500
-	@echo "=== [6/12] Go: exec.Command guard ==="
+	@echo "=== [6/7] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
-	@echo "=== [7/12] Go: test with race detector ==="
+	@echo "=== [7/7] Go: test with race detector ==="
 	@go test -race -timeout 15m ./...
-	@echo "=== [8/12] Frontend: format check ==="
+	@echo "=== Go quality gates PASSED ==="
+
+# Frontend-only quality gate (builds frontend first)
+check-frontend: frontend
+	@echo "=== [1/5] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
-	@echo "=== [9/12] Frontend: typecheck ==="
+	@echo "=== [2/5] Frontend: typecheck ==="
 	@cd $(FRONTEND_DIR) && npm run typecheck
-	@echo "=== [10/12] Frontend: eslint ==="
+	@echo "=== [3/5] Frontend: eslint ==="
 	@cd $(FRONTEND_DIR) && npm run lint
-	@echo "=== [11/12] Frontend: architectural checks ==="
+	@echo "=== [4/5] Frontend: architectural checks ==="
 	@cd $(FRONTEND_DIR) && npm run check:arch
-	@echo "=== [12/12] Frontend: unit tests ==="
+	@echo "=== [5/5] Frontend: unit tests ==="
 	@cd $(FRONTEND_DIR) && npm run test:unit
+	@echo "=== Frontend quality gates PASSED ==="
+
+# Unified quality gate — runs all Go + frontend checks
+check: check-go check-frontend
 	@echo "=== All quality gates PASSED ==="
 
 # Backward-compatible alias for 'make check'
@@ -217,6 +229,8 @@ help:
 	@echo "  make sync-beads   - Sync beads packages (rewrite imports)"
 	@echo "  make update-beads - Pull latest beads + sync"
 	@echo "  make check        - Unified quality gate (all 12 checks)"
+	@echo "  make check-go     - Go-only quality gate (skips frontend rebuild if dist/ exists)"
+	@echo "  make check-frontend - Frontend-only quality gate"
 	@echo "  make gate         - Alias for make check"
 	@echo "  make gate-e2e     - Quality gate + self-contained e2e tests"
 	@echo "  make hooks        - Install git hooks (pre-push gate)"
