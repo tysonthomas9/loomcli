@@ -194,11 +194,9 @@ func TestCheckBdDaemon(t *testing.T) {
 func TestCheckProjectConfig(t *testing.T) {
 	t.Run("no loom.yaml", func(t *testing.T) {
 		dir := t.TempDir()
-		t.Setenv("LOOM_CONFIG_DIR", dir)
 		defer ResetBeadsDirCache()
 		ResetBeadsDirCache()
-		beadsDirCache = dir
-		beadsDirOnce.Do(func() {})
+		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
 		result := checkProjectConfig()
 		if result.Status != StatusWarn {
@@ -208,17 +206,14 @@ func TestCheckProjectConfig(t *testing.T) {
 
 	t.Run("invalid loom.yaml", func(t *testing.T) {
 		dir := t.TempDir()
-		t.Setenv("LOOM_CONFIG_DIR", dir)
 		defer ResetBeadsDirCache()
 		ResetBeadsDirCache()
+		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
 		// Write invalid YAML
 		if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("{{invalid"), 0644); err != nil {
 			t.Fatal(err)
 		}
-
-		beadsDirCache = dir
-		beadsDirOnce.Do(func() {})
 
 		result := checkProjectConfig()
 		if result.Status != StatusFail {
@@ -228,9 +223,9 @@ func TestCheckProjectConfig(t *testing.T) {
 
 	t.Run("valid loom.yaml", func(t *testing.T) {
 		dir := t.TempDir()
-		t.Setenv("LOOM_CONFIG_DIR", dir)
 		defer ResetBeadsDirCache()
 		ResetBeadsDirCache()
+		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
 		yamlContent := `agents:
   - worktree: falcon
@@ -241,9 +236,6 @@ func TestCheckProjectConfig(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
 			t.Fatal(err)
 		}
-
-		beadsDirCache = dir
-		beadsDirOnce.Do(func() {})
 
 		result := checkProjectConfig()
 		if result.Status != StatusPass {
@@ -349,8 +341,8 @@ func TestCheckBeadsInit(t *testing.T) {
 	t.Run("beads initialized", func(t *testing.T) {
 		dir := t.TempDir()
 		defer ResetBeadsDirCache()
-		beadsDirCache = dir
-		beadsDirOnce.Do(func() {})
+		ResetBeadsDirCache()
+		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
 		if err := os.MkdirAll(filepath.Join(dir, ".beads"), 0755); err != nil {
 			t.Fatal(err)
@@ -365,8 +357,8 @@ func TestCheckBeadsInit(t *testing.T) {
 	t.Run("beads not initialized", func(t *testing.T) {
 		dir := t.TempDir()
 		defer ResetBeadsDirCache()
-		beadsDirCache = dir
-		beadsDirOnce.Do(func() {})
+		ResetBeadsDirCache()
+		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
 
 		result := checkBeadsInit()
 		if result.Status != StatusFail {
