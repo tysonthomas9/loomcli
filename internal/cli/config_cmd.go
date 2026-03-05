@@ -31,12 +31,15 @@ Subcommands:
   show         Display current configuration
   add-repo     Add a repository to a workspace
   remove-repo  Remove a repository from a workspace
+  migrate      Migrate config files to the current version
 
 Examples:
   loom config init                                    # Create default config
   loom config show                                    # Display config
   loom config add-repo default myrepo --path /tmp/r   # Add a repo
-  loom config remove-repo default myrepo              # Remove a repo`,
+  loom config remove-repo default myrepo              # Remove a repo
+  loom config migrate                                 # Migrate global config
+  loom config migrate --project                       # Migrate project config`,
 }
 
 var configInitCmd = &cobra.Command{
@@ -71,6 +74,18 @@ var configRemoveRepoCmd = &cobra.Command{
 	Run:   runConfigRemoveRepo,
 }
 
+var configMigrateProject bool
+
+var configMigrateCmd = &cobra.Command{
+	Use:   "migrate [path]",
+	Short: "Migrate config files to the current version",
+	Long: `Upgrades config files to the current schema version. Creates a timestamped
+backup before modifying. If no path is given, migrates ~/.loom/config.yaml.
+Use --project to migrate the project-local loom.yaml instead.`,
+	Args: cobra.MaximumNArgs(1),
+	Run:  runConfigMigrate,
+}
+
 func init() {
 	configInitCmd.Flags().BoolVar(&configInitForce, "force", false, "Overwrite existing config")
 	configInitCmd.Flags().StringVar(&configInitWorkspace, "workspace", "", "Workspace name (default: current directory basename)")
@@ -80,10 +95,13 @@ func init() {
 	configAddRepoCmd.Flags().StringVar(&configAddRepoBranch, "branch", "", "Default branch")
 	configAddRepoCmd.Flags().StringVar(&configAddRepoRemote, "remote", "", "Git remote name")
 
+	configMigrateCmd.Flags().BoolVar(&configMigrateProject, "project", false, "Migrate project-local loom.yaml instead of global config")
+
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configAddRepoCmd)
 	configCmd.AddCommand(configRemoveRepoCmd)
+	configCmd.AddCommand(configMigrateCmd)
 
 	rootCmd.AddCommand(configCmd)
 }
@@ -197,6 +215,30 @@ func runConfigAddRepo(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Printf("Added repo %q to workspace %q.\n", repoName, wsName)
+}
+
+func runConfigMigrate(cmd *cobra.Command, args []string) {
+	var path string
+	if len(args) > 0 {
+		path = args[0]
+	} else if configMigrateProject {
+		path = "loom.yaml"
+	} else {
+		path = GetConfigPath()
+	}
+
+	oldVersion, backupPath, err := MigrateConfigFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if oldVersion == CurrentConfigVersion {
+		fmt.Printf("Config is already at version %d, no migration needed.\n", CurrentConfigVersion)
+		return
+	}
+
+	fmt.Printf("Migrated from version %d to %d. Backup saved to %s.\n", oldVersion, CurrentConfigVersion, backupPath)
 }
 
 func runConfigRemoveRepo(cmd *cobra.Command, args []string) {

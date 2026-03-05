@@ -64,6 +64,7 @@ type AgentEntry struct {
 
 // ProjectFile represents the project-local loom.yaml.
 type ProjectFile struct {
+	Version int                   `yaml:"version,omitempty"`
 	Backend string                `yaml:"backend,omitempty"`
 	Daemon  *DaemonSettings       `yaml:"daemon,omitempty"`
 	Roles   map[string]RoleConfig `yaml:"roles,omitempty"`
@@ -112,6 +113,9 @@ func LoadProjectFile(dir string) (*ProjectFile, error) {
 	var pf ProjectFile
 	if err := yaml.Unmarshal(data, &pf); err != nil {
 		return nil, fmt.Errorf("parsing project file %s: %w", path, err)
+	}
+	if pf.Version < CurrentConfigVersion {
+		fmt.Fprintf(os.Stderr, "Warning: project config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, pf.Version, CurrentConfigVersion)
 	}
 	return &pf, nil
 }

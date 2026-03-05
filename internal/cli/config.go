@@ -10,6 +10,7 @@ import (
 
 // LoomConfig is the top-level configuration from ~/.loom/config.yaml
 type LoomConfig struct {
+	Version          int                        `yaml:"version,omitempty"`
 	DefaultWorkspace string                     `yaml:"default_workspace,omitempty"`
 	Backend          string                     `yaml:"backend,omitempty"`
 	Workspaces       map[string]WorkspaceConfig `yaml:"workspaces"`
@@ -102,6 +103,10 @@ func LoadConfig() (*LoomConfig, error) {
 				return nil, fmt.Errorf("invalid config %s: workspace %q repo %d (%q): %w", path, wsName, i, repo.Name, err)
 			}
 		}
+	}
+
+	if cfg.Version < CurrentConfigVersion {
+		fmt.Fprintf(os.Stderr, "Warning: config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, cfg.Version, CurrentConfigVersion)
 	}
 
 	// Run comprehensive validation (warnings only — don't block on path checks)
