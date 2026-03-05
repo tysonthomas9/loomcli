@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +13,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
+
+// externalCmdTimeout is the maximum time allowed for external backend
+// meta and health check commands to complete.
+const externalCmdTimeout = 5 * time.Second
 
 // ExternalBackend implements the Backend interface by delegating to an external
 // binary discovered on PATH matching the loom-backend-* naming convention.
@@ -122,8 +129,12 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 // the "meta --json" subcommand. Returns a zero-value BackendMeta if the
 // subcommand fails or is not implemented.
 func (e *ExternalBackend) Meta() BackendMeta {
-	out, err := exec.Command(e.binPath, "meta", "--json").Output()
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), externalCmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, e.binPath, "meta", "--json")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil && !(errors.Is(err, exec.ErrWaitDelay) && len(out) > 0) {
 		return BackendMeta{
 			DisplayName: e.name,
 			BinaryName:  filepath.Base(e.binPath),
@@ -143,8 +154,12 @@ func (e *ExternalBackend) Meta() BackendMeta {
 // backend by invoking the "health --json" subcommand. Returns an unhealthy
 // status if the subcommand fails or is not implemented.
 func (e *ExternalBackend) HealthCheck() HealthStatus {
-	out, err := exec.Command(e.binPath, "health", "--json").Output()
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), externalCmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, e.binPath, "health", "--json")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil && !(errors.Is(err, exec.ErrWaitDelay) && len(out) > 0) {
 		return HealthStatus{
 			Installed: true, // the binary was found on PATH during discovery
 			Healthy:   false,

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 // createMockBackendBinary creates a shell script that acts as a mock
@@ -432,6 +433,67 @@ func TestIsRegistered(t *testing.T) {
 	}
 	if IsRegistered("nonexistent") {
 		t.Error("expected IsRegistered('nonexistent') to return false")
+	}
+}
+
+func TestExternalBackend_Meta_Timeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helpers not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	script := "#!/bin/sh\nsleep 30\n"
+	binPath := filepath.Join(dir, "loom-backend-slow")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	eb := &ExternalBackend{name: "slow", binPath: binPath}
+	start := time.Now()
+	meta := eb.Meta()
+	elapsed := time.Since(start)
+
+	// Should return fallback within externalCmdTimeout + buffer, not 30s
+	if elapsed > externalCmdTimeout+2*time.Second {
+		t.Fatalf("Meta() took %v, expected timeout around %v", elapsed, externalCmdTimeout)
+	}
+	if meta.DisplayName != "slow" {
+		t.Errorf("expected fallback DisplayName 'slow', got %q", meta.DisplayName)
+	}
+	if meta.BinaryName != "loom-backend-slow" {
+		t.Errorf("expected fallback BinaryName 'loom-backend-slow', got %q", meta.BinaryName)
+	}
+}
+
+func TestExternalBackend_HealthCheck_Timeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helpers not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	script := "#!/bin/sh\nsleep 30\n"
+	binPath := filepath.Join(dir, "loom-backend-slow")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	eb := &ExternalBackend{name: "slow", binPath: binPath}
+	start := time.Now()
+	hs := eb.HealthCheck()
+	elapsed := time.Since(start)
+
+	// Should return within externalCmdTimeout + buffer, not 30s
+	if elapsed > externalCmdTimeout+2*time.Second {
+		t.Fatalf("HealthCheck() took %v, expected timeout around %v", elapsed, externalCmdTimeout)
+	}
+	if hs.Healthy {
+		t.Error("expected unhealthy status on timeout")
+	}
+	if !hs.Installed {
+		t.Error("expected Installed=true")
+	}
+	if hs.Message == "" {
+		t.Error("expected a non-empty error message")
 	}
 }
 
