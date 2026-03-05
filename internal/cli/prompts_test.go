@@ -1094,6 +1094,37 @@ func TestAllTemplatesRender(t *testing.T) {
 	}
 }
 
+// TestReadOnlyPreamble verifies the function returns preamble when env is set
+// and empty string when not set.
+func TestReadOnlyPreamble(t *testing.T) {
+	t.Run("returns preamble when LOOM_READ_ONLY=1", func(t *testing.T) {
+		t.Setenv("LOOM_READ_ONLY", "1")
+		result := ReadOnlyPreamble()
+		if result == "" {
+			t.Error("ReadOnlyPreamble() = empty, want non-empty")
+		}
+		if !strings.Contains(result, "READ-ONLY") {
+			t.Errorf("ReadOnlyPreamble() = %q, want contains 'READ-ONLY'", result)
+		}
+	})
+
+	t.Run("returns empty when LOOM_READ_ONLY not set", func(t *testing.T) {
+		t.Setenv("LOOM_READ_ONLY", "")
+		result := ReadOnlyPreamble()
+		if result != "" {
+			t.Errorf("ReadOnlyPreamble() = %q, want empty", result)
+		}
+	})
+
+	t.Run("returns empty when LOOM_READ_ONLY=0", func(t *testing.T) {
+		t.Setenv("LOOM_READ_ONLY", "0")
+		result := ReadOnlyPreamble()
+		if result != "" {
+			t.Errorf("ReadOnlyPreamble() = %q, want empty (only '1' triggers)", result)
+		}
+	})
+}
+
 func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 	// Create a temp empty directory and point LOOM_CONFIG_DIR to it
 	tmpDir := t.TempDir()
