@@ -205,6 +205,11 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	eventBus := events.NewBus(eventsDir)
 	defer func() { _ = eventBus.Close() }()
 
+	// 9.6. Initialize OTel exporter if enabled
+	if otelExp := initOTelExporter(config, eventBus); otelExp != nil {
+		defer stopOTelExporter(otelExp)
+	}
+
 	// 10. Create and start daemon (from daemon.go)
 	daemon, err := NewDaemon(config, projectDir, eventBus)
 	if err != nil {
@@ -248,22 +253,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	}
 
 	// Start state file updater goroutine
-	stateUpdateDone := make(chan struct{})
-	go func() {
-		defer close(stateUpdateDone)
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-shutdown:
-				return
-			case <-ticker.C:
-				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), maxRetries); err != nil {
-					fmt.Printf("Warning: failed to update state file: %v\n", err)
-				}
-			}
-		}
-	}()
+	stateUpdateDone := startStateUpdater(shutdown, stateFilePath, startedAt, daemon, maxRetries)
 
 	// 13. Wait for shutdown signal
 	<-shutdown
@@ -527,47 +517,4 @@ func computeAgentStatus(ap SupervisedAgentStatus, maxRetries int) string {
 		return "failed"
 	}
 	return "stopped"
-}
-
-// printDryRunInfo displays what would happen in dry-run mode.
-// NOTE: If DaemonSettings gains secret fields (RedisURL, APIKey, JWTKey),
-// their values should be masked via SecretResolver.MaskSecrets() before printing.
-func printDryRunInfo(config *DaemonConfig, pidFile, logDir, stateFile string) {
-	fmt.Println("DRY RUN - No daemon will be started")
-	fmt.Println("")
-	fmt.Println("Configuration:")
-	fmt.Printf("  PID file: %s\n", pidFile)
-	fmt.Printf("  State file: %s\n", stateFile)
-	fmt.Printf("  Log directory: %s\n", logDir)
-	if config.Daemon.RestartPolicy.MaxRetries != nil {
-		fmt.Printf("  Max retries: %d\n", *config.Daemon.RestartPolicy.MaxRetries)
-	} else {
-		fmt.Printf("  Max retries: 3 (default)\n")
-	}
-	if config.Daemon.RestartPolicy.BackoffInitial != nil {
-		fmt.Printf("  Backoff initial: %ds\n", *config.Daemon.RestartPolicy.BackoffInitial)
-	} else {
-		fmt.Printf("  Backoff initial: 2s (default)\n")
-	}
-	if config.Daemon.RestartPolicy.BackoffMax != nil {
-		fmt.Printf("  Backoff max: %ds\n", *config.Daemon.RestartPolicy.BackoffMax)
-	} else {
-		fmt.Printf("  Backoff max: 300s (default)\n")
-	}
-	if config.Daemon.MaxAgents != nil {
-		fmt.Printf("  Max agents: %d\n", *config.Daemon.MaxAgents)
-	} else {
-		fmt.Printf("  Max agents: 20 (default)\n")
-	}
-	fmt.Println("")
-	fmt.Println("Agents to supervise:")
-	for _, a := range config.Agents {
-		fmt.Printf("  - %s (role: %s, auto: %v)\n", a.Worktree, a.Role, a.Auto)
-	}
-	fmt.Println("")
-	fmt.Println("Recommended systemd resource controls:")
-	fmt.Println("  LimitNOFILE=65536      # file descriptor limit")
-	fmt.Println("  MemoryMax=4G           # memory ceiling")
-	fmt.Println("  CPUQuota=200%          # CPU limit (200% = 2 cores)")
-	fmt.Println("  TasksMax=256           # max tasks (processes+threads)")
 }

@@ -12,14 +12,27 @@ import (
 
 // DaemonSettings holds daemon-specific config fields.
 type DaemonSettings struct {
-	PIDFile       string        `yaml:"pid_file,omitempty"`
-	LogDir        string        `yaml:"log_dir,omitempty"`
-	EventsDir     string        `yaml:"events_dir,omitempty"`
-	RestartPolicy RestartPolicy `yaml:"restart_policy,omitempty"`
-	MaxAgents     *int          `yaml:"max_agents,omitempty"`
-	RedisURL      string        `yaml:"redis_url,omitempty"`
-	APIKey        string        `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
-	JWTKey        string        `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	PIDFile       string            `yaml:"pid_file,omitempty"`
+	LogDir        string            `yaml:"log_dir,omitempty"`
+	EventsDir     string            `yaml:"events_dir,omitempty"`
+	RestartPolicy RestartPolicy     `yaml:"restart_policy,omitempty"`
+	MaxAgents     *int              `yaml:"max_agents,omitempty"`
+	RedisURL      string            `yaml:"redis_url,omitempty"`
+	APIKey        string            `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	JWTKey        string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	OTel          *OTelDaemonConfig `yaml:"otel,omitempty"`
+}
+
+// OTelDaemonConfig holds OpenTelemetry export configuration for the daemon.
+type OTelDaemonConfig struct {
+	Enabled         bool    `yaml:"enabled,omitempty"`
+	Endpoint        string  `yaml:"endpoint,omitempty"`
+	Protocol        string  `yaml:"protocol,omitempty"`
+	ServiceName     string  `yaml:"service_name,omitempty"`
+	SampleRate      float64 `yaml:"sample_rate,omitempty"`
+	FlushIntervalMs int     `yaml:"flush_interval_ms,omitempty"`
+	Traces          *bool   `yaml:"traces,omitempty"`
+	Metrics         *bool   `yaml:"metrics,omitempty"`
 }
 
 // RestartPolicy defines how the daemon restarts failed agents.
@@ -268,6 +281,39 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	}
 	if src.JWTKey != "" {
 		dst.JWTKey = src.JWTKey
+	}
+	if src.OTel != nil {
+		if dst.OTel == nil {
+			dst.OTel = &OTelDaemonConfig{}
+		}
+		overlayOTelConfig(dst.OTel, src.OTel)
+	}
+}
+
+func overlayOTelConfig(dst, src *OTelDaemonConfig) {
+	if src.Enabled {
+		dst.Enabled = true
+	}
+	if src.Endpoint != "" {
+		dst.Endpoint = src.Endpoint
+	}
+	if src.Protocol != "" {
+		dst.Protocol = src.Protocol
+	}
+	if src.ServiceName != "" {
+		dst.ServiceName = src.ServiceName
+	}
+	if src.SampleRate != 0 {
+		dst.SampleRate = src.SampleRate
+	}
+	if src.FlushIntervalMs != 0 {
+		dst.FlushIntervalMs = src.FlushIntervalMs
+	}
+	if src.Traces != nil {
+		dst.Traces = src.Traces
+	}
+	if src.Metrics != nil {
+		dst.Metrics = src.Metrics
 	}
 }
 
