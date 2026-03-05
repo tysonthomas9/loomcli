@@ -355,3 +355,13 @@ func TestConcurrencyTracker_NilReceiver(t *testing.T) {
 	ct.Release("task") // should not panic
 	ct.Close()         // should not panic
 }
+
+func TestConcurrencyTracker_AcquireUnlimitedAfterClose(t *testing.T) {
+	ct := NewConcurrencyTracker(map[string]RoleConfig{
+		"unlimited": {}, // no MaxConcurrency = unlimited
+	})
+	ct.Close()
+	if ct.Acquire("unlimited") {
+		t.Error("Acquire on closed tracker should return false for unlimited roles")
+	}
+}
