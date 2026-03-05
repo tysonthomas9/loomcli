@@ -6,6 +6,8 @@ import (
 	"log"
 	"sort"
 	"sync"
+
+	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
 // EpicAssigner manages epic-to-worktree assignments for the daemon.
@@ -195,6 +197,11 @@ func (d *Daemon) handleEpicTransition(ap *AgentProcess) error {
 
 	// Epic is exhausted
 	log.Printf("[daemon] Agent %s: epic %s exhausted (no ready tasks)", ap.entry.Worktree, currentEpicID)
+
+	// Emit epic_exhausted event
+	if evt, err := events.NewEvent(events.EpicExhausted, ap.entry.Worktree, ap.entry.Role, currentEpicID, events.EpicExhaustedData{EpicID: currentEpicID}); err == nil {
+		d.emitEvent(evt)
+	}
 
 	// Release the current assignment
 	d.epicAssigner.ReleaseWorktree(ap.entry.Worktree)

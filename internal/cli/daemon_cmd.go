@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -199,8 +200,13 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	// 9. Setup signal handler
 	shutdown := SetupSignalHandler()
 
+	// 9.5. Initialize event bus for structured observability
+	eventsDir := resolveDaemonPath(projectDir, config.Daemon.EventsDir)
+	eventBus := events.NewBus(eventsDir)
+	defer func() { _ = eventBus.Close() }()
+
 	// 10. Create and start daemon (from daemon.go)
-	daemon, err := NewDaemon(config, projectDir)
+	daemon, err := NewDaemon(config, projectDir, eventBus)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)

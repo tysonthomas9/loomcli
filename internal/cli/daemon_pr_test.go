@@ -369,7 +369,7 @@ func TestEnsureEpicPR_FullFlow(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	err := EnsureEpicPR("/repo", "loomcli-mzr")
+	err := EnsureEpicPR("/repo", "loomcli-mzr", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestEnsureEpicPR_GhNotAvailable(t *testing.T) {
 	cmdMock := NewCommandMock(t, []CommandStub{})
 	cmdMock.Install()
 
-	err := EnsureEpicPR("/repo", "loomcli-mzr")
+	err := EnsureEpicPR("/repo", "loomcli-mzr", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestEnsureEpicPR_BranchNotPushed(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	err := EnsureEpicPR("/repo", "loomcli-mzr")
+	err := EnsureEpicPR("/repo", "loomcli-mzr", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestEnsureEpicPR_PRAlreadyExists(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	err := EnsureEpicPR("/repo", "loomcli-mzr")
+	err := EnsureEpicPR("/repo", "loomcli-mzr", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestEnsureEpicPR_MergedPR_CreatesNew(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	err := EnsureEpicPR("/repo", "loomcli-mzr")
+	err := EnsureEpicPR("/repo", "loomcli-mzr", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -480,7 +480,7 @@ func TestEnsureEpicPR_PRCreateFails_ReturnsError(t *testing.T) {
 	})
 	cmdMock.Install()
 
-	err := EnsureEpicPR("/repo", "loomcli-mzr")
+	err := EnsureEpicPR("/repo", "loomcli-mzr", nil)
 	if err == nil {
 		t.Fatal("expected error when PR creation fails")
 	}

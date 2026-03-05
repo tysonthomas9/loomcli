@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
 var claimCmd = &cobra.Command{
@@ -55,6 +59,9 @@ func runClaim(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Emit task_claimed event (best-effort)
+	emitTaskClaimedEvent(taskID, taskTitle)
+
 	// Clear stale checkpoint if it's for a different task
 	lockDir := ResolveLockDir(cwd)
 	if cp, err := LoadCheckpoint(lockDir); err == nil && cp != nil && cp.TaskID != taskID {
@@ -65,6 +72,36 @@ func runClaim(cmd *cobra.Command, args []string) {
 	fmt.Printf("Claimed task: %s\n", taskID)
 	if taskTitle != "" {
 		fmt.Printf("Title: %s\n", taskTitle)
+	}
+}
+
+// emitTaskClaimedEvent creates a temporary event bus and emits a task_claimed event.
+// Uses LOOM_EVENTS_DIR env var, falling back to .loom/events relative to git toplevel.
+func emitTaskClaimedEvent(taskID, taskTitle string) {
+	eventsDir := os.Getenv("LOOM_EVENTS_DIR")
+	if eventsDir == "" {
+		// Fall back to .loom/events relative to git toplevel
+		cmd := execCommand("", "git", "rev-parse", "--show-toplevel")
+		if cmd.Err != nil {
+			return
+		}
+		toplevel := strings.TrimSpace(cmd.Stdout)
+		if toplevel == "" {
+			return
+		}
+		eventsDir = filepath.Join(toplevel, ".loom", "events")
+	}
+
+	bus := events.NewBus(eventsDir)
+	defer func() { _ = bus.Close() }()
+
+	agentName := os.Getenv("BD_ACTOR")
+	evt, err := events.NewEvent(events.TaskClaimed, agentName, "", "", events.TaskClaimedData{TaskID: taskID, Title: taskTitle})
+	if err != nil {
+		return
+	}
+	if emitErr := bus.Emit(evt); emitErr != nil {
+		log.Printf("[claim] Failed to emit task_claimed event: %v", emitErr)
 	}
 }
 
