@@ -10,7 +10,7 @@ import type { ReactNode } from 'react';
 import type { Status } from '@/types';
 
 import styles from './StatusColumn.module.css';
-import { formatStatusLabel } from './utils';
+import { formatStatusLabel } from '@/utils/statusFormat';
 
 /**
  * Column type for visual variants (different from status value).

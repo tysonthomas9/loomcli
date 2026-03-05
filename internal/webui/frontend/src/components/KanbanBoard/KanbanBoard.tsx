@@ -23,7 +23,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { DraggableIssueCard } from '@/components/DraggableIssueCard';
 import { EmptyColumn } from '@/components/EmptyColumn';
 import { StatusColumn } from '@/components/StatusColumn';
-import { formatStatusLabel } from '@/components/StatusColumn/utils';
+import { formatStatusLabel } from '@/utils/statusFormat';
 import type { FilterState } from '@/hooks/useFilterState';
 import type { BlockerRef, Issue, Status } from '@/types';
 

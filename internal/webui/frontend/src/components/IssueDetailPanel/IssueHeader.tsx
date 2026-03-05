@@ -7,7 +7,7 @@ import type { Issue, IssueDetails, Priority } from '@/types';
 import type { Status } from '@/types/status';
 
 import { EditableTitle } from '../EditableTitle';
-import { formatStatusLabel } from '../StatusColumn/utils';
+import { formatStatusLabel } from '@/utils/statusFormat';
 import { StatusDropdown } from '../StatusDropdown';
 import styles from './IssueHeader.module.css';
 

@@ -23,7 +23,7 @@ import type { BlockedInfo } from '@/components/KanbanBoard';
 import { KanbanBoard } from '@/components/KanbanBoard';
 import { DEFAULT_COLUMNS, createColumns } from '@/components/KanbanBoard/columnConfigs';
 import type { KanbanColumnConfig } from '@/components/KanbanBoard/types';
-import { formatStatusLabel } from '@/components/StatusColumn/utils';
+import { formatStatusLabel } from '@/utils/statusFormat';
 import { SwimLane } from '@/components/SwimLane';
 import type { FilterState } from '@/hooks/useFilterState';
 import type { Issue, Status } from '@/types';

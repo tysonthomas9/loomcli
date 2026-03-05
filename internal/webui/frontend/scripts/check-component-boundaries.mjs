@@ -21,32 +21,12 @@ export const ALLOWLIST = [
     target: "@/components/KanbanBoard/types",
   },
   {
-    source: "src/components/SwimLaneBoard/SwimLaneBoard.tsx",
-    target: "@/components/StatusColumn/utils",
-  },
-  {
     source: "src/components/SwimLane/SwimLane.tsx",
     target: "@/components/KanbanBoard/types",
   },
   {
-    source: "src/components/StatusDropdown/StatusDropdown.tsx",
-    target: "@/components/StatusColumn/utils",
-  },
-  {
-    source: "src/components/GraphControls/GraphControls.tsx",
-    target: "@/components/StatusColumn/utils",
-  },
-  {
-    source: "src/components/KanbanBoard/KanbanBoard.tsx",
-    target: "@/components/StatusColumn/utils",
-  },
-  {
     source: "src/components/IssueDetailPanel/CommentsSection.tsx",
     target: "@/components/table/columns",
-  },
-  {
-    source: "src/components/IssueDetailPanel/IssueHeader.tsx",
-    target: "../StatusColumn/utils",
   },
 ];
 

@@ -5,7 +5,7 @@
 
 import { useCallback } from 'react';
 
-import { formatStatusLabel } from '@/components/StatusColumn/utils';
+import { formatStatusLabel } from '@/utils/statusFormat';
 import type { Status, KnownStatus } from '@/types/status';
 import { USER_SELECTABLE_STATUSES } from '@/types/status';
 
