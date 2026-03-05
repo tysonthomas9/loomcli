@@ -467,7 +467,7 @@ func TestComputeAgentStatus_Running(t *testing.T) {
 		RestartCount: 0,
 	}
 
-	status := computeAgentStatus(ap)
+	status := computeAgentStatus(ap, 3)
 
 	if status != "running" {
 		t.Errorf("computeAgentStatus() = %q, want %q for running process", status, "running")
@@ -481,7 +481,7 @@ func TestComputeAgentStatus_Stopped(t *testing.T) {
 		RestartCount: 0,
 	}
 
-	status := computeAgentStatus(ap)
+	status := computeAgentStatus(ap, 3)
 
 	if status != "stopped" {
 		t.Errorf("computeAgentStatus() = %q, want %q when PID is 0", status, "stopped")
@@ -495,7 +495,7 @@ func TestComputeAgentStatus_StoppedWithDeadPID(t *testing.T) {
 		RestartCount: 2,
 	}
 
-	status := computeAgentStatus(ap)
+	status := computeAgentStatus(ap, 3)
 
 	if status != "stopped" {
 		t.Errorf("computeAgentStatus() = %q, want %q for dead process with low restart count", status, "stopped")
@@ -509,7 +509,7 @@ func TestComputeAgentStatus_Failed(t *testing.T) {
 		RestartCount: 4, // > 3 (default max retries)
 	}
 
-	status := computeAgentStatus(ap)
+	status := computeAgentStatus(ap, 3)
 
 	if status != "failed" {
 		t.Errorf("computeAgentStatus() = %q, want %q for high restart count", status, "failed")
@@ -534,7 +534,7 @@ func TestComputeAgentStatus_FailedBoundary(t *testing.T) {
 				RestartCount: tt.restartCount,
 			}
 
-			status := computeAgentStatus(ap)
+			status := computeAgentStatus(ap, 3)
 
 			if status != tt.want {
 				t.Errorf("computeAgentStatus() = %q, want %q for restartCount=%d", status, tt.want, tt.restartCount)
@@ -550,10 +550,38 @@ func TestComputeAgentStatus_RunningOverridesRestartCount(t *testing.T) {
 		RestartCount: 10, // high restart count
 	}
 
-	status := computeAgentStatus(ap)
+	status := computeAgentStatus(ap, 3)
 
 	if status != "running" {
 		t.Errorf("computeAgentStatus() = %q, want %q - running should override restart count", status, "running")
+	}
+}
+
+func TestComputeAgentStatus_CustomMaxRetries(t *testing.T) {
+	tests := []struct {
+		name         string
+		restartCount int
+		maxRetries   int
+		want         string
+	}{
+		{"below custom limit", 4, 10, "stopped"},
+		{"at custom limit", 10, 10, "stopped"},
+		{"above custom limit", 11, 10, "failed"},
+		{"zero max retries, no restarts", 0, 0, "stopped"},
+		{"zero max retries, one restart", 1, 0, "failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ap := SupervisedAgentStatus{
+				PID:          0,
+				RestartCount: tt.restartCount,
+			}
+			status := computeAgentStatus(ap, tt.maxRetries)
+			if status != tt.want {
+				t.Errorf("computeAgentStatus(restartCount=%d, maxRetries=%d) = %q, want %q",
+					tt.restartCount, tt.maxRetries, status, tt.want)
+			}
+		})
 	}
 }
 
@@ -582,7 +610,7 @@ func TestWriteStateFile_Success(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents)
+	err := writeStateFile(stateFilePath, startedAt, agents, 3)
 
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
@@ -615,7 +643,7 @@ func TestWriteStateFile_AtomicWrite(t *testing.T) {
 
 	// Write state
 	agents := []SupervisedAgentStatus{{Worktree: "test", Role: "plan"}}
-	if err := writeStateFile(stateFilePath, startedAt, agents); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -783,7 +811,7 @@ func TestStateFileLifecycle(t *testing.T) {
 	agents := []SupervisedAgentStatus{
 		{Worktree: "falcon", Role: "plan", PID: os.Getpid()},
 	}
-	if err := writeStateFile(stateFilePath, startedAt, agents); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -798,7 +826,7 @@ func TestStateFileLifecycle(t *testing.T) {
 
 	// Update state (add agent)
 	agents = append(agents, SupervisedAgentStatus{Worktree: "nova", Role: "task"})
-	if err := writeStateFile(stateFilePath, startedAt, agents); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, 3); err != nil {
 		t.Fatalf("writeStateFile() update error = %v", err)
 	}
 

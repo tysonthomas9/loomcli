@@ -218,9 +218,15 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	fmt.Println("Press Ctrl+C to stop")
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 
+	// Extract configured max retries (default 3)
+	maxRetries := 3
+	if config.Daemon.RestartPolicy.MaxRetries != nil {
+		maxRetries = *config.Daemon.RestartPolicy.MaxRetries
+	}
+
 	// Write initial state file
 	startedAt := time.Now()
-	if err := writeStateFile(stateFilePath, startedAt, daemon.Agents()); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), maxRetries); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
 
@@ -246,7 +252,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 			case <-shutdown:
 				return
 			case <-ticker.C:
-				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents()); err != nil {
+				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), maxRetries); err != nil {
 					fmt.Printf("Warning: failed to update state file: %v\n", err)
 				}
 			}
@@ -466,7 +472,7 @@ func readStateFile(path string) (*DaemonState, error) {
 }
 
 // writeStateFile writes the daemon-agents.json state file
-func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentStatus) error {
+func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentStatus, maxRetries int) error {
 	state := DaemonState{
 		PID:       os.Getpid(),
 		StartedAt: startedAt,
@@ -478,7 +484,7 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 			Worktree:       ap.Worktree,
 			Role:           ap.Role,
 			PID:            ap.PID,
-			Status:         computeAgentStatus(ap),
+			Status:         computeAgentStatus(ap, maxRetries),
 			EpicID:         ap.AssignedEpicID,
 			CurrentBackend: ap.CurrentBackend,
 			RestartCount:   ap.RestartCount,
@@ -506,12 +512,12 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 }
 
 // computeAgentStatus determines the status string based on agent state
-func computeAgentStatus(ap SupervisedAgentStatus) string {
+func computeAgentStatus(ap SupervisedAgentStatus, maxRetries int) string {
 	if ap.PID > 0 && lockfile.IsProcessRunning(ap.PID) {
 		return "running"
 	}
 	// Not running - check if it failed
-	if ap.RestartCount > 3 { // default max retries
+	if ap.RestartCount > maxRetries {
 		return "failed"
 	}
 	return "stopped"

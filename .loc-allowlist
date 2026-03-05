@@ -15,7 +15,7 @@
 630 internal/webui/handlers_deps.go
 593 internal/rpc/client.go
 593 internal/cli/init.go
-557 internal/cli/daemon_cmd.go
+565 internal/cli/daemon_cmd.go
 517 internal/types/issue.go
 514 internal/cli/recover.go
 511 internal/webui/handlers_issues_write.go
