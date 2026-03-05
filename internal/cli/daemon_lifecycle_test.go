@@ -260,13 +260,14 @@ func TestStopAgent_ForcedKill(t *testing.T) {
 
 	// Spawn a process that ignores SIGTERM
 	cmd := exec.Command("bash", "-c", `trap "" TERM; sleep 60`) //nolint:norawexec
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start trap process: %v", err)
 	}
 	pid := cmd.Process.Pid
 
 	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		_ = cmd.Wait()
 	})
 
