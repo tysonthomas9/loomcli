@@ -17,6 +17,9 @@ type DaemonSettings struct {
 	EventsDir     string        `yaml:"events_dir,omitempty"`
 	RestartPolicy RestartPolicy `yaml:"restart_policy,omitempty"`
 	MaxAgents     *int          `yaml:"max_agents,omitempty"`
+	RedisURL      string        `yaml:"redis_url,omitempty"`
+	APIKey        string        `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	JWTKey        string        `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
 }
 
 // RestartPolicy defines how the daemon restarts failed agents.
@@ -93,6 +96,11 @@ func LoadProjectFile(dir string) (*ProjectFile, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("reading project file %s: %w", path, err)
+	}
+
+	data, err = ExpandConfigBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("expanding env vars in %s: %w", path, err)
 	}
 
 	var pf ProjectFile
@@ -241,6 +249,15 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	}
 	if src.MaxAgents != nil {
 		dst.MaxAgents = src.MaxAgents
+	}
+	if src.RedisURL != "" {
+		dst.RedisURL = src.RedisURL
+	}
+	if src.APIKey != "" {
+		dst.APIKey = src.APIKey
+	}
+	if src.JWTKey != "" {
+		dst.JWTKey = src.JWTKey
 	}
 }
 

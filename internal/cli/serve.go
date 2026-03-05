@@ -192,6 +192,16 @@ func runServe(cmd *cobra.Command, args []string) {
 		}()
 	}
 
+	// Fall back to daemon config for Redis/API key when CLI flags/env vars are not set
+	if dc, dcErr := LoadDaemonConfig("."); dcErr == nil {
+		if serveRedisAddr == "" && dc.Daemon.RedisURL != "" {
+			serveRedisAddr = dc.Daemon.RedisURL
+		}
+		if serveAPIKey == "" && dc.Daemon.APIKey != "" {
+			serveAPIKey = dc.Daemon.APIKey
+		}
+	}
+
 	// Provision shared JWT signing key from Redis (if configured) or environment
 	var fleetJWTKey []byte
 	var fleetRedisConfig *fleet.RedisConfig

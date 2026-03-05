@@ -5,8 +5,8 @@
 892 internal/cli/prompts.go
 883 internal/cli/monitor.go
 728 internal/webui/fleet_handlers.go
-895 internal/cli/serve.go
-1088 internal/cli/daemon.go
+905 internal/cli/serve.go
+1091 internal/cli/daemon.go
 703 internal/rpc/protocol.go
 665 internal/cli/worktree.go
 656 internal/webui/log_streamer.go

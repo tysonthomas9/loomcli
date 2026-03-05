@@ -14,6 +14,8 @@ func TestRunClaim_Success(t *testing.T) {
 	// Setup temp worktree directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	// Set LOOM_EVENTS_DIR to avoid git rev-parse call in emitTaskClaimedEvent
+	t.Setenv("LOOM_EVENTS_DIR", filepath.Join(tmpDir, "events"))
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
@@ -76,6 +78,8 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	// When bd show returns error, claim should still work but without title
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	// Set LOOM_EVENTS_DIR to avoid git rev-parse call in emitTaskClaimedEvent
+	t.Setenv("LOOM_EVENTS_DIR", filepath.Join(tmpDir, "events"))
 	origDir, _ := os.Getwd()
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
