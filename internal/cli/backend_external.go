@@ -25,17 +25,35 @@ type ExternalBackend struct {
 func (e *ExternalBackend) Name() string { return e.name }
 
 func (e *ExternalBackend) InvokeInteractive(workDir, prompt, agentName string) error {
-	cmd := exec.Command(e.binPath, "invoke", "--interactive", prompt)
+	cmd := exec.Command(e.binPath, "invoke", "--interactive")
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
 	cmd.Env = env
-	cmd.Stdin = os.Stdin
+
+	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings.
+	// MultiReader delivers the prompt first, then falls through to os.Stdin
+	// for interactive terminal input.
+	r, w, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("failed to create pipe: %w", err)
+	}
+	if _, err := io.WriteString(w, prompt); err != nil {
+		w.Close()
+		r.Close()
+		return fmt.Errorf("failed to write prompt to stdin: %w", err)
+	}
+	w.Close()
+	cmd.Stdin = io.MultiReader(r, os.Stdin)
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+
+	err = cmd.Run()
+	r.Close()
+	return err
 }
 
 func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {

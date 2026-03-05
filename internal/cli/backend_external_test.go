@@ -231,10 +231,11 @@ func TestExternalBackend_InvokeInteractive(t *testing.T) {
 		t.Skip("shell script test helpers not supported on Windows")
 	}
 
-	// Create a mock script that records its arguments to a file
+	// Create a mock script that records args and reads prompt from stdin
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "args.txt")
-	script := "#!/bin/sh\necho \"$@\" > " + argsFile + "\n"
+	stdinFile := filepath.Join(dir, "stdin.txt")
+	script := "#!/bin/sh\necho \"$@\" > " + argsFile + "\ncat > " + stdinFile + "\n"
 	binPath := filepath.Join(dir, "loom-backend-test")
 	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
 		t.Fatalf("failed to create mock binary: %v", err)
@@ -246,13 +247,22 @@ func TestExternalBackend_InvokeInteractive(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	data, err := os.ReadFile(argsFile)
+	// Verify prompt is NOT in CLI args
+	argsData, err := os.ReadFile(argsFile)
 	if err != nil {
 		t.Fatalf("failed to read args file: %v", err)
 	}
-	got := string(data)
-	if got != "invoke --interactive hello world\n" {
-		t.Fatalf("expected 'invoke --interactive hello world', got %q", got)
+	if got := string(argsData); got != "invoke --interactive\n" {
+		t.Fatalf("expected args 'invoke --interactive', got %q", got)
+	}
+
+	// Verify prompt IS received via stdin
+	stdinData, err := os.ReadFile(stdinFile)
+	if err != nil {
+		t.Fatalf("failed to read stdin file: %v", err)
+	}
+	if got := string(stdinData); got != "hello world" {
+		t.Fatalf("expected 'hello world' via stdin, got %q", got)
 	}
 }
 
@@ -304,7 +314,7 @@ func TestExternalBackend_EnvPassthrough(t *testing.T) {
 
 	dir := t.TempDir()
 	envFile := filepath.Join(dir, "env.txt")
-	script := "#!/bin/sh\nenv > " + envFile + "\n"
+	script := "#!/bin/sh\ncat > /dev/null\nenv > " + envFile + "\n"
 	binPath := filepath.Join(dir, "loom-backend-test")
 	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
 		t.Fatalf("failed to create mock binary: %v", err)
