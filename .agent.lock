@@ -1,10 +1,10 @@
 {
-  "pid": 15245,
+  "pid": 15457,
   "command": "task",
-  "started_at": "2026-03-05T01:41:00.605229-08:00",
+  "started_at": "2026-03-05T04:21:41.721066-08:00",
   "agent_name": "blaze",
-  "task_id": "loomcli-mc31t",
-  "task_title": "Pass statusBranch as parameter instead of mutating global monitorBranch",
-  "task_started_at": "2026-03-05T01:41:25.81545-08:00",
+  "task_id": "loomcli-5luma",
+  "task_title": "Add lock documentation for buildCommand accessing AgentProcess fields",
+  "task_started_at": "2026-03-05T04:22:03.316356-08:00",
   "state": "active"
 }

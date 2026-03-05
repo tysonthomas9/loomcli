@@ -494,9 +494,11 @@ func (d *Daemon) tryFallbackBackend(ap *AgentProcess) bool {
 	return true
 }
 
-// buildCommand constructs the exec.Cmd for spawning an agent subprocess.
-// Extracted from spawnAgent for testability. Does not start the process.
+// buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
+	ap.mu.Lock()
+	epicID := ap.assignedEpicID // snapshot before getEffectiveBackend (also acquires ap.mu)
+	ap.mu.Unlock()
 	var cmd *exec.Cmd
 
 	// Resolve backend using failover-aware resolution
@@ -508,8 +510,8 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		if agentBackend != "" {
 			args = append(args, "--backend", agentBackend)
 		}
-		if ap.assignedEpicID != "" {
-			args = append(args, "--parent", ap.assignedEpicID)
+		if epicID != "" {
+			args = append(args, "--parent", epicID)
 		}
 		cmd = exec.Command("loom", args...)
 	} else {
@@ -521,8 +523,8 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		if agentBackend != "" {
 			args = append(args, "--backend", agentBackend)
 		}
-		if ap.assignedEpicID != "" {
-			args = append(args, "--parent", ap.assignedEpicID)
+		if epicID != "" {
+			args = append(args, "--parent", epicID)
 		}
 		cmd = exec.Command("loom", args...)
 	}
@@ -556,8 +558,6 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 
 // spawnAgent starts the subprocess for an agent.
 func (d *Daemon) spawnAgent(ap *AgentProcess) error {
-	// Build command before acquiring the lock because buildCommand calls
-	// getEffectiveBackend which also acquires ap.mu (non-reentrant mutex).
 	cmd := d.buildCommand(ap)
 
 	ap.mu.Lock()
