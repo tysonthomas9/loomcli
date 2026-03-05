@@ -17,6 +17,6 @@
 593 internal/cli/init.go
 574 internal/cli/daemon_cmd.go
 517 internal/types/issue.go
-658 internal/cli/doctor.go
+667 internal/cli/doctor.go
 516 internal/cli/recover.go
 516 internal/webui/handlers_issues_write.go

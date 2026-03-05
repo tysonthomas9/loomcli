@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -157,11 +159,30 @@ func TestCheckGitRepo(t *testing.T) {
 }
 
 func TestCheckBdDaemon(t *testing.T) {
+	t.Run("bd not on PATH", func(t *testing.T) {
+		oldLookPath := lookPath
+		defer func() { lookPath = oldLookPath }()
+
+		lookPath = func(string) (string, error) {
+			return "", exec.ErrNotFound
+		}
+
+		result := checkBdDaemon()
+		if result.Status != StatusFail {
+			t.Errorf("expected fail, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "bd not found") {
+			t.Errorf("expected summary to contain 'bd not found', got %q", result.Summary)
+		}
+	})
+
 	t.Run("daemon running", func(t *testing.T) {
 		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
+		oldLookPath := lookPath
+		defer func() { execCommand = oldExec; lookPath = oldLookPath }()
 		defer ResetBeadsDirCache()
 
+		lookPath = func(string) (string, error) { return "/usr/bin/bd", nil }
 		execCommand = func(dir, name string, args ...string) CommandResult {
 			if name == "bd" && len(args) >= 2 && args[1] == "status" {
 				return CommandResult{Stdout: `{"status":"running","pid":1234}`}
@@ -177,9 +198,11 @@ func TestCheckBdDaemon(t *testing.T) {
 
 	t.Run("daemon not running", func(t *testing.T) {
 		oldExec := execCommand
-		defer func() { execCommand = oldExec }()
+		oldLookPath := lookPath
+		defer func() { execCommand = oldExec; lookPath = oldLookPath }()
 		defer ResetBeadsDirCache()
 
+		lookPath = func(string) (string, error) { return "/usr/bin/bd", nil }
 		execCommand = func(dir, name string, args ...string) CommandResult {
 			return CommandResult{Err: fmt.Errorf("not running")}
 		}
