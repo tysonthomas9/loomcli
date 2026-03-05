@@ -14,6 +14,7 @@ import (
 type DaemonSettings struct {
 	PIDFile       string        `yaml:"pid_file,omitempty"`
 	LogDir        string        `yaml:"log_dir,omitempty"`
+	EventsDir     string        `yaml:"events_dir,omitempty"`
 	RestartPolicy RestartPolicy `yaml:"restart_policy,omitempty"`
 	MaxAgents     *int          `yaml:"max_agents,omitempty"`
 }
@@ -119,8 +120,9 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 	// Start with defaults
 	dc := &DaemonConfig{
 		Daemon: DaemonSettings{
-			PIDFile: ".loom/daemon.pid",
-			LogDir:  ".loom/logs",
+			PIDFile:   ".loom/daemon.pid",
+			LogDir:    ".loom/logs",
+			EventsDir: ".loom/events",
 			RestartPolicy: RestartPolicy{
 				MaxRetries:     intPtr(3),
 				BackoffInitial: intPtr(2),
@@ -203,6 +205,9 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	}
 	if src.LogDir != "" {
 		dst.LogDir = src.LogDir
+	}
+	if src.EventsDir != "" {
+		dst.EventsDir = src.EventsDir
 	}
 	if src.RestartPolicy.MaxRetries != nil {
 		dst.RestartPolicy.MaxRetries = src.RestartPolicy.MaxRetries
