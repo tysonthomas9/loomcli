@@ -112,11 +112,6 @@ type StatusIssue struct {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	// Set monitorBranch if --branch was passed, so CollectMonitorData picks it up.
-	if statusBranch != "" {
-		monitorBranch = statusBranch
-	}
-
 	var (
 		daemonInfo DaemonInfo
 		monData    *MonitorData
@@ -133,7 +128,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		defer wg.Done()
-		monData = collectMonitorData(100)
+		monData = collectMonitorData(100, statusBranch)
 	}()
 
 	wg.Wait()

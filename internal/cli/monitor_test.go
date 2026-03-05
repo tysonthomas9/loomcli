@@ -1326,7 +1326,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		agents, _ := collectAgentStatus(nil)
+		agents, _ := collectAgentStatus(nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1374,7 +1374,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		agents, _ := collectAgentStatus(nil)
+		agents, _ := collectAgentStatus(nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1425,7 +1425,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			"spark": {ID: "T-123", Status: "in_progress"},
 		}
 
-		agents, _ := collectAgentStatus(agentTasks)
+		agents, _ := collectAgentStatus(agentTasks, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1473,7 +1473,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		agents, _ := collectAgentStatus(nil)
+		agents, _ := collectAgentStatus(nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1539,7 +1539,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		_, taskIDToAgents := collectAgentStatus(nil)
+		_, taskIDToAgents := collectAgentStatus(nil, "")
 
 		if len(taskIDToAgents["T-conflict"]) != 2 {
 			t.Errorf("expected 2 agents claiming same task, got %d", len(taskIDToAgents["T-conflict"]))
@@ -1604,7 +1604,7 @@ func TestCollectMonitorData(t *testing.T) {
 		return CommandResult{}
 	}
 
-	data := collectMonitorData(100)
+	data := collectMonitorData(100, "")
 
 	// Verify all sections populated
 	if data.Timestamp.IsZero() {
@@ -1690,7 +1690,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 		return CommandResult{}
 	}
 
-	data := CollectMonitorData()
+	data := CollectMonitorData("")
 	if data == nil {
 		t.Fatal("CollectMonitorData returned nil")
 	}
@@ -1738,7 +1738,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 		return CommandResult{}
 	}
 
-	agents := CollectAgentStatusOnly()
+	agents := CollectAgentStatusOnly("")
 	if len(agents) != 1 {
 		t.Fatalf("expected 1 agent, got %d", len(agents))
 	}
@@ -2069,7 +2069,7 @@ func TestGetWorktreeGitSyncStatusError(t *testing.T) {
 		return CommandResult{Err: fmt.Errorf("git failed")}
 	}
 
-	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main")
+	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main", "")
 	if ahead != 0 || behind != 0 {
 		t.Errorf("expected (0, 0) on error, got (%d, %d)", ahead, behind)
 	}
@@ -2083,7 +2083,7 @@ func TestGetWorktreeGitSyncStatusMalformed(t *testing.T) {
 		return CommandResult{Stdout: "not-a-number"}
 	}
 
-	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main")
+	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main", "")
 	if ahead != 0 || behind != 0 {
 		t.Errorf("expected (0, 0) on malformed output, got (%d, %d)", ahead, behind)
 	}
@@ -2093,17 +2093,13 @@ func TestGetWorktreeGitSyncStatusCustomBranch(t *testing.T) {
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })
 
-	oldBranch := monitorBranch
-	monitorBranch = "develop"
-	t.Cleanup(func() { monitorBranch = oldBranch })
-
 	var capturedArgs []string
 	execCommand = func(dir, name string, args ...string) CommandResult {
 		capturedArgs = args
 		return CommandResult{Stdout: "2\t4"}
 	}
 
-	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main")
+	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main", "develop")
 	if ahead != 4 || behind != 2 {
 		t.Errorf("expected (4, 2), got (%d, %d)", ahead, behind)
 	}
@@ -2219,7 +2215,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 				"alpha": {ID: "T-999", Title: "Test Task", Priority: 2, Status: "in_progress"},
 			}
 
-			agents, _ := collectAgentStatus(agentTasks)
+			agents, _ := collectAgentStatus(agentTasks, "")
 			if len(agents) != 1 {
 				t.Fatalf("expected 1 agent, got %d", len(agents))
 			}
