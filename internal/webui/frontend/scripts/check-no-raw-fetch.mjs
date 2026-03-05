@@ -2,13 +2,13 @@
 // AST-based linter that bans direct fetch() calls outside src/api/.
 // Components, hooks, and utils must use the API client (src/api/client.ts).
 
-import { readFileSync, readdirSync, statSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join, relative, extname, sep } from "path";
 import { fileURLToPath } from "url";
 import ts from "typescript";
 
-// Directories to scan (relative to frontend root).
-const SCAN_DIRS = ["src/components", "src/hooks", "src/utils"];
+// Directories to exclude when scanning src/ (relative names, not paths).
+const EXCLUDE_DIRS = new Set(["api", "__tests__", "node_modules"]);
 
 // Allowlist of "relPath:line" entries permitted to use raw fetch().
 // Currently empty — the codebase is clean.
@@ -67,7 +67,7 @@ function walkNode(node, callback) {
 }
 
 /**
- * Recursively collect .ts/.tsx files under dir.
+ * Recursively collect .ts/.tsx files under dir, skipping EXCLUDE_DIRS.
  */
 function collectFiles(dir) {
   const results = [];
@@ -80,7 +80,7 @@ function collectFiles(dir) {
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === "node_modules") continue;
+      if (EXCLUDE_DIRS.has(entry.name)) continue;
       results.push(...collectFiles(full));
     } else {
       const ext = extname(entry.name);
@@ -135,42 +135,29 @@ export function scanFile(filePath, sourceRoot, contents) {
 }
 
 /**
- * Scan all files in SCAN_DIRS for raw fetch() calls.
- * Returns { violations, allowlistedCount }.
+ * Scan all files under src/ (excluding EXCLUDE_DIRS) for raw fetch() calls.
+ * Returns { violations, allowlistedCount, scannedCount }.
  */
 export function scanAll(rootDir) {
   const violations = [];
-  let scannedCount = 0;
   let allowlistedCount = 0;
 
-  for (const scanDir of SCAN_DIRS) {
-    const absDir = join(rootDir, scanDir);
-    let stat;
-    try {
-      stat = statSync(absDir);
-    } catch {
-      // Directory may not exist — skip silently.
-      continue;
-    }
-    if (!stat.isDirectory()) continue;
+  const srcDir = join(rootDir, "src");
+  const files = collectFiles(srcDir);
 
-    const files = collectFiles(absDir);
-    scannedCount += files.length;
-
-    for (const filePath of files) {
-      const fileViolations = scanFile(filePath, rootDir);
-      for (const v of fileViolations) {
-        const key = `${v.relPath}:${v.line}`;
-        if (ALLOWLIST.has(key)) {
-          allowlistedCount++;
-        } else {
-          violations.push(v);
-        }
+  for (const filePath of files) {
+    const fileViolations = scanFile(filePath, rootDir);
+    for (const v of fileViolations) {
+      const key = `${v.relPath}:${v.line}`;
+      if (ALLOWLIST.has(key)) {
+        allowlistedCount++;
+      } else {
+        violations.push(v);
       }
     }
   }
 
-  return { violations, allowlistedCount, scannedCount };
+  return { violations, allowlistedCount, scannedCount: files.length };
 }
 
 function main() {
