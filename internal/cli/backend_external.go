@@ -154,6 +154,13 @@ func (e *ExternalBackend) Meta() BackendMeta {
 // backend by invoking the "health --json" subcommand. Returns an unhealthy
 // status if the subcommand fails or is not implemented.
 func (e *ExternalBackend) HealthCheck() HealthStatus {
+	if _, err := os.Stat(e.binPath); err != nil {
+		return HealthStatus{
+			Installed: false,
+			Healthy:   false,
+			Message:   fmt.Sprintf("binary no longer found at %s", e.binPath),
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), externalCmdTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, e.binPath, "health", "--json")

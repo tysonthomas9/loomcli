@@ -355,14 +355,14 @@ func TestExternalBackend_Meta_Fallback(t *testing.T) {
 }
 
 func TestExternalBackend_HealthCheck_Fallback(t *testing.T) {
-	// When binPath doesn't exist / health subcommand fails, should return unhealthy
+	// When binPath doesn't exist, should return Installed=false
 	eb := &ExternalBackend{name: "broken", binPath: "/nonexistent/loom-backend-broken"}
 	hs := eb.HealthCheck()
 	if hs.Healthy {
 		t.Error("expected unhealthy status when binary doesn't exist")
 	}
-	if !hs.Installed {
-		t.Error("expected Installed=true (binary was found during discovery)")
+	if hs.Installed {
+		t.Error("expected Installed=false when binary no longer exists on disk")
 	}
 	if hs.Message == "" {
 		t.Error("expected a non-empty message describing the failure")
@@ -420,6 +420,66 @@ echo '{"Healthy":true,"Installed":true,"Version":"2.0","APIKeySet":true,"Message
 	}
 	if hs.Message != "ready" {
 		t.Errorf("expected Message 'ready', got %q", hs.Message)
+	}
+}
+
+func TestExternalBackend_HealthCheck_BinaryDeletedAfterDiscovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helpers not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	script := `#!/bin/sh
+echo '{"Healthy":true,"Installed":true,"Version":"1.0","Message":"ok"}'
+`
+	binPath := filepath.Join(dir, "loom-backend-ephemeral")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	eb := &ExternalBackend{name: "ephemeral", binPath: binPath}
+
+	// Delete the binary to simulate removal after discovery.
+	if err := os.Remove(binPath); err != nil {
+		t.Fatalf("failed to remove mock binary: %v", err)
+	}
+
+	hs := eb.HealthCheck()
+	if hs.Installed {
+		t.Error("expected Installed=false after binary deletion")
+	}
+	if hs.Healthy {
+		t.Error("expected Healthy=false after binary deletion")
+	}
+	if hs.Message == "" {
+		t.Error("expected a non-empty message describing the missing binary")
+	}
+}
+
+func TestExternalBackend_HealthCheck_BinaryExistsButHealthFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helpers not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	script := `#!/bin/sh
+exit 1
+`
+	binPath := filepath.Join(dir, "loom-backend-failing")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	eb := &ExternalBackend{name: "failing", binPath: binPath}
+	hs := eb.HealthCheck()
+	if !hs.Installed {
+		t.Error("expected Installed=true when binary exists but health fails")
+	}
+	if hs.Healthy {
+		t.Error("expected Healthy=false when health subcommand fails")
+	}
+	if hs.Message == "" {
+		t.Error("expected a non-empty message describing the failure")
 	}
 }
 
