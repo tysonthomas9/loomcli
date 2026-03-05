@@ -34,7 +34,7 @@ const TERMINAL_SESSION = 'talk-to-lead';
 async function fetchTerminalToken(): Promise<string | null> {
   try {
     const resp = await get<{ token: string }>(
-      `/api/terminal/token?session=${TERMINAL_SESSION}`
+      `/api/terminal/token?session=${TERMINAL_SESSION}` // allow-url
     );
     return resp.token;
   } catch {
@@ -47,7 +47,7 @@ async function fetchTerminalToken(): Promise<string | null> {
  */
 function buildWsUrl(token: string | null): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${TERMINAL_SESSION}`;
+  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${TERMINAL_SESSION}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
   }
@@ -364,10 +364,10 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
       setConnectionState('connecting');
       try {
         const tokenResp = await get<{ token: string }>(
-          `/api/terminal/token?session=${TERMINAL_SESSION}`
+          `/api/terminal/token?session=${TERMINAL_SESSION}` // allow-url
         );
         const token = tokenResp?.token ?? '';
-        await post(`/api/terminal/restart?session=${TERMINAL_SESSION}&token=${encodeURIComponent(token)}`, {});
+        await post(`/api/terminal/restart?session=${TERMINAL_SESSION}&token=${encodeURIComponent(token)}`, {}); // allow-url
       } catch {
         // Restart may fail if daemon unavailable; proceed with reconnect anyway
       }
