@@ -309,6 +309,33 @@ func TestClassifyByExitCode(t *testing.T) {
 	}
 }
 
+func TestClassifyByExitCodeMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		exitCode int
+		contains []string
+	}{
+		{"SIGKILL", 137, []string{"SIGKILL", "137"}},
+		{"SIGTERM", 143, []string{"SIGTERM", "143"}},
+		{"generic failure", 1, []string{"exit code 1"}},
+		{"arbitrary code", 42, []string{"exit code 42"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := classifyByExitCodeMessage(tt.exitCode)
+			for _, s := range tt.contains {
+				if !strings.Contains(got, s) {
+					t.Errorf("classifyByExitCodeMessage(%d) = %q, want to contain %q", tt.exitCode, got, s)
+				}
+			}
+		})
+	}
+}
+
 func TestClassifyFromLog(t *testing.T) {
 	t.Parallel()
 
