@@ -8,16 +8,15 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 FRONTEND_DIR="$REPO_ROOT/internal/webui/frontend"
 
-# Filter args to only frontend src/ files
+# Filter args to only frontend src/ files (any depth)
+FRONTEND_PREFIX="internal/webui/frontend/src/"
 frontend_files=()
 ts_tsx_files=()
 for file in "$@"; do
-    if [[ "$file" == internal/webui/frontend/src/*.ts ]] ||
-       [[ "$file" == internal/webui/frontend/src/*.tsx ]] ||
-       [[ "$file" == internal/webui/frontend/src/*.css ]]; then
+    if [[ "$file" == "${FRONTEND_PREFIX}"* ]] && [[ "$file" =~ \.(ts|tsx|css)$ ]]; then
         rel="${file#internal/webui/frontend/}"
         frontend_files+=("$rel")
-        if [[ "$file" == *.ts || "$file" == *.tsx ]]; then
+        if [[ "$file" =~ \.(ts|tsx)$ ]]; then
             ts_tsx_files+=("$rel")
         fi
     fi
