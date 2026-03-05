@@ -71,7 +71,14 @@ func TestClassifyClaude(t *testing.T) {
 			name:      "overloaded error",
 			log:       "Error: 529 overloaded_error: API is temporarily overloaded",
 			exitCode:  1,
-			wantClass: Transient,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "overloaded error with retry-after",
+			log:       "Error: 529 overloaded_error: API is temporarily overloaded\nretry-after: 45",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 45 * time.Second,
 		},
 		{
 			name:      "server error 500",

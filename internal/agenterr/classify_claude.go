@@ -14,7 +14,7 @@ var claudePatterns = []struct {
 }{
 	{regexp.MustCompile(`(?i)rate.?limit|too many requests`), RateLimited, "rate limit exceeded"},
 	{regexp.MustCompile(`(?i)\b429\b`), RateLimited, "rate limit exceeded (429)"},
-	{regexp.MustCompile(`(?i)overloaded_error`), Transient, "API overloaded"},
+	{regexp.MustCompile(`(?i)overloaded_error`), RateLimited, "API overloaded (529)"},
 	{regexp.MustCompile(`(?i)invalid.?api.?key|authentication.?failed`), AuthFailure, "invalid API key"},
 	{regexp.MustCompile(`(?i)\b401\b|unauthorized`), AuthFailure, "authentication failed (401)"},
 	{regexp.MustCompile(`(?i)ANTHROPIC_API_KEY`), AuthFailure, "ANTHROPIC_API_KEY not set or invalid"},
