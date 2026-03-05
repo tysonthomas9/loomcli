@@ -51,6 +51,7 @@ func SetupSignalHandler() chan struct{} {
 
 	go func() {
 		sig := <-sigChan
+		signal.Stop(sigChan) // Stop delivering signals to this channel
 		log.Printf("[auto] Shutdown signal received: %v (PID=%d, PGID=%d)", sig, os.Getpid(), syscall.Getpgrp())
 		fmt.Printf("\n[auto] Shutdown signal received (%v), stopping gracefully...\n", sig)
 		close(shutdown) // Closing unblocks ALL receivers
