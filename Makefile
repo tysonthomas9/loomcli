@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc check-no-raw-exec test-coverage test-frontend-coverage
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover
 
 # Default target
 all: build
@@ -24,6 +24,18 @@ test-integration:
 test-all:
 	@echo "Running all tests..."
 	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
+
+# Run tests with race detector and coverage
+test-race-cover:
+	@echo "Running tests with race detector and coverage..."
+	@TEST_COVER=1 TEST_RACE=1 TEST_TIMEOUT=15m ./scripts/test.sh
+	@./scripts/check-coverage.sh
+
+# Run integration tests with race detector and coverage
+test-integration-race-cover:
+	@echo "Running integration tests with race detector and coverage..."
+	@TEST_COVER=1 TEST_RACE=1 TEST_TAGS=integration TEST_TIMEOUT=15m ./scripts/test.sh
+	@./scripts/check-coverage.sh
 
 # Run Go linter
 lint:
@@ -213,6 +225,8 @@ help:
 	@echo "  make test              - Run unit tests with coverage"
 	@echo "  make test-integration  - Run unit + integration tests"
 	@echo "  make test-all          - Run all tests (unit + integration + e2e)"
+	@echo "  make test-race-cover   - Run tests with race detector + coverage"
+	@echo "  make test-integration-race-cover - Run integration tests with race + coverage"
 	@echo "  make test-coverage     - Run Go tests with coverage threshold"
 	@echo "  make test-frontend-coverage - Run frontend tests with coverage threshold"
 	@echo "  make check-no-raw-exec - Check for raw exec.Command in unit tests"
