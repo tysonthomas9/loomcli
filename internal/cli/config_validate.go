@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -129,7 +130,13 @@ func validateAgentEntries(r *ValidationResult, agents []AgentEntry, roles map[st
 
 // validateRoles checks role configs for valid prompt files and task filters.
 func validateRoles(r *ValidationResult, roles map[string]RoleConfig, projectDir string) {
-	for name, rc := range roles {
+	roleNames := make([]string, 0, len(roles))
+	for name := range roles {
+		roleNames = append(roleNames, name)
+	}
+	sort.Strings(roleNames)
+	for _, name := range roleNames {
+		rc := roles[name]
 		field := fmt.Sprintf("roles.%s", name)
 
 		// Prompt file existence (warning, not error)
@@ -150,6 +157,7 @@ func validateRoles(r *ValidationResult, roles map[string]RoleConfig, projectDir 
 			for k := range validTaskFilters {
 				keys = append(keys, k)
 			}
+			sort.Strings(keys)
 			r.addError(field+".task_filter", fmt.Sprintf(
 				"%q must be one of: %s", rc.TaskFilter, strings.Join(keys, ", ")))
 		}
