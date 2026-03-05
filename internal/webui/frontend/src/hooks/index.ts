@@ -100,3 +100,9 @@ export type {
 
 export { useUsage } from './useUsage';
 export type { UseUsageOptions, UseUsageResult } from './useUsage';
+
+export { useObservabilityMetrics } from './useObservabilityMetrics';
+export type {
+  UseObservabilityMetricsOptions,
+  UseObservabilityMetricsResult,
+} from './useObservabilityMetrics';

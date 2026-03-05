@@ -40,6 +40,9 @@ export type { BackendConfigData, AgentBackendOverride, BackendConfigPatchRequest
 // Usage API functions (loom server)
 export { fetchUsage } from './usage';
 
+// Observability API functions (loom server)
+export { fetchObservabilityMetrics } from './observability';
+
 // Log streaming API functions
 export {
   getTaskLogPhases,

@@ -62,6 +62,11 @@ const SettingsView = lazy(() =>
   import('@/components/SettingsView').then((m) => ({ default: m.SettingsView }))
 );
 
+// Lazy load ObservabilityDashboard (observability metrics view)
+const ObservabilityDashboard = lazy(() =>
+  import('@/components/ObservabilityDashboard').then((m) => ({ default: m.ObservabilityDashboard }))
+);
+
 // Lazy load TerminalPanel (xterm.js ~100KB)
 const TerminalPanel = lazy(() =>
   import('@/components/TerminalPanel').then((m) => ({ default: m.TerminalPanel }))
@@ -625,6 +630,11 @@ function App() {
             onIssueClick={handleIssueClick}
             onAgentClick={handleAgentClick}
           />
+        </Suspense>
+      )}
+      {activeView === 'observability' && (
+        <Suspense fallback={<LoadingSkeleton.Column />}>
+          <ObservabilityDashboard />
         </Suspense>
       )}
       {activeView === 'settings' && (

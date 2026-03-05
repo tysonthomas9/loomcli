@@ -10,7 +10,7 @@ import styles from './ViewSwitcher.module.css';
 /**
  * Available view modes.
  */
-export type ViewMode = 'kanban' | 'table' | 'graph' | 'monitor' | 'settings';
+export type ViewMode = 'kanban' | 'table' | 'graph' | 'monitor' | 'observability' | 'settings';
 
 /**
  * Default view when none is specified.
@@ -33,6 +33,7 @@ const VIEWS: ViewConfig[] = [
   { id: 'table', label: 'Table' },
   { id: 'graph', label: 'Graph' },
   { id: 'monitor', label: 'Monitor' },
+  { id: 'observability', label: 'Observability' },
 ];
 
 /**

@@ -189,6 +189,13 @@ export type {
   UsageParams,
 } from './usage';
 
+// Observability types
+export type {
+  MetricsSnapshot,
+  HourlyBucket,
+  ObservabilityMetricsResponse,
+} from './observability';
+
 // Graph types (React Flow)
 export type {
   IssueNodeData,
