@@ -76,6 +76,7 @@ ENDPOINTS
   GET /api/sync        Sync status
   GET /api/usage       Token usage and cost data (filterable)
   GET /api/workspaces  Workspace configuration (workspace mode only)
+  GET /api/observability/{metrics,events}  Observability data
 
 ENVIRONMENT VARIABLES
   LOOM_SERVER_PORT    Server port (default: 8081)
@@ -349,6 +350,9 @@ func runServe(cmd *cobra.Command, args []string) {
 	mux.HandleFunc("GET /api/stale-detector", handleStaleDetector)
 	mux.HandleFunc("GET /api/usage", handleUsage)
 	mux.HandleFunc("GET /metrics", handleMetrics)
+	eventsDir := resolveEventsDir()
+	mux.HandleFunc("GET /api/observability/metrics", handleObservabilityMetrics(eventsDir))
+	mux.HandleFunc("GET /api/observability/events", handleObservabilityEvents(eventsDir))
 
 	// Wrap with CORS middleware
 	handler := corsMiddleware(serveCorsOrigin, mux)
@@ -444,8 +448,6 @@ func corsMiddleware(corsOrigin string, next http.Handler) http.Handler {
 	})
 }
 
-// Response types for JSON API
-
 // WorkspaceInfo represents workspace metadata for API responses.
 type WorkspaceInfo struct {
 	Mode       string   `json:"mode"`                 // "workspace" or "legacy"
@@ -515,8 +517,6 @@ type StatusResponse struct {
 	Sync           SyncInfo            `json:"sync"`
 	Timestamp      time.Time           `json:"timestamp"`
 }
-
-// HTTP Handlers
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, HealthResponse{
