@@ -356,6 +356,24 @@ func TestConcurrencyTracker_NilReceiver(t *testing.T) {
 	ct.Close()         // should not panic
 }
 
+func TestConcurrencyTracker_NilActiveCount(t *testing.T) {
+	var ct *ConcurrencyTracker
+	if got := ct.ActiveCount("any"); got != 0 {
+		t.Errorf("nil ActiveCount = %d, want 0", got)
+	}
+}
+
+func TestConcurrencyTracker_NilCounts(t *testing.T) {
+	var ct *ConcurrencyTracker
+	counts := ct.Counts()
+	if counts == nil {
+		t.Error("nil Counts() returned nil, want empty map")
+	}
+	if len(counts) != 0 {
+		t.Errorf("nil Counts() len = %d, want 0", len(counts))
+	}
+}
+
 func TestConcurrencyTracker_AcquireUnlimitedAfterClose(t *testing.T) {
 	ct := NewConcurrencyTracker(map[string]RoleConfig{
 		"unlimited": {}, // no MaxConcurrency = unlimited

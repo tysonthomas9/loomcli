@@ -108,15 +108,21 @@ func (ct *ConcurrencyTracker) Release(role string) {
 	ct.cond.Broadcast()
 }
 
-// ActiveCount returns the current active count for a role.
+// ActiveCount returns the current active count for a role. Safe on nil receiver.
 func (ct *ConcurrencyTracker) ActiveCount(role string) int {
+	if ct == nil {
+		return 0
+	}
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 	return ct.counts[role]
 }
 
-// Counts returns a copy of the counts map (for status/monitoring).
+// Counts returns a copy of the counts map (for status/monitoring). Safe on nil receiver.
 func (ct *ConcurrencyTracker) Counts() map[string]int {
+	if ct == nil {
+		return map[string]int{}
+	}
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
