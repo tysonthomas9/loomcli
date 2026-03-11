@@ -100,6 +100,8 @@ export interface LoomAgentStatus {
   ahead: number;
   /** Commits behind integration branch */
   behind: number;
+  /** Worktree path relative to repo root (e.g., "worktrees/cobalt") */
+  path?: string;
   /** Role from daemon config (e.g., "plan", "task") */
   role?: string;
   /** Recent commits ahead of integration branch */

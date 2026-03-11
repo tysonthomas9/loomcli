@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,7 @@ type AgentStatus struct {
 	Status        string         `json:"status"`                   // "ready", "3 changes", "running (plan, 5m ago)"
 	Ahead         int            `json:"ahead"`                    // commits ahead of integration branch
 	Behind        int            `json:"behind"`                   // commits behind integration branch
+	Path          string         `json:"path,omitempty"`           // worktree path relative to repo root
 	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
 	Workspace     string         `json:"workspace"`                // workspace name (empty in legacy mode)
 	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
@@ -439,11 +441,13 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 		return nil, nil
 	}
 
-	// Load daemon-managed agents (if any)
+	// Load daemon-managed agents (if any) and determine repo root for relative paths
 	var daemonManaged map[string]DaemonAgentInfo
+	repoRoot := ""
 	if projectDir, err2 := os.Getwd(); err2 == nil {
 		daemonStatePath := ResolveDaemonStatePath(projectDir)
 		daemonManaged = loadDaemonManagedAgents(daemonStatePath)
+		repoRoot = projectDir
 	}
 
 	var agents []AgentStatus
@@ -466,6 +470,13 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			Workspace:     wt.Workspace,
 			Role:          daemonInfo.Role,
 			DaemonManaged: daemonInfo.Managed,
+		}
+
+		// Set relative worktree path (e.g., "worktrees/cobalt")
+		if repoRoot != "" {
+			if rel, err2 := filepath.Rel(repoRoot, wt.Path); err2 == nil && !strings.HasPrefix(rel, "..") {
+				agent.Path = filepath.ToSlash(rel)
+			}
 		}
 
 		// Check for running agent (lock status)

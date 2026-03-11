@@ -457,6 +457,12 @@ export function AgentDetailPanel({
                 <div className={styles.section}>
                   <h3 className={styles.sectionTitle}>Agent Info</h3>
                   <dl className={styles.infoGrid}>
+                    {agent.path && (
+                      <>
+                        <dt>Path</dt>
+                        <dd>{agent.path}</dd>
+                      </>
+                    )}
                     <dt>Branch</dt>
                     <dd>{agent.branch}</dd>
                     <dt>Status</dt>
