@@ -101,6 +101,22 @@ func (b *FileSecretBackend) Resolve(name string) (string, bool, error) {
 	return val, true, nil
 }
 
+// redactOpURI masks the field component of an op:// URI for safe error reporting.
+// It returns "op://vault/item/***" if the URI has at least vault/item/field parts,
+// or "op://***" if parsing fails.
+func redactOpURI(uri string) string {
+	trimmed := strings.TrimPrefix(uri, "op://")
+	if trimmed == uri {
+		// Not an op:// URI at all
+		return "op://***"
+	}
+	parts := strings.SplitN(trimmed, "/", 3)
+	if len(parts) < 3 || parts[0] == "" || parts[1] == "" {
+		return "op://***"
+	}
+	return "op://" + parts[0] + "/" + parts[1] + "/***"
+}
+
 // OnePasswordBackend resolves op:// URIs via the 1Password CLI.
 type OnePasswordBackend struct {
 	opAvailable bool
@@ -126,7 +142,7 @@ func (b *OnePasswordBackend) Resolve(name string) (string, bool, error) {
 
 	result := execCommandContext(ctx, "", "op", "read", name)
 	if result.Err != nil {
-		return "", false, fmt.Errorf("op read %s: %s", name, strings.TrimSpace(result.Stderr))
+		return "", false, fmt.Errorf("op read %s: %s", redactOpURI(name), strings.TrimSpace(result.Stderr))
 	}
 	return strings.TrimSpace(result.Stdout), true, nil
 }
