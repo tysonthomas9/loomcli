@@ -20,7 +20,7 @@ func TestRequest_JSONRoundTrip(t *testing.T) {
 		ExpectedDB:    "/home/user/project/.beads/db.sqlite",
 	}
 
-	data, err := json.Marshal(original)
+	data, err := json.Marshal(original) // #nosec G117 — test struct, no real secrets
 	if err != nil {
 		t.Fatalf("json.Marshal() error: %v", err)
 	}

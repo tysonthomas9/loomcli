@@ -2,5 +2,5 @@
  * IssueNode component exports.
  */
 
-export { IssueNode } from './IssueNode';
-export type { IssueNodeProps } from './IssueNode';
+export { IssueNode } from "./IssueNode";
+export type { IssueNodeProps } from "./IssueNode";

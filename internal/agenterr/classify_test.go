@@ -71,7 +71,14 @@ func TestClassifyClaude(t *testing.T) {
 			name:      "overloaded error",
 			log:       "Error: 529 overloaded_error: API is temporarily overloaded",
 			exitCode:  1,
-			wantClass: Transient,
+			wantClass: RateLimited,
+		},
+		{
+			name:      "overloaded error with retry-after",
+			log:       "Error: 529 overloaded_error: API is temporarily overloaded\nretry-after: 45",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 45 * time.Second,
 		},
 		{
 			name:      "server error 500",
@@ -127,6 +134,7 @@ func TestClassifyCodex(t *testing.T) {
 		log       string
 		exitCode  int
 		wantClass ErrorClass
+		wantRetry time.Duration
 	}{
 		{
 			name:      "rate limit",
@@ -135,10 +143,31 @@ func TestClassifyCodex(t *testing.T) {
 			wantClass: RateLimited,
 		},
 		{
+			name:      "rate limit with retry-after",
+			log:       "Error: 429 rate_limit: too many requests\nretry-after: 45",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 45 * time.Second,
+		},
+		{
+			name:      "rate limit with Retry-After header casing",
+			log:       "Error: too many requests\nRetry-After: 120",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 120 * time.Second,
+		},
+		{
 			name:      "tokens per minute",
 			log:       "Error: tokens per min limit exceeded",
 			exitCode:  1,
 			wantClass: RateLimited,
+		},
+		{
+			name:      "tokens per minute with retry-after",
+			log:       "Error: tokens per min limit exceeded\nretry-after: 60",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 60 * time.Second,
 		},
 		{
 			name:      "auth failure",
@@ -203,6 +232,9 @@ func TestClassifyCodex(t *testing.T) {
 			if result.Class != tt.wantClass {
 				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
 			}
+			if result.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			}
 		})
 	}
 }
@@ -215,12 +247,27 @@ func TestClassifyOpenCode(t *testing.T) {
 		log       string
 		exitCode  int
 		wantClass ErrorClass
+		wantRetry time.Duration
 	}{
 		{
 			name:      "rate limit",
 			log:       "Error: 429 too many requests",
 			exitCode:  1,
 			wantClass: RateLimited,
+		},
+		{
+			name:      "rate limit with retry-after",
+			log:       "Error: 429 too many requests\nretry-after: 30",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 30 * time.Second,
+		},
+		{
+			name:      "rate limit with Retry-After header casing",
+			log:       "Error: rate_limit exceeded\nRetry-After: 90",
+			exitCode:  1,
+			wantClass: RateLimited,
+			wantRetry: 90 * time.Second,
 		},
 		{
 			name:      "auth failure",
@@ -279,6 +326,9 @@ func TestClassifyOpenCode(t *testing.T) {
 			if result.Class != tt.wantClass {
 				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
 			}
+			if result.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			}
 		})
 	}
 }
@@ -304,6 +354,33 @@ func TestClassifyByExitCode(t *testing.T) {
 			got := classifyByExitCode(tt.exitCode)
 			if got != tt.wantClass {
 				t.Errorf("classifyByExitCode(%d) = %s, want %s", tt.exitCode, got, tt.wantClass)
+			}
+		})
+	}
+}
+
+func TestClassifyByExitCodeMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		exitCode int
+		contains []string
+	}{
+		{"SIGKILL", 137, []string{"SIGKILL", "137"}},
+		{"SIGTERM", 143, []string{"SIGTERM", "143"}},
+		{"generic failure", 1, []string{"exit code 1"}},
+		{"arbitrary code", 42, []string{"exit code 42"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := classifyByExitCodeMessage(tt.exitCode)
+			for _, s := range tt.contains {
+				if !strings.Contains(got, s) {
+					t.Errorf("classifyByExitCodeMessage(%d) = %q, want to contain %q", tt.exitCode, got, s)
+				}
 			}
 		})
 	}
@@ -385,6 +462,52 @@ func TestClassifyFromLog(t *testing.T) {
 		aerr := ClassifyFromLog(logPath, 143, "unknown-backend")
 		if aerr.Class != Transient {
 			t.Errorf("class = %s, want Transient (exit code 143 fallback)", aerr.Class)
+		}
+	})
+
+	t.Run("codex rate limit with retry-after", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "agent.log")
+		if err := os.WriteFile(logPath, []byte("Starting codex agent...\nError: 429 rate_limit: too many requests\nretry-after: 45\n"), 0600); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+
+		aerr := ClassifyFromLog(logPath, 1, "codex")
+		if aerr.Class != RateLimited {
+			t.Errorf("class = %s, want RateLimited", aerr.Class)
+		}
+		if aerr.RetryAfter != 45*time.Second {
+			t.Errorf("retryAfter = %v, want 45s", aerr.RetryAfter)
+		}
+		if aerr.Backend != "codex" {
+			t.Errorf("backend = %q, want %q", aerr.Backend, "codex")
+		}
+		if aerr.ExitCode != 1 {
+			t.Errorf("exitCode = %d, want 1", aerr.ExitCode)
+		}
+	})
+
+	t.Run("opencode rate limit with retry-after", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "agent.log")
+		if err := os.WriteFile(logPath, []byte("Starting opencode agent...\nError: 429 too many requests\nretry-after: 30\n"), 0600); err != nil {
+			t.Fatalf("write log: %v", err)
+		}
+
+		aerr := ClassifyFromLog(logPath, 1, "opencode")
+		if aerr.Class != RateLimited {
+			t.Errorf("class = %s, want RateLimited", aerr.Class)
+		}
+		if aerr.RetryAfter != 30*time.Second {
+			t.Errorf("retryAfter = %v, want 30s", aerr.RetryAfter)
+		}
+		if aerr.Backend != "opencode" {
+			t.Errorf("backend = %q, want %q", aerr.Backend, "opencode")
+		}
+		if aerr.ExitCode != 1 {
+			t.Errorf("exitCode = %d, want 1", aerr.ExitCode)
 		}
 	})
 

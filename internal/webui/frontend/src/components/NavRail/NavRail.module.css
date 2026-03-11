@@ -39,7 +39,7 @@
   border-color: var(--color-border-hover);
 }
 
-.navButton[data-active='true'] {
+.navButton[data-active="true"] {
   background-color: var(--color-status-open);
   color: var(--color-text-inverse);
   border-color: color-mix(in srgb, var(--color-status-open) 65%, #ffffff);

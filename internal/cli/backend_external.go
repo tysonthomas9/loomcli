@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +13,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
+
+// externalCmdTimeout is the maximum time allowed for external backend
+// meta and health check commands to complete.
+const externalCmdTimeout = 5 * time.Second
 
 // ExternalBackend implements the Backend interface by delegating to an external
 // binary discovered on PATH matching the loom-backend-* naming convention.
@@ -25,17 +32,35 @@ type ExternalBackend struct {
 func (e *ExternalBackend) Name() string { return e.name }
 
 func (e *ExternalBackend) InvokeInteractive(workDir, prompt, agentName string) error {
-	cmd := exec.Command(e.binPath, "invoke", "--interactive", prompt)
+	cmd := exec.Command(e.binPath, "invoke", "--interactive")
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
 	cmd.Env = env
-	cmd.Stdin = os.Stdin
+
+	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings.
+	// MultiReader delivers the prompt first, then falls through to os.Stdin
+	// for interactive terminal input.
+	r, w, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("failed to create pipe: %w", err)
+	}
+	if _, err := io.WriteString(w, prompt); err != nil {
+		w.Close()
+		r.Close()
+		return fmt.Errorf("failed to write prompt to stdin: %w", err)
+	}
+	w.Close()
+	cmd.Stdin = io.MultiReader(r, os.Stdin)
+
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+
+	err = cmd.Run()
+	r.Close()
+	return err
 }
 
 func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
@@ -104,8 +129,12 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 // the "meta --json" subcommand. Returns a zero-value BackendMeta if the
 // subcommand fails or is not implemented.
 func (e *ExternalBackend) Meta() BackendMeta {
-	out, err := exec.Command(e.binPath, "meta", "--json").Output()
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), externalCmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, e.binPath, "meta", "--json")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil && !(errors.Is(err, exec.ErrWaitDelay) && len(out) > 0) {
 		return BackendMeta{
 			DisplayName: e.name,
 			BinaryName:  filepath.Base(e.binPath),
@@ -125,8 +154,19 @@ func (e *ExternalBackend) Meta() BackendMeta {
 // backend by invoking the "health --json" subcommand. Returns an unhealthy
 // status if the subcommand fails or is not implemented.
 func (e *ExternalBackend) HealthCheck() HealthStatus {
-	out, err := exec.Command(e.binPath, "health", "--json").Output()
-	if err != nil {
+	if _, err := os.Stat(e.binPath); err != nil {
+		return HealthStatus{
+			Installed: false,
+			Healthy:   false,
+			Message:   fmt.Sprintf("binary no longer found at %s", e.binPath),
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), externalCmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, e.binPath, "health", "--json")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil && !(errors.Is(err, exec.ErrWaitDelay) && len(out) > 0) {
 		return HealthStatus{
 			Installed: true, // the binary was found on PATH during discovery
 			Healthy:   false,
@@ -215,5 +255,8 @@ func DiscoverExternalBackends() {
 }
 
 func init() {
+	if os.Getenv("LOOM_NO_EXTERNAL_BACKENDS") != "" {
+		return
+	}
 	DiscoverExternalBackends()
 }

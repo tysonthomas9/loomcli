@@ -12,10 +12,27 @@ import (
 
 // DaemonSettings holds daemon-specific config fields.
 type DaemonSettings struct {
-	PIDFile       string        `yaml:"pid_file,omitempty"`
-	LogDir        string        `yaml:"log_dir,omitempty"`
-	RestartPolicy RestartPolicy `yaml:"restart_policy,omitempty"`
-	MaxAgents     *int          `yaml:"max_agents,omitempty"`
+	PIDFile       string            `yaml:"pid_file,omitempty"`
+	LogDir        string            `yaml:"log_dir,omitempty"`
+	EventsDir     string            `yaml:"events_dir,omitempty"`
+	RestartPolicy RestartPolicy     `yaml:"restart_policy,omitempty"`
+	MaxAgents     *int              `yaml:"max_agents,omitempty"`
+	RedisURL      string            `yaml:"redis_url,omitempty"`
+	APIKey        string            `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	JWTKey        string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	OTel          *OTelDaemonConfig `yaml:"otel,omitempty"`
+}
+
+// OTelDaemonConfig holds OpenTelemetry export configuration for the daemon.
+type OTelDaemonConfig struct {
+	Enabled         bool    `yaml:"enabled,omitempty"`
+	Endpoint        string  `yaml:"endpoint,omitempty"`
+	Protocol        string  `yaml:"protocol,omitempty"`
+	ServiceName     string  `yaml:"service_name,omitempty"`
+	SampleRate      float64 `yaml:"sample_rate,omitempty"`
+	FlushIntervalMs int     `yaml:"flush_interval_ms,omitempty"`
+	Traces          *bool   `yaml:"traces,omitempty"`
+	Metrics         *bool   `yaml:"metrics,omitempty"`
 }
 
 // RestartPolicy defines how the daemon restarts failed agents.
@@ -60,6 +77,7 @@ type AgentEntry struct {
 
 // ProjectFile represents the project-local loom.yaml.
 type ProjectFile struct {
+	Version int                   `yaml:"version,omitempty"`
 	Backend string                `yaml:"backend,omitempty"`
 	Daemon  *DaemonSettings       `yaml:"daemon,omitempty"`
 	Roles   map[string]RoleConfig `yaml:"roles,omitempty"`
@@ -94,9 +112,23 @@ func LoadProjectFile(dir string) (*ProjectFile, error) {
 		return nil, fmt.Errorf("reading project file %s: %w", path, err)
 	}
 
+	data, err = ExpandConfigBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("expanding env vars in %s: %w", path, err)
+	}
+
+	resolver := NewSecretResolver()
+	data, err = ResolveSecretsInBytes(data, resolver)
+	if err != nil {
+		return nil, fmt.Errorf("resolving secrets in %s: %w", path, err)
+	}
+
 	var pf ProjectFile
 	if err := yaml.Unmarshal(data, &pf); err != nil {
 		return nil, fmt.Errorf("parsing project file %s: %w", path, err)
+	}
+	if pf.Version < CurrentConfigVersion {
+		fmt.Fprintf(os.Stderr, "Warning: project config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, pf.Version, CurrentConfigVersion)
 	}
 	return &pf, nil
 }
@@ -119,8 +151,9 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 	// Start with defaults
 	dc := &DaemonConfig{
 		Daemon: DaemonSettings{
-			PIDFile: ".loom/daemon.pid",
-			LogDir:  ".loom/logs",
+			PIDFile:   ".loom/daemon.pid",
+			LogDir:    ".loom/logs",
+			EventsDir: ".loom/events",
 			RestartPolicy: RestartPolicy{
 				MaxRetries:     intPtr(3),
 				BackoffInitial: intPtr(2),
@@ -204,6 +237,9 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	if src.LogDir != "" {
 		dst.LogDir = src.LogDir
 	}
+	if src.EventsDir != "" {
+		dst.EventsDir = src.EventsDir
+	}
 	if src.RestartPolicy.MaxRetries != nil {
 		dst.RestartPolicy.MaxRetries = src.RestartPolicy.MaxRetries
 	}
@@ -236,6 +272,48 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	}
 	if src.MaxAgents != nil {
 		dst.MaxAgents = src.MaxAgents
+	}
+	if src.RedisURL != "" {
+		dst.RedisURL = src.RedisURL
+	}
+	if src.APIKey != "" {
+		dst.APIKey = src.APIKey
+	}
+	if src.JWTKey != "" {
+		dst.JWTKey = src.JWTKey
+	}
+	if src.OTel != nil {
+		if dst.OTel == nil {
+			dst.OTel = &OTelDaemonConfig{}
+		}
+		overlayOTelConfig(dst.OTel, src.OTel)
+	}
+}
+
+func overlayOTelConfig(dst, src *OTelDaemonConfig) {
+	if src.Enabled {
+		dst.Enabled = true
+	}
+	if src.Endpoint != "" {
+		dst.Endpoint = src.Endpoint
+	}
+	if src.Protocol != "" {
+		dst.Protocol = src.Protocol
+	}
+	if src.ServiceName != "" {
+		dst.ServiceName = src.ServiceName
+	}
+	if src.SampleRate != 0 {
+		dst.SampleRate = src.SampleRate
+	}
+	if src.FlushIntervalMs != 0 {
+		dst.FlushIntervalMs = src.FlushIntervalMs
+	}
+	if src.Traces != nil {
+		dst.Traces = src.Traces
+	}
+	if src.Metrics != nil {
+		dst.Metrics = src.Metrics
 	}
 }
 

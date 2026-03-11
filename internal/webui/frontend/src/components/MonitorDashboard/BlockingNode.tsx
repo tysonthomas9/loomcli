@@ -3,13 +3,13 @@
  * Rich node card showing issue details, status badges, and blocking relationships.
  */
 
-import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { memo } from 'react';
+import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { memo } from "react";
 
-import type { IssueNode as IssueNodeType } from '@/types';
-import { formatIssueId } from '@/utils/formatIssueId';
+import type { IssueNode as IssueNodeType } from "@/types";
+import { formatIssueId } from "@/utils/formatIssueId";
 
-import styles from './BlockingNode.module.css';
+import styles from "./BlockingNode.module.css";
 
 /**
  * Derive the node status for styling purposes.
@@ -20,22 +20,25 @@ import styles from './BlockingNode.module.css';
 function deriveNodeStatus(
   isBlocked: boolean,
   blockedCount: number,
-  isRootBlocker: boolean
-): 'healthy' | 'blocking' | 'blocked' {
-  if (isBlocked) return 'blocked';
-  if (blockedCount > 0 || isRootBlocker) return 'blocking';
-  return 'healthy';
+  isRootBlocker: boolean,
+): "healthy" | "blocking" | "blocked" {
+  if (isBlocked) return "blocked";
+  if (blockedCount > 0 || isRootBlocker) return "blocking";
+  return "healthy";
 }
 
 /**
  * BlockingNode renders a rich card for a node in the BlockingDependenciesCanvas.
  */
-function BlockingNodeComponent({ data, selected }: NodeProps<IssueNodeType>): JSX.Element {
+function BlockingNodeComponent({
+  data,
+  selected,
+}: NodeProps<IssueNodeType>): JSX.Element {
   const { title, issue, blockedCount, isRootBlocker, isReady } = data;
 
   const displayId = formatIssueId(issue.id);
-  const displayTitle = title || 'Untitled';
-  const description = issue.description || issue.notes || '';
+  const displayTitle = title || "Untitled";
+  const description = issue.description || issue.notes || "";
   const isBlocked = !isReady && !data.isClosed;
   const nodeStatus = deriveNodeStatus(isBlocked, blockedCount, isRootBlocker);
 
@@ -54,16 +57,21 @@ function BlockingNodeComponent({ data, selected }: NodeProps<IssueNodeType>): JS
       data-node-status={nodeStatus}
       aria-label={`Issue: ${displayTitle}`}
     >
-      <Handle type="target" position={Position.Left} className={styles.handle} id="target" />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className={styles.handle}
+        id="target"
+      />
 
       <header className={styles.header}>
         <span className={styles.issueId}>{displayId}</span>
         <span className={styles.statusBadge} data-status={nodeStatus}>
-          {nodeStatus === 'blocked'
-            ? 'Waiting'
-            : nodeStatus === 'blocking'
-              ? 'Blocking'
-              : 'Healthy'}
+          {nodeStatus === "blocked"
+            ? "Waiting"
+            : nodeStatus === "blocking"
+              ? "Blocking"
+              : "Healthy"}
         </span>
       </header>
 
@@ -74,13 +82,20 @@ function BlockingNodeComponent({ data, selected }: NodeProps<IssueNodeType>): JS
       <footer className={styles.footer}>
         {isBlocked && blockedByIds.length > 0 && (
           <span className={styles.blockedBy}>
-            Blocked by {blockedByIds.map((id) => formatIssueId(id)).join(', ')}
+            Blocked by {blockedByIds.map((id) => formatIssueId(id)).join(", ")}
           </span>
         )}
-        {blockedCount > 0 && <span className={styles.blockingCount}>Blocking {blockedCount}</span>}
+        {blockedCount > 0 && (
+          <span className={styles.blockingCount}>Blocking {blockedCount}</span>
+        )}
       </footer>
 
-      <Handle type="source" position={Position.Right} className={styles.handle} id="source" />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className={styles.handle}
+        id="source"
+      />
     </article>
   );
 }
@@ -88,7 +103,10 @@ function BlockingNodeComponent({ data, selected }: NodeProps<IssueNodeType>): JS
 /**
  * Custom equality comparison for memo.
  */
-function arePropsEqual(prev: NodeProps<IssueNodeType>, next: NodeProps<IssueNodeType>): boolean {
+function arePropsEqual(
+  prev: NodeProps<IssueNodeType>,
+  next: NodeProps<IssueNodeType>,
+): boolean {
   return (
     prev.selected === next.selected &&
     prev.data.issue.id === next.data.issue.id &&

@@ -340,3 +340,28 @@ func TestConcurrencyTracker_EmptyRoles(t *testing.T) {
 	}
 	ct.Release("anything")
 }
+
+// TestConcurrencyTracker_NilReceiver verifies nil receiver safety for all methods.
+func TestConcurrencyTracker_NilReceiver(t *testing.T) {
+	var ct *ConcurrencyTracker
+
+	// All should be no-ops or return safe defaults
+	if !ct.Acquire("task") {
+		t.Error("Acquire on nil should return true")
+	}
+	if !ct.TryAcquire("task") {
+		t.Error("TryAcquire on nil should return true")
+	}
+	ct.Release("task") // should not panic
+	ct.Close()         // should not panic
+}
+
+func TestConcurrencyTracker_AcquireUnlimitedAfterClose(t *testing.T) {
+	ct := NewConcurrencyTracker(map[string]RoleConfig{
+		"unlimited": {}, // no MaxConcurrency = unlimited
+	})
+	ct.Close()
+	if ct.Acquire("unlimited") {
+		t.Error("Acquire on closed tracker should return false for unlimited roles")
+	}
+}

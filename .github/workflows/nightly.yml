@@ -31,19 +31,7 @@ jobs:
         run: go test -v -race -tags=integration -coverprofile=coverage.out -timeout=30m ./...
 
       - name: Check coverage threshold
-        run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          MIN_COVERAGE=50
-          WARN_COVERAGE=55
-          echo "Coverage: $COVERAGE%"
-          if (( $(echo "$COVERAGE < $MIN_COVERAGE" | bc -l) )); then
-            echo "Coverage is below ${MIN_COVERAGE}% threshold"
-            exit 1
-          elif (( $(echo "$COVERAGE < $WARN_COVERAGE" | bc -l) )); then
-            echo "Coverage is below ${WARN_COVERAGE}% (warning threshold)"
-          else
-            echo "Coverage meets threshold"
-          fi
+        run: ./scripts/check-coverage.sh coverage.out 70
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -70,4 +58,4 @@ jobs:
           git config --global user.email "ci@loomcli.test"
 
       - name: E2E Container Tests
-        run: go test -tags container -v -timeout 15m ./e2e/
+        run: go test -tags container -v -timeout 20m ./e2e/

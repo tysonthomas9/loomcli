@@ -6,7 +6,10 @@
 .dashboard {
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: auto minmax(200px, 1fr) minmax(300px, 1fr) minmax(200px, auto);
+  grid-template-rows: auto minmax(200px, 1fr) minmax(300px, 1fr) minmax(
+      200px,
+      auto
+    );
   gap: var(--space-4);
   padding: var(--space-4);
   width: 100%;

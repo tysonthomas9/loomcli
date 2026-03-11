@@ -4,16 +4,20 @@
  * Supports both normal rendering and overlay mode (for DragOverlay).
  */
 
-import { useDraggable } from '@dnd-kit/core';
+import { useDraggable } from "@dnd-kit/core";
 
-import { IssueCard, type IssueCardProps } from '../IssueCard';
-import styles from './DraggableIssueCard.module.css';
+import { IssueCard, type IssueCardProps } from "../IssueCard";
+import styles from "./DraggableIssueCard.module.css";
 
 /**
  * Drag handle icon (6 grip dots in 2x3 grid).
  * Provides visual affordance that cards are draggable.
  */
-function DragHandleIcon({ className }: { className?: string | undefined }): JSX.Element {
+function DragHandleIcon({
+  className,
+}: {
+  className?: string | undefined;
+}): JSX.Element {
   return (
     <svg
       className={className}
@@ -62,11 +66,12 @@ export function DraggableIssueCard({
   columnId,
   isBacklog,
 }: DraggableIssueCardProps): JSX.Element {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: issue.id,
-    data: { issue, type: 'issue', columnId },
-    disabled: isOverlay,
-  });
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: issue.id,
+      data: { issue, type: "issue", columnId },
+      disabled: isOverlay,
+    });
 
   // Build IssueCard props, only including optional fields if defined
   // (required for exactOptionalPropertyTypes compatibility)
@@ -92,7 +97,9 @@ export function DraggableIssueCard({
 
   // Apply transform using CSS translate3d for hardware acceleration
   const style: React.CSSProperties = {
-    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+    transform: transform
+      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
+      : undefined,
     opacity: isDragging ? 0.5 : 1,
   };
 
@@ -101,7 +108,7 @@ export function DraggableIssueCard({
       ref={setNodeRef}
       style={style}
       className={styles.draggable}
-      data-dragging={isDragging ? 'true' : undefined}
+      data-dragging={isDragging ? "true" : undefined}
       {...listeners}
       {...attributes}
     >

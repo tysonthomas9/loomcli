@@ -7,52 +7,52 @@
  * Maps to Go types.AgentState.
  */
 export type AgentState =
-  | 'idle'
-  | 'spawning'
-  | 'running'
-  | 'working'
-  | 'stuck'
-  | 'done'
-  | 'stopped'
-  | 'dead'
-  | '';
+  | "idle"
+  | "spawning"
+  | "running"
+  | "working"
+  | "stuck"
+  | "done"
+  | "stopped"
+  | "dead"
+  | "";
 
 /**
  * Agent state constants.
  */
-export const StateIdle: AgentState = 'idle';
-export const StateSpawning: AgentState = 'spawning';
-export const StateRunning: AgentState = 'running';
-export const StateWorking: AgentState = 'working';
-export const StateStuck: AgentState = 'stuck';
-export const StateDone: AgentState = 'done';
-export const StateStopped: AgentState = 'stopped';
-export const StateDead: AgentState = 'dead';
+export const StateIdle: AgentState = "idle";
+export const StateSpawning: AgentState = "spawning";
+export const StateRunning: AgentState = "running";
+export const StateWorking: AgentState = "working";
+export const StateStuck: AgentState = "stuck";
+export const StateDone: AgentState = "done";
+export const StateStopped: AgentState = "stopped";
+export const StateDead: AgentState = "dead";
 
 /**
  * Molecule type for swarm coordination.
  * Maps to Go types.MolType.
  */
-export type MolType = 'swarm' | 'patrol' | 'work' | '';
+export type MolType = "swarm" | "patrol" | "work" | "";
 
 /**
  * MolType constants.
  */
-export const MolTypeSwarm: MolType = 'swarm';
-export const MolTypePatrol: MolType = 'patrol';
-export const MolTypeWork: MolType = 'work';
+export const MolTypeSwarm: MolType = "swarm";
+export const MolTypePatrol: MolType = "patrol";
+export const MolTypeWork: MolType = "work";
 
 /**
  * Work type for assignment models.
  * Maps to Go types.WorkType.
  */
-export type WorkType = 'mutex' | 'open_competition' | '';
+export type WorkType = "mutex" | "open_competition" | "";
 
 /**
  * WorkType constants.
  */
-export const WorkTypeMutex: WorkType = 'mutex';
-export const WorkTypeOpenCompetition: WorkType = 'open_competition';
+export const WorkTypeMutex: WorkType = "mutex";
+export const WorkTypeOpenCompetition: WorkType = "open_competition";
 
 // ============================================================================
 // Loom Server Types
@@ -64,10 +64,10 @@ export const WorkTypeOpenCompetition: WorkType = 'open_competition';
  * Used to provide appropriate UI feedback for different connection scenarios.
  */
 export type LoomConnectionState =
-  | 'never_connected' // Initial state before first successful fetch
-  | 'connected' // Healthy connection
-  | 'disconnected' // Lost connection (may have cached data)
-  | 'reconnecting'; // Actively trying to reconnect
+  | "never_connected" // Initial state before first successful fetch
+  | "connected" // Healthy connection
+  | "disconnected" // Lost connection (may have cached data)
+  | "reconnecting"; // Actively trying to reconnect
 
 /**
  * Commit detail from the loom server.
@@ -114,15 +114,15 @@ export interface LoomAgentStatus {
 export interface ParsedLoomStatus {
   /** The raw status type */
   type:
-    | 'ready'
-    | 'working'
-    | 'planning'
-    | 'done'
-    | 'review'
-    | 'idle'
-    | 'error'
-    | 'dirty'
-    | 'changes';
+    | "ready"
+    | "working"
+    | "planning"
+    | "done"
+    | "review"
+    | "idle"
+    | "error"
+    | "dirty"
+    | "changes";
   /** Task ID if working on a task */
   taskId?: string;
   /** Duration string (e.g., "5m", "2h30m") */
@@ -249,30 +249,30 @@ export function parseLoomStatus(status: string): ParsedLoomStatus {
   // Check for "X changes" pattern
   const changesMatch = status.match(/^(\d+)\s+changes?$/);
   if (changesMatch && changesMatch[1] !== undefined) {
-    return { type: 'changes', changeCount: parseInt(changesMatch[1], 10) };
+    return { type: "changes", changeCount: parseInt(changesMatch[1], 10) };
   }
 
   // Check for "dirty"
-  if (status === 'dirty') {
-    return { type: 'dirty' };
+  if (status === "dirty") {
+    return { type: "dirty" };
   }
 
   // Check for "ready"
-  if (status === 'ready') {
-    return { type: 'ready' };
+  if (status === "ready") {
+    return { type: "ready" };
   }
 
   // Check for status with task ID and duration
   // Pattern: "working: bd-123 (5m)" or "planning: ... (2m)"
   const taskMatch = status.match(
-    /^(working|planning|done|review|error|idle):\s*(.+?)?\s*\(([^)]+)\)$/
+    /^(working|planning|done|review|error|idle):\s*(.+?)?\s*\(([^)]+)\)$/,
   );
   if (taskMatch && taskMatch[1] !== undefined && taskMatch[3] !== undefined) {
-    const type = taskMatch[1] as ParsedLoomStatus['type'];
+    const type = taskMatch[1] as ParsedLoomStatus["type"];
     const taskId = taskMatch[2]?.trim();
     const duration = taskMatch[3];
     const result: ParsedLoomStatus = { type, duration };
-    if (taskId && taskId !== '...') {
+    if (taskId && taskId !== "...") {
       result.taskId = taskId;
     }
     return result;
@@ -281,9 +281,9 @@ export function parseLoomStatus(status: string): ParsedLoomStatus {
   // Fallback: just extract the type
   const typeMatch = status.match(/^(working|planning|done|review|error|idle)/);
   if (typeMatch && typeMatch[1] !== undefined) {
-    return { type: typeMatch[1] as ParsedLoomStatus['type'] };
+    return { type: typeMatch[1] as ParsedLoomStatus["type"] };
   }
 
   // Unknown status - treat as ready
-  return { type: 'ready' };
+  return { type: "ready" };
 }

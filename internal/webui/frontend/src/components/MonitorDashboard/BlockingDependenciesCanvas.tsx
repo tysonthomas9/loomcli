@@ -5,23 +5,34 @@
  * zoom controls, expand button, and a color-coded legend.
  */
 
-import { ReactFlow, Controls, type NodeMouseHandler } from '@xyflow/react';
-import { useMemo, useCallback } from 'react';
+import { ReactFlow, Controls, type NodeMouseHandler } from "@xyflow/react";
+import { useMemo, useCallback } from "react";
 
-import '@xyflow/react/dist/style.css';
-import { useAutoLayout, type UseAutoLayoutOptions } from '@/hooks/useAutoLayout';
-import { useBlockedIssues } from '@/hooks/useBlockedIssues';
-import { useGraphData, type UseGraphDataOptions } from '@/hooks/useGraphData';
-import type { Issue, IssueNode as IssueNodeType, DependencyType } from '@/types';
+import "@xyflow/react/dist/style.css";
+import {
+  useAutoLayout,
+  type UseAutoLayoutOptions,
+} from "@/hooks/useAutoLayout";
+import { useBlockedIssues } from "@/hooks/useBlockedIssues";
+import { useGraphData, type UseGraphDataOptions } from "@/hooks/useGraphData";
+import type {
+  Issue,
+  IssueNode as IssueNodeType,
+  DependencyType,
+} from "@/types";
 
-import styles from './BlockingDependenciesCanvas.module.css';
-import { BlockingEdge } from './BlockingEdge';
-import { BlockingNode } from './BlockingNode';
+import styles from "./BlockingDependenciesCanvas.module.css";
+import { BlockingEdge } from "./BlockingEdge";
+import { BlockingNode } from "./BlockingNode";
 
 /**
  * Blocking dependency types to display.
  */
-const BLOCKING_DEP_TYPES: DependencyType[] = ['blocks', 'conditional-blocks', 'waits-for'];
+const BLOCKING_DEP_TYPES: DependencyType[] = [
+  "blocks",
+  "conditional-blocks",
+  "waits-for",
+];
 
 // Register custom node and edge types
 const nodeTypes = {
@@ -66,7 +77,7 @@ export function BlockingDependenciesCanvas({
 
   // Filter to non-closed issues
   const visibleIssues = useMemo(() => {
-    return issues.filter((issue) => issue.status !== 'closed');
+    return issues.filter((issue) => issue.status !== "closed");
   }, [issues]);
 
   // Transform to nodes and edges with blocking deps only
@@ -76,24 +87,31 @@ export function BlockingDependenciesCanvas({
       includeDependencyTypes: BLOCKING_DEP_TYPES,
       includeOrphanEdges: true,
     }),
-    [blockedIssueIds]
+    [blockedIssueIds],
   );
 
-  const { nodes: rawNodes, edges } = useGraphData(visibleIssues, graphDataOptions);
+  const { nodes: rawNodes, edges } = useGraphData(
+    visibleIssues,
+    graphDataOptions,
+  );
 
   // Apply auto-layout with compact spacing
   const layoutOptions: UseAutoLayoutOptions = useMemo(
     () => ({
-      direction: 'LR',
+      direction: "LR",
       nodesep: 40,
       ranksep: 80,
       nodeWidth: 240,
       nodeHeight: 120,
     }),
-    []
+    [],
   );
 
-  const { nodes: layoutedNodes } = useAutoLayout(rawNodes, edges, layoutOptions);
+  const { nodes: layoutedNodes } = useAutoLayout(
+    rawNodes,
+    edges,
+    layoutOptions,
+  );
 
   // Handle node click
   const handleNodeClick: NodeMouseHandler<IssueNodeType> = useCallback(
@@ -102,10 +120,12 @@ export function BlockingDependenciesCanvas({
         onNodeClick(node.data.issue);
       }
     },
-    [onNodeClick]
+    [onNodeClick],
   );
 
-  const rootClassName = className ? `${styles.canvas} ${className}` : styles.canvas;
+  const rootClassName = className
+    ? `${styles.canvas} ${className}`
+    : styles.canvas;
 
   const isEmpty = layoutedNodes.length === 0;
 
@@ -151,7 +171,7 @@ export function BlockingDependenciesCanvas({
             <Controls
               showInteractive={false}
               position="bottom-right"
-              className={styles.controls ?? ''}
+              className={styles.controls ?? ""}
             />
           </ReactFlow>
 
@@ -162,7 +182,9 @@ export function BlockingDependenciesCanvas({
               <span className={styles.legendLabel}>Healthy</span>
             </div>
             <div className={styles.legendItem}>
-              <span className={`${styles.legendDot} ${styles.legendBlocking}`} />
+              <span
+                className={`${styles.legendDot} ${styles.legendBlocking}`}
+              />
               <span className={styles.legendLabel}>Blocking</span>
             </div>
             <div className={styles.legendItem}>

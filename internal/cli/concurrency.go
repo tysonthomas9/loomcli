@@ -45,7 +45,9 @@ func (ct *ConcurrencyTracker) Acquire(role string) bool {
 
 	limit := ct.limits[role]
 	if limit == 0 {
-		// Unlimited — always acquire immediately
+		if ct.closed {
+			return false
+		}
 		ct.counts[role]++
 		return true
 	}

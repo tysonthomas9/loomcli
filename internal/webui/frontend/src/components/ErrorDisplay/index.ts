@@ -1,2 +1,2 @@
-export { ErrorDisplay } from './ErrorDisplay';
-export type { ErrorDisplayProps, ErrorDisplayVariant } from './ErrorDisplay';
+export { ErrorDisplay } from "./ErrorDisplay";
+export type { ErrorDisplayProps, ErrorDisplayVariant } from "./ErrorDisplay";

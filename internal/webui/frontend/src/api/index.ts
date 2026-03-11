@@ -1,12 +1,22 @@
-export { ApiError, get, post, patch, del, initAuth, getAuthToken, getAuthState, onAuthStateChange } from './client';
-export type { RequestOptions, AuthState } from './client';
+export {
+  ApiError,
+  get,
+  post,
+  patch,
+  del,
+  initAuth,
+  getAuthToken,
+  getAuthState,
+  onAuthStateChange,
+} from "./client";
+export type { RequestOptions, AuthState } from "./client";
 
 // SSE client for real-time updates (recommended)
-export { BeadsSSEClient, getSSEUrl } from './sse';
-export type { SSEClientOptions } from './sse';
+export { BeadsSSEClient, getSSEUrl } from "./sse";
+export type { SSEClientOptions } from "./sse";
 
 // Re-export common types from SSE
-export type { ConnectionState, MutationType, MutationPayload } from './sse';
+export type { ConnectionState, MutationType, MutationPayload } from "./sse";
 
 // Issue API functions
 export {
@@ -21,24 +31,36 @@ export {
   addDependency,
   removeDependency,
   addComment,
-} from './issues';
+} from "./issues";
 export type {
   CreateIssueRequest,
   UpdateIssueRequest,
   GraphFilter,
   AddCommentRequest,
-} from './issues';
+} from "./issues";
 
 // Agent API functions (loom server)
-export { fetchAgents, checkLoomHealth, fetchStatus, fetchTasks } from './agents';
-export type { FetchStatusResult } from './agents';
+export {
+  fetchAgents,
+  checkLoomHealth,
+  fetchStatus,
+  fetchTasks,
+} from "./agents";
+export type { FetchStatusResult } from "./agents";
 
 // Backend config API functions
-export { getBackendConfig, updateBackendConfig } from './config';
-export type { BackendConfigData, AgentBackendOverride, BackendConfigPatchRequest } from './config';
+export { getBackendConfig, updateBackendConfig } from "./config";
+export type {
+  BackendConfigData,
+  AgentBackendOverride,
+  BackendConfigPatchRequest,
+} from "./config";
 
 // Usage API functions (loom server)
-export { fetchUsage } from './usage';
+export { fetchUsage } from "./usage";
+
+// Observability API functions (loom server)
+export { fetchObservabilityMetrics } from "./observability";
 
 // Log streaming API functions
 export {
@@ -48,4 +70,4 @@ export {
   getAgentTerminalToken,
   getAgentTerminalWsUrl,
   getAgentLogArchive,
-} from './logs';
+} from "./logs";

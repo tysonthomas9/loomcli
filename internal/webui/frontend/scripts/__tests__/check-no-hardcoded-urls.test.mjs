@@ -15,7 +15,6 @@ import {
   scanAll,
   isExcluded,
   walkDir,
-  ALLOWLIST,
 } from "../check-no-hardcoded-urls.mjs";
 
 // ---------------------------------------------------------------------------
@@ -73,15 +72,15 @@ describe("isExcluded", () => {
 
 describe("scanFile — /api/ paths", () => {
   it("detects hardcoded /api/ path in string literal", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", `const url = "/api/issues";`);
-    expect(v).toHaveLength(1);
-    expect(v[0].line).toBe(1);
-    expect(v[0].message).toContain("/api/");
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", `const url = "/api/issues";`);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].line).toBe(1);
+    expect(violations[0].message).toContain("/api/");
   });
 
   it("detects /api/ in template literal", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", "const url = `/api/issues/${id}`;");
-    expect(v).toHaveLength(1);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", "const url = `/api/issues/${id}`;");
+    expect(violations).toHaveLength(1);
   });
 
   it("detects multiple violations in one file", () => {
@@ -91,15 +90,15 @@ describe("scanFile — /api/ paths", () => {
       "const b = 2;",
       'const y = "/api/config";',
     ].join("\n");
-    const v = scanFile("/fake/src/Foo.ts", "/fake", source);
-    expect(v).toHaveLength(2);
-    expect(v[0].line).toBe(2);
-    expect(v[1].line).toBe(4);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", source);
+    expect(violations).toHaveLength(2);
+    expect(violations[0].line).toBe(2);
+    expect(violations[1].line).toBe(4);
   });
 
   it("reports correct source line preview", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", '  const url = "/api/issues";');
-    expect(v[0].source).toBe('  const url = "/api/issues";');
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", '  const url = "/api/issues";');
+    expect(violations[0].source).toBe('  const url = "/api/issues";');
   });
 });
 
@@ -109,24 +108,24 @@ describe("scanFile — /api/ paths", () => {
 
 describe("scanFile — localhost URLs", () => {
   it("detects http://localhost", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "http://localhost:3000";');
-    expect(v).toHaveLength(1);
-    expect(v[0].message).toContain("localhost");
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "http://localhost:3000";');
+    expect(violations).toHaveLength(1);
+    expect(violations[0].message).toContain("localhost");
   });
 
   it("detects https://localhost", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "https://localhost";');
-    expect(v).toHaveLength(1);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "https://localhost";');
+    expect(violations).toHaveLength(1);
   });
 
   it("detects http://127.0.0.1", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "http://127.0.0.1:8080";');
-    expect(v).toHaveLength(1);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "http://127.0.0.1:8080";');
+    expect(violations).toHaveLength(1);
   });
 
   it("detects https://127.0.0.1", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "https://127.0.0.1";');
-    expect(v).toHaveLength(1);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "https://127.0.0.1";');
+    expect(violations).toHaveLength(1);
   });
 });
 
@@ -136,35 +135,35 @@ describe("scanFile — localhost URLs", () => {
 
 describe("scanFile — skip patterns", () => {
   it("skips single-line comments", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", '// fetch from /api/issues');
-    expect(v).toHaveLength(0);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", '// fetch from /api/issues');
+    expect(violations).toHaveLength(0);
   });
 
   it("skips JSDoc comment lines", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", " * Maps to /api/issues/graph.");
-    expect(v).toHaveLength(0);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", " * Maps to /api/issues/graph.");
+    expect(violations).toHaveLength(0);
   });
 
   it("skips block comments", () => {
     const source = ["/* This calls /api/issues", " * and more /api/stuff", " */"].join(
       "\n",
     );
-    const v = scanFile("/fake/src/Foo.ts", "/fake", source);
-    expect(v).toHaveLength(0);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", source);
+    expect(violations).toHaveLength(0);
   });
 
   it("skips single-line block comments", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", "/* /api/test */");
-    expect(v).toHaveLength(0);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", "/* /api/test */");
+    expect(violations).toHaveLength(0);
   });
 
   it("skips import statements", () => {
-    const v = scanFile(
+    const { violations } = scanFile(
       "/fake/src/Foo.ts",
       "/fake",
       'import { get } from "@/api/client";',
     );
-    expect(v).toHaveLength(0);
+    expect(violations).toHaveLength(0);
   });
 
   it("skips multi-line import continuations (} from ...)", () => {
@@ -174,49 +173,49 @@ describe("scanFile — skip patterns", () => {
       "  type ConnectionState,",
       '} from "../api/sse";',
     ].join("\n");
-    const v = scanFile("/fake/src/Foo.ts", "/fake", source);
-    expect(v).toHaveLength(0);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", source);
+    expect(violations).toHaveLength(0);
   });
 
   it("skips re-export type declarations", () => {
-    const v = scanFile(
+    const { violations } = scanFile(
       "/fake/src/Foo.ts",
       "/fake",
       'export type { MutationPayload } from "../api/sse";',
     );
-    expect(v).toHaveLength(0);
+    expect(violations).toHaveLength(0);
   });
 
   it("skips re-export star declarations", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", 'export * from "../api/sse";');
-    expect(v).toHaveLength(0);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'export * from "../api/sse";');
+    expect(violations).toHaveLength(0);
   });
 
   it("skips re-export value declarations", () => {
-    const v = scanFile(
+    const { violations } = scanFile(
       "/fake/src/Foo.ts",
       "/fake",
       'export { MutationType } from "../api/sse";',
     );
-    expect(v).toHaveLength(0);
+    expect(violations).toHaveLength(0);
   });
 
   it("catches export const with /api/ (not a re-export)", () => {
-    const v = scanFile(
+    const { violations } = scanFile(
       "/fake/src/Foo.ts",
       "/fake",
       'export const BASE = "/api/v2/items";',
     );
-    expect(v).toHaveLength(1);
+    expect(violations).toHaveLength(1);
   });
 
   it("catches export function with localhost", () => {
-    const v = scanFile(
+    const { violations } = scanFile(
       "/fake/src/Foo.ts",
       "/fake",
       'export function getUrl() { return "http://localhost:3000"; }',
     );
-    expect(v).toHaveLength(1);
+    expect(violations).toHaveLength(1);
   });
 });
 
@@ -225,23 +224,24 @@ describe("scanFile — skip patterns", () => {
 // ---------------------------------------------------------------------------
 
 describe("scanFile — edge cases", () => {
-  it("returns empty array for empty file", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", "");
-    expect(v).toHaveLength(0);
+  it("returns empty violations for empty file", () => {
+    const { violations, allowedCount } = scanFile("/fake/src/Foo.ts", "/fake", "");
+    expect(violations).toHaveLength(0);
+    expect(allowedCount).toBe(0);
   });
 
-  it("returns empty array for clean file", () => {
-    const v = scanFile("/fake/src/Foo.ts", "/fake", "const x = 1;\nconst y = 2;\n");
-    expect(v).toHaveLength(0);
+  it("returns empty violations for clean file", () => {
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", "const x = 1;\nconst y = 2;\n");
+    expect(violations).toHaveLength(0);
   });
 
   it("computes correct relPath", () => {
-    const v = scanFile(
+    const { violations } = scanFile(
       "/project/src/components/Foo.ts",
       "/project",
       'const url = "/api/test";',
     );
-    expect(v[0].relPath).toBe("src/components/Foo.ts");
+    expect(violations[0].relPath).toBe("src/components/Foo.ts");
   });
 
   it("resumes scanning after block comment ends", () => {
@@ -249,9 +249,57 @@ describe("scanFile — edge cases", () => {
       "/* block comment with /api/foo */",
       'const url = "/api/issues";',
     ].join("\n");
-    const v = scanFile("/fake/src/Foo.ts", "/fake", source);
-    expect(v).toHaveLength(1);
-    expect(v[0].line).toBe(2);
+    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].line).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scanFile — // allow-url inline suppression
+// ---------------------------------------------------------------------------
+
+describe("scanFile — // allow-url", () => {
+  it("suppresses /api/ violation when line has // allow-url", () => {
+    const { violations, allowedCount } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      'const url = `/api/terminal/token`; // allow-url',
+    );
+    expect(violations).toHaveLength(0);
+    expect(allowedCount).toBe(1);
+  });
+
+  it("suppresses localhost violation when line has // allow-url", () => {
+    const { violations, allowedCount } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      'const url = "http://localhost:3000"; // allow-url',
+    );
+    expect(violations).toHaveLength(0);
+    expect(allowedCount).toBe(1);
+  });
+
+  it("counts allowedCount correctly for multiple allowed lines", () => {
+    const source = [
+      'const a = "/api/foo"; // allow-url',
+      'const b = "/api/bar";',
+      'const c = "/api/baz"; // allow-url',
+    ].join("\n");
+    const { violations, allowedCount } = scanFile("/fake/src/Foo.ts", "/fake", source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].line).toBe(2);
+    expect(allowedCount).toBe(2);
+  });
+
+  it("does not suppress when // allow-url is absent", () => {
+    const { violations, allowedCount } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      'const url = "/api/issues";',
+    );
+    expect(violations).toHaveLength(1);
+    expect(allowedCount).toBe(0);
   });
 });
 
@@ -274,7 +322,7 @@ describe("scanAll", () => {
     writeSource(root, "src/components/Foo.ts", 'const url = "/api/issues";');
     writeSource(root, "src/hooks/useBar.ts", 'const x = "http://localhost:3000";');
 
-    const result = scanAll(root, new Set());
+    const result = scanAll(root);
     expect(result.violations).toHaveLength(2);
     expect(result.scannedCount).toBe(2);
   });
@@ -283,7 +331,7 @@ describe("scanAll", () => {
     writeSource(root, "src/api/client.ts", 'const url = "/api/issues";');
     writeSource(root, "src/components/Foo.ts", "const x = 1;");
 
-    const result = scanAll(root, new Set());
+    const result = scanAll(root);
     expect(result.violations).toHaveLength(0);
   });
 
@@ -292,23 +340,22 @@ describe("scanAll", () => {
     writeSource(root, "src/components/__tests__/Bar.ts", 'const url = "/api/issues";');
     writeSource(root, "src/components/Clean.ts", "const x = 1;");
 
-    const result = scanAll(root, new Set());
+    const result = scanAll(root);
     expect(result.violations).toHaveLength(0);
     expect(result.scannedCount).toBe(1);
   });
 
-  it("respects allowlist", () => {
-    writeSource(root, "src/components/Foo.ts", 'const url = "/api/issues";');
-    const allowlist = new Set(["src/components/Foo.ts:1"]);
+  it("respects inline // allow-url comments", () => {
+    writeSource(root, "src/components/Foo.ts", 'const url = "/api/issues"; // allow-url');
 
-    const result = scanAll(root, allowlist);
+    const result = scanAll(root);
     expect(result.violations).toHaveLength(0);
     expect(result.allowlistedCount).toBe(1);
   });
 
   it("returns error if src/ not found", () => {
     // Root exists but no src/ directory
-    const result = scanAll(root, new Set());
+    const result = scanAll(root);
     expect(result.error).toContain("src/ directory not found");
     expect(result.exitCode).toBe(2);
   });
@@ -317,7 +364,7 @@ describe("scanAll", () => {
     writeSource(root, "src/components/Foo.ts", "const x = 1;");
     writeSource(root, "src/hooks/useBar.ts", "const y = 2;");
 
-    const result = scanAll(root, new Set());
+    const result = scanAll(root);
     expect(result.violations).toHaveLength(0);
     expect(result.scannedCount).toBe(2);
   });
@@ -367,19 +414,5 @@ describe("walkDir", () => {
   it("returns empty for nonexistent directory", () => {
     const files = walkDir(join(root, "nonexistent"));
     expect(files).toHaveLength(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-describe("ALLOWLIST", () => {
-  it("is a Set with TerminalPanel entries", () => {
-    expect(ALLOWLIST).toBeInstanceOf(Set);
-    expect(ALLOWLIST.size).toBe(4);
-    for (const entry of ALLOWLIST) {
-      expect(entry).toContain("TerminalPanel");
-    }
   });
 });

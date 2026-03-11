@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -199,8 +200,18 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	// 9. Setup signal handler
 	shutdown := SetupSignalHandler()
 
+	// 9.5. Initialize event bus for structured observability
+	eventsDir := resolveDaemonPath(projectDir, config.Daemon.EventsDir)
+	eventBus := events.NewBus(eventsDir)
+	defer func() { _ = eventBus.Close() }()
+
+	// 9.6. Initialize OTel exporter if enabled
+	if otelExp := initOTelExporter(config, eventBus); otelExp != nil {
+		defer stopOTelExporter(otelExp)
+	}
+
 	// 10. Create and start daemon (from daemon.go)
-	daemon, err := NewDaemon(config, projectDir)
+	daemon, err := NewDaemon(config, projectDir, eventBus)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)
@@ -218,9 +229,15 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	fmt.Println("Press Ctrl+C to stop")
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 
+	// Extract configured max retries (default 3)
+	maxRetries := 3
+	if config.Daemon.RestartPolicy.MaxRetries != nil {
+		maxRetries = *config.Daemon.RestartPolicy.MaxRetries
+	}
+
 	// Write initial state file
 	startedAt := time.Now()
-	if err := writeStateFile(stateFilePath, startedAt, daemon.Agents()); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, daemon.Agents(), maxRetries); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
 
@@ -236,22 +253,7 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	}
 
 	// Start state file updater goroutine
-	stateUpdateDone := make(chan struct{})
-	go func() {
-		defer close(stateUpdateDone)
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-shutdown:
-				return
-			case <-ticker.C:
-				if err := writeStateFile(stateFilePath, startedAt, daemon.Agents()); err != nil {
-					fmt.Printf("Warning: failed to update state file: %v\n", err)
-				}
-			}
-		}
-	}()
+	stateUpdateDone := startStateUpdater(shutdown, stateFilePath, startedAt, daemon, maxRetries)
 
 	// 13. Wait for shutdown signal
 	<-shutdown
@@ -466,7 +468,7 @@ func readStateFile(path string) (*DaemonState, error) {
 }
 
 // writeStateFile writes the daemon-agents.json state file
-func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentStatus) error {
+func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentStatus, maxRetries int) error {
 	state := DaemonState{
 		PID:       os.Getpid(),
 		StartedAt: startedAt,
@@ -478,7 +480,7 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 			Worktree:       ap.Worktree,
 			Role:           ap.Role,
 			PID:            ap.PID,
-			Status:         computeAgentStatus(ap),
+			Status:         computeAgentStatus(ap, maxRetries),
 			EpicID:         ap.AssignedEpicID,
 			CurrentBackend: ap.CurrentBackend,
 			RestartCount:   ap.RestartCount,
@@ -506,54 +508,13 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 }
 
 // computeAgentStatus determines the status string based on agent state
-func computeAgentStatus(ap SupervisedAgentStatus) string {
+func computeAgentStatus(ap SupervisedAgentStatus, maxRetries int) string {
 	if ap.PID > 0 && lockfile.IsProcessRunning(ap.PID) {
 		return "running"
 	}
 	// Not running - check if it failed
-	if ap.RestartCount > 3 { // default max retries
+	if ap.RestartCount > maxRetries {
 		return "failed"
 	}
 	return "stopped"
-}
-
-// printDryRunInfo displays what would happen in dry-run mode
-func printDryRunInfo(config *DaemonConfig, pidFile, logDir, stateFile string) {
-	fmt.Println("DRY RUN - No daemon will be started")
-	fmt.Println("")
-	fmt.Println("Configuration:")
-	fmt.Printf("  PID file: %s\n", pidFile)
-	fmt.Printf("  State file: %s\n", stateFile)
-	fmt.Printf("  Log directory: %s\n", logDir)
-	if config.Daemon.RestartPolicy.MaxRetries != nil {
-		fmt.Printf("  Max retries: %d\n", *config.Daemon.RestartPolicy.MaxRetries)
-	} else {
-		fmt.Printf("  Max retries: 3 (default)\n")
-	}
-	if config.Daemon.RestartPolicy.BackoffInitial != nil {
-		fmt.Printf("  Backoff initial: %ds\n", *config.Daemon.RestartPolicy.BackoffInitial)
-	} else {
-		fmt.Printf("  Backoff initial: 2s (default)\n")
-	}
-	if config.Daemon.RestartPolicy.BackoffMax != nil {
-		fmt.Printf("  Backoff max: %ds\n", *config.Daemon.RestartPolicy.BackoffMax)
-	} else {
-		fmt.Printf("  Backoff max: 300s (default)\n")
-	}
-	if config.Daemon.MaxAgents != nil {
-		fmt.Printf("  Max agents: %d\n", *config.Daemon.MaxAgents)
-	} else {
-		fmt.Printf("  Max agents: 20 (default)\n")
-	}
-	fmt.Println("")
-	fmt.Println("Agents to supervise:")
-	for _, a := range config.Agents {
-		fmt.Printf("  - %s (role: %s, auto: %v)\n", a.Worktree, a.Role, a.Auto)
-	}
-	fmt.Println("")
-	fmt.Println("Recommended systemd resource controls:")
-	fmt.Println("  LimitNOFILE=65536      # file descriptor limit")
-	fmt.Println("  MemoryMax=4G           # memory ceiling")
-	fmt.Println("  CPUQuota=200%          # CPU limit (200% = 2 cores)")
-	fmt.Println("  TasksMax=256           # max tasks (processes+threads)")
 }

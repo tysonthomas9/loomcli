@@ -3,9 +3,9 @@
  * Used by AssigneePrompt to remember previously entered names.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from "react";
 
-const STORAGE_KEY = 'beads-recent-assignees';
+const STORAGE_KEY = "beads-recent-assignees";
 const MAX_RECENT = 5;
 
 /**
@@ -30,7 +30,7 @@ function loadFromStorage(): string[] {
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is string => typeof item === 'string');
+    return parsed.filter((item): item is string => typeof item === "string");
   } catch {
     return [];
   }
@@ -64,7 +64,9 @@ function saveToStorage(names: string[]): void {
  * ```
  */
 export function useRecentAssignees(): UseRecentAssigneesReturn {
-  const [recentAssignees, setRecentAssignees] = useState<string[]>(() => loadFromStorage());
+  const [recentAssignees, setRecentAssignees] = useState<string[]>(() =>
+    loadFromStorage(),
+  );
 
   // Sync state to localStorage when it changes
   useEffect(() => {
@@ -77,7 +79,9 @@ export function useRecentAssignees(): UseRecentAssigneesReturn {
     setRecentAssignees((prev) => {
       // Remove duplicates (case-insensitive comparison but preserve original case)
       const trimmedName = name.trim();
-      const filtered = prev.filter((n) => n.toLowerCase() !== trimmedName.toLowerCase());
+      const filtered = prev.filter(
+        (n) => n.toLowerCase() !== trimmedName.toLowerCase(),
+      );
       // Add to front and trim to max
       const updated = [trimmedName, ...filtered].slice(0, MAX_RECENT);
       return updated;

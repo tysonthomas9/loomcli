@@ -3,10 +3,10 @@
  * Catches JavaScript errors during rendering and displays a fallback UI.
  */
 
-import { Component } from 'react';
-import type { ErrorInfo, ReactNode } from 'react';
+import { Component } from "react";
+import type { ErrorInfo, ReactNode } from "react";
 
-import { ErrorDisplay } from '@/components/ErrorDisplay';
+import { ErrorDisplay } from "@/components/ErrorDisplay";
 
 /**
  * State for the ErrorBoundary component.
@@ -57,7 +57,10 @@ export interface ErrorBoundaryProps {
  * </ErrorBoundary>
  * ```
  */
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+export class ErrorBoundary extends Component<
+  ErrorBoundaryProps,
+  ErrorBoundaryState
+> {
   state: ErrorBoundaryState = {
     hasError: false,
     error: null,
@@ -68,7 +71,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    console.error('ErrorBoundary caught an error:', error, errorInfo.componentStack);
+    console.error(
+      "ErrorBoundary caught an error:",
+      error,
+      errorInfo.componentStack,
+    );
     this.props.onError?.(error, errorInfo);
   }
 
@@ -97,10 +104,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   render(): ReactNode {
     if (this.state.hasError) {
       const { fallback } = this.props;
-      const error = this.state.error ?? new Error('Unknown error');
+      const error = this.state.error ?? new Error("Unknown error");
 
       // Custom fallback (function or element)
-      if (typeof fallback === 'function') {
+      if (typeof fallback === "function") {
         return fallback(error, this.resetError);
       }
       if (fallback !== undefined) {

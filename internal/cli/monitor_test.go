@@ -1326,7 +1326,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		agents, _ := collectAgentStatus(nil)
+		agents, _ := collectAgentStatus(nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1374,7 +1374,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		agents, _ := collectAgentStatus(nil)
+		agents, _ := collectAgentStatus(nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1425,7 +1425,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			"spark": {ID: "T-123", Status: "in_progress"},
 		}
 
-		agents, _ := collectAgentStatus(agentTasks)
+		agents, _ := collectAgentStatus(agentTasks, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1473,7 +1473,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		agents, _ := collectAgentStatus(nil)
+		agents, _ := collectAgentStatus(nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1539,7 +1539,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		_, taskIDToAgents := collectAgentStatus(nil)
+		_, taskIDToAgents := collectAgentStatus(nil, "")
 
 		if len(taskIDToAgents["T-conflict"]) != 2 {
 			t.Errorf("expected 2 agents claiming same task, got %d", len(taskIDToAgents["T-conflict"]))
@@ -1604,7 +1604,7 @@ func TestCollectMonitorData(t *testing.T) {
 		return CommandResult{}
 	}
 
-	data := collectMonitorData(100)
+	data := collectMonitorData(100, "")
 
 	// Verify all sections populated
 	if data.Timestamp.IsZero() {
@@ -1690,7 +1690,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 		return CommandResult{}
 	}
 
-	data := CollectMonitorData()
+	data := CollectMonitorData("")
 	if data == nil {
 		t.Fatal("CollectMonitorData returned nil")
 	}
@@ -1738,7 +1738,7 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 		return CommandResult{}
 	}
 
-	agents := CollectAgentStatusOnly()
+	agents := CollectAgentStatusOnly("")
 	if len(agents) != 1 {
 		t.Fatalf("expected 1 agent, got %d", len(agents))
 	}
@@ -2069,7 +2069,7 @@ func TestGetWorktreeGitSyncStatusError(t *testing.T) {
 		return CommandResult{Err: fmt.Errorf("git failed")}
 	}
 
-	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main")
+	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main", "")
 	if ahead != 0 || behind != 0 {
 		t.Errorf("expected (0, 0) on error, got (%d, %d)", ahead, behind)
 	}
@@ -2083,7 +2083,7 @@ func TestGetWorktreeGitSyncStatusMalformed(t *testing.T) {
 		return CommandResult{Stdout: "not-a-number"}
 	}
 
-	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main")
+	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main", "")
 	if ahead != 0 || behind != 0 {
 		t.Errorf("expected (0, 0) on malformed output, got (%d, %d)", ahead, behind)
 	}
@@ -2093,17 +2093,13 @@ func TestGetWorktreeGitSyncStatusCustomBranch(t *testing.T) {
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })
 
-	oldBranch := monitorBranch
-	monitorBranch = "develop"
-	t.Cleanup(func() { monitorBranch = oldBranch })
-
 	var capturedArgs []string
 	execCommand = func(dir, name string, args ...string) CommandResult {
 		capturedArgs = args
 		return CommandResult{Stdout: "2\t4"}
 	}
 
-	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main")
+	ahead, behind := getWorktreeGitSyncStatus("/fake/path", "main", "develop")
 	if ahead != 4 || behind != 2 {
 		t.Errorf("expected (4, 2), got (%d, %d)", ahead, behind)
 	}
@@ -2219,7 +2215,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 				"alpha": {ID: "T-999", Title: "Test Task", Priority: 2, Status: "in_progress"},
 			}
 
-			agents, _ := collectAgentStatus(agentTasks)
+			agents, _ := collectAgentStatus(agentTasks, "")
 			if len(agents) != 1 {
 				t.Fatalf("expected 1 agent, got %d", len(agents))
 			}
@@ -2617,368 +2613,6 @@ func TestRenderAgentLine(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// ===========================================================================
-// Daemon-Managed Agents Tests
-// ===========================================================================
-
-func TestLoadDaemonManagedAgents_NoFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
-
-	result := loadDaemonManagedAgents(stateFilePath)
-
-	// When file doesn't exist, should return nil
-	if result != nil {
-		t.Errorf("loadDaemonManagedAgents() = %v, want nil when file doesn't exist", result)
-	}
-}
-
-func TestLoadDaemonManagedAgents_ValidFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
-
-	// Create valid daemon-agents.json with current PID (so it passes the "is running" check)
-	state := DaemonAgentState{
-		PID: os.Getpid(), // Use current process PID so IsProcessRunning returns true
-		Agents: []DaemonAgentStateEntry{
-			{Worktree: "falcon", Status: "running"},
-			{Worktree: "nova", Status: "idle"},
-			{Worktree: "spark", Status: "running"},
-		},
-	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		t.Fatalf("failed to marshal state: %v", err)
-	}
-	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
-		t.Fatalf("failed to write daemon-agents.json: %v", err)
-	}
-
-	result := loadDaemonManagedAgents(stateFilePath)
-
-	// Should return map with all three worktrees
-	if result == nil {
-		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
-	}
-	if len(result) != 3 {
-		t.Errorf("len(result) = %d, want 3", len(result))
-	}
-	if !result["falcon"].Managed {
-		t.Error("result[falcon].Managed = false, want true")
-	}
-	if !result["nova"].Managed {
-		t.Error("result[nova].Managed = false, want true")
-	}
-	if !result["spark"].Managed {
-		t.Error("result[spark].Managed = false, want true")
-	}
-}
-
-func TestLoadDaemonManagedAgents_InvalidJSON(t *testing.T) {
-	tmpDir := t.TempDir()
-	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
-
-	// Create file with invalid JSON
-	if err := os.WriteFile(stateFilePath, []byte("not valid json"), 0644); err != nil {
-		t.Fatalf("failed to write daemon-agents.json: %v", err)
-	}
-
-	result := loadDaemonManagedAgents(stateFilePath)
-
-	// Should return nil on invalid JSON
-	if result != nil {
-		t.Errorf("loadDaemonManagedAgents() = %v, want nil for invalid JSON", result)
-	}
-}
-
-func TestLoadDaemonManagedAgents_StaleDaemon(t *testing.T) {
-	tmpDir := t.TempDir()
-	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
-
-	// Create daemon-agents.json with a PID that doesn't exist (very high PID unlikely to exist)
-	// Use a PID that's almost certainly not running
-	state := DaemonAgentState{
-		PID: 2147483647, // Max int32, extremely unlikely to be a real process
-		Agents: []DaemonAgentStateEntry{
-			{Worktree: "falcon", Status: "running"},
-		},
-	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		t.Fatalf("failed to marshal state: %v", err)
-	}
-	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
-		t.Fatalf("failed to write daemon-agents.json: %v", err)
-	}
-
-	result := loadDaemonManagedAgents(stateFilePath)
-
-	// Should return nil when daemon process is not running (stale state file)
-	if result != nil {
-		t.Errorf("loadDaemonManagedAgents() = %v, want nil for stale daemon (non-existent PID)", result)
-	}
-}
-
-func TestLoadDaemonManagedAgents_EmptyAgents(t *testing.T) {
-	tmpDir := t.TempDir()
-	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
-
-	// Create valid daemon-agents.json with current PID but empty agents array
-	state := DaemonAgentState{
-		PID:    os.Getpid(),
-		Agents: []DaemonAgentStateEntry{}, // empty
-	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		t.Fatalf("failed to marshal state: %v", err)
-	}
-	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
-		t.Fatalf("failed to write daemon-agents.json: %v", err)
-	}
-
-	result := loadDaemonManagedAgents(stateFilePath)
-
-	// Should return empty map (not nil) when agents array is empty but file is valid
-	if result == nil {
-		t.Fatal("loadDaemonManagedAgents() returned nil, want empty map for empty agents")
-	}
-	if len(result) != 0 {
-		t.Errorf("len(result) = %d, want 0", len(result))
-	}
-}
-
-func TestLoadDaemonManagedAgents_SkipsEmptyWorktreeNames(t *testing.T) {
-	tmpDir := t.TempDir()
-	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
-
-	// Create daemon-agents.json with some empty worktree names
-	state := DaemonAgentState{
-		PID: os.Getpid(),
-		Agents: []DaemonAgentStateEntry{
-			{Worktree: "falcon", Status: "running"},
-			{Worktree: "", Status: "running"}, // empty worktree name
-			{Worktree: "nova", Status: "idle"},
-		},
-	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		t.Fatalf("failed to marshal state: %v", err)
-	}
-	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
-		t.Fatalf("failed to write daemon-agents.json: %v", err)
-	}
-
-	result := loadDaemonManagedAgents(stateFilePath)
-
-	// Should only include non-empty worktree names
-	if result == nil {
-		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
-	}
-	if len(result) != 2 {
-		t.Errorf("len(result) = %d, want 2 (should skip empty worktree name)", len(result))
-	}
-	if !result["falcon"].Managed {
-		t.Error("result[falcon].Managed = false, want true")
-	}
-	if !result["nova"].Managed {
-		t.Error("result[nova].Managed = false, want true")
-	}
-	if result[""].Managed {
-		t.Error("result[\"\"].Managed = true, want false (empty worktree name should be skipped)")
-	}
-}
-
-func TestLoadDaemonManagedAgents_WithRole(t *testing.T) {
-	tmpDir := t.TempDir()
-	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
-
-	state := DaemonAgentState{
-		PID: os.Getpid(),
-		Agents: []DaemonAgentStateEntry{
-			{Worktree: "falcon", Status: "running", Role: "task"},
-			{Worktree: "nova", Status: "idle", Role: "plan"},
-			{Worktree: "spark", Status: "running"}, // no role
-		},
-	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		t.Fatalf("failed to marshal state: %v", err)
-	}
-	if err := os.WriteFile(stateFilePath, data, 0644); err != nil {
-		t.Fatalf("failed to write daemon-agents.json: %v", err)
-	}
-
-	result := loadDaemonManagedAgents(stateFilePath)
-	if result == nil {
-		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
-	}
-
-	if result["falcon"].Role != "task" {
-		t.Errorf("result[falcon].Role = %q, want %q", result["falcon"].Role, "task")
-	}
-	if result["nova"].Role != "plan" {
-		t.Errorf("result[nova].Role = %q, want %q", result["nova"].Role, "plan")
-	}
-	if result["spark"].Role != "" {
-		t.Errorf("result[spark].Role = %q, want empty string", result["spark"].Role)
-	}
-}
-func TestRenderAgentLine_WithDaemonMarker(t *testing.T) {
-	agent := AgentStatus{
-		Name:          "falcon",
-		Branch:        "falcon",
-		Status:        "ready",
-		Ahead:         0,
-		Behind:        0,
-		DaemonManaged: true,
-	}
-
-	var sb strings.Builder
-	renderAgentLine(&sb, agent, "  ")
-	output := sb.String()
-
-	// Verify [D] prefix is present
-	if !strings.Contains(output, "[D]") {
-		t.Errorf("output should contain '[D]' marker for daemon-managed agent, got:\n%s", output)
-	}
-	if !strings.Contains(output, "[D] falcon") {
-		t.Errorf("output should contain '[D] falcon', got:\n%s", output)
-	}
-}
-
-func TestRenderAgentLine_WithoutDaemonMarker(t *testing.T) {
-	agent := AgentStatus{
-		Name:          "falcon",
-		Branch:        "falcon",
-		Status:        "ready",
-		Ahead:         0,
-		Behind:        0,
-		DaemonManaged: false,
-	}
-
-	var sb strings.Builder
-	renderAgentLine(&sb, agent, "  ")
-	output := sb.String()
-
-	// Verify [D] prefix is NOT present
-	if strings.Contains(output, "[D]") {
-		t.Errorf("output should NOT contain '[D]' marker for non-daemon agent, got:\n%s", output)
-	}
-	// Agent name should still be present
-	if !strings.Contains(output, "falcon") {
-		t.Errorf("output should contain agent name 'falcon', got:\n%s", output)
-	}
-}
-
-func TestRenderAgentLine_DaemonManagedWithSyncIndicators(t *testing.T) {
-	agent := AgentStatus{
-		Name:          "nova",
-		Branch:        "nova",
-		Status:        "working: T-1 (5m)",
-		Ahead:         3,
-		Behind:        2,
-		DaemonManaged: true,
-	}
-
-	var sb strings.Builder
-	renderAgentLine(&sb, agent, "  ")
-	output := sb.String()
-
-	// Verify all elements are present
-	if !strings.Contains(output, "[D]") {
-		t.Error("missing [D] marker")
-	}
-	if !strings.Contains(output, "nova") {
-		t.Error("missing agent name")
-	}
-	if !strings.Contains(output, "working:") {
-		t.Error("missing status")
-	}
-	if !strings.Contains(output, "↑3") {
-		t.Error("missing ahead indicator")
-	}
-	if !strings.Contains(output, "↓2") {
-		t.Error("missing behind indicator")
-	}
-}
-
-func TestAgentStatusDaemonManagedField(t *testing.T) {
-	// Test JSON serialization with DaemonManaged field
-	agent := AgentStatus{
-		Name:          "falcon",
-		Branch:        "falcon",
-		Status:        "ready",
-		DaemonManaged: true,
-	}
-
-	data, err := json.Marshal(agent)
-	if err != nil {
-		t.Fatalf("failed to marshal AgentStatus: %v", err)
-	}
-
-	jsonStr := string(data)
-
-	// Verify daemon_managed field is present when true
-	if !strings.Contains(jsonStr, `"daemon_managed":true`) {
-		t.Errorf("expected daemon_managed:true in JSON, got: %s", jsonStr)
-	}
-
-	// Test that false value is omitted (omitempty)
-	agentNotManaged := AgentStatus{
-		Name:          "nova",
-		Branch:        "nova",
-		Status:        "ready",
-		DaemonManaged: false,
-	}
-
-	data, err = json.Marshal(agentNotManaged)
-	if err != nil {
-		t.Fatalf("failed to marshal AgentStatus: %v", err)
-	}
-
-	jsonStr = string(data)
-
-	// With omitempty, daemon_managed:false should be omitted
-	if strings.Contains(jsonStr, "daemon_managed") {
-		t.Errorf("daemon_managed should be omitted when false (omitempty), got: %s", jsonStr)
-	}
-}
-
-func TestDaemonAgentStateStructs(t *testing.T) {
-	// Test that the structs correctly parse daemon-agents.json format
-	jsonData := `{
-		"pid": 12345,
-		"agents": [
-			{"worktree": "falcon", "status": "running"},
-			{"worktree": "nova", "status": "idle"}
-		]
-	}`
-
-	var state DaemonAgentState
-	if err := json.Unmarshal([]byte(jsonData), &state); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-
-	if state.PID != 12345 {
-		t.Errorf("PID = %d, want 12345", state.PID)
-	}
-	if len(state.Agents) != 2 {
-		t.Fatalf("len(Agents) = %d, want 2", len(state.Agents))
-	}
-	if state.Agents[0].Worktree != "falcon" {
-		t.Errorf("Agents[0].Worktree = %q, want %q", state.Agents[0].Worktree, "falcon")
-	}
-	if state.Agents[0].Status != "running" {
-		t.Errorf("Agents[0].Status = %q, want %q", state.Agents[0].Status, "running")
-	}
-	if state.Agents[1].Worktree != "nova" {
-		t.Errorf("Agents[1].Worktree = %q, want %q", state.Agents[1].Worktree, "nova")
-	}
-	if state.Agents[1].Status != "idle" {
-		t.Errorf("Agents[1].Status = %q, want %q", state.Agents[1].Status, "idle")
 	}
 }
 

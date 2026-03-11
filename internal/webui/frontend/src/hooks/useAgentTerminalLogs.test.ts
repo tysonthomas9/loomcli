@@ -1,24 +1,24 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getAgentLogArchive,
   getAgentTerminalInfo,
   getAgentTerminalToken,
   getAgentTerminalWsUrl,
-} from '@/api';
+} from "@/api";
 
-import { useAgentTerminalLogs } from './useAgentTerminalLogs';
+import { useAgentTerminalLogs } from "./useAgentTerminalLogs";
 
-vi.mock('@/api', () => ({
+vi.mock("@/api", () => ({
   getAgentLogArchive: vi.fn(),
   getAgentTerminalInfo: vi.fn(),
   getAgentTerminalToken: vi.fn(),
   getAgentTerminalWsUrl: vi.fn(),
 }));
-vi.mock('@/utils/reconnectBackoff', () => ({
+vi.mock("@/utils/reconnectBackoff", () => ({
   calculateBackoffDelay: vi.fn(() => 1),
   DEFAULT_RECONNECT_CONFIG: {
     baseDelay: 1,
@@ -42,7 +42,7 @@ class MockWebSocket {
 
   readonly url: string;
   readyState = MockWebSocket.CONNECTING;
-  binaryType = '';
+  binaryType = "";
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
@@ -63,7 +63,7 @@ class MockWebSocket {
 
   triggerOpen(): void {
     this.readyState = MockWebSocket.OPEN;
-    this.onopen?.(new Event('open'));
+    this.onopen?.(new Event("open"));
   }
 
   triggerMessage(data: string | ArrayBuffer): void {
@@ -87,7 +87,7 @@ function createDeferred<T>() {
 
 function decodeChunks(chunks: Array<{ chunk: Uint8Array }>): string {
   const decoder = new TextDecoder();
-  return chunks.map((entry) => decoder.decode(entry.chunk)).join('');
+  return chunks.map((entry) => decoder.decode(entry.chunk)).join("");
 }
 
 async function flushAsyncWork(): Promise<void> {
@@ -96,7 +96,7 @@ async function flushAsyncWork(): Promise<void> {
   });
 }
 
-describe('useAgentTerminalLogs', () => {
+describe("useAgentTerminalLogs", () => {
   let originalWebSocket: typeof globalThis.WebSocket;
 
   beforeEach(() => {
@@ -108,7 +108,8 @@ describe('useAgentTerminalLogs', () => {
     vi.clearAllMocks();
 
     mockGetAgentTerminalWsUrl.mockImplementation(
-      (agentName: string, token: string) => `ws://localhost/${agentName}?token=${token}`
+      (agentName: string, token: string) =>
+        `ws://localhost/${agentName}?token=${token}`,
     );
   });
 
@@ -118,20 +119,22 @@ describe('useAgentTerminalLogs', () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
-  it('falls back to archive snapshot after tmux retry exhaustion while preserving existing output', async () => {
-    mockGetAgentTerminalInfo.mockResolvedValueOnce('tmux').mockResolvedValueOnce('archive');
-    mockGetAgentTerminalToken.mockResolvedValue('token-123');
+  it("falls back to archive snapshot after tmux retry exhaustion while preserving existing output", async () => {
+    mockGetAgentTerminalInfo
+      .mockResolvedValueOnce("tmux")
+      .mockResolvedValueOnce("archive");
+    mockGetAgentTerminalToken.mockResolvedValue("token-123");
     mockGetAgentLogArchive.mockResolvedValue({
-      lines: ['archive line'],
+      lines: ["archive line"],
       lineCount: 1,
       startLine: 1,
     });
 
     const { result } = renderHook(() =>
       useAgentTerminalLogs({
-        agentName: 'ember',
+        agentName: "ember",
         enabled: true,
-      })
+      }),
     );
 
     await flushAsyncWork();
@@ -141,17 +144,17 @@ describe('useAgentTerminalLogs', () => {
     expect(initialSocket).toBeDefined();
     act(() => {
       initialSocket?.triggerOpen();
-      initialSocket?.triggerMessage('live output\n');
+      initialSocket?.triggerMessage("live output\n");
     });
 
-    expect(decodeChunks(result.current.chunks)).toContain('live output');
+    expect(decodeChunks(result.current.chunks)).toContain("live output");
 
     act(() => {
       initialSocket?.triggerClose();
     });
 
-    expect(result.current.state).toBe('reconnecting');
-    expect(decodeChunks(result.current.chunks)).toContain('live output');
+    expect(result.current.state).toBe("reconnecting");
+    expect(decodeChunks(result.current.chunks)).toContain("live output");
 
     // maxAttempts is mocked to 2 for deterministic coverage.
     await act(async () => {
@@ -171,33 +174,35 @@ describe('useAgentTerminalLogs', () => {
     });
     await flushAsyncWork();
 
-    expect(result.current.mode).toBe('archive');
-    expect(result.current.state).toBe('connected');
+    expect(result.current.mode).toBe("archive");
+    expect(result.current.state).toBe("connected");
 
     expect(mockGetAgentTerminalInfo).toHaveBeenCalledTimes(2);
-    expect(mockGetAgentLogArchive).toHaveBeenCalledWith('ember', 500);
-    expect(decodeChunks(result.current.chunks)).toContain('archive line');
+    expect(mockGetAgentLogArchive).toHaveBeenCalledWith("ember", 500);
+    expect(decodeChunks(result.current.chunks)).toContain("archive line");
   });
 
-  it('auto-returns to tmux mode from archive snapshot when a live session appears', async () => {
-    mockGetAgentTerminalInfo.mockResolvedValueOnce('archive').mockResolvedValue('tmux');
+  it("auto-returns to tmux mode from archive snapshot when a live session appears", async () => {
+    mockGetAgentTerminalInfo
+      .mockResolvedValueOnce("archive")
+      .mockResolvedValue("tmux");
     mockGetAgentLogArchive.mockResolvedValue({
-      lines: ['snapshot'],
+      lines: ["snapshot"],
       lineCount: 1,
       startLine: 1,
     });
-    mockGetAgentTerminalToken.mockResolvedValue('token-abc');
+    mockGetAgentTerminalToken.mockResolvedValue("token-abc");
 
     const { result } = renderHook(() =>
       useAgentTerminalLogs({
-        agentName: 'ember',
+        agentName: "ember",
         enabled: true,
-      })
+      }),
     );
 
     await flushAsyncWork();
-    expect(result.current.mode).toBe('archive');
-    expect(result.current.state).toBe('connected');
+    expect(result.current.mode).toBe("archive");
+    expect(result.current.state).toBe("connected");
     expect(MockWebSocket.instances).toHaveLength(0);
 
     await act(async () => {
@@ -206,42 +211,46 @@ describe('useAgentTerminalLogs', () => {
     await flushAsyncWork();
 
     expect(MockWebSocket.instances).toHaveLength(1);
-    expect(result.current.mode).toBe('tmux');
+    expect(result.current.mode).toBe("tmux");
 
     act(() => {
       MockWebSocket.instances[0]?.triggerOpen();
     });
-    expect(result.current.state).toBe('connected');
-    expect(result.current.mode).toBe('tmux');
+    expect(result.current.state).toBe("connected");
+    expect(result.current.mode).toBe("tmux");
   });
 
-  it('dedupes concurrent archive top-load requests', async () => {
-    mockGetAgentTerminalInfo.mockResolvedValue('archive');
-    const deferredLoad = createDeferred<{ lines: string[]; lineCount: number; startLine: number }>();
+  it("dedupes concurrent archive top-load requests", async () => {
+    mockGetAgentTerminalInfo.mockResolvedValue("archive");
+    const deferredLoad = createDeferred<{
+      lines: string[];
+      lineCount: number;
+      startLine: number;
+    }>();
 
     mockGetAgentLogArchive
       .mockResolvedValueOnce({
-        lines: ['line-200', 'line-201'],
+        lines: ["line-200", "line-201"],
         lineCount: 2,
         startLine: 200,
       })
       .mockImplementationOnce(() => deferredLoad.promise)
       .mockResolvedValueOnce({
-        lines: ['line-196', 'line-197'],
+        lines: ["line-196", "line-197"],
         lineCount: 2,
         startLine: 196,
       });
 
     const { result } = renderHook(() =>
       useAgentTerminalLogs({
-        agentName: 'ember',
+        agentName: "ember",
         enabled: true,
-      })
+      }),
     );
 
     await flushAsyncWork();
     await flushAsyncWork();
-    expect(result.current.mode).toBe('archive');
+    expect(result.current.mode).toBe("archive");
     expect(result.current.hasMoreLines).toBe(true);
 
     act(() => {
@@ -251,12 +260,17 @@ describe('useAgentTerminalLogs', () => {
     await flushAsyncWork();
 
     expect(mockGetAgentLogArchive).toHaveBeenCalledTimes(2);
-    expect(mockGetAgentLogArchive).toHaveBeenNthCalledWith(2, 'ember', 500, 200);
+    expect(mockGetAgentLogArchive).toHaveBeenNthCalledWith(
+      2,
+      "ember",
+      500,
+      200,
+    );
     expect(result.current.isLoadingMore).toBe(true);
 
     await act(async () => {
       deferredLoad.resolve({
-        lines: ['line-198', 'line-199'],
+        lines: ["line-198", "line-199"],
         lineCount: 2,
         startLine: 198,
       });
@@ -271,6 +285,11 @@ describe('useAgentTerminalLogs', () => {
     await flushAsyncWork();
 
     expect(mockGetAgentLogArchive).toHaveBeenCalledTimes(3);
-    expect(mockGetAgentLogArchive).toHaveBeenNthCalledWith(3, 'ember', 500, 198);
+    expect(mockGetAgentLogArchive).toHaveBeenNthCalledWith(
+      3,
+      "ember",
+      500,
+      198,
+    );
   });
 });

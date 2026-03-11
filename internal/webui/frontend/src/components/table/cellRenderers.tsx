@@ -3,12 +3,12 @@
  * Extracted to enable code sharing between components.
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
 
-import type { BlockedInfo } from '@/components/KanbanBoard';
-import type { Issue, Priority, Status, IssueType } from '@/types';
+import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { Issue, Priority, Status, IssueType } from "@/types";
 
-import { BlockedCell } from './BlockedCell';
+import { BlockedCell } from "./BlockedCell";
 import {
   formatPriority,
   getPriorityClassName,
@@ -16,7 +16,7 @@ import {
   getStatusClassName,
   formatIssueType,
   formatDate,
-} from './columns';
+} from "./columns";
 
 /**
  * Options for rendering cell content.
@@ -36,30 +36,32 @@ export function renderCellContent(
   columnId: string,
   value: unknown,
   _issue: Issue,
-  options?: RenderCellOptions
+  options?: RenderCellOptions,
 ): ReactNode {
   switch (columnId) {
-    case 'id':
+    case "id":
       return <span className="issue-table__id">{String(value)}</span>;
 
-    case 'priority': {
+    case "priority": {
       const priority = value as Priority;
       const validPriority = priority >= 0 && priority <= 4 ? priority : 2;
       return (
-        <span className={`issue-table__priority ${getPriorityClassName(validPriority)}`}>
+        <span
+          className={`issue-table__priority ${getPriorityClassName(validPriority)}`}
+        >
           {formatPriority(validPriority)}
         </span>
       );
     }
 
-    case 'title':
+    case "title":
       return (
         <span className="issue-table__title" title={String(value)}>
           {String(value)}
         </span>
       );
 
-    case 'status': {
+    case "status": {
       const status = value as Status | undefined;
       return (
         <span className={`issue-table__status ${getStatusClassName(status)}`}>
@@ -68,7 +70,7 @@ export function renderCellContent(
       );
     }
 
-    case 'blocked': {
+    case "blocked": {
       const blockedInfo = options?.blockedInfo;
       return (
         <BlockedCell
@@ -79,18 +81,28 @@ export function renderCellContent(
       );
     }
 
-    case 'issue_type': {
+    case "issue_type": {
       const issueType = value as IssueType | undefined;
-      return <span className="issue-table__type">{formatIssueType(issueType)}</span>;
+      return (
+        <span className="issue-table__type">{formatIssueType(issueType)}</span>
+      );
     }
 
-    case 'assignee':
-      return <span className="issue-table__assignee">{value ? String(value) : '-'}</span>;
+    case "assignee":
+      return (
+        <span className="issue-table__assignee">
+          {value ? String(value) : "-"}
+        </span>
+      );
 
-    case 'updated_at':
-      return <span className="issue-table__date">{formatDate(value as string | undefined)}</span>;
+    case "updated_at":
+      return (
+        <span className="issue-table__date">
+          {formatDate(value as string | undefined)}
+        </span>
+      );
 
     default:
-      return value != null ? String(value) : '-';
+      return value != null ? String(value) : "-";
   }
 }

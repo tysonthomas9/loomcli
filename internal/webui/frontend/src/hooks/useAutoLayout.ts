@@ -7,23 +7,23 @@
  * flow into child nodes in a consistent direction.
  */
 
-import dagre from '@dagrejs/dagre';
-import { Position } from '@xyflow/react';
-import { useMemo } from 'react';
+import dagre from "@dagrejs/dagre";
+import { Position } from "@xyflow/react";
+import { useMemo } from "react";
 
-import type { IssueNode, DependencyEdge } from '@/types';
+import type { IssueNode, DependencyEdge } from "@/types";
 
 /**
  * Layout direction for the graph.
  * TB = top-to-bottom, BT = bottom-to-top, LR = left-to-right, RL = right-to-left.
  */
-export type LayoutDirection = 'TB' | 'BT' | 'LR' | 'RL';
+export type LayoutDirection = "TB" | "BT" | "LR" | "RL";
 
 /**
  * Alignment within ranks (rows/columns).
  * UL = upper left, UR = upper right, DL = down left, DR = down right.
  */
-export type RankAlignment = 'UL' | 'UR' | 'DL' | 'DR' | undefined;
+export type RankAlignment = "UL" | "UR" | "DL" | "DR" | undefined;
 
 /**
  * Default node dimensions for layout calculation.
@@ -79,13 +79,13 @@ function getHandlePositions(direction: LayoutDirection): {
   targetPosition: Position;
 } {
   switch (direction) {
-    case 'TB':
+    case "TB":
       return { sourcePosition: Position.Bottom, targetPosition: Position.Top };
-    case 'BT':
+    case "BT":
       return { sourcePosition: Position.Top, targetPosition: Position.Bottom };
-    case 'LR':
+    case "LR":
       return { sourcePosition: Position.Right, targetPosition: Position.Left };
-    case 'RL':
+    case "RL":
       return { sourcePosition: Position.Left, targetPosition: Position.Right };
     default:
       return { sourcePosition: Position.Bottom, targetPosition: Position.Top };
@@ -110,7 +110,7 @@ interface ResolvedOptions {
 function getLayoutedNodes(
   nodes: IssueNode[],
   edges: DependencyEdge[],
-  options: ResolvedOptions
+  options: ResolvedOptions,
 ): { nodes: IssueNode[]; bounds: { width: number; height: number } } {
   const { direction, nodesep, ranksep, align, nodeWidth, nodeHeight } = options;
 
@@ -202,10 +202,10 @@ function getLayoutedNodes(
 export function useAutoLayout(
   nodes: IssueNode[],
   edges: DependencyEdge[],
-  options: UseAutoLayoutOptions = {}
+  options: UseAutoLayoutOptions = {},
 ): UseAutoLayoutReturn {
   const {
-    direction = 'TB',
+    direction = "TB",
     nodesep = DEFAULT_NODESEP,
     ranksep = DEFAULT_RANKSEP,
     align,

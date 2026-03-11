@@ -3,34 +3,47 @@
  * Displays a single issue as a card with title, ID, priority badge, and optional blocked indicator.
  */
 
-import { getAvatarColor, getStatusDotColor, getStatusLabel } from '@/components/AgentCard';
-import { BlockedBadge } from '@/components/BlockedBadge';
-import { useAgentContext } from '@/hooks';
-import type { BlockerRef, Issue } from '@/types';
-import { parseLoomStatus } from '@/types';
-import { formatIssueId } from '@/utils/formatIssueId';
-import { getOpenStatus, getReviewType } from '@/utils/issueCategory';
-import type { OpenStatus, ReviewType } from '@/utils/issueCategory';
+import {
+  getAvatarColor,
+  getStatusDotColor,
+  getStatusLabel,
+} from "@/components/AgentCard";
+import { BlockedBadge } from "@/components/BlockedBadge";
+import { useAgentContext } from "@/hooks";
+import type { BlockerRef, Issue } from "@/types";
+import { parseLoomStatus } from "@/types";
+import { formatIssueId } from "@/utils/formatIssueId";
+import { getOpenStatus, getReviewType } from "@/utils/issueCategory";
+import type { OpenStatus, ReviewType } from "@/utils/issueCategory";
 
-import { AgentRow } from './AgentRow';
-import styles from './IssueCard.module.css';
+import { AgentRow } from "./AgentRow";
+import styles from "./IssueCard.module.css";
 
 /**
  * Review badge configuration by type.
  */
-const REVIEW_BADGE_CONFIG: Record<ReviewType, { icon: string; label: string; className: string }> =
-  {
-    plan: { icon: '📝', label: 'Plan', className: styles.reviewPlan ?? '' },
-    code: { icon: '🔍', label: 'Code', className: styles.reviewCode ?? '' },
-    help: { icon: '❓', label: 'Help', className: styles.reviewHelp ?? '' },
-  };
+const REVIEW_BADGE_CONFIG: Record<
+  ReviewType,
+  { icon: string; label: string; className: string }
+> = {
+  plan: { icon: "📝", label: "Plan", className: styles.reviewPlan ?? "" },
+  code: { icon: "🔍", label: "Code", className: styles.reviewCode ?? "" },
+  help: { icon: "❓", label: "Help", className: styles.reviewHelp ?? "" },
+};
 
 /**
  * Open status badge configuration by type.
  */
-const OPEN_BADGE_CONFIG: Record<OpenStatus, { icon: string; label: string; className: string }> = {
-  needs_plan: { icon: '📋', label: 'Needs Plan', className: styles.openNeedsPlan ?? '' },
-  ready: { icon: '✅', label: 'Ready', className: styles.openReady ?? '' },
+const OPEN_BADGE_CONFIG: Record<
+  OpenStatus,
+  { icon: string; label: string; className: string }
+> = {
+  needs_plan: {
+    icon: "📋",
+    label: "Needs Plan",
+    className: styles.openNeedsPlan ?? "",
+  },
+  ready: { icon: "✅", label: "Ready", className: styles.openReady ?? "" },
 };
 
 /**
@@ -83,17 +96,23 @@ export function IssueCard({
 
   const priority = getPriorityLevel(issue.priority);
   const displayId = formatIssueId(issue.id);
-  const displayTitle = issue.title || 'Untitled';
+  const displayTitle = issue.title || "Untitled";
   const isBlocked = (blockedByCount ?? 0) > 0;
   const reviewType = getReviewType(issue);
-  const openStatus = columnId === 'ready' ? getOpenStatus(issue) : null;
+  const openStatus = columnId === "ready" ? getOpenStatus(issue) : null;
 
   // Compute agent row data for in_progress cards with an assignee
-  const showAgentRow = columnId === 'in_progress' && !!issue.assignee;
-  const assignedAgent = issue.assignee ? getAgentByName(issue.assignee) : undefined;
-  const agentParsedStatus = assignedAgent ? parseLoomStatus(assignedAgent.status) : null;
+  const showAgentRow = columnId === "in_progress" && !!issue.assignee;
+  const assignedAgent = issue.assignee
+    ? getAgentByName(issue.assignee)
+    : undefined;
+  const agentParsedStatus = assignedAgent
+    ? parseLoomStatus(assignedAgent.status)
+    : null;
 
-  const rootClassName = className ? `${styles.issueCard} ${className}` : styles.issueCard;
+  const rootClassName = className
+    ? `${styles.issueCard} ${className}`
+    : styles.issueCard;
 
   const handleClick = () => {
     if (onClick) {
@@ -102,7 +121,7 @@ export function IssueCard({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (onClick && (event.key === 'Enter' || event.key === ' ')) {
+    if (onClick && (event.key === "Enter" || event.key === " ")) {
       event.preventDefault();
       onClick(issue);
     }
@@ -113,13 +132,13 @@ export function IssueCard({
       className={rootClassName}
       data-priority={priority}
       data-column={columnId}
-      data-blocked={isBlocked ? 'true' : undefined}
-      data-in-backlog={isBacklog ? 'true' : undefined}
+      data-blocked={isBlocked ? "true" : undefined}
+      data-in-backlog={isBacklog ? "true" : undefined}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       tabIndex={onClick ? 0 : undefined}
-      role={onClick ? 'button' : undefined}
-      aria-label={`Issue: ${displayTitle}${isBlocked ? ' (blocked)' : ''}${isBacklog ? ' (backlog)' : ''}`}
+      role={onClick ? "button" : undefined}
+      aria-label={`Issue: ${displayTitle}${isBlocked ? " (blocked)" : ""}${isBacklog ? " (backlog)" : ""}`}
     >
       <header className={styles.header}>
         <span className={styles.id}>{displayId}</span>
@@ -134,7 +153,7 @@ export function IssueCard({
             {REVIEW_BADGE_CONFIG[reviewType].label}
           </span>
         )}
-        {reviewType === 'code' && issue.external_ref && (
+        {reviewType === "code" && issue.external_ref && (
           <a
             className={styles.prLink}
             href={issue.external_ref}
@@ -161,10 +180,12 @@ export function IssueCard({
           <BlockedBadge
             count={blockedByCount ?? 0}
             {...(blockedBy !== undefined && { issueIds: blockedBy })}
-            {...(blockedByDetails !== undefined && { issueDetails: blockedByDetails })}
+            {...(blockedByDetails !== undefined && {
+              issueDetails: blockedByDetails,
+            })}
           />
         )}
-        {issue.status === 'deferred' && (
+        {issue.status === "deferred" && (
           <span className={styles.deferredBadge} aria-label="Deferred">
             <span aria-hidden="true">⏸</span> Deferred
           </span>
@@ -182,10 +203,16 @@ export function IssueCard({
         <AgentRow
           agentName={issue.assignee}
           status={agentParsedStatus}
-          avatarColor={getAvatarColor(issue.assignee.replace(/^\[H\]\s*/, ''))}
-          dotColor={agentParsedStatus ? getStatusDotColor(agentParsedStatus.type) : undefined}
+          avatarColor={getAvatarColor(issue.assignee.replace(/^\[H\]\s*/, ""))}
+          dotColor={
+            agentParsedStatus
+              ? getStatusDotColor(agentParsedStatus.type)
+              : undefined
+          }
           activity={
-            agentParsedStatus && assignedAgent ? getStatusLabel(agentParsedStatus) : undefined
+            agentParsedStatus && assignedAgent
+              ? getStatusLabel(agentParsedStatus)
+              : undefined
           }
         />
       )}

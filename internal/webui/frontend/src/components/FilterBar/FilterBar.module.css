@@ -24,8 +24,8 @@
   white-space: nowrap;
 }
 
-.header .filterGroup[data-filter='priority'],
-.header .filterGroup[data-filter='type'] {
+.header .filterGroup[data-filter="priority"],
+.header .filterGroup[data-filter="type"] {
   gap: var(--space-2);
 }
 
@@ -66,7 +66,8 @@
   outline: none;
   border-color: var(--color-primary);
   background-color: var(--color-bg);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--color-primary) 20%, transparent);
 }
 
 .clearButton {
@@ -129,7 +130,8 @@
 .dropdownTrigger:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--color-primary) 20%, transparent);
 }
 
 .dropdownArrow {
@@ -169,7 +171,7 @@
   background-color: var(--color-bg-secondary);
 }
 
-.dropdownItem input[type='checkbox'] {
+.dropdownItem input[type="checkbox"] {
   width: 16px;
   height: 16px;
   accent-color: var(--color-primary);
@@ -189,7 +191,7 @@
   min-width: fit-content; /* Ensure adequate space */
 }
 
-.checkboxLabel input[type='checkbox'] {
+.checkboxLabel input[type="checkbox"] {
   width: 16px;
   height: 16px;
   accent-color: var(--color-blocked);

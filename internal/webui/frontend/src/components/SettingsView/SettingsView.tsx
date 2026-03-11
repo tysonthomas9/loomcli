@@ -3,25 +3,28 @@
  * Displays project backend configuration with a dropdown and per-agent overrides table.
  */
 
-import { useState } from 'react';
+import { useState } from "react";
 
-import { ErrorDisplay } from '@/components/ErrorDisplay';
-import { LoadingSkeleton } from '@/components/LoadingSkeleton';
-import { useBackendConfig } from '@/hooks/useBackendConfig';
-import { useToast } from '@/hooks/useToast';
+import { ErrorDisplay } from "@/components/ErrorDisplay";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton";
+import { useBackendConfig } from "@/hooks/useBackendConfig";
+import { useToast } from "@/hooks/useToast";
 
-import styles from './SettingsView.module.css';
+import styles from "./SettingsView.module.css";
 
 export interface SettingsViewProps {
   className?: string;
 }
 
 export function SettingsView({ className }: SettingsViewProps): JSX.Element {
-  const { config, isLoading, error, isSaving, updateBackend, refetch } = useBackendConfig();
+  const { config, isLoading, error, isSaving, updateBackend, refetch } =
+    useBackendConfig();
   const { showToast } = useToast();
   const [selectedBackend, setSelectedBackend] = useState<string | null>(null);
 
-  const rootClassName = [styles.settingsView, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.settingsView, className]
+    .filter(Boolean)
+    .join(" ");
 
   // Loading state
   if (isLoading && !config) {
@@ -64,7 +67,7 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
   const hasChanges = currentValue !== config.backend;
 
   // Check if any agents have backend overrides
-  const agentsWithOverrides = config.agents.filter((a) => a.backend !== '');
+  const agentsWithOverrides = config.agents.filter((a) => a.backend !== "");
 
   const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedBackend(e.target.value);
@@ -76,10 +79,10 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
     const ok = await updateBackend(currentValue);
     if (ok) {
       setSelectedBackend(null);
-      showToast('Backend updated successfully', { type: 'success' });
-      window.dispatchEvent(new CustomEvent('terminal-backend-changed'));
+      showToast("Backend updated successfully", { type: "success" });
+      window.dispatchEvent(new CustomEvent("terminal-backend-changed"));
     } else {
-      showToast('Failed to update backend', { type: 'error' });
+      showToast("Failed to update backend", { type: "error" });
     }
   };
 
@@ -115,7 +118,9 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
                 ))}
               </select>
               <span className={styles.sourceTag}>
-                {config.source === 'project' ? 'From project loom.yaml' : 'Default'}
+                {config.source === "project"
+                  ? "From project loom.yaml"
+                  : "Default"}
               </span>
             </div>
           </div>
@@ -127,7 +132,7 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
               onClick={handleSave}
               data-testid="save-button"
             >
-              {isSaving ? 'Saving...' : 'Save'}
+              {isSaving ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
@@ -140,7 +145,10 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
         </div>
         <div className={styles.panelContent}>
           {agentsWithOverrides.length > 0 ? (
-            <table className={styles.agentTable} data-testid="agent-overrides-table">
+            <table
+              className={styles.agentTable}
+              data-testid="agent-overrides-table"
+            >
               <thead>
                 <tr>
                   <th>Worktree</th>
@@ -159,7 +167,10 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
               </tbody>
             </table>
           ) : (
-            <p className={styles.emptyMessage} data-testid="no-overrides-message">
+            <p
+              className={styles.emptyMessage}
+              data-testid="no-overrides-message"
+            >
               No per-agent overrides configured.
             </p>
           )}

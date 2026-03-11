@@ -36,32 +36,32 @@
 }
 
 /* Status-specific colors */
-.statusDropdown[data-status='open'] {
+.statusDropdown[data-status="open"] {
   background-color: var(--color-info-bg);
   color: var(--color-info);
 }
 
-.statusDropdown[data-status='in_progress'] {
+.statusDropdown[data-status="in_progress"] {
   background-color: var(--color-warning-bg);
   color: var(--color-warning);
 }
 
-.statusDropdown[data-status='closed'] {
+.statusDropdown[data-status="closed"] {
   background-color: var(--color-success-bg);
   color: var(--color-success);
 }
 
-.statusDropdown[data-status='blocked'] {
+.statusDropdown[data-status="blocked"] {
   background-color: var(--color-danger-bg);
   color: var(--color-danger);
 }
 
-.statusDropdown[data-status='deferred'] {
+.statusDropdown[data-status="deferred"] {
   background-color: var(--color-bg-tertiary);
   color: var(--color-text-muted);
 }
 
-.statusDropdown[data-status='review'] {
+.statusDropdown[data-status="review"] {
   background-color: #f3e8ff; /* purple-100 */
   color: var(--color-status-review);
 }
@@ -84,7 +84,7 @@
 }
 
 /* Saving indicator - pulsing animation */
-.statusDropdown[data-saving='true'] {
+.statusDropdown[data-saving="true"] {
   animation: pulse 1.5s ease-in-out infinite;
 }
 

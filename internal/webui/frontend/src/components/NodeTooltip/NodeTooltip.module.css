@@ -76,19 +76,19 @@
   background-color: var(--color-status-open);
 }
 
-.statusBadge[data-status='open'] {
+.statusBadge[data-status="open"] {
   background-color: var(--color-status-open);
 }
 
-.statusBadge[data-status='in_progress'] {
+.statusBadge[data-status="in_progress"] {
   background-color: var(--color-status-in-progress);
 }
 
-.statusBadge[data-status='closed'] {
+.statusBadge[data-status="closed"] {
   background-color: var(--color-status-closed);
 }
 
-.statusBadge[data-status='blocked'] {
+.statusBadge[data-status="blocked"] {
   background-color: var(--color-blocked);
 }
 
@@ -104,24 +104,24 @@
   background-color: var(--color-priority-4);
 }
 
-.priorityBadge[data-priority='0'] {
+.priorityBadge[data-priority="0"] {
   background-color: var(--color-priority-0);
 }
 
-.priorityBadge[data-priority='1'] {
+.priorityBadge[data-priority="1"] {
   background-color: var(--color-priority-1);
 }
 
-.priorityBadge[data-priority='2'] {
+.priorityBadge[data-priority="2"] {
   background-color: var(--color-priority-2);
   color: var(--color-text); /* Dark text for WCAG AA contrast */
 }
 
-.priorityBadge[data-priority='3'] {
+.priorityBadge[data-priority="3"] {
   background-color: var(--color-priority-3);
 }
 
-.priorityBadge[data-priority='4'] {
+.priorityBadge[data-priority="4"] {
   background-color: var(--color-priority-4);
 }
 

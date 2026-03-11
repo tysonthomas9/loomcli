@@ -3,13 +3,13 @@
  * Interactive dropdown for changing issue status.
  */
 
-import { useCallback } from 'react';
+import { useCallback } from "react";
 
-import { formatStatusLabel } from '@/components/StatusColumn/utils';
-import type { Status, KnownStatus } from '@/types/status';
-import { USER_SELECTABLE_STATUSES } from '@/types/status';
+import { formatStatusLabel } from "@/utils/statusFormat";
+import type { Status, KnownStatus } from "@/types/status";
+import { USER_SELECTABLE_STATUSES } from "@/types/status";
 
-import styles from './StatusDropdown.module.css';
+import styles from "./StatusDropdown.module.css";
 
 /**
  * Status option for the dropdown.
@@ -24,10 +24,12 @@ interface StatusOption {
 /**
  * Status options for the dropdown.
  */
-const STATUS_OPTIONS: StatusOption[] = USER_SELECTABLE_STATUSES.map((status) => ({
-  value: status,
-  label: formatStatusLabel(status),
-}));
+const STATUS_OPTIONS: StatusOption[] = USER_SELECTABLE_STATUSES.map(
+  (status) => ({
+    value: status,
+    label: formatStatusLabel(status),
+  }),
+);
 
 /**
  * Props for the StatusDropdown component.
@@ -65,11 +67,13 @@ export function StatusDropdown({
         onStatusChange(newStatus);
       }
     },
-    [status, onStatusChange]
+    [status, onStatusChange],
   );
 
   const isDisabled = disabled || isSaving;
-  const rootClassName = [styles.statusDropdown, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.statusDropdown, className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <select

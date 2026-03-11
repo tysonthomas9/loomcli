@@ -3,9 +3,9 @@
  * Provides real-time agent status with automatic polling.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from "react";
 
-import { fetchAgents, fetchStatus, fetchTasks } from '@/api';
+import { fetchAgents, fetchStatus, fetchTasks } from "@/api";
 import type {
   LoomAgentStatus,
   LoomTaskSummary,
@@ -14,7 +14,7 @@ import type {
   LoomSyncInfo,
   LoomStats,
   LoomConnectionState,
-} from '@/types';
+} from "@/types";
 
 /**
  * Options for the useAgents hook.
@@ -100,7 +100,7 @@ const DEFAULT_TASKS: LoomTaskSummary = {
 
 const DEFAULT_SYNC: LoomSyncInfo = {
   db_synced: true,
-  db_last_sync: '',
+  db_last_sync: "",
   git_needs_push: 0,
   git_needs_pull: 0,
 };
@@ -130,7 +130,11 @@ const MAX_RETRY_DELAY = 60; // seconds
 const BACKOFF_MULTIPLIER = 2;
 const LOOM_FETCH_TIMEOUT_MS = 15000;
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   const timeoutPromise = new Promise<T>((_, reject) => {
@@ -154,7 +158,9 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
   const [agents, setAgents] = useState<LoomAgentStatus[]>([]);
   const [tasks, setTasks] = useState<LoomTaskSummary>(DEFAULT_TASKS);
   const [taskLists, setTaskLists] = useState<LoomTaskLists>(DEFAULT_TASK_LISTS);
-  const [agentTasks, setAgentTasks] = useState<Record<string, LoomTaskInfo>>({});
+  const [agentTasks, setAgentTasks] = useState<Record<string, LoomTaskInfo>>(
+    {},
+  );
   const [sync, setSync] = useState<LoomSyncInfo>(DEFAULT_SYNC);
   const [stats, setStats] = useState<LoomStats>(DEFAULT_STATS);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -184,11 +190,11 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
 
   // Compute connection state from other state values
   const connectionState: LoomConnectionState = (() => {
-    if (isConnected) return 'connected';
-    if (isLoading && !wasEverConnected) return 'never_connected';
-    if (retryCountdown > 0) return 'reconnecting';
-    if (!wasEverConnected) return 'never_connected';
-    return 'disconnected';
+    if (isConnected) return "connected";
+    if (isLoading && !wasEverConnected) return "never_connected";
+    if (retryCountdown > 0) return "reconnecting";
+    if (!wasEverConnected) return "never_connected";
+    return "disconnected";
   })();
 
   // Clear any pending retry timers
@@ -221,7 +227,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
       const agentsResult = await withTimeout(
         fetchAgents(),
         LOOM_FETCH_TIMEOUT_MS,
-        'Loom agents fetch'
+        "Loom agents fetch",
       );
 
       // Only update state if still mounted
@@ -241,7 +247,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
           const statusResult = await withTimeout(
             fetchStatus(),
             LOOM_FETCH_TIMEOUT_MS,
-            'Loom status fetch'
+            "Loom status fetch",
           );
           if (mountedRef.current) {
             setTasks(statusResult.tasks);
@@ -251,8 +257,10 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
           }
         } catch (statusError) {
           console.warn(
-            'Loom status fetch failed:',
-            statusError instanceof Error ? statusError.message : String(statusError)
+            "Loom status fetch failed:",
+            statusError instanceof Error
+              ? statusError.message
+              : String(statusError),
           );
         }
       })();
@@ -262,15 +270,15 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
           const tasksResult = await withTimeout(
             fetchTasks(),
             LOOM_FETCH_TIMEOUT_MS,
-            'Loom tasks fetch'
+            "Loom tasks fetch",
           );
           if (mountedRef.current) {
             setTaskLists(tasksResult);
           }
         } catch (taskError) {
           console.warn(
-            'Loom tasks fetch failed:',
-            taskError instanceof Error ? taskError.message : String(taskError)
+            "Loom tasks fetch failed:",
+            taskError instanceof Error ? taskError.message : String(taskError),
           );
         }
       })();
@@ -292,7 +300,12 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
   // Schedule retry when disconnected after being connected
   useEffect(() => {
     // Only schedule retry if we were connected and now have an error, and no retry is in progress
-    if (!error || !wasEverConnected || isConnected || fetchInProgressRef.current) {
+    if (
+      !error ||
+      !wasEverConnected ||
+      isConnected ||
+      fetchInProgressRef.current
+    ) {
       return;
     }
 
@@ -327,7 +340,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
       // Increase delay for next retry (exponential backoff)
       currentRetryDelayRef.current = Math.min(
         currentRetryDelayRef.current * BACKOFF_MULTIPLIER,
-        MAX_RETRY_DELAY
+        MAX_RETRY_DELAY,
       );
       void fetchData();
     }, delay * 1000);
@@ -384,7 +397,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
         // force-reset the lock to unblock polling
         const fetchAge = Date.now() - fetchStartTimeRef.current;
         if (fetchInProgressRef.current && fetchAge > 20000) {
-          console.warn('Loom fetch watchdog: force-resetting stale fetch lock');
+          console.warn("Loom fetch watchdog: force-resetting stale fetch lock");
           fetchInProgressRef.current = false;
         }
         void fetchData();
@@ -393,13 +406,13 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
 
     // Visibility change handler: refetch immediately when tab becomes visible
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === "visible") {
         // Force-reset in case previous fetch was orphaned during background
         fetchInProgressRef.current = false;
         void fetchData();
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     // Cleanup
     return () => {
@@ -407,7 +420,7 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
       if (intervalId) {
         clearInterval(intervalId);
       }
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       // Clear retry timers on unmount
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);

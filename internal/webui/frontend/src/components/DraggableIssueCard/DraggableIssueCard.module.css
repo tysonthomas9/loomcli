@@ -32,7 +32,7 @@
 }
 
 .draggable:active .dragHandle,
-.draggable[data-dragging='true'] .dragHandle {
+.draggable[data-dragging="true"] .dragHandle {
   opacity: 1;
 }
 
@@ -40,7 +40,7 @@
   cursor: grabbing;
 }
 
-.draggable[data-dragging='true'] {
+.draggable[data-dragging="true"] {
   cursor: grabbing;
 }
 

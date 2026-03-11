@@ -6,15 +6,6 @@ import { readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, extname, sep } from "path";
 import { fileURLToPath } from "url";
 
-// Allowlist of "relPath:line" entries that are permitted.
-// TerminalPanel uses raw /api/ paths for terminal token + WebSocket endpoints.
-export const ALLOWLIST = new Set([
-  "src/components/TerminalPanel/TerminalPanel.tsx:37",
-  "src/components/TerminalPanel/TerminalPanel.tsx:50",
-  "src/components/TerminalPanel/TerminalPanel.tsx:372",
-  "src/components/TerminalPanel/TerminalPanel.tsx:376",
-]);
-
 const RULES = [
   {
     pattern: /\/api\//,
@@ -102,20 +93,22 @@ export function walkDir(dir) {
 
 /**
  * Scan a single file for hardcoded URL violations.
- * Returns an array of { relPath, line, message, source } violations.
+ * Returns { violations: [...], allowedCount } where allowedCount tracks
+ * lines suppressed by an inline // allow-url comment.
  */
 export function scanFile(filePath, frontendDir, contents) {
   if (contents === undefined) {
     try {
       contents = readFileSync(filePath, "utf-8");
     } catch {
-      return [];
+      return { violations: [], allowedCount: 0 };
     }
   }
 
   const relPath = relative(frontendDir, filePath).replaceAll(sep, "/");
   const lines = contents.split("\n");
   const violations = [];
+  let allowedCount = 0;
   let inBlockComment = false;
 
   for (let i = 0; i < lines.length; i++) {
@@ -141,24 +134,28 @@ export function scanFile(filePath, frontendDir, contents) {
 
     for (const rule of RULES) {
       if (rule.pattern.test(line)) {
-        violations.push({
-          relPath,
-          line: i + 1,
-          message: rule.message,
-          source: line.trimEnd(),
-        });
+        if (line.includes("// allow-url")) {
+          allowedCount++;
+        } else {
+          violations.push({
+            relPath,
+            line: i + 1,
+            message: rule.message,
+            source: line.trimEnd(),
+          });
+        }
       }
     }
   }
 
-  return violations;
+  return { violations, allowedCount };
 }
 
 /**
  * Scan all .ts/.tsx files under src/ for hardcoded URL violations.
  * Returns { violations, allowlistedCount, scannedCount }.
  */
-export function scanAll(frontendDir, allowlist = ALLOWLIST) {
+export function scanAll(frontendDir) {
   const srcDir = join(frontendDir, "src");
   let srcStat;
   try {
@@ -181,16 +178,9 @@ export function scanAll(frontendDir, allowlist = ALLOWLIST) {
     if (isExcluded(relPath)) continue;
 
     scannedCount++;
-    const fileViolations = scanFile(filePath, frontendDir);
-
-    for (const v of fileViolations) {
-      const key = `${v.relPath}:${v.line}`;
-      if (allowlist.has(key)) {
-        allowlistedCount++;
-      } else {
-        violations.push(v);
-      }
-    }
+    const result = scanFile(filePath, frontendDir);
+    violations.push(...result.violations);
+    allowlistedCount += result.allowedCount;
   }
 
   return { violations, allowlistedCount, scannedCount };

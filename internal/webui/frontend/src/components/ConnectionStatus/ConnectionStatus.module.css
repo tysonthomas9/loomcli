@@ -25,7 +25,7 @@
   font-family: var(--font-family-base);
 }
 
-.connectionStatus[data-compact='true'] {
+.connectionStatus[data-compact="true"] {
   gap: 0;
 }
 
@@ -40,7 +40,7 @@
     box-shadow var(--transition-fast);
 }
 
-.connectionStatus[data-compact='true'] .indicator {
+.connectionStatus[data-compact="true"] .indicator {
   width: 8px;
   height: 8px;
 }
@@ -77,24 +77,24 @@
  * =========================== */
 
 /* Connected - success green */
-.connectionStatus[data-state='connected'] .indicator {
+.connectionStatus[data-state="connected"] .indicator {
   background-color: var(--color-success);
 }
 
 /* Connecting - warning amber with pulse */
-.connectionStatus[data-state='connecting'] .indicator {
+.connectionStatus[data-state="connecting"] .indicator {
   background-color: var(--color-warning);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
 /* Reconnecting - warning amber with pulse */
-.connectionStatus[data-state='reconnecting'] .indicator {
+.connectionStatus[data-state="reconnecting"] .indicator {
   background-color: var(--color-warning);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
 /* Disconnected - danger red with glow for visibility */
-.connectionStatus[data-state='disconnected'] .indicator {
+.connectionStatus[data-state="disconnected"] .indicator {
   background-color: var(--color-danger);
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--color-danger) 25%, transparent),
@@ -150,7 +150,7 @@
  * Disconnected state text emphasis
  * Red text provides urgency/warning
  * =========================== */
-.connectionStatus[data-state='disconnected'] .text {
+.connectionStatus[data-state="disconnected"] .text {
   color: var(--color-danger);
 }
 
@@ -158,16 +158,16 @@
  * Badge variant border colors by state
  * Subtle tint to reinforce state
  * =========================== */
-.badge[data-state='connected'] {
+.badge[data-state="connected"] {
   border-color: var(--color-success);
 }
 
-.badge[data-state='connecting'],
-.badge[data-state='reconnecting'] {
+.badge[data-state="connecting"],
+.badge[data-state="reconnecting"] {
   border-color: var(--color-warning);
 }
 
-.badge[data-state='disconnected'] {
+.badge[data-state="disconnected"] {
   border-color: var(--color-danger);
 }
 

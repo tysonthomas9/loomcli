@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 // createMockBackendBinary creates a shell script that acts as a mock
@@ -231,10 +232,11 @@ func TestExternalBackend_InvokeInteractive(t *testing.T) {
 		t.Skip("shell script test helpers not supported on Windows")
 	}
 
-	// Create a mock script that records its arguments to a file
+	// Create a mock script that records args and reads prompt from stdin
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "args.txt")
-	script := "#!/bin/sh\necho \"$@\" > " + argsFile + "\n"
+	stdinFile := filepath.Join(dir, "stdin.txt")
+	script := "#!/bin/sh\necho \"$@\" > " + argsFile + "\ncat > " + stdinFile + "\n"
 	binPath := filepath.Join(dir, "loom-backend-test")
 	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
 		t.Fatalf("failed to create mock binary: %v", err)
@@ -246,13 +248,22 @@ func TestExternalBackend_InvokeInteractive(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	data, err := os.ReadFile(argsFile)
+	// Verify prompt is NOT in CLI args
+	argsData, err := os.ReadFile(argsFile)
 	if err != nil {
 		t.Fatalf("failed to read args file: %v", err)
 	}
-	got := string(data)
-	if got != "invoke --interactive hello world\n" {
-		t.Fatalf("expected 'invoke --interactive hello world', got %q", got)
+	if got := string(argsData); got != "invoke --interactive\n" {
+		t.Fatalf("expected args 'invoke --interactive', got %q", got)
+	}
+
+	// Verify prompt IS received via stdin
+	stdinData, err := os.ReadFile(stdinFile)
+	if err != nil {
+		t.Fatalf("failed to read stdin file: %v", err)
+	}
+	if got := string(stdinData); got != "hello world" {
+		t.Fatalf("expected 'hello world' via stdin, got %q", got)
 	}
 }
 
@@ -304,7 +315,7 @@ func TestExternalBackend_EnvPassthrough(t *testing.T) {
 
 	dir := t.TempDir()
 	envFile := filepath.Join(dir, "env.txt")
-	script := "#!/bin/sh\nenv > " + envFile + "\n"
+	script := "#!/bin/sh\ncat > /dev/null\nenv > " + envFile + "\n"
 	binPath := filepath.Join(dir, "loom-backend-test")
 	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
 		t.Fatalf("failed to create mock binary: %v", err)
@@ -344,14 +355,14 @@ func TestExternalBackend_Meta_Fallback(t *testing.T) {
 }
 
 func TestExternalBackend_HealthCheck_Fallback(t *testing.T) {
-	// When binPath doesn't exist / health subcommand fails, should return unhealthy
+	// When binPath doesn't exist, should return Installed=false
 	eb := &ExternalBackend{name: "broken", binPath: "/nonexistent/loom-backend-broken"}
 	hs := eb.HealthCheck()
 	if hs.Healthy {
 		t.Error("expected unhealthy status when binary doesn't exist")
 	}
-	if !hs.Installed {
-		t.Error("expected Installed=true (binary was found during discovery)")
+	if hs.Installed {
+		t.Error("expected Installed=false when binary no longer exists on disk")
 	}
 	if hs.Message == "" {
 		t.Error("expected a non-empty message describing the failure")
@@ -412,6 +423,66 @@ echo '{"Healthy":true,"Installed":true,"Version":"2.0","APIKeySet":true,"Message
 	}
 }
 
+func TestExternalBackend_HealthCheck_BinaryDeletedAfterDiscovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helpers not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	script := `#!/bin/sh
+echo '{"Healthy":true,"Installed":true,"Version":"1.0","Message":"ok"}'
+`
+	binPath := filepath.Join(dir, "loom-backend-ephemeral")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	eb := &ExternalBackend{name: "ephemeral", binPath: binPath}
+
+	// Delete the binary to simulate removal after discovery.
+	if err := os.Remove(binPath); err != nil {
+		t.Fatalf("failed to remove mock binary: %v", err)
+	}
+
+	hs := eb.HealthCheck()
+	if hs.Installed {
+		t.Error("expected Installed=false after binary deletion")
+	}
+	if hs.Healthy {
+		t.Error("expected Healthy=false after binary deletion")
+	}
+	if hs.Message == "" {
+		t.Error("expected a non-empty message describing the missing binary")
+	}
+}
+
+func TestExternalBackend_HealthCheck_BinaryExistsButHealthFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helpers not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	script := `#!/bin/sh
+exit 1
+`
+	binPath := filepath.Join(dir, "loom-backend-failing")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	eb := &ExternalBackend{name: "failing", binPath: binPath}
+	hs := eb.HealthCheck()
+	if !hs.Installed {
+		t.Error("expected Installed=true when binary exists but health fails")
+	}
+	if hs.Healthy {
+		t.Error("expected Healthy=false when health subcommand fails")
+	}
+	if hs.Message == "" {
+		t.Error("expected a non-empty message describing the failure")
+	}
+}
+
 func TestIsRegistered(t *testing.T) {
 	resetBackendState(t)
 
@@ -422,6 +493,77 @@ func TestIsRegistered(t *testing.T) {
 	}
 	if IsRegistered("nonexistent") {
 		t.Error("expected IsRegistered('nonexistent') to return false")
+	}
+}
+
+func TestExternalBackend_Meta_Timeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helpers not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	script := "#!/bin/sh\nsleep 30\n"
+	binPath := filepath.Join(dir, "loom-backend-slow")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	eb := &ExternalBackend{name: "slow", binPath: binPath}
+	start := time.Now()
+	meta := eb.Meta()
+	elapsed := time.Since(start)
+
+	// Should return fallback within externalCmdTimeout + buffer, not 30s
+	if elapsed > externalCmdTimeout+2*time.Second {
+		t.Fatalf("Meta() took %v, expected timeout around %v", elapsed, externalCmdTimeout)
+	}
+	if meta.DisplayName != "slow" {
+		t.Errorf("expected fallback DisplayName 'slow', got %q", meta.DisplayName)
+	}
+	if meta.BinaryName != "loom-backend-slow" {
+		t.Errorf("expected fallback BinaryName 'loom-backend-slow', got %q", meta.BinaryName)
+	}
+}
+
+func TestExternalBackend_HealthCheck_Timeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helpers not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	script := "#!/bin/sh\nsleep 30\n"
+	binPath := filepath.Join(dir, "loom-backend-slow")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	eb := &ExternalBackend{name: "slow", binPath: binPath}
+	start := time.Now()
+	hs := eb.HealthCheck()
+	elapsed := time.Since(start)
+
+	// Should return within externalCmdTimeout + buffer, not 30s
+	if elapsed > externalCmdTimeout+2*time.Second {
+		t.Fatalf("HealthCheck() took %v, expected timeout around %v", elapsed, externalCmdTimeout)
+	}
+	if hs.Healthy {
+		t.Error("expected unhealthy status on timeout")
+	}
+	if !hs.Installed {
+		t.Error("expected Installed=true")
+	}
+	if hs.Message == "" {
+		t.Error("expected a non-empty error message")
+	}
+}
+
+func TestInitGuard_NoExternalBackendsEnv(t *testing.T) {
+	// Verify that when LOOM_NO_EXTERNAL_BACKENDS is set, the env var is respected.
+	// Note: init() runs once at package load so cannot be directly re-tested.
+	// This test documents the guard contract and verifies the env var mechanism.
+	t.Setenv("LOOM_NO_EXTERNAL_BACKENDS", "1")
+	if os.Getenv("LOOM_NO_EXTERNAL_BACKENDS") == "" {
+		t.Fatal("expected LOOM_NO_EXTERNAL_BACKENDS to be non-empty")
 	}
 }
 

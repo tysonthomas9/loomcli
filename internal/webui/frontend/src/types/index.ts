@@ -8,10 +8,10 @@
  */
 
 // Common types
-export type { ISODateString, Priority, Duration } from './common';
+export type { ISODateString, Priority, Duration } from "./common";
 
 // Status types
-export type { Status, KnownStatus } from './status';
+export type { Status, KnownStatus } from "./status";
 export {
   StatusOpen,
   StatusInProgress,
@@ -26,10 +26,10 @@ export {
   USER_SELECTABLE_STATUSES,
   isKnownStatus,
   isValidStatus,
-} from './status';
+} from "./status";
 
 // Issue type types
-export type { IssueType, KnownIssueType } from './issueType';
+export type { IssueType, KnownIssueType } from "./issueType";
 export {
   TypeBug,
   TypeFeature,
@@ -39,7 +39,7 @@ export {
   KNOWN_ISSUE_TYPES,
   isKnownIssueType,
   isValidIssueType,
-} from './issueType';
+} from "./issueType";
 
 // Dependency types
 export type {
@@ -47,7 +47,7 @@ export type {
   DependencyType,
   KnownDependencyType,
   DependencyCounts,
-} from './dependency';
+} from "./dependency";
 export {
   DepBlocks,
   DepParentChild,
@@ -68,17 +68,27 @@ export {
   DepCausedBy,
   DepValidates,
   DepDelegatedFrom,
-} from './dependency';
+} from "./dependency";
 
 // Comment types
-export type { Comment } from './comment';
+export type { Comment } from "./comment";
 
 // Label types
-export type { Label } from './label';
+export type { Label } from "./label";
 
 // Entity types (HOP)
-export type { EntityRef, ValidationOutcome, Validation, BondRef } from './entity';
-export { BondTypeSequential, BondTypeParallel, BondTypeConditional, BondTypeRoot } from './entity';
+export type {
+  EntityRef,
+  ValidationOutcome,
+  Validation,
+  BondRef,
+} from "./entity";
+export {
+  BondTypeSequential,
+  BondTypeParallel,
+  BondTypeConditional,
+  BondTypeRoot,
+} from "./entity";
 
 // Agent types
 export type {
@@ -98,7 +108,7 @@ export type {
   LoomTasksResponse,
   LoomTaskLists,
   LoomConnectionState,
-} from './agent';
+} from "./agent";
 export {
   StateIdle,
   StateSpawning,
@@ -114,7 +124,7 @@ export {
   WorkTypeMutex,
   WorkTypeOpenCompetition,
   parseLoomStatus,
-} from './agent';
+} from "./agent";
 
 // Issue types
 export type {
@@ -128,21 +138,30 @@ export type {
   MoleculeProgressStats,
   GraphDependency,
   GraphIssue,
-} from './issue';
+} from "./issue";
 
 // Statistics types
-export type { Statistics, EpicStatus } from './statistics';
+export type { Statistics, EpicStatus } from "./statistics";
 
 // Filter types
-export type { SortPolicy, WorkFilter } from './filter';
-export { SortPolicyHybrid, SortPolicyPriority, SortPolicyOldest } from './filter';
+export type { SortPolicy, WorkFilter } from "./filter";
+export {
+  SortPolicyHybrid,
+  SortPolicyPriority,
+  SortPolicyOldest,
+} from "./filter";
 
 // API types
-export type { ApiResponse, ApiError, ApiResult, PaginatedResponse } from './api';
-export { isApiSuccess, isApiError } from './api';
+export type {
+  ApiResponse,
+  ApiError,
+  ApiResult,
+  PaginatedResponse,
+} from "./api";
+export { isApiSuccess, isApiError } from "./api";
 
 // Event types
-export type { EventType, Event } from './event';
+export type { EventType, Event } from "./event";
 export {
   EventCreated,
   EventUpdated,
@@ -155,10 +174,10 @@ export {
   EventLabelAdded,
   EventLabelRemoved,
   EventCompacted,
-} from './event';
+} from "./event";
 
 // Mutation types (for real-time sync)
-export type { MutationType, MutationPayload, MutationEvent } from './mutation';
+export type { MutationType, MutationPayload, MutationEvent } from "./mutation";
 export {
   MutationCreate,
   MutationUpdate,
@@ -177,7 +196,7 @@ export {
   isBondedMutation,
   isSquashedMutation,
   isBurnedMutation,
-} from './mutation';
+} from "./mutation";
 
 // Usage types
 export type {
@@ -187,7 +206,14 @@ export type {
   UsageDailyCost,
   UsageResponse,
   UsageParams,
-} from './usage';
+} from "./usage";
+
+// Observability types
+export type {
+  MetricsSnapshot,
+  HourlyBucket,
+  ObservabilityMetricsResponse,
+} from "./observability";
 
 // Graph types (React Flow)
 export type {
@@ -197,4 +223,4 @@ export type {
   DependencyEdge,
   GraphNodeType,
   GraphEdgeType,
-} from './graph';
+} from "./graph";

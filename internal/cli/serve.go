@@ -46,7 +46,7 @@ var (
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
-	collectDataFunc = func() *MonitorData { return collectMonitorData(50) }
+	collectDataFunc = func() *MonitorData { return collectMonitorData(50, monitorBranch) }
 
 	// staleDetectorInstance holds the running stale detector for status queries.
 	staleDetectorInstance *kv.StaleDetector
@@ -76,6 +76,7 @@ ENDPOINTS
   GET /api/sync        Sync status
   GET /api/usage       Token usage and cost data (filterable)
   GET /api/workspaces  Workspace configuration (workspace mode only)
+  GET /api/observability/{metrics,events}  Observability data
 
 ENVIRONMENT VARIABLES
   LOOM_SERVER_PORT    Server port (default: 8081)
@@ -155,7 +156,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// concurrent API requests. The frontend polls 3 endpoints every 5s;
 	// without this cache each poll cycle spawns ~60-90 subprocesses.
 	collector := newCachedCollector(2*time.Second, func() *MonitorData {
-		return collectMonitorData(50)
+		return collectMonitorData(50, monitorBranch)
 	})
 	collectDataFunc = collector.get
 
@@ -190,6 +191,16 @@ func runServe(cmd *cobra.Command, args []string) {
 				log.Printf("Warning: failed to stop bd daemon: %v", result.Err)
 			}
 		}()
+	}
+
+	// Fall back to daemon config for Redis/API key when CLI flags/env vars are not set
+	if dc, dcErr := LoadDaemonConfig("."); dcErr == nil {
+		if serveRedisAddr == "" && dc.Daemon.RedisURL != "" {
+			serveRedisAddr = dc.Daemon.RedisURL
+		}
+		if serveAPIKey == "" && dc.Daemon.APIKey != "" {
+			serveAPIKey = dc.Daemon.APIKey
+		}
 	}
 
 	// Provision shared JWT signing key from Redis (if configured) or environment
@@ -339,6 +350,9 @@ func runServe(cmd *cobra.Command, args []string) {
 	mux.HandleFunc("GET /api/stale-detector", handleStaleDetector)
 	mux.HandleFunc("GET /api/usage", handleUsage)
 	mux.HandleFunc("GET /metrics", handleMetrics)
+	eventsDir := resolveEventsDir()
+	mux.HandleFunc("GET /api/observability/metrics", handleObservabilityMetrics(eventsDir))
+	mux.HandleFunc("GET /api/observability/events", handleObservabilityEvents(eventsDir))
 
 	// Wrap with CORS middleware
 	handler := corsMiddleware(serveCorsOrigin, mux)
@@ -434,8 +448,6 @@ func corsMiddleware(corsOrigin string, next http.Handler) http.Handler {
 	})
 }
 
-// Response types for JSON API
-
 // WorkspaceInfo represents workspace metadata for API responses.
 type WorkspaceInfo struct {
 	Mode       string   `json:"mode"`                 // "workspace" or "legacy"
@@ -505,8 +517,6 @@ type StatusResponse struct {
 	Sync           SyncInfo            `json:"sync"`
 	Timestamp      time.Time           `json:"timestamp"`
 }
-
-// HTTP Handlers
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, HealthResponse{

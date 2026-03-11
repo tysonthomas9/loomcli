@@ -7,22 +7,28 @@
  * IssueNode and DependencyEdge objects.
  */
 
-import { MarkerType } from '@xyflow/react';
-import { useMemo } from 'react';
+import { MarkerType } from "@xyflow/react";
+import { useMemo } from "react";
 
-import type { Issue, Dependency, DependencyType, IssueNode, DependencyEdge } from '@/types';
+import type {
+  Issue,
+  Dependency,
+  DependencyType,
+  IssueNode,
+  DependencyEdge,
+} from "@/types";
 
-import { computeAllBlockedCounts } from './useBlockedChain';
+import { computeAllBlockedCounts } from "./useBlockedChain";
 
 /**
  * Blocking dependency types that affect ready work calculation.
  * These dependencies prevent an issue from being "ready" to work on.
  */
 const BLOCKING_TYPES = new Set<DependencyType>([
-  'blocks',
-  'parent-child',
-  'conditional-blocks',
-  'waits-for',
+  "blocks",
+  "parent-child",
+  "conditional-blocks",
+  "waits-for",
 ]);
 
 /**
@@ -78,7 +84,7 @@ function createNodeId(issueId: string): string {
 function createEdgeId(
   sourceIssueId: string,
   targetIssueId: string,
-  depType: DependencyType
+  depType: DependencyType,
 ): string {
   return `edge-${sourceIssueId}-${targetIssueId}-${depType}`;
 }
@@ -86,7 +92,7 @@ function createEdgeId(
 /**
  * Timestamp for ghost issues - created once to avoid repeated Date operations.
  */
-const GHOST_TIMESTAMP = '1970-01-01T00:00:00.000Z';
+const GHOST_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
 /**
  * Create a minimal ghost issue for orphan edge targets.
@@ -118,7 +124,7 @@ function shouldIncludeDependency(
   dep: Dependency,
   issueIdSet: Set<string>,
   includeDependencyTypes?: DependencyType[],
-  allowOrphan?: boolean
+  allowOrphan?: boolean,
 ): DependencyInclusionResult {
   const targetExists = issueIdSet.has(dep.depends_on_id);
 
@@ -161,7 +167,7 @@ function shouldIncludeDependency(
 /**
  * Non-ready statuses - issues with these statuses are never "ready".
  */
-const NON_READY_STATUSES = new Set(['closed', 'deferred']);
+const NON_READY_STATUSES = new Set(["closed", "deferred"]);
 
 /**
  * Check if an issue is ready based on status and blocked state.
@@ -172,7 +178,7 @@ const NON_READY_STATUSES = new Set(['closed', 'deferred']);
 function computeIsReady(
   issueId: string,
   status: string | undefined,
-  blockedIssueIds: Set<string> | undefined
+  blockedIssueIds: Set<string> | undefined,
 ): boolean {
   // Closed and deferred issues are never ready
   if (status && NON_READY_STATUSES.has(status)) {
@@ -188,9 +194,10 @@ function computeIsReady(
 
 export function useGraphData(
   issues: Issue[],
-  options: UseGraphDataOptions = {}
+  options: UseGraphDataOptions = {},
 ): UseGraphDataReturn {
-  const { includeDependencyTypes, blockedIssueIds, includeOrphanEdges } = options;
+  const { includeDependencyTypes, blockedIssueIds, includeOrphanEdges } =
+    options;
 
   return useMemo(() => {
     // Handle empty input
@@ -233,7 +240,7 @@ export function useGraphData(
           dep,
           issueIdSet,
           includeDependencyTypes,
-          includeOrphanEdges
+          includeOrphanEdges,
         );
         if (!result.include) {
           continue;
@@ -246,8 +253,14 @@ export function useGraphData(
 
         // dep.issue_id is the source (has dependency)
         // dep.depends_on_id is the target (is depended upon)
-        outgoingCounts.set(dep.issue_id, (outgoingCounts.get(dep.issue_id) ?? 0) + 1);
-        incomingCounts.set(dep.depends_on_id, (incomingCounts.get(dep.depends_on_id) ?? 0) + 1);
+        outgoingCounts.set(
+          dep.issue_id,
+          (outgoingCounts.get(dep.issue_id) ?? 0) + 1,
+        );
+        incomingCounts.set(
+          dep.depends_on_id,
+          (incomingCounts.get(dep.depends_on_id) ?? 0) + 1,
+        );
       }
     }
 
@@ -264,7 +277,7 @@ export function useGraphData(
           dep,
           issueIdSet,
           includeDependencyTypes,
-          includeOrphanEdges
+          includeOrphanEdges,
         );
         if (!result.include) {
           continue;
@@ -274,12 +287,12 @@ export function useGraphData(
 
         edges.push({
           id: createEdgeId(dep.issue_id, dep.depends_on_id, dep.type),
-          type: 'dependency',
+          type: "dependency",
           source: createNodeId(dep.issue_id),
           target: createNodeId(dep.depends_on_id),
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            color: isBlocking ? '#ef4444' : '#64748b',
+            color: isBlocking ? "#ef4444" : "#64748b",
           },
           data: {
             dependencyType: dep.type,
@@ -315,7 +328,7 @@ export function useGraphData(
     // dependencies with unknown blocking relationships (per design doc)
     const transitiveBlockedCounts = computeAllBlockedCounts(
       issues.map((issue) => issue.id),
-      edges
+      edges,
     );
 
     // Create nodes with blocked count and root blocker flag
@@ -326,7 +339,7 @@ export function useGraphData(
 
       return {
         id: createNodeId(issue.id),
-        type: 'issue',
+        type: "issue",
         position: { x: 0, y: 0 }, // Layout handled by dagre in T061
         data: {
           issue,
@@ -339,7 +352,7 @@ export function useGraphData(
           isReady: computeIsReady(issue.id, issue.status, blockedIssueIds),
           blockedCount,
           isRootBlocker,
-          isClosed: issue.status === 'closed',
+          isClosed: issue.status === "closed",
         },
       };
     });
@@ -350,7 +363,7 @@ export function useGraphData(
         const ghostIssue = createGhostIssue(missingId);
         nodes.push({
           id: createNodeId(missingId),
-          type: 'issue',
+          type: "issue",
           position: { x: 0, y: 0 },
           data: {
             issue: ghostIssue,

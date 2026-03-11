@@ -14,9 +14,9 @@ import type {
   Status,
   DependencyType,
   Comment,
-} from '@/types';
+} from "@/types";
 
-import { get, post, patch, del, ApiError } from './client';
+import { get, post, patch, del, ApiError } from "./client";
 
 // ============= Response Types =============
 
@@ -57,16 +57,16 @@ function buildQueryString(params: Record<string, unknown>): string {
     if (Array.isArray(value)) {
       // Arrays become comma-separated: labels=a,b,c
       if (value.length > 0) {
-        searchParams.set(key, value.join(','));
+        searchParams.set(key, value.join(","));
       }
-    } else if (typeof value === 'boolean') {
-      searchParams.set(key, value ? 'true' : 'false');
+    } else if (typeof value === "boolean") {
+      searchParams.set(key, value ? "true" : "false");
     } else {
       searchParams.set(key, String(value));
     }
   }
   const queryString = searchParams.toString();
-  return queryString ? `?${queryString}` : '';
+  return queryString ? `?${queryString}` : "";
 }
 
 /**
@@ -84,7 +84,9 @@ function unwrap<T>(response: ApiResult<T>): T {
  * Map WorkFilter to backend query parameter names.
  * WorkFilter uses 'sort_policy' but backend expects 'sort'.
  */
-function mapWorkFilterToQueryParams(filter: WorkFilter): Record<string, unknown> {
+function mapWorkFilterToQueryParams(
+  filter: WorkFilter,
+): Record<string, unknown> {
   const { sort_policy, ...rest } = filter;
   const params: Record<string, unknown> = { ...rest };
   if (sort_policy !== undefined) {
@@ -99,7 +101,9 @@ function mapWorkFilterToQueryParams(filter: WorkFilter): Record<string, unknown>
  * Get a single issue by ID with full details.
  */
 export async function getIssue(id: string): Promise<IssueDetails> {
-  const response = await get<ApiResult<IssueDetails>>(`/api/issues/${encodeURIComponent(id)}`);
+  const response = await get<ApiResult<IssueDetails>>(
+    `/api/issues/${encodeURIComponent(id)}`,
+  );
   return unwrap(response);
 }
 
@@ -116,7 +120,7 @@ export async function getReadyIssues(options?: WorkFilter): Promise<Issue[]> {
  * Get project statistics.
  */
 export async function getStats(): Promise<Statistics> {
-  const response = await get<ApiResult<Statistics>>('/api/stats');
+  const response = await get<ApiResult<Statistics>>("/api/stats");
   return unwrap(response);
 }
 
@@ -139,7 +143,9 @@ export interface BlockedFilter {
 /**
  * Get issues that have blocking dependencies (waiting on other issues).
  */
-export async function getBlockedIssues(options?: BlockedFilter): Promise<BlockedIssue[]> {
+export async function getBlockedIssues(
+  options?: BlockedFilter,
+): Promise<BlockedIssue[]> {
   const params: Record<string, unknown> = {};
   if (options?.parent_id) {
     params.parent_id = options.parent_id;
@@ -168,8 +174,8 @@ export async function getBlockedIssues(options?: BlockedFilter): Promise<Blocked
  */
 export async function getKanbanIssues(options?: WorkFilter): Promise<Issue[]> {
   const params: Record<string, unknown> = {
-    exclude_status: 'tombstone',
-    include_blocked: 'true',
+    exclude_status: "tombstone",
+    include_blocked: "true",
   };
   if (options) {
     const mapped = mapWorkFilterToQueryParams(options);
@@ -187,7 +193,7 @@ export async function getKanbanIssues(options?: WorkFilter): Promise<Issue[]> {
  */
 export interface GraphFilter {
   /** Status filter: 'all', 'open', or 'closed' (default: 'all') */
-  status?: 'all' | 'open' | 'closed';
+  status?: "all" | "open" | "closed";
   /** Include closed issues when status is 'all' (default: true) */
   includeClosed?: boolean;
 }
@@ -225,7 +231,9 @@ interface GraphApiIssue {
  * NOTE: The backend returns a slim payload (id, title, status, priority,
  * issue_type, labels, dependencies). Missing Issue fields are set to defaults.
  */
-export async function fetchGraphIssues(options?: GraphFilter): Promise<Issue[]> {
+export async function fetchGraphIssues(
+  options?: GraphFilter,
+): Promise<Issue[]> {
   const params: Record<string, unknown> = {};
   if (options?.status) {
     params.status = options.status;
@@ -237,12 +245,14 @@ export async function fetchGraphIssues(options?: GraphFilter): Promise<Issue[]> 
   const response = await get<GraphApiResponse>(`/api/issues/graph${query}`);
 
   if (!response.success) {
-    throw new ApiError(0, response.error || 'Unknown error');
+    throw new ApiError(0, response.error || "Unknown error");
   }
 
   // Warn in development if backend returns success without issues field
-  if (response.issues === undefined && process.env.NODE_ENV === 'development') {
-    console.warn('[fetchGraphIssues] Backend returned success without issues field');
+  if (response.issues === undefined && process.env.NODE_ENV === "development") {
+    console.warn(
+      "[fetchGraphIssues] Backend returned success without issues field",
+    );
   }
 
   // Transform slim graph API response to full Issue objects
@@ -255,8 +265,8 @@ export async function fetchGraphIssues(options?: GraphFilter): Promise<Issue[]> 
       priority: issue.priority as Priority,
       issue_type: issue.issue_type as IssueType,
       labels: issue.labels ?? [],
-      created_at: '', // Not available in slim payload
-      updated_at: '', // Not available in slim payload
+      created_at: "", // Not available in slim payload
+      updated_at: "", // Not available in slim payload
       defer_until: issue.defer_until ?? null,
       due_at: issue.due_at ?? null,
     };
@@ -265,7 +275,7 @@ export async function fetchGraphIssues(options?: GraphFilter): Promise<Issue[]> 
         issue_id: issue.id,
         depends_on_id: dep.depends_on_id,
         type: dep.type as DependencyType,
-        created_at: '', // Not available in slim payload
+        created_at: "", // Not available in slim payload
       }));
     }
     return result;
@@ -322,15 +332,21 @@ export interface UpdateIssueRequest {
  * Create a new issue.
  */
 export async function createIssue(data: CreateIssueRequest): Promise<Issue> {
-  const response = await post<ApiResult<Issue>>('/api/issues', data);
+  const response = await post<ApiResult<Issue>>("/api/issues", data);
   return unwrap(response);
 }
 
 /**
  * Update an existing issue.
  */
-export async function updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
-  const response = await patch<ApiResult<Issue>>(`/api/issues/${encodeURIComponent(id)}`, data);
+export async function updateIssue(
+  id: string,
+  data: UpdateIssueRequest,
+): Promise<Issue> {
+  const response = await patch<ApiResult<Issue>>(
+    `/api/issues/${encodeURIComponent(id)}`,
+    data,
+  );
   return unwrap(response);
 }
 
@@ -340,7 +356,7 @@ export async function updateIssue(id: string, data: UpdateIssueRequest): Promise
 export async function closeIssue(id: string, reason?: string): Promise<void> {
   const response = await post<ApiResult<null>>(
     `/api/issues/${encodeURIComponent(id)}/close`,
-    reason ? { reason } : {}
+    reason ? { reason } : {},
   );
   unwrap(response);
 }
@@ -356,11 +372,11 @@ export async function closeIssue(id: string, reason?: string): Promise<void> {
 export async function addDependency(
   issueId: string,
   dependsOnId: string,
-  depType: DependencyType = 'blocks'
+  depType: DependencyType = "blocks",
 ): Promise<void> {
   const response = await post<ApiResult<null>>(
     `/api/issues/${encodeURIComponent(issueId)}/dependencies`,
-    { depends_on_id: dependsOnId, dep_type: depType }
+    { depends_on_id: dependsOnId, dep_type: depType },
   );
   unwrap(response);
 }
@@ -370,9 +386,12 @@ export async function addDependency(
  * @param issueId - The issue to remove the dependency from
  * @param dependsOnId - The issue that was being depended on
  */
-export async function removeDependency(issueId: string, dependsOnId: string): Promise<void> {
+export async function removeDependency(
+  issueId: string,
+  dependsOnId: string,
+): Promise<void> {
   const response = await del<ApiResult<null>>(
-    `/api/issues/${encodeURIComponent(issueId)}/dependencies/${encodeURIComponent(dependsOnId)}`
+    `/api/issues/${encodeURIComponent(issueId)}/dependencies/${encodeURIComponent(dependsOnId)}`,
   );
   unwrap(response);
 }
@@ -389,10 +408,13 @@ export interface AddCommentRequest {
 /**
  * Add a comment to an issue.
  */
-export async function addComment(issueId: string, text: string): Promise<Comment> {
+export async function addComment(
+  issueId: string,
+  text: string,
+): Promise<Comment> {
   const response = await post<ApiResult<Comment>>(
     `/api/issues/${encodeURIComponent(issueId)}/comments`,
-    { text }
+    { text },
   );
   return unwrap(response);
 }

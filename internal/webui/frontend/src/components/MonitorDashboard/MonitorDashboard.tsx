@@ -7,19 +7,21 @@
  * - Usage Panel (bottom, lazy-loaded)
  */
 
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense } from "react";
 
-import type { ViewMode } from '@/components/ViewSwitcher';
-import { useAgents, useBlockedIssues } from '@/hooks';
-import type { Issue } from '@/types';
+import type { ViewMode } from "@/components/ViewSwitcher";
+import { useAgents, useBlockedIssues } from "@/hooks";
+import type { Issue } from "@/types";
 
-import { AgentActivityPanel } from './AgentActivityPanel';
-import { ConnectionBanner } from './ConnectionBanner';
-import styles from './MonitorDashboard.module.css';
-import { ProjectHealthPanel } from './ProjectHealthPanel';
+import { AgentActivityPanel } from "./AgentActivityPanel";
+import { ConnectionBanner } from "./ConnectionBanner";
+import styles from "./MonitorDashboard.module.css";
+import { ProjectHealthPanel } from "./ProjectHealthPanel";
 
 const UsageDashboard = lazy(() =>
-  import('@/components/UsageDashboard').then((m) => ({ default: m.UsageDashboard }))
+  import("@/components/UsageDashboard").then((m) => ({
+    default: m.UsageDashboard,
+  })),
 );
 
 /**
@@ -67,7 +69,7 @@ export function MonitorDashboard({
   });
 
   // Handler for bottleneck clicks - opens issue detail panel
-  const handleBottleneckClick = (issue: Pick<Issue, 'id' | 'title'>) => {
+  const handleBottleneckClick = (issue: Pick<Issue, "id" | "title">) => {
     onIssueClick?.({ ...issue } as Issue);
   };
 
@@ -76,17 +78,19 @@ export function MonitorDashboard({
     onAgentClick?.(agentName);
   };
 
-  const rootClassName = className ? `${styles.dashboard} ${className}` : styles.dashboard;
+  const rootClassName = className
+    ? `${styles.dashboard} ${className}`
+    : styles.dashboard;
 
   return (
     <div className={rootClassName} data-testid="monitor-dashboard">
       {/* Connection banner for stale data warning */}
       {showStaleBanner && lastUpdated && (
         <ConnectionBanner
-          className={styles.connectionBanner ?? ''}
+          className={styles.connectionBanner ?? ""}
           lastUpdated={lastUpdated}
           retryCountdown={retryCountdown}
-          isReconnecting={connectionState === 'reconnecting'}
+          isReconnecting={connectionState === "reconnecting"}
           onRetry={retryNow}
         />
       )}
@@ -123,7 +127,10 @@ export function MonitorDashboard({
           </h2>
           <span className={styles.refreshIndicator}>↻ 5s</span>
           {/* TODO: Wire up agent configuration when available */}
-          <button className={styles.settingsButton} aria-label="Agent activity settings">
+          <button
+            className={styles.settingsButton}
+            aria-label="Agent activity settings"
+          >
             ⚙️
           </button>
         </header>

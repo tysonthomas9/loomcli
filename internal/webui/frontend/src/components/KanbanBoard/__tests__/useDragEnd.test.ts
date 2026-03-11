@@ -6,16 +6,20 @@
  * Unit tests for useDragEnd handler factory.
  */
 
-import type { DragEndEvent, Active, Over } from '@dnd-kit/core';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { DragEndEvent, Active, Over } from "@dnd-kit/core";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import * as api from '@/api';
-import type { Issue, Status } from '@/types';
+import * as api from "@/api";
+import type { Issue, Status } from "@/types";
 
-import { createDragEndHandler, isDraggableData, isDroppableData } from '../useDragEnd';
+import {
+  createDragEndHandler,
+  isDraggableData,
+  isDroppableData,
+} from "../useDragEnd";
 
 // Mock the API module
-vi.mock('@/api', () => ({
+vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
 }));
 
@@ -25,12 +29,12 @@ vi.mock('@/api', () => ({
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: `issue-${Math.random().toString(36).slice(2, 9)}`,
-    title: 'Test Issue',
+    title: "Test Issue",
     priority: 2,
-    status: 'open',
-    issue_type: 'task',
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-01-01T00:00:00Z',
+    status: "open",
+    issue_type: "task",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
     ...overrides,
   };
 }
@@ -41,12 +45,12 @@ function createMockIssue(overrides: Partial<Issue> = {}): Issue {
 function createMockDragEvent(
   issue: Issue | null,
   newStatus: Status | null,
-  opts?: { activeType?: string; hasOverData?: boolean }
+  opts?: { activeType?: string; hasOverData?: boolean },
 ): DragEndEvent {
   const active: Active = {
-    id: issue?.id ?? 'test-id',
+    id: issue?.id ?? "test-id",
     data: {
-      current: issue ? { issue, type: opts?.activeType ?? 'issue' } : undefined,
+      current: issue ? { issue, type: opts?.activeType ?? "issue" } : undefined,
     },
     rect: { current: { initial: null, translated: null } },
   };
@@ -55,7 +59,8 @@ function createMockDragEvent(
     ? {
         id: newStatus,
         data: {
-          current: opts?.hasOverData === false ? undefined : { status: newStatus },
+          current:
+            opts?.hasOverData === false ? undefined : { status: newStatus },
         },
         disabled: false,
         rect: { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 },
@@ -71,99 +76,103 @@ function createMockDragEvent(
   };
 }
 
-describe('useDragEnd', () => {
+describe("useDragEnd", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.updateIssue).mockResolvedValue(createMockIssue());
   });
 
-  describe('isDraggableData type guard', () => {
-    it('returns false for null', () => {
+  describe("isDraggableData type guard", () => {
+    it("returns false for null", () => {
       expect(isDraggableData(null)).toBe(false);
     });
 
-    it('returns false for undefined', () => {
+    it("returns false for undefined", () => {
       expect(isDraggableData(undefined)).toBe(false);
     });
 
-    it('returns false for non-object', () => {
-      expect(isDraggableData('string')).toBe(false);
+    it("returns false for non-object", () => {
+      expect(isDraggableData("string")).toBe(false);
       expect(isDraggableData(123)).toBe(false);
       expect(isDraggableData(true)).toBe(false);
     });
 
-    it('returns false for object without issue', () => {
-      expect(isDraggableData({ type: 'issue' })).toBe(false);
+    it("returns false for object without issue", () => {
+      expect(isDraggableData({ type: "issue" })).toBe(false);
     });
 
-    it('returns false for object without type', () => {
+    it("returns false for object without type", () => {
       expect(isDraggableData({ issue: createMockIssue() })).toBe(false);
     });
 
-    it('returns false for wrong type value', () => {
-      expect(isDraggableData({ issue: createMockIssue(), type: 'card' })).toBe(false);
-      expect(isDraggableData({ issue: createMockIssue(), type: 'other' })).toBe(false);
+    it("returns false for wrong type value", () => {
+      expect(isDraggableData({ issue: createMockIssue(), type: "card" })).toBe(
+        false,
+      );
+      expect(isDraggableData({ issue: createMockIssue(), type: "other" })).toBe(
+        false,
+      );
     });
 
-    it('returns true for valid DraggableData', () => {
-      const data = { issue: createMockIssue(), type: 'issue' };
+    it("returns true for valid DraggableData", () => {
+      const data = { issue: createMockIssue(), type: "issue" };
       expect(isDraggableData(data)).toBe(true);
     });
 
-    it('returns true even with extra properties', () => {
+    it("returns true even with extra properties", () => {
       const data = {
         issue: createMockIssue(),
-        type: 'issue',
-        extra: 'property',
+        type: "issue",
+        extra: "property",
       };
       expect(isDraggableData(data)).toBe(true);
     });
   });
 
-  describe('isDroppableData type guard', () => {
-    it('returns false for null', () => {
+  describe("isDroppableData type guard", () => {
+    it("returns false for null", () => {
       expect(isDroppableData(null)).toBe(false);
     });
 
-    it('returns false for undefined', () => {
+    it("returns false for undefined", () => {
       expect(isDroppableData(undefined)).toBe(false);
     });
 
-    it('returns false for non-object', () => {
-      expect(isDroppableData('string')).toBe(false);
+    it("returns false for non-object", () => {
+      expect(isDroppableData("string")).toBe(false);
       expect(isDroppableData(123)).toBe(false);
     });
 
-    it('returns false for object without status', () => {
+    it("returns false for object without status", () => {
       expect(isDroppableData({})).toBe(false);
-      expect(isDroppableData({ other: 'value' })).toBe(false);
+      expect(isDroppableData({ other: "value" })).toBe(false);
     });
 
-    it('returns false for non-string status', () => {
+    it("returns false for non-string status", () => {
       expect(isDroppableData({ status: 123 })).toBe(false);
       expect(isDroppableData({ status: null })).toBe(false);
-      expect(isDroppableData({ status: { value: 'open' } })).toBe(false);
+      expect(isDroppableData({ status: { value: "open" } })).toBe(false);
     });
 
-    it('returns true for valid DroppableData', () => {
-      expect(isDroppableData({ status: 'open' })).toBe(true);
-      expect(isDroppableData({ status: 'in_progress' })).toBe(true);
-      expect(isDroppableData({ status: 'custom_status' })).toBe(true);
+    it("returns true for valid DroppableData", () => {
+      expect(isDroppableData({ status: "open" })).toBe(true);
+      expect(isDroppableData({ status: "in_progress" })).toBe(true);
+      expect(isDroppableData({ status: "custom_status" })).toBe(true);
     });
 
-    it('returns true for empty string status', () => {
+    it("returns true for empty string status", () => {
       // Empty string is technically a valid string
-      expect(isDroppableData({ status: '' })).toBe(true);
+      expect(isDroppableData({ status: "" })).toBe(true);
     });
   });
 
-  describe('createDragEndHandler', () => {
-    describe('early returns (validation)', () => {
-      it('returns early when over is null (no drop target)', async () => {
+  describe("createDragEndHandler", () => {
+    describe("early returns (validation)", () => {
+      it("returns early when over is null (no drop target)", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
+        const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, null);
 
         await handler(event);
@@ -172,11 +181,11 @@ describe('useDragEnd', () => {
         expect(api.updateIssue).not.toHaveBeenCalled();
       });
 
-      it('returns early when active data is missing issue', async () => {
+      it("returns early when active data is missing issue", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const event = createMockDragEvent(null, 'in_progress');
+        const event = createMockDragEvent(null, "in_progress");
 
         await handler(event);
 
@@ -184,12 +193,14 @@ describe('useDragEnd', () => {
         expect(api.updateIssue).not.toHaveBeenCalled();
       });
 
-      it('returns early when active data has wrong type', async () => {
+      it("returns early when active data has wrong type", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'in_progress', { activeType: 'card' });
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "in_progress", {
+          activeType: "card",
+        });
 
         await handler(event);
 
@@ -197,12 +208,14 @@ describe('useDragEnd', () => {
         expect(api.updateIssue).not.toHaveBeenCalled();
       });
 
-      it('returns early when over data is missing status', async () => {
+      it("returns early when over data is missing status", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'in_progress', { hasOverData: false });
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "in_progress", {
+          hasOverData: false,
+        });
 
         await handler(event);
 
@@ -210,12 +223,12 @@ describe('useDragEnd', () => {
         expect(api.updateIssue).not.toHaveBeenCalled();
       });
 
-      it('returns early when dropping on same column (same status)', async () => {
+      it("returns early when dropping on same column (same status)", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'open');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "open");
 
         await handler(event);
 
@@ -224,154 +237,172 @@ describe('useDragEnd', () => {
       });
     });
 
-    describe('callback execution', () => {
-      it('calls onIssueStatusChange with correct arguments', async () => {
+    describe("callback execution", () => {
+      it("calls onIssueStatusChange with correct arguments", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ id: 'test-123', status: 'open' });
-        const event = createMockDragEvent(issue, 'in_progress');
+        const issue = createMockIssue({ id: "test-123", status: "open" });
+        const event = createMockDragEvent(issue, "in_progress");
 
         await handler(event);
 
         expect(onIssueStatusChange).toHaveBeenCalledTimes(1);
-        expect(onIssueStatusChange).toHaveBeenCalledWith('test-123', 'in_progress');
+        expect(onIssueStatusChange).toHaveBeenCalledWith(
+          "test-123",
+          "in_progress",
+        );
       });
 
-      it('calls onIssueStatusChange BEFORE updateIssue API call', async () => {
+      it("calls onIssueStatusChange BEFORE updateIssue API call", async () => {
         const callOrder: string[] = [];
 
         const onIssueStatusChange = vi.fn(() => {
-          callOrder.push('onIssueStatusChange');
+          callOrder.push("onIssueStatusChange");
         });
 
         vi.mocked(api.updateIssue).mockImplementation(async () => {
-          callOrder.push('updateIssue');
+          callOrder.push("updateIssue");
           return createMockIssue();
         });
 
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         await handler(event);
 
-        expect(callOrder).toEqual(['onIssueStatusChange', 'updateIssue']);
+        expect(callOrder).toEqual(["onIssueStatusChange", "updateIssue"]);
       });
 
-      it('calls onSuccess after successful API call', async () => {
+      it("calls onSuccess after successful API call", async () => {
         const onIssueStatusChange = vi.fn();
         const onSuccess = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange, onSuccess });
+        const handler = createDragEndHandler({
+          onIssueStatusChange,
+          onSuccess,
+        });
 
-        const issue = createMockIssue({ id: 'success-test', status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ id: "success-test", status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         await handler(event);
 
         expect(onSuccess).toHaveBeenCalledTimes(1);
         expect(onSuccess).toHaveBeenCalledWith(
-          expect.objectContaining({ id: 'success-test' }),
-          'closed'
+          expect.objectContaining({ id: "success-test" }),
+          "closed",
         );
       });
 
-      it('does not call onSuccess when API call fails', async () => {
-        vi.mocked(api.updateIssue).mockRejectedValue(new Error('API Error'));
+      it("does not call onSuccess when API call fails", async () => {
+        vi.mocked(api.updateIssue).mockRejectedValue(new Error("API Error"));
 
         const onIssueStatusChange = vi.fn();
         const onSuccess = vi.fn();
         const onError = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange, onSuccess, onError });
+        const handler = createDragEndHandler({
+          onIssueStatusChange,
+          onSuccess,
+          onError,
+        });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         await handler(event);
 
         expect(onSuccess).not.toHaveBeenCalled();
       });
 
-      it('calls onError with error, issue, and previousStatus on API failure', async () => {
-        const apiError = new Error('Network error');
+      it("calls onError with error, issue, and previousStatus on API failure", async () => {
+        const apiError = new Error("Network error");
         vi.mocked(api.updateIssue).mockRejectedValue(apiError);
 
         const onIssueStatusChange = vi.fn();
         const onError = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange, onError });
 
-        const issue = createMockIssue({ id: 'error-test', status: 'in_progress' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({
+          id: "error-test",
+          status: "in_progress",
+        });
+        const event = createMockDragEvent(issue, "closed");
 
         await handler(event);
 
         expect(onError).toHaveBeenCalledTimes(1);
         expect(onError).toHaveBeenCalledWith(
           apiError,
-          expect.objectContaining({ id: 'error-test' }),
-          'in_progress'
+          expect.objectContaining({ id: "error-test" }),
+          "in_progress",
         );
       });
 
-      it('does not throw when onSuccess is not provided', async () => {
+      it("does not throw when onSuccess is not provided", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         await expect(handler(event)).resolves.not.toThrow();
       });
 
-      it('does not throw when onError is not provided and API fails', async () => {
-        vi.mocked(api.updateIssue).mockRejectedValue(new Error('API Error'));
+      it("does not throw when onError is not provided and API fails", async () => {
+        vi.mocked(api.updateIssue).mockRejectedValue(new Error("API Error"));
 
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         await expect(handler(event)).resolves.not.toThrow();
       });
     });
 
-    describe('API interaction', () => {
-      it('calls updateIssue with correct issue ID', async () => {
+    describe("API interaction", () => {
+      it("calls updateIssue with correct issue ID", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ id: 'api-test-id', status: 'open' });
-        const event = createMockDragEvent(issue, 'in_progress');
+        const issue = createMockIssue({ id: "api-test-id", status: "open" });
+        const event = createMockDragEvent(issue, "in_progress");
 
         await handler(event);
 
-        expect(api.updateIssue).toHaveBeenCalledWith('api-test-id', expect.any(Object));
+        expect(api.updateIssue).toHaveBeenCalledWith(
+          "api-test-id",
+          expect.any(Object),
+        );
       });
 
-      it('calls updateIssue with status update payload', async () => {
+      it("calls updateIssue with status update payload", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         await handler(event);
 
-        expect(api.updateIssue).toHaveBeenCalledWith(expect.any(String), { status: 'closed' });
+        expect(api.updateIssue).toHaveBeenCalledWith(expect.any(String), {
+          status: "closed",
+        });
       });
 
-      it('handles different status transitions', async () => {
+      it("handles different status transitions", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
         const transitions: [Status, Status][] = [
-          ['open', 'in_progress'],
-          ['in_progress', 'closed'],
-          ['closed', 'open'],
-          ['open', 'blocked'],
-          ['blocked', 'deferred'],
+          ["open", "in_progress"],
+          ["in_progress", "closed"],
+          ["closed", "open"],
+          ["open", "blocked"],
+          ["blocked", "deferred"],
         ];
 
         for (const [from, to] of transitions) {
@@ -382,21 +413,23 @@ describe('useDragEnd', () => {
 
           await handler(event);
 
-          expect(api.updateIssue).toHaveBeenCalledWith(expect.any(String), { status: to });
+          expect(api.updateIssue).toHaveBeenCalledWith(expect.any(String), {
+            status: to,
+          });
         }
       });
     });
 
-    describe('edge cases', () => {
-      it('handles issue with undefined status (defaults to open)', async () => {
+    describe("edge cases", () => {
+      it("handles issue with undefined status (defaults to open)", async () => {
         const onIssueStatusChange = vi.fn();
         const onError = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange, onError });
 
-        vi.mocked(api.updateIssue).mockRejectedValue(new Error('fail'));
+        vi.mocked(api.updateIssue).mockRejectedValue(new Error("fail"));
 
         const issue = createMockIssue({ status: undefined });
-        const event = createMockDragEvent(issue, 'in_progress');
+        const event = createMockDragEvent(issue, "in_progress");
 
         await handler(event);
 
@@ -404,45 +437,55 @@ describe('useDragEnd', () => {
         expect(onIssueStatusChange).toHaveBeenCalled();
 
         // onError should receive 'open' as previousStatus
-        expect(onError).toHaveBeenCalledWith(expect.any(Error), expect.any(Object), 'open');
+        expect(onError).toHaveBeenCalledWith(
+          expect.any(Error),
+          expect.any(Object),
+          "open",
+        );
       });
 
-      it('handles custom status values', async () => {
+      it("handles custom status values", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'custom_status' as Status });
-        const event = createMockDragEvent(issue, 'another_custom' as Status);
+        const issue = createMockIssue({ status: "custom_status" as Status });
+        const event = createMockDragEvent(issue, "another_custom" as Status);
 
         await handler(event);
 
-        expect(onIssueStatusChange).toHaveBeenCalledWith(expect.any(String), 'another_custom');
+        expect(onIssueStatusChange).toHaveBeenCalledWith(
+          expect.any(String),
+          "another_custom",
+        );
         expect(api.updateIssue).toHaveBeenCalledWith(expect.any(String), {
-          status: 'another_custom',
+          status: "another_custom",
         });
       });
 
-      it('optimistic update still happens even if API fails', async () => {
-        vi.mocked(api.updateIssue).mockRejectedValue(new Error('API Error'));
+      it("optimistic update still happens even if API fails", async () => {
+        vi.mocked(api.updateIssue).mockRejectedValue(new Error("API Error"));
 
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         await handler(event);
 
         // Optimistic update should have been called
-        expect(onIssueStatusChange).toHaveBeenCalledWith(expect.any(String), 'closed');
+        expect(onIssueStatusChange).toHaveBeenCalledWith(
+          expect.any(String),
+          "closed",
+        );
       });
 
-      it('returns a Promise that resolves', async () => {
+      it("returns a Promise that resolves", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         const result = handler(event);
 
@@ -450,19 +493,19 @@ describe('useDragEnd', () => {
         await expect(result).resolves.toBeUndefined();
       });
 
-      it('returns early for empty active data current', async () => {
+      it("returns early for empty active data current", async () => {
         const onIssueStatusChange = vi.fn();
         const handler = createDragEndHandler({ onIssueStatusChange });
 
         const event: DragEndEvent = {
           active: {
-            id: 'test',
+            id: "test",
             data: { current: undefined },
             rect: { current: { initial: null, translated: null } },
           },
           over: {
-            id: 'in_progress',
-            data: { current: { status: 'in_progress' } },
+            id: "in_progress",
+            data: { current: { status: "in_progress" } },
             disabled: false,
             rect: { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 },
           },
@@ -477,24 +520,28 @@ describe('useDragEnd', () => {
       });
     });
 
-    describe('handler factory', () => {
-      it('returns a function', () => {
+    describe("handler factory", () => {
+      it("returns a function", () => {
         const handler = createDragEndHandler({
           onIssueStatusChange: vi.fn(),
         });
 
-        expect(typeof handler).toBe('function');
+        expect(typeof handler).toBe("function");
       });
 
-      it('creates independent handlers', async () => {
+      it("creates independent handlers", async () => {
         const callback1 = vi.fn();
         const callback2 = vi.fn();
 
-        const handler1 = createDragEndHandler({ onIssueStatusChange: callback1 });
-        const _handler2 = createDragEndHandler({ onIssueStatusChange: callback2 });
+        const handler1 = createDragEndHandler({
+          onIssueStatusChange: callback1,
+        });
+        const _handler2 = createDragEndHandler({
+          onIssueStatusChange: callback2,
+        });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         await handler1(event);
 
@@ -502,15 +549,15 @@ describe('useDragEnd', () => {
         expect(callback2).not.toHaveBeenCalled();
       });
 
-      it('captures options at creation time', async () => {
+      it("captures options at creation time", async () => {
         const onSuccess = vi.fn();
         const handler = createDragEndHandler({
           onIssueStatusChange: vi.fn(),
           onSuccess,
         });
 
-        const issue = createMockIssue({ status: 'open' });
-        const event = createMockDragEvent(issue, 'closed');
+        const issue = createMockIssue({ status: "open" });
+        const event = createMockDragEvent(issue, "closed");
 
         await handler(event);
 

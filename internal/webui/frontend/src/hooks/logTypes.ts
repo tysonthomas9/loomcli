@@ -14,4 +14,8 @@ export interface LogChunk {
 /**
  * Connection states used by LogViewer.
  */
-export type LogStreamState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+export type LogStreamState =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "reconnecting";

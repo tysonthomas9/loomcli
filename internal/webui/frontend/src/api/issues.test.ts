@@ -1,8 +1,15 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import type { Issue, IssueDetails, Statistics, WorkFilter, BlockedIssue, Comment } from '@/types';
+import type {
+  Issue,
+  IssueDetails,
+  Statistics,
+  WorkFilter,
+  BlockedIssue,
+  Comment,
+} from "@/types";
 
-import { ApiError, get, post, patch, del } from './client';
+import { ApiError, get, post, patch, del } from "./client";
 import {
   getIssue,
   getReadyIssues,
@@ -19,13 +26,13 @@ import {
   buildQueryString,
   unwrap,
   mapWorkFilterToQueryParams,
-} from './issues';
-import type { CreateIssueRequest, UpdateIssueRequest } from './issues';
+} from "./issues";
+import type { CreateIssueRequest, UpdateIssueRequest } from "./issues";
 
 // Import mocked functions after mock setup
 
 // Mock the client module
-vi.mock('./client', () => ({
+vi.mock("./client", () => ({
   get: vi.fn(),
   post: vi.fn(),
   patch: vi.fn(),
@@ -34,10 +41,10 @@ vi.mock('./client', () => ({
     constructor(
       public status: number,
       public statusText: string,
-      public body?: unknown
+      public body?: unknown,
     ) {
       super(`API Error: ${status} ${statusText}`);
-      this.name = 'ApiError';
+      this.name = "ApiError";
     }
   },
 }));
@@ -47,7 +54,7 @@ const mockPost = post as ReturnType<typeof vi.fn>;
 const mockPatch = patch as ReturnType<typeof vi.fn>;
 const mockDel = del as ReturnType<typeof vi.fn>;
 
-describe('issues API', () => {
+describe("issues API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -58,172 +65,177 @@ describe('issues API', () => {
 
   // ============= Helper Function Tests =============
 
-  describe('buildQueryString', () => {
-    it('returns empty string for empty object', () => {
-      expect(buildQueryString({})).toBe('');
+  describe("buildQueryString", () => {
+    it("returns empty string for empty object", () => {
+      expect(buildQueryString({})).toBe("");
     });
 
-    it('returns empty string when all values are undefined or null', () => {
-      expect(buildQueryString({ a: undefined, b: null })).toBe('');
+    it("returns empty string when all values are undefined or null", () => {
+      expect(buildQueryString({ a: undefined, b: null })).toBe("");
     });
 
-    it('builds query string from simple key-value pairs', () => {
-      const result = buildQueryString({ status: 'open', priority: 'high' });
-      expect(result).toBe('?status=open&priority=high');
+    it("builds query string from simple key-value pairs", () => {
+      const result = buildQueryString({ status: "open", priority: "high" });
+      expect(result).toBe("?status=open&priority=high");
     });
 
-    it('converts numbers to strings', () => {
+    it("converts numbers to strings", () => {
       const result = buildQueryString({ limit: 10, offset: 5 });
-      expect(result).toBe('?limit=10&offset=5');
+      expect(result).toBe("?limit=10&offset=5");
     });
 
     it('converts booleans to "true" or "false"', () => {
-      expect(buildQueryString({ active: true })).toBe('?active=true');
-      expect(buildQueryString({ active: false })).toBe('?active=false');
+      expect(buildQueryString({ active: true })).toBe("?active=true");
+      expect(buildQueryString({ active: false })).toBe("?active=false");
     });
 
-    it('joins arrays with commas', () => {
-      const result = buildQueryString({ labels: ['bug', 'urgent', 'frontend'] });
-      expect(result).toBe('?labels=bug%2Curgent%2Cfrontend');
-    });
-
-    it('omits empty arrays', () => {
-      const result = buildQueryString({ labels: [], status: 'open' });
-      expect(result).toBe('?status=open');
-    });
-
-    it('handles mixed parameter types', () => {
+    it("joins arrays with commas", () => {
       const result = buildQueryString({
-        status: 'open',
+        labels: ["bug", "urgent", "frontend"],
+      });
+      expect(result).toBe("?labels=bug%2Curgent%2Cfrontend");
+    });
+
+    it("omits empty arrays", () => {
+      const result = buildQueryString({ labels: [], status: "open" });
+      expect(result).toBe("?status=open");
+    });
+
+    it("handles mixed parameter types", () => {
+      const result = buildQueryString({
+        status: "open",
         limit: 20,
         includeArchived: false,
-        labels: ['a', 'b'],
+        labels: ["a", "b"],
         empty: undefined,
       });
       // URLSearchParams maintains insertion order
-      expect(result).toContain('status=open');
-      expect(result).toContain('limit=20');
-      expect(result).toContain('includeArchived=false');
-      expect(result).toContain('labels=a%2Cb');
-      expect(result).not.toContain('empty');
+      expect(result).toContain("status=open");
+      expect(result).toContain("limit=20");
+      expect(result).toContain("includeArchived=false");
+      expect(result).toContain("labels=a%2Cb");
+      expect(result).not.toContain("empty");
     });
   });
 
-  describe('unwrap', () => {
-    it('returns data from successful response', () => {
-      const successResponse = { success: true as const, data: { id: '1', title: 'Test' } };
+  describe("unwrap", () => {
+    it("returns data from successful response", () => {
+      const successResponse = {
+        success: true as const,
+        data: { id: "1", title: "Test" },
+      };
       const result = unwrap(successResponse);
-      expect(result).toEqual({ id: '1', title: 'Test' });
+      expect(result).toEqual({ id: "1", title: "Test" });
     });
 
-    it('returns array data from successful response', () => {
-      const items = [{ id: '1' }, { id: '2' }];
+    it("returns array data from successful response", () => {
+      const items = [{ id: "1" }, { id: "2" }];
       const successResponse = { success: true as const, data: items };
       const result = unwrap(successResponse);
       expect(result).toEqual(items);
     });
 
-    it('throws ApiError on failure response', () => {
+    it("throws ApiError on failure response", () => {
       const failureResponse = {
         success: false as const,
-        error: 'Something went wrong',
+        error: "Something went wrong",
       };
       expect(() => unwrap(failureResponse)).toThrow(ApiError);
     });
 
-    it('includes error message from failure response', () => {
+    it("includes error message from failure response", () => {
       const failureResponse = {
         success: false as const,
-        error: 'Issue not found',
+        error: "Issue not found",
       };
       try {
         unwrap(failureResponse);
-        expect.fail('Expected unwrap to throw');
+        expect.fail("Expected unwrap to throw");
       } catch (e) {
         expect(e).toBeInstanceOf(ApiError);
         const apiError = e as ApiError;
         expect(apiError.status).toBe(0);
-        expect(apiError.statusText).toBe('Issue not found');
+        expect(apiError.statusText).toBe("Issue not found");
       }
     });
 
-    it('handles failure response with code', () => {
+    it("handles failure response with code", () => {
       const failureResponse = {
         success: false as const,
-        error: 'Validation failed',
-        code: 'VALIDATION_ERROR',
+        error: "Validation failed",
+        code: "VALIDATION_ERROR",
       };
       expect(() => unwrap(failureResponse)).toThrow(ApiError);
     });
   });
 
-  describe('mapWorkFilterToQueryParams', () => {
-    it('returns empty object for empty filter', () => {
+  describe("mapWorkFilterToQueryParams", () => {
+    it("returns empty object for empty filter", () => {
       const result = mapWorkFilterToQueryParams({});
       expect(result).toEqual({});
     });
 
-    it('renames sort_policy to sort', () => {
-      const filter: WorkFilter = { sort_policy: 'priority' };
+    it("renames sort_policy to sort", () => {
+      const filter: WorkFilter = { sort_policy: "priority" };
       const result = mapWorkFilterToQueryParams(filter);
-      expect(result).toEqual({ sort: 'priority' });
-      expect(result).not.toHaveProperty('sort_policy');
+      expect(result).toEqual({ sort: "priority" });
+      expect(result).not.toHaveProperty("sort_policy");
     });
 
-    it('passes through other properties unchanged', () => {
+    it("passes through other properties unchanged", () => {
       const filter: WorkFilter = {
-        status: 'open',
-        priority: 'high',
-        labels: ['bug'],
+        status: "open",
+        priority: "high",
+        labels: ["bug"],
       };
       const result = mapWorkFilterToQueryParams(filter);
       expect(result).toEqual({
-        status: 'open',
-        priority: 'high',
-        labels: ['bug'],
+        status: "open",
+        priority: "high",
+        labels: ["bug"],
       });
     });
 
-    it('handles filter with all properties including sort_policy', () => {
+    it("handles filter with all properties including sort_policy", () => {
       const filter: WorkFilter = {
-        status: 'in_progress',
-        priority: 'medium',
-        labels: ['feature', 'v2'],
-        sort_policy: 'oldest',
-        assignee: 'user123',
+        status: "in_progress",
+        priority: "medium",
+        labels: ["feature", "v2"],
+        sort_policy: "oldest",
+        assignee: "user123",
       };
       const result = mapWorkFilterToQueryParams(filter);
       expect(result).toEqual({
-        status: 'in_progress',
-        priority: 'medium',
-        labels: ['feature', 'v2'],
-        sort: 'oldest',
-        assignee: 'user123',
+        status: "in_progress",
+        priority: "medium",
+        labels: ["feature", "v2"],
+        sort: "oldest",
+        assignee: "user123",
       });
-      expect(result).not.toHaveProperty('sort_policy');
+      expect(result).not.toHaveProperty("sort_policy");
     });
 
-    it('does not add sort if sort_policy is undefined', () => {
-      const filter: WorkFilter = { status: 'open', sort_policy: undefined };
+    it("does not add sort if sort_policy is undefined", () => {
+      const filter: WorkFilter = { status: "open", sort_policy: undefined };
       const result = mapWorkFilterToQueryParams(filter);
-      expect(result).not.toHaveProperty('sort');
-      expect(result).not.toHaveProperty('sort_policy');
+      expect(result).not.toHaveProperty("sort");
+      expect(result).not.toHaveProperty("sort_policy");
     });
   });
 
   // ============= Read Operation Tests =============
 
-  describe('getIssue', () => {
+  describe("getIssue", () => {
     const mockIssueDetails: IssueDetails = {
-      id: 'issue-123',
-      title: 'Test Issue',
-      description: 'A test issue',
-      issue_type: 'bug',
-      priority: 'high',
-      status: 'open',
-      labels: ['test'],
-      created_at: '2024-01-01T00:00:00Z',
-      updated_at: '2024-01-01T00:00:00Z',
+      id: "issue-123",
+      title: "Test Issue",
+      description: "A test issue",
+      issue_type: "bug",
+      priority: "high",
+      status: "open",
+      labels: ["test"],
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
       dependencies: [],
       dependents: [],
       blocked_by: [],
@@ -231,113 +243,119 @@ describe('issues API', () => {
       comments: [],
     };
 
-    it('calls get with correct URL', async () => {
+    it("calls get with correct URL", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssueDetails });
 
-      await getIssue('issue-123');
+      await getIssue("issue-123");
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/issue-123');
+      expect(mockGet).toHaveBeenCalledWith("/api/issues/issue-123");
     });
 
-    it('unwraps successful response and returns IssueDetails', async () => {
+    it("unwraps successful response and returns IssueDetails", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssueDetails });
 
-      const result = await getIssue('issue-123');
+      const result = await getIssue("issue-123");
 
       expect(result).toEqual(mockIssueDetails);
     });
 
-    it('encodes special characters in ID', async () => {
+    it("encodes special characters in ID", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssueDetails });
 
-      await getIssue('issue/with/slashes');
+      await getIssue("issue/with/slashes");
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/issue%2Fwith%2Fslashes');
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/issues/issue%2Fwith%2Fslashes",
+      );
     });
 
-    it('encodes spaces in ID', async () => {
+    it("encodes spaces in ID", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssueDetails });
 
-      await getIssue('issue with spaces');
+      await getIssue("issue with spaces");
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/issue%20with%20spaces');
+      expect(mockGet).toHaveBeenCalledWith("/api/issues/issue%20with%20spaces");
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockGet.mockResolvedValue({ success: false, error: 'Issue not found' });
+    it("throws ApiError on failure response", async () => {
+      mockGet.mockResolvedValue({ success: false, error: "Issue not found" });
 
-      await expect(getIssue('nonexistent')).rejects.toThrow(ApiError);
+      await expect(getIssue("nonexistent")).rejects.toThrow(ApiError);
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(404, 'Not Found', { error: 'Issue not found' });
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(404, "Not Found", {
+        error: "Issue not found",
+      });
       mockGet.mockRejectedValue(error);
 
-      await expect(getIssue('nonexistent')).rejects.toThrow(ApiError);
-      await expect(getIssue('nonexistent')).rejects.toMatchObject({
+      await expect(getIssue("nonexistent")).rejects.toThrow(ApiError);
+      await expect(getIssue("nonexistent")).rejects.toMatchObject({
         status: 404,
-        statusText: 'Not Found',
+        statusText: "Not Found",
       });
     });
   });
 
-  describe('getReadyIssues', () => {
+  describe("getReadyIssues", () => {
     const mockIssues: Issue[] = [
       {
-        id: 'issue-1',
-        title: 'First Issue',
-        issue_type: 'task',
-        priority: 'high',
-        status: 'open',
+        id: "issue-1",
+        title: "First Issue",
+        issue_type: "task",
+        priority: "high",
+        status: "open",
         labels: [],
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
       },
       {
-        id: 'issue-2',
-        title: 'Second Issue',
-        issue_type: 'bug',
-        priority: 'medium',
-        status: 'open',
-        labels: ['urgent'],
-        created_at: '2024-01-02T00:00:00Z',
-        updated_at: '2024-01-02T00:00:00Z',
+        id: "issue-2",
+        title: "Second Issue",
+        issue_type: "bug",
+        priority: "medium",
+        status: "open",
+        labels: ["urgent"],
+        created_at: "2024-01-02T00:00:00Z",
+        updated_at: "2024-01-02T00:00:00Z",
       },
     ];
 
-    it('calls get with /api/ready when no options', async () => {
+    it("calls get with /api/ready when no options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
       await getReadyIssues();
 
-      expect(mockGet).toHaveBeenCalledWith('/api/ready');
+      expect(mockGet).toHaveBeenCalledWith("/api/ready");
     });
 
-    it('calls get with /api/ready when empty options', async () => {
+    it("calls get with /api/ready when empty options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
       await getReadyIssues({});
 
-      expect(mockGet).toHaveBeenCalledWith('/api/ready');
+      expect(mockGet).toHaveBeenCalledWith("/api/ready");
     });
 
-    it('builds query string from filter options', async () => {
+    it("builds query string from filter options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getReadyIssues({ status: 'open', priority: 'high' });
+      await getReadyIssues({ status: "open", priority: "high" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/ready?status=open&priority=high');
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/ready?status=open&priority=high",
+      );
     });
 
-    it('renames sort_policy to sort in query', async () => {
+    it("renames sort_policy to sort in query", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getReadyIssues({ sort_policy: 'priority' });
+      await getReadyIssues({ sort_policy: "priority" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/ready?sort=priority');
+      expect(mockGet).toHaveBeenCalledWith("/api/ready?sort=priority");
     });
 
-    it('unwraps successful response and returns Issue array', async () => {
+    it("unwraps successful response and returns Issue array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
       const result = await getReadyIssues();
@@ -345,14 +363,17 @@ describe('issues API', () => {
       expect(result).toEqual(mockIssues);
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockGet.mockResolvedValue({ success: false, error: 'Database unavailable' });
+    it("throws ApiError on failure response", async () => {
+      mockGet.mockResolvedValue({
+        success: false,
+        error: "Database unavailable",
+      });
 
       await expect(getReadyIssues()).rejects.toThrow(ApiError);
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(500, 'Internal Server Error');
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(500, "Internal Server Error");
       mockGet.mockRejectedValue(error);
 
       await expect(getReadyIssues()).rejects.toThrow(ApiError);
@@ -361,93 +382,93 @@ describe('issues API', () => {
       });
     });
 
-    it('handles complex filter with labels array', async () => {
+    it("handles complex filter with labels array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
       await getReadyIssues({
-        labels: ['bug', 'urgent'],
-        sort_policy: 'oldest',
-        assignee: 'dev1',
+        labels: ["bug", "urgent"],
+        sort_policy: "oldest",
+        assignee: "dev1",
       });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain('/api/ready?');
-      expect(callArg).toContain('labels=bug%2Curgent');
-      expect(callArg).toContain('sort=oldest');
-      expect(callArg).toContain('assignee=dev1');
+      expect(callArg).toContain("/api/ready?");
+      expect(callArg).toContain("labels=bug%2Curgent");
+      expect(callArg).toContain("sort=oldest");
+      expect(callArg).toContain("assignee=dev1");
     });
   });
 
-  describe('getKanbanIssues', () => {
+  describe("getKanbanIssues", () => {
     const mockIssues: Issue[] = [
       {
-        id: 'issue-1',
-        title: 'Open Task',
-        issue_type: 'task',
-        priority: 'high',
-        status: 'open',
+        id: "issue-1",
+        title: "Open Task",
+        issue_type: "task",
+        priority: "high",
+        status: "open",
         labels: [],
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
       },
       {
-        id: 'issue-2',
-        title: 'In Progress Bug',
-        issue_type: 'bug',
-        priority: 'medium',
-        status: 'in_progress',
-        labels: ['urgent'],
-        created_at: '2024-01-02T00:00:00Z',
-        updated_at: '2024-01-02T00:00:00Z',
+        id: "issue-2",
+        title: "In Progress Bug",
+        issue_type: "bug",
+        priority: "medium",
+        status: "in_progress",
+        labels: ["urgent"],
+        created_at: "2024-01-02T00:00:00Z",
+        updated_at: "2024-01-02T00:00:00Z",
       },
     ];
 
-    it('calls get with default kanban params when no options', async () => {
+    it("calls get with default kanban params when no options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
       await getKanbanIssues();
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain('/api/issues?');
-      expect(callArg).toContain('exclude_status=tombstone');
-      expect(callArg).toContain('include_blocked=true');
+      expect(callArg).toContain("/api/issues?");
+      expect(callArg).toContain("exclude_status=tombstone");
+      expect(callArg).toContain("include_blocked=true");
     });
 
-    it('calls get with default kanban params when empty options', async () => {
+    it("calls get with default kanban params when empty options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
       await getKanbanIssues({});
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain('/api/issues?');
-      expect(callArg).toContain('exclude_status=tombstone');
-      expect(callArg).toContain('include_blocked=true');
+      expect(callArg).toContain("/api/issues?");
+      expect(callArg).toContain("exclude_status=tombstone");
+      expect(callArg).toContain("include_blocked=true");
     });
 
-    it('merges WorkFilter options with kanban defaults', async () => {
+    it("merges WorkFilter options with kanban defaults", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues({ assignee: 'dev1', priority: 2 });
+      await getKanbanIssues({ assignee: "dev1", priority: 2 });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain('/api/issues?');
-      expect(callArg).toContain('exclude_status=tombstone');
-      expect(callArg).toContain('include_blocked=true');
-      expect(callArg).toContain('assignee=dev1');
-      expect(callArg).toContain('priority=2');
+      expect(callArg).toContain("/api/issues?");
+      expect(callArg).toContain("exclude_status=tombstone");
+      expect(callArg).toContain("include_blocked=true");
+      expect(callArg).toContain("assignee=dev1");
+      expect(callArg).toContain("priority=2");
     });
 
-    it('renames sort_policy to sort in merged query', async () => {
+    it("renames sort_policy to sort in merged query", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues({ sort_policy: 'priority' });
+      await getKanbanIssues({ sort_policy: "priority" });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain('sort=priority');
-      expect(callArg).not.toContain('sort_policy');
+      expect(callArg).toContain("sort=priority");
+      expect(callArg).not.toContain("sort_policy");
     });
 
-    it('unwraps successful response and returns Issue array', async () => {
+    it("unwraps successful response and returns Issue array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
       const result = await getKanbanIssues();
@@ -455,7 +476,7 @@ describe('issues API', () => {
       expect(result).toEqual(mockIssues);
     });
 
-    it('returns empty array when no issues', async () => {
+    it("returns empty array when no issues", async () => {
       mockGet.mockResolvedValue({ success: true, data: [] });
 
       const result = await getKanbanIssues();
@@ -463,14 +484,17 @@ describe('issues API', () => {
       expect(result).toEqual([]);
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockGet.mockResolvedValue({ success: false, error: 'Database unavailable' });
+    it("throws ApiError on failure response", async () => {
+      mockGet.mockResolvedValue({
+        success: false,
+        error: "Database unavailable",
+      });
 
       await expect(getKanbanIssues()).rejects.toThrow(ApiError);
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(500, 'Internal Server Error');
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(500, "Internal Server Error");
       mockGet.mockRejectedValue(error);
 
       await expect(getKanbanIssues()).rejects.toThrow(ApiError);
@@ -479,38 +503,38 @@ describe('issues API', () => {
       });
     });
 
-    it('handles filter with labels array', async () => {
+    it("handles filter with labels array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
       await getKanbanIssues({
-        labels: ['bug', 'urgent'],
-        assignee: 'dev1',
+        labels: ["bug", "urgent"],
+        assignee: "dev1",
       });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain('labels=bug%2Curgent');
-      expect(callArg).toContain('assignee=dev1');
+      expect(callArg).toContain("labels=bug%2Curgent");
+      expect(callArg).toContain("assignee=dev1");
       // kanban defaults still present
-      expect(callArg).toContain('exclude_status=tombstone');
-      expect(callArg).toContain('include_blocked=true');
+      expect(callArg).toContain("exclude_status=tombstone");
+      expect(callArg).toContain("include_blocked=true");
     });
 
-    it('WorkFilter options can override kanban defaults via Object.assign', async () => {
+    it("WorkFilter options can override kanban defaults via Object.assign", async () => {
       // The implementation uses Object.assign(params, mapped) so WorkFilter
       // values will override the kanban defaults if they share the same key.
       // This test documents that behavior.
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
-      await getKanbanIssues({ status: 'open' });
+      await getKanbanIssues({ status: "open" });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain('status=open');
+      expect(callArg).toContain("status=open");
       // exclude_status and include_blocked are separate keys, so still present
-      expect(callArg).toContain('exclude_status=tombstone');
-      expect(callArg).toContain('include_blocked=true');
+      expect(callArg).toContain("exclude_status=tombstone");
+      expect(callArg).toContain("include_blocked=true");
     });
 
-    it('uses /api/issues endpoint (not /api/ready)', async () => {
+    it("uses /api/issues endpoint (not /api/ready)", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockIssues });
 
       await getKanbanIssues();
@@ -520,7 +544,7 @@ describe('issues API', () => {
     });
   });
 
-  describe('getStats', () => {
+  describe("getStats", () => {
     const mockStats: Statistics = {
       total_issues: 100,
       open_issues: 45,
@@ -539,15 +563,15 @@ describe('issues API', () => {
       },
     };
 
-    it('calls get with /api/stats', async () => {
+    it("calls get with /api/stats", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockStats });
 
       await getStats();
 
-      expect(mockGet).toHaveBeenCalledWith('/api/stats');
+      expect(mockGet).toHaveBeenCalledWith("/api/stats");
     });
 
-    it('unwraps successful response and returns Statistics', async () => {
+    it("unwraps successful response and returns Statistics", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockStats });
 
       const result = await getStats();
@@ -555,153 +579,153 @@ describe('issues API', () => {
       expect(result).toEqual(mockStats);
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockGet.mockResolvedValue({ success: false, error: 'Stats unavailable' });
+    it("throws ApiError on failure response", async () => {
+      mockGet.mockResolvedValue({ success: false, error: "Stats unavailable" });
 
       await expect(getStats()).rejects.toThrow(ApiError);
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(503, 'Service Unavailable');
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(503, "Service Unavailable");
       mockGet.mockRejectedValue(error);
 
       await expect(getStats()).rejects.toThrow(ApiError);
     });
   });
 
-  describe('getBlockedIssues', () => {
+  describe("getBlockedIssues", () => {
     const mockBlockedIssues: BlockedIssue[] = [
       {
-        id: 'issue-1',
-        title: 'Blocked Task',
-        issue_type: 'task',
-        priority: 'high',
-        status: 'open',
-        labels: ['blocked'],
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
+        id: "issue-1",
+        title: "Blocked Task",
+        issue_type: "task",
+        priority: "high",
+        status: "open",
+        labels: ["blocked"],
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
         blocked_by_count: 2,
-        blocked_by: ['issue-2', 'issue-3'],
+        blocked_by: ["issue-2", "issue-3"],
       },
     ];
 
-    it('calls get with /api/blocked when no options', async () => {
+    it("calls get with /api/blocked when no options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
       await getBlockedIssues();
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
     });
 
-    it('calls get with /api/blocked when empty options', async () => {
+    it("calls get with /api/blocked when empty options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
       await getBlockedIssues({});
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
     });
 
-    it('builds query string with parent_id', async () => {
+    it("builds query string with parent_id", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ parent_id: 'epic-1' });
+      await getBlockedIssues({ parent_id: "epic-1" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked?parent_id=epic-1');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked?parent_id=epic-1");
     });
 
-    it('builds query string with priority', async () => {
+    it("builds query string with priority", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
       await getBlockedIssues({ priority: 2 });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked?priority=2');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked?priority=2");
     });
 
-    it('builds query string with priority 0', async () => {
+    it("builds query string with priority 0", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
       await getBlockedIssues({ priority: 0 });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked?priority=0');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked?priority=0");
     });
 
-    it('builds query string with type', async () => {
+    it("builds query string with type", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ type: 'bug' });
+      await getBlockedIssues({ type: "bug" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked?type=bug');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked?type=bug");
     });
 
-    it('builds query string with assignee', async () => {
+    it("builds query string with assignee", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ assignee: 'dev1' });
+      await getBlockedIssues({ assignee: "dev1" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked?assignee=dev1');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked?assignee=dev1");
     });
 
-    it('builds query string with limit', async () => {
+    it("builds query string with limit", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
       await getBlockedIssues({ limit: 10 });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked?limit=10');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked?limit=10");
     });
 
-    it('builds query string with limit 0', async () => {
+    it("builds query string with limit 0", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
       await getBlockedIssues({ limit: 0 });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked?limit=0');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked?limit=0");
     });
 
-    it('builds query string with all filter options', async () => {
+    it("builds query string with all filter options", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
       await getBlockedIssues({
-        parent_id: 'epic-1',
+        parent_id: "epic-1",
         priority: 1,
-        type: 'bug',
-        assignee: 'dev1',
+        type: "bug",
+        assignee: "dev1",
         limit: 5,
       });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain('/api/blocked?');
-      expect(callArg).toContain('parent_id=epic-1');
-      expect(callArg).toContain('priority=1');
-      expect(callArg).toContain('type=bug');
-      expect(callArg).toContain('assignee=dev1');
-      expect(callArg).toContain('limit=5');
+      expect(callArg).toContain("/api/blocked?");
+      expect(callArg).toContain("parent_id=epic-1");
+      expect(callArg).toContain("priority=1");
+      expect(callArg).toContain("type=bug");
+      expect(callArg).toContain("assignee=dev1");
+      expect(callArg).toContain("limit=5");
     });
 
-    it('omits empty string parent_id', async () => {
+    it("omits empty string parent_id", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ parent_id: '' });
+      await getBlockedIssues({ parent_id: "" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
     });
 
-    it('omits empty string type', async () => {
+    it("omits empty string type", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ type: '' });
+      await getBlockedIssues({ type: "" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
     });
 
-    it('omits empty string assignee', async () => {
+    it("omits empty string assignee", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
-      await getBlockedIssues({ assignee: '' });
+      await getBlockedIssues({ assignee: "" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/blocked');
+      expect(mockGet).toHaveBeenCalledWith("/api/blocked");
     });
 
-    it('unwraps successful response and returns BlockedIssue array', async () => {
+    it("unwraps successful response and returns BlockedIssue array", async () => {
       mockGet.mockResolvedValue({ success: true, data: mockBlockedIssues });
 
       const result = await getBlockedIssues();
@@ -709,7 +733,7 @@ describe('issues API', () => {
       expect(result).toEqual(mockBlockedIssues);
     });
 
-    it('returns empty array when no blocked issues', async () => {
+    it("returns empty array when no blocked issues", async () => {
       mockGet.mockResolvedValue({ success: true, data: [] });
 
       const result = await getBlockedIssues();
@@ -717,14 +741,17 @@ describe('issues API', () => {
       expect(result).toEqual([]);
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockGet.mockResolvedValue({ success: false, error: 'Database unavailable' });
+    it("throws ApiError on failure response", async () => {
+      mockGet.mockResolvedValue({
+        success: false,
+        error: "Database unavailable",
+      });
 
       await expect(getBlockedIssues()).rejects.toThrow(ApiError);
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(500, 'Internal Server Error');
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(500, "Internal Server Error");
       mockGet.mockRejectedValue(error);
 
       await expect(getBlockedIssues()).rejects.toThrow(ApiError);
@@ -736,75 +763,79 @@ describe('issues API', () => {
 
   // ============= Graph Operation Tests =============
 
-  describe('fetchGraphIssues', () => {
-    it('calls get with /api/issues/graph when no options', async () => {
+  describe("fetchGraphIssues", () => {
+    it("calls get with /api/issues/graph when no options", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
       await fetchGraphIssues();
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/graph');
+      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph");
     });
 
-    it('calls get with /api/issues/graph when empty options', async () => {
+    it("calls get with /api/issues/graph when empty options", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
       await fetchGraphIssues({});
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/graph');
+      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph");
     });
 
-    it('builds query string with status parameter', async () => {
+    it("builds query string with status parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ status: 'open' });
+      await fetchGraphIssues({ status: "open" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/graph?status=open');
+      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph?status=open");
     });
 
-    it('builds query string with status=closed parameter', async () => {
+    it("builds query string with status=closed parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ status: 'closed' });
+      await fetchGraphIssues({ status: "closed" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/graph?status=closed');
+      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph?status=closed");
     });
 
-    it('builds query string with status=all parameter', async () => {
+    it("builds query string with status=all parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ status: 'all' });
+      await fetchGraphIssues({ status: "all" });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/graph?status=all');
+      expect(mockGet).toHaveBeenCalledWith("/api/issues/graph?status=all");
     });
 
-    it('builds query string with include_closed=true parameter', async () => {
+    it("builds query string with include_closed=true parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
       await fetchGraphIssues({ includeClosed: true });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/graph?include_closed=true');
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/issues/graph?include_closed=true",
+      );
     });
 
-    it('builds query string with include_closed=false parameter', async () => {
+    it("builds query string with include_closed=false parameter", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
       await fetchGraphIssues({ includeClosed: false });
 
-      expect(mockGet).toHaveBeenCalledWith('/api/issues/graph?include_closed=false');
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/issues/graph?include_closed=false",
+      );
     });
 
-    it('builds query string with both status and include_closed parameters', async () => {
+    it("builds query string with both status and include_closed parameters", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
-      await fetchGraphIssues({ status: 'all', includeClosed: true });
+      await fetchGraphIssues({ status: "all", includeClosed: true });
 
       const callArg = mockGet.mock.calls[0][0] as string;
-      expect(callArg).toContain('/api/issues/graph?');
-      expect(callArg).toContain('status=all');
-      expect(callArg).toContain('include_closed=true');
+      expect(callArg).toContain("/api/issues/graph?");
+      expect(callArg).toContain("status=all");
+      expect(callArg).toContain("include_closed=true");
     });
 
-    it('returns empty array when issues is empty', async () => {
+    it("returns empty array when issues is empty", async () => {
       mockGet.mockResolvedValue({ success: true, issues: [] });
 
       const result = await fetchGraphIssues();
@@ -812,7 +843,7 @@ describe('issues API', () => {
       expect(result).toEqual([]);
     });
 
-    it('returns empty array when issues is undefined in response', async () => {
+    it("returns empty array when issues is undefined in response", async () => {
       mockGet.mockResolvedValue({ success: true });
 
       const result = await fetchGraphIssues();
@@ -820,20 +851,20 @@ describe('issues API', () => {
       expect(result).toEqual([]);
     });
 
-    it('transforms simplified dependencies to full Dependency format', async () => {
+    it("transforms simplified dependencies to full Dependency format", async () => {
       const graphApiResponse = {
         success: true,
         issues: [
           {
-            id: 'issue-1',
-            title: 'Issue with dependencies',
-            issue_type: 'task',
-            priority: 'high',
-            status: 'open',
+            id: "issue-1",
+            title: "Issue with dependencies",
+            issue_type: "task",
+            priority: "high",
+            status: "open",
             labels: [],
             dependencies: [
-              { depends_on_id: 'issue-2', type: 'blocks' },
-              { depends_on_id: 'issue-3', type: 'related' },
+              { depends_on_id: "issue-2", type: "blocks" },
+              { depends_on_id: "issue-3", type: "related" },
             ],
           },
         ],
@@ -845,32 +876,32 @@ describe('issues API', () => {
       expect(result).toHaveLength(1);
       expect(result[0].dependencies).toHaveLength(2);
       expect(result[0].dependencies![0]).toEqual({
-        issue_id: 'issue-1',
-        depends_on_id: 'issue-2',
-        type: 'blocks',
-        created_at: '', // Not available in slim graph payload
+        issue_id: "issue-1",
+        depends_on_id: "issue-2",
+        type: "blocks",
+        created_at: "", // Not available in slim graph payload
       });
       expect(result[0].dependencies![1]).toEqual({
-        issue_id: 'issue-1',
-        depends_on_id: 'issue-3',
-        type: 'related',
-        created_at: '', // Not available in slim graph payload
+        issue_id: "issue-1",
+        depends_on_id: "issue-3",
+        type: "related",
+        created_at: "", // Not available in slim graph payload
       });
     });
 
-    it('handles issues with no dependencies', async () => {
+    it("handles issues with no dependencies", async () => {
       const graphApiResponse = {
         success: true,
         issues: [
           {
-            id: 'issue-1',
-            title: 'Issue without dependencies',
-            issue_type: 'bug',
-            priority: 'medium',
-            status: 'open',
-            labels: ['test'],
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            id: "issue-1",
+            title: "Issue without dependencies",
+            issue_type: "bug",
+            priority: "medium",
+            status: "open",
+            labels: ["test"],
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
         ],
       };
@@ -879,23 +910,23 @@ describe('issues API', () => {
       const result = await fetchGraphIssues();
 
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('issue-1');
+      expect(result[0].id).toBe("issue-1");
       expect(result[0].dependencies).toBeUndefined();
     });
 
-    it('handles issues with empty dependencies array', async () => {
+    it("handles issues with empty dependencies array", async () => {
       const graphApiResponse = {
         success: true,
         issues: [
           {
-            id: 'issue-1',
-            title: 'Issue with empty dependencies',
-            issue_type: 'feature',
-            priority: 'low',
-            status: 'open',
+            id: "issue-1",
+            title: "Issue with empty dependencies",
+            issue_type: "feature",
+            priority: "low",
+            status: "open",
             labels: [],
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
             dependencies: [],
           },
         ],
@@ -908,20 +939,20 @@ describe('issues API', () => {
       expect(result[0].dependencies).toEqual([]);
     });
 
-    it('preserves slim issue fields during transformation', async () => {
+    it("preserves slim issue fields during transformation", async () => {
       const graphApiResponse = {
         success: true,
         issues: [
           {
-            id: 'issue-123',
-            title: 'Full Issue',
-            issue_type: 'task',
+            id: "issue-123",
+            title: "Full Issue",
+            issue_type: "task",
             priority: 2,
-            status: 'in_progress',
-            labels: ['urgent', 'frontend'],
-            due_at: '2024-02-01T00:00:00Z',
-            defer_until: '2024-01-15T00:00:00Z',
-            dependencies: [{ depends_on_id: 'issue-456', type: 'blocks' }],
+            status: "in_progress",
+            labels: ["urgent", "frontend"],
+            due_at: "2024-02-01T00:00:00Z",
+            defer_until: "2024-01-15T00:00:00Z",
+            dependencies: [{ depends_on_id: "issue-456", type: "blocks" }],
           },
         ],
       };
@@ -932,53 +963,53 @@ describe('issues API', () => {
       expect(result).toHaveLength(1);
       const issue = result[0];
       // Slim payload fields
-      expect(issue.id).toBe('issue-123');
-      expect(issue.title).toBe('Full Issue');
-      expect(issue.issue_type).toBe('task');
+      expect(issue.id).toBe("issue-123");
+      expect(issue.title).toBe("Full Issue");
+      expect(issue.issue_type).toBe("task");
       expect(issue.priority).toBe(2);
-      expect(issue.status).toBe('in_progress');
-      expect(issue.labels).toEqual(['urgent', 'frontend']);
-      expect(issue.due_at).toBe('2024-02-01T00:00:00Z');
-      expect(issue.defer_until).toBe('2024-01-15T00:00:00Z');
+      expect(issue.status).toBe("in_progress");
+      expect(issue.labels).toEqual(["urgent", "frontend"]);
+      expect(issue.due_at).toBe("2024-02-01T00:00:00Z");
+      expect(issue.defer_until).toBe("2024-01-15T00:00:00Z");
       // Fields not in slim payload default to empty
-      expect(issue.created_at).toBe('');
-      expect(issue.updated_at).toBe('');
+      expect(issue.created_at).toBe("");
+      expect(issue.updated_at).toBe("");
     });
 
-    it('handles multiple issues with mixed dependency states', async () => {
+    it("handles multiple issues with mixed dependency states", async () => {
       const graphApiResponse = {
         success: true,
         issues: [
           {
-            id: 'issue-1',
-            title: 'Issue 1',
-            issue_type: 'task',
-            priority: 'high',
-            status: 'open',
+            id: "issue-1",
+            title: "Issue 1",
+            issue_type: "task",
+            priority: "high",
+            status: "open",
             labels: [],
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
-            dependencies: [{ depends_on_id: 'issue-2', type: 'blocks' }],
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+            dependencies: [{ depends_on_id: "issue-2", type: "blocks" }],
           },
           {
-            id: 'issue-2',
-            title: 'Issue 2',
-            issue_type: 'bug',
-            priority: 'medium',
-            status: 'open',
+            id: "issue-2",
+            title: "Issue 2",
+            issue_type: "bug",
+            priority: "medium",
+            status: "open",
             labels: [],
-            created_at: '2024-01-02T00:00:00Z',
-            updated_at: '2024-01-02T00:00:00Z',
+            created_at: "2024-01-02T00:00:00Z",
+            updated_at: "2024-01-02T00:00:00Z",
           },
           {
-            id: 'issue-3',
-            title: 'Issue 3',
-            issue_type: 'feature',
-            priority: 'low',
-            status: 'closed',
+            id: "issue-3",
+            title: "Issue 3",
+            issue_type: "feature",
+            priority: "low",
+            status: "closed",
             labels: [],
-            created_at: '2024-01-03T00:00:00Z',
-            updated_at: '2024-01-03T00:00:00Z',
+            created_at: "2024-01-03T00:00:00Z",
+            updated_at: "2024-01-03T00:00:00Z",
             dependencies: [],
           },
         ],
@@ -993,22 +1024,28 @@ describe('issues API', () => {
       expect(result[2].dependencies).toEqual([]);
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockGet.mockResolvedValue({ success: false, error: 'Database unavailable' });
+    it("throws ApiError on failure response", async () => {
+      mockGet.mockResolvedValue({
+        success: false,
+        error: "Database unavailable",
+      });
 
       await expect(fetchGraphIssues()).rejects.toThrow(ApiError);
     });
 
-    it('throws ApiError with error message from failure response', async () => {
-      mockGet.mockResolvedValue({ success: false, error: 'Graph query failed' });
+    it("throws ApiError with error message from failure response", async () => {
+      mockGet.mockResolvedValue({
+        success: false,
+        error: "Graph query failed",
+      });
 
       try {
         await fetchGraphIssues();
-        expect.fail('Expected fetchGraphIssues to throw');
+        expect.fail("Expected fetchGraphIssues to throw");
       } catch (e) {
         expect(e).toBeInstanceOf(ApiError);
         const apiError = e as ApiError;
-        expect(apiError.statusText).toBe('Graph query failed');
+        expect(apiError.statusText).toBe("Graph query failed");
       }
     });
 
@@ -1017,16 +1054,16 @@ describe('issues API', () => {
 
       try {
         await fetchGraphIssues();
-        expect.fail('Expected fetchGraphIssues to throw');
+        expect.fail("Expected fetchGraphIssues to throw");
       } catch (e) {
         expect(e).toBeInstanceOf(ApiError);
         const apiError = e as ApiError;
-        expect(apiError.statusText).toBe('Unknown error');
+        expect(apiError.statusText).toBe("Unknown error");
       }
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(500, 'Internal Server Error');
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(500, "Internal Server Error");
       mockGet.mockRejectedValue(error);
 
       await expect(fetchGraphIssues()).rejects.toThrow(ApiError);
@@ -1035,20 +1072,20 @@ describe('issues API', () => {
       });
     });
 
-    it('handles custom dependency types', async () => {
+    it("handles custom dependency types", async () => {
       const graphApiResponse = {
         success: true,
         issues: [
           {
-            id: 'issue-1',
-            title: 'Issue with custom dependency',
-            issue_type: 'task',
-            priority: 'high',
-            status: 'open',
+            id: "issue-1",
+            title: "Issue with custom dependency",
+            issue_type: "task",
+            priority: "high",
+            status: "open",
             labels: [],
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
-            dependencies: [{ depends_on_id: 'issue-2', type: 'custom-type' }],
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+            dependencies: [{ depends_on_id: "issue-2", type: "custom-type" }],
           },
         ],
       };
@@ -1056,39 +1093,39 @@ describe('issues API', () => {
 
       const result = await fetchGraphIssues();
 
-      expect(result[0].dependencies![0].type).toBe('custom-type');
+      expect(result[0].dependencies![0].type).toBe("custom-type");
     });
   });
 
   // ============= Write Operation Tests =============
 
-  describe('createIssue', () => {
+  describe("createIssue", () => {
     const mockCreatedIssue: Issue = {
-      id: 'new-issue-123',
-      title: 'New Issue',
-      issue_type: 'feature',
-      priority: 'medium',
-      status: 'open',
+      id: "new-issue-123",
+      title: "New Issue",
+      issue_type: "feature",
+      priority: "medium",
+      status: "open",
       labels: [],
-      created_at: '2024-01-15T00:00:00Z',
-      updated_at: '2024-01-15T00:00:00Z',
+      created_at: "2024-01-15T00:00:00Z",
+      updated_at: "2024-01-15T00:00:00Z",
     };
 
     const validCreateRequest: CreateIssueRequest = {
-      title: 'New Issue',
-      issue_type: 'feature',
-      priority: 'medium',
+      title: "New Issue",
+      issue_type: "feature",
+      priority: "medium",
     };
 
-    it('calls post with /api/issues and request body', async () => {
+    it("calls post with /api/issues and request body", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockCreatedIssue });
 
       await createIssue(validCreateRequest);
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues', validCreateRequest);
+      expect(mockPost).toHaveBeenCalledWith("/api/issues", validCreateRequest);
     });
 
-    it('unwraps successful response and returns Issue', async () => {
+    it("unwraps successful response and returns Issue", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockCreatedIssue });
 
       const result = await createIssue(validCreateRequest);
@@ -1096,47 +1133,49 @@ describe('issues API', () => {
       expect(result).toEqual(mockCreatedIssue);
     });
 
-    it('handles create request with all optional fields', async () => {
+    it("handles create request with all optional fields", async () => {
       const fullRequest: CreateIssueRequest = {
-        title: 'Full Issue',
-        issue_type: 'bug',
-        priority: 'high',
-        id: 'custom-id',
-        parent: 'parent-123',
-        description: 'Detailed description',
-        design: 'Design notes',
-        acceptance_criteria: 'Must pass tests',
-        notes: 'Additional notes',
-        assignee: 'dev1',
-        owner: 'pm1',
-        created_by: 'user1',
-        external_ref: 'JIRA-123',
+        title: "Full Issue",
+        issue_type: "bug",
+        priority: "high",
+        id: "custom-id",
+        parent: "parent-123",
+        description: "Detailed description",
+        design: "Design notes",
+        acceptance_criteria: "Must pass tests",
+        notes: "Additional notes",
+        assignee: "dev1",
+        owner: "pm1",
+        created_by: "user1",
+        external_ref: "JIRA-123",
         estimated_minutes: 120,
-        labels: ['urgent', 'frontend'],
-        dependencies: ['dep-1', 'dep-2'],
-        due_at: '2024-02-01T00:00:00Z',
-        defer_until: '2024-01-20T00:00:00Z',
+        labels: ["urgent", "frontend"],
+        dependencies: ["dep-1", "dep-2"],
+        due_at: "2024-02-01T00:00:00Z",
+        defer_until: "2024-01-20T00:00:00Z",
       };
 
       mockPost.mockResolvedValue({ success: true, data: mockCreatedIssue });
 
       await createIssue(fullRequest);
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues', fullRequest);
+      expect(mockPost).toHaveBeenCalledWith("/api/issues", fullRequest);
     });
 
-    it('throws ApiError on failure response', async () => {
+    it("throws ApiError on failure response", async () => {
       mockPost.mockResolvedValue({
         success: false,
-        error: 'Validation failed',
-        code: 'VALIDATION_ERROR',
+        error: "Validation failed",
+        code: "VALIDATION_ERROR",
       });
 
       await expect(createIssue(validCreateRequest)).rejects.toThrow(ApiError);
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(400, 'Bad Request', { error: 'Invalid issue type' });
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(400, "Bad Request", {
+        error: "Invalid issue type",
+      });
       mockPost.mockRejectedValue(error);
 
       await expect(createIssue(validCreateRequest)).rejects.toThrow(ApiError);
@@ -1146,263 +1185,318 @@ describe('issues API', () => {
     });
   });
 
-  describe('updateIssue', () => {
+  describe("updateIssue", () => {
     const mockUpdatedIssue: Issue = {
-      id: 'issue-123',
-      title: 'Updated Title',
-      issue_type: 'bug',
-      priority: 'high',
-      status: 'in_progress',
-      labels: ['updated'],
-      created_at: '2024-01-01T00:00:00Z',
-      updated_at: '2024-01-15T00:00:00Z',
+      id: "issue-123",
+      title: "Updated Title",
+      issue_type: "bug",
+      priority: "high",
+      status: "in_progress",
+      labels: ["updated"],
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-15T00:00:00Z",
     };
 
-    it('calls patch with correct URL and request body', async () => {
-      const updateData: UpdateIssueRequest = { title: 'Updated Title' };
+    it("calls patch with correct URL and request body", async () => {
+      const updateData: UpdateIssueRequest = { title: "Updated Title" };
       mockPatch.mockResolvedValue({ success: true, data: mockUpdatedIssue });
 
-      await updateIssue('issue-123', updateData);
+      await updateIssue("issue-123", updateData);
 
-      expect(mockPatch).toHaveBeenCalledWith('/api/issues/issue-123', updateData);
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/issues/issue-123",
+        updateData,
+      );
     });
 
-    it('encodes special characters in ID', async () => {
-      const updateData: UpdateIssueRequest = { status: 'closed' };
+    it("encodes special characters in ID", async () => {
+      const updateData: UpdateIssueRequest = { status: "closed" };
       mockPatch.mockResolvedValue({ success: true, data: mockUpdatedIssue });
 
-      await updateIssue('issue/special', updateData);
+      await updateIssue("issue/special", updateData);
 
-      expect(mockPatch).toHaveBeenCalledWith('/api/issues/issue%2Fspecial', updateData);
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/issues/issue%2Fspecial",
+        updateData,
+      );
     });
 
-    it('unwraps successful response and returns Issue', async () => {
-      const updateData: UpdateIssueRequest = { priority: 'high' };
+    it("unwraps successful response and returns Issue", async () => {
+      const updateData: UpdateIssueRequest = { priority: "high" };
       mockPatch.mockResolvedValue({ success: true, data: mockUpdatedIssue });
 
-      const result = await updateIssue('issue-123', updateData);
+      const result = await updateIssue("issue-123", updateData);
 
       expect(result).toEqual(mockUpdatedIssue);
     });
 
-    it('handles update request with all fields', async () => {
+    it("handles update request with all fields", async () => {
       const fullUpdate: UpdateIssueRequest = {
-        title: 'New Title',
-        description: 'New description',
-        design: 'New design',
-        notes: 'New notes',
-        priority: 'low',
-        status: 'blocked',
-        assignee: 'new-assignee',
-        labels: ['label1', 'label2'],
+        title: "New Title",
+        description: "New description",
+        design: "New design",
+        notes: "New notes",
+        priority: "low",
+        status: "blocked",
+        assignee: "new-assignee",
+        labels: ["label1", "label2"],
       };
       mockPatch.mockResolvedValue({ success: true, data: mockUpdatedIssue });
 
-      await updateIssue('issue-123', fullUpdate);
+      await updateIssue("issue-123", fullUpdate);
 
-      expect(mockPatch).toHaveBeenCalledWith('/api/issues/issue-123', fullUpdate);
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/issues/issue-123",
+        fullUpdate,
+      );
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockPatch.mockResolvedValue({ success: false, error: 'Issue not found' });
+    it("throws ApiError on failure response", async () => {
+      mockPatch.mockResolvedValue({ success: false, error: "Issue not found" });
 
-      await expect(updateIssue('nonexistent', { title: 'x' })).rejects.toThrow(ApiError);
+      await expect(updateIssue("nonexistent", { title: "x" })).rejects.toThrow(
+        ApiError,
+      );
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(404, 'Not Found');
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(404, "Not Found");
       mockPatch.mockRejectedValue(error);
 
-      await expect(updateIssue('issue-123', { title: 'x' })).rejects.toThrow(ApiError);
+      await expect(updateIssue("issue-123", { title: "x" })).rejects.toThrow(
+        ApiError,
+      );
     });
   });
 
-  describe('closeIssue', () => {
-    it('calls post with correct URL and empty body when no reason', async () => {
+  describe("closeIssue", () => {
+    it("calls post with correct URL and empty body when no reason", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await closeIssue('issue-123');
+      await closeIssue("issue-123");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-123/close', {});
+      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/close", {});
     });
 
-    it('calls post with reason in body when provided', async () => {
+    it("calls post with reason in body when provided", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await closeIssue('issue-123', 'Completed successfully');
+      await closeIssue("issue-123", "Completed successfully");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-123/close', {
-        reason: 'Completed successfully',
+      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/close", {
+        reason: "Completed successfully",
       });
     });
 
-    it('encodes special characters in ID', async () => {
+    it("encodes special characters in ID", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await closeIssue('issue/with/path');
+      await closeIssue("issue/with/path");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue%2Fwith%2Fpath/close', {});
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/issues/issue%2Fwith%2Fpath/close",
+        {},
+      );
     });
 
-    it('returns void on success', async () => {
+    it("returns void on success", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      const result = await closeIssue('issue-123');
+      const result = await closeIssue("issue-123");
 
       expect(result).toBeUndefined();
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(403, 'Forbidden', { error: 'Cannot close issue' });
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(403, "Forbidden", {
+        error: "Cannot close issue",
+      });
       mockPost.mockRejectedValue(error);
 
-      await expect(closeIssue('issue-123')).rejects.toThrow(ApiError);
-      await expect(closeIssue('issue-123')).rejects.toMatchObject({
+      await expect(closeIssue("issue-123")).rejects.toThrow(ApiError);
+      await expect(closeIssue("issue-123")).rejects.toMatchObject({
         status: 403,
       });
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockPost.mockResolvedValue({ success: false, error: 'Cannot close blocked issue' });
+    it("throws ApiError on failure response", async () => {
+      mockPost.mockResolvedValue({
+        success: false,
+        error: "Cannot close blocked issue",
+      });
 
-      await expect(closeIssue('issue-123')).rejects.toThrow(ApiError);
+      await expect(closeIssue("issue-123")).rejects.toThrow(ApiError);
     });
 
-    it('handles empty string reason as no reason', async () => {
+    it("handles empty string reason as no reason", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
       // Empty string is falsy, so should send empty object
-      await closeIssue('issue-123', '');
+      await closeIssue("issue-123", "");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-123/close', {});
+      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/close", {});
     });
   });
 
   // ============= Dependency Operation Tests =============
 
-  describe('addDependency', () => {
-    it('calls post with correct URL and default dep_type', async () => {
+  describe("addDependency", () => {
+    it("calls post with correct URL and default dep_type", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await addDependency('issue-1', 'issue-2');
+      await addDependency("issue-1", "issue-2");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-1/dependencies', {
-        depends_on_id: 'issue-2',
-        dep_type: 'blocks',
-      });
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/issues/issue-1/dependencies",
+        {
+          depends_on_id: "issue-2",
+          dep_type: "blocks",
+        },
+      );
     });
 
-    it('calls post with custom dep_type', async () => {
+    it("calls post with custom dep_type", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await addDependency('issue-1', 'issue-2', 'related');
+      await addDependency("issue-1", "issue-2", "related");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-1/dependencies', {
-        depends_on_id: 'issue-2',
-        dep_type: 'related',
-      });
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/issues/issue-1/dependencies",
+        {
+          depends_on_id: "issue-2",
+          dep_type: "related",
+        },
+      );
     });
 
-    it('encodes special characters in issueId', async () => {
+    it("encodes special characters in issueId", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await addDependency('issue/1', 'issue-2');
+      await addDependency("issue/1", "issue-2");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue%2F1/dependencies', {
-        depends_on_id: 'issue-2',
-        dep_type: 'blocks',
-      });
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/issues/issue%2F1/dependencies",
+        {
+          depends_on_id: "issue-2",
+          dep_type: "blocks",
+        },
+      );
     });
 
-    it('does not encode dependsOnId in URL (sent in body)', async () => {
+    it("does not encode dependsOnId in URL (sent in body)", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      await addDependency('issue-1', 'dep/with/slashes');
+      await addDependency("issue-1", "dep/with/slashes");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-1/dependencies', {
-        depends_on_id: 'dep/with/slashes',
-        dep_type: 'blocks',
-      });
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/issues/issue-1/dependencies",
+        {
+          depends_on_id: "dep/with/slashes",
+          dep_type: "blocks",
+        },
+      );
     });
 
-    it('returns void on success', async () => {
+    it("returns void on success", async () => {
       mockPost.mockResolvedValue({ success: true, data: null });
 
-      const result = await addDependency('issue-1', 'issue-2');
+      const result = await addDependency("issue-1", "issue-2");
 
       expect(result).toBeUndefined();
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockPost.mockResolvedValue({ success: false, error: 'Dependency cycle detected' });
+    it("throws ApiError on failure response", async () => {
+      mockPost.mockResolvedValue({
+        success: false,
+        error: "Dependency cycle detected",
+      });
 
-      await expect(addDependency('issue-1', 'issue-2')).rejects.toThrow(ApiError);
+      await expect(addDependency("issue-1", "issue-2")).rejects.toThrow(
+        ApiError,
+      );
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(400, 'Bad Request');
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(400, "Bad Request");
       mockPost.mockRejectedValue(error);
 
-      await expect(addDependency('issue-1', 'issue-2')).rejects.toThrow(ApiError);
-      await expect(addDependency('issue-1', 'issue-2')).rejects.toMatchObject({
+      await expect(addDependency("issue-1", "issue-2")).rejects.toThrow(
+        ApiError,
+      );
+      await expect(addDependency("issue-1", "issue-2")).rejects.toMatchObject({
         status: 400,
       });
     });
   });
 
-  describe('removeDependency', () => {
-    it('calls del with correct URL', async () => {
+  describe("removeDependency", () => {
+    it("calls del with correct URL", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      await removeDependency('issue-1', 'dep-2');
+      await removeDependency("issue-1", "dep-2");
 
-      expect(mockDel).toHaveBeenCalledWith('/api/issues/issue-1/dependencies/dep-2');
+      expect(mockDel).toHaveBeenCalledWith(
+        "/api/issues/issue-1/dependencies/dep-2",
+      );
     });
 
-    it('encodes special characters in issueId', async () => {
+    it("encodes special characters in issueId", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      await removeDependency('issue/1', 'dep-2');
+      await removeDependency("issue/1", "dep-2");
 
-      expect(mockDel).toHaveBeenCalledWith('/api/issues/issue%2F1/dependencies/dep-2');
+      expect(mockDel).toHaveBeenCalledWith(
+        "/api/issues/issue%2F1/dependencies/dep-2",
+      );
     });
 
-    it('encodes special characters in dependsOnId', async () => {
+    it("encodes special characters in dependsOnId", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      await removeDependency('issue-1', 'dep/2');
+      await removeDependency("issue-1", "dep/2");
 
-      expect(mockDel).toHaveBeenCalledWith('/api/issues/issue-1/dependencies/dep%2F2');
+      expect(mockDel).toHaveBeenCalledWith(
+        "/api/issues/issue-1/dependencies/dep%2F2",
+      );
     });
 
-    it('encodes special characters in both IDs', async () => {
+    it("encodes special characters in both IDs", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      await removeDependency('issue/1', 'dep/2');
+      await removeDependency("issue/1", "dep/2");
 
-      expect(mockDel).toHaveBeenCalledWith('/api/issues/issue%2F1/dependencies/dep%2F2');
+      expect(mockDel).toHaveBeenCalledWith(
+        "/api/issues/issue%2F1/dependencies/dep%2F2",
+      );
     });
 
-    it('returns void on success', async () => {
+    it("returns void on success", async () => {
       mockDel.mockResolvedValue({ success: true, data: null });
 
-      const result = await removeDependency('issue-1', 'dep-2');
+      const result = await removeDependency("issue-1", "dep-2");
 
       expect(result).toBeUndefined();
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockDel.mockResolvedValue({ success: false, error: 'Dependency not found' });
+    it("throws ApiError on failure response", async () => {
+      mockDel.mockResolvedValue({
+        success: false,
+        error: "Dependency not found",
+      });
 
-      await expect(removeDependency('issue-1', 'dep-2')).rejects.toThrow(ApiError);
+      await expect(removeDependency("issue-1", "dep-2")).rejects.toThrow(
+        ApiError,
+      );
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(404, 'Not Found');
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(404, "Not Found");
       mockDel.mockRejectedValue(error);
 
-      await expect(removeDependency('issue-1', 'dep-2')).rejects.toThrow(ApiError);
-      await expect(removeDependency('issue-1', 'dep-2')).rejects.toMatchObject({
+      await expect(removeDependency("issue-1", "dep-2")).rejects.toThrow(
+        ApiError,
+      );
+      await expect(removeDependency("issue-1", "dep-2")).rejects.toMatchObject({
         status: 404,
       });
     });
@@ -1410,75 +1504,75 @@ describe('issues API', () => {
 
   // ============= Comment Operation Tests =============
 
-  describe('addComment', () => {
+  describe("addComment", () => {
     const mockComment: Comment = {
       id: 1,
-      issue_id: 'issue-123',
-      author: 'user1',
-      text: 'This is a comment',
-      created_at: '2024-01-15T00:00:00Z',
+      issue_id: "issue-123",
+      author: "user1",
+      text: "This is a comment",
+      created_at: "2024-01-15T00:00:00Z",
     };
 
-    it('calls post with correct URL and body', async () => {
+    it("calls post with correct URL and body", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      await addComment('issue-123', 'This is a comment');
+      await addComment("issue-123", "This is a comment");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-123/comments', {
-        text: 'This is a comment',
+      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/comments", {
+        text: "This is a comment",
       });
     });
 
-    it('encodes special characters in issueId', async () => {
+    it("encodes special characters in issueId", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      await addComment('issue/1', 'hello');
+      await addComment("issue/1", "hello");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue%2F1/comments', {
-        text: 'hello',
+      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue%2F1/comments", {
+        text: "hello",
       });
     });
 
-    it('unwraps successful response and returns Comment', async () => {
+    it("unwraps successful response and returns Comment", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      const result = await addComment('issue-123', 'This is a comment');
+      const result = await addComment("issue-123", "This is a comment");
 
       expect(result).toEqual(mockComment);
     });
 
-    it('sends text as-is without sanitization', async () => {
+    it("sends text as-is without sanitization", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      await addComment('issue-123', '<script>alert("xss")</script>');
+      await addComment("issue-123", '<script>alert("xss")</script>');
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-123/comments', {
+      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/comments", {
         text: '<script>alert("xss")</script>',
       });
     });
 
-    it('handles empty text', async () => {
+    it("handles empty text", async () => {
       mockPost.mockResolvedValue({ success: true, data: mockComment });
 
-      await addComment('issue-123', '');
+      await addComment("issue-123", "");
 
-      expect(mockPost).toHaveBeenCalledWith('/api/issues/issue-123/comments', {
-        text: '',
+      expect(mockPost).toHaveBeenCalledWith("/api/issues/issue-123/comments", {
+        text: "",
       });
     });
 
-    it('throws ApiError on failure response', async () => {
-      mockPost.mockResolvedValue({ success: false, error: 'Issue not found' });
+    it("throws ApiError on failure response", async () => {
+      mockPost.mockResolvedValue({ success: false, error: "Issue not found" });
 
-      await expect(addComment('issue-123', 'text')).rejects.toThrow(ApiError);
+      await expect(addComment("issue-123", "text")).rejects.toThrow(ApiError);
     });
 
-    it('propagates ApiError from client', async () => {
-      const error = new ApiError(404, 'Not Found');
+    it("propagates ApiError from client", async () => {
+      const error = new ApiError(404, "Not Found");
       mockPost.mockRejectedValue(error);
 
-      await expect(addComment('issue-123', 'text')).rejects.toThrow(ApiError);
-      await expect(addComment('issue-123', 'text')).rejects.toMatchObject({
+      await expect(addComment("issue-123", "text")).rejects.toThrow(ApiError);
+      await expect(addComment("issue-123", "text")).rejects.toMatchObject({
         status: 404,
       });
     });
@@ -1486,13 +1580,13 @@ describe('issues API', () => {
 
   // ============= Integration-style Tests =============
 
-  describe('error handling consistency', () => {
-    it('all read operations throw ApiError on network failure', async () => {
-      const networkError = new ApiError(0, 'Network error');
+  describe("error handling consistency", () => {
+    it("all read operations throw ApiError on network failure", async () => {
+      const networkError = new ApiError(0, "Network error");
 
       mockGet.mockRejectedValue(networkError);
 
-      await expect(getIssue('123')).rejects.toThrow(ApiError);
+      await expect(getIssue("123")).rejects.toThrow(ApiError);
       await expect(getReadyIssues()).rejects.toThrow(ApiError);
       await expect(getKanbanIssues()).rejects.toThrow(ApiError);
       await expect(getStats()).rejects.toThrow(ApiError);
@@ -1500,21 +1594,23 @@ describe('issues API', () => {
       await expect(fetchGraphIssues()).rejects.toThrow(ApiError);
     });
 
-    it('all write operations throw ApiError on network failure', async () => {
-      const networkError = new ApiError(0, 'Network error');
+    it("all write operations throw ApiError on network failure", async () => {
+      const networkError = new ApiError(0, "Network error");
 
       mockPost.mockRejectedValue(networkError);
       mockPatch.mockRejectedValue(networkError);
       mockDel.mockRejectedValue(networkError);
 
       await expect(
-        createIssue({ title: 'x', issue_type: 'bug', priority: 'high' })
+        createIssue({ title: "x", issue_type: "bug", priority: "high" }),
       ).rejects.toThrow(ApiError);
-      await expect(updateIssue('123', { title: 'x' })).rejects.toThrow(ApiError);
-      await expect(closeIssue('123')).rejects.toThrow(ApiError);
-      await expect(addDependency('123', '456')).rejects.toThrow(ApiError);
-      await expect(removeDependency('123', '456')).rejects.toThrow(ApiError);
-      await expect(addComment('123', 'text')).rejects.toThrow(ApiError);
+      await expect(updateIssue("123", { title: "x" })).rejects.toThrow(
+        ApiError,
+      );
+      await expect(closeIssue("123")).rejects.toThrow(ApiError);
+      await expect(addDependency("123", "456")).rejects.toThrow(ApiError);
+      await expect(removeDependency("123", "456")).rejects.toThrow(ApiError);
+      await expect(addComment("123", "text")).rejects.toThrow(ApiError);
     });
   });
 });

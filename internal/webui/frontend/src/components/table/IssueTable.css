@@ -211,17 +211,29 @@
 }
 
 .issue-table__status.status-open {
-  background-color: color-mix(in srgb, var(--color-status-open) 15%, transparent);
+  background-color: color-mix(
+    in srgb,
+    var(--color-status-open) 15%,
+    transparent
+  );
   color: var(--color-status-open);
 }
 
 .issue-table__status.status-in-progress {
-  background-color: color-mix(in srgb, var(--color-status-in-progress) 15%, transparent);
+  background-color: color-mix(
+    in srgb,
+    var(--color-status-in-progress) 15%,
+    transparent
+  );
   color: var(--color-status-in-progress);
 }
 
 .issue-table__status.status-closed {
-  background-color: color-mix(in srgb, var(--color-status-closed) 15%, transparent);
+  background-color: color-mix(
+    in srgb,
+    var(--color-status-closed) 15%,
+    transparent
+  );
   color: var(--color-status-closed);
 }
 
@@ -350,38 +362,38 @@
  * =========================== */
 
 /* ID column sticky positioning */
-.issue-table__header-cell[data-column='id'],
-.issue-table__cell[data-column='id'] {
+.issue-table__header-cell[data-column="id"],
+.issue-table__cell[data-column="id"] {
   position: sticky;
   left: 0;
   z-index: var(--z-sticky);
 }
 
 /* Header sticky cells need explicit background */
-.issue-table__header-cell[data-column='id'] {
+.issue-table__header-cell[data-column="id"] {
   background-color: var(--color-bg-secondary);
 }
 
 /* Body sticky cells need opaque background */
-.issue-table__cell[data-column='id'] {
+.issue-table__cell[data-column="id"] {
   background-color: var(--color-bg);
 }
 
 /* Match hover state background for sticky cells */
-.issue-table__row:hover .issue-table__cell[data-column='id'] {
+.issue-table__row:hover .issue-table__cell[data-column="id"] {
   background-color: var(--color-bg-secondary);
 }
 
 /* Match selected state background for sticky cells */
-.issue-table__row--selected .issue-table__cell[data-column='id'],
-.issue-table__row--selected:hover .issue-table__cell[data-column='id'] {
+.issue-table__row--selected .issue-table__cell[data-column="id"],
+.issue-table__row--selected:hover .issue-table__cell[data-column="id"] {
   background-color: var(--color-bg-tertiary);
 }
 
 /* Visual separator shadow on sticky column's right edge */
-.issue-table__header-cell[data-column='id']::after,
-.issue-table__cell[data-column='id']::after {
-  content: '';
+.issue-table__header-cell[data-column="id"]::after,
+.issue-table__cell[data-column="id"]::after {
+  content: "";
   position: absolute;
   top: 0;
   right: -4px;
@@ -419,7 +431,8 @@
 }
 
 /* When checkbox is present, ID column shifts right */
-.issue-table__header-cell--checkbox ~ .issue-table__header-cell[data-column='id'],
-.issue-table__cell--checkbox ~ .issue-table__cell[data-column='id'] {
+.issue-table__header-cell--checkbox
+  ~ .issue-table__header-cell[data-column="id"],
+.issue-table__cell--checkbox ~ .issue-table__cell[data-column="id"] {
   left: 40px; /* width of checkbox column */
 }

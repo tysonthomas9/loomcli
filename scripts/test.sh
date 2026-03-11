@@ -28,6 +28,7 @@ COVERAGE="${TEST_COVER:-}"
 TAGS="${TEST_TAGS:-}"
 COVERPROFILE="${TEST_COVERPROFILE:-/tmp/loom.coverage.out}"
 COVERPKG="${TEST_COVERPKG:-}"
+RACE="${TEST_RACE:-}"
 
 # Parse arguments
 PACKAGES=()
@@ -87,6 +88,10 @@ fi
 
 if [[ -n "$TAGS" ]]; then
     CMD+=(-tags "$TAGS")
+fi
+
+if [[ -n "$RACE" ]]; then
+    CMD+=(-race)
 fi
 
 if [[ -n "$COVERAGE" ]]; then

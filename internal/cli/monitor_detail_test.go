@@ -84,12 +84,7 @@ func TestGetGitHubRemoteURL(t *testing.T) {
 
 // TestGetWorktreeCommitDetails tests fetching recent commits ahead of integration branch.
 func TestGetWorktreeCommitDetails(t *testing.T) {
-	// Save and restore monitorBranch
-	origBranch := monitorBranch
-	t.Cleanup(func() { monitorBranch = origBranch })
-
 	t.Run("normal commits with github URL", func(t *testing.T) {
-		monitorBranch = ""
 
 		mock := NewCommandMock(t, []CommandStub{
 			{
@@ -102,7 +97,7 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 		})
 		mock.Install()
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 5, "https://github.com/user/repo")
+		commits := getWorktreeCommitDetails("/some/path", "main", 5, "https://github.com/user/repo", "")
 		if len(commits) != 3 {
 			t.Fatalf("expected 3 commits, got %d", len(commits))
 		}
@@ -128,8 +123,6 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 	})
 
 	t.Run("commits without github URL", func(t *testing.T) {
-		monitorBranch = ""
-
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -139,7 +132,7 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 		})
 		mock.Install()
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 3, "")
+		commits := getWorktreeCommitDetails("/some/path", "main", 3, "", "")
 		if len(commits) != 1 {
 			t.Fatalf("expected 1 commit, got %d", len(commits))
 		}
@@ -155,8 +148,6 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 	})
 
 	t.Run("no commits ahead", func(t *testing.T) {
-		monitorBranch = ""
-
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -166,15 +157,13 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 		})
 		mock.Install()
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 10, "https://github.com/user/repo")
+		commits := getWorktreeCommitDetails("/some/path", "main", 10, "https://github.com/user/repo", "")
 		if commits != nil {
 			t.Errorf("expected nil for no commits, got %v", commits)
 		}
 	})
 
 	t.Run("git error returns nil", func(t *testing.T) {
-		monitorBranch = ""
-
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name: "git",
@@ -184,15 +173,13 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 		})
 		mock.Install()
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 10, "https://github.com/user/repo")
+		commits := getWorktreeCommitDetails("/some/path", "main", 10, "https://github.com/user/repo", "")
 		if commits != nil {
 			t.Errorf("expected nil on git error, got %v", commits)
 		}
 	})
 
-	t.Run("uses monitorBranch override", func(t *testing.T) {
-		monitorBranch = "develop"
-
+	t.Run("uses branch override", func(t *testing.T) {
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -202,7 +189,7 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 		})
 		mock.Install()
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 5, "")
+		commits := getWorktreeCommitDetails("/some/path", "main", 5, "", "develop")
 		if len(commits) != 1 {
 			t.Fatalf("expected 1 commit, got %d", len(commits))
 		}
@@ -212,8 +199,6 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 	})
 
 	t.Run("commit message with pipe character", func(t *testing.T) {
-		monitorBranch = ""
-
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -223,7 +208,7 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 		})
 		mock.Install()
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 5, "")
+		commits := getWorktreeCommitDetails("/some/path", "main", 5, "", "")
 		if len(commits) != 1 {
 			t.Fatalf("expected 1 commit, got %d", len(commits))
 		}
@@ -234,8 +219,6 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 	})
 
 	t.Run("whitespace-only output returns nil", func(t *testing.T) {
-		monitorBranch = ""
-
 		mock := NewCommandMock(t, []CommandStub{
 			{
 				Name:   "git",
@@ -245,7 +228,7 @@ func TestGetWorktreeCommitDetails(t *testing.T) {
 		})
 		mock.Install()
 
-		commits := getWorktreeCommitDetails("/some/path", "main", 10, "")
+		commits := getWorktreeCommitDetails("/some/path", "main", 10, "", "")
 		if commits != nil {
 			t.Errorf("expected nil for whitespace-only output, got %v", commits)
 		}

@@ -5,76 +5,108 @@
  * issues as nodes and dependencies as edges in an interactive DAG layout.
  */
 
-import { ReactFlow, Background, MiniMap, Panel, type NodeMouseHandler } from '@xyflow/react';
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import {
+  ReactFlow,
+  Background,
+  MiniMap,
+  Panel,
+  type NodeMouseHandler,
+} from "@xyflow/react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 
-import '@xyflow/react/dist/style.css';
-import { IssueNode, DependencyEdge, GraphControls, GraphLegend, NodeTooltip } from '@/components';
-import type { DependencyTypeGroup } from '@/components/GraphControls';
-import type { TooltipPosition } from '@/components/NodeTooltip';
-import { useAutoLayout, type UseAutoLayoutOptions } from '@/hooks/useAutoLayout';
-import { useBlockedIssues } from '@/hooks/useBlockedIssues';
-import { useGraphData, type UseGraphDataOptions } from '@/hooks/useGraphData';
-import type { Issue, IssueNode as IssueNodeType, DependencyType } from '@/types';
-import type { Status } from '@/types/status';
+import "@xyflow/react/dist/style.css";
+import {
+  IssueNode,
+  DependencyEdge,
+  GraphControls,
+  GraphLegend,
+  NodeTooltip,
+} from "@/components";
+import type { DependencyTypeGroup } from "@/components/GraphControls";
+import type { TooltipPosition } from "@/components/NodeTooltip";
+import {
+  useAutoLayout,
+  type UseAutoLayoutOptions,
+} from "@/hooks/useAutoLayout";
+import { useBlockedIssues } from "@/hooks/useBlockedIssues";
+import { useGraphData, type UseGraphDataOptions } from "@/hooks/useGraphData";
+import type {
+  Issue,
+  IssueNode as IssueNodeType,
+  DependencyType,
+} from "@/types";
+import type { Status } from "@/types/status";
 
-import styles from './GraphView.module.css';
+import styles from "./GraphView.module.css";
 
-const STORAGE_KEY_SHOW_CLOSED = 'graph-show-closed';
-const STORAGE_KEY_STATUS_FILTER = 'graph-status-filter';
-const STORAGE_KEY_DEP_TYPE_FILTER = 'graph-dep-type-filter';
+const STORAGE_KEY_SHOW_CLOSED = "graph-show-closed";
+const STORAGE_KEY_STATUS_FILTER = "graph-status-filter";
+const STORAGE_KEY_DEP_TYPE_FILTER = "graph-dep-type-filter";
 
 /**
  * Dependency types for each filter group.
  */
-const BLOCKING_DEP_TYPES: DependencyType[] = ['blocks', 'conditional-blocks', 'waits-for'];
-const PARENT_CHILD_DEP_TYPES: DependencyType[] = ['parent-child'];
+const BLOCKING_DEP_TYPES: DependencyType[] = [
+  "blocks",
+  "conditional-blocks",
+  "waits-for",
+];
+const PARENT_CHILD_DEP_TYPES: DependencyType[] = ["parent-child"];
 const NON_BLOCKING_DEP_TYPES: DependencyType[] = [
-  'related',
-  'discovered-from',
-  'replies-to',
-  'relates-to',
-  'duplicates',
-  'supersedes',
-  'authored-by',
-  'assigned-to',
-  'approved-by',
-  'attests',
-  'tracks',
-  'until',
-  'caused-by',
-  'validates',
-  'delegated-from',
+  "related",
+  "discovered-from",
+  "replies-to",
+  "relates-to",
+  "duplicates",
+  "supersedes",
+  "authored-by",
+  "assigned-to",
+  "approved-by",
+  "attests",
+  "tracks",
+  "until",
+  "caused-by",
+  "validates",
+  "delegated-from",
 ];
 
 /**
  * Valid dependency type groups for localStorage validation.
  */
-const VALID_DEP_TYPE_GROUPS: DependencyTypeGroup[] = ['blocking', 'parent-child', 'non-blocking'];
+const VALID_DEP_TYPE_GROUPS: DependencyTypeGroup[] = [
+  "blocking",
+  "parent-child",
+  "non-blocking",
+];
 
 /**
  * Default dependency type filter (blocking + parent-child enabled).
  */
-const DEFAULT_DEP_TYPE_FILTER = new Set<DependencyTypeGroup>(['blocking', 'parent-child']);
+const DEFAULT_DEP_TYPE_FILTER = new Set<DependencyTypeGroup>([
+  "blocking",
+  "parent-child",
+]);
 
 /**
  * Convert a Set of dependency type groups to an array of DependencyType values.
  * If all groups are unchecked, returns undefined to show all edges.
  */
-function depTypeGroupsToTypes(groups: Set<DependencyTypeGroup>): DependencyType[] | undefined {
+function depTypeGroupsToTypes(
+  groups: Set<DependencyTypeGroup>,
+): DependencyType[] | undefined {
   // If no groups selected, show all edges (no filter)
   if (groups.size === 0) {
     return undefined;
   }
 
   const types: DependencyType[] = [];
-  if (groups.has('blocking')) {
+  if (groups.has("blocking")) {
     types.push(...BLOCKING_DEP_TYPES);
   }
-  if (groups.has('parent-child')) {
+  if (groups.has("parent-child")) {
     types.push(...PARENT_CHILD_DEP_TYPES);
   }
-  if (groups.has('non-blocking')) {
+  if (groups.has("non-blocking")) {
     types.push(...NON_BLOCKING_DEP_TYPES);
   }
   return types;
@@ -84,13 +116,13 @@ function depTypeGroupsToTypes(groups: Set<DependencyTypeGroup>): DependencyType[
  * Valid status filter values for localStorage.
  * Order matches USER_SELECTABLE_STATUSES.
  */
-const VALID_STATUS_FILTERS: readonly (Status | 'all')[] = [
-  'all',
-  'open',
-  'in_progress',
-  'blocked',
-  'deferred',
-  'closed',
+const VALID_STATUS_FILTERS: readonly (Status | "all")[] = [
+  "all",
+  "open",
+  "in_progress",
+  "blocked",
+  "deferred",
+  "closed",
 ] as const;
 
 // Register custom node and edge types
@@ -117,7 +149,7 @@ export interface GraphViewProps {
   /** Whether nodes can be manually dragged (default: false) */
   nodesDraggable?: boolean;
   /** Layout direction (default: 'LR') */
-  layoutDirection?: UseAutoLayoutOptions['direction'];
+  layoutDirection?: UseAutoLayoutOptions["direction"];
   /** Whether to show the MiniMap (default: true) */
   showMiniMap?: boolean;
   /** Whether to show the GraphControls (default: true) */
@@ -149,7 +181,7 @@ export function GraphView({
   onNodeMouseEnter,
   onNodeMouseLeave,
   nodesDraggable = false,
-  layoutDirection = 'LR',
+  layoutDirection = "LR",
   showMiniMap = true,
   showControls = true,
   className,
@@ -162,7 +194,7 @@ export function GraphView({
   const [showClosed, setShowClosed] = useState(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_SHOW_CLOSED);
-      return stored === null ? true : stored === 'true';
+      return stored === null ? true : stored === "true";
     } catch {
       // Silently fail if localStorage is unavailable (private browsing, quota exceeded)
       return true;
@@ -179,17 +211,17 @@ export function GraphView({
   }, [showClosed]);
 
   // Initialize statusFilter from localStorage, default to 'all'
-  const [statusFilter, setStatusFilter] = useState<Status | 'all'>(() => {
+  const [statusFilter, setStatusFilter] = useState<Status | "all">(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_STATUS_FILTER);
       // Validate stored value is a valid status filter
-      if (stored && VALID_STATUS_FILTERS.includes(stored as Status | 'all')) {
-        return stored as Status | 'all';
+      if (stored && VALID_STATUS_FILTERS.includes(stored as Status | "all")) {
+        return stored as Status | "all";
       }
-      return 'all';
+      return "all";
     } catch {
       // Silently fail if localStorage is unavailable (private browsing, quota exceeded)
-      return 'all';
+      return "all";
     }
   });
 
@@ -203,7 +235,9 @@ export function GraphView({
   }, [statusFilter]);
 
   // Initialize dependencyTypeFilter from localStorage, default to blocking + parent-child
-  const [dependencyTypeFilter, setDependencyTypeFilter] = useState<Set<DependencyTypeGroup>>(() => {
+  const [dependencyTypeFilter, setDependencyTypeFilter] = useState<
+    Set<DependencyTypeGroup>
+  >(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_DEP_TYPE_FILTER);
       if (stored) {
@@ -215,7 +249,8 @@ export function GraphView({
         // Validate all values are strings and valid groups
         const validGroups = parsed.filter(
           (g): g is DependencyTypeGroup =>
-            typeof g === 'string' && VALID_DEP_TYPE_GROUPS.includes(g as DependencyTypeGroup)
+            typeof g === "string" &&
+            VALID_DEP_TYPE_GROUPS.includes(g as DependencyTypeGroup),
         );
         return new Set(validGroups);
       }
@@ -229,7 +264,10 @@ export function GraphView({
   // Persist dependencyTypeFilter preference to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_DEP_TYPE_FILTER, JSON.stringify([...dependencyTypeFilter]));
+      localStorage.setItem(
+        STORAGE_KEY_DEP_TYPE_FILTER,
+        JSON.stringify([...dependencyTypeFilter]),
+      );
     } catch {
       // Silently fail if localStorage is unavailable (private browsing, quota exceeded)
     }
@@ -238,12 +276,13 @@ export function GraphView({
   // Convert dependency type filter groups to DependencyType array for useGraphData
   const includeDependencyTypes = useMemo(
     () => depTypeGroupsToTypes(dependencyTypeFilter),
-    [dependencyTypeFilter]
+    [dependencyTypeFilter],
   );
 
   // Tooltip state for hover preview
   const [hoveredIssue, setHoveredIssue] = useState<Issue | null>(null);
-  const [tooltipPosition, setTooltipPosition] = useState<TooltipPosition | null>(null);
+  const [tooltipPosition, setTooltipPosition] =
+    useState<TooltipPosition | null>(null);
 
   // Fetch blocked issues for ready state calculation
   const { data: blockedIssues } = useBlockedIssues({ enabled: true });
@@ -258,12 +297,12 @@ export function GraphView({
     let filtered = issues;
 
     // If a specific status is selected, filter to only that status
-    if (statusFilter !== 'all') {
+    if (statusFilter !== "all") {
       filtered = filtered.filter((issue) => issue.status === statusFilter);
     } else {
       // When 'all' is selected, respect the showClosed toggle
       if (!showClosed) {
-        filtered = filtered.filter((issue) => issue.status !== 'closed');
+        filtered = filtered.filter((issue) => issue.status !== "closed");
       }
     }
 
@@ -278,14 +317,21 @@ export function GraphView({
     }
     return opts;
   }, [blockedIssueIds, includeDependencyTypes]);
-  const { nodes: rawNodes, edges } = useGraphData(visibleIssues, graphDataOptions);
+  const { nodes: rawNodes, edges } = useGraphData(
+    visibleIssues,
+    graphDataOptions,
+  );
 
   // Apply auto-layout
   const layoutOptions: UseAutoLayoutOptions = useMemo(
     () => ({ direction: layoutDirection }),
-    [layoutDirection]
+    [layoutDirection],
   );
-  const { nodes: layoutedNodes } = useAutoLayout(rawNodes, edges, layoutOptions);
+  const { nodes: layoutedNodes } = useAutoLayout(
+    rawNodes,
+    edges,
+    layoutOptions,
+  );
 
   // Handle node click - extract issue from node data
   const handleNodeClick: NodeMouseHandler<IssueNodeType> = useCallback(
@@ -294,7 +340,7 @@ export function GraphView({
         onNodeClick(node.data.issue);
       }
     },
-    [onNodeClick]
+    [onNodeClick],
   );
 
   // Handle node mouse enter - sets tooltip state and calls external callback
@@ -312,17 +358,20 @@ export function GraphView({
         }
       }
     },
-    [onNodeMouseEnter]
+    [onNodeMouseEnter],
   );
 
   // Handle node mouse leave - clears tooltip state and calls external callback
-  const handleNodeMouseLeave: NodeMouseHandler<IssueNodeType> = useCallback(() => {
-    setHoveredIssue(null);
-    setTooltipPosition(null);
-    onNodeMouseLeave?.();
-  }, [onNodeMouseLeave]);
+  const handleNodeMouseLeave: NodeMouseHandler<IssueNodeType> =
+    useCallback(() => {
+      setHoveredIssue(null);
+      setTooltipPosition(null);
+      onNodeMouseLeave?.();
+    }, [onNodeMouseLeave]);
 
-  const rootClassName = className ? `${styles.graphView} ${className}` : styles.graphView;
+  const rootClassName = className
+    ? `${styles.graphView} ${className}`
+    : styles.graphView;
 
   // Build ReactFlow props conditionally to avoid passing undefined
   const reactFlowProps: Record<string, unknown> = {
@@ -337,7 +386,7 @@ export function GraphView({
     fitViewOptions: { padding: 0.2, maxZoom: 1.5 },
     minZoom: 0.1,
     maxZoom: 2,
-    attributionPosition: 'bottom-left',
+    attributionPosition: "bottom-left",
   };
 
   if (onNodeClick) {
@@ -349,8 +398,8 @@ export function GraphView({
 
   // Build MiniMap props conditionally
   const miniMapProps: Record<string, unknown> = {
-    maskColor: 'rgba(0, 0, 0, 0.1)',
-    position: 'bottom-right',
+    maskColor: "rgba(0, 0, 0, 0.1)",
+    position: "bottom-right",
   };
   if (styles.miniMapNode) {
     miniMapProps.nodeClassName = styles.miniMapNode;
@@ -367,7 +416,9 @@ export function GraphView({
     >
       <ReactFlow {...(reactFlowProps as Record<string, never>)}>
         <Background gap={16} size={1} />
-        {showMiniMap && <MiniMap {...(miniMapProps as Record<string, never>)} />}
+        {showMiniMap && (
+          <MiniMap {...(miniMapProps as Record<string, never>)} />
+        )}
         {showControls && (
           <Panel position="top-right">
             <GraphControls

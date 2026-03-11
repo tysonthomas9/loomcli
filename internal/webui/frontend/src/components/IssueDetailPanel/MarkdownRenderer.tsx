@@ -3,9 +3,9 @@
  * Renders markdown content with consistent styling.
  */
 
-import Markdown from 'react-markdown';
+import Markdown from "react-markdown";
 
-import styles from './MarkdownRenderer.module.css';
+import styles from "./MarkdownRenderer.module.css";
 
 export interface MarkdownRendererProps {
   /** Markdown content to render */
@@ -18,8 +18,11 @@ export interface MarkdownRendererProps {
  * MarkdownRenderer displays markdown content with consistent typography styles.
  * Handles empty/null content gracefully.
  */
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps): JSX.Element {
-  const rootClassName = [styles.markdown, className].filter(Boolean).join(' ');
+export function MarkdownRenderer({
+  content,
+  className,
+}: MarkdownRendererProps): JSX.Element {
+  const rootClassName = [styles.markdown, className].filter(Boolean).join(" ");
 
   if (!content) {
     return (

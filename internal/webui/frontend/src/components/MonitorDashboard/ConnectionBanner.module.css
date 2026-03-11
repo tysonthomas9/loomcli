@@ -15,12 +15,12 @@
 }
 
 /* Stronger warning for very stale data (>5 min) */
-.banner[data-stale='true'] {
+.banner[data-stale="true"] {
   background-color: var(--color-danger-bg);
   border-color: var(--color-danger);
 }
 
-.banner[data-stale='true'] .icon {
+.banner[data-stale="true"] .icon {
   color: var(--color-danger);
 }
 

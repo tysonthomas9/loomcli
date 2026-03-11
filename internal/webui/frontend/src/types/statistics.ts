@@ -2,7 +2,7 @@
  * Statistics and aggregate types.
  */
 
-import type { Issue } from './issue';
+import type { Issue } from "./issue";
 
 /**
  * Aggregate statistics.

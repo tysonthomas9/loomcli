@@ -4,12 +4,12 @@
  * Supports base shapes (rect, text, circle) and preset variants for IssueCard and StatusColumn.
  */
 
-import styles from './LoadingSkeleton.module.css';
+import styles from "./LoadingSkeleton.module.css";
 
 /**
  * Shape variants for the base skeleton.
  */
-export type SkeletonShape = 'rect' | 'text' | 'circle';
+export type SkeletonShape = "rect" | "text" | "circle";
 
 /**
  * Props for the LoadingSkeleton component.
@@ -57,7 +57,7 @@ export interface LoadingSkeletonMonitorProps {
  * Renders an animated placeholder in the specified shape.
  */
 export function LoadingSkeleton({
-  shape = 'rect',
+  shape = "rect",
   width,
   height,
   className,
@@ -72,14 +72,14 @@ export function LoadingSkeleton({
   // Build inline styles for custom dimensions
   const style: React.CSSProperties = {};
   if (width !== undefined) {
-    style.width = typeof width === 'number' ? `${width}px` : width;
+    style.width = typeof width === "number" ? `${width}px` : width;
   }
   if (height !== undefined) {
-    style.height = typeof height === 'number' ? `${height}px` : height;
+    style.height = typeof height === "number" ? `${height}px` : height;
   }
 
   // For text shape with multiple lines
-  if (shape === 'text' && lines > 1) {
+  if (shape === "text" && lines > 1) {
     return (
       <div className={styles.textContainer} aria-hidden="true">
         {Array.from({ length: lines }, (_, i) => (
@@ -89,7 +89,7 @@ export function LoadingSkeleton({
             style={{
               ...style,
               // Last line is shorter
-              width: i === lines - 1 ? '60%' : style.width,
+              width: i === lines - 1 ? "60%" : style.width,
             }}
           />
         ))}
@@ -128,8 +128,13 @@ function Card({ className }: LoadingSkeletonCardProps): JSX.Element {
  * Column skeleton matching StatusColumn header.
  * Use when loading columns in the Kanban board.
  */
-function Column({ className, cardCount = 3 }: LoadingSkeletonColumnProps): JSX.Element {
-  const rootClassName = className ? `${styles.column} ${className}` : styles.column;
+function Column({
+  className,
+  cardCount = 3,
+}: LoadingSkeletonColumnProps): JSX.Element {
+  const rootClassName = className
+    ? `${styles.column} ${className}`
+    : styles.column;
 
   return (
     <div className={rootClassName} aria-hidden="true">
@@ -152,10 +157,16 @@ function Column({ className, cardCount = 3 }: LoadingSkeletonColumnProps): JSX.E
  * Shows a placeholder with simulated nodes and edges.
  */
 function Graph({ className }: LoadingSkeletonGraphProps): JSX.Element {
-  const rootClassName = className ? `${styles.graph} ${className}` : styles.graph;
+  const rootClassName = className
+    ? `${styles.graph} ${className}`
+    : styles.graph;
 
   return (
-    <div className={rootClassName} aria-hidden="true" data-testid="loading-skeleton-graph">
+    <div
+      className={rootClassName}
+      aria-hidden="true"
+      data-testid="loading-skeleton-graph"
+    >
       {/* Simulated graph nodes */}
       <div className={styles.graphNodes}>
         <div className={styles.graphNode}>
@@ -182,10 +193,16 @@ function Graph({ className }: LoadingSkeletonGraphProps): JSX.Element {
  * Shows a 2x2 grid of placeholder panels.
  */
 function Monitor({ className }: LoadingSkeletonMonitorProps): JSX.Element {
-  const rootClassName = className ? `${styles.monitor} ${className}` : styles.monitor;
+  const rootClassName = className
+    ? `${styles.monitor} ${className}`
+    : styles.monitor;
 
   return (
-    <div className={rootClassName} aria-hidden="true" data-testid="loading-skeleton-monitor">
+    <div
+      className={rootClassName}
+      aria-hidden="true"
+      data-testid="loading-skeleton-monitor"
+    >
       {[1, 2, 3, 4].map((i) => (
         <div key={i} className={styles.monitorPanel}>
           <div className={styles.monitorPanelHeader}>

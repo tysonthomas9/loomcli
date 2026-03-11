@@ -6,16 +6,22 @@
  * Unit tests for App component.
  */
 
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import '@testing-library/jest-dom';
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import "@testing-library/jest-dom";
 
-import type { ConnectionState } from '@/api/sse';
-import { useFilterState, useIssueDetail, useViewState, useAgents, useAgentContext } from '@/hooks';
-import { useIssues } from '@/hooks/useIssues';
-import type { Issue, Status } from '@/types';
+import type { ConnectionState } from "@/api/sse";
+import {
+  useFilterState,
+  useIssueDetail,
+  useViewState,
+  useAgents,
+  useAgentContext,
+} from "@/hooks";
+import { useIssues } from "@/hooks/useIssues";
+import type { Issue, Status } from "@/types";
 
-import App from '../App';
+import App from "../App";
 
 // Create hoisted mocks for @/api functions used by handleApprove/handleReject
 const { mockCloseIssue, mockUpdateIssue, mockAddComment } = vi.hoisted(() => ({
@@ -32,83 +38,111 @@ const {
   mockUseAgents,
   mockUseAgentContext,
 } = vi.hoisted(() => ({
-    mockUseIssues: vi.fn(),
-    mockUseIssueDetail: vi.fn(),
-    mockUseToast: vi.fn(() => ({
-      toasts: [],
-      showToast: vi.fn(),
-      dismissToast: vi.fn(),
-      dismissAll: vi.fn(),
-    })),
-    mockUseAgents: vi.fn(() => ({
-      agents: [],
-      tasks: {
-        needs_planning: 0,
-        ready_to_implement: 0,
-        in_progress: 0,
-        need_review: 0,
-        blocked: 0,
-      },
-      taskLists: {
-        needsPlanning: [],
-        readyToImplement: [],
-        needsReview: [],
-        inProgress: [],
-        blocked: [],
-      },
-      agentTasks: {},
-      sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-      stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
-      isLoading: false,
-      isConnected: true,
-      connectionState: 'connected',
-      wasEverConnected: true,
-      retryCountdown: 0,
-      error: null,
-      lastUpdated: null,
-      refetch: vi.fn(),
-      retryNow: vi.fn(),
-    })),
-    mockUseAgentContext: vi.fn(() => ({
-      agents: [],
-      tasks: {
-        needs_planning: 0,
-        ready_to_implement: 0,
-        in_progress: 0,
-        need_review: 0,
-        blocked: 0,
-      },
-      taskLists: {
-        needsPlanning: [],
-        readyToImplement: [],
-        needsReview: [],
-        inProgress: [],
-        blocked: [],
-      },
-      agentTasks: {},
-      sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-      stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
-      isLoading: false,
-      isConnected: true,
-      connectionState: 'connected',
-      wasEverConnected: true,
-      retryCountdown: 0,
-      error: null,
-      lastUpdated: null,
-      refetch: vi.fn(),
-      retryNow: vi.fn(),
-      getAgentByName: vi.fn(() => undefined),
-    })),
-  }));
+  mockUseIssues: vi.fn(),
+  mockUseIssueDetail: vi.fn(),
+  mockUseToast: vi.fn(() => ({
+    toasts: [],
+    showToast: vi.fn(),
+    dismissToast: vi.fn(),
+    dismissAll: vi.fn(),
+  })),
+  mockUseAgents: vi.fn(() => ({
+    agents: [],
+    tasks: {
+      needs_planning: 0,
+      ready_to_implement: 0,
+      in_progress: 0,
+      need_review: 0,
+      blocked: 0,
+    },
+    taskLists: {
+      needsPlanning: [],
+      readyToImplement: [],
+      needsReview: [],
+      inProgress: [],
+      blocked: [],
+    },
+    agentTasks: {},
+    sync: {
+      db_synced: true,
+      db_last_sync: "",
+      git_needs_push: 0,
+      git_needs_pull: 0,
+    },
+    stats: {
+      open: 0,
+      closed: 0,
+      total: 0,
+      completion: 0,
+      remaining: 0,
+      in_progress: 0,
+      review: 0,
+      blocked: 0,
+    },
+    isLoading: false,
+    isConnected: true,
+    connectionState: "connected",
+    wasEverConnected: true,
+    retryCountdown: 0,
+    error: null,
+    lastUpdated: null,
+    refetch: vi.fn(),
+    retryNow: vi.fn(),
+  })),
+  mockUseAgentContext: vi.fn(() => ({
+    agents: [],
+    tasks: {
+      needs_planning: 0,
+      ready_to_implement: 0,
+      in_progress: 0,
+      need_review: 0,
+      blocked: 0,
+    },
+    taskLists: {
+      needsPlanning: [],
+      readyToImplement: [],
+      needsReview: [],
+      inProgress: [],
+      blocked: [],
+    },
+    agentTasks: {},
+    sync: {
+      db_synced: true,
+      db_last_sync: "",
+      git_needs_push: 0,
+      git_needs_pull: 0,
+    },
+    stats: {
+      open: 0,
+      closed: 0,
+      total: 0,
+      completion: 0,
+      remaining: 0,
+      in_progress: 0,
+      review: 0,
+      blocked: 0,
+    },
+    isLoading: false,
+    isConnected: true,
+    connectionState: "connected",
+    wasEverConnected: true,
+    retryCountdown: 0,
+    error: null,
+    lastUpdated: null,
+    refetch: vi.fn(),
+    retryNow: vi.fn(),
+    getAgentByName: vi.fn(() => undefined),
+  })),
+}));
 
 // Mock the useIssues hook from its direct module
-vi.mock('@/hooks/useIssues', () => ({
+vi.mock("@/hooks/useIssues", () => ({
   useIssues: mockUseIssues,
 }));
 
 // Mock @/api functions used by handleApprove and handleReject
-vi.mock('@/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api')>();
+vi.mock("@/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api")>();
   return {
     ...actual,
     updateIssue: mockUpdateIssue,
@@ -118,7 +152,7 @@ vi.mock('@/api', async (importOriginal) => {
 });
 
 // Mock GraphView to avoid ResizeObserver issues in jsdom
-vi.mock('@/components/GraphView', () => ({
+vi.mock("@/components/GraphView", () => ({
   GraphView: ({ issues }: { issues: unknown[] }) => (
     <div data-testid="mock-graph-view">
       Graph View ({Array.isArray(issues) ? issues.length : 0} issues)
@@ -127,19 +161,31 @@ vi.mock('@/components/GraphView', () => ({
 }));
 
 // Mock MonitorDashboard to avoid complex dependencies in jsdom
-vi.mock('@/components/MonitorDashboard', () => ({
-  MonitorDashboard: () => <div data-testid="monitor-dashboard">Monitor Dashboard</div>,
+vi.mock("@/components/MonitorDashboard", () => ({
+  MonitorDashboard: () => (
+    <div data-testid="monitor-dashboard">Monitor Dashboard</div>
+  ),
 }));
 
 // Mock TerminalPanel to avoid xterm.js browser dependencies in jsdom
-vi.mock('@/components/TerminalPanel', () => ({
-  TerminalPanel: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => (
+vi.mock("@/components/TerminalPanel", () => ({
+  TerminalPanel: ({
+    isOpen,
+    onClose,
+  }: {
+    isOpen: boolean;
+    onClose: () => void;
+  }) => (
     <div
       data-testid="terminal-panel-overlay"
-      data-state={isOpen ? 'open' : 'closed'}
+      data-state={isOpen ? "open" : "closed"}
       aria-hidden={!isOpen}
     >
-      <button data-testid="terminal-close-button" onClick={onClose} aria-label="Close terminal">
+      <button
+        data-testid="terminal-close-button"
+        onClick={onClose}
+        aria-label="Close terminal"
+      >
         Close
       </button>
     </div>
@@ -153,12 +199,12 @@ const { mockUseViewState, mockSetActiveView } = vi.hoisted(() => ({
 }));
 
 // Mock the hooks barrel file that App.tsx imports from
-vi.mock('@/hooks', () => ({
+vi.mock("@/hooks", () => ({
   useIssues: mockUseIssues,
   useIssueDetail: mockUseIssueDetail,
   useToast: mockUseToast,
   useViewState: mockUseViewState,
-  DEFAULT_GROUP_BY: 'none',
+  DEFAULT_GROUP_BY: "none",
   useFilterState: vi.fn(() => [
     {}, // FilterState - empty means App.tsx will apply DEFAULT_GROUP_BY fallback
     {
@@ -188,7 +234,7 @@ vi.mock('@/hooks', () => ({
   })),
   useSort: vi.fn((options: { data: unknown[] }) => ({
     sortedData: options.data,
-    sortState: { key: null, direction: 'asc' },
+    sortState: { key: null, direction: "asc" },
     handleSort: vi.fn(),
     clearSort: vi.fn(),
   })),
@@ -228,15 +274,15 @@ vi.mock('@/hooks', () => ({
   })),
   useTaskLogPolling: vi.fn(() => ({
     chunks: [],
-    state: 'disconnected' as const,
+    state: "disconnected" as const,
     error: null,
     resetVersion: 0,
     refresh: vi.fn(),
   })),
   useAgentTerminalLogs: vi.fn(() => ({
-    mode: 'idle' as const,
+    mode: "idle" as const,
     chunks: [],
-    state: 'disconnected' as const,
+    state: "disconnected" as const,
     error: null,
     resetVersion: 0,
     refresh: vi.fn(),
@@ -255,12 +301,12 @@ const _useViewStateMock = mockUseViewState;
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: `issue-${Math.random().toString(36).slice(2, 9)}`,
-    title: 'Test Issue',
+    title: "Test Issue",
     priority: 2,
-    status: 'open',
-    issue_type: 'task',
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-01-01T00:00:00Z',
+    status: "open",
+    issue_type: "task",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-01T00:00:00Z",
     ...overrides,
   };
 }
@@ -284,17 +330,18 @@ interface MockUseIssuesReturn {
 }
 
 function createMockUseIssuesReturn(
-  overrides: Partial<MockUseIssuesReturn> = {}
+  overrides: Partial<MockUseIssuesReturn> = {},
 ): MockUseIssuesReturn {
   const issues = overrides.issues ?? [];
-  const issuesMap = overrides.issuesMap ?? new Map(issues.map((issue) => [issue.id, issue]));
+  const issuesMap =
+    overrides.issuesMap ?? new Map(issues.map((issue) => [issue.id, issue]));
 
   return {
     issues,
     issuesMap,
     isLoading: false,
     error: null,
-    connectionState: 'connected',
+    connectionState: "connected",
     isConnected: true,
     reconnectAttempts: 0,
     refetch: vi.fn().mockResolvedValue(undefined),
@@ -316,7 +363,7 @@ function createMockUseIssueDetailReturn(
     error: string | null;
     fetchIssue: ReturnType<typeof vi.fn>;
     clearIssue: ReturnType<typeof vi.fn>;
-  }> = {}
+  }> = {},
 ) {
   return {
     issueDetails: null,
@@ -328,11 +375,11 @@ function createMockUseIssueDetailReturn(
   };
 }
 
-describe('App', () => {
+describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Set up default useViewState mock (kanban is the default view)
-    mockUseViewState.mockReturnValue(['kanban', mockSetActiveView]);
+    mockUseViewState.mockReturnValue(["kanban", mockSetActiveView]);
     // Set up default useIssueDetail mock
     mockUseIssueDetail.mockReturnValue(createMockUseIssueDetailReturn());
     // Set up default API mocks (resolve by default so existing tests aren't affected)
@@ -340,28 +387,30 @@ describe('App', () => {
     mockAddComment.mockResolvedValue({});
   });
 
-  describe('loading state', () => {
-    it('renders LoadingSkeleton columns when isLoading is true', () => {
+  describe("loading state", () => {
+    it("renders LoadingSkeleton columns when isLoading is true", () => {
       const mockReturn = createMockUseIssuesReturn({ isLoading: true });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       const { container } = render(<App />);
 
       // LoadingSkeleton.Column components have aria-hidden="true"
-      const skeletonColumns = container.querySelectorAll('[aria-hidden="true"]');
+      const skeletonColumns = container.querySelectorAll(
+        '[aria-hidden="true"]',
+      );
 
       // Each Column skeleton contains multiple nested elements with aria-hidden
       // We verify that skeletons are rendered by checking for the column structure
       expect(skeletonColumns.length).toBeGreaterThan(0);
 
       // Should not render KanbanBoard when loading
-      expect(screen.queryByRole('article')).not.toBeInTheDocument();
+      expect(screen.queryByRole("article")).not.toBeInTheDocument();
 
       // Should not render ErrorDisplay when loading
-      expect(screen.queryByTestId('error-display')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("error-display")).not.toBeInTheDocument();
     });
 
-    it('renders three LoadingSkeleton.Column components when loading', () => {
+    it("renders three LoadingSkeleton.Column components when loading", () => {
       const mockReturn = createMockUseIssuesReturn({ isLoading: true });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -369,7 +418,9 @@ describe('App', () => {
 
       // The loading skeleton columns have a specific structure
       // We check for the loading container with three skeleton columns
-      const flexContainer = container.querySelector('[data-testid="loading-container"]');
+      const flexContainer = container.querySelector(
+        '[data-testid="loading-container"]',
+      );
       expect(flexContainer).toBeInTheDocument();
 
       // Count direct children of the flex container (the 3 skeleton columns)
@@ -377,10 +428,10 @@ describe('App', () => {
       expect(children?.length).toBe(3);
     });
 
-    it('renders ConnectionStatus in header when loading', () => {
+    it("renders ConnectionStatus in header when loading", () => {
       const mockReturn = createMockUseIssuesReturn({
         isLoading: true,
-        connectionState: 'connecting',
+        connectionState: "connecting",
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -392,36 +443,39 @@ describe('App', () => {
     });
   });
 
-  describe('error state', () => {
-    it('renders ErrorDisplay when error is present', () => {
+  describe("error state", () => {
+    it("renders ErrorDisplay when error is present", () => {
       const mockReturn = createMockUseIssuesReturn({
-        error: 'Failed to fetch issues',
+        error: "Failed to fetch issues",
         isLoading: false,
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      expect(screen.getByTestId('error-display')).toBeInTheDocument();
-      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toBeInTheDocument();
     });
 
-    it('renders ErrorDisplay with fetch-error variant', () => {
+    it("renders ErrorDisplay with fetch-error variant", () => {
       const mockReturn = createMockUseIssuesReturn({
-        error: 'Network error',
+        error: "Network error",
         isLoading: false,
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      expect(screen.getByTestId('error-display')).toHaveAttribute('data-variant', 'fetch-error');
+      expect(screen.getByTestId("error-display")).toHaveAttribute(
+        "data-variant",
+        "fetch-error",
+      );
     });
 
-    it('renders retry button that calls refetch', () => {
+    it("renders retry button that calls refetch", () => {
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
-        error: 'Network error',
+        error: "Network error",
         isLoading: false,
         refetch,
       });
@@ -429,16 +483,16 @@ describe('App', () => {
 
       render(<App />);
 
-      const retryButton = screen.getByTestId('retry-button');
+      const retryButton = screen.getByTestId("retry-button");
       expect(retryButton).toBeInTheDocument();
 
       fireEvent.click(retryButton);
       expect(refetch).toHaveBeenCalledTimes(1);
     });
 
-    it('shows error details when showDetails is true', () => {
+    it("shows error details when showDetails is true", () => {
       const mockReturn = createMockUseIssuesReturn({
-        error: 'Specific error message',
+        error: "Specific error message",
         isLoading: false,
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -446,16 +500,16 @@ describe('App', () => {
       render(<App />);
 
       // The App component passes showDetails to ErrorDisplay
-      expect(screen.getByText('Technical details')).toBeInTheDocument();
-      expect(screen.getByText('Specific error message')).toBeInTheDocument();
+      expect(screen.getByText("Technical details")).toBeInTheDocument();
+      expect(screen.getByText("Specific error message")).toBeInTheDocument();
     });
 
-    it('renders ConnectionStatus with reconnecting state in error state', () => {
+    it("renders ConnectionStatus with reconnecting state in error state", () => {
       const retryConnection = vi.fn();
       const mockReturn = createMockUseIssuesReturn({
-        error: 'Connection failed',
+        error: "Connection failed",
         isLoading: false,
-        connectionState: 'reconnecting',
+        connectionState: "reconnecting",
         reconnectAttempts: 2,
         retryConnection,
       });
@@ -468,9 +522,9 @@ describe('App', () => {
       expect(status).toBeInTheDocument();
     });
 
-    it('does not render KanbanBoard when error is present', () => {
+    it("does not render KanbanBoard when error is present", () => {
       const mockReturn = createMockUseIssuesReturn({
-        error: 'Error occurred',
+        error: "Error occurred",
         isLoading: false,
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -478,25 +532,35 @@ describe('App', () => {
       render(<App />);
 
       // KanbanBoard renders StatusColumns with headings
-      expect(screen.queryByRole('heading', { name: 'Open' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('heading', { name: 'In Progress' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('heading', { name: 'Done' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "Open" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "In Progress" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "Done" }),
+      ).not.toBeInTheDocument();
     });
   });
 
-  describe('success state', () => {
-    it('renders KanbanBoard with issues when data is loaded', () => {
+  describe("success state", () => {
+    it("renders KanbanBoard with issues when data is loaded", () => {
       const issues = [
-        createMockIssue({ id: 'issue-1', title: 'First Issue', status: 'open' }),
         createMockIssue({
-          id: 'issue-2',
-          title: 'Second Issue',
-          status: 'in_progress',
+          id: "issue-1",
+          title: "First Issue",
+          status: "open",
         }),
         createMockIssue({
-          id: 'issue-3',
-          title: 'Third Issue',
-          status: 'closed',
+          id: "issue-2",
+          title: "Second Issue",
+          status: "in_progress",
+        }),
+        createMockIssue({
+          id: "issue-3",
+          title: "Third Issue",
+          status: "closed",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -505,19 +569,21 @@ describe('App', () => {
       render(<App />);
 
       // SwimLaneBoard should render with status columns
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'In Progress' })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Done' })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "In Progress" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Done" })).toBeInTheDocument();
 
       // Issues should be rendered
-      expect(screen.getByText('First Issue')).toBeInTheDocument();
-      expect(screen.getByText('Second Issue')).toBeInTheDocument();
-      expect(screen.getByText('Third Issue')).toBeInTheDocument();
+      expect(screen.getByText("First Issue")).toBeInTheDocument();
+      expect(screen.getByText("Second Issue")).toBeInTheDocument();
+      expect(screen.getByText("Third Issue")).toBeInTheDocument();
     });
 
-    it('renders ConnectionStatus in header actions', () => {
+    it("renders ConnectionStatus in header actions", () => {
       const mockReturn = createMockUseIssuesReturn({
-        connectionState: 'connected',
+        connectionState: "connected",
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -528,32 +594,32 @@ describe('App', () => {
       expect(statusElement).toBeInTheDocument();
     });
 
-    it('does not render ErrorDisplay when no error', () => {
+    it("does not render ErrorDisplay when no error", () => {
       const mockReturn = createMockUseIssuesReturn({ error: null });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      expect(screen.queryByTestId('error-display')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("error-display")).not.toBeInTheDocument();
     });
 
-    it('does not render LoadingSkeleton when not loading', () => {
+    it("does not render LoadingSkeleton when not loading", () => {
       const mockReturn = createMockUseIssuesReturn({ isLoading: false });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       const { container: _container } = render(<App />);
 
       // The loading container should not be present when not loading
-      expect(screen.queryByTestId('loading-container')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("loading-container")).not.toBeInTheDocument();
     });
 
-    it('renders empty KanbanBoard when issues array is empty', () => {
+    it("renders empty KanbanBoard when issues array is empty", () => {
       const mockReturn = createMockUseIssuesReturn({ issues: [] });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Use flat view (groupBy: 'none') to verify empty column rendering
       vi.mocked(useFilterState).mockReturnValue([
-        { groupBy: 'none' },
+        { groupBy: "none" },
         {
           setPriority: vi.fn(),
           setType: vi.fn(),
@@ -569,16 +635,20 @@ describe('App', () => {
       render(<App />);
 
       // Should render columns even with no issues
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'In Progress' })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Done' })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "In Progress" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Done" })).toBeInTheDocument();
     });
   });
 
-  describe('drag-end handler', () => {
-    it('calls updateIssueStatus with correct parameters on drag-end', async () => {
+  describe("drag-end handler", () => {
+    it("calls updateIssueStatus with correct parameters on drag-end", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
-      const issues = [createMockIssue({ id: 'drag-issue', title: 'Drag Me', status: 'open' })];
+      const issues = [
+        createMockIssue({ id: "drag-issue", title: "Drag Me", status: "open" }),
+      ];
       const mockReturn = createMockUseIssuesReturn({
         issues,
         updateIssueStatus,
@@ -593,12 +663,14 @@ describe('App', () => {
       expect(updateIssueStatus).not.toHaveBeenCalled();
 
       // The KanbanBoard should be rendered with the issues
-      expect(screen.getByText('Drag Me')).toBeInTheDocument();
+      expect(screen.getByText("Drag Me")).toBeInTheDocument();
     });
 
-    it('updateIssueStatus is passed to KanbanBoard via onDragEnd', () => {
+    it("updateIssueStatus is passed to KanbanBoard via onDragEnd", () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
-      const issues = [createMockIssue({ id: 'test-issue', title: 'Test', status: 'open' })];
+      const issues = [
+        createMockIssue({ id: "test-issue", title: "Test", status: "open" }),
+      ];
       const mockReturn = createMockUseIssuesReturn({
         issues,
         updateIssueStatus,
@@ -609,19 +681,21 @@ describe('App', () => {
 
       // Verify KanbanBoard is rendered (we can't easily test the drag event
       // but we verify the component structure is correct)
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
-      expect(screen.getByText('Test')).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
+      expect(screen.getByText("Test")).toBeInTheDocument();
     });
   });
 
-  describe('drag-end failure and ErrorToast', () => {
-    it('shows ErrorToast when updateIssueStatus throws', async () => {
-      const updateIssueStatus = vi.fn().mockRejectedValue(new Error('Update failed'));
+  describe("drag-end failure and ErrorToast", () => {
+    it("shows ErrorToast when updateIssueStatus throws", async () => {
+      const updateIssueStatus = vi
+        .fn()
+        .mockRejectedValue(new Error("Update failed"));
       const issues = [
         createMockIssue({
-          id: 'fail-issue',
-          title: 'Will Fail',
-          status: 'open',
+          id: "fail-issue",
+          title: "Will Fail",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({
@@ -633,15 +707,15 @@ describe('App', () => {
       render(<App />);
 
       // Verify the issue is rendered
-      expect(screen.getByText('Will Fail')).toBeInTheDocument();
+      expect(screen.getByText("Will Fail")).toBeInTheDocument();
 
       // Note: Testing the actual toast appearance requires triggering the drag-end
       // which involves complex dnd-kit event simulation. The test below verifies
       // that the toast is not shown initially.
-      expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("error-toast")).not.toBeInTheDocument();
     });
 
-    it('ErrorToast is not rendered initially', () => {
+    it("ErrorToast is not rendered initially", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -649,17 +723,19 @@ describe('App', () => {
 
       render(<App />);
 
-      expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("error-toast")).not.toBeInTheDocument();
     });
 
-    it('ErrorToast can display error message from updateIssueStatus failure', async () => {
+    it("ErrorToast can display error message from updateIssueStatus failure", async () => {
       // This test demonstrates the expected behavior by directly testing
       // that when toastError state is set, ErrorToast appears.
       // Since we can't easily trigger drag events, we test the component's
       // handling of the error state through the hook's error mechanism.
 
-      const updateIssueStatus = vi.fn().mockRejectedValue(new Error('API Error'));
-      const issues = [createMockIssue({ id: 'test-1', status: 'open' })];
+      const updateIssueStatus = vi
+        .fn()
+        .mockRejectedValue(new Error("API Error"));
+      const issues = [createMockIssue({ id: "test-1", status: "open" })];
       const mockReturn = createMockUseIssuesReturn({
         issues,
         updateIssueStatus,
@@ -669,14 +745,14 @@ describe('App', () => {
       render(<App />);
 
       // Verify the component is ready to handle errors
-      expect(screen.queryByTestId('error-toast')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("error-toast")).not.toBeInTheDocument();
     });
   });
 
-  describe('ConnectionStatus in header', () => {
-    it('renders ConnectionStatus with connected state', () => {
+  describe("ConnectionStatus in header", () => {
+    it("renders ConnectionStatus with connected state", () => {
       const mockReturn = createMockUseIssuesReturn({
-        connectionState: 'connected',
+        connectionState: "connected",
         isConnected: true,
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -688,9 +764,9 @@ describe('App', () => {
       expect(status).toBeInTheDocument();
     });
 
-    it('renders ConnectionStatus with disconnected state', () => {
+    it("renders ConnectionStatus with disconnected state", () => {
       const mockReturn = createMockUseIssuesReturn({
-        connectionState: 'disconnected',
+        connectionState: "disconnected",
         isConnected: false,
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -701,9 +777,9 @@ describe('App', () => {
       expect(status).toBeInTheDocument();
     });
 
-    it('renders ConnectionStatus with reconnecting state and attempt count', () => {
+    it("renders ConnectionStatus with reconnecting state and attempt count", () => {
       const mockReturn = createMockUseIssuesReturn({
-        connectionState: 'reconnecting',
+        connectionState: "reconnecting",
         isConnected: false,
         reconnectAttempts: 3,
       });
@@ -715,9 +791,9 @@ describe('App', () => {
       expect(status).toBeInTheDocument();
     });
 
-    it('renders ConnectionStatus with connecting state', () => {
+    it("renders ConnectionStatus with connecting state", () => {
       const mockReturn = createMockUseIssuesReturn({
-        connectionState: 'connecting',
+        connectionState: "connecting",
         isConnected: false,
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -728,10 +804,10 @@ describe('App', () => {
       expect(status).toBeInTheDocument();
     });
 
-    it('passes retryConnection to ConnectionStatus onRetry', () => {
+    it("passes retryConnection to ConnectionStatus onRetry", () => {
       const retryConnection = vi.fn();
       const mockReturn = createMockUseIssuesReturn({
-        connectionState: 'reconnecting',
+        connectionState: "reconnecting",
         reconnectAttempts: 1,
         retryConnection,
       });
@@ -746,17 +822,19 @@ describe('App', () => {
     });
   });
 
-  describe('AppLayout integration', () => {
-    it('renders with Cortex title in header', () => {
+  describe("AppLayout integration", () => {
+    it("renders with Cortex title in header", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      expect(screen.getByRole('heading', { name: 'Cortex', level: 1 })).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Cortex", level: 1 }),
+      ).toBeInTheDocument();
     });
 
-    it('renders header with banner role', () => {
+    it("renders header with banner role", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -767,18 +845,18 @@ describe('App', () => {
       expect(banner).toBeInTheDocument();
     });
 
-    it('renders main content area', () => {
+    it("renders main content area", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      expect(screen.getByRole('main')).toBeInTheDocument();
+      expect(screen.getByRole("main")).toBeInTheDocument();
     });
   });
 
-  describe('useIssues hook integration', () => {
-    it('calls useIssues hook on mount', () => {
+  describe("useIssues hook integration", () => {
+    it("calls useIssues hook on mount", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -787,12 +865,12 @@ describe('App', () => {
       expect(useIssues).toHaveBeenCalled();
     });
 
-    it('uses all expected properties from useIssues return', () => {
+    it("uses all expected properties from useIssues return", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
         isLoading: false,
         error: null,
-        connectionState: 'connected',
+        connectionState: "connected",
         reconnectAttempts: 0,
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -803,22 +881,26 @@ describe('App', () => {
       // it correctly uses all the hook's return values
       const banner = container.querySelector('header[role="banner"]');
       expect(banner).toBeInTheDocument();
-      expect(screen.getByRole('main')).toBeInTheDocument();
+      expect(screen.getByRole("main")).toBeInTheDocument();
     });
   });
 
-  describe('state transitions', () => {
-    it('transitions from loading to success', () => {
+  describe("state transitions", () => {
+    it("transitions from loading to success", () => {
       const mockLoadingReturn = createMockUseIssuesReturn({ isLoading: true });
       vi.mocked(useIssues).mockReturnValue(mockLoadingReturn);
 
       const { rerender } = render(<App />);
 
       // Verify loading state
-      expect(screen.queryByRole('heading', { name: 'Open' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "Open" }),
+      ).not.toBeInTheDocument();
 
       // Transition to success
-      const issues = [createMockIssue({ title: 'Loaded Issue', status: 'open' })];
+      const issues = [
+        createMockIssue({ title: "Loaded Issue", status: "open" }),
+      ];
       const mockSuccessReturn = createMockUseIssuesReturn({
         isLoading: false,
         issues,
@@ -828,46 +910,48 @@ describe('App', () => {
       rerender(<App />);
 
       // Verify success state
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
-      expect(screen.getByText('Loaded Issue')).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
+      expect(screen.getByText("Loaded Issue")).toBeInTheDocument();
     });
 
-    it('transitions from loading to error', () => {
+    it("transitions from loading to error", () => {
       const mockLoadingReturn = createMockUseIssuesReturn({ isLoading: true });
       vi.mocked(useIssues).mockReturnValue(mockLoadingReturn);
 
       const { rerender } = render(<App />);
 
       // Verify loading state
-      expect(screen.queryByTestId('error-display')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("error-display")).not.toBeInTheDocument();
 
       // Transition to error
       const mockErrorReturn = createMockUseIssuesReturn({
         isLoading: false,
-        error: 'Network error occurred',
+        error: "Network error occurred",
       });
       vi.mocked(useIssues).mockReturnValue(mockErrorReturn);
 
       rerender(<App />);
 
       // Verify error state
-      expect(screen.getByTestId('error-display')).toBeInTheDocument();
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
     });
 
-    it('transitions from error to success on retry', () => {
+    it("transitions from error to success on retry", () => {
       const mockErrorReturn = createMockUseIssuesReturn({
         isLoading: false,
-        error: 'Initial error',
+        error: "Initial error",
       });
       vi.mocked(useIssues).mockReturnValue(mockErrorReturn);
 
       const { rerender } = render(<App />);
 
       // Verify error state
-      expect(screen.getByTestId('error-display')).toBeInTheDocument();
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
 
       // Transition to success after retry
-      const issues = [createMockIssue({ title: 'Retrieved Issue', status: 'open' })];
+      const issues = [
+        createMockIssue({ title: "Retrieved Issue", status: "open" }),
+      ];
       const mockSuccessReturn = createMockUseIssuesReturn({
         isLoading: false,
         error: null,
@@ -878,13 +962,13 @@ describe('App', () => {
       rerender(<App />);
 
       // Verify success state
-      expect(screen.queryByTestId('error-display')).not.toBeInTheDocument();
-      expect(screen.getByText('Retrieved Issue')).toBeInTheDocument();
+      expect(screen.queryByTestId("error-display")).not.toBeInTheDocument();
+      expect(screen.getByText("Retrieved Issue")).toBeInTheDocument();
     });
   });
 
-  describe('filter integration', () => {
-    it('renders SearchInput in the navigation slot', () => {
+  describe("filter integration", () => {
+    it("renders SearchInput in the navigation slot", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -893,11 +977,13 @@ describe('App', () => {
       render(<App />);
 
       // SearchInput should be rendered with the search input test id
-      expect(screen.getByTestId('search-input')).toBeInTheDocument();
-      expect(screen.getByPlaceholderText('Search tasks...')).toBeInTheDocument();
+      expect(screen.getByTestId("search-input")).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText("Search tasks..."),
+      ).toBeInTheDocument();
     });
 
-    it('renders FilterBar in the navigation slot', () => {
+    it("renders FilterBar in the navigation slot", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -906,11 +992,11 @@ describe('App', () => {
       render(<App />);
 
       // FilterBar should be rendered with its test id (priority/type hidden in header variant)
-      expect(screen.getByTestId('filter-bar')).toBeInTheDocument();
-      expect(screen.getByTestId('groupby-filter')).toBeInTheDocument();
+      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+      expect(screen.getByTestId("groupby-filter")).toBeInTheDocument();
     });
 
-    it('renders filter navigation even in loading state', () => {
+    it("renders filter navigation even in loading state", () => {
       const mockReturn = createMockUseIssuesReturn({
         isLoading: true,
       });
@@ -919,28 +1005,36 @@ describe('App', () => {
       render(<App />);
 
       // In the new layout, search and filters are always in the header
-      expect(screen.getByTestId('search-input')).toBeInTheDocument();
-      expect(screen.getByTestId('filter-bar')).toBeInTheDocument();
+      expect(screen.getByTestId("search-input")).toBeInTheDocument();
+      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
     });
 
-    it('renders filter navigation even in error state', () => {
+    it("renders filter navigation even in error state", () => {
       const mockReturn = createMockUseIssuesReturn({
         isLoading: false,
-        error: 'Network error',
+        error: "Network error",
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
       // In the new layout, search and filters are always in the header
-      expect(screen.getByTestId('search-input')).toBeInTheDocument();
-      expect(screen.getByTestId('filter-bar')).toBeInTheDocument();
+      expect(screen.getByTestId("search-input")).toBeInTheDocument();
+      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
     });
 
-    it('passes filtered issues to KanbanBoard', () => {
+    it("passes filtered issues to KanbanBoard", () => {
       const issues = [
-        createMockIssue({ id: 'issue-1', title: 'First Issue', status: 'open' }),
-        createMockIssue({ id: 'issue-2', title: 'Second Issue', status: 'closed' }),
+        createMockIssue({
+          id: "issue-1",
+          title: "First Issue",
+          status: "open",
+        }),
+        createMockIssue({
+          id: "issue-2",
+          title: "Second Issue",
+          status: "closed",
+        }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -948,13 +1042,15 @@ describe('App', () => {
       render(<App />);
 
       // With the mock returning all issues, both should be visible
-      expect(screen.getByText('First Issue')).toBeInTheDocument();
-      expect(screen.getByText('Second Issue')).toBeInTheDocument();
+      expect(screen.getByText("First Issue")).toBeInTheDocument();
+      expect(screen.getByText("Second Issue")).toBeInTheDocument();
     });
 
-    it('clears search input when filter state search is cleared externally', async () => {
+    it("clears search input when filter state search is cleared externally", async () => {
       // Set up issues so the app renders in success state
-      const issues = [createMockIssue({ id: 'issue-1', title: 'Test Issue', status: 'open' })];
+      const issues = [
+        createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
+      ];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -969,13 +1065,18 @@ describe('App', () => {
       };
 
       // Mock useFilterState to return filter with search value
-      vi.mocked(useFilterState).mockReturnValue([{ search: 'test query' }, filterActions]);
+      vi.mocked(useFilterState).mockReturnValue([
+        { search: "test query" },
+        filterActions,
+      ]);
 
       const { rerender } = render(<App />);
 
       // Verify search input has the initial value
-      const searchInput = screen.getByTestId('search-input-field') as HTMLInputElement;
-      expect(searchInput.value).toBe('test query');
+      const searchInput = screen.getByTestId(
+        "search-input-field",
+      ) as HTMLInputElement;
+      expect(searchInput.value).toBe("test query");
 
       // Simulate external filter state clearing (e.g. clearAll was called)
       vi.mocked(useFilterState).mockReturnValue([{}, filterActions]);
@@ -985,16 +1086,20 @@ describe('App', () => {
 
       // Wait for the search input to be cleared
       await waitFor(() => {
-        expect(searchInput.value).toBe('');
+        expect(searchInput.value).toBe("");
       });
     });
   });
 
-  describe('swim lane integration', () => {
-    it('renders SwimLaneBoard instead of KanbanBoard when activeView is kanban', () => {
+  describe("swim lane integration", () => {
+    it("renders SwimLaneBoard instead of KanbanBoard when activeView is kanban", () => {
       const issues = [
-        createMockIssue({ id: 'issue-1', title: 'Issue One', status: 'open' }),
-        createMockIssue({ id: 'issue-2', title: 'Issue Two', status: 'in_progress' }),
+        createMockIssue({ id: "issue-1", title: "Issue One", status: "open" }),
+        createMockIssue({
+          id: "issue-2",
+          title: "Issue Two",
+          status: "in_progress",
+        }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -1002,15 +1107,17 @@ describe('App', () => {
       render(<App />);
 
       // SwimLaneBoard should render status columns
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'In Progress' })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "In Progress" }),
+      ).toBeInTheDocument();
 
       // Issues should be visible
-      expect(screen.getByText('Issue One')).toBeInTheDocument();
-      expect(screen.getByText('Issue Two')).toBeInTheDocument();
+      expect(screen.getByText("Issue One")).toBeInTheDocument();
+      expect(screen.getByText("Issue Two")).toBeInTheDocument();
     });
 
-    it('passes groupBy prop to SwimLaneBoard with default value of epic', () => {
+    it("passes groupBy prop to SwimLaneBoard with default value of epic", () => {
       const issues = [createMockIssue()];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -1033,17 +1140,17 @@ describe('App', () => {
       render(<App />);
 
       // Verify SwimLaneBoard is rendered with correct groupBy (epic is default)
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
     });
 
-    it('passes groupBy prop to SwimLaneBoard with epic grouping', () => {
+    it("passes groupBy prop to SwimLaneBoard with epic grouping", () => {
       const issues = [createMockIssue()];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Mock FilterState with groupBy: 'epic'
       vi.mocked(useFilterState).mockReturnValue([
-        { groupBy: 'epic' },
+        { groupBy: "epic" },
         {
           setPriority: vi.fn(),
           setType: vi.fn(),
@@ -1059,17 +1166,17 @@ describe('App', () => {
       render(<App />);
 
       // SwimLaneBoard should still render
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
     });
 
-    it('FilterBar receives groupBy and onGroupByChange props', () => {
+    it("FilterBar receives groupBy and onGroupByChange props", () => {
       const issues = [createMockIssue()];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       const setGroupBy = vi.fn();
       vi.mocked(useFilterState).mockReturnValue([
-        { groupBy: 'none' },
+        { groupBy: "none" },
         {
           setPriority: vi.fn(),
           setType: vi.fn(),
@@ -1085,15 +1192,15 @@ describe('App', () => {
       render(<App />);
 
       // FilterBar should be rendered with groupBy props
-      expect(screen.getByTestId('filter-bar')).toBeInTheDocument();
+      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
     });
 
-    it('updates SwimLaneBoard groupBy when FilterBar groupBy changes', () => {
+    it("updates SwimLaneBoard groupBy when FilterBar groupBy changes", () => {
       const issues = [createMockIssue()];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
-      let currentGroupBy = 'none';
+      let currentGroupBy = "none";
       const setGroupBy = vi.fn((value: string) => {
         currentGroupBy = value;
       });
@@ -1109,27 +1216,35 @@ describe('App', () => {
         clearAll: vi.fn(),
       };
 
-      vi.mocked(useFilterState).mockReturnValue([{ groupBy: currentGroupBy }, filterActions]);
+      vi.mocked(useFilterState).mockReturnValue([
+        { groupBy: currentGroupBy },
+        filterActions,
+      ]);
 
       const { rerender } = render(<App />);
 
       // Initial render with groupBy: 'none'
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
 
       // Simulate groupBy change to 'priority'
-      currentGroupBy = 'priority';
-      vi.mocked(useFilterState).mockReturnValue([{ groupBy: currentGroupBy }, filterActions]);
+      currentGroupBy = "priority";
+      vi.mocked(useFilterState).mockReturnValue([
+        { groupBy: currentGroupBy },
+        filterActions,
+      ]);
 
       rerender(<App />);
 
       // SwimLaneBoard should still render with updated groupBy
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
       expect(setGroupBy).not.toHaveBeenCalled(); // setGroupBy is called by FilterBar, not App
     });
 
-    it('passes onDragEnd handler to SwimLaneBoard', () => {
+    it("passes onDragEnd handler to SwimLaneBoard", () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
-      const issues = [createMockIssue({ id: 'drag-test', title: 'Drag Me', status: 'open' })];
+      const issues = [
+        createMockIssue({ id: "drag-test", title: "Drag Me", status: "open" }),
+      ];
       const mockReturn = createMockUseIssuesReturn({
         issues,
         updateIssueStatus,
@@ -1139,22 +1254,22 @@ describe('App', () => {
       render(<App />);
 
       // SwimLaneBoard should be rendered with the drag handler
-      expect(screen.getByText('Drag Me')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByText("Drag Me")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
     });
 
-    it('SwimLaneBoard receives filtered issues', () => {
+    it("SwimLaneBoard receives filtered issues", () => {
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'High Priority Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "High Priority Issue",
+          status: "open",
           priority: 0,
         }),
         createMockIssue({
-          id: 'issue-2',
-          title: 'Low Priority Issue',
-          status: 'open',
+          id: "issue-2",
+          title: "Low Priority Issue",
+          status: "open",
           priority: 4,
         }),
       ];
@@ -1164,16 +1279,16 @@ describe('App', () => {
       render(<App />);
 
       // Both issues should be visible since no filters are active
-      expect(screen.getByText('High Priority Issue')).toBeInTheDocument();
-      expect(screen.getByText('Low Priority Issue')).toBeInTheDocument();
+      expect(screen.getByText("High Priority Issue")).toBeInTheDocument();
+      expect(screen.getByText("Low Priority Issue")).toBeInTheDocument();
     });
 
-    it('SwimLaneBoard receives blocked issues map when available', () => {
+    it("SwimLaneBoard receives blocked issues map when available", () => {
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Blocked Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Blocked Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1182,16 +1297,16 @@ describe('App', () => {
       render(<App />);
 
       // SwimLaneBoard should render without errors
-      expect(screen.getByText('Blocked Issue')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByText("Blocked Issue")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
     });
 
-    it('SwimLaneBoard respects showBlocked filter', () => {
+    it("SwimLaneBoard respects showBlocked filter", () => {
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Issue To Show',
-          status: 'open',
+          id: "issue-1",
+          title: "Issue To Show",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1199,7 +1314,7 @@ describe('App', () => {
 
       // Mock FilterState with showBlocked: true
       vi.mocked(useFilterState).mockReturnValue([
-        { groupBy: 'none', showBlocked: true },
+        { groupBy: "none", showBlocked: true },
         {
           setPriority: vi.fn(),
           setType: vi.fn(),
@@ -1215,30 +1330,32 @@ describe('App', () => {
       render(<App />);
 
       // SwimLaneBoard should render with showBlocked prop passed
-      expect(screen.getByText('Issue To Show')).toBeInTheDocument();
+      expect(screen.getByText("Issue To Show")).toBeInTheDocument();
     });
   });
 
-  describe('IssueDetailPanel integration', () => {
-    it('renders IssueDetailPanel in closed state by default', () => {
+  describe("IssueDetailPanel integration", () => {
+    it("renders IssueDetailPanel in closed state by default", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       const { container } = render(<App />);
 
       // Panel should be rendered but closed (isOpen=false)
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
       expect(panel).toBeInTheDocument();
-      expect(panel).toHaveAttribute('data-state', 'closed');
+      expect(panel).toHaveAttribute("data-state", "closed");
     });
 
-    it('opens panel when issue is clicked in SwimLaneBoard', () => {
+    it("opens panel when issue is clicked in SwimLaneBoard", () => {
       const fetchIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Test Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Test Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1246,27 +1363,29 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue card
-      const issueCard = screen.getByText('Test Issue');
+      const issueCard = screen.getByText("Test Issue");
       fireEvent.click(issueCard);
 
       // Panel should now be open
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-state', 'open');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
     });
 
-    it('calls fetchIssue with correct ID when issue is clicked', () => {
+    it("calls fetchIssue with correct ID when issue is clicked", () => {
       const fetchIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-123',
-          title: 'Clickable Issue',
-          status: 'open',
+          id: "issue-123",
+          title: "Clickable Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1274,27 +1393,27 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
-        })
+        }),
       );
 
       render(<App />);
 
       // Click on the issue card
-      const issueCard = screen.getByText('Clickable Issue');
+      const issueCard = screen.getByText("Clickable Issue");
       fireEvent.click(issueCard);
 
       // fetchIssue should be called with the correct ID
       expect(fetchIssue).toHaveBeenCalledTimes(1);
-      expect(fetchIssue).toHaveBeenCalledWith('issue-123');
+      expect(fetchIssue).toHaveBeenCalledWith("issue-123");
     });
 
-    it('closes panel when onClose is called', () => {
+    it("closes panel when onClose is called", () => {
       const clearIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Closeable Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Closeable Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1303,43 +1422,47 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
-            id: 'issue-1',
-            title: 'Closeable Issue Details',
+            id: "issue-1",
+            title: "Closeable Issue Details",
             priority: 2,
-            status: 'open',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "open",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
           clearIssue,
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue card (uses aria-label "Issue: {title}")
-      const issueCard = screen.getByRole('button', { name: /Issue: Closeable Issue/ });
+      const issueCard = screen.getByRole("button", {
+        name: /Issue: Closeable Issue/,
+      });
       fireEvent.click(issueCard);
 
       // Panel should be open
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-state', 'open');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Click the close button (rendered by IssueHeader inside DefaultContent)
-      const closeButton = screen.getByTestId('header-close-button');
+      const closeButton = screen.getByTestId("header-close-button");
       fireEvent.click(closeButton);
 
       // Panel should close immediately
-      expect(panel).toHaveAttribute('data-state', 'closed');
+      expect(panel).toHaveAttribute("data-state", "closed");
     });
 
-    it('does not re-fetch when clicking the same issue that is already selected and open', () => {
+    it("does not re-fetch when clicking the same issue that is already selected and open", () => {
       const fetchIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Same Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Same Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1347,13 +1470,13 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
-        })
+        }),
       );
 
       render(<App />);
 
       // Click on the issue card twice
-      const issueCard = screen.getByText('Same Issue');
+      const issueCard = screen.getByText("Same Issue");
       fireEvent.click(issueCard);
 
       expect(fetchIssue).toHaveBeenCalledTimes(1);
@@ -1365,13 +1488,13 @@ describe('App', () => {
       expect(fetchIssue).toHaveBeenCalledTimes(1);
     });
 
-    it('passes loading state to IssueDetailPanel during fetch', () => {
+    it("passes loading state to IssueDetailPanel during fetch", () => {
       const fetchIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Loading Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Loading Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1380,26 +1503,28 @@ describe('App', () => {
         createMockUseIssueDetailReturn({
           isLoading: true,
           fetchIssue,
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue to open the panel
-      const issueCard = screen.getByText('Loading Issue');
+      const issueCard = screen.getByText("Loading Issue");
       fireEvent.click(issueCard);
 
       // Panel should show loading state
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-loading', 'true');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-loading", "true");
     });
 
-    it('passes issue details to IssueDetailPanel when loaded', () => {
+    it("passes issue details to IssueDetailPanel when loaded", () => {
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Detail Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Detail Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1407,69 +1532,71 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
-            id: 'issue-1',
-            title: 'Detail Issue Title',
-            description: 'Issue description',
+            id: "issue-1",
+            title: "Detail Issue Title",
+            description: "Issue description",
             priority: 2,
-            status: 'open',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "open",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
           isLoading: false,
-        })
+        }),
       );
 
       render(<App />);
 
       // Click on the issue to open the panel
-      const issueCard = screen.getByText('Detail Issue');
+      const issueCard = screen.getByText("Detail Issue");
       fireEvent.click(issueCard);
 
       // Panel should show the issue title
-      expect(screen.getByText('Detail Issue Title')).toBeInTheDocument();
+      expect(screen.getByText("Detail Issue Title")).toBeInTheDocument();
     });
 
-    it('passes error state to IssueDetailPanel when fetch fails', () => {
+    it("passes error state to IssueDetailPanel when fetch fails", () => {
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Error Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Error Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
-          error: 'Failed to fetch issue details',
+          error: "Failed to fetch issue details",
           isLoading: false,
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue to open the panel
-      const issueCard = screen.getByText('Error Issue');
+      const issueCard = screen.getByText("Error Issue");
       fireEvent.click(issueCard);
 
       // Panel should show the error state
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-error', 'true');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-error", "true");
     });
 
-    it('fetches new issue when clicking a different issue while panel is open', () => {
+    it("fetches new issue when clicking a different issue while panel is open", () => {
       const fetchIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'First Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "First Issue",
+          status: "open",
         }),
         createMockIssue({
-          id: 'issue-2',
-          title: 'Second Issue',
-          status: 'open',
+          id: "issue-2",
+          title: "Second Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1477,179 +1604,179 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
-        })
+        }),
       );
 
       render(<App />);
 
       // Click on the first issue
-      const firstIssue = screen.getByText('First Issue');
+      const firstIssue = screen.getByText("First Issue");
       fireEvent.click(firstIssue);
 
       expect(fetchIssue).toHaveBeenCalledTimes(1);
-      expect(fetchIssue).toHaveBeenCalledWith('issue-1');
+      expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // Click on the second issue
-      const secondIssue = screen.getByText('Second Issue');
+      const secondIssue = screen.getByText("Second Issue");
       fireEvent.click(secondIssue);
 
       // fetchIssue should be called again with the new ID
       expect(fetchIssue).toHaveBeenCalledTimes(2);
-      expect(fetchIssue).toHaveBeenCalledWith('issue-2');
+      expect(fetchIssue).toHaveBeenCalledWith("issue-2");
     });
   });
 
-  describe('useIssues mode parameter based on activeView', () => {
+  describe("useIssues mode parameter based on activeView", () => {
     it('calls useIssues with mode: "kanban" when activeView is "kanban"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(['kanban', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["kanban", mockSetActiveView]);
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({ mode: 'kanban' });
+      expect(useIssues).toHaveBeenCalledWith({ mode: "kanban" });
     });
 
     it('calls useIssues with mode: "ready" when activeView is "table"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(['table', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["table", mockSetActiveView]);
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({ mode: 'ready' });
+      expect(useIssues).toHaveBeenCalledWith({ mode: "ready" });
     });
 
     it('calls useIssues with mode: "graph" when activeView is "graph"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(['graph', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["graph", mockSetActiveView]);
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({ mode: 'graph' });
+      expect(useIssues).toHaveBeenCalledWith({ mode: "graph" });
     });
 
-    it('refetches issues when view changes from kanban to graph', () => {
+    it("refetches issues when view changes from kanban to graph", () => {
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({ refetch });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with kanban view
-      vi.mocked(useViewState).mockReturnValue(['kanban', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["kanban", mockSetActiveView]);
 
       const { rerender } = render(<App />);
 
       // Verify initial call with mode: 'kanban'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'kanban' });
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: "kanban" });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();
 
       // Switch to graph view
-      vi.mocked(useViewState).mockReturnValue(['graph', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["graph", mockSetActiveView]);
 
       rerender(<App />);
 
       // Verify useIssues is called with mode: 'graph' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'graph' });
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: "graph" });
     });
 
-    it('refetches issues when view changes from graph to kanban', () => {
+    it("refetches issues when view changes from graph to kanban", () => {
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({ refetch });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with graph view
-      vi.mocked(useViewState).mockReturnValue(['graph', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["graph", mockSetActiveView]);
 
       const { rerender } = render(<App />);
 
       // Verify initial call with mode: 'graph'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'graph' });
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: "graph" });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();
 
       // Switch to kanban view
-      vi.mocked(useViewState).mockReturnValue(['kanban', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["kanban", mockSetActiveView]);
 
       rerender(<App />);
 
       // Verify useIssues is called with mode: 'kanban' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'kanban' });
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: "kanban" });
     });
 
-    it('refetches issues when view changes from graph to table', () => {
+    it("refetches issues when view changes from graph to table", () => {
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({ refetch });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with graph view
-      vi.mocked(useViewState).mockReturnValue(['graph', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["graph", mockSetActiveView]);
 
       const { rerender } = render(<App />);
 
       // Verify initial call with mode: 'graph'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'graph' });
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: "graph" });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();
 
       // Switch to table view
-      vi.mocked(useViewState).mockReturnValue(['table', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["table", mockSetActiveView]);
 
       rerender(<App />);
 
       // Verify useIssues is called with mode: 'ready' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'ready' });
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: "ready" });
     });
 
-    it('switches from kanban mode to ready mode when view changes from kanban to table', () => {
+    it("switches from kanban mode to ready mode when view changes from kanban to table", () => {
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({ refetch });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with kanban view
-      vi.mocked(useViewState).mockReturnValue(['kanban', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["kanban", mockSetActiveView]);
 
       const { rerender } = render(<App />);
 
       // Verify initial call with mode: 'kanban'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'kanban' });
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: "kanban" });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();
 
       // Switch to table view
-      vi.mocked(useViewState).mockReturnValue(['table', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["table", mockSetActiveView]);
 
       rerender(<App />);
 
       // Verify useIssues is still called with mode: 'ready'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: 'ready' });
+      expect(useIssues).toHaveBeenLastCalledWith({ mode: "ready" });
     });
 
-    it('useViewState is called before useIssues to determine fetch mode', () => {
+    it("useViewState is called before useIssues to determine fetch mode", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Track call order
       const callOrder: string[] = [];
       vi.mocked(useViewState).mockImplementation(() => {
-        callOrder.push('useViewState');
-        return ['graph', mockSetActiveView];
+        callOrder.push("useViewState");
+        return ["graph", mockSetActiveView];
       });
       vi.mocked(useIssues).mockImplementation(() => {
-        callOrder.push('useIssues');
+        callOrder.push("useIssues");
         return mockReturn;
       });
 
       render(<App />);
 
       // Verify useViewState is called before useIssues
-      const viewStateIndex = callOrder.indexOf('useViewState');
-      const issuesIndex = callOrder.indexOf('useIssues');
+      const viewStateIndex = callOrder.indexOf("useViewState");
+      const issuesIndex = callOrder.indexOf("useIssues");
       expect(viewStateIndex).toBeLessThan(issuesIndex);
       expect(viewStateIndex).toBeGreaterThanOrEqual(0);
       expect(issuesIndex).toBeGreaterThanOrEqual(0);
@@ -1658,275 +1785,283 @@ describe('App', () => {
     it('calls useIssues with mode: "ready" when activeView is "monitor"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(['monitor', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["monitor", mockSetActiveView]);
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({ mode: 'ready' });
+      expect(useIssues).toHaveBeenCalledWith({ mode: "ready" });
     });
   });
 
-  describe('MonitorDashboard lazy loading integration', () => {
+  describe("MonitorDashboard lazy loading integration", () => {
     it('renders MonitorDashboard when activeView is "monitor"', async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(['monitor', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["monitor", mockSetActiveView]);
 
       render(<App />);
 
       // Wait for lazy-loaded MonitorDashboard to appear
       await waitFor(() => {
-        expect(screen.getByTestId('monitor-dashboard')).toBeInTheDocument();
+        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
       });
     });
 
-    it('shows LoadingSkeleton.Monitor as fallback during lazy load', async () => {
+    it("shows LoadingSkeleton.Monitor as fallback during lazy load", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(['monitor', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["monitor", mockSetActiveView]);
 
       render(<App />);
 
       // The skeleton may appear briefly during the lazy load
       // We check that MonitorDashboard eventually loads (which means Suspense worked)
       await waitFor(() => {
-        expect(screen.getByTestId('monitor-dashboard')).toBeInTheDocument();
+        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
       });
     });
 
     it('does not render MonitorDashboard when activeView is "kanban"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(['kanban', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["kanban", mockSetActiveView]);
 
       render(<App />);
 
       // MonitorDashboard should not be rendered when kanban view is active
-      expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
       // Kanban view should be active (SwimLaneBoard renders status columns)
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
     });
 
     it('does not render MonitorDashboard when activeView is "table"', () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(['table', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["table", mockSetActiveView]);
 
       render(<App />);
 
       // MonitorDashboard should not be rendered when table view is active
-      expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
     });
 
     it('does not render MonitorDashboard when activeView is "graph"', async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
-      vi.mocked(useViewState).mockReturnValue(['graph', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["graph", mockSetActiveView]);
 
       render(<App />);
 
       // Wait for lazy-loaded GraphView to appear
       await waitFor(() => {
-        expect(screen.getByTestId('mock-graph-view')).toBeInTheDocument();
+        expect(screen.getByTestId("mock-graph-view")).toBeInTheDocument();
       });
 
       // MonitorDashboard should not be rendered when graph view is active
-      expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
     });
 
-    it('transitions from kanban to monitor view correctly', async () => {
+    it("transitions from kanban to monitor view correctly", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with kanban view
-      vi.mocked(useViewState).mockReturnValue(['kanban', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["kanban", mockSetActiveView]);
 
       const { rerender } = render(<App />);
 
       // Verify kanban view is rendered
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
-      expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
+      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
 
       // Switch to monitor view
-      vi.mocked(useViewState).mockReturnValue(['monitor', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["monitor", mockSetActiveView]);
 
       rerender(<App />);
 
       // Wait for MonitorDashboard to load
       await waitFor(() => {
-        expect(screen.getByTestId('monitor-dashboard')).toBeInTheDocument();
+        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
       });
 
       // Kanban columns should no longer be rendered
-      expect(screen.queryByRole('heading', { name: 'Open' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "Open" }),
+      ).not.toBeInTheDocument();
     });
 
-    it('transitions from monitor to kanban view correctly', async () => {
+    it("transitions from monitor to kanban view correctly", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with monitor view
-      vi.mocked(useViewState).mockReturnValue(['monitor', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["monitor", mockSetActiveView]);
 
       const { rerender } = render(<App />);
 
       // Wait for MonitorDashboard to load
       await waitFor(() => {
-        expect(screen.getByTestId('monitor-dashboard')).toBeInTheDocument();
+        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
       });
 
       // Switch to kanban view
-      vi.mocked(useViewState).mockReturnValue(['kanban', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["kanban", mockSetActiveView]);
 
       rerender(<App />);
 
       // Verify kanban view is now rendered
-      expect(screen.getByRole('heading', { name: 'Open' })).toBeInTheDocument();
-      expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
+      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
     });
 
-    it('transitions from graph to monitor view correctly', async () => {
+    it("transitions from graph to monitor view correctly", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with graph view
-      vi.mocked(useViewState).mockReturnValue(['graph', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["graph", mockSetActiveView]);
 
       const { rerender } = render(<App />);
 
       // Wait for GraphView to load
       await waitFor(() => {
-        expect(screen.getByTestId('mock-graph-view')).toBeInTheDocument();
+        expect(screen.getByTestId("mock-graph-view")).toBeInTheDocument();
       });
 
       // Switch to monitor view
-      vi.mocked(useViewState).mockReturnValue(['monitor', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["monitor", mockSetActiveView]);
 
       rerender(<App />);
 
       // Wait for MonitorDashboard to load
       await waitFor(() => {
-        expect(screen.getByTestId('monitor-dashboard')).toBeInTheDocument();
+        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
       });
 
       // GraphView should no longer be rendered
-      expect(screen.queryByTestId('mock-graph-view')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("mock-graph-view")).not.toBeInTheDocument();
     });
 
-    it('transitions from monitor to graph view correctly', async () => {
+    it("transitions from monitor to graph view correctly", async () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with monitor view
-      vi.mocked(useViewState).mockReturnValue(['monitor', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["monitor", mockSetActiveView]);
 
       const { rerender } = render(<App />);
 
       // Wait for MonitorDashboard to load
       await waitFor(() => {
-        expect(screen.getByTestId('monitor-dashboard')).toBeInTheDocument();
+        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
       });
 
       // Switch to graph view
-      vi.mocked(useViewState).mockReturnValue(['graph', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["graph", mockSetActiveView]);
 
       rerender(<App />);
 
       // Wait for GraphView to load
       await waitFor(() => {
-        expect(screen.getByTestId('mock-graph-view')).toBeInTheDocument();
+        expect(screen.getByTestId("mock-graph-view")).toBeInTheDocument();
       });
 
       // MonitorDashboard should no longer be rendered
-      expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
     });
 
-    it('transitions from table to monitor view correctly', async () => {
+    it("transitions from table to monitor view correctly", async () => {
       const mockReturn = createMockUseIssuesReturn({
-        issues: [createMockIssue({ id: 'test-1', title: 'Test Issue', status: 'open' })],
+        issues: [
+          createMockIssue({
+            id: "test-1",
+            title: "Test Issue",
+            status: "open",
+          }),
+        ],
       });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       // Start with table view
-      vi.mocked(useViewState).mockReturnValue(['table', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["table", mockSetActiveView]);
 
       const { rerender } = render(<App />);
 
       // Verify table view is rendered (IssueTable has specific structure)
-      expect(screen.queryByTestId('monitor-dashboard')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("monitor-dashboard")).not.toBeInTheDocument();
 
       // Switch to monitor view
-      vi.mocked(useViewState).mockReturnValue(['monitor', mockSetActiveView]);
+      vi.mocked(useViewState).mockReturnValue(["monitor", mockSetActiveView]);
 
       rerender(<App />);
 
       // Wait for MonitorDashboard to load
       await waitFor(() => {
-        expect(screen.getByTestId('monitor-dashboard')).toBeInTheDocument();
+        expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
       });
     });
   });
 
-  describe('TerminalPanel integration', () => {
-    it('renders TalkToLeadButton in the app', () => {
+  describe("TerminalPanel integration", () => {
+    it("renders TalkToLeadButton in the app", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      expect(screen.getByTestId('talk-to-lead-button')).toBeInTheDocument();
+      expect(screen.getByTestId("talk-to-lead-button")).toBeInTheDocument();
     });
 
-    it('TalkToLeadButton has isActive=false by default (terminal closed)', () => {
+    it("TalkToLeadButton has isActive=false by default (terminal closed)", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      const button = screen.getByTestId('talk-to-lead-button');
-      expect(button).not.toHaveAttribute('data-active');
+      const button = screen.getByTestId("talk-to-lead-button");
+      expect(button).not.toHaveAttribute("data-active");
       // When isActive is false (default), aria-pressed is "false"
-      expect(button).toHaveAttribute('aria-pressed', 'false');
+      expect(button).toHaveAttribute("aria-pressed", "false");
     });
 
-    it('opens terminal and sets TalkToLeadButton isActive=true when clicked', () => {
+    it("opens terminal and sets TalkToLeadButton isActive=true when clicked", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      const button = screen.getByTestId('talk-to-lead-button');
+      const button = screen.getByTestId("talk-to-lead-button");
       fireEvent.click(button);
 
       // Button should now be active
-      expect(button).toHaveAttribute('data-active', 'true');
-      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(button).toHaveAttribute("data-active", "true");
+      expect(button).toHaveAttribute("aria-pressed", "true");
     });
 
-    it('closes terminal when TalkToLeadButton is clicked while terminal is open (toggle)', () => {
+    it("closes terminal when TalkToLeadButton is clicked while terminal is open (toggle)", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      const button = screen.getByTestId('talk-to-lead-button');
+      const button = screen.getByTestId("talk-to-lead-button");
 
       // Open terminal
       fireEvent.click(button);
-      expect(button).toHaveAttribute('data-active', 'true');
+      expect(button).toHaveAttribute("data-active", "true");
 
       // Close terminal (toggle)
       fireEvent.click(button);
-      expect(button).not.toHaveAttribute('data-active');
+      expect(button).not.toHaveAttribute("data-active");
     });
 
-    it('closes terminal when IssueDetailPanel opens (single-panel policy)', () => {
+    it("closes terminal when IssueDetailPanel opens (single-panel policy)", () => {
       const fetchIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Test Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Test Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1934,32 +2069,32 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
-        })
+        }),
       );
 
       render(<App />);
 
       // Open terminal first
-      const talkButton = screen.getByTestId('talk-to-lead-button');
+      const talkButton = screen.getByTestId("talk-to-lead-button");
       fireEvent.click(talkButton);
-      expect(talkButton).toHaveAttribute('data-active', 'true');
+      expect(talkButton).toHaveAttribute("data-active", "true");
 
       // Click on an issue to open IssueDetailPanel
-      const issueCard = screen.getByText('Test Issue');
+      const issueCard = screen.getByText("Test Issue");
       fireEvent.click(issueCard);
 
       // Terminal should now be closed
-      expect(talkButton).not.toHaveAttribute('data-active');
+      expect(talkButton).not.toHaveAttribute("data-active");
     });
 
-    it('closes issue panel when terminal opens (single-panel policy)', () => {
+    it("closes issue panel when terminal opens (single-panel policy)", () => {
       const fetchIssue = vi.fn();
       const clearIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Test Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Test Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -1968,30 +2103,32 @@ describe('App', () => {
         createMockUseIssueDetailReturn({
           fetchIssue,
           clearIssue,
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Open issue panel first
-      const issueCard = screen.getByText('Test Issue');
+      const issueCard = screen.getByText("Test Issue");
       fireEvent.click(issueCard);
 
       // Issue panel should be open
-      const issuePanel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(issuePanel).toHaveAttribute('data-state', 'open');
+      const issuePanel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(issuePanel).toHaveAttribute("data-state", "open");
 
       // Open terminal
-      const talkButton = screen.getByTestId('talk-to-lead-button');
+      const talkButton = screen.getByTestId("talk-to-lead-button");
       fireEvent.click(talkButton);
 
       // Issue panel should now be closed
-      expect(issuePanel).toHaveAttribute('data-state', 'closed');
+      expect(issuePanel).toHaveAttribute("data-state", "closed");
       // Terminal should be open
-      expect(talkButton).toHaveAttribute('data-active', 'true');
+      expect(talkButton).toHaveAttribute("data-active", "true");
     });
 
-    it('closes terminal when AgentDetailPanel opens (single-panel policy)', () => {
+    it("closes terminal when AgentDetailPanel opens (single-panel policy)", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -1999,11 +2136,11 @@ describe('App', () => {
       vi.mocked(useAgentContext).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2021,11 +2158,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2039,11 +2190,11 @@ describe('App', () => {
       vi.mocked(useAgents).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2061,11 +2212,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2077,19 +2242,19 @@ describe('App', () => {
       render(<App />);
 
       // Open terminal first
-      const talkButton = screen.getByTestId('talk-to-lead-button');
+      const talkButton = screen.getByTestId("talk-to-lead-button");
       fireEvent.click(talkButton);
-      expect(talkButton).toHaveAttribute('data-active', 'true');
+      expect(talkButton).toHaveAttribute("data-active", "true");
 
       // Click on an agent to open AgentDetailPanel
-      const agentCard = screen.getByText('agent-1');
+      const agentCard = screen.getByText("agent-1");
       fireEvent.click(agentCard);
 
       // Terminal should now be closed
-      expect(talkButton).not.toHaveAttribute('data-active');
+      expect(talkButton).not.toHaveAttribute("data-active");
     });
 
-    it('closes agent panel when terminal opens (single-panel policy)', () => {
+    it("closes agent panel when terminal opens (single-panel policy)", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -2097,11 +2262,11 @@ describe('App', () => {
       vi.mocked(useAgentContext).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2119,11 +2284,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2137,11 +2316,11 @@ describe('App', () => {
       vi.mocked(useAgents).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2159,11 +2338,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2175,83 +2368,85 @@ describe('App', () => {
       const { container } = render(<App />);
 
       // Open agent panel first
-      const agentCard = screen.getByText('agent-1');
+      const agentCard = screen.getByText("agent-1");
       fireEvent.click(agentCard);
 
       // Agent panel should be open
-      const agentPanel = container.querySelector('[data-testid="agent-detail-panel"]');
-      expect(agentPanel).toHaveAttribute('data-state', 'open');
+      const agentPanel = container.querySelector(
+        '[data-testid="agent-detail-panel"]',
+      );
+      expect(agentPanel).toHaveAttribute("data-state", "open");
 
       // Open terminal
-      const talkButton = screen.getByTestId('talk-to-lead-button');
+      const talkButton = screen.getByTestId("talk-to-lead-button");
       fireEvent.click(talkButton);
 
       // Agent panel should now be closed
-      expect(agentPanel).toHaveAttribute('data-state', 'closed');
+      expect(agentPanel).toHaveAttribute("data-state", "closed");
       // Terminal should be open
-      expect(talkButton).toHaveAttribute('data-active', 'true');
+      expect(talkButton).toHaveAttribute("data-active", "true");
     });
 
-    it('renders TerminalPanel in Suspense (lazy loaded)', () => {
+    it("renders TerminalPanel in Suspense (lazy loaded)", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
       // Open terminal to trigger lazy load
-      const talkButton = screen.getByTestId('talk-to-lead-button');
+      const talkButton = screen.getByTestId("talk-to-lead-button");
       fireEvent.click(talkButton);
 
       // The terminal panel overlay should be present (lazy loaded)
-      expect(screen.getByTestId('terminal-panel-overlay')).toBeInTheDocument();
+      expect(screen.getByTestId("terminal-panel-overlay")).toBeInTheDocument();
     });
 
-    it('terminal close button calls handleTerminalClose', () => {
+    it("terminal close button calls handleTerminalClose", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
       // Open terminal
-      const talkButton = screen.getByTestId('talk-to-lead-button');
+      const talkButton = screen.getByTestId("talk-to-lead-button");
       fireEvent.click(talkButton);
-      expect(talkButton).toHaveAttribute('data-active', 'true');
+      expect(talkButton).toHaveAttribute("data-active", "true");
 
       // Click terminal close button
-      const closeButton = screen.getByTestId('terminal-close-button');
+      const closeButton = screen.getByTestId("terminal-close-button");
       fireEvent.click(closeButton);
 
       // Terminal should be closed
-      expect(talkButton).not.toHaveAttribute('data-active');
+      expect(talkButton).not.toHaveAttribute("data-active");
     });
 
-    it('multiple toggle cycles work correctly', () => {
+    it("multiple toggle cycles work correctly", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
       render(<App />);
 
-      const button = screen.getByTestId('talk-to-lead-button');
+      const button = screen.getByTestId("talk-to-lead-button");
 
       // Toggle cycle 1: open -> close
       fireEvent.click(button);
-      expect(button).toHaveAttribute('data-active', 'true');
+      expect(button).toHaveAttribute("data-active", "true");
       fireEvent.click(button);
-      expect(button).not.toHaveAttribute('data-active');
+      expect(button).not.toHaveAttribute("data-active");
 
       // Toggle cycle 2: open -> close
       fireEvent.click(button);
-      expect(button).toHaveAttribute('data-active', 'true');
+      expect(button).toHaveAttribute("data-active", "true");
       fireEvent.click(button);
-      expect(button).not.toHaveAttribute('data-active');
+      expect(button).not.toHaveAttribute("data-active");
 
       // Toggle cycle 3: open
       fireEvent.click(button);
-      expect(button).toHaveAttribute('data-active', 'true');
+      expect(button).toHaveAttribute("data-active", "true");
     });
   });
 
-  describe('panel close timeout race condition prevention', () => {
+  describe("panel close timeout race condition prevention", () => {
     beforeEach(() => {
       vi.useFakeTimers();
     });
@@ -2260,19 +2455,19 @@ describe('App', () => {
       vi.useRealTimers();
     });
 
-    it('cancels pending issue panel timeout when new issue is selected', () => {
+    it("cancels pending issue panel timeout when new issue is selected", () => {
       const fetchIssue = vi.fn();
       const clearIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'First Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "First Issue",
+          status: "open",
         }),
         createMockIssue({
-          id: 'issue-2',
-          title: 'Second Issue',
-          status: 'open',
+          id: "issue-2",
+          title: "Second Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -2283,60 +2478,70 @@ describe('App', () => {
           fetchIssue,
           clearIssue,
           issueDetails: {
-            id: 'issue-1',
-            title: 'First Issue',
+            id: "issue-1",
+            title: "First Issue",
             priority: 2,
-            status: 'open',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "open",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Open issue panel for first issue (use aria-label to target the issue card button specifically)
-      const firstIssue = screen.getByRole('button', { name: /Issue: First Issue/ });
+      const firstIssue = screen.getByRole("button", {
+        name: /Issue: First Issue/,
+      });
       fireEvent.click(firstIssue);
 
       // Panel should be open
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-state', 'open');
-      expect(fetchIssue).toHaveBeenCalledWith('issue-1');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
+      expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // Close the panel (starts 300ms timeout to clear selectedIssueId)
-      const closeButton = screen.getByTestId('header-close-button');
+      const closeButton = screen.getByTestId("header-close-button");
       fireEvent.click(closeButton);
 
       // Panel starts closing
-      expect(panel).toHaveAttribute('data-state', 'closed');
+      expect(panel).toHaveAttribute("data-state", "closed");
 
       // Before timeout completes (within 300ms), click a different issue
       vi.advanceTimersByTime(100); // Only 100ms passed
-      const secondIssue = screen.getByRole('button', { name: /Issue: Second Issue/ });
+      const secondIssue = screen.getByRole("button", {
+        name: /Issue: Second Issue/,
+      });
       fireEvent.click(secondIssue);
 
       // Panel should immediately reopen for the new issue
-      expect(panel).toHaveAttribute('data-state', 'open');
-      expect(fetchIssue).toHaveBeenCalledWith('issue-2');
+      expect(panel).toHaveAttribute("data-state", "open");
+      expect(fetchIssue).toHaveBeenCalledWith("issue-2");
 
       // Advance past original timeout (300ms total = 200ms more)
       vi.advanceTimersByTime(300);
 
       // Panel should still be open (timeout was cancelled)
-      expect(panel).toHaveAttribute('data-state', 'open');
+      expect(panel).toHaveAttribute("data-state", "open");
       // clearIssue should NOT have been called (it would clear the new selection)
       expect(clearIssue).not.toHaveBeenCalled();
     });
 
-    it('rapidly switching between issues does not blank the panel', () => {
+    it("rapidly switching between issues does not blank the panel", () => {
       const fetchIssue = vi.fn();
       const clearIssue = vi.fn();
       const issues = [
-        createMockIssue({ id: 'issue-1', title: 'Issue One', status: 'open' }),
-        createMockIssue({ id: 'issue-2', title: 'Issue Two', status: 'open' }),
-        createMockIssue({ id: 'issue-3', title: 'Issue Three', status: 'open' }),
+        createMockIssue({ id: "issue-1", title: "Issue One", status: "open" }),
+        createMockIssue({ id: "issue-2", title: "Issue Two", status: "open" }),
+        createMockIssue({
+          id: "issue-3",
+          title: "Issue Three",
+          status: "open",
+        }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -2344,56 +2549,60 @@ describe('App', () => {
         createMockUseIssueDetailReturn({
           fetchIssue,
           clearIssue,
-        })
+        }),
       );
 
       const { container } = render(<App />);
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
 
       // Click issue 1
-      fireEvent.click(screen.getByText('Issue One'));
-      expect(panel).toHaveAttribute('data-state', 'open');
+      fireEvent.click(screen.getByText("Issue One"));
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Immediately click issue 2 (no delay)
-      fireEvent.click(screen.getByText('Issue Two'));
-      expect(panel).toHaveAttribute('data-state', 'open');
+      fireEvent.click(screen.getByText("Issue Two"));
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Immediately click issue 3 (no delay)
-      fireEvent.click(screen.getByText('Issue Three'));
-      expect(panel).toHaveAttribute('data-state', 'open');
+      fireEvent.click(screen.getByText("Issue Three"));
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Wait for any timeouts to complete
       vi.advanceTimersByTime(500);
 
       // Panel should still be open showing issue 3
-      expect(panel).toHaveAttribute('data-state', 'open');
-      expect(fetchIssue).toHaveBeenLastCalledWith('issue-3');
+      expect(panel).toHaveAttribute("data-state", "open");
+      expect(fetchIssue).toHaveBeenLastCalledWith("issue-3");
       // clearIssue should never have been called during rapid switching
       expect(clearIssue).not.toHaveBeenCalled();
     });
 
-    it('opening agent panel then quickly opening issue panel shows the issue correctly', () => {
+    it("opening agent panel then quickly opening issue panel shows the issue correctly", () => {
       const fetchIssue = vi.fn();
       const clearIssue = vi.fn();
-      const issues = [createMockIssue({ id: 'issue-1', title: 'Test Issue', status: 'open' })];
+      const issues = [
+        createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
+      ];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
           clearIssue,
-        })
+        }),
       );
 
       // Mock agents for the sidebar
       vi.mocked(useAgentContext).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2411,11 +2620,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2427,11 +2650,11 @@ describe('App', () => {
       vi.mocked(useAgents).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2449,11 +2672,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2463,55 +2700,61 @@ describe('App', () => {
       });
 
       const { container } = render(<App />);
-      const issuePanel = container.querySelector('[data-testid="issue-detail-panel"]');
-      const agentPanel = container.querySelector('[data-testid="agent-detail-panel"]');
+      const issuePanel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      const agentPanel = container.querySelector(
+        '[data-testid="agent-detail-panel"]',
+      );
 
       // Open agent panel
-      const agentCard = screen.getByText('agent-1');
+      const agentCard = screen.getByText("agent-1");
       fireEvent.click(agentCard);
-      expect(agentPanel).toHaveAttribute('data-state', 'open');
-      expect(issuePanel).toHaveAttribute('data-state', 'closed');
+      expect(agentPanel).toHaveAttribute("data-state", "open");
+      expect(issuePanel).toHaveAttribute("data-state", "closed");
 
       // Quickly (within 300ms timeout) open issue panel
       vi.advanceTimersByTime(100);
-      const issueCard = screen.getByText('Test Issue');
+      const issueCard = screen.getByText("Test Issue");
       fireEvent.click(issueCard);
 
       // Issue panel should now be open
-      expect(issuePanel).toHaveAttribute('data-state', 'open');
+      expect(issuePanel).toHaveAttribute("data-state", "open");
       // Agent panel should be closed
-      expect(agentPanel).toHaveAttribute('data-state', 'closed');
-      expect(fetchIssue).toHaveBeenCalledWith('issue-1');
+      expect(agentPanel).toHaveAttribute("data-state", "closed");
+      expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // Wait for all timeouts to complete
       vi.advanceTimersByTime(500);
 
       // Issue panel should still be open (agent panel close timeout should not affect it)
-      expect(issuePanel).toHaveAttribute('data-state', 'open');
+      expect(issuePanel).toHaveAttribute("data-state", "open");
     });
 
-    it('opening issue panel then quickly opening agent panel shows the agent correctly', () => {
+    it("opening issue panel then quickly opening agent panel shows the agent correctly", () => {
       const fetchIssue = vi.fn();
       const clearIssue = vi.fn();
-      const issues = [createMockIssue({ id: 'issue-1', title: 'Test Issue', status: 'open' })];
+      const issues = [
+        createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
+      ];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           fetchIssue,
           clearIssue,
-        })
+        }),
       );
 
       // Mock agents for the sidebar
       vi.mocked(useAgentContext).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2529,11 +2772,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2545,11 +2802,11 @@ describe('App', () => {
       vi.mocked(useAgents).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2567,11 +2824,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2581,38 +2852,44 @@ describe('App', () => {
       });
 
       const { container } = render(<App />);
-      const issuePanel = container.querySelector('[data-testid="issue-detail-panel"]');
-      const agentPanel = container.querySelector('[data-testid="agent-detail-panel"]');
+      const issuePanel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      const agentPanel = container.querySelector(
+        '[data-testid="agent-detail-panel"]',
+      );
 
       // Open issue panel
-      const issueCard = screen.getByText('Test Issue');
+      const issueCard = screen.getByText("Test Issue");
       fireEvent.click(issueCard);
-      expect(issuePanel).toHaveAttribute('data-state', 'open');
-      expect(agentPanel).toHaveAttribute('data-state', 'closed');
+      expect(issuePanel).toHaveAttribute("data-state", "open");
+      expect(agentPanel).toHaveAttribute("data-state", "closed");
 
       // Quickly (within 300ms timeout) open agent panel
       vi.advanceTimersByTime(100);
-      const agentCard = screen.getByText('agent-1');
+      const agentCard = screen.getByText("agent-1");
       fireEvent.click(agentCard);
 
       // Agent panel should now be open
-      expect(agentPanel).toHaveAttribute('data-state', 'open');
+      expect(agentPanel).toHaveAttribute("data-state", "open");
       // Issue panel should be closed
-      expect(issuePanel).toHaveAttribute('data-state', 'closed');
+      expect(issuePanel).toHaveAttribute("data-state", "closed");
 
       // Wait for all timeouts to complete
       vi.advanceTimersByTime(500);
 
       // Agent panel should still be open (issue panel close timeout should not affect it)
-      expect(agentPanel).toHaveAttribute('data-state', 'open');
+      expect(agentPanel).toHaveAttribute("data-state", "open");
       // clearIssue should have been called after the timeout to clean up
       // (This is expected since issue panel was properly closed)
     });
 
-    it('cleans up timeouts on unmount', () => {
+    it("cleans up timeouts on unmount", () => {
       const fetchIssue = vi.fn();
       const clearIssue = vi.fn();
-      const issues = [createMockIssue({ id: 'issue-1', title: 'Test Issue', status: 'open' })];
+      const issues = [
+        createMockIssue({ id: "issue-1", title: "Test Issue", status: "open" }),
+      ];
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
       // Provide issueDetails so the close button is rendered
@@ -2621,26 +2898,30 @@ describe('App', () => {
           fetchIssue,
           clearIssue,
           issueDetails: {
-            id: 'issue-1',
-            title: 'Test Issue',
+            id: "issue-1",
+            title: "Test Issue",
             priority: 2,
-            status: 'open',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "open",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
-        })
+        }),
       );
 
       const { container, unmount } = render(<App />);
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
 
       // Open and close the panel (starts timeout) - use aria-label to avoid duplicate text match
-      fireEvent.click(screen.getByRole('button', { name: /Issue: Test Issue/ }));
-      expect(panel).toHaveAttribute('data-state', 'open');
+      fireEvent.click(
+        screen.getByRole("button", { name: /Issue: Test Issue/ }),
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Close the panel
-      const closeButton = screen.getByTestId('header-close-button');
+      const closeButton = screen.getByTestId("header-close-button");
       fireEvent.click(closeButton);
 
       // Unmount before timeout completes
@@ -2654,14 +2935,14 @@ describe('App', () => {
       }).not.toThrow();
     });
 
-    it('handles close then reopen within timeout window correctly', () => {
+    it("handles close then reopen within timeout window correctly", () => {
       const fetchIssue = vi.fn();
       const clearIssue = vi.fn();
       const issues = [
         createMockIssue({
-          id: 'issue-1',
-          title: 'Same Issue',
-          status: 'open',
+          id: "issue-1",
+          title: "Same Issue",
+          status: "open",
         }),
       ];
       const mockReturn = createMockUseIssuesReturn({ issues });
@@ -2671,37 +2952,41 @@ describe('App', () => {
           fetchIssue,
           clearIssue,
           issueDetails: {
-            id: 'issue-1',
-            title: 'Same Issue',
+            id: "issue-1",
+            title: "Same Issue",
             priority: 2,
-            status: 'open',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "open",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
-        })
+        }),
       );
 
       const { container } = render(<App />);
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
 
       // Open issue panel
-      const issueCard = screen.getByRole('button', { name: /Issue: Same Issue/ });
+      const issueCard = screen.getByRole("button", {
+        name: /Issue: Same Issue/,
+      });
       fireEvent.click(issueCard);
-      expect(panel).toHaveAttribute('data-state', 'open');
+      expect(panel).toHaveAttribute("data-state", "open");
       expect(fetchIssue).toHaveBeenCalledTimes(1);
 
       // Close the panel
-      const closeButton = screen.getByTestId('header-close-button');
+      const closeButton = screen.getByTestId("header-close-button");
       fireEvent.click(closeButton);
-      expect(panel).toHaveAttribute('data-state', 'closed');
+      expect(panel).toHaveAttribute("data-state", "closed");
 
       // Within timeout, click the same issue again
       vi.advanceTimersByTime(150);
       fireEvent.click(issueCard);
 
       // Panel should reopen
-      expect(panel).toHaveAttribute('data-state', 'open');
+      expect(panel).toHaveAttribute("data-state", "open");
       // fetchIssue should be called again for the reopened panel
       expect(fetchIssue).toHaveBeenCalledTimes(2);
 
@@ -2709,12 +2994,12 @@ describe('App', () => {
       vi.advanceTimersByTime(300);
 
       // Panel should still be open - the new open cancelled the pending timeout
-      expect(panel).toHaveAttribute('data-state', 'open');
+      expect(panel).toHaveAttribute("data-state", "open");
       // clearIssue should not have been called (would wipe the panel content)
       expect(clearIssue).not.toHaveBeenCalled();
     });
 
-    it('agent panel timeout is properly cancelled when clicking another agent', () => {
+    it("agent panel timeout is properly cancelled when clicking another agent", () => {
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
@@ -2722,18 +3007,18 @@ describe('App', () => {
       vi.mocked(useAgentContext).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
           {
-            name: 'agent-2',
-            status: 'working',
+            name: "agent-2",
+            status: "working",
             current_task: null,
-            workspace: '/test2',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test2",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2751,11 +3036,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2767,18 +3066,18 @@ describe('App', () => {
       vi.mocked(useAgents).mockReturnValue({
         agents: [
           {
-            name: 'agent-1',
-            status: 'idle',
+            name: "agent-1",
+            status: "idle",
             current_task: null,
-            workspace: '/test',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test",
+            started_at: "2024-01-01T00:00:00Z",
           },
           {
-            name: 'agent-2',
-            status: 'working',
+            name: "agent-2",
+            status: "working",
             current_task: null,
-            workspace: '/test2',
-            started_at: '2024-01-01T00:00:00Z',
+            workspace: "/test2",
+            started_at: "2024-01-01T00:00:00Z",
           },
         ],
         agentTasks: {},
@@ -2796,11 +3095,25 @@ describe('App', () => {
           inProgress: [],
           blocked: [],
         },
-        sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-        stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 0,
+        },
+        stats: {
+          open: 0,
+          closed: 0,
+          total: 0,
+          completion: 0,
+          remaining: 0,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
         isLoading: false,
         isConnected: true,
-        connectionState: 'connected',
+        connectionState: "connected",
         wasEverConnected: true,
         retryCountdown: 0,
         error: null,
@@ -2810,47 +3123,49 @@ describe('App', () => {
       });
 
       const { container } = render(<App />);
-      const agentPanel = container.querySelector('[data-testid="agent-detail-panel"]');
+      const agentPanel = container.querySelector(
+        '[data-testid="agent-detail-panel"]',
+      );
 
       // Open agent panel for first agent
-      fireEvent.click(screen.getByText('agent-1'));
-      expect(agentPanel).toHaveAttribute('data-state', 'open');
+      fireEvent.click(screen.getByText("agent-1"));
+      expect(agentPanel).toHaveAttribute("data-state", "open");
 
       // Close the panel using the close button (aria-label="Close panel")
-      const closeButton = screen.getByRole('button', { name: 'Close panel' });
+      const closeButton = screen.getByRole("button", { name: "Close panel" });
       fireEvent.click(closeButton);
-      expect(agentPanel).toHaveAttribute('data-state', 'closed');
+      expect(agentPanel).toHaveAttribute("data-state", "closed");
 
       // Within timeout, click the second agent
       vi.advanceTimersByTime(150);
-      fireEvent.click(screen.getByText('agent-2'));
+      fireEvent.click(screen.getByText("agent-2"));
 
       // Panel should reopen for agent-2
-      expect(agentPanel).toHaveAttribute('data-state', 'open');
+      expect(agentPanel).toHaveAttribute("data-state", "open");
 
       // Wait for original timeout to complete
       vi.advanceTimersByTime(300);
 
       // Panel should still be open - the new agent click cancelled the timeout
-      expect(agentPanel).toHaveAttribute('data-state', 'open');
+      expect(agentPanel).toHaveAttribute("data-state", "open");
     });
   });
 
-  describe('handleApprove and handleReject', () => {
+  describe("handleApprove and handleReject", () => {
     beforeEach(() => {
       mockCloseIssue.mockResolvedValue(undefined);
       mockUpdateIssue.mockResolvedValue(undefined);
       mockAddComment.mockResolvedValue(undefined);
     });
 
-    it('plan approve calls updateIssueStatus with open status', async () => {
+    it("plan approve calls updateIssueStatus with open status", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       // Plan review: status=review, no PR URL in external_ref
       const planIssue = createMockIssue({
-        id: 'plan-issue',
-        title: 'Plan Review Issue',
-        status: 'review',
+        id: "plan-issue",
+        title: "Plan Review Issue",
+        status: "review",
       });
       const mockReturn = createMockUseIssuesReturn({
         issues: [planIssue],
@@ -2861,35 +3176,39 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
-            id: 'plan-issue',
-            title: 'Plan Review Issue',
+            id: "plan-issue",
+            title: "Plan Review Issue",
             priority: 2,
-            status: 'review',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "review",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue card to open the panel (use aria-label to avoid duplicate text match)
-      const issueCard = screen.getByRole('button', { name: /Issue: Plan Review Issue/ });
+      const issueCard = screen.getByRole("button", {
+        name: /Issue: Plan Review Issue/,
+      });
       fireEvent.click(issueCard);
 
       // Panel should be open with approve button visible
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-state', 'open');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Click the approve button
-      const approveButton = screen.getByTestId('panel-approve-button');
+      const approveButton = screen.getByTestId("panel-approve-button");
       fireEvent.click(approveButton);
 
       await waitFor(() => {
         // Plan approve should call updateIssueStatus with 'open' (ready for implementation)
         expect(updateIssueStatus).toHaveBeenCalledTimes(1);
-        expect(updateIssueStatus).toHaveBeenCalledWith('plan-issue', 'open');
+        expect(updateIssueStatus).toHaveBeenCalledWith("plan-issue", "open");
       });
 
       // Should NOT call closeIssue for plan review
@@ -2897,19 +3216,19 @@ describe('App', () => {
 
       // Panel should be closed after successful approve
       await waitFor(() => {
-        expect(panel).toHaveAttribute('data-state', 'closed');
+        expect(panel).toHaveAttribute("data-state", "closed");
       });
     });
 
-    it('help approve calls updateIssueStatus with in_progress status', async () => {
+    it("help approve calls updateIssueStatus with in_progress status", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       // Help review: status=blocked, has notes
       const helpIssue = createMockIssue({
-        id: 'help-issue',
-        title: 'Help Review Issue',
-        status: 'blocked',
-        notes: 'I need help with this task',
+        id: "help-issue",
+        title: "Help Review Issue",
+        status: "blocked",
+        notes: "I need help with this task",
       });
       const mockReturn = createMockUseIssuesReturn({
         issues: [helpIssue],
@@ -2920,36 +3239,43 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
-            id: 'help-issue',
-            title: 'Help Review Issue',
+            id: "help-issue",
+            title: "Help Review Issue",
             priority: 2,
-            status: 'blocked',
-            notes: 'I need help with this task',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "blocked",
+            notes: "I need help with this task",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue card to open the panel (use aria-label to avoid duplicate text match)
-      const issueCard = screen.getByRole('button', { name: /Issue: Help Review Issue/ });
+      const issueCard = screen.getByRole("button", {
+        name: /Issue: Help Review Issue/,
+      });
       fireEvent.click(issueCard);
 
       // Panel should be open
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-state', 'open');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Click the approve button
-      const approveButton = screen.getByTestId('panel-approve-button');
+      const approveButton = screen.getByTestId("panel-approve-button");
       fireEvent.click(approveButton);
 
       await waitFor(() => {
         // Help approve should call updateIssueStatus with 'in_progress' (unblock)
         expect(updateIssueStatus).toHaveBeenCalledTimes(1);
-        expect(updateIssueStatus).toHaveBeenCalledWith('help-issue', 'in_progress');
+        expect(updateIssueStatus).toHaveBeenCalledWith(
+          "help-issue",
+          "in_progress",
+        );
       });
 
       // Should NOT call closeIssue for help review
@@ -2957,19 +3283,19 @@ describe('App', () => {
 
       // Panel should be closed after successful approve
       await waitFor(() => {
-        expect(panel).toHaveAttribute('data-state', 'closed');
+        expect(panel).toHaveAttribute("data-state", "closed");
       });
     });
 
-    it('code approve calls closeIssue and then refetch', async () => {
+    it("code approve calls closeIssue and then refetch", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       // Code review: status=review, external_ref is a PR URL
       const codeIssue = createMockIssue({
-        id: 'code-issue',
-        title: 'Code Review Issue',
-        status: 'review',
-        external_ref: 'https://github.com/org/repo/pull/42',
+        id: "code-issue",
+        title: "Code Review Issue",
+        status: "review",
+        external_ref: "https://github.com/org/repo/pull/42",
       });
       const mockReturn = createMockUseIssuesReturn({
         issues: [codeIssue],
@@ -2980,36 +3306,43 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
-            id: 'code-issue',
-            title: 'Code Review Issue',
+            id: "code-issue",
+            title: "Code Review Issue",
             priority: 2,
-            status: 'review',
-            external_ref: 'https://github.com/org/repo/pull/42',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "review",
+            external_ref: "https://github.com/org/repo/pull/42",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue card to open the panel (use aria-label to avoid duplicate text match)
-      const issueCard = screen.getByRole('button', { name: /Issue: Code Review Issue/ });
+      const issueCard = screen.getByRole("button", {
+        name: /Issue: Code Review Issue/,
+      });
       fireEvent.click(issueCard);
 
       // Panel should be open
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-state', 'open');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Click the approve button
-      const approveButton = screen.getByTestId('panel-approve-button');
+      const approveButton = screen.getByTestId("panel-approve-button");
       fireEvent.click(approveButton);
 
       await waitFor(() => {
         // Code approve should call closeIssue
         expect(mockCloseIssue).toHaveBeenCalledTimes(1);
-        expect(mockCloseIssue).toHaveBeenCalledWith('code-issue', 'PR approved after code review');
+        expect(mockCloseIssue).toHaveBeenCalledWith(
+          "code-issue",
+          "PR approved after code review",
+        );
       });
 
       // Should also call refetch after closeIssue
@@ -3022,18 +3355,18 @@ describe('App', () => {
 
       // Panel should be closed after successful approve
       await waitFor(() => {
-        expect(panel).toHaveAttribute('data-state', 'closed');
+        expect(panel).toHaveAttribute("data-state", "closed");
       });
     });
 
-    it('reject calls addComment, updateIssue, refetch and closes panel', async () => {
+    it("reject calls addComment, updateIssue, refetch and closes panel", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       // Plan review issue for reject test
       const reviewIssue = createMockIssue({
-        id: 'reject-issue',
-        title: 'Reject Review Issue',
-        status: 'review',
+        id: "reject-issue",
+        title: "Reject Review Issue",
+        status: "review",
       });
       const mockReturn = createMockUseIssuesReturn({
         issues: [reviewIssue],
@@ -3044,54 +3377,60 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
-            id: 'reject-issue',
-            title: 'Reject Review Issue',
+            id: "reject-issue",
+            title: "Reject Review Issue",
             priority: 2,
-            status: 'review',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "review",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue card to open the panel (use aria-label to avoid duplicate text match)
-      const issueCard = screen.getByRole('button', { name: /Issue: Reject Review Issue/ });
+      const issueCard = screen.getByRole("button", {
+        name: /Issue: Reject Review Issue/,
+      });
       fireEvent.click(issueCard);
 
       // Panel should be open
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-state', 'open');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Click the reject button to show the reject form
-      const rejectButton = screen.getByTestId('panel-reject-button');
+      const rejectButton = screen.getByTestId("panel-reject-button");
       fireEvent.click(rejectButton);
 
       // Fill in the reject comment
-      const textarea = screen.getByTestId('reject-textarea');
-      fireEvent.change(textarea, { target: { value: 'Needs more work on the design' } });
+      const textarea = screen.getByTestId("reject-textarea");
+      fireEvent.change(textarea, {
+        target: { value: "Needs more work on the design" },
+      });
 
       // Submit the reject form
-      const submitButton = screen.getByTestId('reject-submit');
+      const submitButton = screen.getByTestId("reject-submit");
       fireEvent.click(submitButton);
 
       await waitFor(() => {
         // Should call addComment with feedback prefix
         expect(mockAddComment).toHaveBeenCalledTimes(1);
         expect(mockAddComment).toHaveBeenCalledWith(
-          'reject-issue',
-          'FEEDBACK: Needs more work on the design'
+          "reject-issue",
+          "FEEDBACK: Needs more work on the design",
         );
       });
 
       await waitFor(() => {
         // Should call updateIssue with status open and needs-revision label
         expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-        expect(mockUpdateIssue).toHaveBeenCalledWith('reject-issue', {
-          status: 'open',
-          add_labels: ['needs-revision'],
+        expect(mockUpdateIssue).toHaveBeenCalledWith("reject-issue", {
+          status: "open",
+          add_labels: ["needs-revision"],
         });
       });
 
@@ -3102,19 +3441,19 @@ describe('App', () => {
 
       // Panel should be closed after successful reject
       await waitFor(() => {
-        expect(panel).toHaveAttribute('data-state', 'closed');
+        expect(panel).toHaveAttribute("data-state", "closed");
       });
     });
 
-    it('code review reject uses CODE REVIEW prefix in comment', async () => {
+    it("code review reject uses CODE REVIEW prefix in comment", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       // Code review issue for reject test
       const codeIssue = createMockIssue({
-        id: 'code-reject-issue',
-        title: 'Code Reject Issue',
-        status: 'review',
-        external_ref: 'https://github.com/org/repo/pull/99',
+        id: "code-reject-issue",
+        title: "Code Reject Issue",
+        status: "review",
+        external_ref: "https://github.com/org/repo/pull/99",
       });
       const mockReturn = createMockUseIssuesReturn({
         issues: [codeIssue],
@@ -3125,57 +3464,63 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
-            id: 'code-reject-issue',
-            title: 'Code Reject Issue',
+            id: "code-reject-issue",
+            title: "Code Reject Issue",
             priority: 2,
-            status: 'review',
-            external_ref: 'https://github.com/org/repo/pull/99',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "review",
+            external_ref: "https://github.com/org/repo/pull/99",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue card to open the panel (use aria-label to avoid duplicate text match)
-      const issueCard = screen.getByRole('button', { name: /Issue: Code Reject Issue/ });
+      const issueCard = screen.getByRole("button", {
+        name: /Issue: Code Reject Issue/,
+      });
       fireEvent.click(issueCard);
 
       // Panel should be open
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-state', 'open');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Click the reject button to show the reject form
-      const rejectButton = screen.getByTestId('panel-reject-button');
+      const rejectButton = screen.getByTestId("panel-reject-button");
       fireEvent.click(rejectButton);
 
       // Fill in the reject comment
-      const textarea = screen.getByTestId('reject-textarea');
-      fireEvent.change(textarea, { target: { value: 'Fix the lint errors' } });
+      const textarea = screen.getByTestId("reject-textarea");
+      fireEvent.change(textarea, { target: { value: "Fix the lint errors" } });
 
       // Submit the reject form
-      const submitButton = screen.getByTestId('reject-submit');
+      const submitButton = screen.getByTestId("reject-submit");
       fireEvent.click(submitButton);
 
       await waitFor(() => {
         // Should call addComment with CODE REVIEW prefix for code review type
         expect(mockAddComment).toHaveBeenCalledTimes(1);
         expect(mockAddComment).toHaveBeenCalledWith(
-          'code-reject-issue',
-          'CODE REVIEW: Fix the lint errors'
+          "code-reject-issue",
+          "CODE REVIEW: Fix the lint errors",
         );
       });
 
       // Panel should be closed after successful reject
       await waitFor(() => {
-        expect(panel).toHaveAttribute('data-state', 'closed');
+        expect(panel).toHaveAttribute("data-state", "closed");
       });
     });
 
-    it('approve shows error toast on failure without closing panel', async () => {
-      const updateIssueStatus = vi.fn().mockRejectedValue(new Error('Network error'));
+    it("approve shows error toast on failure without closing panel", async () => {
+      const updateIssueStatus = vi
+        .fn()
+        .mockRejectedValue(new Error("Network error"));
       const showToast = vi.fn();
       mockUseToast.mockReturnValue({
         toasts: [],
@@ -3184,9 +3529,9 @@ describe('App', () => {
         dismissAll: vi.fn(),
       });
       const planIssue = createMockIssue({
-        id: 'fail-issue',
-        title: 'Fail Approve Issue',
-        status: 'review',
+        id: "fail-issue",
+        title: "Fail Approve Issue",
+        status: "review",
       });
       const mockReturn = createMockUseIssuesReturn({
         issues: [planIssue],
@@ -3196,37 +3541,43 @@ describe('App', () => {
       vi.mocked(useIssueDetail).mockReturnValue(
         createMockUseIssueDetailReturn({
           issueDetails: {
-            id: 'fail-issue',
-            title: 'Fail Approve Issue',
+            id: "fail-issue",
+            title: "Fail Approve Issue",
             priority: 2,
-            status: 'review',
-            issue_type: 'task',
-            created_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            status: "review",
+            issue_type: "task",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
-        })
+        }),
       );
 
       const { container } = render(<App />);
 
       // Click on the issue card to open the panel (use aria-label to avoid duplicate text match)
-      const issueCard = screen.getByRole('button', { name: /Issue: Fail Approve Issue/ });
+      const issueCard = screen.getByRole("button", {
+        name: /Issue: Fail Approve Issue/,
+      });
       fireEvent.click(issueCard);
 
-      const panel = container.querySelector('[data-testid="issue-detail-panel"]');
-      expect(panel).toHaveAttribute('data-state', 'open');
+      const panel = container.querySelector(
+        '[data-testid="issue-detail-panel"]',
+      );
+      expect(panel).toHaveAttribute("data-state", "open");
 
       // Click the approve button
-      const approveButton = screen.getByTestId('panel-approve-button');
+      const approveButton = screen.getByTestId("panel-approve-button");
       fireEvent.click(approveButton);
 
       await waitFor(() => {
         // Should show error toast
-        expect(showToast).toHaveBeenCalledWith('Network error', { type: 'error' });
+        expect(showToast).toHaveBeenCalledWith("Network error", {
+          type: "error",
+        });
       });
 
       // Panel should remain open on failure
-      expect(panel).toHaveAttribute('data-state', 'open');
+      expect(panel).toHaveAttribute("data-state", "open");
     });
   });
 });

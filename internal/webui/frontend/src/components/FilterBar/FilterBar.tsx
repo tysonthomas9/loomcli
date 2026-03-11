@@ -4,12 +4,16 @@
  * Integrates with useFilterState hook for URL synchronization.
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from "react";
 
-import { type FilterState, type FilterActions, isEmptyFilter } from '@/hooks/useFilterState';
-import type { Priority, IssueType } from '@/types';
+import {
+  type FilterState,
+  type FilterActions,
+  isEmptyFilter,
+} from "@/hooks/useFilterState";
+import type { Priority, IssueType } from "@/types";
 
-import styles from './FilterBar.module.css';
+import styles from "./FilterBar.module.css";
 
 /**
  * Priority option for the dropdown.
@@ -26,12 +30,12 @@ interface PriorityOption {
  * Order: All, then P0-P4.
  */
 const PRIORITY_OPTIONS: PriorityOption[] = [
-  { label: 'All priorities', value: undefined },
-  { label: 'P0 (Critical)', value: 0 },
-  { label: 'P1 (High)', value: 1 },
-  { label: 'P2 (Medium)', value: 2 },
-  { label: 'P3 (Normal)', value: 3 },
-  { label: 'P4 (Backlog)', value: 4 },
+  { label: "All priorities", value: undefined },
+  { label: "P0 (Critical)", value: 0 },
+  { label: "P1 (High)", value: 1 },
+  { label: "P2 (Medium)", value: 2 },
+  { label: "P3 (Normal)", value: 3 },
+  { label: "P4 (Backlog)", value: 4 },
 ];
 
 /**
@@ -49,18 +53,24 @@ interface TypeOption {
  * Order: All, then known types in display order.
  */
 const TYPE_OPTIONS: TypeOption[] = [
-  { label: 'All types', value: undefined },
-  { label: 'Bug', value: 'bug' },
-  { label: 'Feature', value: 'feature' },
-  { label: 'Task', value: 'task' },
-  { label: 'Epic', value: 'epic' },
-  { label: 'Chore', value: 'chore' },
+  { label: "All types", value: undefined },
+  { label: "Bug", value: "bug" },
+  { label: "Feature", value: "feature" },
+  { label: "Task", value: "task" },
+  { label: "Epic", value: "epic" },
+  { label: "Chore", value: "chore" },
 ];
 
 /**
  * Group by option for swim lane grouping.
  */
-export type GroupByOption = 'none' | 'epic' | 'assignee' | 'priority' | 'type' | 'label';
+export type GroupByOption =
+  | "none"
+  | "epic"
+  | "assignee"
+  | "priority"
+  | "type"
+  | "label";
 
 /**
  * Group by option for the dropdown.
@@ -76,12 +86,12 @@ interface GroupByOptionItem {
  * Group by options for the dropdown.
  */
 const GROUP_BY_OPTIONS: GroupByOptionItem[] = [
-  { label: 'All', value: 'none' },
-  { label: 'Epic', value: 'epic' },
-  { label: 'Assignee', value: 'assignee' },
-  { label: 'Priority', value: 'priority' },
-  { label: 'Type', value: 'type' },
-  { label: 'Label', value: 'label' },
+  { label: "All", value: "none" },
+  { label: "Epic", value: "epic" },
+  { label: "Assignee", value: "assignee" },
+  { label: "Priority", value: "priority" },
+  { label: "Type", value: "type" },
+  { label: "Label", value: "label" },
 ];
 
 /**
@@ -111,7 +121,7 @@ export interface FilterBarProps {
   /** Show group-by selector (default: onGroupByChange is provided) */
   showGroupBy?: boolean;
   /** Visual variant */
-  variant?: 'header' | 'panel';
+  variant?: "header" | "panel";
   /** Testing id for the root element */
   testId?: string;
 }
@@ -137,8 +147,8 @@ export function FilterBar({
   showType = true,
   showLabels = true,
   showGroupBy,
-  variant = 'panel',
-  testId = 'filter-bar',
+  variant = "panel",
+  testId = "filter-bar",
 }: FilterBarProps): JSX.Element {
   const shouldShowGroupBy = showGroupBy ?? onGroupByChange !== undefined;
 
@@ -150,27 +160,27 @@ export function FilterBar({
   const handlePriorityChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const value = event.target.value;
-      if (value === '') {
+      if (value === "") {
         actions.setPriority(undefined);
       } else {
         const priority = parseInt(value, 10) as Priority;
         actions.setPriority(priority);
       }
     },
-    [actions]
+    [actions],
   );
 
   // Handle type change
   const handleTypeChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const value = event.target.value;
-      if (value === '') {
+      if (value === "") {
         actions.setType(undefined);
       } else {
         actions.setType(value as IssueType);
       }
     },
-    [actions]
+    [actions],
   );
 
   // Handle clear all
@@ -185,13 +195,17 @@ export function FilterBar({
   // Close dropdown on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (labelDropdownRef.current && !labelDropdownRef.current.contains(event.target as Node)) {
+      if (
+        labelDropdownRef.current &&
+        !labelDropdownRef.current.contains(event.target as Node)
+      ) {
         setLabelDropdownOpen(false);
       }
     }
     if (labelDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [labelDropdownOpen]);
 
@@ -204,7 +218,7 @@ export function FilterBar({
         : [...current, label];
       actions.setLabels(newLabels.length > 0 ? newLabels : undefined);
     },
-    [filters.labels, actions]
+    [filters.labels, actions],
   );
 
   // Toggle label dropdown
@@ -218,12 +232,12 @@ export function FilterBar({
       const value = event.target.value as GroupByOption;
       onGroupByChange?.(value);
     },
-    [onGroupByChange]
+    [onGroupByChange],
   );
 
   const rootClassName = [styles.filterBar, styles[variant], className]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
 
   return (
     <div className={rootClassName} data-testid={testId} data-variant={variant}>
@@ -236,13 +250,13 @@ export function FilterBar({
             <select
               id="priority-filter"
               className={styles.select}
-              value={filters.priority ?? ''}
+              value={filters.priority ?? ""}
               onChange={handlePriorityChange}
               aria-label="Filter by priority"
               data-testid="priority-filter"
             >
               {PRIORITY_OPTIONS.map((option) => (
-                <option key={option.value ?? 'all'} value={option.value ?? ''}>
+                <option key={option.value ?? "all"} value={option.value ?? ""}>
                   {option.label}
                 </option>
               ))}
@@ -258,13 +272,13 @@ export function FilterBar({
             <select
               id="type-filter"
               className={styles.select}
-              value={filters.type ?? ''}
+              value={filters.type ?? ""}
               onChange={handleTypeChange}
               aria-label="Filter by type"
               data-testid="type-filter"
             >
               {TYPE_OPTIONS.map((option) => (
-                <option key={option.value ?? 'all'} value={option.value ?? ''}>
+                <option key={option.value ?? "all"} value={option.value ?? ""}>
                   {option.label}
                 </option>
               ))}
@@ -288,7 +302,7 @@ export function FilterBar({
               >
                 {filters.labels && filters.labels.length > 0
                   ? `${filters.labels.length} selected`
-                  : 'All labels'}
+                  : "All labels"}
                 <span className={styles.dropdownArrow} aria-hidden="true">
                   ▼
                 </span>
@@ -329,7 +343,7 @@ export function FilterBar({
             <select
               id="groupby-filter"
               className={styles.select}
-              value={groupBy ?? 'none'}
+              value={groupBy ?? "none"}
               onChange={handleGroupByChange}
               aria-label="Group issues by"
               data-testid="groupby-filter"

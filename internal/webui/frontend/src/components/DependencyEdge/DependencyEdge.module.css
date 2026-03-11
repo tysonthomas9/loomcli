@@ -135,5 +135,9 @@
 .edgeLabel.highlighted {
   border-color: var(--color-blocked, #ef4444);
   color: var(--color-blocked, #ef4444);
-  background-color: color-mix(in srgb, var(--color-blocked) 10%, var(--color-bg));
+  background-color: color-mix(
+    in srgb,
+    var(--color-blocked) 10%,
+    var(--color-bg)
+  );
 }

@@ -3,29 +3,29 @@
  * Slide-out panel with an embedded xterm.js terminal connected via WebSocket.
  */
 
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import { Terminal } from '@xterm/xterm';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { Terminal } from "@xterm/xterm";
+import { useEffect, useRef, useState, useCallback } from "react";
 
-import { get, post } from '@/api/client';
+import { get, post } from "@/api/client";
 import {
   startAutoReconnect,
   DEFAULT_RECONNECT_CONFIG,
   type ReconnectState,
-} from '@/utils/reconnectBackoff';
+} from "@/utils/reconnectBackoff";
 
-import '@xterm/xterm/css/xterm.css';
-import styles from './TerminalPanel.module.css';
+import "@xterm/xterm/css/xterm.css";
+import styles from "./TerminalPanel.module.css";
 
 export interface TerminalPanelProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type ConnectionState = 'disconnected' | 'connecting' | 'connected';
+type ConnectionState = "disconnected" | "connecting" | "connected";
 
-const TERMINAL_SESSION = 'talk-to-lead';
+const TERMINAL_SESSION = "talk-to-lead";
 
 /**
  * Fetch a one-time terminal auth token from the server.
@@ -34,7 +34,7 @@ const TERMINAL_SESSION = 'talk-to-lead';
 async function fetchTerminalToken(): Promise<string | null> {
   try {
     const resp = await get<{ token: string }>(
-      `/api/terminal/token?session=${TERMINAL_SESSION}`
+      `/api/terminal/token?session=${TERMINAL_SESSION}`, // allow-url
     );
     return resp.token;
   } catch {
@@ -46,8 +46,8 @@ async function fetchTerminalToken(): Promise<string | null> {
  * Build the WebSocket URL for the terminal relay endpoint.
  */
 function buildWsUrl(token: string | null): string {
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${TERMINAL_SESSION}`;
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${TERMINAL_SESSION}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
   }
@@ -79,65 +79,70 @@ function connectWebSocket(
   setConnectionState: (s: ConnectionState) => void,
   setWasConnected: (v: boolean) => void,
   onConnected?: () => void,
-  onDisconnected?: () => void
+  onDisconnected?: () => void,
 ): () => void {
-  setConnectionState('connecting');
+  setConnectionState("connecting");
 
   let cancelled = false;
 
   // Fetch one-time token, then open WebSocket
-  fetchTerminalToken().then((token) => {
-    if (cancelled) return;
+  fetchTerminalToken()
+    .then((token) => {
+      if (cancelled) return;
 
-    const ws = new WebSocket(buildWsUrl(token));
-    wsRef.current = ws;
-    ws.binaryType = 'arraybuffer';
+      const ws = new WebSocket(buildWsUrl(token));
+      wsRef.current = ws;
+      ws.binaryType = "arraybuffer";
 
-    ws.onopen = () => {
-      setConnectionState('connected');
-      setWasConnected(true);
-      fitAddon.fit();
-      ws.send(encodeResize(terminal.cols, terminal.rows));
-      onConnected?.();
-    };
+      ws.onopen = () => {
+        setConnectionState("connected");
+        setWasConnected(true);
+        fitAddon.fit();
+        ws.send(encodeResize(terminal.cols, terminal.rows));
+        onConnected?.();
+      };
 
-    ws.onmessage = (ev: MessageEvent) => {
-      if (typeof ev.data === 'string') {
-        terminal.write(ev.data);
-      } else if (ev.data instanceof ArrayBuffer) {
-        terminal.write(new Uint8Array(ev.data));
-      }
-    };
+      ws.onmessage = (ev: MessageEvent) => {
+        if (typeof ev.data === "string") {
+          terminal.write(ev.data);
+        } else if (ev.data instanceof ArrayBuffer) {
+          terminal.write(new Uint8Array(ev.data));
+        }
+      };
 
-    ws.onclose = () => {
-      setConnectionState('disconnected');
-      onDisconnected?.();
-    };
+      ws.onclose = () => {
+        setConnectionState("disconnected");
+        onDisconnected?.();
+      };
 
-    ws.onerror = () => {
-      setConnectionState('disconnected');
-    };
+      ws.onerror = () => {
+        setConnectionState("disconnected");
+      };
 
-    const onDataDisposable = terminal.onData((data: string) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
+      const onDataDisposable = terminal.onData((data: string) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data);
+        }
+      });
+
+      // Store cleanup for the data listener so the outer cleanup can call it
+      wsCleanupInner = () => {
+        onDataDisposable.dispose();
+        if (
+          ws.readyState === WebSocket.OPEN ||
+          ws.readyState === WebSocket.CONNECTING
+        ) {
+          ws.close(1000);
+        }
+        wsRef.current = null;
+      };
+    })
+    .catch(() => {
+      if (!cancelled) {
+        setConnectionState("disconnected");
+        onDisconnected?.();
       }
     });
-
-    // Store cleanup for the data listener so the outer cleanup can call it
-    wsCleanupInner = () => {
-      onDataDisposable.dispose();
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close(1000);
-      }
-      wsRef.current = null;
-    };
-  }).catch(() => {
-    if (!cancelled) {
-      setConnectionState('disconnected');
-      onDisconnected?.();
-    }
-  });
 
   // Inner cleanup set by the async token fetch
   let wsCleanupInner: (() => void) | null = null;
@@ -160,7 +165,10 @@ function formatCountdown(nextRetryAt: number): string {
   return `${remaining}s`;
 }
 
-export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Element {
+export function TerminalPanel({
+  isOpen,
+  onClose,
+}: TerminalPanelProps): JSX.Element {
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -169,7 +177,8 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
   const reconnectCancelRef = useRef<(() => void) | null>(null);
   const panelRef = useRef<HTMLElement>(null);
 
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>("disconnected");
   const [wasConnected, setWasConnected] = useState(false);
   const [reconnectState, setReconnectState] = useState<ReconnectState>({
     attempt: 0,
@@ -217,9 +226,9 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
       scrollback: 5000,
       smoothScrollDuration: 120,
       theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
+        background: "#1e1e1e",
+        foreground: "#d4d4d4",
+        cursor: "#d4d4d4",
       },
     });
 
@@ -259,16 +268,13 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
         () => {
           // onDisconnected: start auto-reconnect if not already running
           if (!mounted || reconnectCancelRef.current) return;
-          const cancel = startAutoReconnect(
-            () => {
-              if (!mounted) return true; // stop loop if unmounted
-              doConnect();
-              return false; // async — success handled by onConnected
-            },
-            setReconnectState
-          );
+          const cancel = startAutoReconnect(() => {
+            if (!mounted) return true; // stop loop if unmounted
+            doConnect();
+            return false; // async — success handled by onConnected
+          }, setReconnectState);
           reconnectCancelRef.current = cancel;
-        }
+        },
       );
       wsCleanupRef.current = cleanup;
     }
@@ -286,7 +292,9 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
           fitAddonRef.current.fit();
           const currentWs = wsRef.current;
           if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-            currentWs.send(encodeResize(terminalRef.current.cols, terminalRef.current.rows));
+            currentWs.send(
+              encodeResize(terminalRef.current.cols, terminalRef.current.rows),
+            );
           }
         }
       }, 100);
@@ -310,7 +318,7 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
       terminalRef.current = null;
       fitAddonRef.current = null;
 
-      setConnectionState('disconnected');
+      setConnectionState("disconnected");
       setReconnectState({ attempt: 0, nextRetryAt: null, gaveUp: false });
     };
   }, [isOpen]);
@@ -343,15 +351,12 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
       () => {
         // onDisconnected: start auto-reconnect
         if (reconnectCancelRef.current) return;
-        const cancel = startAutoReconnect(
-          () => {
-            handleReconnect();
-            return false;
-          },
-          setReconnectState
-        );
+        const cancel = startAutoReconnect(() => {
+          handleReconnect();
+          return false;
+        }, setReconnectState);
         reconnectCancelRef.current = cancel;
-      }
+      },
     );
     wsCleanupRef.current = cleanupWs;
   }, []);
@@ -361,21 +366,23 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
     if (!isOpen) return;
 
     const handler = async () => {
-      setConnectionState('connecting');
+      setConnectionState("connecting");
       try {
         const tokenResp = await get<{ token: string }>(
-          `/api/terminal/token?session=${TERMINAL_SESSION}`
+          `/api/terminal/token?session=${TERMINAL_SESSION}`, // allow-url
         );
-        const token = tokenResp?.token ?? '';
-        await post(`/api/terminal/restart?session=${TERMINAL_SESSION}&token=${encodeURIComponent(token)}`, {});
+        const token = tokenResp?.token ?? "";
+        // prettier-ignore
+        await post(`/api/terminal/restart?session=${TERMINAL_SESSION}&token=${encodeURIComponent(token)}`, {}); // allow-url
       } catch {
         // Restart may fail if daemon unavailable; proceed with reconnect anyway
       }
       handleReconnect();
     };
 
-    window.addEventListener('terminal-backend-changed', handler);
-    return () => window.removeEventListener('terminal-backend-changed', handler);
+    window.addEventListener("terminal-backend-changed", handler);
+    return () =>
+      window.removeEventListener("terminal-backend-changed", handler);
   }, [isOpen, handleReconnect]);
 
   // Body scroll lock
@@ -383,7 +390,7 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
     if (!isOpen) return;
 
     const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
@@ -403,14 +410,16 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
         onClose();
       }
     },
-    [onClose]
+    [onClose],
   );
 
-  const overlayClass = `${styles.overlay}${isOpen ? ` ${styles.open}` : ''}`;
+  const overlayClass = `${styles.overlay}${isOpen ? ` ${styles.open}` : ""}`;
 
   // Determine reconnect overlay content
-  const showReconnectOverlay = connectionState === 'disconnected' && wasConnected;
-  const isAutoReconnecting = reconnectState.nextRetryAt !== null && !reconnectState.gaveUp;
+  const showReconnectOverlay =
+    connectionState === "disconnected" && wasConnected;
+  const isAutoReconnecting =
+    reconnectState.nextRetryAt !== null && !reconnectState.gaveUp;
 
   return (
     <div
@@ -444,13 +453,24 @@ export function TerminalPanel({ isOpen, onClose }: TerminalPanelProps): JSX.Elem
             &#x2715;
           </button>
         </header>
-        <div className={styles.terminalContainer} ref={termRef} data-testid="terminal-container">
+        <div
+          className={styles.terminalContainer}
+          ref={termRef}
+          data-testid="terminal-container"
+        >
           {showReconnectOverlay && (
-            <div className={styles.reconnectOverlay} data-testid="terminal-reconnect-overlay">
+            <div
+              className={styles.reconnectOverlay}
+              data-testid="terminal-reconnect-overlay"
+            >
               {isAutoReconnecting ? (
-                <p className={styles.reconnectStatus} data-testid="terminal-reconnect-status">
-                  Reconnecting in {countdown ?? '...'} (attempt{' '}
-                  {reconnectState.attempt + 1}/{DEFAULT_RECONNECT_CONFIG.maxAttempts})
+                <p
+                  className={styles.reconnectStatus}
+                  data-testid="terminal-reconnect-status"
+                >
+                  Reconnecting in {countdown ?? "..."} (attempt{" "}
+                  {reconnectState.attempt + 1}/
+                  {DEFAULT_RECONNECT_CONFIG.maxAttempts})
                 </p>
               ) : reconnectState.gaveUp ? (
                 <p>Could not reconnect</p>

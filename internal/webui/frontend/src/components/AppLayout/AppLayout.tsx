@@ -3,9 +3,9 @@
  * Provides a consistent structure with fixed header and main content area.
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
 
-import styles from './AppLayout.module.css';
+import styles from "./AppLayout.module.css";
 
 /**
  * Props for the AppLayout component.
@@ -38,10 +38,12 @@ export function AppLayout({
   navigation,
   actions,
   sidebar,
-  title = 'Beads',
+  title = "Beads",
   className,
 }: AppLayoutProps): JSX.Element {
-  const rootClassName = className ? `${styles.appLayout} ${className}` : styles.appLayout;
+  const rootClassName = className
+    ? `${styles.appLayout} ${className}`
+    : styles.appLayout;
 
   return (
     <div className={rootClassName}>

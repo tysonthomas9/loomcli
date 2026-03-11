@@ -4,19 +4,19 @@
  * Acts as a drop target for draggable IssueCards via @dnd-kit.
  */
 
-import { useDroppable } from '@dnd-kit/core';
-import type { ReactNode } from 'react';
+import { useDroppable } from "@dnd-kit/core";
+import type { ReactNode } from "react";
 
-import type { Status } from '@/types';
+import type { Status } from "@/types";
 
-import styles from './StatusColumn.module.css';
-import { formatStatusLabel } from './utils';
+import styles from "./StatusColumn.module.css";
+import { formatStatusLabel } from "@/utils/statusFormat";
 
 /**
  * Column type for visual variants (different from status value).
  * Allows same status to have different visual treatments.
  */
-export type ColumnType = 'ready' | 'backlog' | 'default';
+export type ColumnType = "ready" | "backlog" | "default";
 
 /**
  * Props for the StatusColumn component.
@@ -65,9 +65,11 @@ export function StatusColumn({
   });
 
   const displayLabel = statusLabel ?? formatStatusLabel(status);
-  const issueWord = count === 1 ? 'issue' : 'issues';
+  const issueWord = count === 1 ? "issue" : "issues";
 
-  const rootClassName = className ? `${styles.statusColumn} ${className}` : styles.statusColumn;
+  const rootClassName = className
+    ? `${styles.statusColumn} ${className}`
+    : styles.statusColumn;
 
   // Build content class with drop state
   // Note: isOver is only true during an active drag operation
@@ -81,13 +83,17 @@ export function StatusColumn({
       className={rootClassName}
       data-status={status}
       data-column-type={columnType}
-      data-has-items={count > 0 ? 'true' : undefined}
+      data-has-items={count > 0 ? "true" : undefined}
       aria-label={`${displayLabel} issues`}
     >
       <header className={styles.header}>
         <div className={styles.headerLabel}>
           {headerIcon && (
-            <span className={styles.columnIcon} aria-hidden="true" data-testid="status-column-icon">
+            <span
+              className={styles.columnIcon}
+              aria-hidden="true"
+              data-testid="status-column-icon"
+            >
               {headerIcon}
             </span>
           )}
@@ -99,14 +105,16 @@ export function StatusColumn({
       </header>
       <div
         ref={setNodeRef}
-        className={contentClasses.join(' ')}
+        className={contentClasses.join(" ")}
         role="list"
         data-droppable-id={status}
-        data-is-over={isOver ? 'true' : undefined}
+        data-is-over={isOver ? "true" : undefined}
       >
         {children}
       </div>
-      {footerAction && <footer className={styles.footer}>{footerAction}</footer>}
+      {footerAction && (
+        <footer className={styles.footer}>{footerAction}</footer>
+      )}
     </section>
   );
 }

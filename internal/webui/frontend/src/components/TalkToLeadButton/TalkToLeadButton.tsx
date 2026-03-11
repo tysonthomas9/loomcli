@@ -1,4 +1,4 @@
-import styles from './TalkToLeadButton.module.css';
+import styles from "./TalkToLeadButton.module.css";
 
 export interface TalkToLeadButtonProps {
   onClick?: () => void;
@@ -13,7 +13,7 @@ export function TalkToLeadButton({ onClick, isActive }: TalkToLeadButtonProps) {
       data-testid="talk-to-lead-button"
       aria-label="Talk to Lead"
       onClick={onClick}
-      data-active={isActive ? 'true' : undefined}
+      data-active={isActive ? "true" : undefined}
       aria-pressed={isActive}
     >
       <svg

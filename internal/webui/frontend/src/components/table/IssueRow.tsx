@@ -3,14 +3,14 @@
  * Encapsulates row rendering logic from IssueTable for better separation of concerns.
  */
 
-import type { KeyboardEvent, ChangeEvent, MouseEvent } from 'react';
+import type { KeyboardEvent, ChangeEvent, MouseEvent } from "react";
 
-import type { BlockedInfo } from '@/components/KanbanBoard';
-import type { Issue } from '@/types';
+import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { Issue } from "@/types";
 
-import { renderCellContent } from './cellRenderers';
-import type { ColumnDef } from './columns';
-import { getCellValue } from './columns';
+import { renderCellContent } from "./cellRenderers";
+import type { ColumnDef } from "./columns";
+import { getCellValue } from "./columns";
 
 /**
  * Props for IssueRow component.
@@ -32,7 +32,9 @@ export interface IssueRowProps<T extends Issue> {
   /** Whether to show checkbox column */
   showCheckbox?: boolean | undefined;
   /** Callback when checkbox state changes */
-  onSelectionChange?: ((issueId: string, selected: boolean) => void) | undefined;
+  onSelectionChange?:
+    | ((issueId: string, selected: boolean) => void)
+    | undefined;
   /** Whether this issue is blocked */
   isBlocked?: boolean | undefined;
   /** Blocked info for rendering the blocked cell */
@@ -62,7 +64,11 @@ export function IssueRow<T extends Issue>({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTableRowElement>) => {
-    if (isClickable && onClick && (event.key === 'Enter' || event.key === ' ')) {
+    if (
+      isClickable &&
+      onClick &&
+      (event.key === "Enter" || event.key === " ")
+    ) {
       event.preventDefault();
       onClick(issue);
     }
@@ -78,14 +84,14 @@ export function IssueRow<T extends Issue>({
   };
 
   const rowClassName = [
-    'issue-table__row',
-    isSelected ? 'issue-table__row--selected' : '',
-    isClickable ? 'issue-table__row--clickable' : '',
-    isBlocked ? 'issue-table__row--blocked' : '',
+    "issue-table__row",
+    isSelected ? "issue-table__row--selected" : "",
+    isClickable ? "issue-table__row--clickable" : "",
+    isBlocked ? "issue-table__row--blocked" : "",
     className,
   ]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
 
   return (
     <tr
@@ -97,7 +103,10 @@ export function IssueRow<T extends Issue>({
       data-testid={`issue-row-${issue.id}`}
     >
       {showCheckbox && (
-        <td className="issue-table__cell issue-table__cell--checkbox" onClick={handleCheckboxClick}>
+        <td
+          className="issue-table__cell issue-table__cell--checkbox"
+          onClick={handleCheckboxClick}
+        >
           <input
             type="checkbox"
             className="issue-table__checkbox"
@@ -113,7 +122,7 @@ export function IssueRow<T extends Issue>({
           <td
             key={column.id}
             className="issue-table__cell"
-            style={{ textAlign: column.align ?? 'left' }}
+            style={{ textAlign: column.align ?? "left" }}
             data-column={column.id}
           >
             {renderCellContent(column.id, value, issue, { blockedInfo })}

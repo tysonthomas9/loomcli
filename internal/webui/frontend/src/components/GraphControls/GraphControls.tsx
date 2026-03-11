@@ -4,19 +4,19 @@
  * that dims blocked and closed nodes, plus zoom controls (zoom in, zoom out, fit view).
  */
 
-import { useReactFlow } from '@xyflow/react';
-import { useCallback } from 'react';
+import { useReactFlow } from "@xyflow/react";
+import { useCallback } from "react";
 
-import { formatStatusLabel } from '@/components/StatusColumn/utils';
-import type { Status } from '@/types/status';
+import { formatStatusLabel } from "@/utils/statusFormat";
+import type { Status } from "@/types/status";
 
-import styles from './GraphControls.module.css';
+import styles from "./GraphControls.module.css";
 
 /**
  * Dependency type filter groups.
  * Groups multiple dependency types into user-friendly categories.
  */
-export type DependencyTypeGroup = 'blocking' | 'parent-child' | 'non-blocking';
+export type DependencyTypeGroup = "blocking" | "parent-child" | "non-blocking";
 
 /**
  * Status filter option for the dropdown.
@@ -25,7 +25,7 @@ interface StatusFilterOption {
   /** Display label */
   label: string;
   /** Value ('all' or a Status value) */
-  value: Status | 'all';
+  value: Status | "all";
 }
 
 /**
@@ -33,12 +33,12 @@ interface StatusFilterOption {
  * Order: All, then user-selectable statuses matching USER_SELECTABLE_STATUSES order.
  */
 const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
-  { label: 'All', value: 'all' },
-  { label: formatStatusLabel('open'), value: 'open' },
-  { label: formatStatusLabel('in_progress'), value: 'in_progress' },
-  { label: formatStatusLabel('blocked'), value: 'blocked' },
-  { label: formatStatusLabel('deferred'), value: 'deferred' },
-  { label: formatStatusLabel('closed'), value: 'closed' },
+  { label: "All", value: "all" },
+  { label: formatStatusLabel("open"), value: "open" },
+  { label: formatStatusLabel("in_progress"), value: "in_progress" },
+  { label: formatStatusLabel("blocked"), value: "blocked" },
+  { label: formatStatusLabel("deferred"), value: "deferred" },
+  { label: formatStatusLabel("closed"), value: "closed" },
 ];
 
 /**
@@ -58,9 +58,9 @@ export interface GraphControlsProps {
   /** Callback when show closed toggle is changed */
   onShowClosedChange?: (value: boolean) => void;
   /** Current status filter value */
-  statusFilter?: Status | 'all';
+  statusFilter?: Status | "all";
   /** Callback when status filter changes */
-  onStatusFilterChange?: (value: Status | 'all') => void;
+  onStatusFilterChange?: (value: Status | "all") => void;
   /** Current dependency type filter (set of enabled groups) */
   dependencyTypeFilter?: Set<DependencyTypeGroup>;
   /** Callback when dependency type filter changes */
@@ -123,29 +123,29 @@ export function GraphControls({
     (event: React.ChangeEvent<HTMLInputElement>) => {
       onHighlightReadyChange(event.target.checked);
     },
-    [onHighlightReadyChange]
+    [onHighlightReadyChange],
   );
 
   const handleShowBlockedOnlyChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       onShowBlockedOnlyChange?.(event.target.checked);
     },
-    [onShowBlockedOnlyChange]
+    [onShowBlockedOnlyChange],
   );
 
   const handleShowClosedChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       onShowClosedChange?.(event.target.checked);
     },
-    [onShowClosedChange]
+    [onShowClosedChange],
   );
 
   const handleStatusFilterChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
-      const value = event.target.value as Status | 'all';
+      const value = event.target.value as Status | "all";
       onStatusFilterChange?.(value);
     },
-    [onStatusFilterChange]
+    [onStatusFilterChange],
   );
 
   const handleDependencyTypeChange = useCallback(
@@ -159,7 +159,7 @@ export function GraphControls({
       }
       onDependencyTypeFilterChange(newFilter);
     },
-    [onDependencyTypeFilterChange, dependencyTypeFilter]
+    [onDependencyTypeFilterChange, dependencyTypeFilter],
   );
 
   const handleZoomIn = useCallback(() => {
@@ -174,7 +174,9 @@ export function GraphControls({
     fitView({ duration: 200, padding: 0.2 });
   }, [fitView]);
 
-  const rootClassName = className ? `${styles.graphControls} ${className}` : styles.graphControls;
+  const rootClassName = className
+    ? `${styles.graphControls} ${className}`
+    : styles.graphControls;
 
   return (
     <div className={rootClassName} data-testid="graph-controls">
@@ -186,7 +188,7 @@ export function GraphControls({
           <select
             id="status-filter"
             className={styles.statusSelect}
-            value={statusFilter ?? 'all'}
+            value={statusFilter ?? "all"}
             onChange={handleStatusFilterChange}
             disabled={disabled}
             aria-label="Filter by status"
@@ -208,8 +210,10 @@ export function GraphControls({
             <label className={styles.depTypeLabel}>
               <input
                 type="checkbox"
-                checked={dependencyTypeFilter.has('blocking')}
-                onChange={(e) => handleDependencyTypeChange('blocking', e.target.checked)}
+                checked={dependencyTypeFilter.has("blocking")}
+                onChange={(e) =>
+                  handleDependencyTypeChange("blocking", e.target.checked)
+                }
                 disabled={disabled}
                 className={styles.depTypeCheckbox}
                 data-testid="dep-type-blocking"
@@ -219,8 +223,10 @@ export function GraphControls({
             <label className={styles.depTypeLabel}>
               <input
                 type="checkbox"
-                checked={dependencyTypeFilter.has('parent-child')}
-                onChange={(e) => handleDependencyTypeChange('parent-child', e.target.checked)}
+                checked={dependencyTypeFilter.has("parent-child")}
+                onChange={(e) =>
+                  handleDependencyTypeChange("parent-child", e.target.checked)
+                }
                 disabled={disabled}
                 className={styles.depTypeCheckbox}
                 data-testid="dep-type-parent-child"
@@ -230,8 +236,10 @@ export function GraphControls({
             <label className={styles.depTypeLabel}>
               <input
                 type="checkbox"
-                checked={dependencyTypeFilter.has('non-blocking')}
-                onChange={(e) => handleDependencyTypeChange('non-blocking', e.target.checked)}
+                checked={dependencyTypeFilter.has("non-blocking")}
+                onChange={(e) =>
+                  handleDependencyTypeChange("non-blocking", e.target.checked)
+                }
                 disabled={disabled}
                 className={styles.depTypeCheckbox}
                 data-testid="dep-type-non-blocking"
@@ -242,7 +250,10 @@ export function GraphControls({
         </div>
       )}
 
-      <label className={styles.toggleLabel} title={disabled ? disabledTitle : undefined}>
+      <label
+        className={styles.toggleLabel}
+        title={disabled ? disabledTitle : undefined}
+      >
         <input
           type="checkbox"
           checked={highlightReady}
@@ -256,7 +267,10 @@ export function GraphControls({
       </label>
 
       {onShowBlockedOnlyChange && (
-        <label className={styles.toggleLabel} title={disabled ? disabledTitle : undefined}>
+        <label
+          className={styles.toggleLabel}
+          title={disabled ? disabledTitle : undefined}
+        >
           <input
             type="checkbox"
             checked={showBlockedOnly}
@@ -271,7 +285,10 @@ export function GraphControls({
       )}
 
       {onShowClosedChange && (
-        <label className={styles.toggleLabel} title={disabled ? disabledTitle : undefined}>
+        <label
+          className={styles.toggleLabel}
+          title={disabled ? disabledTitle : undefined}
+        >
           <input
             type="checkbox"
             checked={showClosed ?? true}
@@ -288,7 +305,11 @@ export function GraphControls({
       {showZoomControls && (
         <>
           <div className={styles.divider} aria-hidden="true" />
-          <div className={styles.zoomControls} role="group" aria-label="Zoom controls">
+          <div
+            className={styles.zoomControls}
+            role="group"
+            aria-label="Zoom controls"
+          >
             <button
               type="button"
               onClick={handleZoomIn}

@@ -5,15 +5,15 @@
  * and markdown rendering for design field.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from "react";
 
 import {
   updateIssue,
   addDependency,
   removeDependency,
   getTaskLogPhases,
-} from '@/api';
-import { useTaskLogPolling } from '@/hooks';
+} from "@/api";
+import { useTaskLogPolling } from "@/hooks";
 import type {
   Issue,
   IssueDetails,
@@ -22,22 +22,22 @@ import type {
   IssueType,
   DependencyType,
   Comment,
-} from '@/types';
-import type { Status } from '@/types/status';
-import { getReviewType } from '@/utils/issueCategory';
+} from "@/types";
+import type { Status } from "@/types/status";
+import { getReviewType } from "@/utils/issueCategory";
 
-import { CommentForm } from './CommentForm';
-import { CommentsSection } from './CommentsSection';
-import { DependencySection } from './DependencySection';
-import { EditableDescription } from './EditableDescription';
-import { IssueHeader } from './IssueHeader';
-import { MarkdownRenderer } from './MarkdownRenderer';
-import { PriorityDropdown } from './PriorityDropdown';
-import { RejectCommentForm } from './RejectCommentForm';
-import { TypeDropdown } from './TypeDropdown';
-import { ErrorToast } from '../ErrorToast';
-import { LogViewer } from '../LogViewer';
-import styles from './IssueDetailPanel.module.css';
+import { CommentForm } from "./CommentForm";
+import { CommentsSection } from "./CommentsSection";
+import { DependencySection } from "./DependencySection";
+import { EditableDescription } from "./EditableDescription";
+import { IssueHeader } from "./IssueHeader";
+import { MarkdownRenderer } from "./MarkdownRenderer";
+import { PriorityDropdown } from "./PriorityDropdown";
+import { RejectCommentForm } from "./RejectCommentForm";
+import { TypeDropdown } from "./TypeDropdown";
+import { ErrorToast } from "../ErrorToast";
+import { LogViewer } from "../LogViewer";
+import styles from "./IssueDetailPanel.module.css";
 
 /**
  * Props for CollapsibleSection.
@@ -72,10 +72,12 @@ function CollapsibleSection({
       >
         <span className={styles.collapsibleTitle}>
           {title}
-          {count !== undefined && <span className={styles.collapsibleCount}>({count})</span>}
+          {count !== undefined && (
+            <span className={styles.collapsibleCount}>({count})</span>
+          )}
         </span>
         <svg
-          className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ''}`}
+          className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ""}`}
           viewBox="0 0 16 16"
           fill="none"
           aria-hidden="true"
@@ -89,7 +91,9 @@ function CollapsibleSection({
           />
         </svg>
       </button>
-      {isExpanded && <div className={styles.collapsibleContent}>{children}</div>}
+      {isExpanded && (
+        <div className={styles.collapsibleContent}>{children}</div>
+      )}
     </section>
   );
 }
@@ -103,12 +107,19 @@ interface BlockingBannerProps {
   status: Status | undefined;
 }
 
-function BlockingBanner({ openBlockerCount, status }: BlockingBannerProps): JSX.Element | null {
+function BlockingBanner({
+  openBlockerCount,
+  status,
+}: BlockingBannerProps): JSX.Element | null {
   // Only show banner when status is 'blocked' AND there are open blockers
-  if (status !== 'blocked' || openBlockerCount === 0) return null;
+  if (status !== "blocked" || openBlockerCount === 0) return null;
 
   return (
-    <div className={styles.blockingBanner} role="alert" data-testid="blocking-banner">
+    <div
+      className={styles.blockingBanner}
+      role="alert"
+      data-testid="blocking-banner"
+    >
       <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <path
           d="M8 1L1 15h14L8 1z"
@@ -117,9 +128,15 @@ function BlockingBanner({ openBlockerCount, status }: BlockingBannerProps): JSX.
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        <path d="M8 6v3M8 11.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        <path
+          d="M8 6v3M8 11.5v.5"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
       </svg>
-      Blocked by {openBlockerCount} {openBlockerCount === 1 ? 'issue' : 'issues'}
+      Blocked by {openBlockerCount}{" "}
+      {openBlockerCount === 1 ? "issue" : "issues"}
     </div>
   );
 }
@@ -128,11 +145,11 @@ function BlockingBanner({ openBlockerCount, status }: BlockingBannerProps): JSX.
  * Format issue type for display.
  */
 function formatIssueType(type: IssueType | undefined): string {
-  if (!type) return 'Task';
-  if (type === 'epic') return 'Epic';
-  if (type === 'task') return 'Task';
-  if (type === 'bug') return 'Bug';
-  if (type === 'feature') return 'Feature';
+  if (!type) return "Task";
+  if (type === "epic") return "Epic";
+  if (type === "task") return "Task";
+  if (type === "bug") return "Bug";
+  if (type === "feature") return "Feature";
   return type;
 }
 
@@ -141,10 +158,10 @@ function formatIssueType(type: IssueType | undefined): string {
  */
 function formatDate(dateString: string): string {
   const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   });
 }
 
@@ -181,19 +198,23 @@ export interface IssueDetailPanelProps {
 function isIssueDetails(issue: Issue | IssueDetails): issue is IssueDetails {
   // Check for any IssueDetails-specific field that the backend includes
   // Comments is always present in /api/issues/{id} responses
-  return 'dependents' in issue || 'dependencies' in issue || 'comments' in issue;
+  return (
+    "dependents" in issue || "dependencies" in issue || "comments" in issue
+  );
 }
 
 /**
  * Render a dependency/dependent issue link.
  */
 function renderDependencyItem(dep: IssueWithDependencyMetadata): JSX.Element {
-  const statusClass = dep.status === 'closed' ? styles.dependencyClosed : '';
+  const statusClass = dep.status === "closed" ? styles.dependencyClosed : "";
   return (
     <li key={dep.id} className={`${styles.dependencyItem} ${statusClass}`}>
       <span className={styles.dependencyId}>{dep.id}</span>
       <span className={styles.dependencyTitle}>{dep.title}</span>
-      {dep.dependency_type && <span className={styles.dependencyType}>{dep.dependency_type}</span>}
+      {dep.dependency_type && (
+        <span className={styles.dependencyType}>{dep.dependency_type}</span>
+      )}
     </li>
   );
 }
@@ -245,18 +266,18 @@ function DefaultContent({
   const [rejectError, setRejectError] = useState<string | null>(null);
 
   // Log tab state (only for task-type issues)
-  type LogTabType = 'details' | 'planning' | 'implementation';
-  const [activeLogTab, setActiveLogTab] = useState<LogTabType>('details');
+  type LogTabType = "details" | "planning" | "implementation";
+  const [activeLogTab, setActiveLogTab] = useState<LogTabType>("details");
   const [availablePhases, setAvailablePhases] = useState<string[]>([]);
 
   // Check if this is a task-type issue (log tabs only apply to tasks)
-  const isTaskType = issue?.issue_type === 'task';
+  const isTaskType = issue?.issue_type === "task";
 
   // Fetch available log phases when issue changes
   useEffect(() => {
     if (!issue || !isTaskType) {
       setAvailablePhases([]);
-      setActiveLogTab('details');
+      setActiveLogTab("details");
       return;
     }
 
@@ -282,15 +303,18 @@ function DefaultContent({
 
   // Reset tab when issue changes
   useEffect(() => {
-    setActiveLogTab('details');
+    setActiveLogTab("details");
   }, [issue?.id]);
 
   // Determine which log URL to connect to
   const shouldConnectToLogs =
     isTaskType &&
-    ((activeLogTab === 'planning' && !issue?.design) || activeLogTab === 'implementation');
-  const activeLogPhase: 'planning' | 'implementation' | null =
-    issue && shouldConnectToLogs ? (activeLogTab as 'planning' | 'implementation') : null;
+    ((activeLogTab === "planning" && !issue?.design) ||
+      activeLogTab === "implementation");
+  const activeLogPhase: "planning" | "implementation" | null =
+    issue && shouldConnectToLogs
+      ? (activeLogTab as "planning" | "implementation")
+      : null;
 
   // Task log snapshot polling hook
   const {
@@ -307,7 +331,9 @@ function DefaultContent({
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);
   const initialComments = hasDetails ? issue.comments : undefined;
-  const [localComments, setLocalComments] = useState<Comment[] | undefined>(initialComments);
+  const [localComments, setLocalComments] = useState<Comment[] | undefined>(
+    initialComments,
+  );
 
   // Sync local comments when issue changes (e.g., different issue selected)
   useEffect(() => {
@@ -338,7 +364,7 @@ function DefaultContent({
         setIsSavingTitle(false);
       }
     },
-    [issue, onIssueUpdate]
+    [issue, onIssueUpdate],
   );
 
   const handleStatusChange = useCallback(
@@ -351,13 +377,14 @@ function DefaultContent({
         const updatedIssue = await updateIssue(issue.id, { status: newStatus });
         onIssueUpdate?.(updatedIssue);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to update status';
+        const message =
+          err instanceof Error ? err.message : "Failed to update status";
         setStatusError(message);
       } finally {
         setIsSavingStatus(false);
       }
     },
-    [issue, onIssueUpdate]
+    [issue, onIssueUpdate],
   );
 
   const handlePrioritySave = useCallback(
@@ -366,13 +393,15 @@ function DefaultContent({
 
       setIsSavingPriority(true);
       try {
-        const updatedIssue = await updateIssue(issue.id, { priority: newPriority });
+        const updatedIssue = await updateIssue(issue.id, {
+          priority: newPriority,
+        });
         onIssueUpdate?.(updatedIssue);
       } finally {
         setIsSavingPriority(false);
       }
     },
-    [issue, onIssueUpdate]
+    [issue, onIssueUpdate],
   );
 
   const handleTypeSave = useCallback(
@@ -381,13 +410,15 @@ function DefaultContent({
 
       setIsSavingType(true);
       try {
-        const updatedIssue = await updateIssue(issue.id, { issue_type: newType });
+        const updatedIssue = await updateIssue(issue.id, {
+          issue_type: newType,
+        });
         onIssueUpdate?.(updatedIssue);
       } finally {
         setIsSavingType(false);
       }
     },
-    [issue, onIssueUpdate]
+    [issue, onIssueUpdate],
   );
 
   const handleAddDependency = useCallback(
@@ -396,7 +427,7 @@ function DefaultContent({
       await addDependency(issue.id, dependsOnId, type);
       // The parent component should refresh issue details via SSE or manual refetch
     },
-    [issue]
+    [issue],
   );
 
   const handleRemoveDependency = useCallback(
@@ -405,7 +436,7 @@ function DefaultContent({
       await removeDependency(issue.id, dependsOnId);
       // The parent component should refresh issue details via SSE or manual refetch
     },
-    [issue]
+    [issue],
   );
 
   // Approve handler
@@ -443,11 +474,11 @@ function DefaultContent({
         // On success, panel will update via status change
       } catch (err) {
         setIsRejecting(false);
-        const message = err instanceof Error ? err.message : 'Failed to reject';
+        const message = err instanceof Error ? err.message : "Failed to reject";
         setRejectError(message);
       }
     },
-    [issue, onReject, isRejecting]
+    [issue, onReject, isRejecting],
   );
 
   // Reset reject form state when issue changes
@@ -500,15 +531,17 @@ function DefaultContent({
   const isReviewItem = reviewType !== null;
 
   // Calculate open blocker count for banner
-  const openBlockerCount = dependencies?.filter((d) => d.status !== 'closed').length ?? 0;
+  const openBlockerCount =
+    dependencies?.filter((d) => d.status !== "closed").length ?? 0;
 
   // Auto-collapse logic for Design/Notes (collapse if long, but keep expanded for review items)
   const shouldCollapseDesign =
     !isReviewItem &&
     issue.design &&
-    (issue.design.length > 200 || issue.design.split('\n').length > 5);
+    (issue.design.length > 200 || issue.design.split("\n").length > 5);
   const shouldCollapseNotes =
-    issue.notes && (issue.notes.length > 200 || issue.notes.split('\n').length > 5);
+    issue.notes &&
+    (issue.notes.length > 200 || issue.notes.split("\n").length > 5);
 
   return (
     <>
@@ -544,7 +577,13 @@ function DefaultContent({
           {issue.owner && (
             <span className={styles.metadataItem} data-testid="metadata-owner">
               <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle cx="8" cy="5" r="3" stroke="currentColor" strokeWidth="1.5" />
+                <circle
+                  cx="8"
+                  cy="5"
+                  r="3"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
                 <path
                   d="M2 14c0-2.5 2.5-4 6-4s6 1.5 6 4"
                   stroke="currentColor"
@@ -556,9 +595,18 @@ function DefaultContent({
             </span>
           )}
           {issue.assignee && (
-            <span className={styles.metadataItem} data-testid="metadata-assignee">
+            <span
+              className={styles.metadataItem}
+              data-testid="metadata-assignee"
+            >
               <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle cx="8" cy="5" r="3" stroke="currentColor" strokeWidth="1.5" />
+                <circle
+                  cx="8"
+                  cy="5"
+                  r="3"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
                 <path
                   d="M2 14c0-2.5 2.5-4 6-4s6 1.5 6 4"
                   stroke="currentColor"
@@ -570,7 +618,10 @@ function DefaultContent({
             </span>
           )}
           {issue.created_at && (
-            <span className={styles.metadataItem} data-testid="metadata-created">
+            <span
+              className={styles.metadataItem}
+              data-testid="metadata-created"
+            >
               Created: {formatDate(issue.created_at)}
             </span>
           )}
@@ -588,7 +639,7 @@ function DefaultContent({
             aria-label="Approve"
             data-testid="panel-approve-button"
           >
-            {isApproving ? '...' : '\u2713'} Approve
+            {isApproving ? "..." : "\u2713"} Approve
           </button>
           <button
             type="button"
@@ -597,7 +648,7 @@ function DefaultContent({
             aria-label="Reject"
             data-testid="panel-reject-button"
           >
-            {'\u2717'} Reject
+            {"\u2717"} Reject
           </button>
         </div>
       )}
@@ -614,47 +665,51 @@ function DefaultContent({
       )}
 
       {/* Blocking Banner */}
-      <BlockingBanner openBlockerCount={openBlockerCount} status={issue.status} />
+      <BlockingBanner
+        openBlockerCount={openBlockerCount}
+        status={issue.status}
+      />
 
       {/* Log Tab Bar (only for task-type issues with available phases) */}
-      {isTaskType && (availablePhases.length > 0 || activeLogTab !== 'details') && (
-        <div className={styles.logTabBar}>
-          <button
-            type="button"
-            className={`${styles.logTab} ${activeLogTab === 'details' ? styles.activeLogTab : ''}`}
-            onClick={() => setActiveLogTab('details')}
-            aria-selected={activeLogTab === 'details'}
-            role="tab"
-          >
-            Details
-          </button>
-          {availablePhases.includes('planning') && (
+      {isTaskType &&
+        (availablePhases.length > 0 || activeLogTab !== "details") && (
+          <div className={styles.logTabBar}>
             <button
               type="button"
-              className={`${styles.logTab} ${activeLogTab === 'planning' ? styles.activeLogTab : ''}`}
-              onClick={() => setActiveLogTab('planning')}
-              aria-selected={activeLogTab === 'planning'}
+              className={`${styles.logTab} ${activeLogTab === "details" ? styles.activeLogTab : ""}`}
+              onClick={() => setActiveLogTab("details")}
+              aria-selected={activeLogTab === "details"}
               role="tab"
             >
-              Planning
+              Details
             </button>
-          )}
-          {availablePhases.includes('implementation') && (
-            <button
-              type="button"
-              className={`${styles.logTab} ${activeLogTab === 'implementation' ? styles.activeLogTab : ''}`}
-              onClick={() => setActiveLogTab('implementation')}
-              aria-selected={activeLogTab === 'implementation'}
-              role="tab"
-            >
-              Implementation
-            </button>
-          )}
-        </div>
-      )}
+            {availablePhases.includes("planning") && (
+              <button
+                type="button"
+                className={`${styles.logTab} ${activeLogTab === "planning" ? styles.activeLogTab : ""}`}
+                onClick={() => setActiveLogTab("planning")}
+                aria-selected={activeLogTab === "planning"}
+                role="tab"
+              >
+                Planning
+              </button>
+            )}
+            {availablePhases.includes("implementation") && (
+              <button
+                type="button"
+                className={`${styles.logTab} ${activeLogTab === "implementation" ? styles.activeLogTab : ""}`}
+                onClick={() => setActiveLogTab("implementation")}
+                aria-selected={activeLogTab === "implementation"}
+                role="tab"
+              >
+                Implementation
+              </button>
+            )}
+          </div>
+        )}
 
       {/* Planning tab with design content (shown when design field exists) */}
-      {activeLogTab === 'planning' && issue?.design ? (
+      {activeLogTab === "planning" && issue?.design ? (
         <div className={styles.scrollableContent}>
           <div className={styles.detailContent}>
             <MarkdownRenderer content={issue.design} />
@@ -723,7 +778,9 @@ function DefaultContent({
                   {/* Dependents (this issue blocks) */}
                   {dependents && dependents.length > 0 && (
                     <section className={styles.section}>
-                      <h3 className={styles.sectionTitle}>Blocks ({dependents.length})</h3>
+                      <h3 className={styles.sectionTitle}>
+                        Blocks ({dependents.length})
+                      </h3>
                       <ul className={styles.dependencyList}>
                         {dependents.map(renderDependencyItem)}
                       </ul>
@@ -732,7 +789,10 @@ function DefaultContent({
 
                   {/* Comments */}
                   <CommentsSection comments={localComments} />
-                  <CommentForm issueId={issue.id} onCommentAdded={handleCommentAdded} />
+                  <CommentForm
+                    issueId={issue.id}
+                    onCommentAdded={handleCommentAdded}
+                  />
 
                   {/* Labels */}
                   {issue.labels && issue.labels.length > 0 && (
@@ -835,14 +895,21 @@ function DefaultContent({
               {/* Dependents (this issue blocks) */}
               {dependents && dependents.length > 0 && (
                 <section className={styles.section}>
-                  <h3 className={styles.sectionTitle}>Blocks ({dependents.length})</h3>
-                  <ul className={styles.dependencyList}>{dependents.map(renderDependencyItem)}</ul>
+                  <h3 className={styles.sectionTitle}>
+                    Blocks ({dependents.length})
+                  </h3>
+                  <ul className={styles.dependencyList}>
+                    {dependents.map(renderDependencyItem)}
+                  </ul>
                 </section>
               )}
 
               {/* Comments */}
               <CommentsSection comments={localComments} />
-              <CommentForm issueId={issue.id} onCommentAdded={handleCommentAdded} />
+              <CommentForm
+                issueId={issue.id}
+                onCommentAdded={handleCommentAdded}
+              />
 
               {/* Labels */}
               {issue.labels && issue.labels.length > 0 && (
@@ -914,7 +981,7 @@ export function IssueDetailPanel({
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         if (isFullscreen) {
           setIsFullscreen(false);
         } else {
@@ -923,8 +990,8 @@ export function IssueDetailPanel({
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, isFullscreen, onClose]);
 
   // Lock body scroll when open, restoring previous value on close.
@@ -933,7 +1000,7 @@ export function IssueDetailPanel({
   useEffect(() => {
     if (isOpen) {
       const previousOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
+      document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = previousOverflow;
       };
@@ -947,7 +1014,11 @@ export function IssueDetailPanel({
       panelRef.current.focus();
       return () => {
         // Check element is still in DOM before restoring focus (could be unmounted)
-        if (previouslyFocused && document.contains(previouslyFocused) && previouslyFocused.focus) {
+        if (
+          previouslyFocused &&
+          document.contains(previouslyFocused) &&
+          previouslyFocused.focus
+        ) {
           previouslyFocused.focus();
         }
       };
@@ -962,7 +1033,7 @@ export function IssueDetailPanel({
     className,
   ]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
 
   // Determine content: children override default, otherwise render default content
   const content = children ?? (
@@ -991,12 +1062,12 @@ export function IssueDetailPanel({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={issue ? `Details for ${issue.title}` : 'Issue details'}
+        aria-label={issue ? `Details for ${issue.title}` : "Issue details"}
         tabIndex={-1}
         data-testid="issue-detail-panel"
-        data-state={isOpen ? 'open' : 'closed'}
-        data-loading={isLoading ? 'true' : 'false'}
-        data-error={error ? 'true' : 'false'}
+        data-state={isOpen ? "open" : "closed"}
+        data-loading={isLoading ? "true" : "false"}
+        data-error={error ? "true" : "false"}
       >
         <div className={styles.content}>{content}</div>
       </aside>

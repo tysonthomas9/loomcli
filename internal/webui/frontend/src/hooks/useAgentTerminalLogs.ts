@@ -1,16 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   getAgentLogArchive,
   getAgentTerminalInfo,
   getAgentTerminalToken,
   getAgentTerminalWsUrl,
-} from '@/api';
-import { calculateBackoffDelay, DEFAULT_RECONNECT_CONFIG } from '@/utils/reconnectBackoff';
+} from "@/api";
+import {
+  calculateBackoffDelay,
+  DEFAULT_RECONNECT_CONFIG,
+} from "@/utils/reconnectBackoff";
 
-import type { LogChunk, LogStreamState } from './logTypes';
+import type { LogChunk, LogStreamState } from "./logTypes";
 
-export type AgentLogTransportMode = 'idle' | 'loading' | 'tmux' | 'archive';
+export type AgentLogTransportMode = "idle" | "loading" | "tmux" | "archive";
 
 export interface UseAgentTerminalLogsOptions {
   agentName: string | null;
@@ -55,9 +58,9 @@ export function useAgentTerminalLogs({
   enabled,
   archiveLines = 500,
 }: UseAgentTerminalLogsOptions): UseAgentTerminalLogsReturn {
-  const [mode, setMode] = useState<AgentLogTransportMode>('idle');
+  const [mode, setMode] = useState<AgentLogTransportMode>("idle");
   const [chunks, setChunks] = useState<LogChunk[]>([]);
-  const [state, setState] = useState<LogStreamState>('disconnected');
+  const [state, setState] = useState<LogStreamState>("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [resetVersion, setResetVersion] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
@@ -69,7 +72,9 @@ export function useAgentTerminalLogs({
   const pendingSizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
-  const archiveProbeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const archiveProbeTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
   const archiveProbeInFlightRef = useRef(false);
   const runIdRef = useRef(0);
   const isLoadingMoreRef = useRef(false);
@@ -78,11 +83,15 @@ export function useAgentTerminalLogs({
   const allLinesRef = useRef<string[]>([]);
   const oldestLineRef = useRef<number>(Infinity);
   const agentNameRef = useRef(agentName);
-  useEffect(() => { agentNameRef.current = agentName; }, [agentName]);
+  useEffect(() => {
+    agentNameRef.current = agentName;
+  }, [agentName]);
   const modeRef = useRef(mode);
-  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
-  const hasMoreLines = oldestLineRef.current > 1 && mode === 'archive';
+  const hasMoreLines = oldestLineRef.current > 1 && mode === "archive";
 
   const resize = useCallback((cols: number, rows: number) => {
     const safeCols = clampTerminalSize(cols, 1, 500);
@@ -112,7 +121,7 @@ export function useAgentTerminalLogs({
     const currentAgent = agentNameRef.current;
     if (
       !currentAgent ||
-      modeRef.current !== 'archive' ||
+      modeRef.current !== "archive" ||
       isLoadingMoreRef.current ||
       oldestLineRef.current <= 1
     ) {
@@ -125,11 +134,14 @@ export function useAgentTerminalLogs({
       const archive = await getAgentLogArchive(
         currentAgent,
         archiveLines,
-        oldestLineRef.current
+        oldestLineRef.current,
       );
 
       // Guard: agent may have changed while fetching
-      if (agentNameRef.current !== currentAgent || modeRef.current !== 'archive') {
+      if (
+        agentNameRef.current !== currentAgent ||
+        modeRef.current !== "archive"
+      ) {
         return;
       }
 
@@ -144,8 +156,9 @@ export function useAgentTerminalLogs({
       allLinesRef.current = [...archive.lines, ...allLinesRef.current];
 
       // Rebuild chunks from accumulated lines
-      const text = allLinesRef.current.join('\n');
-      const normalized = text.length > 0 && !text.endsWith('\n') ? `${text}\n` : text;
+      const text = allLinesRef.current.join("\n");
+      const normalized =
+        text.length > 0 && !text.endsWith("\n") ? `${text}\n` : text;
       const chunkBytes = encoderRef.current.encode(normalized);
       byteOffsetRef.current = chunkBytes.length;
 
@@ -158,12 +171,13 @@ export function useAgentTerminalLogs({
                 timestamp: new Date().toISOString(),
               },
             ]
-          : []
+          : [],
       );
       setResetVersion((prev) => prev + 1);
     } catch (err) {
       // Silently fail — user can try scrolling up again
-      const message = err instanceof Error ? err.message : 'Failed to load older logs';
+      const message =
+        err instanceof Error ? err.message : "Failed to load older logs";
       setError(message);
     } finally {
       isLoadingMoreRef.current = false;
@@ -210,8 +224,8 @@ export function useAgentTerminalLogs({
       allLinesRef.current = [];
       oldestLineRef.current = Infinity;
       setChunks([]);
-      setMode('idle');
-      setState('disconnected');
+      setMode("idle");
+      setState("disconnected");
       setError(null);
       isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
@@ -223,22 +237,22 @@ export function useAgentTerminalLogs({
       if (!isCurrentRun()) return;
       stopArchiveProbe();
       closeSocket();
-      setMode('tmux');
-      setState('connecting');
+      setMode("tmux");
+      setState("connecting");
 
       try {
         const token = await getAgentTerminalToken(agentName);
         if (!isCurrentRun()) return;
 
         const ws = new WebSocket(getAgentTerminalWsUrl(agentName, token));
-        ws.binaryType = 'arraybuffer';
+        ws.binaryType = "arraybuffer";
         wsRef.current = ws;
 
         ws.onopen = () => {
           if (!isCurrentRun() || wsRef.current !== ws) return;
           reconnectAttemptRef.current = 0;
           stopReconnectTimer();
-          setState('connected');
+          setState("connected");
           setError(null);
           const pendingSize = pendingSizeRef.current;
           if (pendingSize) {
@@ -250,7 +264,7 @@ export function useAgentTerminalLogs({
           if (!isCurrentRun() || wsRef.current !== ws) return;
 
           let bytes: Uint8Array;
-          if (typeof event.data === 'string') {
+          if (typeof event.data === "string") {
             bytes = encoderRef.current.encode(event.data);
           } else if (event.data instanceof ArrayBuffer) {
             bytes = new Uint8Array(event.data);
@@ -269,13 +283,13 @@ export function useAgentTerminalLogs({
 
         ws.onerror = () => {
           if (!isCurrentRun() || wsRef.current !== ws) return;
-          setError('Terminal stream error');
+          setError("Terminal stream error");
         };
 
         ws.onclose = () => {
           if (!isCurrentRun() || wsRef.current !== ws) return;
           wsRef.current = null;
-          setState('reconnecting');
+          setState("reconnecting");
 
           const attempt = reconnectAttemptRef.current;
           if (attempt >= DEFAULT_RECONNECT_CONFIG.maxAttempts) {
@@ -285,15 +299,21 @@ export function useAgentTerminalLogs({
                 const transport = await getAgentTerminalInfo(agentName);
                 if (!isCurrentRun()) return;
 
-                if (transport === 'archive') {
-                  const archive = await getAgentLogArchive(agentName, archiveLines);
+                if (transport === "archive") {
+                  const archive = await getAgentLogArchive(
+                    agentName,
+                    archiveLines,
+                  );
                   if (!isCurrentRun()) return;
 
                   allLinesRef.current = archive.lines ?? [];
                   oldestLineRef.current = archive.startLine;
 
-                  const text = allLinesRef.current.join('\n');
-                  const normalized = text.length > 0 && !text.endsWith('\n') ? `${text}\n` : text;
+                  const text = allLinesRef.current.join("\n");
+                  const normalized =
+                    text.length > 0 && !text.endsWith("\n")
+                      ? `${text}\n`
+                      : text;
                   const chunkBytes = encoderRef.current.encode(normalized);
                   byteOffsetRef.current = chunkBytes.length;
 
@@ -306,20 +326,22 @@ export function useAgentTerminalLogs({
                             timestamp: new Date().toISOString(),
                           },
                         ]
-                      : []
+                      : [],
                   );
-                  setMode('archive');
-                  setState('connected');
+                  setMode("archive");
+                  setState("connected");
                   setResetVersion((prev) => prev + 1);
 
                   if (!archiveProbeTimerRef.current) {
                     archiveProbeTimerRef.current = setInterval(async () => {
-                      if (!isCurrentRun() || archiveProbeInFlightRef.current) return;
+                      if (!isCurrentRun() || archiveProbeInFlightRef.current)
+                        return;
                       archiveProbeInFlightRef.current = true;
                       try {
-                        const probeTransport = await getAgentTerminalInfo(agentName);
+                        const probeTransport =
+                          await getAgentTerminalInfo(agentName);
                         if (!isCurrentRun()) return;
-                        if (probeTransport === 'tmux') {
+                        if (probeTransport === "tmux") {
                           stopArchiveProbe();
                           reconnectAttemptRef.current = 0;
                           void connectTmux();
@@ -336,7 +358,9 @@ export function useAgentTerminalLogs({
               } catch (err) {
                 if (!isCurrentRun()) return;
                 const message =
-                  err instanceof Error ? err.message : 'Failed to inspect terminal availability';
+                  err instanceof Error
+                    ? err.message
+                    : "Failed to inspect terminal availability";
                 setError(message);
               }
 
@@ -355,7 +379,10 @@ export function useAgentTerminalLogs({
             return;
           }
 
-          const delay = calculateBackoffDelay(attempt, DEFAULT_RECONNECT_CONFIG);
+          const delay = calculateBackoffDelay(
+            attempt,
+            DEFAULT_RECONNECT_CONFIG,
+          );
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
             if (!isCurrentRun()) return;
@@ -366,9 +393,11 @@ export function useAgentTerminalLogs({
       } catch (connectErr) {
         if (!isCurrentRun()) return;
         const message =
-          connectErr instanceof Error ? connectErr.message : 'Failed to connect terminal';
+          connectErr instanceof Error
+            ? connectErr.message
+            : "Failed to connect terminal";
         setError(message);
-        setState('reconnecting');
+        setState("reconnecting");
 
         if (reconnectTimerRef.current) {
           return;
@@ -395,8 +424,8 @@ export function useAgentTerminalLogs({
       allLinesRef.current = [];
       oldestLineRef.current = Infinity;
       setChunks([]);
-      setState('connecting');
-      setMode('loading');
+      setState("connecting");
+      setMode("loading");
       setError(null);
       isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
@@ -406,7 +435,7 @@ export function useAgentTerminalLogs({
         const transport = await getAgentTerminalInfo(agentName);
         if (!isCurrentRun()) return;
 
-        if (transport === 'archive') {
+        if (transport === "archive") {
           const archive = await getAgentLogArchive(agentName, archiveLines);
           if (!isCurrentRun()) return;
 
@@ -414,8 +443,9 @@ export function useAgentTerminalLogs({
           allLinesRef.current = archive.lines ?? [];
           oldestLineRef.current = archive.startLine;
 
-          const text = allLinesRef.current.join('\n');
-          const normalized = text.length > 0 && !text.endsWith('\n') ? `${text}\n` : text;
+          const text = allLinesRef.current.join("\n");
+          const normalized =
+            text.length > 0 && !text.endsWith("\n") ? `${text}\n` : text;
           const chunkBytes = encoderRef.current.encode(normalized);
           byteOffsetRef.current = chunkBytes.length;
 
@@ -428,10 +458,10 @@ export function useAgentTerminalLogs({
                     timestamp: new Date().toISOString(),
                   },
                 ]
-              : []
+              : [],
           );
-          setMode('archive');
-          setState('connected');
+          setMode("archive");
+          setState("connected");
           if (!archiveProbeTimerRef.current) {
             archiveProbeTimerRef.current = setInterval(async () => {
               if (!isCurrentRun() || archiveProbeInFlightRef.current) return;
@@ -439,7 +469,7 @@ export function useAgentTerminalLogs({
               try {
                 const probeTransport = await getAgentTerminalInfo(agentName);
                 if (!isCurrentRun()) return;
-                if (probeTransport === 'tmux') {
+                if (probeTransport === "tmux") {
                   stopArchiveProbe();
                   reconnectAttemptRef.current = 0;
                   void connectTmux();
@@ -457,10 +487,11 @@ export function useAgentTerminalLogs({
         void connectTmux();
       } catch (err) {
         if (!isCurrentRun()) return;
-        const message = err instanceof Error ? err.message : 'Failed to load logs';
+        const message =
+          err instanceof Error ? err.message : "Failed to load logs";
         setError(message);
-        setState('disconnected');
-        setMode('archive');
+        setState("disconnected");
+        setMode("archive");
       }
     };
 

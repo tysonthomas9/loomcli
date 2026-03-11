@@ -1,18 +1,18 @@
 /**
  * @vitest-environment jsdom
  */
-import { renderHook, act, waitFor } from '@testing-library/react';
-import type React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, act, waitFor } from "@testing-library/react";
+import type React from "react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { useIssues } from './useIssues';
-import * as useSSEModule from './useSSE';
-import * as issuesApi from '../api/issues';
-import type { ConnectionState } from '../api/sse';
-import type { Issue } from '../types/issue';
+import { useIssues } from "./useIssues";
+import * as useSSEModule from "./useSSE";
+import * as issuesApi from "../api/issues";
+import type { ConnectionState } from "../api/sse";
+import type { Issue } from "../types/issue";
 
 // Mock the API
-vi.mock('../api/issues', () => ({
+vi.mock("../api/issues", () => ({
   getReadyIssues: vi.fn(),
   getKanbanIssues: vi.fn(),
   updateIssue: vi.fn(),
@@ -20,12 +20,12 @@ vi.mock('../api/issues', () => ({
 }));
 
 // Mock useSSE
-vi.mock('./useSSE', () => ({
+vi.mock("./useSSE", () => ({
   useSSE: vi.fn(),
 }));
 
 // Mock useToast
-vi.mock('./useToast', () => ({
+vi.mock("./useToast", () => ({
   useToast: () => ({
     toasts: [],
     showToast: vi.fn(),
@@ -39,11 +39,11 @@ vi.mock('./useToast', () => ({
  */
 function createTestIssue(overrides: Partial<Issue> = {}): Issue {
   return {
-    id: 'test-issue-1',
-    title: 'Test Issue',
+    id: "test-issue-1",
+    title: "Test Issue",
     priority: 2,
-    created_at: '2025-01-23T10:00:00Z',
-    updated_at: '2025-01-23T10:00:00Z',
+    created_at: "2025-01-23T10:00:00Z",
+    updated_at: "2025-01-23T10:00:00Z",
     ...overrides,
   };
 }
@@ -52,10 +52,10 @@ function createTestIssue(overrides: Partial<Issue> = {}): Issue {
  * Helper to create mock useSSE return value.
  */
 function createMockSSE(
-  overrides: Partial<useSSEModule.UseSSEReturn> = {}
+  overrides: Partial<useSSEModule.UseSSEReturn> = {},
 ): useSSEModule.UseSSEReturn {
   return {
-    state: 'disconnected' as ConnectionState,
+    state: "disconnected" as ConnectionState,
     lastError: null,
     isConnected: false,
     reconnectAttempts: 0,
@@ -67,7 +67,7 @@ function createMockSSE(
   };
 }
 
-describe('useIssues', () => {
+describe("useIssues", () => {
   let mockSSE: useSSEModule.UseSSEReturn;
   let onMutationCallback: ((mutation: unknown) => void) | undefined;
   let _onStateChangeCallback: ((state: ConnectionState) => void) | undefined;
@@ -92,37 +92,37 @@ describe('useIssues', () => {
     _onStateChangeCallback = undefined;
   });
 
-  describe('Hook initialization', () => {
-    it('returns expected shape with all properties', async () => {
+  describe("Hook initialization", () => {
+    it("returns expected shape with all properties", async () => {
       const { result } = renderHook(() => useIssues());
 
-      expect(result.current).toHaveProperty('issues');
-      expect(result.current).toHaveProperty('issuesMap');
-      expect(result.current).toHaveProperty('isLoading');
-      expect(result.current).toHaveProperty('error');
-      expect(result.current).toHaveProperty('connectionState');
-      expect(result.current).toHaveProperty('isConnected');
-      expect(result.current).toHaveProperty('reconnectAttempts');
-      expect(result.current).toHaveProperty('refetch');
-      expect(result.current).toHaveProperty('updateIssueStatus');
-      expect(result.current).toHaveProperty('getIssue');
-      expect(result.current).toHaveProperty('mutationCount');
-      expect(result.current).toHaveProperty('retryConnection');
+      expect(result.current).toHaveProperty("issues");
+      expect(result.current).toHaveProperty("issuesMap");
+      expect(result.current).toHaveProperty("isLoading");
+      expect(result.current).toHaveProperty("error");
+      expect(result.current).toHaveProperty("connectionState");
+      expect(result.current).toHaveProperty("isConnected");
+      expect(result.current).toHaveProperty("reconnectAttempts");
+      expect(result.current).toHaveProperty("refetch");
+      expect(result.current).toHaveProperty("updateIssueStatus");
+      expect(result.current).toHaveProperty("getIssue");
+      expect(result.current).toHaveProperty("mutationCount");
+      expect(result.current).toHaveProperty("retryConnection");
 
-      expect(typeof result.current.refetch).toBe('function');
-      expect(typeof result.current.updateIssueStatus).toBe('function');
-      expect(typeof result.current.getIssue).toBe('function');
-      expect(typeof result.current.retryConnection).toBe('function');
+      expect(typeof result.current.refetch).toBe("function");
+      expect(typeof result.current.updateIssueStatus).toBe("function");
+      expect(typeof result.current.getIssue).toBe("function");
+      expect(typeof result.current.retryConnection).toBe("function");
     });
 
-    it('initial state has empty issues and Map', () => {
+    it("initial state has empty issues and Map", () => {
       const { result } = renderHook(() => useIssues({ autoFetch: false }));
 
       expect(result.current.issues).toEqual([]);
       expect(result.current.issuesMap.size).toBe(0);
     });
 
-    it('initial state has no loading or error', () => {
+    it("initial state has no loading or error", () => {
       const { result } = renderHook(() => useIssues({ autoFetch: false }));
 
       expect(result.current.isLoading).toBe(false);
@@ -130,11 +130,11 @@ describe('useIssues', () => {
     });
   });
 
-  describe('Auto-fetch behavior', () => {
-    it('fetches issues on mount when autoFetch is true (default)', async () => {
+  describe("Auto-fetch behavior", () => {
+    it("fetches issues on mount when autoFetch is true (default)", async () => {
       const mockIssues = [
-        createTestIssue({ id: 'issue-1', title: 'Issue 1' }),
-        createTestIssue({ id: 'issue-2', title: 'Issue 2' }),
+        createTestIssue({ id: "issue-1", title: "Issue 1" }),
+        createTestIssue({ id: "issue-2", title: "Issue 2" }),
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
@@ -152,7 +152,7 @@ describe('useIssues', () => {
       expect(result.current.issuesMap.size).toBe(2);
     });
 
-    it('does not fetch on mount when autoFetch is false', async () => {
+    it("does not fetch on mount when autoFetch is false", async () => {
       const { result } = renderHook(() => useIssues({ autoFetch: false }));
 
       // Give time for potential fetch
@@ -164,8 +164,8 @@ describe('useIssues', () => {
       expect(result.current.issues).toHaveLength(0);
     });
 
-    it('passes filter to API when provided', async () => {
-      const filter = { priority: 1, assignee: 'user@example.com' };
+    it("passes filter to API when provided", async () => {
+      const filter = { priority: 1, assignee: "user@example.com" };
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
 
       renderHook(() => useIssues({ filter }));
@@ -176,10 +176,12 @@ describe('useIssues', () => {
     });
   });
 
-  describe('Fetch error handling', () => {
-    it('sets error state on fetch failure', async () => {
-      const errorMessage = 'Network error';
-      vi.mocked(issuesApi.getReadyIssues).mockRejectedValue(new Error(errorMessage));
+  describe("Fetch error handling", () => {
+    it("sets error state on fetch failure", async () => {
+      const errorMessage = "Network error";
+      vi.mocked(issuesApi.getReadyIssues).mockRejectedValue(
+        new Error(errorMessage),
+      );
 
       const { result } = renderHook(() => useIssues());
 
@@ -191,14 +193,16 @@ describe('useIssues', () => {
       expect(result.current.issues).toHaveLength(0);
     });
 
-    it('clears error on successful refetch', async () => {
+    it("clears error on successful refetch", async () => {
       // First fetch fails
-      vi.mocked(issuesApi.getReadyIssues).mockRejectedValueOnce(new Error('Network error'));
+      vi.mocked(issuesApi.getReadyIssues).mockRejectedValueOnce(
+        new Error("Network error"),
+      );
 
       const { result } = renderHook(() => useIssues());
 
       await waitFor(() => {
-        expect(result.current.error).toBe('Network error');
+        expect(result.current.error).toBe("Network error");
       });
 
       // Refetch succeeds
@@ -214,9 +218,11 @@ describe('useIssues', () => {
     });
   });
 
-  describe('Refetch functionality', () => {
-    it('refetch replaces existing issues', async () => {
-      const initialIssues = [createTestIssue({ id: 'initial', title: 'Initial' })];
+  describe("Refetch functionality", () => {
+    it("refetch replaces existing issues", async () => {
+      const initialIssues = [
+        createTestIssue({ id: "initial", title: "Initial" }),
+      ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce(initialIssues);
 
       const { result } = renderHook(() => useIssues());
@@ -227,8 +233,8 @@ describe('useIssues', () => {
 
       // Refetch with different issues
       const newIssues = [
-        createTestIssue({ id: 'new-1', title: 'New 1' }),
-        createTestIssue({ id: 'new-2', title: 'New 2' }),
+        createTestIssue({ id: "new-1", title: "New 1" }),
+        createTestIssue({ id: "new-2", title: "New 2" }),
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(newIssues);
 
@@ -237,11 +243,14 @@ describe('useIssues', () => {
       });
 
       expect(result.current.issues).toHaveLength(2);
-      expect(result.current.issues.map((i) => i.id)).toEqual(['new-1', 'new-2']);
-      expect(result.current.issuesMap.has('initial')).toBe(false);
+      expect(result.current.issues.map((i) => i.id)).toEqual([
+        "new-1",
+        "new-2",
+      ]);
+      expect(result.current.issuesMap.has("initial")).toBe(false);
     });
 
-    it('refetch sets loading state correctly', async () => {
+    it("refetch sets loading state correctly", async () => {
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
 
       const { result } = renderHook(() => useIssues({ autoFetch: false }));
@@ -263,30 +272,11 @@ describe('useIssues', () => {
     });
   });
 
-  describe('Map and Array synchronization', () => {
-    it('issues array is derived from issuesMap', async () => {
-      const mockIssues = [createTestIssue({ id: 'issue-1' }), createTestIssue({ id: 'issue-2' })];
-      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
-
-      const { result } = renderHook(() => useIssues());
-
-      await waitFor(() => {
-        expect(result.current.issues).toHaveLength(2);
-      });
-
-      // Array should contain the same issues as Map
-      expect(result.current.issuesMap.get('issue-1')).toEqual(
-        result.current.issues.find((i) => i.id === 'issue-1')
-      );
-      expect(result.current.issuesMap.get('issue-2')).toEqual(
-        result.current.issues.find((i) => i.id === 'issue-2')
-      );
-    });
-
-    it('getIssue returns correct issue from Map', async () => {
+  describe("Map and Array synchronization", () => {
+    it("issues array is derived from issuesMap", async () => {
       const mockIssues = [
-        createTestIssue({ id: 'issue-1', title: 'Issue One' }),
-        createTestIssue({ id: 'issue-2', title: 'Issue Two' }),
+        createTestIssue({ id: "issue-1" }),
+        createTestIssue({ id: "issue-2" }),
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
@@ -296,32 +286,54 @@ describe('useIssues', () => {
         expect(result.current.issues).toHaveLength(2);
       });
 
-      expect(result.current.getIssue('issue-1')?.title).toBe('Issue One');
-      expect(result.current.getIssue('issue-2')?.title).toBe('Issue Two');
-      expect(result.current.getIssue('nonexistent')).toBeUndefined();
+      // Array should contain the same issues as Map
+      expect(result.current.issuesMap.get("issue-1")).toEqual(
+        result.current.issues.find((i) => i.id === "issue-1"),
+      );
+      expect(result.current.issuesMap.get("issue-2")).toEqual(
+        result.current.issues.find((i) => i.id === "issue-2"),
+      );
+    });
+
+    it("getIssue returns correct issue from Map", async () => {
+      const mockIssues = [
+        createTestIssue({ id: "issue-1", title: "Issue One" }),
+        createTestIssue({ id: "issue-2", title: "Issue Two" }),
+      ];
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
+
+      const { result } = renderHook(() => useIssues());
+
+      await waitFor(() => {
+        expect(result.current.issues).toHaveLength(2);
+      });
+
+      expect(result.current.getIssue("issue-1")?.title).toBe("Issue One");
+      expect(result.current.getIssue("issue-2")?.title).toBe("Issue Two");
+      expect(result.current.getIssue("nonexistent")).toBeUndefined();
     });
   });
 
-  describe('SSE integration', () => {
-    it('passes autoConnect option to useSSE', () => {
+  describe("SSE integration", () => {
+    it("passes autoConnect option to useSSE", () => {
       renderHook(() => useIssues({ autoConnect: false }));
 
       expect(useSSEModule.useSSE).toHaveBeenCalledWith(
-        expect.objectContaining({ autoConnect: false })
+        expect.objectContaining({ autoConnect: false }),
       );
     });
 
-    it('uses autoConnect=true by default', () => {
+    it("uses autoConnect=true by default", () => {
       renderHook(() => useIssues());
 
       expect(useSSEModule.useSSE).toHaveBeenCalledWith(
-        expect.objectContaining({ autoConnect: true })
+        expect.objectContaining({ autoConnect: true }),
       );
     });
 
-    it('exposes SSE connection state', () => {
+    it("exposes SSE connection state", () => {
       mockSSE = createMockSSE({
-        state: 'connected',
+        state: "connected",
         isConnected: true,
         reconnectAttempts: 0,
       });
@@ -329,14 +341,14 @@ describe('useIssues', () => {
 
       const { result } = renderHook(() => useIssues({ autoFetch: false }));
 
-      expect(result.current.connectionState).toBe('connected');
+      expect(result.current.connectionState).toBe("connected");
       expect(result.current.isConnected).toBe(true);
       expect(result.current.reconnectAttempts).toBe(0);
     });
 
-    it('exposes reconnect attempts during reconnection', () => {
+    it("exposes reconnect attempts during reconnection", () => {
       mockSSE = createMockSSE({
-        state: 'reconnecting',
+        state: "reconnecting",
         isConnected: false,
         reconnectAttempts: 3,
       });
@@ -344,11 +356,11 @@ describe('useIssues', () => {
 
       const { result } = renderHook(() => useIssues({ autoFetch: false }));
 
-      expect(result.current.connectionState).toBe('reconnecting');
+      expect(result.current.connectionState).toBe("reconnecting");
       expect(result.current.reconnectAttempts).toBe(3);
     });
 
-    it('retryConnection calls SSE retryNow', () => {
+    it("retryConnection calls SSE retryNow", () => {
       const retryNow = vi.fn();
       mockSSE = createMockSSE({ retryNow });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
@@ -366,9 +378,9 @@ describe('useIssues', () => {
     // The 'since' parameter is passed during connection for catch-up events.
   });
 
-  describe('Mutation handling', () => {
-    it('handles create mutation from SSE', async () => {
-      const mockIssues = [createTestIssue({ id: 'existing' })];
+  describe("Mutation handling", () => {
+    it("handles create mutation from SSE", async () => {
+      const mockIssues = [createTestIssue({ id: "existing" })];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
       const { result } = renderHook(() => useIssues());
@@ -380,23 +392,25 @@ describe('useIssues', () => {
       // Simulate receiving a create mutation
       act(() => {
         onMutationCallback?.({
-          type: 'create',
-          issue_id: 'new-issue',
-          title: 'New Issue from SSE',
+          type: "create",
+          issue_id: "new-issue",
+          title: "New Issue from SSE",
           timestamp: new Date().toISOString(),
         });
       });
 
       expect(result.current.issues).toHaveLength(2);
-      expect(result.current.getIssue('new-issue')?.title).toBe('New Issue from SSE');
+      expect(result.current.getIssue("new-issue")?.title).toBe(
+        "New Issue from SSE",
+      );
     });
 
-    it('handles update mutation from SSE', async () => {
+    it("handles update mutation from SSE", async () => {
       const mockIssues = [
         createTestIssue({
-          id: 'issue-1',
-          title: 'Original Title',
-          updated_at: '2025-01-23T10:00:00Z',
+          id: "issue-1",
+          title: "Original Title",
+          updated_at: "2025-01-23T10:00:00Z",
         }),
       ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
@@ -410,18 +424,21 @@ describe('useIssues', () => {
       // Simulate receiving an update mutation
       act(() => {
         onMutationCallback?.({
-          type: 'update',
-          issue_id: 'issue-1',
-          title: 'Updated Title',
-          timestamp: '2025-01-23T12:00:00Z',
+          type: "update",
+          issue_id: "issue-1",
+          title: "Updated Title",
+          timestamp: "2025-01-23T12:00:00Z",
         });
       });
 
-      expect(result.current.getIssue('issue-1')?.title).toBe('Updated Title');
+      expect(result.current.getIssue("issue-1")?.title).toBe("Updated Title");
     });
 
-    it('handles delete mutation from SSE', async () => {
-      const mockIssues = [createTestIssue({ id: 'issue-1' }), createTestIssue({ id: 'issue-2' })];
+    it("handles delete mutation from SSE", async () => {
+      const mockIssues = [
+        createTestIssue({ id: "issue-1" }),
+        createTestIssue({ id: "issue-2" }),
+      ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
       const { result } = renderHook(() => useIssues());
@@ -433,19 +450,21 @@ describe('useIssues', () => {
       // Simulate receiving a delete mutation
       act(() => {
         onMutationCallback?.({
-          type: 'delete',
-          issue_id: 'issue-1',
+          type: "delete",
+          issue_id: "issue-1",
           timestamp: new Date().toISOString(),
         });
       });
 
       expect(result.current.issues).toHaveLength(1);
-      expect(result.current.getIssue('issue-1')).toBeUndefined();
-      expect(result.current.getIssue('issue-2')).toBeDefined();
+      expect(result.current.getIssue("issue-1")).toBeUndefined();
+      expect(result.current.getIssue("issue-2")).toBeDefined();
     });
 
-    it('tracks mutation count', async () => {
-      const mockIssues = [createTestIssue({ id: 'issue-1', updated_at: '2025-01-23T10:00:00Z' })];
+    it("tracks mutation count", async () => {
+      const mockIssues = [
+        createTestIssue({ id: "issue-1", updated_at: "2025-01-23T10:00:00Z" }),
+      ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
 
       const { result } = renderHook(() => useIssues());
@@ -458,10 +477,10 @@ describe('useIssues', () => {
 
       act(() => {
         onMutationCallback?.({
-          type: 'update',
-          issue_id: 'issue-1',
-          title: 'Updated',
-          timestamp: '2025-01-23T12:00:00Z',
+          type: "update",
+          issue_id: "issue-1",
+          title: "Updated",
+          timestamp: "2025-01-23T12:00:00Z",
         });
       });
 
@@ -469,10 +488,10 @@ describe('useIssues', () => {
 
       act(() => {
         onMutationCallback?.({
-          type: 'create',
-          issue_id: 'issue-2',
-          title: 'New',
-          timestamp: '2025-01-23T13:00:00Z',
+          type: "create",
+          issue_id: "issue-2",
+          title: "New",
+          timestamp: "2025-01-23T13:00:00Z",
         });
       });
 
@@ -480,9 +499,9 @@ describe('useIssues', () => {
     });
   });
 
-  describe('Optimistic status update', () => {
-    it('updates status optimistically', async () => {
-      const mockIssues = [createTestIssue({ id: 'issue-1', status: 'open' })];
+  describe("Optimistic status update", () => {
+    it("updates status optimistically", async () => {
+      const mockIssues = [createTestIssue({ id: "issue-1", status: "open" })];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
       vi.mocked(issuesApi.updateIssue).mockResolvedValue(mockIssues[0]);
 
@@ -495,24 +514,31 @@ describe('useIssues', () => {
       // Start the update (don't await yet)
       let updatePromise: Promise<void>;
       act(() => {
-        updatePromise = result.current.updateIssueStatus('issue-1', 'in_progress');
+        updatePromise = result.current.updateIssueStatus(
+          "issue-1",
+          "in_progress",
+        );
       });
 
       // Status should be updated optimistically
-      expect(result.current.getIssue('issue-1')?.status).toBe('in_progress');
+      expect(result.current.getIssue("issue-1")?.status).toBe("in_progress");
 
       await act(async () => {
         await updatePromise;
       });
 
       // API should have been called
-      expect(issuesApi.updateIssue).toHaveBeenCalledWith('issue-1', { status: 'in_progress' });
+      expect(issuesApi.updateIssue).toHaveBeenCalledWith("issue-1", {
+        status: "in_progress",
+      });
     });
 
-    it('rolls back on API failure', async () => {
-      const mockIssues = [createTestIssue({ id: 'issue-1', status: 'open' })];
+    it("rolls back on API failure", async () => {
+      const mockIssues = [createTestIssue({ id: "issue-1", status: "open" })];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
-      vi.mocked(issuesApi.updateIssue).mockRejectedValue(new Error('API error'));
+      vi.mocked(issuesApi.updateIssue).mockRejectedValue(
+        new Error("API error"),
+      );
 
       const { result } = renderHook(() => useIssues());
 
@@ -523,15 +549,15 @@ describe('useIssues', () => {
       // Attempt update that will fail
       await expect(
         act(async () => {
-          await result.current.updateIssueStatus('issue-1', 'in_progress');
-        })
-      ).rejects.toThrow('API error');
+          await result.current.updateIssueStatus("issue-1", "in_progress");
+        }),
+      ).rejects.toThrow("API error");
 
       // Status should be rolled back to original
-      expect(result.current.getIssue('issue-1')?.status).toBe('open');
+      expect(result.current.getIssue("issue-1")?.status).toBe("open");
     });
 
-    it('throws error when issue not found', async () => {
+    it("throws error when issue not found", async () => {
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
 
       const { result } = renderHook(() => useIssues());
@@ -542,12 +568,12 @@ describe('useIssues', () => {
 
       await expect(
         act(async () => {
-          await result.current.updateIssueStatus('nonexistent', 'in_progress');
-        })
-      ).rejects.toThrow('Issue nonexistent not found');
+          await result.current.updateIssueStatus("nonexistent", "in_progress");
+        }),
+      ).rejects.toThrow("Issue nonexistent not found");
     });
 
-    it('uses functional update for rollback to preserve concurrent mutations', async () => {
+    it("uses functional update for rollback to preserve concurrent mutations", async () => {
       // This test verifies that the rollback uses a functional update pattern
       // rather than restoring a full map snapshot. The functional update approach
       // is important because it preserves any SSE mutations that arrived during
@@ -560,34 +586,40 @@ describe('useIssues', () => {
       // Note: Due to React testing library complexities with async state updates
       // across multiple act() blocks, we test the behavior indirectly.
 
-      const mockIssues = [createTestIssue({ id: 'issue-1', status: 'open', title: 'Issue One' })];
+      const mockIssues = [
+        createTestIssue({ id: "issue-1", status: "open", title: "Issue One" }),
+      ];
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
-      vi.mocked(issuesApi.updateIssue).mockRejectedValue(new Error('API error'));
+      vi.mocked(issuesApi.updateIssue).mockRejectedValue(
+        new Error("API error"),
+      );
 
       const { result } = renderHook(() => useIssues());
       await waitFor(() => expect(result.current.issues).toHaveLength(1));
 
       // Verify rollback still works correctly after code change
-      expect(result.current.getIssue('issue-1')?.status).toBe('open');
+      expect(result.current.getIssue("issue-1")?.status).toBe("open");
 
       await expect(
         act(async () => {
-          await result.current.updateIssueStatus('issue-1', 'in_progress');
-        })
-      ).rejects.toThrow('API error');
+          await result.current.updateIssueStatus("issue-1", "in_progress");
+        }),
+      ).rejects.toThrow("API error");
 
       // Issue should be rolled back to original status
-      expect(result.current.getIssue('issue-1')?.status).toBe('open');
+      expect(result.current.getIssue("issue-1")?.status).toBe("open");
     });
   });
 
-  describe('Error combination', () => {
-    it('combines SSE error with fetch error (fetch takes priority)', async () => {
-      const fetchError = 'Fetch failed';
-      vi.mocked(issuesApi.getReadyIssues).mockRejectedValue(new Error(fetchError));
+  describe("Error combination", () => {
+    it("combines SSE error with fetch error (fetch takes priority)", async () => {
+      const fetchError = "Fetch failed";
+      vi.mocked(issuesApi.getReadyIssues).mockRejectedValue(
+        new Error(fetchError),
+      );
 
       mockSSE = createMockSSE({
-        lastError: 'SSE error',
+        lastError: "SSE error",
       });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
 
@@ -601,11 +633,11 @@ describe('useIssues', () => {
       expect(result.current.error).toBe(fetchError);
     });
 
-    it('shows SSE error when no fetch error', async () => {
+    it("shows SSE error when no fetch error", async () => {
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
 
       mockSSE = createMockSSE({
-        lastError: 'SSE connection failed',
+        lastError: "SSE connection failed",
       });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
 
@@ -615,12 +647,12 @@ describe('useIssues', () => {
         expect(result.current.isLoading).toBe(false);
       });
 
-      expect(result.current.error).toBe('SSE connection failed');
+      expect(result.current.error).toBe("SSE connection failed");
     });
   });
 
-  describe('Hook options', () => {
-    it('respects all default options', () => {
+  describe("Hook options", () => {
+    it("respects all default options", () => {
       renderHook(() => useIssues());
 
       // Should auto-fetch
@@ -628,28 +660,30 @@ describe('useIssues', () => {
 
       // Should auto-connect
       expect(useSSEModule.useSSE).toHaveBeenCalledWith(
-        expect.objectContaining({ autoConnect: true })
+        expect.objectContaining({ autoConnect: true }),
       );
     });
 
-    it('can disable auto-fetch and auto-connect', () => {
+    it("can disable auto-fetch and auto-connect", () => {
       renderHook(() =>
         useIssues({
           autoFetch: false,
           autoConnect: false,
-        })
+        }),
       );
 
       expect(issuesApi.getReadyIssues).not.toHaveBeenCalled();
       expect(useSSEModule.useSSE).toHaveBeenCalledWith(
-        expect.objectContaining({ autoConnect: false })
+        expect.objectContaining({ autoConnect: false }),
       );
     });
   });
 
-  describe('Method stability', () => {
-    it('refetch is stable across renders', async () => {
-      const { result, rerender } = renderHook(() => useIssues({ autoFetch: false }));
+  describe("Method stability", () => {
+    it("refetch is stable across renders", async () => {
+      const { result, rerender } = renderHook(() =>
+        useIssues({ autoFetch: false }),
+      );
 
       const initialRefetch = result.current.refetch;
 
@@ -658,8 +692,10 @@ describe('useIssues', () => {
       expect(result.current.refetch).toBe(initialRefetch);
     });
 
-    it('getIssue is stable when issuesMap does not change', async () => {
-      const { result, rerender } = renderHook(() => useIssues({ autoFetch: false }));
+    it("getIssue is stable when issuesMap does not change", async () => {
+      const { result, rerender } = renderHook(() =>
+        useIssues({ autoFetch: false }),
+      );
 
       const initialGetIssue = result.current.getIssue;
 
@@ -668,8 +704,10 @@ describe('useIssues', () => {
       expect(result.current.getIssue).toBe(initialGetIssue);
     });
 
-    it('retryConnection is stable across renders', async () => {
-      const { result, rerender } = renderHook(() => useIssues({ autoFetch: false }));
+    it("retryConnection is stable across renders", async () => {
+      const { result, rerender } = renderHook(() =>
+        useIssues({ autoFetch: false }),
+      );
 
       const initialRetryConnection = result.current.retryConnection;
 
@@ -679,16 +717,16 @@ describe('useIssues', () => {
     });
   });
 
-  describe('Graph mode', () => {
+  describe("Graph mode", () => {
     beforeEach(() => {
       vi.mocked(issuesApi.fetchGraphIssues).mockResolvedValue([]);
     });
 
-    it('calls fetchGraphIssues when mode is graph', async () => {
-      const mockGraphIssues = [createTestIssue({ id: 'graph-1' })];
+    it("calls fetchGraphIssues when mode is graph", async () => {
+      const mockGraphIssues = [createTestIssue({ id: "graph-1" })];
       vi.mocked(issuesApi.fetchGraphIssues).mockResolvedValue(mockGraphIssues);
 
-      const { result } = renderHook(() => useIssues({ mode: 'graph' }));
+      const { result } = renderHook(() => useIssues({ mode: "graph" }));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -697,16 +735,18 @@ describe('useIssues', () => {
       expect(result.current.issues).toEqual(mockGraphIssues);
     });
 
-    it('passes graphFilter options to fetchGraphIssues', async () => {
-      const graphFilter = { status: 'open' as const, includeClosed: false };
-      const { result } = renderHook(() => useIssues({ mode: 'graph', graphFilter }));
+    it("passes graphFilter options to fetchGraphIssues", async () => {
+      const graphFilter = { status: "open" as const, includeClosed: false };
+      const { result } = renderHook(() =>
+        useIssues({ mode: "graph", graphFilter }),
+      );
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
       expect(issuesApi.fetchGraphIssues).toHaveBeenCalledWith(graphFilter);
     });
 
-    it('uses ready mode by default', async () => {
+    it("uses ready mode by default", async () => {
       const { result } = renderHook(() => useIssues());
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -715,10 +755,12 @@ describe('useIssues', () => {
       expect(issuesApi.fetchGraphIssues).not.toHaveBeenCalled();
     });
 
-    it('refetches using graph mode when mode is graph', async () => {
+    it("refetches using graph mode when mode is graph", async () => {
       vi.mocked(issuesApi.fetchGraphIssues).mockResolvedValue([]);
 
-      const { result } = renderHook(() => useIssues({ mode: 'graph', autoFetch: false }));
+      const { result } = renderHook(() =>
+        useIssues({ mode: "graph", autoFetch: false }),
+      );
 
       await act(async () => {
         await result.current.refetch();
@@ -728,11 +770,13 @@ describe('useIssues', () => {
       expect(issuesApi.getReadyIssues).not.toHaveBeenCalled();
     });
 
-    it('handles errors in graph mode', async () => {
-      const errorMessage = 'Graph API error';
-      vi.mocked(issuesApi.fetchGraphIssues).mockRejectedValue(new Error(errorMessage));
+    it("handles errors in graph mode", async () => {
+      const errorMessage = "Graph API error";
+      vi.mocked(issuesApi.fetchGraphIssues).mockRejectedValue(
+        new Error(errorMessage),
+      );
 
-      const { result } = renderHook(() => useIssues({ mode: 'graph' }));
+      const { result } = renderHook(() => useIssues({ mode: "graph" }));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -740,35 +784,37 @@ describe('useIssues', () => {
       expect(result.current.issues).toHaveLength(0);
     });
 
-    it('loads graph issues with dependencies', async () => {
+    it("loads graph issues with dependencies", async () => {
       const mockGraphIssues = [
         createTestIssue({
-          id: 'graph-1',
+          id: "graph-1",
           dependencies: [
             {
-              issue_id: 'graph-1',
-              depends_on_id: 'graph-2',
-              type: 'blocks',
-              created_at: '2025-01-23T10:00:00Z',
+              issue_id: "graph-1",
+              depends_on_id: "graph-2",
+              type: "blocks",
+              created_at: "2025-01-23T10:00:00Z",
             },
           ],
         }),
-        createTestIssue({ id: 'graph-2' }),
+        createTestIssue({ id: "graph-2" }),
       ];
       vi.mocked(issuesApi.fetchGraphIssues).mockResolvedValue(mockGraphIssues);
 
-      const { result } = renderHook(() => useIssues({ mode: 'graph' }));
+      const { result } = renderHook(() => useIssues({ mode: "graph" }));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
       expect(result.current.issues).toHaveLength(2);
-      expect(result.current.getIssue('graph-1')?.dependencies).toHaveLength(1);
-      expect(result.current.getIssue('graph-1')?.dependencies?.[0].depends_on_id).toBe('graph-2');
+      expect(result.current.getIssue("graph-1")?.dependencies).toHaveLength(1);
+      expect(
+        result.current.getIssue("graph-1")?.dependencies?.[0].depends_on_id,
+      ).toBe("graph-2");
     });
   });
 
-  describe('SSE integration', () => {
-    it('exposes lastEventId from SSE connection', async () => {
+  describe("SSE integration", () => {
+    it("exposes lastEventId from SSE connection", async () => {
       mockSSE = createMockSSE({ lastEventId: 1706011200000 });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
@@ -780,7 +826,7 @@ describe('useIssues', () => {
       expect(result.current.lastEventId).toBe(1706011200000);
     });
 
-    it('returns undefined lastEventId when no events received', async () => {
+    it("returns undefined lastEventId when no events received", async () => {
       mockSSE = createMockSSE({ lastEventId: undefined });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(mockSSE);
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
@@ -793,13 +839,13 @@ describe('useIssues', () => {
     });
   });
 
-  describe('Race condition prevention (refetch + SSE merge)', () => {
-    it('preserves SSE mutations received during refetch', async () => {
+  describe("Race condition prevention (refetch + SSE merge)", () => {
+    it("preserves SSE mutations received during refetch", async () => {
       // Start with initial issue from API
       const initialIssue = createTestIssue({
-        id: 'issue-1',
-        title: 'Original Title',
-        updated_at: '2025-01-23T10:00:00Z',
+        id: "issue-1",
+        title: "Original Title",
+        updated_at: "2025-01-23T10:00:00Z",
       });
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce([initialIssue]);
 
@@ -825,38 +871,42 @@ describe('useIssues', () => {
       // Before refetch completes, simulate SSE update mutation with newer timestamp
       act(() => {
         onMutationCallback?.({
-          type: 'update',
-          issue_id: 'issue-1',
-          title: 'SSE Updated Title',
-          timestamp: '2025-01-23T12:00:00Z',
+          type: "update",
+          issue_id: "issue-1",
+          title: "SSE Updated Title",
+          timestamp: "2025-01-23T12:00:00Z",
         });
       });
 
       // Verify SSE mutation was applied
-      expect(result.current.getIssue('issue-1')?.title).toBe('SSE Updated Title');
+      expect(result.current.getIssue("issue-1")?.title).toBe(
+        "SSE Updated Title",
+      );
 
       // Resolve the refetch with stale data (older timestamp)
       await act(async () => {
         resolveRefetch!([
           createTestIssue({
-            id: 'issue-1',
-            title: 'Stale API Title',
-            updated_at: '2025-01-23T10:00:00Z',
+            id: "issue-1",
+            title: "Stale API Title",
+            updated_at: "2025-01-23T10:00:00Z",
           }),
         ]);
         await refetchPromise;
       });
 
       // Verify the SSE mutation is preserved (not overwritten by stale API data)
-      expect(result.current.getIssue('issue-1')?.title).toBe('SSE Updated Title');
+      expect(result.current.getIssue("issue-1")?.title).toBe(
+        "SSE Updated Title",
+      );
     });
 
-    it('preserves issues created via SSE during refetch', async () => {
+    it("preserves issues created via SSE during refetch", async () => {
       // Start with initial issues from API
       const initialIssue = createTestIssue({
-        id: 'issue-1',
-        title: 'Existing Issue',
-        updated_at: '2025-01-23T10:00:00Z',
+        id: "issue-1",
+        title: "Existing Issue",
+        updated_at: "2025-01-23T10:00:00Z",
       });
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce([initialIssue]);
 
@@ -883,16 +933,18 @@ describe('useIssues', () => {
       const newIssueTimestamp = new Date().toISOString();
       act(() => {
         onMutationCallback?.({
-          type: 'create',
-          issue_id: 'new-sse-issue',
-          title: 'SSE Created Issue',
+          type: "create",
+          issue_id: "new-sse-issue",
+          title: "SSE Created Issue",
           timestamp: newIssueTimestamp,
         });
       });
 
       // Verify new issue was added
       expect(result.current.issues).toHaveLength(2);
-      expect(result.current.getIssue('new-sse-issue')?.title).toBe('SSE Created Issue');
+      expect(result.current.getIssue("new-sse-issue")?.title).toBe(
+        "SSE Created Issue",
+      );
 
       // Resolve the refetch (without the new issue in response)
       await act(async () => {
@@ -902,23 +954,28 @@ describe('useIssues', () => {
 
       // Verify the new issue is preserved in state
       expect(result.current.issues).toHaveLength(2);
-      expect(result.current.getIssue('new-sse-issue')?.title).toBe('SSE Created Issue');
-      expect(result.current.getIssue('issue-1')).toBeDefined();
+      expect(result.current.getIssue("new-sse-issue")?.title).toBe(
+        "SSE Created Issue",
+      );
+      expect(result.current.getIssue("issue-1")).toBeDefined();
     });
 
-    it('respects SSE deletes during refetch', async () => {
+    it("respects SSE deletes during refetch", async () => {
       // Start with initial issues from API
       const issue1 = createTestIssue({
-        id: 'issue-1',
-        title: 'Issue 1',
-        updated_at: '2025-01-23T10:00:00Z',
+        id: "issue-1",
+        title: "Issue 1",
+        updated_at: "2025-01-23T10:00:00Z",
       });
       const issue2 = createTestIssue({
-        id: 'issue-2',
-        title: 'Issue 2',
-        updated_at: '2025-01-23T10:00:00Z',
+        id: "issue-2",
+        title: "Issue 2",
+        updated_at: "2025-01-23T10:00:00Z",
       });
-      vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce([issue1, issue2]);
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce([
+        issue1,
+        issue2,
+      ]);
 
       const { result } = renderHook(() => useIssues());
 
@@ -942,15 +999,15 @@ describe('useIssues', () => {
       // Before refetch completes, simulate SSE delete mutation
       act(() => {
         onMutationCallback?.({
-          type: 'delete',
-          issue_id: 'issue-1',
+          type: "delete",
+          issue_id: "issue-1",
           timestamp: new Date().toISOString(),
         });
       });
 
       // Verify delete was applied
       expect(result.current.issues).toHaveLength(1);
-      expect(result.current.getIssue('issue-1')).toBeUndefined();
+      expect(result.current.getIssue("issue-1")).toBeUndefined();
 
       // Resolve the refetch (with the deleted issue still present in response)
       await act(async () => {
@@ -960,16 +1017,16 @@ describe('useIssues', () => {
 
       // Verify the issue remains deleted after refetch completes
       expect(result.current.issues).toHaveLength(1);
-      expect(result.current.getIssue('issue-1')).toBeUndefined();
-      expect(result.current.getIssue('issue-2')).toBeDefined();
+      expect(result.current.getIssue("issue-1")).toBeUndefined();
+      expect(result.current.getIssue("issue-2")).toBeDefined();
     });
 
-    it('uses API data when current state is stale', async () => {
+    it("uses API data when current state is stale", async () => {
       // Start with initial issue with old timestamp
       const oldIssue = createTestIssue({
-        id: 'issue-1',
-        title: 'Old Title',
-        updated_at: '2025-01-23T08:00:00Z',
+        id: "issue-1",
+        title: "Old Title",
+        updated_at: "2025-01-23T08:00:00Z",
       });
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValueOnce([oldIssue]);
 
@@ -979,13 +1036,13 @@ describe('useIssues', () => {
         expect(result.current.issues).toHaveLength(1);
       });
 
-      expect(result.current.getIssue('issue-1')?.title).toBe('Old Title');
+      expect(result.current.getIssue("issue-1")?.title).toBe("Old Title");
 
       // Trigger refetch with newer timestamp
       const newerIssue = createTestIssue({
-        id: 'issue-1',
-        title: 'New Title from API',
-        updated_at: '2025-01-23T12:00:00Z',
+        id: "issue-1",
+        title: "New Title from API",
+        updated_at: "2025-01-23T12:00:00Z",
       });
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([newerIssue]);
 
@@ -994,21 +1051,25 @@ describe('useIssues', () => {
       });
 
       // Verify API data is used (not the old local state)
-      expect(result.current.getIssue('issue-1')?.title).toBe('New Title from API');
-      expect(result.current.getIssue('issue-1')?.updated_at).toBe('2025-01-23T12:00:00Z');
+      expect(result.current.getIssue("issue-1")?.title).toBe(
+        "New Title from API",
+      );
+      expect(result.current.getIssue("issue-1")?.updated_at).toBe(
+        "2025-01-23T12:00:00Z",
+      );
     });
   });
 
-  describe('Kanban mode', () => {
+  describe("Kanban mode", () => {
     beforeEach(() => {
       vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue([]);
     });
 
-    it('calls getKanbanIssues when mode is kanban', async () => {
-      const mockIssues = [createTestIssue({ id: 'kanban-1' })];
+    it("calls getKanbanIssues when mode is kanban", async () => {
+      const mockIssues = [createTestIssue({ id: "kanban-1" })];
       vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues({ mode: 'kanban' }));
+      const { result } = renderHook(() => useIssues({ mode: "kanban" }));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -1017,42 +1078,44 @@ describe('useIssues', () => {
       expect(result.current.issues).toEqual(mockIssues);
     });
 
-    it('passes filter to getKanbanIssues', async () => {
-      const filter = { priority: 1, assignee: 'dev@example.com' };
+    it("passes filter to getKanbanIssues", async () => {
+      const filter = { priority: 1, assignee: "dev@example.com" };
       vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue([]);
 
-      renderHook(() => useIssues({ mode: 'kanban', filter }));
+      renderHook(() => useIssues({ mode: "kanban", filter }));
 
       await waitFor(() => {
         expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith(filter);
       });
     });
 
-    it('returns issues with blocked enrichment fields', async () => {
+    it("returns issues with blocked enrichment fields", async () => {
       const mockIssues = [
         createTestIssue({
-          id: 'kanban-1',
+          id: "kanban-1",
           is_blocked: true,
           blocked_by_count: 2,
-          blocked_by: ['dep-1', 'dep-2'],
+          blocked_by: ["dep-1", "dep-2"],
         }),
       ];
       vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue(mockIssues);
 
-      const { result } = renderHook(() => useIssues({ mode: 'kanban' }));
+      const { result } = renderHook(() => useIssues({ mode: "kanban" }));
 
       await waitFor(() => expect(result.current.issues).toHaveLength(1));
 
-      const issue = result.current.getIssue('kanban-1');
+      const issue = result.current.getIssue("kanban-1");
       expect(issue?.is_blocked).toBe(true);
       expect(issue?.blocked_by_count).toBe(2);
-      expect(issue?.blocked_by).toEqual(['dep-1', 'dep-2']);
+      expect(issue?.blocked_by).toEqual(["dep-1", "dep-2"]);
     });
 
-    it('refetch uses kanban mode when mode is kanban', async () => {
+    it("refetch uses kanban mode when mode is kanban", async () => {
       vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue([]);
 
-      const { result } = renderHook(() => useIssues({ mode: 'kanban', autoFetch: false }));
+      const { result } = renderHook(() =>
+        useIssues({ mode: "kanban", autoFetch: false }),
+      );
 
       await act(async () => {
         await result.current.refetch();
@@ -1062,11 +1125,13 @@ describe('useIssues', () => {
       expect(issuesApi.getReadyIssues).not.toHaveBeenCalled();
     });
 
-    it('handles errors in kanban mode', async () => {
-      const errorMessage = 'Kanban API error';
-      vi.mocked(issuesApi.getKanbanIssues).mockRejectedValue(new Error(errorMessage));
+    it("handles errors in kanban mode", async () => {
+      const errorMessage = "Kanban API error";
+      vi.mocked(issuesApi.getKanbanIssues).mockRejectedValue(
+        new Error(errorMessage),
+      );
 
-      const { result } = renderHook(() => useIssues({ mode: 'kanban' }));
+      const { result } = renderHook(() => useIssues({ mode: "kanban" }));
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -1075,12 +1140,17 @@ describe('useIssues', () => {
     });
   });
 
-  describe('Too-far-behind detection', () => {
-    it('triggers refetch when reconnecting→connected with attempts >= TOO_FAR_BEHIND_THRESHOLD (3)', async () => {
+  describe("Too-far-behind detection", () => {
+    it("triggers refetch when reconnecting→connected with attempts >= TOO_FAR_BEHIND_THRESHOLD (3)", async () => {
       // Start with initial data
-      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([
+        createTestIssue(),
+      ]);
 
-      let currentMockSSE = createMockSSE({ state: 'connected', isConnected: true });
+      let currentMockSSE = createMockSSE({
+        state: "connected",
+        isConnected: true,
+      });
 
       vi.mocked(useSSEModule.useSSE).mockImplementation((options) => {
         onMutationCallback = options?.onMutation;
@@ -1093,11 +1163,13 @@ describe('useIssues', () => {
 
       // Clear call count from initial fetch
       vi.mocked(issuesApi.getReadyIssues).mockClear();
-      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([
+        createTestIssue(),
+      ]);
 
       // Simulate reconnecting with 3 attempts
       currentMockSSE = createMockSSE({
-        state: 'reconnecting',
+        state: "reconnecting",
         isConnected: false,
         reconnectAttempts: 3,
       });
@@ -1106,11 +1178,13 @@ describe('useIssues', () => {
 
       // Clear again since reconnecting state doesn't trigger refetch
       vi.mocked(issuesApi.getReadyIssues).mockClear();
-      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([
+        createTestIssue(),
+      ]);
 
       // Now transition to connected
       currentMockSSE = createMockSSE({
-        state: 'connected',
+        state: "connected",
         isConnected: true,
         reconnectAttempts: 0,
       });
@@ -1123,10 +1197,15 @@ describe('useIssues', () => {
       });
     });
 
-    it('does NOT trigger refetch when reconnecting→connected with attempts < 3', async () => {
-      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+    it("does NOT trigger refetch when reconnecting→connected with attempts < 3", async () => {
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([
+        createTestIssue(),
+      ]);
 
-      let currentMockSSE = createMockSSE({ state: 'connected', isConnected: true });
+      let currentMockSSE = createMockSSE({
+        state: "connected",
+        isConnected: true,
+      });
       vi.mocked(useSSEModule.useSSE).mockImplementation((options) => {
         onMutationCallback = options?.onMutation;
         return currentMockSSE;
@@ -1140,7 +1219,7 @@ describe('useIssues', () => {
 
       // Simulate reconnecting with only 2 attempts (below threshold)
       currentMockSSE = createMockSSE({
-        state: 'reconnecting',
+        state: "reconnecting",
         isConnected: false,
         reconnectAttempts: 2,
       });
@@ -1151,7 +1230,7 @@ describe('useIssues', () => {
 
       // Now transition to connected
       currentMockSSE = createMockSSE({
-        state: 'connected',
+        state: "connected",
         isConnected: true,
         reconnectAttempts: 0,
       });
@@ -1162,10 +1241,15 @@ describe('useIssues', () => {
       expect(issuesApi.getReadyIssues).not.toHaveBeenCalled();
     });
 
-    it('resets maxReconnectAttemptsRef after successful reconnection', async () => {
-      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+    it("resets maxReconnectAttemptsRef after successful reconnection", async () => {
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([
+        createTestIssue(),
+      ]);
 
-      let currentMockSSE = createMockSSE({ state: 'connected', isConnected: true });
+      let currentMockSSE = createMockSSE({
+        state: "connected",
+        isConnected: true,
+      });
       vi.mocked(useSSEModule.useSSE).mockImplementation((options) => {
         onMutationCallback = options?.onMutation;
         return currentMockSSE;
@@ -1176,14 +1260,24 @@ describe('useIssues', () => {
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
       // First cycle: reconnect with 3 attempts (triggers refetch)
-      currentMockSSE = createMockSSE({ state: 'reconnecting', isConnected: false, reconnectAttempts: 3 });
+      currentMockSSE = createMockSSE({
+        state: "reconnecting",
+        isConnected: false,
+        reconnectAttempts: 3,
+      });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
       rerender();
 
       vi.mocked(issuesApi.getReadyIssues).mockClear();
-      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([createTestIssue()]);
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([
+        createTestIssue(),
+      ]);
 
-      currentMockSSE = createMockSSE({ state: 'connected', isConnected: true, reconnectAttempts: 0 });
+      currentMockSSE = createMockSSE({
+        state: "connected",
+        isConnected: true,
+        reconnectAttempts: 0,
+      });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
       rerender();
 
@@ -1194,11 +1288,19 @@ describe('useIssues', () => {
       // Second cycle: reconnect with only 1 attempt (should NOT trigger refetch because counter was reset)
       vi.mocked(issuesApi.getReadyIssues).mockClear();
 
-      currentMockSSE = createMockSSE({ state: 'reconnecting', isConnected: false, reconnectAttempts: 1 });
+      currentMockSSE = createMockSSE({
+        state: "reconnecting",
+        isConnected: false,
+        reconnectAttempts: 1,
+      });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
       rerender();
 
-      currentMockSSE = createMockSSE({ state: 'connected', isConnected: true, reconnectAttempts: 0 });
+      currentMockSSE = createMockSSE({
+        state: "connected",
+        isConnected: true,
+        reconnectAttempts: 0,
+      });
       vi.mocked(useSSEModule.useSSE).mockReturnValue(currentMockSSE);
       rerender();
 
@@ -1207,34 +1309,50 @@ describe('useIssues', () => {
     });
   });
 
-  describe('Empty ID defensive check', () => {
-    it('skips API issues with empty id during refetch merge', async () => {
-      const issueWithEmptyId = createTestIssue({ id: '', title: 'Empty ID' });
-      const validIssue = createTestIssue({ id: 'valid-1', title: 'Valid Issue' });
-      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([issueWithEmptyId, validIssue]);
+  describe("Empty ID defensive check", () => {
+    it("skips API issues with empty id during refetch merge", async () => {
+      const issueWithEmptyId = createTestIssue({ id: "", title: "Empty ID" });
+      const validIssue = createTestIssue({
+        id: "valid-1",
+        title: "Valid Issue",
+      });
+      vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([
+        issueWithEmptyId,
+        validIssue,
+      ]);
 
       const { result } = renderHook(() => useIssues());
 
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
       expect(result.current.issues).toHaveLength(1);
-      expect(result.current.getIssue('valid-1')).toBeDefined();
-      expect(result.current.issuesMap.has('')).toBe(false);
+      expect(result.current.getIssue("valid-1")).toBeDefined();
+      expect(result.current.issuesMap.has("")).toBe(false);
     });
   });
 
-  describe('Concurrent optimistic updates', () => {
-    it('concurrent status updates to different issues preserve both changes', async () => {
-      const issue1 = createTestIssue({ id: 'issue-1', status: 'open' });
-      const issue2 = createTestIssue({ id: 'issue-2', status: 'open' });
+  describe("Concurrent optimistic updates", () => {
+    it("concurrent status updates to different issues preserve both changes", async () => {
+      const issue1 = createTestIssue({ id: "issue-1", status: "open" });
+      const issue2 = createTestIssue({ id: "issue-2", status: "open" });
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([issue1, issue2]);
 
       // Use deferred promises to control when API calls resolve
       let resolveFirst!: (value: Issue) => void;
       let resolveSecond!: (value: Issue) => void;
       vi.mocked(issuesApi.updateIssue)
-        .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
-        .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveFirst = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveSecond = resolve;
+            }),
+        );
 
       const { result } = renderHook(() => useIssues());
 
@@ -1243,43 +1361,53 @@ describe('useIssues', () => {
       // Start first update (optimistic)
       let promise1: Promise<void>;
       act(() => {
-        promise1 = result.current.updateIssueStatus('issue-1', 'in_progress');
+        promise1 = result.current.updateIssueStatus("issue-1", "in_progress");
       });
 
       // Start second update while first is still in-flight
       let promise2: Promise<void>;
       act(() => {
-        promise2 = result.current.updateIssueStatus('issue-2', 'closed');
+        promise2 = result.current.updateIssueStatus("issue-2", "closed");
       });
 
       // Both optimistic updates should be reflected before API calls resolve
-      expect(result.current.getIssue('issue-1')?.status).toBe('in_progress');
-      expect(result.current.getIssue('issue-2')?.status).toBe('closed');
+      expect(result.current.getIssue("issue-1")?.status).toBe("in_progress");
+      expect(result.current.getIssue("issue-2")?.status).toBe("closed");
 
       // Resolve both API calls
       await act(async () => {
-        resolveFirst({ ...issue1, status: 'in_progress' as const });
-        resolveSecond({ ...issue2, status: 'closed' as const });
+        resolveFirst({ ...issue1, status: "in_progress" as const });
+        resolveSecond({ ...issue2, status: "closed" as const });
         await promise1!;
         await promise2!;
       });
 
       // Both should retain their new statuses
-      expect(result.current.getIssue('issue-1')?.status).toBe('in_progress');
-      expect(result.current.getIssue('issue-2')?.status).toBe('closed');
+      expect(result.current.getIssue("issue-1")?.status).toBe("in_progress");
+      expect(result.current.getIssue("issue-2")?.status).toBe("closed");
     });
 
-    it('rollback of one issue does not clobber a concurrent update to another issue', async () => {
-      const issue1 = createTestIssue({ id: 'issue-1', status: 'open' });
-      const issue2 = createTestIssue({ id: 'issue-2', status: 'open' });
+    it("rollback of one issue does not clobber a concurrent update to another issue", async () => {
+      const issue1 = createTestIssue({ id: "issue-1", status: "open" });
+      const issue2 = createTestIssue({ id: "issue-2", status: "open" });
       vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([issue1, issue2]);
 
       // Use deferred promises: issue-1 will fail, issue-2 will succeed
       let rejectFirst!: (err: Error) => void;
       let resolveSecond!: (value: Issue) => void;
       vi.mocked(issuesApi.updateIssue)
-        .mockImplementationOnce(() => new Promise((_, reject) => { rejectFirst = reject; }))
-        .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+        .mockImplementationOnce(
+          () =>
+            new Promise((_, reject) => {
+              rejectFirst = reject;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveSecond = resolve;
+            }),
+        );
 
       const { result } = renderHook(() => useIssues());
 
@@ -1288,29 +1416,33 @@ describe('useIssues', () => {
       // Start both updates while both are in-flight
       let promise1: Promise<void>;
       act(() => {
-        promise1 = result.current.updateIssueStatus('issue-1', 'in_progress');
+        promise1 = result.current.updateIssueStatus("issue-1", "in_progress");
       });
 
       let promise2: Promise<void>;
       act(() => {
-        promise2 = result.current.updateIssueStatus('issue-2', 'closed');
+        promise2 = result.current.updateIssueStatus("issue-2", "closed");
       });
 
       // Both optimistic updates visible
-      expect(result.current.getIssue('issue-1')?.status).toBe('in_progress');
-      expect(result.current.getIssue('issue-2')?.status).toBe('closed');
+      expect(result.current.getIssue("issue-1")?.status).toBe("in_progress");
+      expect(result.current.getIssue("issue-2")?.status).toBe("closed");
 
       // Reject first, resolve second
       await act(async () => {
-        rejectFirst(new Error('API error'));
-        resolveSecond({ ...issue2, status: 'closed' as const });
-        try { await promise1!; } catch { /* expected */ }
+        rejectFirst(new Error("API error"));
+        resolveSecond({ ...issue2, status: "closed" as const });
+        try {
+          await promise1!;
+        } catch {
+          /* expected */
+        }
         await promise2!;
       });
 
       // issue-1 should be rolled back, issue-2 should retain new status
-      expect(result.current.getIssue('issue-1')?.status).toBe('open');
-      expect(result.current.getIssue('issue-2')?.status).toBe('closed');
+      expect(result.current.getIssue("issue-1")?.status).toBe("open");
+      expect(result.current.getIssue("issue-2")?.status).toBe("closed");
     });
   });
 });

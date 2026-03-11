@@ -3,9 +3,9 @@
  * Provides memoized filtering with type-safe criteria.
  */
 
-import { useMemo } from 'react';
+import { useMemo } from "react";
 
-import type { Issue, Status, Priority, IssueType } from '@/types';
+import type { Issue, Status, Priority, IssueType } from "@/types";
 
 /**
  * Options for the useIssueFilter hook.
@@ -58,20 +58,26 @@ function matchesSearchTerm(issue: Issue, term: string): boolean {
   const normalizedTerm = term.toLowerCase();
 
   // Check title (guard against null/undefined)
-  if (typeof issue.title === 'string' && issue.title.toLowerCase().includes(normalizedTerm)) {
+  if (
+    typeof issue.title === "string" &&
+    issue.title.toLowerCase().includes(normalizedTerm)
+  ) {
     return true;
   }
 
   // Check description (guard against null/undefined)
   if (
-    typeof issue.description === 'string' &&
+    typeof issue.description === "string" &&
     issue.description.toLowerCase().includes(normalizedTerm)
   ) {
     return true;
   }
 
   // Check notes (guard against null/undefined)
-  if (typeof issue.notes === 'string' && issue.notes.toLowerCase().includes(normalizedTerm)) {
+  if (
+    typeof issue.notes === "string" &&
+    issue.notes.toLowerCase().includes(normalizedTerm)
+  ) {
     return true;
   }
 
@@ -93,17 +99,26 @@ function matchesFilters(issue: Issue, options: UseIssueFilterOptions): boolean {
   }
 
   // Priority range (min)
-  if (options.priorityMin !== undefined && issue.priority < options.priorityMin) {
+  if (
+    options.priorityMin !== undefined &&
+    issue.priority < options.priorityMin
+  ) {
     return false;
   }
 
   // Priority range (max)
-  if (options.priorityMax !== undefined && issue.priority > options.priorityMax) {
+  if (
+    options.priorityMax !== undefined &&
+    issue.priority > options.priorityMax
+  ) {
     return false;
   }
 
   // Issue type filter
-  if (options.issueType !== undefined && issue.issue_type !== options.issueType) {
+  if (
+    options.issueType !== undefined &&
+    issue.issue_type !== options.issueType
+  ) {
     return false;
   }
 
@@ -114,7 +129,7 @@ function matchesFilters(issue: Issue, options: UseIssueFilterOptions): boolean {
     }
   } else if (options.unassigned === true) {
     // Only check unassigned if assignee filter is not set
-    if (issue.assignee !== undefined && issue.assignee !== '') {
+    if (issue.assignee !== undefined && issue.assignee !== "") {
       return false;
     }
   }
@@ -122,7 +137,9 @@ function matchesFilters(issue: Issue, options: UseIssueFilterOptions): boolean {
   // Labels filter (all must match)
   if (options.labels !== undefined && options.labels.length > 0) {
     const issueLabels = issue.labels ?? [];
-    const allLabelsMatch = options.labels.every((label) => issueLabels.includes(label));
+    const allLabelsMatch = options.labels.every((label) =>
+      issueLabels.includes(label),
+    );
     if (!allLabelsMatch) {
       return false;
     }
@@ -131,7 +148,9 @@ function matchesFilters(issue: Issue, options: UseIssueFilterOptions): boolean {
   // Labels filter (any must match)
   if (options.labelsAny !== undefined && options.labelsAny.length > 0) {
     const issueLabels = issue.labels ?? [];
-    const anyLabelMatches = options.labelsAny.some((label) => issueLabels.includes(label));
+    const anyLabelMatches = options.labelsAny.some((label) =>
+      issueLabels.includes(label),
+    );
     if (!anyLabelMatches) {
       return false;
     }
@@ -146,32 +165,32 @@ function matchesFilters(issue: Issue, options: UseIssueFilterOptions): boolean {
 function getActiveFilters(options: UseIssueFilterOptions): string[] {
   const active: string[] = [];
 
-  if (options.searchTerm && options.searchTerm.trim() !== '') {
-    active.push('search');
+  if (options.searchTerm && options.searchTerm.trim() !== "") {
+    active.push("search");
   }
   if (options.status !== undefined) {
-    active.push('status');
+    active.push("status");
   }
   if (options.priority !== undefined) {
-    active.push('priority');
+    active.push("priority");
   }
   if (options.priorityMin !== undefined || options.priorityMax !== undefined) {
-    active.push('priorityRange');
+    active.push("priorityRange");
   }
   if (options.issueType !== undefined) {
-    active.push('type');
+    active.push("type");
   }
   if (options.assignee !== undefined) {
-    active.push('assignee');
+    active.push("assignee");
   }
   if (options.unassigned === true) {
-    active.push('unassigned');
+    active.push("unassigned");
   }
   if (options.labels !== undefined && options.labels.length > 0) {
-    active.push('labels');
+    active.push("labels");
   }
   if (options.labelsAny !== undefined && options.labelsAny.length > 0) {
-    active.push('labelsAny');
+    active.push("labelsAny");
   }
 
   return active;
@@ -209,7 +228,7 @@ function getActiveFilters(options: UseIssueFilterOptions): string[] {
  */
 export function useIssueFilter(
   issues: Issue[],
-  options: UseIssueFilterOptions
+  options: UseIssueFilterOptions,
 ): UseIssueFilterReturn {
   // Destructure searchTerm for normalization
   const { searchTerm } = options;
@@ -221,7 +240,7 @@ export function useIssueFilter(
 
   // Normalize search term
   const normalizedSearchTerm = useMemo(() => {
-    return searchTerm?.trim() ?? '';
+    return searchTerm?.trim() ?? "";
   }, [searchTerm]);
 
   // Memoized filtered issues
@@ -233,7 +252,7 @@ export function useIssueFilter(
 
     return issues.filter((issue) => {
       // Check search term first (if provided)
-      if (normalizedSearchTerm !== '') {
+      if (normalizedSearchTerm !== "") {
         if (!matchesSearchTerm(issue, normalizedSearchTerm)) {
           return false;
         }

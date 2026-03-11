@@ -3,9 +3,9 @@
  * Provides visual feedback about whether the application is connected to the beads daemon.
  */
 
-import type { ConnectionState } from '@/api/sse';
+import type { ConnectionState } from "@/api/sse";
 
-import styles from './ConnectionStatus.module.css';
+import styles from "./ConnectionStatus.module.css";
 
 /**
  * Props for the ConnectionStatus component.
@@ -16,7 +16,7 @@ export interface ConnectionStatusProps {
   /** Additional CSS class name */
   className?: string;
   /** Display variant */
-  variant?: 'badge' | 'inline';
+  variant?: "badge" | "inline";
   /** Compact mode for tight UI (default: false) */
   compact?: boolean;
   /** Show status text (default: true) */
@@ -32,21 +32,24 @@ export interface ConnectionStatusProps {
 /**
  * Map connection state to user-friendly display text.
  */
-function getStatusText(state: ConnectionState, reconnectAttempts?: number): string {
+function getStatusText(
+  state: ConnectionState,
+  reconnectAttempts?: number,
+): string {
   switch (state) {
-    case 'connected':
-      return 'Connected';
-    case 'connecting':
-      return 'Connecting...';
-    case 'reconnecting':
+    case "connected":
+      return "Connected";
+    case "connecting":
+      return "Connecting...";
+    case "reconnecting":
       if (reconnectAttempts !== undefined && reconnectAttempts > 0) {
         return `Reconnecting (attempt ${reconnectAttempts})...`;
       }
-      return 'Reconnecting...';
-    case 'disconnected':
-      return 'Disconnected';
+      return "Reconnecting...";
+    case "disconnected":
+      return "Disconnected";
     default:
-      return 'Unknown';
+      return "Unknown";
   }
 }
 
@@ -57,7 +60,7 @@ function getStatusText(state: ConnectionState, reconnectAttempts?: number): stri
 export function ConnectionStatus({
   state,
   className,
-  variant = 'inline',
+  variant = "inline",
   compact = false,
   showText = true,
   reconnectAttempts,
@@ -68,11 +71,11 @@ export function ConnectionStatus({
 
   const rootClassName = [styles.connectionStatus, styles[variant], className]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
 
   // Show retry button when reconnecting with attempts >= 1 and callback provided
   const shouldShowRetry =
-    state === 'reconnecting' &&
+    state === "reconnecting" &&
     showRetryButton &&
     onRetry !== undefined &&
     reconnectAttempts !== undefined &&
@@ -86,7 +89,7 @@ export function ConnectionStatus({
       aria-label={`Connection status: ${statusText}`}
       data-state={state}
       data-variant={variant}
-      data-compact={compact ? 'true' : undefined}
+      data-compact={compact ? "true" : undefined}
     >
       <span className={styles.indicator} aria-hidden="true" />
       {showText && <span className={styles.text}>{statusText}</span>}

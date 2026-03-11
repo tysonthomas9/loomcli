@@ -319,6 +319,15 @@ func checkBdCLI() CheckResult {
 }
 
 func checkBdDaemon() CheckResult {
+	if _, err := lookPath("bd"); err != nil {
+		return CheckResult{
+			Name:    "bd_daemon",
+			Status:  StatusFail,
+			Summary: "bd not found (cannot check daemon)",
+			Detail:  "Install with: make install-bd",
+		}
+	}
+
 	result := execCommand(GetBeadsDir(), "bd", "daemon", "status", "--json")
 	if result.Err != nil {
 		return CheckResult{

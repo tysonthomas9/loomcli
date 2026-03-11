@@ -3,7 +3,7 @@
  * Interfaces with GET/PATCH /api/config/backend endpoints.
  */
 
-import { get, patch, ApiError } from './client';
+import { get, patch, ApiError } from "./client";
 
 // ============= Types =============
 
@@ -62,14 +62,21 @@ function unwrap<T>(response: ApiResult<T>): T {
  * Get the current backend configuration.
  */
 export async function getBackendConfig(): Promise<BackendConfigData> {
-  const response = await get<ApiResult<BackendConfigData>>('/api/config/backend');
+  const response = await get<ApiResult<BackendConfigData>>(
+    "/api/config/backend",
+  );
   return unwrap(response);
 }
 
 /**
  * Update the project default backend.
  */
-export async function updateBackendConfig(backend: string): Promise<BackendConfigData> {
-  const response = await patch<ApiResult<BackendConfigData>>('/api/config/backend', { backend });
+export async function updateBackendConfig(
+  backend: string,
+): Promise<BackendConfigData> {
+  const response = await patch<ApiResult<BackendConfigData>>(
+    "/api/config/backend",
+    { backend },
+  );
   return unwrap(response);
 }

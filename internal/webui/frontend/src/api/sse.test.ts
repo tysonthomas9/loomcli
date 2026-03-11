@@ -1,10 +1,10 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { BeadsSSEClient, getSSEUrl } from './sse';
-import type { MutationPayload } from './sse';
+import { BeadsSSEClient, getSSEUrl } from "./sse";
+import type { MutationPayload } from "./sse";
 
 // Mock EventSource class with static constants matching the real EventSource API
 class MockEventSource {
@@ -20,7 +20,8 @@ class MockEventSource {
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
 
-  private eventListeners: Map<string, ((e: MessageEvent) => void)[]> = new Map();
+  private eventListeners: Map<string, ((e: MessageEvent) => void)[]> =
+    new Map();
 
   constructor(url: string) {
     this.url = url;
@@ -60,7 +61,7 @@ class MockEventSource {
   }
 
   simulateMutation(data: MutationPayload, eventId?: string): void {
-    const listeners = this.eventListeners.get('mutation') ?? [];
+    const listeners = this.eventListeners.get("mutation") ?? [];
     // Compute eventId from timestamp if not provided (simulates server behavior)
     const lastEventId = eventId ?? String(Date.parse(data.timestamp));
     const event = {
@@ -73,8 +74,8 @@ class MockEventSource {
   }
 
   simulateConnectedEvent(): void {
-    const listeners = this.eventListeners.get('connected') ?? [];
-    const event = { data: '' } as MessageEvent;
+    const listeners = this.eventListeners.get("connected") ?? [];
+    const event = { data: "" } as MessageEvent;
     for (const listener of listeners) {
       listener(event);
     }
@@ -89,7 +90,7 @@ class MockEventSource {
   }
 }
 
-describe('BeadsSSEClient', () => {
+describe("BeadsSSEClient", () => {
   let originalEventSource: typeof EventSource;
 
   beforeEach(() => {
@@ -103,15 +104,15 @@ describe('BeadsSSEClient', () => {
     vi.restoreAllMocks();
   });
 
-  describe('Initialization', () => {
-    it('creates a client with initial disconnected state', () => {
+  describe("Initialization", () => {
+    it("creates a client with initial disconnected state", () => {
       const client = new BeadsSSEClient();
 
-      expect(client.getState()).toBe('disconnected');
+      expect(client.getState()).toBe("disconnected");
       expect(client.getReconnectAttempts()).toBe(0);
     });
 
-    it('accepts callbacks in options', () => {
+    it("accepts callbacks in options", () => {
       const onMutation = vi.fn();
       const onError = vi.fn();
       const onStateChange = vi.fn();
@@ -124,64 +125,66 @@ describe('BeadsSSEClient', () => {
         onReconnect,
       });
 
-      expect(client.getState()).toBe('disconnected');
+      expect(client.getState()).toBe("disconnected");
     });
   });
 
-  describe('Connection lifecycle', () => {
-    it('connect() creates EventSource', () => {
+  describe("Connection lifecycle", () => {
+    it("connect() creates EventSource", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
 
       expect(MockEventSource.lastInstance).toBeDefined();
-      expect(MockEventSource.lastInstance?.url).toContain('/api/events');
+      expect(MockEventSource.lastInstance?.url).toContain("/api/events");
     });
 
-    it('connect() with since parameter adds query string', () => {
+    it("connect() with since parameter adds query string", () => {
       const client = new BeadsSSEClient();
 
       client.connect(1706011200000);
 
-      expect(MockEventSource.lastInstance?.url).toContain('since=1706011200000');
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "since=1706011200000",
+      );
     });
 
-    it('state transitions from disconnected to connecting to connected', () => {
+    it("state transitions from disconnected to connecting to connected", () => {
       const onStateChange = vi.fn();
       const client = new BeadsSSEClient({ onStateChange });
 
-      expect(client.getState()).toBe('disconnected');
+      expect(client.getState()).toBe("disconnected");
 
       client.connect();
 
-      expect(client.getState()).toBe('connecting');
-      expect(onStateChange).toHaveBeenCalledWith('connecting');
+      expect(client.getState()).toBe("connecting");
+      expect(onStateChange).toHaveBeenCalledWith("connecting");
 
       MockEventSource.lastInstance?.simulateOpen();
 
-      expect(client.getState()).toBe('connected');
-      expect(onStateChange).toHaveBeenCalledWith('connected');
+      expect(client.getState()).toBe("connected");
+      expect(onStateChange).toHaveBeenCalledWith("connected");
     });
 
-    it('disconnect() closes EventSource and updates state', () => {
+    it("disconnect() closes EventSource and updates state", () => {
       const onStateChange = vi.fn();
       const client = new BeadsSSEClient({ onStateChange });
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
-      expect(client.getState()).toBe('connected');
+      expect(client.getState()).toBe("connected");
 
       const esInstance = MockEventSource.lastInstance;
 
       client.disconnect();
 
-      expect(client.getState()).toBe('disconnected');
+      expect(client.getState()).toBe("disconnected");
       expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(onStateChange).toHaveBeenCalledWith('disconnected');
+      expect(onStateChange).toHaveBeenCalledWith("disconnected");
     });
 
-    it('connect() when already connected does nothing', () => {
+    it("connect() when already connected does nothing", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
@@ -194,14 +197,16 @@ describe('BeadsSSEClient', () => {
       expect(MockEventSource.instances.length).toBe(1);
     });
 
-    it('handles EventSource constructor throwing', () => {
+    it("handles EventSource constructor throwing", () => {
       const onStateChange = vi.fn();
       const onError = vi.fn();
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
 
       // Override EventSource to throw on construction
       const ThrowingEventSource = function () {
-        throw new Error('SecurityError');
+        throw new Error("SecurityError");
       } as unknown as typeof EventSource;
       ThrowingEventSource.CONNECTING = 0;
       ThrowingEventSource.OPEN = 1;
@@ -213,10 +218,10 @@ describe('BeadsSSEClient', () => {
       client.connect();
 
       // handleError is called but eventSource is null, so state stays 'connecting'
-      expect(client.getState()).toBe('connecting');
+      expect(client.getState()).toBe("connecting");
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        '[SSE] Failed to create EventSource:',
-        expect.any(Error)
+        "[SSE] Failed to create EventSource:",
+        expect.any(Error),
       );
       // onError is NOT called because handleError requires non-null eventSource
       expect(onError).not.toHaveBeenCalled();
@@ -224,18 +229,19 @@ describe('BeadsSSEClient', () => {
       consoleErrorSpy.mockRestore();
       // Restore MockEventSource for subsequent tests
       global.EventSource = MockEventSource as unknown as typeof EventSource;
-
     });
 
-    it('eventSource remains null after constructor failure and disconnect works', async () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it("eventSource remains null after constructor failure and disconnect works", async () => {
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
 
       global.EventSource = class ThrowingEventSource {
         static readonly CONNECTING = 0;
         static readonly OPEN = 1;
         static readonly CLOSED = 2;
         constructor() {
-          throw new Error('EventSource not supported');
+          throw new Error("EventSource not supported");
         }
       } as unknown as typeof EventSource;
 
@@ -243,21 +249,21 @@ describe('BeadsSSEClient', () => {
       await client.connect();
 
       // Verify no active connection
-      expect(client.getState()).toBe('connecting');
+      expect(client.getState()).toBe("connecting");
 
       // disconnect() should work without error even though eventSource is null
       client.disconnect();
-      expect(client.getState()).toBe('disconnected');
+      expect(client.getState()).toBe("disconnected");
 
       consoleErrorSpy.mockRestore();
     });
 
-    it('connect() when connecting does nothing', () => {
+    it("connect() when connecting does nothing", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
 
-      expect(client.getState()).toBe('connecting');
+      expect(client.getState()).toBe("connecting");
       expect(MockEventSource.instances.length).toBe(1);
 
       client.connect();
@@ -266,8 +272,8 @@ describe('BeadsSSEClient', () => {
     });
   });
 
-  describe('Message parsing and callback invocation', () => {
-    it('onMutation called with parsed payload', () => {
+  describe("Message parsing and callback invocation", () => {
+    it("onMutation called with parsed payload", () => {
       const onMutation = vi.fn();
       const client = new BeadsSSEClient({ onMutation });
 
@@ -275,10 +281,10 @@ describe('BeadsSSEClient', () => {
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-123',
-        title: 'Test Issue',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-123",
+        title: "Test Issue",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
       MockEventSource.lastInstance?.simulateMutation(mutation);
@@ -286,9 +292,11 @@ describe('BeadsSSEClient', () => {
       expect(onMutation).toHaveBeenCalledWith(mutation);
     });
 
-    it('malformed JSON is ignored with warning', () => {
+    it("malformed JSON is ignored with warning", () => {
       const onMutation = vi.fn();
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
       const client = new BeadsSSEClient({ onMutation });
 
       client.connect();
@@ -296,22 +304,28 @@ describe('BeadsSSEClient', () => {
 
       // Simulate invalid JSON by directly calling the listener with malformed data
       const listeners =
-        (MockEventSource.lastInstance as MockEventSource)['eventListeners'].get('mutation') ?? [];
-      const event = { data: 'not valid json' } as MessageEvent;
+        (MockEventSource.lastInstance as MockEventSource)["eventListeners"].get(
+          "mutation",
+        ) ?? [];
+      const event = { data: "not valid json" } as MessageEvent;
       for (const listener of listeners) {
         listener(event);
       }
 
       expect(onMutation).not.toHaveBeenCalled();
-      expect(consoleWarnSpy).toHaveBeenCalledWith('[SSE] Received malformed mutation event');
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[SSE] Received malformed mutation event",
+      );
 
       consoleWarnSpy.mockRestore();
     });
 
-    it('connected event is handled', () => {
+    it("connected event is handled", () => {
       const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'development';
-      const consoleDebugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+      process.env.NODE_ENV = "development";
+      const consoleDebugSpy = vi
+        .spyOn(console, "debug")
+        .mockImplementation(() => {});
 
       const client = new BeadsSSEClient();
 
@@ -319,15 +333,17 @@ describe('BeadsSSEClient', () => {
       MockEventSource.lastInstance?.simulateOpen();
       MockEventSource.lastInstance?.simulateConnectedEvent();
 
-      expect(consoleDebugSpy).toHaveBeenCalledWith('[SSE] Received connected event');
+      expect(consoleDebugSpy).toHaveBeenCalledWith(
+        "[SSE] Received connected event",
+      );
 
       consoleDebugSpy.mockRestore();
       process.env.NODE_ENV = originalEnv;
     });
   });
 
-  describe('Error handling and reconnect state tracking', () => {
-    it('error during connecting state triggers reconnecting', () => {
+  describe("Error handling and reconnect state tracking", () => {
+    it("error during connecting state triggers reconnecting", () => {
       const onStateChange = vi.fn();
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient({ onStateChange, onReconnect });
@@ -338,13 +354,13 @@ describe('BeadsSSEClient', () => {
       // Simulate error while browser is reconnecting
       MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
 
-      expect(client.getState()).toBe('reconnecting');
+      expect(client.getState()).toBe("reconnecting");
       expect(client.getReconnectAttempts()).toBe(1);
-      expect(onStateChange).toHaveBeenCalledWith('reconnecting');
+      expect(onStateChange).toHaveBeenCalledWith("reconnecting");
       expect(onReconnect).toHaveBeenCalledWith(1);
     });
 
-    it('error during closed state triggers reconnecting and calls onError', () => {
+    it("error during closed state triggers reconnecting and calls onError", () => {
       const onError = vi.fn();
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient({ onError, onReconnect });
@@ -355,13 +371,13 @@ describe('BeadsSSEClient', () => {
       // Simulate closed state error
       MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
 
-      expect(client.getState()).toBe('reconnecting');
+      expect(client.getState()).toBe("reconnecting");
       expect(client.getReconnectAttempts()).toBe(1);
-      expect(onError).toHaveBeenCalledWith('Connection closed');
+      expect(onError).toHaveBeenCalledWith("Connection closed");
       expect(onReconnect).toHaveBeenCalledWith(1);
     });
 
-    it('reconnectAttempts increments on consecutive errors', () => {
+    it("reconnectAttempts increments on consecutive errors", () => {
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient({ onReconnect });
 
@@ -378,7 +394,7 @@ describe('BeadsSSEClient', () => {
       expect(client.getReconnectAttempts()).toBe(3);
     });
 
-    it('reconnectAttempts resets to 0 on successful open', () => {
+    it("reconnectAttempts resets to 0 on successful open", () => {
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient({ onReconnect });
 
@@ -397,7 +413,7 @@ describe('BeadsSSEClient', () => {
       expect(onReconnect).toHaveBeenCalledWith(0);
     });
 
-    it('error after manual disconnect is ignored', () => {
+    it("error after manual disconnect is ignored", () => {
       const onError = vi.fn();
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient({ onError, onReconnect });
@@ -420,8 +436,10 @@ describe('BeadsSSEClient', () => {
       expect(client.getReconnectAttempts()).toBe(0);
     });
 
-    it('logs warning after 5 connection failures', () => {
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it("logs warning after 5 connection failures", () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
       const client = new BeadsSSEClient();
 
       client.connect();
@@ -432,50 +450,50 @@ describe('BeadsSSEClient', () => {
       }
 
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        '[SSE] Multiple connection failures, will continue retrying'
+        "[SSE] Multiple connection failures, will continue retrying",
       );
 
       consoleWarnSpy.mockRestore();
     });
   });
 
-  describe('Last event ID tracking for reconnection catch-up', () => {
-    it('getLastEventId returns undefined initially', () => {
+  describe("Last event ID tracking for reconnection catch-up", () => {
+    it("getLastEventId returns undefined initially", () => {
       const client = new BeadsSSEClient();
 
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it('getLastEventId returns the last event ID after receiving a mutation', () => {
+    it("getLastEventId returns the last event ID after receiving a mutation", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-123',
-        title: 'Test Issue',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-123",
+        title: "Test Issue",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
       MockEventSource.lastInstance?.simulateMutation(mutation);
 
-      const expectedTime = Date.parse('2025-01-23T12:00:00Z');
+      const expectedTime = Date.parse("2025-01-23T12:00:00Z");
       expect(client.getLastEventId()).toBe(expectedTime);
     });
 
-    it('tracks last event ID from event.lastEventId', () => {
+    it("tracks last event ID from event.lastEventId", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-123',
-        title: 'Test Issue',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-123",
+        title: "Test Issue",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
       MockEventSource.lastInstance?.simulateMutation(mutation);
@@ -484,28 +502,30 @@ describe('BeadsSSEClient', () => {
       client.disconnect();
       client.connect();
 
-      const expectedTime = Date.parse('2025-01-23T12:00:00Z');
-      expect(MockEventSource.lastInstance?.url).toContain(`since=${expectedTime}`);
+      const expectedTime = Date.parse("2025-01-23T12:00:00Z");
+      expect(MockEventSource.lastInstance?.url).toContain(
+        `since=${expectedTime}`,
+      );
     });
 
-    it('uses latest event ID when receiving multiple mutations', () => {
+    it("uses latest event ID when receiving multiple mutations", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation1: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-123',
-        title: 'First Issue',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-123",
+        title: "First Issue",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
       const mutation2: MutationPayload = {
-        type: 'update',
-        issue_id: 'beads-456',
-        title: 'Second Issue',
-        timestamp: '2025-01-23T14:00:00Z',
+        type: "update",
+        issue_id: "beads-456",
+        title: "Second Issue",
+        timestamp: "2025-01-23T14:00:00Z",
       };
 
       MockEventSource.lastInstance?.simulateMutation(mutation1);
@@ -514,21 +534,23 @@ describe('BeadsSSEClient', () => {
       client.disconnect();
       client.connect();
 
-      const expectedTime = Date.parse('2025-01-23T14:00:00Z');
-      expect(MockEventSource.lastInstance?.url).toContain(`since=${expectedTime}`);
+      const expectedTime = Date.parse("2025-01-23T14:00:00Z");
+      expect(MockEventSource.lastInstance?.url).toContain(
+        `since=${expectedTime}`,
+      );
     });
 
-    it('connect with explicit since overrides last event ID', () => {
+    it("connect with explicit since overrides last event ID", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-123',
-        title: 'Test Issue',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-123",
+        title: "Test Issue",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
       MockEventSource.lastInstance?.simulateMutation(mutation);
@@ -536,108 +558,110 @@ describe('BeadsSSEClient', () => {
       client.disconnect();
       client.connect(1706100000000);
 
-      expect(MockEventSource.lastInstance?.url).toContain('since=1706100000000');
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "since=1706100000000",
+      );
     });
 
-    it('ignores lastEventId of 0', () => {
+    it("ignores lastEventId of 0", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-100',
-        title: 'Test',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-100",
+        title: "Test",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
-      MockEventSource.lastInstance?.simulateMutation(mutation, '0');
+      MockEventSource.lastInstance?.simulateMutation(mutation, "0");
 
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it('ignores negative lastEventId', () => {
+    it("ignores negative lastEventId", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-101',
-        title: 'Test',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-101",
+        title: "Test",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
-      MockEventSource.lastInstance?.simulateMutation(mutation, '-1');
+      MockEventSource.lastInstance?.simulateMutation(mutation, "-1");
 
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it('ignores non-numeric lastEventId', () => {
+    it("ignores non-numeric lastEventId", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-102',
-        title: 'Test',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-102",
+        title: "Test",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
-      MockEventSource.lastInstance?.simulateMutation(mutation, 'abc');
+      MockEventSource.lastInstance?.simulateMutation(mutation, "abc");
 
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it('does not overwrite newer ID with older ID (out-of-order)', () => {
+    it("does not overwrite newer ID with older ID (out-of-order)", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation1: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-103',
-        title: 'First',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-103",
+        title: "First",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
       const mutation2: MutationPayload = {
-        type: 'update',
-        issue_id: 'beads-104',
-        title: 'Second',
-        timestamp: '2025-01-23T11:00:00Z',
+        type: "update",
+        issue_id: "beads-104",
+        title: "Second",
+        timestamp: "2025-01-23T11:00:00Z",
       };
 
-      MockEventSource.lastInstance?.simulateMutation(mutation1, '2000');
-      MockEventSource.lastInstance?.simulateMutation(mutation2, '1000');
+      MockEventSource.lastInstance?.simulateMutation(mutation1, "2000");
+      MockEventSource.lastInstance?.simulateMutation(mutation2, "1000");
 
       expect(client.getLastEventId()).toBe(2000);
     });
 
-    it('handles empty lastEventId string', () => {
+    it("handles empty lastEventId string", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-105',
-        title: 'Test',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-105",
+        title: "Test",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
-      MockEventSource.lastInstance?.simulateMutation(mutation, '');
+      MockEventSource.lastInstance?.simulateMutation(mutation, "");
 
       expect(client.getLastEventId()).toBeUndefined();
     });
 
-    it('invalid timestamp in mutation is ignored for tracking', () => {
+    it("invalid timestamp in mutation is ignored for tracking", () => {
       const onMutation = vi.fn();
       const client = new BeadsSSEClient({ onMutation });
 
@@ -645,10 +669,10 @@ describe('BeadsSSEClient', () => {
       MockEventSource.lastInstance?.simulateOpen();
 
       const mutation = {
-        type: 'create',
-        issue_id: 'beads-123',
-        title: 'Test Issue',
-        timestamp: 'invalid-date',
+        type: "create",
+        issue_id: "beads-123",
+        title: "Test Issue",
+        timestamp: "invalid-date",
       };
 
       MockEventSource.lastInstance?.simulateMutation(mutation);
@@ -660,18 +684,18 @@ describe('BeadsSSEClient', () => {
       client.connect();
 
       // Should not have a since parameter since timestamp was invalid
-      expect(MockEventSource.lastInstance?.url).not.toContain('since=');
+      expect(MockEventSource.lastInstance?.url).not.toContain("since=");
     });
   });
 
-  describe('retryNow', () => {
-    it('only works when in reconnecting state', () => {
+  describe("retryNow", () => {
+    it("only works when in reconnecting state", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
-      expect(client.getState()).toBe('connected');
+      expect(client.getState()).toBe("connected");
 
       client.retryNow();
 
@@ -679,7 +703,7 @@ describe('BeadsSSEClient', () => {
       expect(MockEventSource.instances.length).toBe(1);
     });
 
-    it('creates new connection immediately when in reconnecting state', () => {
+    it("creates new connection immediately when in reconnecting state", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
@@ -687,16 +711,16 @@ describe('BeadsSSEClient', () => {
 
       // Trigger reconnecting state
       MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
-      expect(client.getState()).toBe('reconnecting');
+      expect(client.getState()).toBe("reconnecting");
       expect(MockEventSource.instances.length).toBe(1);
 
       client.retryNow();
 
       expect(MockEventSource.instances.length).toBe(2);
-      expect(client.getState()).toBe('connecting');
+      expect(client.getState()).toBe("connecting");
     });
 
-    it('resets reconnect counter on manual retry', () => {
+    it("resets reconnect counter on manual retry", () => {
       const onReconnect = vi.fn();
       const client = new BeadsSSEClient({ onReconnect });
 
@@ -715,8 +739,8 @@ describe('BeadsSSEClient', () => {
     });
   });
 
-  describe('Cleanup on destroy', () => {
-    it('destroy() closes EventSource and clears callbacks', () => {
+  describe("Cleanup on destroy", () => {
+    it("destroy() closes EventSource and clears callbacks", () => {
       const onMutation = vi.fn();
       const onStateChange = vi.fn();
       const client = new BeadsSSEClient({ onMutation, onStateChange });
@@ -728,7 +752,7 @@ describe('BeadsSSEClient', () => {
       client.destroy();
 
       expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
-      expect(client.getState()).toBe('disconnected');
+      expect(client.getState()).toBe("disconnected");
 
       // Callbacks should not be called after destroy
       onStateChange.mockClear();
@@ -737,25 +761,25 @@ describe('BeadsSSEClient', () => {
       // Try to trigger callbacks - they should not be called
       esInstance?.simulateOpen();
       esInstance?.simulateMutation({
-        type: 'create',
-        issue_id: 'beads-789',
-        title: 'Should not trigger',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-789",
+        title: "Should not trigger",
+        timestamp: "2025-01-23T12:00:00Z",
       });
 
       expect(onStateChange).not.toHaveBeenCalled();
       expect(onMutation).not.toHaveBeenCalled();
     });
 
-    it('instance should not be reused after destroy', () => {
+    it("instance should not be reused after destroy", () => {
       const client = new BeadsSSEClient();
 
       client.connect();
       MockEventSource.lastInstance?.simulateOpen();
-      expect(client.getState()).toBe('connected');
+      expect(client.getState()).toBe("connected");
 
       client.destroy();
-      expect(client.getState()).toBe('disconnected');
+      expect(client.getState()).toBe("disconnected");
 
       // Note: The client doesn't prevent reuse, but callbacks are cleared
       // This documents the behavior - destroy() clears callbacks
@@ -763,20 +787,22 @@ describe('BeadsSSEClient', () => {
   });
 });
 
-describe('getSSEUrl', () => {
-  it('returns base URL without since parameter', () => {
+describe("getSSEUrl", () => {
+  it("returns base URL without since parameter", () => {
     const url = getSSEUrl();
 
     expect(url).toBe(`${window.location.origin}/api/events`);
   });
 
-  it('includes since parameter when provided', () => {
+  it("includes since parameter when provided", () => {
     const url = getSSEUrl(1706011200000);
 
-    expect(url).toBe(`${window.location.origin}/api/events?since=1706011200000`);
+    expect(url).toBe(
+      `${window.location.origin}/api/events?since=1706011200000`,
+    );
   });
 
-  it('handles since value of 0', () => {
+  it("handles since value of 0", () => {
     const url = getSSEUrl(0);
 
     expect(url).toBe(`${window.location.origin}/api/events?since=0`);

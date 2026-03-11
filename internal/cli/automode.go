@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -26,6 +27,7 @@ type AutoModeOptions struct {
 	CustomPromptGen func(string, *WorkspaceConfig) string // Custom prompt generator (overrides AgentType selection)
 	CustomTaskCheck func() (bool, error)                  // Custom task availability check (overrides AgentType selection)
 	BackoffBase     time.Duration                         // Base backoff duration for no-progress retries (default 30s)
+	EventBus        events.Emitter                        // Event emission for observability (nil = no events)
 }
 
 // AutoModeState tracks the current state of auto mode execution
@@ -49,6 +51,7 @@ func SetupSignalHandler() chan struct{} {
 
 	go func() {
 		sig := <-sigChan
+		signal.Stop(sigChan) // Stop delivering signals to this channel
 		log.Printf("[auto] Shutdown signal received: %v (PID=%d, PGID=%d)", sig, os.Getpid(), syscall.Getpgrp())
 		fmt.Printf("\n[auto] Shutdown signal received (%v), stopping gracefully...\n", sig)
 		close(shutdown) // Closing unblocks ALL receivers
@@ -84,6 +87,9 @@ func agentClaimedTask(worktreePath string) bool {
 func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	if opts.BackoffBase == 0 {
 		opts.BackoffBase = 30 * time.Second
+	}
+	if opts.EventBus == nil {
+		opts.EventBus = events.NopBus{}
 	}
 
 	state := &AutoModeState{
@@ -203,6 +209,9 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		fmt.Printf("[auto] === Starting task %d ===\n", state.TasksCompleted+1)
 		fmt.Println("")
 
+		// Capture HEAD ref before agent run (for diff stats on completion)
+		beforeRef := captureHEADRef(opts.WorktreePath)
+
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := generatePrompt(opts.AgentName, workspace)
 
@@ -228,6 +237,17 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			fmt.Printf("[auto] Agent exited with error: %v\n", err)
 			state.ConsecutiveErrors++
 
+			// Emit task_failed event (try to include TaskID from lock file)
+			failedTaskID := ""
+			if info, readErr := ReadLockFile(opts.WorktreePath); readErr == nil && info != nil {
+				failedTaskID = info.TaskID
+			}
+			if evt, evtErr := events.NewEvent(events.TaskFailed, opts.AgentName, "", "", events.TaskFailedData{TaskID: failedTaskID, Error: err.Error()}); evtErr == nil {
+				if emitErr := opts.EventBus.Emit(evt); emitErr != nil {
+					log.Printf("[auto] Failed to emit task_failed event: %v", emitErr)
+				}
+			}
+
 			// Stop after 3 consecutive errors
 			if state.ConsecutiveErrors >= 3 {
 				state.ShouldExit = true
@@ -252,6 +272,25 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			state.TasksCompleted++
 			state.ConsecutiveNoProgress = 0
 			state.LastTaskTime = time.Now()
+
+			// Emit task_completed event with diff stats
+			taskID := ""
+			if info, readErr := ReadLockFile(opts.WorktreePath); readErr == nil && info != nil {
+				taskID = info.TaskID
+			}
+			diffStats := ComputeDiffStats(opts.WorktreePath, beforeRef)
+			duration := events.Duration{Duration: endedAt.Sub(startedAt)}
+			if evt, evtErr := events.NewEvent(events.TaskCompleted, opts.AgentName, "", "", events.TaskCompletedData{
+				TaskID:       taskID,
+				Duration:     duration,
+				FilesChanged: diffStats.FilesChanged,
+				LinesAdded:   diffStats.LinesAdded,
+				LinesRemoved: diffStats.LinesRemoved,
+			}); evtErr == nil {
+				if emitErr := opts.EventBus.Emit(evt); emitErr != nil {
+					log.Printf("[auto] Failed to emit task_completed event: %v", emitErr)
+				}
+			}
 
 			fmt.Println("")
 			fmt.Printf("[auto] Task completed. Total: %d\n", state.TasksCompleted)
@@ -350,4 +389,16 @@ func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktree
 	if err := store.Append(record); err != nil {
 		log.Printf("[auto] Warning: failed to record usage: %v", err)
 	}
+}
+
+// captureHEADRef returns the current HEAD ref for the worktree.
+// Returns empty string on error (ComputeDiffStats handles this gracefully).
+func captureHEADRef(worktreePath string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = worktreePath
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

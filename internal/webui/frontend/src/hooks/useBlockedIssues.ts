@@ -3,10 +3,10 @@
  * Provides issues that have blocking dependencies (waiting on other issues to complete).
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from "react";
 
-import { getBlockedIssues, type BlockedFilter } from '@/api/issues';
-import type { BlockedIssue } from '@/types';
+import { getBlockedIssues, type BlockedFilter } from "@/api/issues";
+import type { BlockedIssue } from "@/types";
 
 /**
  * Options for the useBlockedIssues hook.
@@ -67,8 +67,18 @@ export interface UseBlockedIssuesResult {
  * }
  * ```
  */
-export function useBlockedIssues(options?: UseBlockedIssuesOptions): UseBlockedIssuesResult {
-  const { parentId, priority, type, assignee, limit, pollInterval, enabled = true } = options ?? {};
+export function useBlockedIssues(
+  options?: UseBlockedIssuesOptions,
+): UseBlockedIssuesResult {
+  const {
+    parentId,
+    priority,
+    type,
+    assignee,
+    limit,
+    pollInterval,
+    enabled = true,
+  } = options ?? {};
 
   const [data, setData] = useState<BlockedIssue[] | null>(null);
   const [loading, setLoading] = useState<boolean>(false);

@@ -243,7 +243,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		fmt.Print("\033[?25h") // Show cursor
 
 		// Collect first batch before entering loop (loading message visible during this)
-		data := collectMonitorData(100)
+		data := collectMonitorData(100, monitorBranch)
 		output := renderDashboard(data)
 		fullOutput := output + fmt.Sprintf("\nPress Ctrl+C to exit (refreshing every %ds)", monitorInterval)
 		fmt.Print("\033[?25l")
@@ -255,7 +255,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		// Watch mode - refresh in place without flickering
 		for {
 			time.Sleep(time.Duration(monitorInterval) * time.Second)
-			data = collectMonitorData(100)
+			data = collectMonitorData(100, monitorBranch)
 			output = renderDashboard(data)
 
 			// Build complete output including status line (no trailing newline)
@@ -270,7 +270,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 	} else {
 		// One-shot mode - show loading message on stderr
 		fmt.Fprint(os.Stderr, "Loading...")
-		data := collectMonitorData(100)
+		data := collectMonitorData(100, monitorBranch)
 		fmt.Fprint(os.Stderr, "\r          \r") // Clear loading message
 		fmt.Print(renderDashboard(data))
 	}
@@ -278,11 +278,11 @@ func runMonitor(cmd *cobra.Command, args []string) {
 
 // CollectMonitorData gathers all dashboard data.
 // Exported for use by the HTTP server.
-func CollectMonitorData() *MonitorData {
-	return collectMonitorData(100)
+func CollectMonitorData(branch string) *MonitorData {
+	return collectMonitorData(100, branch)
 }
 
-func collectMonitorData(readyLimit int) *MonitorData {
+func collectMonitorData(readyLimit int, branch string) *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
 	// Start stats and sync bd call in parallel with task collection
@@ -309,7 +309,7 @@ func collectMonitorData(readyLimit int) *MonitorData {
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
-	data.Agents, taskIDToAgents = collectAgentStatus(data.AgentTasks)
+	data.Agents, taskIDToAgents = collectAgentStatus(data.AgentTasks, branch)
 
 	// Detect task conflicts (multiple agents claiming same task)
 	data.TaskConflicts = make(map[string][]string)
@@ -331,8 +331,8 @@ func collectMonitorData(readyLimit int) *MonitorData {
 
 // CollectAgentStatusOnly returns just agent status without task context.
 // Exported for use by the HTTP server.
-func CollectAgentStatusOnly() []AgentStatus {
-	agents, _ := collectAgentStatus(nil)
+func CollectAgentStatusOnly(branch string) []AgentStatus {
+	agents, _ := collectAgentStatus(nil, branch)
 	return agents
 }
 
@@ -362,8 +362,8 @@ func getGitHubRemoteURL(path string) string {
 }
 
 // getWorktreeCommitDetails returns the recent commits ahead of the integration branch.
-func getWorktreeCommitDetails(path, defaultBranch string, limit int, githubURL string) []CommitDetail {
-	branch := monitorBranch
+func getWorktreeCommitDetails(path, defaultBranch string, limit int, githubURL string, overrideBranch string) []CommitDetail {
+	branch := overrideBranch
 	if branch == "" {
 		branch = defaultBranch
 	}
@@ -433,7 +433,7 @@ func getWorktreeFileChanges(path string) []FileChange {
 	return changes
 }
 
-func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[string][]string) {
+func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
 	worktrees, err := DiscoverWorktrees()
 	if err != nil {
 		return nil, nil
@@ -527,11 +527,11 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 		}
 
 		// Check ahead/behind integration branch
-		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, defaultBranch)
+		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, defaultBranch, branch)
 
 		// Populate commit details when ahead > 0
 		if agent.Ahead > 0 {
-			agent.Commits = getWorktreeCommitDetails(wt.Path, defaultBranch, 10, githubURL)
+			agent.Commits = getWorktreeCommitDetails(wt.Path, defaultBranch, 10, githubURL, branch)
 		}
 
 		// Populate file changes (returns nil for clean trees)
@@ -543,8 +543,8 @@ func collectAgentStatus(agentTasks map[string]TaskInfo) ([]AgentStatus, map[stri
 	return agents, taskIDToAgents
 }
 
-func getWorktreeGitSyncStatus(path, defaultBranch string) (ahead, behind int) {
-	branch := monitorBranch
+func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string) (ahead, behind int) {
+	branch := overrideBranch
 	if branch == "" {
 		branch = defaultBranch
 	}

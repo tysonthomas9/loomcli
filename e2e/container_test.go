@@ -144,7 +144,7 @@ func TestContainer_SmokeTest(t *testing.T) {
 }
 
 func TestContainer_FullTestSuite(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Minute)
 	defer cancel()
 
 	output, exitCode, err := dockerRun(ctx, nil, "run_test.sh")

@@ -237,7 +237,7 @@ func (c *Client) executeWithTimeout(operation string, args interface{}, cwd stri
 		AuthToken:     authToken,
 	}
 
-	reqJSON, err := json.Marshal(req)
+	reqJSON, err := json.Marshal(req) // #nosec G117 — AuthToken is an internal daemon IPC token, not a user secret
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}

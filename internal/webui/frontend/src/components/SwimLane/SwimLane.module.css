@@ -58,7 +58,7 @@
   transition: transform var(--transition-fast);
 }
 
-.swimLane:not([data-collapsed='true']) .chevronIcon {
+.swimLane:not([data-collapsed="true"]) .chevronIcon {
   transform: rotate(90deg);
 }
 
@@ -104,7 +104,7 @@
   border-right: none;
 }
 
-.laneContent[data-collapsed='true'] {
+.laneContent[data-collapsed="true"] {
   max-height: 0;
   opacity: 0;
   padding-top: 0;

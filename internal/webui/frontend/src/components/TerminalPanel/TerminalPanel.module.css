@@ -86,15 +86,15 @@
   transition: background-color var(--transition-fast, 150ms);
 }
 
-.statusDot[data-status='connecting'] {
+.statusDot[data-status="connecting"] {
   background-color: var(--color-warning, #d4a017);
 }
 
-.statusDot[data-status='connected'] {
+.statusDot[data-status="connected"] {
   background-color: var(--color-success, #22c55e);
 }
 
-.statusDot[data-status='disconnected'] {
+.statusDot[data-status="disconnected"] {
   background-color: var(--color-text-muted, #999);
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -70,6 +71,18 @@ type Daemon struct {
 
 	epicAssigner *EpicAssigner       // manages epic-to-worktree assignments
 	concurrency  *ConcurrencyTracker // enforces per-role concurrency limits
+	eventBus     events.Emitter      // event emission for observability (nil-safe via NopBus default)
+}
+
+// emitEvent is a convenience helper that emits an event via the daemon's event bus.
+// If the bus is nil (e.g., in tests that construct Daemon directly), it silently returns.
+func (d *Daemon) emitEvent(evt events.Event) {
+	if d.eventBus == nil {
+		return
+	}
+	if err := d.eventBus.Emit(evt); err != nil {
+		log.Printf("[daemon] Failed to emit %s event: %v", evt.Type, err)
+	}
 }
 
 // builtInRoles defines the built-in role names that use loom <role> command.
@@ -79,12 +92,17 @@ var builtInRoles = map[string]bool{
 }
 
 // NewDaemon creates a daemon from the loaded config.
-func NewDaemon(config *DaemonConfig, projectDir string) (*Daemon, error) {
+// If eventBus is nil, a NopBus is used (events are silently discarded).
+func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter) (*Daemon, error) {
 	if config == nil {
 		return nil, fmt.Errorf("daemon config is nil")
 	}
 	if len(config.Agents) == 0 {
 		return nil, fmt.Errorf("no agents configured in loom.yaml")
+	}
+
+	if eventBus == nil {
+		eventBus = events.NopBus{}
 	}
 
 	d := &Daemon{
@@ -93,6 +111,7 @@ func NewDaemon(config *DaemonConfig, projectDir string) (*Daemon, error) {
 		agents:       make([]*AgentProcess, 0, len(config.Agents)),
 		epicAssigner: NewEpicAssigner(),
 		concurrency:  NewConcurrencyTracker(config.Roles),
+		eventBus:     eventBus,
 	}
 
 	for i, entry := range config.Agents {
@@ -256,6 +275,13 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		ap.assignedEpicID = epicID
 		ap.mu.Unlock()
 
+		// Emit epic_assigned event if an epic was assigned
+		if epicID != "" {
+			if evt, err := events.NewEvent(events.EpicAssigned, ap.entry.Worktree, ap.entry.Role, epicID, events.EpicAssignedData{EpicID: epicID}); err == nil {
+				d.emitEvent(evt)
+			}
+		}
+
 		// 2. Ensure correct branch for epic assignment
 		targetBranch := ap.entry.Worktree // default: agent-name branch
 		if epicID != "" {
@@ -299,7 +325,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		currentEpicID := ap.assignedEpicID
 		ap.mu.Unlock()
 		if currentEpicID != "" {
-			if err := EnsureEpicPR(ap.worktreePath, currentEpicID); err != nil {
+			if err := EnsureEpicPR(ap.worktreePath, currentEpicID, d.eventBus); err != nil {
 				log.Printf("[daemon] Agent %s: PR creation failed: %v", ap.entry.Worktree, err)
 				// Non-fatal — don't block restart
 			}
@@ -341,6 +367,11 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		count := ap.restartCount
 		ap.mu.Unlock()
 		log.Printf("[daemon] Agent %s: waiting %v before restart (attempt %d)", ap.entry.Worktree, backoff, count)
+
+		// Emit agent_restarted event
+		if evt, err := events.NewEvent(events.AgentRestarted, ap.entry.Worktree, ap.entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
+			d.emitEvent(evt)
+		}
 
 		select {
 		case <-time.After(backoff):
@@ -463,9 +494,11 @@ func (d *Daemon) tryFallbackBackend(ap *AgentProcess) bool {
 	return true
 }
 
-// buildCommand constructs the exec.Cmd for spawning an agent subprocess.
-// Extracted from spawnAgent for testability. Does not start the process.
+// buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
+	ap.mu.Lock()
+	epicID := ap.assignedEpicID // snapshot before getEffectiveBackend (also acquires ap.mu)
+	ap.mu.Unlock()
 	var cmd *exec.Cmd
 
 	// Resolve backend using failover-aware resolution
@@ -477,8 +510,8 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		if agentBackend != "" {
 			args = append(args, "--backend", agentBackend)
 		}
-		if ap.assignedEpicID != "" {
-			args = append(args, "--parent", ap.assignedEpicID)
+		if epicID != "" {
+			args = append(args, "--parent", epicID)
 		}
 		cmd = exec.Command("loom", args...)
 	} else {
@@ -490,8 +523,8 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		if agentBackend != "" {
 			args = append(args, "--backend", agentBackend)
 		}
-		if ap.assignedEpicID != "" {
-			args = append(args, "--parent", ap.assignedEpicID)
+		if epicID != "" {
+			args = append(args, "--parent", epicID)
 		}
 		cmd = exec.Command("loom", args...)
 	}
@@ -506,6 +539,7 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 	cmd.Env = append(FilteredEnv(),
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
+		fmt.Sprintf("LOOM_EVENTS_DIR=%s", resolveDaemonPath(d.projectDir, d.config.Daemon.EventsDir)),
 	)
 
 	// Propagate role constraints as env vars for the subprocess
@@ -524,8 +558,6 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 
 // spawnAgent starts the subprocess for an agent.
 func (d *Daemon) spawnAgent(ap *AgentProcess) error {
-	// Build command before acquiring the lock because buildCommand calls
-	// getEffectiveBackend which also acquires ap.mu (non-reentrant mutex).
 	cmd := d.buildCommand(ap)
 
 	ap.mu.Lock()
@@ -565,6 +597,12 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 	ap.lastStart = time.Now()
 
 	log.Printf("[daemon] Agent %s: spawned subprocess PID %d", ap.entry.Worktree, ap.pid)
+
+	// Emit agent_started event (best-effort)
+	if evt, err := events.NewEvent(events.AgentStarted, ap.entry.Worktree, ap.entry.Role, ap.assignedEpicID, events.AgentStartedData{PID: ap.pid}); err == nil {
+		d.emitEvent(evt)
+	}
+
 	return nil
 }
 
@@ -592,6 +630,10 @@ func (d *Daemon) waitForAgent(ap *AgentProcess) int {
 		ap.lastExitCode = 0
 	}
 	exitCode := ap.lastExitCode
+	pid := ap.pid // capture before clearing
+	worktree := ap.entry.Worktree
+	role := ap.entry.Role
+	epicID := ap.assignedEpicID
 	ap.cmd = nil
 	ap.pid = 0
 
@@ -603,6 +645,11 @@ func (d *Daemon) waitForAgent(ap *AgentProcess) int {
 		ap.logFile = nil
 	}
 	ap.mu.Unlock()
+
+	// Emit agent_stopped event outside the lock (best-effort)
+	if evt, err := events.NewEvent(events.AgentStopped, worktree, role, epicID, events.AgentStoppedData{PID: pid, ExitCode: exitCode}); err == nil {
+		d.emitEvent(evt)
+	}
 
 	return exitCode
 }
@@ -958,6 +1005,7 @@ func (d *Daemon) healthChecker() {
 // checkAgentHealth performs health checks on all agents.
 func (d *Daemon) checkAgentHealth() {
 	outputTimeout := d.getOutputTimeout()
+	var totalAgents, healthyAgents int
 
 	for _, ap := range d.agents {
 		ap.mu.Lock()
@@ -968,6 +1016,8 @@ func (d *Daemon) checkAgentHealth() {
 		lastStart := ap.lastStart
 		ap.mu.Unlock()
 
+		totalAgents++
+
 		if pid == 0 {
 			continue // Not running
 		}
@@ -976,6 +1026,8 @@ func (d *Daemon) checkAgentHealth() {
 		if !lockfile.IsProcessRunning(pid) {
 			// Process died unexpectedly - superviseAgent will detect via cmd.Wait()
 			log.Printf("[daemon] Agent %s (PID %d) is not running", worktreeName, pid)
+		} else {
+			healthyAgents++
 		}
 
 		// Check lock file for stale state
@@ -1001,6 +1053,11 @@ func (d *Daemon) checkAgentHealth() {
 				}
 			}
 		}
+	}
+
+	// Emit health_check summary event
+	if evt, err := events.NewEvent(events.HealthCheck, "", "", "", events.HealthCheckData{AgentCount: totalAgents, HealthyCount: healthyAgents}); err == nil {
+		d.emitEvent(evt)
 	}
 }
 

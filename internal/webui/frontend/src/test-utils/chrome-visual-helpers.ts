@@ -36,7 +36,7 @@
  */
 export const TEST_SELECTORS = {
   // ConnectionStatus component
-  connectionStatus: '[data-state]',
+  connectionStatus: "[data-state]",
   connectedState: '[data-state="connected"]',
   connectingState: '[data-state="connecting"]',
   reconnectingState: '[data-state="reconnecting"]',
@@ -44,19 +44,20 @@ export const TEST_SELECTORS = {
   retryButton: '[aria-label="Retry connection now"]',
 
   // IssueCard component
-  issueCard: 'article[data-priority]',
-  issueCardByPriority: (priority: number) => `article[data-priority="${priority}"]`,
+  issueCard: "article[data-priority]",
+  issueCardByPriority: (priority: number) =>
+    `article[data-priority="${priority}"]`,
   blockedCard: 'article[data-blocked="true"]',
   pendingCard: 'article[data-in-pending="true"]',
 
   // StatusColumn component
-  statusColumn: 'section[data-status]',
+  statusColumn: "section[data-status]",
   columnByStatus: (status: string) => `section[data-status="${status}"]`,
   columnWithItems: 'section[data-has-items="true"]',
-  emptyColumn: 'section:not([data-has-items])',
+  emptyColumn: "section:not([data-has-items])",
 
   // Droppable areas
-  droppableArea: '[data-droppable-id]',
+  droppableArea: "[data-droppable-id]",
   activeDropTarget: '[data-is-over="true"]',
 } as const;
 
@@ -65,30 +66,30 @@ export const TEST_SELECTORS = {
  */
 export const CONNECTION_STATES = {
   connected: {
-    dataState: 'connected',
-    indicatorColor: 'green (var(--color-success))',
-    text: 'Connected',
+    dataState: "connected",
+    indicatorColor: "green (var(--color-success))",
+    text: "Connected",
     showsRetry: false,
     hasAnimation: false,
   },
   connecting: {
-    dataState: 'connecting',
-    indicatorColor: 'amber (var(--color-warning))',
-    text: 'Connecting...',
+    dataState: "connecting",
+    indicatorColor: "amber (var(--color-warning))",
+    text: "Connecting...",
     showsRetry: false,
     hasAnimation: true, // pulse animation
   },
   reconnecting: {
-    dataState: 'reconnecting',
-    indicatorColor: 'amber (var(--color-warning))',
+    dataState: "reconnecting",
+    indicatorColor: "amber (var(--color-warning))",
     textPattern: /Reconnecting \(attempt \d+\)\.\.\./,
     showsRetry: true, // after first attempt
     hasAnimation: true, // pulse animation
   },
   disconnected: {
-    dataState: 'disconnected',
-    indicatorColor: 'red (var(--color-danger))',
-    text: 'Disconnected',
+    dataState: "disconnected",
+    indicatorColor: "red (var(--color-danger))",
+    text: "Disconnected",
     showsRetry: false,
     hasAnimation: false,
   },
@@ -97,17 +98,23 @@ export const CONNECTION_STATES = {
 /**
  * Issue statuses used in the kanban board.
  */
-export const ISSUE_STATUSES = ['open', 'in_progress', 'review', 'blocked', 'closed'] as const;
+export const ISSUE_STATUSES = [
+  "open",
+  "in_progress",
+  "review",
+  "blocked",
+  "closed",
+] as const;
 
 /**
  * Priority levels and their visual styling.
  */
 export const PRIORITY_LEVELS = {
-  0: { label: 'P0', className: 'priority0', color: 'red (critical)' },
-  1: { label: 'P1', className: 'priority1', color: 'orange (high)' },
-  2: { label: 'P2', className: 'priority2', color: 'yellow (medium)' },
-  3: { label: 'P3', className: 'priority3', color: 'blue (low)' },
-  4: { label: 'P4', className: 'priority4', color: 'gray (backlog)' },
+  0: { label: "P0", className: "priority0", color: "red (critical)" },
+  1: { label: "P1", className: "priority1", color: "orange (high)" },
+  2: { label: "P2", className: "priority2", color: "yellow (medium)" },
+  3: { label: "P3", className: "priority3", color: "blue (low)" },
+  4: { label: "P4", className: "priority4", color: "gray (backlog)" },
 } as const;
 
 /**
@@ -135,13 +142,13 @@ export const TIMING_EXPECTATIONS = {
  */
 export const NETWORK_PATTERNS = {
   /** SSE endpoint for real-time events (shows as "eventsource" type in DevTools) */
-  sseEndpoint: '/api/events',
+  sseEndpoint: "/api/events",
   /** Initial data fetch (regular fetch request) */
-  readyEndpoint: '/api/ready',
+  readyEndpoint: "/api/ready",
   /** Issue detail endpoint pattern */
   issueEndpoint: /\/api\/issues\/[\w-]+/,
   /** DevTools Network tab type filter for SSE connections */
-  sseNetworkType: 'eventsource',
+  sseNetworkType: "eventsource",
 } as const;
 
 /**
@@ -149,19 +156,19 @@ export const NETWORK_PATTERNS = {
  */
 export const A11Y_ATTRIBUTES = {
   connectionStatus: {
-    role: 'status',
-    ariaLive: 'polite',
+    role: "status",
+    ariaLive: "polite",
     ariaLabelPattern: /Connection status: .+/,
   },
   issueCard: {
-    role: 'button', // when clickable
+    role: "button", // when clickable
     ariaLabelPattern: /Issue: .+/,
   },
   statusColumn: {
     ariaLabelPattern: /.+ issues/,
   },
   retryButton: {
-    ariaLabel: 'Retry connection now',
+    ariaLabel: "Retry connection now",
   },
 } as const;
 

@@ -2,22 +2,36 @@
  * Hook barrel exports for the beads-web-ui frontend.
  */
 
-export { useSSE } from './useSSE';
-export type { UseSSEOptions, UseSSEReturn } from './useSSE';
+export { useSSE } from "./useSSE";
+export type { UseSSEOptions, UseSSEReturn } from "./useSSE";
 
-export { useDebounce } from './useDebounce';
+export { useDebounce } from "./useDebounce";
 
-export { useSort } from './useSort';
-export type { UseSortOptions, UseSortReturn, SortState, SortDirection } from './useSort';
+export { useSort } from "./useSort";
+export type {
+  UseSortOptions,
+  UseSortReturn,
+  SortState,
+  SortDirection,
+} from "./useSort";
 
-export { useIssueFilter } from './useIssueFilter';
-export type { UseIssueFilterOptions, UseIssueFilterReturn } from './useIssueFilter';
+export { useIssueFilter } from "./useIssueFilter";
+export type {
+  UseIssueFilterOptions,
+  UseIssueFilterReturn,
+} from "./useIssueFilter";
 
-export { useBlockedIssues } from './useBlockedIssues';
-export type { UseBlockedIssuesOptions, UseBlockedIssuesResult } from './useBlockedIssues';
+export { useBlockedIssues } from "./useBlockedIssues";
+export type {
+  UseBlockedIssuesOptions,
+  UseBlockedIssuesResult,
+} from "./useBlockedIssues";
 
-export { useMutationHandler } from './useMutationHandler';
-export type { UseMutationHandlerOptions, UseMutationHandlerReturn } from './useMutationHandler';
+export { useMutationHandler } from "./useMutationHandler";
+export type {
+  UseMutationHandlerOptions,
+  UseMutationHandlerReturn,
+} from "./useMutationHandler";
 
 export {
   useFilterState,
@@ -25,78 +39,91 @@ export {
   parseFromUrl,
   isEmptyFilter,
   DEFAULT_GROUP_BY,
-} from './useFilterState';
+} from "./useFilterState";
 export type {
   FilterState,
   FilterActions,
   UseFilterStateOptions,
   UseFilterStateReturn,
-} from './useFilterState';
+} from "./useFilterState";
 
-export { useSelection } from './useSelection';
-export type { UseSelectionOptions, UseSelectionReturn } from './useSelection';
+export { useSelection } from "./useSelection";
+export type { UseSelectionOptions, UseSelectionReturn } from "./useSelection";
 
-export { useBulkClose } from './useBulkClose';
-export type { UseBulkCloseOptions, UseBulkCloseReturn } from './useBulkClose';
+export { useBulkClose } from "./useBulkClose";
+export type { UseBulkCloseOptions, UseBulkCloseReturn } from "./useBulkClose";
 
-export { useIssues } from './useIssues';
-export type { UseIssuesOptions, UseIssuesReturn } from './useIssues';
+export { useIssues } from "./useIssues";
+export type { UseIssuesOptions, UseIssuesReturn } from "./useIssues";
 
-export { useGraphData } from './useGraphData';
-export type { UseGraphDataOptions, UseGraphDataReturn } from './useGraphData';
+export { useGraphData } from "./useGraphData";
+export type { UseGraphDataOptions, UseGraphDataReturn } from "./useGraphData";
 
-export { useBlockedChain, getBlockedChain, computeAllBlockedCounts } from './useBlockedChain';
+export {
+  useBlockedChain,
+  getBlockedChain,
+  computeAllBlockedCounts,
+} from "./useBlockedChain";
 export type {
   UseBlockedChainOptions,
   UseBlockedChainReturn,
   BlockedChainResult,
-} from './useBlockedChain';
+} from "./useBlockedChain";
 
-export { useAutoLayout } from './useAutoLayout';
+export { useAutoLayout } from "./useAutoLayout";
 export type {
   UseAutoLayoutOptions,
   UseAutoLayoutReturn,
   LayoutDirection,
   RankAlignment,
-} from './useAutoLayout';
+} from "./useAutoLayout";
 
-export { useViewState } from './useViewState';
-export type { UseViewStateOptions, UseViewStateReturn } from './useViewState';
+export { useViewState } from "./useViewState";
+export type { UseViewStateOptions, UseViewStateReturn } from "./useViewState";
 
-export { useIssueDetail } from './useIssueDetail';
-export type { UseIssueDetailReturn } from './useIssueDetail';
+export { useIssueDetail } from "./useIssueDetail";
+export type { UseIssueDetailReturn } from "./useIssueDetail";
 
-export { useAgents } from './useAgents';
-export type { UseAgentsOptions, UseAgentsResult } from './useAgents';
+export { useAgents } from "./useAgents";
+export type { UseAgentsOptions, UseAgentsResult } from "./useAgents";
 
-export { AgentProvider, useAgentContext } from './useAgentContext';
-export type { AgentContextValue, AgentProviderProps } from './useAgentContext';
+export { AgentProvider, useAgentContext } from "./useAgentContext";
+export type { AgentContextValue, AgentProviderProps } from "./useAgentContext";
 
-export { useToast, ToastProvider } from './useToast';
+export { useToast, ToastProvider } from "./useToast";
 export type {
   ToastType,
   ToastOptions,
   Toast,
   ToastContextValue,
   ToastProviderProps,
-} from './useToast';
+} from "./useToast";
 
-export { useRecentAssignees } from './useRecentAssignees';
-export type { UseRecentAssigneesReturn } from './useRecentAssignees';
+export { useRecentAssignees } from "./useRecentAssignees";
+export type { UseRecentAssigneesReturn } from "./useRecentAssignees";
 
-export { useBackendConfig } from './useBackendConfig';
-export type { UseBackendConfigReturn } from './useBackendConfig';
+export { useBackendConfig } from "./useBackendConfig";
+export type { UseBackendConfigReturn } from "./useBackendConfig";
 
-export { useTaskLogPolling } from './useTaskLogPolling';
-export type { UseTaskLogPollingOptions, UseTaskLogPollingReturn } from './useTaskLogPolling';
-export type { LogChunk, LogStreamState } from './logTypes';
+export { useTaskLogPolling } from "./useTaskLogPolling";
+export type {
+  UseTaskLogPollingOptions,
+  UseTaskLogPollingReturn,
+} from "./useTaskLogPolling";
+export type { LogChunk, LogStreamState } from "./logTypes";
 
-export { useAgentTerminalLogs } from './useAgentTerminalLogs';
+export { useAgentTerminalLogs } from "./useAgentTerminalLogs";
 export type {
   AgentLogTransportMode,
   UseAgentTerminalLogsOptions,
   UseAgentTerminalLogsReturn,
-} from './useAgentTerminalLogs';
+} from "./useAgentTerminalLogs";
 
-export { useUsage } from './useUsage';
-export type { UseUsageOptions, UseUsageResult } from './useUsage';
+export { useUsage } from "./useUsage";
+export type { UseUsageOptions, UseUsageResult } from "./useUsage";
+
+export { useObservabilityMetrics } from "./useObservabilityMetrics";
+export type {
+  UseObservabilityMetricsOptions,
+  UseObservabilityMetricsResult,
+} from "./useObservabilityMetrics";

@@ -1,2 +1,2 @@
-export { SettingsView } from './SettingsView';
-export type { SettingsViewProps } from './SettingsView';
+export { SettingsView } from "./SettingsView";
+export type { SettingsViewProps } from "./SettingsView";

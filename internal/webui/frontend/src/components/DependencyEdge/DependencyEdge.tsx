@@ -3,12 +3,20 @@
  * Renders edges between issue nodes with visual styles based on dependency type.
  */
 
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
-import { memo } from 'react';
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  getSmoothStepPath,
+  type EdgeProps,
+} from "@xyflow/react";
+import { memo } from "react";
 
-import type { DependencyEdge as DependencyEdgeType, DependencyType } from '@/types';
+import type {
+  DependencyEdge as DependencyEdgeType,
+  DependencyType,
+} from "@/types";
 
-import styles from './DependencyEdge.module.css';
+import styles from "./DependencyEdge.module.css";
 
 /**
  * Props for the DependencyEdge component.
@@ -22,21 +30,21 @@ export type DependencyEdgeProps = EdgeProps<DependencyEdgeType>;
  */
 function getTypeClassName(
   dependencyType: DependencyType | undefined,
-  styleModule: Record<string, string>
+  styleModule: Record<string, string>,
 ): string {
   switch (dependencyType) {
-    case 'blocks':
-      return styleModule.typeBlocks ?? '';
-    case 'parent-child':
-      return styleModule.typeParentChild ?? '';
-    case 'conditional-blocks':
-      return styleModule.typeConditionalBlocks ?? '';
-    case 'waits-for':
-      return styleModule.typeWaitsFor ?? '';
-    case 'related':
-      return styleModule.typeRelated ?? '';
+    case "blocks":
+      return styleModule.typeBlocks ?? "";
+    case "parent-child":
+      return styleModule.typeParentChild ?? "";
+    case "conditional-blocks":
+      return styleModule.typeConditionalBlocks ?? "";
+    case "waits-for":
+      return styleModule.typeWaitsFor ?? "";
+    case "related":
+      return styleModule.typeRelated ?? "";
     default:
-      return styleModule.typeDefault ?? '';
+      return styleModule.typeDefault ?? "";
   }
 }
 
@@ -68,7 +76,7 @@ function DependencyEdgeComponent({
   });
 
   const isHighlighted = data?.isHighlighted ?? false;
-  const dependencyType = data?.dependencyType ?? 'blocks';
+  const dependencyType = data?.dependencyType ?? "blocks";
 
   // Format label text (display as-is)
   const labelText = dependencyType;
@@ -79,7 +87,9 @@ function DependencyEdgeComponent({
     edgeClassName = `${edgeClassName} ${styles.highlighted}`;
   }
 
-  const labelClassName = selected ? `${styles.edgeLabel} ${styles.selected}` : styles.edgeLabel;
+  const labelClassName = selected
+    ? `${styles.edgeLabel} ${styles.selected}`
+    : styles.edgeLabel;
 
   return (
     <>
@@ -92,9 +102,9 @@ function DependencyEdgeComponent({
       <EdgeLabelRenderer>
         <div
           style={{
-            position: 'absolute',
+            position: "absolute",
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            pointerEvents: 'all',
+            pointerEvents: "all",
           }}
           className={labelClassName}
           data-type={dependencyType}

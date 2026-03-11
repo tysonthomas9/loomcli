@@ -4,14 +4,14 @@
  * Follows the same slide-out pattern as IssueDetailPanel.
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState } from "react";
 
-import { useAgentTerminalLogs } from '@/hooks';
-import type { LoomAgentStatus, LoomTaskInfo } from '@/types';
-import { parseLoomStatus } from '@/types';
+import { useAgentTerminalLogs } from "@/hooks";
+import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
+import { parseLoomStatus } from "@/types";
 
-import { LogViewer } from '../LogViewer';
-import styles from './AgentDetailPanel.module.css';
+import { LogViewer } from "../LogViewer";
+import styles from "./AgentDetailPanel.module.css";
 
 /**
  * Props for the AgentDetailPanel component.
@@ -35,14 +35,14 @@ export interface AgentDetailPanelProps {
  * Pastel color palette for agent avatars (matches AgentCard).
  */
 const AVATAR_COLORS = [
-  '#9DC08B',
-  '#F59E87',
-  '#B6B2DF',
-  '#95CBE9',
-  '#F5C28E',
-  '#E8A5B3',
-  '#A5D4C8',
-  '#D4A5D8',
+  "#9DC08B",
+  "#F59E87",
+  "#B6B2DF",
+  "#95CBE9",
+  "#F5C28E",
+  "#E8A5B3",
+  "#A5D4C8",
+  "#D4A5D8",
 ];
 
 function getAvatarColor(name: string): string {
@@ -50,7 +50,7 @@ function getAvatarColor(name: string): string {
   for (let i = 0; i < name.length; i++) {
     hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
   }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? '#9DC08B';
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#9DC08B";
 }
 
 function shouldUseWhiteText(hex: string): boolean {
@@ -63,61 +63,61 @@ function shouldUseWhiteText(hex: string): boolean {
 
 function getStatusDotColor(type: string): string {
   switch (type) {
-    case 'working':
-    case 'planning':
-    case 'dirty':
-    case 'changes':
-      return 'var(--color-status-working, #facc15)';
-    case 'error':
-      return 'var(--color-status-error, #ef4444)';
-    case 'done':
-      return 'var(--color-status-done, #22c55e)';
-    case 'review':
-      return 'var(--color-status-review, #3b82f6)';
-    case 'idle':
-    case 'ready':
+    case "working":
+    case "planning":
+    case "dirty":
+    case "changes":
+      return "var(--color-status-working, #facc15)";
+    case "error":
+      return "var(--color-status-error, #ef4444)";
+    case "done":
+      return "var(--color-status-done, #22c55e)";
+    case "review":
+      return "var(--color-status-review, #3b82f6)";
+    case "idle":
+    case "ready":
     default:
-      return 'var(--color-status-idle, #9ca3af)';
+      return "var(--color-status-idle, #9ca3af)";
   }
 }
 
 function getStatusLabel(type: string): string {
   switch (type) {
-    case 'working':
-      return 'Working';
-    case 'planning':
-      return 'Planning';
-    case 'done':
-      return 'Done';
-    case 'review':
-      return 'Awaiting Review';
-    case 'idle':
-      return 'Idle';
-    case 'error':
-      return 'Error';
-    case 'dirty':
-      return 'Uncommitted Changes';
-    case 'changes':
-      return 'Has Changes';
-    case 'ready':
-      return 'Ready';
+    case "working":
+      return "Working";
+    case "planning":
+      return "Planning";
+    case "done":
+      return "Done";
+    case "review":
+      return "Awaiting Review";
+    case "idle":
+      return "Idle";
+    case "error":
+      return "Error";
+    case "dirty":
+      return "Uncommitted Changes";
+    case "changes":
+      return "Has Changes";
+    case "ready":
+      return "Ready";
     default:
-      return 'Unknown';
+      return "Unknown";
   }
 }
 
 function getPriorityLabel(priority: number): string {
   switch (priority) {
     case 0:
-      return 'P0 Critical';
+      return "P0 Critical";
     case 1:
-      return 'P1 High';
+      return "P1 High";
     case 2:
-      return 'P2 Medium';
+      return "P2 Medium";
     case 3:
-      return 'P3 Low';
+      return "P3 Low";
     case 4:
-      return 'P4 Backlog';
+      return "P4 Backlog";
     default:
       return `P${priority}`;
   }
@@ -126,7 +126,7 @@ function getPriorityLabel(priority: number): string {
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = 'info' | 'logs';
+type TabType = "info" | "logs";
 
 export function AgentDetailPanel({
   isOpen,
@@ -137,7 +137,7 @@ export function AgentDetailPanel({
   onTaskClick,
 }: AgentDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
-  const [activeTab, setActiveTab] = useState<TabType>('info');
+  const [activeTab, setActiveTab] = useState<TabType>("info");
 
   const {
     mode: logMode,
@@ -153,12 +153,12 @@ export function AgentDetailPanel({
     isLoadingMore,
   } = useAgentTerminalLogs({
     agentName,
-    enabled: isOpen && activeTab === 'logs' && agentName !== null,
+    enabled: isOpen && activeTab === "logs" && agentName !== null,
   });
 
   // Reset to info tab when agent changes
   useEffect(() => {
-    setActiveTab('info');
+    setActiveTab("info");
   }, [agentName]);
 
   // Handle Escape key
@@ -166,20 +166,20 @@ export function AgentDetailPanel({
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         onClose();
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
   // Lock body scroll when open
   useEffect(() => {
     if (isOpen) {
       const previousOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
+      document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = previousOverflow;
       };
@@ -192,7 +192,11 @@ export function AgentDetailPanel({
       const previouslyFocused = document.activeElement as HTMLElement | null;
       panelRef.current.focus();
       return () => {
-        if (previouslyFocused && document.contains(previouslyFocused) && previouslyFocused.focus) {
+        if (
+          previouslyFocused &&
+          document.contains(previouslyFocused) &&
+          previouslyFocused.focus
+        ) {
           previouslyFocused.focus();
         }
       };
@@ -203,17 +207,21 @@ export function AgentDetailPanel({
     (taskId: string) => {
       onTaskClick?.(taskId);
     },
-    [onTaskClick]
+    [onTaskClick],
   );
 
   // Find the agent from the array
-  const agent = agentName ? agents.find((a) => a.name === agentName) : undefined;
+  const agent = agentName
+    ? agents.find((a) => a.name === agentName)
+    : undefined;
   const parsed = agent ? parseLoomStatus(agent.status) : undefined;
   const task = agentName ? agentTasks[agentName] : undefined;
   const currentTaskId = parsed?.taskId;
-  const isActive = parsed?.type === 'working' || parsed?.type === 'planning';
+  const isActive = parsed?.type === "working" || parsed?.type === "planning";
 
-  const rootClassName = [styles.overlay, isOpen && styles.open].filter(Boolean).join(' ');
+  const rootClassName = [styles.overlay, isOpen && styles.open]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
@@ -228,10 +236,10 @@ export function AgentDetailPanel({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={agent ? `Details for agent ${agent.name}` : 'Agent details'}
+        aria-label={agent ? `Details for agent ${agent.name}` : "Agent details"}
         tabIndex={-1}
         data-testid="agent-detail-panel"
-        data-state={isOpen ? 'open' : 'closed'}
+        data-state={isOpen ? "open" : "closed"}
       >
         {agent && parsed ? (
           <>
@@ -242,7 +250,9 @@ export function AgentDetailPanel({
                   className={styles.agentAvatar}
                   style={{
                     backgroundColor: getAvatarColor(agent.name),
-                    color: shouldUseWhiteText(getAvatarColor(agent.name)) ? '#fff' : '#1f2937',
+                    color: shouldUseWhiteText(getAvatarColor(agent.name))
+                      ? "#fff"
+                      : "#1f2937",
                   }}
                 >
                   {agent.name.charAt(0).toUpperCase()}
@@ -252,7 +262,9 @@ export function AgentDetailPanel({
                   <div className={styles.statusRow}>
                     <span
                       className={styles.statusDot}
-                      style={{ backgroundColor: getStatusDotColor(parsed.type) }}
+                      style={{
+                        backgroundColor: getStatusDotColor(parsed.type),
+                      }}
                       data-active={isActive}
                       aria-hidden="true"
                     />
@@ -289,12 +301,16 @@ export function AgentDetailPanel({
               )}
 
               {/* Tab Bar */}
-              <div className={styles.tabBar} role="tablist" aria-label="Agent detail tabs">
+              <div
+                className={styles.tabBar}
+                role="tablist"
+                aria-label="Agent detail tabs"
+              >
                 <button
                   type="button"
-                  className={`${styles.tab} ${activeTab === 'info' ? styles.activeTab : ''}`}
-                  onClick={() => setActiveTab('info')}
-                  aria-selected={activeTab === 'info'}
+                  className={`${styles.tab} ${activeTab === "info" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("info")}
+                  aria-selected={activeTab === "info"}
                   role="tab"
                   id="agent-panel-tab-info"
                   aria-controls="agent-panel-tabpanel-info"
@@ -303,9 +319,9 @@ export function AgentDetailPanel({
                 </button>
                 <button
                   type="button"
-                  className={`${styles.tab} ${activeTab === 'logs' ? styles.activeTab : ''}`}
-                  onClick={() => setActiveTab('logs')}
-                  aria-selected={activeTab === 'logs'}
+                  className={`${styles.tab} ${activeTab === "logs" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("logs")}
+                  aria-selected={activeTab === "logs"}
                   role="tab"
                   id="agent-panel-tab-logs"
                   aria-controls="agent-panel-tabpanel-logs"
@@ -316,7 +332,7 @@ export function AgentDetailPanel({
             </div>
 
             {/* Tab Content */}
-            {activeTab === 'info' ? (
+            {activeTab === "info" ? (
               /* Info Tab - Scrollable Content */
               <div
                 className={styles.scrollableContent}
@@ -337,7 +353,10 @@ export function AgentDetailPanel({
                       <div className={styles.taskInfo}>
                         <p className={styles.taskTitle}>{task.title}</p>
                         <div className={styles.taskMeta}>
-                          <span className={styles.priorityBadge} data-priority={task.priority}>
+                          <span
+                            className={styles.priorityBadge}
+                            data-priority={task.priority}
+                          >
                             {getPriorityLabel(task.priority)}
                           </span>
                         </div>
@@ -382,9 +401,13 @@ export function AgentDetailPanel({
                               {commit.hash}
                             </a>
                           ) : (
-                            <span className={styles.commitHash}>{commit.hash}</span>
+                            <span className={styles.commitHash}>
+                              {commit.hash}
+                            </span>
                           )}
-                          <span className={styles.commitMessage}>{commit.message}</span>
+                          <span className={styles.commitMessage}>
+                            {commit.message}
+                          </span>
                         </div>
                       ))}
                       {agent.ahead > 10 && (
@@ -407,22 +430,26 @@ export function AgentDetailPanel({
                             className={styles.changeStatus}
                             data-status={change.status}
                           >
-                            {change.status === 'M'
-                              ? 'M'
-                              : change.status === 'A'
-                                ? '+'
-                                : change.status === 'D'
-                                  ? '-'
-                                  : change.status === '??'
-                                    ? '?'
+                            {change.status === "M"
+                              ? "M"
+                              : change.status === "A"
+                                ? "+"
+                                : change.status === "D"
+                                  ? "-"
+                                  : change.status === "??"
+                                    ? "?"
                                     : change.status}
                           </span>
-                          <span className={styles.changePath}>{change.path}</span>
+                          <span className={styles.changePath}>
+                            {change.path}
+                          </span>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <span className={styles.emptyState}>Clean working tree</span>
+                    <span className={styles.emptyState}>
+                      Clean working tree
+                    </span>
                   )}
                 </div>
 
@@ -459,15 +486,15 @@ export function AgentDetailPanel({
               >
                 <div className={styles.logsMetaRow}>
                   <span className={styles.logsModeBadge} data-mode={logMode}>
-                    {logMode === 'tmux'
-                      ? 'Live (tmux)'
-                      : logMode === 'archive'
-                        ? 'Archive snapshot'
-                        : logMode === 'loading'
-                          ? 'Loading logs...'
-                          : 'Idle'}
+                    {logMode === "tmux"
+                      ? "Live (tmux)"
+                      : logMode === "archive"
+                        ? "Archive snapshot"
+                        : logMode === "loading"
+                          ? "Loading logs..."
+                          : "Idle"}
                   </span>
-                  {logMode === 'archive' && (
+                  {logMode === "archive" && (
                     <button
                       type="button"
                       className={styles.logsRefreshButton}
@@ -482,14 +509,18 @@ export function AgentDetailPanel({
                   connectionState={logConnectionState}
                   error={logError}
                   height="100%"
-                  autoScroll={logMode !== 'tmux'}
+                  autoScroll={logMode !== "tmux"}
                   resetVersion={logResetVersion}
-                  mode={logMode === 'tmux' ? 'interactive' : 'static'}
+                  mode={logMode === "tmux" ? "interactive" : "static"}
                   onTerminalResize={resizeLogs}
-                  onScrollToTop={logMode === 'archive' ? loadOlderLogs : undefined}
+                  onScrollToTop={
+                    logMode === "archive" ? loadOlderLogs : undefined
+                  }
                   isLoadingMore={isLoadingMore}
-                  hasMoreOlder={logMode === 'archive' ? hasMoreLines : false}
-                  {...(logMode === 'tmux' ? { onTerminalData: sendLogInput } : {})}
+                  hasMoreOlder={logMode === "archive" ? hasMoreLines : false}
+                  {...(logMode === "tmux"
+                    ? { onTerminalData: sendLogInput }
+                    : {})}
                 />
               </div>
             )}

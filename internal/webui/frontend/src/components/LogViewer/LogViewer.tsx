@@ -3,14 +3,14 @@
  * Terminal-style log display using xterm.js for proper ANSI rendering.
  */
 
-import { FitAddon } from '@xterm/addon-fit';
-import { Terminal } from '@xterm/xterm';
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
+import { useRef, useEffect, useCallback, useState } from "react";
 
-import type { LogChunk, LogStreamState } from '@/hooks/logTypes';
+import type { LogChunk, LogStreamState } from "@/hooks/logTypes";
 
-import '@xterm/xterm/css/xterm.css';
-import styles from './LogViewer.module.css';
+import "@xterm/xterm/css/xterm.css";
+import styles from "./LogViewer.module.css";
 
 /**
  * Props for the LogViewer component.
@@ -39,7 +39,7 @@ export interface LogViewerProps {
   /** Optional callback to forward terminal data to the backend stream */
   onTerminalData?: (data: string) => void;
   /** Terminal mode: 'interactive' resizes with container, 'static' fixes cols at initial fit. Default: 'interactive' */
-  mode?: 'interactive' | 'static';
+  mode?: "interactive" | "static";
   /** Callback when user scrolls to the top of the buffer (for loading older content) */
   onScrollToTop?: (() => void) | undefined;
   /** Whether older content is currently being loaded */
@@ -51,17 +51,29 @@ export interface LogViewerProps {
 /**
  * Get connection status display info.
  */
-function getStatusInfo(state: LogStreamState): { label: string; color: string } {
+function getStatusInfo(state: LogStreamState): {
+  label: string;
+  color: string;
+} {
   switch (state) {
-    case 'connected':
-      return { label: 'Connected', color: 'var(--color-status-done, #22c55e)' };
-    case 'connecting':
-      return { label: 'Connecting...', color: 'var(--color-status-working, #facc15)' };
-    case 'reconnecting':
-      return { label: 'Reconnecting...', color: 'var(--color-status-working, #facc15)' };
-    case 'disconnected':
+    case "connected":
+      return { label: "Connected", color: "var(--color-status-done, #22c55e)" };
+    case "connecting":
+      return {
+        label: "Connecting...",
+        color: "var(--color-status-working, #facc15)",
+      };
+    case "reconnecting":
+      return {
+        label: "Reconnecting...",
+        color: "var(--color-status-working, #facc15)",
+      };
+    case "disconnected":
     default:
-      return { label: 'Disconnected', color: 'var(--color-status-error, #ef4444)' };
+      return {
+        label: "Disconnected",
+        color: "var(--color-status-error, #ef4444)",
+      };
   }
 }
 
@@ -75,11 +87,11 @@ export function LogViewer({
   onAutoScrollChange,
   className,
   error,
-  height = '100%',
+  height = "100%",
   resetVersion = 0,
   onTerminalResize,
   onTerminalData,
-  mode = 'interactive',
+  mode = "interactive",
   onScrollToTop,
   isLoadingMore = false,
   hasMoreOlder = false,
@@ -91,18 +103,28 @@ export function LogViewer({
   const lastResetVersionRef = useRef(resetVersion);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(autoScrollProp);
   const autoScrollRef = useRef(autoScrollEnabled);
-  useEffect(() => { autoScrollRef.current = autoScrollEnabled; }, [autoScrollEnabled]);
+  useEffect(() => {
+    autoScrollRef.current = autoScrollEnabled;
+  }, [autoScrollEnabled]);
   const modeRef = useRef(mode);
-  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   // Refs for scroll-to-top detection (stable across renders)
   const scrollToTopTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const onScrollToTopRef = useRef(onScrollToTop);
-  useEffect(() => { onScrollToTopRef.current = onScrollToTop; }, [onScrollToTop]);
+  useEffect(() => {
+    onScrollToTopRef.current = onScrollToTop;
+  }, [onScrollToTop]);
   const hasMoreOlderRef = useRef(hasMoreOlder);
-  useEffect(() => { hasMoreOlderRef.current = hasMoreOlder; }, [hasMoreOlder]);
+  useEffect(() => {
+    hasMoreOlderRef.current = hasMoreOlder;
+  }, [hasMoreOlder]);
   const isLoadingMoreRef = useRef(isLoadingMore);
-  useEffect(() => { isLoadingMoreRef.current = isLoadingMore; }, [isLoadingMore]);
+  useEffect(() => {
+    isLoadingMoreRef.current = isLoadingMore;
+  }, [isLoadingMore]);
 
   // Track previous buffer length for scroll position restoration after prepend
   const prevBufferLengthRef = useRef(0);
@@ -131,11 +153,11 @@ export function LogViewer({
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 50000,
       cursorBlink: false,
-      cursorStyle: 'bar',
+      cursorStyle: "bar",
       cursorWidth: 0,
       theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
+        background: "#1e1e1e",
+        foreground: "#d4d4d4",
       },
     });
 
@@ -154,7 +176,10 @@ export function LogViewer({
     const runFit = () => {
       if (!fitAddonRef.current || !terminalRef.current) return;
       fitAddonRef.current.fit();
-      if (modeRef.current === 'static' && terminalRef.current.rows > STATIC_MAX_ROWS) {
+      if (
+        modeRef.current === "static" &&
+        terminalRef.current.rows > STATIC_MAX_ROWS
+      ) {
         terminalRef.current.resize(terminalRef.current.cols, STATIC_MAX_ROWS);
       }
       onTerminalResize?.(terminalRef.current.cols, terminalRef.current.rows);
@@ -181,7 +206,12 @@ export function LogViewer({
 
       // Scroll-to-top detection for infinite scroll
       const isAtTop = buffer.viewportY === 0;
-      if (isAtTop && hasMoreOlderRef.current && !isLoadingMoreRef.current && !suppressTopDetectionRef.current) {
+      if (
+        isAtTop &&
+        hasMoreOlderRef.current &&
+        !isLoadingMoreRef.current &&
+        !suppressTopDetectionRef.current
+      ) {
         clearTimeout(scrollToTopTimerRef.current);
         scrollToTopTimerRef.current = setTimeout(() => {
           onScrollToTopRef.current?.();
@@ -192,7 +222,7 @@ export function LogViewer({
     // ResizeObserver for dynamic sizing (skipped in static mode to prevent re-wrapping)
     let resizeTimer: ReturnType<typeof setTimeout>;
     const observer = new ResizeObserver(() => {
-      if (modeRef.current === 'static') return;
+      if (modeRef.current === "static") return;
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         runFit();
@@ -231,15 +261,19 @@ export function LogViewer({
     terminal.options.disableStdin = !onTerminalData;
 
     if (onTerminalData) {
-      const disposable = terminal.onData((data: string) => onTerminalData(data));
-      return () => { disposable.dispose(); };
+      const disposable = terminal.onData((data: string) =>
+        onTerminalData(data),
+      );
+      return () => {
+        disposable.dispose();
+      };
     }
   }, [onTerminalData]);
 
   // Refit when stream resets/reconnects to keep wrapping in sync with panel layout changes.
   // Skip in static mode — archive content should keep its initial column width.
   useEffect(() => {
-    if (modeRef.current === 'static') return;
+    if (modeRef.current === "static") return;
     const fitAddon = fitAddonRef.current;
     const terminal = terminalRef.current;
     if (!fitAddon || !terminal) return;
@@ -292,7 +326,10 @@ export function LogViewer({
         if (addedLines > 0) {
           const targetViewportY = Math.max(
             0,
-            Math.min(prevViewportYRef.current + addedLines, terminal.buffer.active.baseY)
+            Math.min(
+              prevViewportYRef.current + addedLines,
+              terminal.buffer.active.baseY,
+            ),
           );
           terminal.scrollToLine(targetViewportY);
         }
@@ -333,12 +370,19 @@ export function LogViewer({
   }, [onAutoScrollChange]);
 
   const statusInfo = getStatusInfo(connectionState);
-  const isPulsing = connectionState === 'connecting' || connectionState === 'reconnecting';
+  const isPulsing =
+    connectionState === "connecting" || connectionState === "reconnecting";
 
-  const containerClassName = [styles.container, className].filter(Boolean).join(' ');
+  const containerClassName = [styles.container, className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div className={containerClassName} style={{ height }} data-testid="log-viewer">
+    <div
+      className={containerClassName}
+      style={{ height }}
+      data-testid="log-viewer"
+    >
       {/* Header with status and controls */}
       <div className={styles.header}>
         <div className={styles.statusContainer}>
@@ -377,7 +421,7 @@ export function LogViewer({
       {/* Loading older logs banner (always mounted to avoid terminal height shifts) */}
       <div
         className={styles.loadingBanner}
-        data-visible={isLoadingMore ? 'true' : 'false'}
+        data-visible={isLoadingMore ? "true" : "false"}
         data-testid="loading-banner"
         role="status"
         aria-live="polite"

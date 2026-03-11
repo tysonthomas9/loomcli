@@ -5,23 +5,28 @@
  * Uses CSS-only visualizations (no chart libraries).
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo } from "react";
 
-import { useUsage } from '@/hooks';
-import type { UsageResponse, UsageParams } from '@/types';
+import { useUsage } from "@/hooks";
+import type { UsageResponse, UsageParams } from "@/types";
 
-import styles from './UsageDashboard.module.css';
+import styles from "./UsageDashboard.module.css";
 
 /** Props for the UsageDashboard component. */
 export interface UsageDashboardProps {
   className?: string;
 }
 
-type DateRange = 'today' | 'week' | 'month' | 'all';
+type DateRange = "today" | "week" | "month" | "all";
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatCost(cost: number): string {
@@ -39,27 +44,29 @@ function dateRangeToParams(range: DateRange): UsageParams {
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
   switch (range) {
-    case 'today':
+    case "today":
       return { since: fmt(now) };
-    case 'week': {
+    case "week": {
       const weekAgo = new Date(now);
       weekAgo.setDate(weekAgo.getDate() - 7);
       return { since: fmt(weekAgo) };
     }
-    case 'month': {
+    case "month": {
       const monthAgo = new Date(now);
       monthAgo.setDate(monthAgo.getDate() - 30);
       return { since: fmt(monthAgo) };
     }
-    case 'all':
+    case "all":
       return {};
   }
 }
 
-export function UsageDashboard({ className }: UsageDashboardProps): JSX.Element {
-  const [dateRange, setDateRange] = useState<DateRange>('week');
-  const [agentFilter, setAgentFilter] = useState<string>('');
-  const [backendFilter, setBackendFilter] = useState<string>('');
+export function UsageDashboard({
+  className,
+}: UsageDashboardProps): JSX.Element {
+  const [dateRange, setDateRange] = useState<DateRange>("week");
+  const [agentFilter, setAgentFilter] = useState<string>("");
+  const [backendFilter, setBackendFilter] = useState<string>("");
 
   const params = useMemo<UsageParams>(() => {
     const base = dateRangeToParams(dateRange);
@@ -81,12 +88,16 @@ export function UsageDashboard({ className }: UsageDashboardProps): JSX.Element 
     return data.by_backend.map((b) => b.name).sort();
   }, [data]);
 
-  const rootClassName = className ? `${styles.dashboard} ${className}` : styles.dashboard;
+  const rootClassName = className
+    ? `${styles.dashboard} ${className}`
+    : styles.dashboard;
 
   if (error && !data) {
     return (
       <div className={rootClassName} data-testid="usage-dashboard">
-        <div className={styles.errorState}>Failed to load usage data: {error.message}</div>
+        <div className={styles.errorState}>
+          Failed to load usage data: {error.message}
+        </div>
       </div>
     );
   }
@@ -221,15 +232,20 @@ function FilterBar({
 }
 
 function SummaryCards({ data }: { data: UsageResponse }) {
-  const avgCost = data.session_count > 0 ? data.total_cost / data.session_count : 0;
+  const avgCost =
+    data.session_count > 0 ? data.total_cost / data.session_count : 0;
   return (
     <div className={styles.summaryRow}>
       <div className={styles.summaryCard}>
-        <span className={styles.summaryValue}>{formatCost(data.total_cost)}</span>
+        <span className={styles.summaryValue}>
+          {formatCost(data.total_cost)}
+        </span>
         <span className={styles.summaryLabel}>Total Cost</span>
       </div>
       <div className={styles.summaryCard}>
-        <span className={styles.summaryValue}>{formatTokens(data.total_input_tokens + data.total_output_tokens)}</span>
+        <span className={styles.summaryValue}>
+          {formatTokens(data.total_input_tokens + data.total_output_tokens)}
+        </span>
         <span className={styles.summaryLabel}>Total Tokens</span>
       </div>
       <div className={styles.summaryCard}>
@@ -244,8 +260,9 @@ function SummaryCards({ data }: { data: UsageResponse }) {
   );
 }
 
-function AgentBarChart({ agents }: { agents: UsageResponse['by_agent'] }) {
-  if (agents.length === 0) return <div className={styles.emptyState}>No agent data</div>;
+function AgentBarChart({ agents }: { agents: UsageResponse["by_agent"] }) {
+  if (agents.length === 0)
+    return <div className={styles.emptyState}>No agent data</div>;
   const maxCost = Math.max(...agents.map((a) => a.total_cost), 0.01);
 
   return (
@@ -255,18 +272,30 @@ function AgentBarChart({ agents }: { agents: UsageResponse['by_agent'] }) {
           <span className={styles.barLabel} title={agent.name}>
             {agent.name}
           </span>
-          <div className={styles.barTrack} role="progressbar" aria-valuenow={agent.total_cost} aria-valuemin={0} aria-valuemax={maxCost}>
-            <div className={styles.barFill} style={{ width: `${(agent.total_cost / maxCost) * 100}%` }} />
+          <div
+            className={styles.barTrack}
+            role="progressbar"
+            aria-valuenow={agent.total_cost}
+            aria-valuemin={0}
+            aria-valuemax={maxCost}
+          >
+            <div
+              className={styles.barFill}
+              style={{ width: `${(agent.total_cost / maxCost) * 100}%` }}
+            />
           </div>
-          <span className={styles.barValue}>{formatCost(agent.total_cost)}</span>
+          <span className={styles.barValue}>
+            {formatCost(agent.total_cost)}
+          </span>
         </div>
       ))}
     </div>
   );
 }
 
-function DailyCostTable({ costs }: { costs: UsageResponse['daily_costs'] }) {
-  if (costs.length === 0) return <div className={styles.emptyState}>No daily data</div>;
+function DailyCostTable({ costs }: { costs: UsageResponse["daily_costs"] }) {
+  if (costs.length === 0)
+    return <div className={styles.emptyState}>No daily data</div>;
 
   return (
     <table className={styles.dailyTable}>
@@ -290,11 +319,14 @@ function DailyCostTable({ costs }: { costs: UsageResponse['daily_costs'] }) {
   );
 }
 
-function SessionTable({ sessions }: { sessions: UsageResponse['sessions'] }) {
+function SessionTable({ sessions }: { sessions: UsageResponse["sessions"] }) {
   // Show most recent 20 sessions
   const recent = useMemo(() => {
     return [...sessions]
-      .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+      .sort(
+        (a, b) =>
+          new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+      )
       .slice(0, 20);
   }, [sessions]);
 
@@ -302,7 +334,9 @@ function SessionTable({ sessions }: { sessions: UsageResponse['sessions'] }) {
 
   return (
     <div>
-      <h3 className={styles.sectionLabel}>Recent Sessions ({sessions.length} total)</h3>
+      <h3 className={styles.sectionLabel}>
+        Recent Sessions ({sessions.length} total)
+      </h3>
       <table className={styles.sessionTable}>
         <thead>
           <tr>
@@ -317,13 +351,19 @@ function SessionTable({ sessions }: { sessions: UsageResponse['sessions'] }) {
         </thead>
         <tbody>
           {recent.map((s) => (
-            <tr key={`${s.started_at}-${s.agent_name}-${s.backend}-${s.task_id}`}>
+            <tr
+              key={`${s.started_at}-${s.agent_name}-${s.backend}-${s.task_id}`}
+            >
               <td>{formatDate(s.started_at)}</td>
               <td>{s.agent_name}</td>
               <td>{s.backend}</td>
-              <td title={s.task_id}>{s.task_id || '-'}</td>
-              <td className={styles.monoCell}>{formatTokens(s.input_tokens + s.output_tokens)}</td>
-              <td className={styles.monoCell}>{formatCost(s.estimated_cost_usd)}</td>
+              <td title={s.task_id}>{s.task_id || "-"}</td>
+              <td className={styles.monoCell}>
+                {formatTokens(s.input_tokens + s.output_tokens)}
+              </td>
+              <td className={styles.monoCell}>
+                {formatCost(s.estimated_cost_usd)}
+              </td>
               <td className={styles.monoCell}>{s.exit_code}</td>
             </tr>
           ))}

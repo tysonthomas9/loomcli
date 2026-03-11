@@ -4,10 +4,10 @@
  * applies optimistic updates, and persists status changes via API.
  */
 
-import type { DragEndEvent } from '@dnd-kit/core';
+import type { DragEndEvent } from "@dnd-kit/core";
 
-import { updateIssue } from '@/api';
-import type { Issue, Status } from '@/types';
+import { updateIssue } from "@/api";
+import type { Issue, Status } from "@/types";
 
 /**
  * Callback to update local state when an issue's status changes.
@@ -35,7 +35,7 @@ export interface HandleDragEndOptions {
  */
 interface DraggableData {
   issue: Issue;
-  type: 'issue';
+  type: "issue";
 }
 
 /**
@@ -53,10 +53,10 @@ interface DroppableData {
 function isDraggableData(data: unknown): data is DraggableData {
   return (
     data != null &&
-    typeof data === 'object' &&
-    'issue' in data &&
-    'type' in data &&
-    (data as DraggableData).type === 'issue'
+    typeof data === "object" &&
+    "issue" in data &&
+    "type" in data &&
+    (data as DraggableData).type === "issue"
   );
 }
 
@@ -67,9 +67,9 @@ function isDraggableData(data: unknown): data is DraggableData {
 function isDroppableData(data: unknown): data is DroppableData {
   return (
     data != null &&
-    typeof data === 'object' &&
-    'status' in data &&
-    typeof (data as DroppableData).status === 'string'
+    typeof data === "object" &&
+    "status" in data &&
+    typeof (data as DroppableData).status === "string"
   );
 }
 
@@ -121,7 +121,7 @@ export function createDragEndHandler(options: HandleDragEndOptions) {
     if (!isDroppableData(overData)) return;
 
     const issue = activeData.issue;
-    const previousStatus = issue.status ?? 'open';
+    const previousStatus = issue.status ?? "open";
     const newStatus = overData.status;
 
     // Skip if dropped on same column (no status change)

@@ -3,19 +3,25 @@
  * Tabbed navigation for switching between Kanban, Table, and Graph views.
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef } from "react";
 
-import styles from './ViewSwitcher.module.css';
+import styles from "./ViewSwitcher.module.css";
 
 /**
  * Available view modes.
  */
-export type ViewMode = 'kanban' | 'table' | 'graph' | 'monitor' | 'settings';
+export type ViewMode =
+  | "kanban"
+  | "table"
+  | "graph"
+  | "monitor"
+  | "observability"
+  | "settings";
 
 /**
  * Default view when none is specified.
  */
-export const DEFAULT_VIEW: ViewMode = 'kanban';
+export const DEFAULT_VIEW: ViewMode = "kanban";
 
 /**
  * View configuration.
@@ -29,10 +35,11 @@ interface ViewConfig {
  * Available views in display order.
  */
 const VIEWS: ViewConfig[] = [
-  { id: 'kanban', label: 'Kanban' },
-  { id: 'table', label: 'Table' },
-  { id: 'graph', label: 'Graph' },
-  { id: 'monitor', label: 'Monitor' },
+  { id: "kanban", label: "Kanban" },
+  { id: "table", label: "Table" },
+  { id: "graph", label: "Graph" },
+  { id: "monitor", label: "Monitor" },
+  { id: "observability", label: "Observability" },
 ];
 
 /**
@@ -48,7 +55,7 @@ export interface ViewSwitcherProps {
   /** Disable view switching (e.g., during loading) */
   disabled?: boolean;
   /** Layout orientation (default: 'horizontal') */
-  orientation?: 'horizontal' | 'vertical';
+  orientation?: "horizontal" | "vertical";
 }
 
 /**
@@ -60,7 +67,7 @@ export function ViewSwitcher({
   onChange,
   className,
   disabled = false,
-  orientation = 'horizontal',
+  orientation = "horizontal",
 }: ViewSwitcherProps): JSX.Element {
   const tabRefs = useRef<Map<ViewMode, HTMLButtonElement | null>>(new Map());
 
@@ -68,7 +75,7 @@ export function ViewSwitcher({
     (id: ViewMode) => (el: HTMLButtonElement | null) => {
       tabRefs.current.set(id, el);
     },
-    []
+    [],
   );
 
   // Handle keyboard navigation
@@ -80,18 +87,18 @@ export function ViewSwitcher({
       let newIndex = currentIndex;
 
       switch (event.key) {
-        case 'ArrowLeft':
-        case 'ArrowUp':
+        case "ArrowLeft":
+        case "ArrowUp":
           newIndex = currentIndex > 0 ? currentIndex - 1 : VIEWS.length - 1;
           break;
-        case 'ArrowRight':
-        case 'ArrowDown':
+        case "ArrowRight":
+        case "ArrowDown":
           newIndex = currentIndex < VIEWS.length - 1 ? currentIndex + 1 : 0;
           break;
-        case 'Home':
+        case "Home":
           newIndex = 0;
           break;
-        case 'End':
+        case "End":
           newIndex = VIEWS.length - 1;
           break;
         default:
@@ -108,16 +115,16 @@ export function ViewSwitcher({
         }
       }
     },
-    [activeView, onChange, disabled]
+    [activeView, onChange, disabled],
   );
 
   const rootClassName = [
     styles.viewSwitcher,
-    orientation === 'vertical' && styles.vertical,
+    orientation === "vertical" && styles.vertical,
     className,
   ]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
 
   return (
     <div
@@ -130,7 +137,9 @@ export function ViewSwitcher({
     >
       {VIEWS.map((view) => {
         const isActive = activeView === view.id;
-        const tabClassName = isActive ? `${styles.tab} ${styles.active}` : styles.tab;
+        const tabClassName = isActive
+          ? `${styles.tab} ${styles.active}`
+          : styles.tab;
 
         return (
           <button

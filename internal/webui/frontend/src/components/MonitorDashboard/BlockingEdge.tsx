@@ -3,12 +3,12 @@
  * Renders dashed red arrows for blocking dependency edges.
  */
 
-import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
-import { memo } from 'react';
+import { BaseEdge, getSmoothStepPath, type EdgeProps } from "@xyflow/react";
+import { memo } from "react";
 
-import type { DependencyEdge as DependencyEdgeType } from '@/types';
+import type { DependencyEdge as DependencyEdgeType } from "@/types";
 
-import styles from './BlockingEdge.module.css';
+import styles from "./BlockingEdge.module.css";
 
 export type BlockingEdgeProps = EdgeProps<DependencyEdgeType>;
 

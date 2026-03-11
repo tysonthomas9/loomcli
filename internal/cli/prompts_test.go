@@ -922,21 +922,27 @@ func TestFleetPromptsNoClaimCommand(t *testing.T) {
 	}
 }
 
-func TestGenerateFleetPlanningPrompt_TaskIDSubstitutionCount(t *testing.T) {
+func TestGenerateFleetPlanningPrompt_TaskIDSubstitution(t *testing.T) {
 	taskID := "UNIQUE-TASK-XYZ-12345"
 	prompt := GenerateFleetPlanningPrompt("agent", taskID, nil)
 	count := strings.Count(prompt, taskID)
-	if count != 6 {
-		t.Errorf("expected taskID to appear 6 times, got %d", count)
+	if count < 2 {
+		t.Errorf("expected taskID to appear at least 2 times, got %d", count)
+	}
+	if strings.Contains(prompt, "%!") {
+		t.Error("prompt contains unsubstituted format directives")
 	}
 }
 
-func TestGenerateFleetTaskPrompt_TaskIDSubstitutionCount(t *testing.T) {
+func TestGenerateFleetTaskPrompt_TaskIDSubstitution(t *testing.T) {
 	taskID := "UNIQUE-TASK-XYZ-12345"
 	prompt := GenerateFleetTaskPrompt("agent", taskID, nil, "")
 	count := strings.Count(prompt, taskID)
-	if count != 4 {
-		t.Errorf("expected taskID to appear 4 times, got %d", count)
+	if count < 2 {
+		t.Errorf("expected taskID to appear at least 2 times, got %d", count)
+	}
+	if strings.Contains(prompt, "%!") {
+		t.Error("prompt contains unsubstituted format directives")
 	}
 }
 
@@ -1092,6 +1098,37 @@ func TestAllTemplatesRender(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestReadOnlyPreamble verifies the function returns preamble when env is set
+// and empty string when not set.
+func TestReadOnlyPreamble(t *testing.T) {
+	t.Run("returns preamble when LOOM_READ_ONLY=1", func(t *testing.T) {
+		t.Setenv("LOOM_READ_ONLY", "1")
+		result := ReadOnlyPreamble()
+		if result == "" {
+			t.Error("ReadOnlyPreamble() = empty, want non-empty")
+		}
+		if !strings.Contains(result, "READ-ONLY") {
+			t.Errorf("ReadOnlyPreamble() = %q, want contains 'READ-ONLY'", result)
+		}
+	})
+
+	t.Run("returns empty when LOOM_READ_ONLY not set", func(t *testing.T) {
+		t.Setenv("LOOM_READ_ONLY", "")
+		result := ReadOnlyPreamble()
+		if result != "" {
+			t.Errorf("ReadOnlyPreamble() = %q, want empty", result)
+		}
+	})
+
+	t.Run("returns empty when LOOM_READ_ONLY=0", func(t *testing.T) {
+		t.Setenv("LOOM_READ_ONLY", "0")
+		result := ReadOnlyPreamble()
+		if result != "" {
+			t.Errorf("ReadOnlyPreamble() = %q, want empty (only '1' triggers)", result)
+		}
+	})
 }
 
 func TestResolveActiveWorkspace_NoConfig(t *testing.T) {

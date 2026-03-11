@@ -6,6 +6,8 @@ import (
 	"log"
 	"strings"
 	"sync"
+
+	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
 // ghAvailable checks if the gh CLI is installed.
@@ -173,7 +175,10 @@ func storeExternalRef(epicID, prURL string) error {
 
 // EnsureEpicPR checks if a PR exists for the epic branch and creates one if needed.
 // This is non-fatal — errors are returned but should not block agent restarts.
-func EnsureEpicPR(worktreePath, epicID string) error {
+func EnsureEpicPR(worktreePath, epicID string, eventBus events.Emitter) error {
+	if eventBus == nil {
+		eventBus = events.NopBus{}
+	}
 	// 1. Check if gh CLI is available
 	if !ghAvailable() {
 		log.Printf("[daemon] gh CLI not available, skipping PR creation for epic %s", epicID)
@@ -214,6 +219,13 @@ func EnsureEpicPR(worktreePath, epicID string) error {
 		return fmt.Errorf("failed to create PR: %w", err)
 	}
 	log.Printf("[daemon] Created PR for epic %s: %s", epicID, newURL)
+
+	// Emit pr_created event
+	if evt, err := events.NewEvent(events.PRCreated, "", "", epicID, events.PRCreatedData{EpicID: epicID, URL: newURL}); err == nil {
+		if emitErr := eventBus.Emit(evt); emitErr != nil {
+			log.Printf("[daemon] Failed to emit pr_created event: %v", emitErr)
+		}
+	}
 
 	// 7. Store PR URL in epic's external_ref
 	if err := storeExternalRef(epicID, newURL); err != nil {

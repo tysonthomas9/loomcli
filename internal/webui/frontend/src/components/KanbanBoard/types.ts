@@ -3,11 +3,11 @@
  * Columns can filter issues by status, dependencies, or title patterns.
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
 
-import type { Issue, Status } from '@/types';
+import type { Issue, Status } from "@/types";
 
-import type { BlockedInfo } from './KanbanBoard';
+import type { BlockedInfo } from "./KanbanBoard";
 
 /**
  * Configuration for a kanban column.
@@ -30,7 +30,7 @@ export interface KanbanColumnConfig {
   /** Column IDs that cards from this column can be dragged to */
   allowedDropTargets?: string[];
   /** Visual style variant */
-  style?: 'normal' | 'muted' | 'highlighted';
+  style?: "normal" | "muted" | "highlighted";
   /** Maximum items to show by default before requiring "Show all" */
   defaultLimit?: number;
 }

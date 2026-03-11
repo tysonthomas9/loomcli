@@ -3,10 +3,10 @@
  * Provides loading state, error handling, and BulkActionToolbar integration.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from "react";
 
-import { closeIssue } from '@/api';
-import type { BulkAction } from '@/components/BulkActionToolbar';
+import { closeIssue } from "@/api";
+import type { BulkAction } from "@/components/BulkActionToolbar";
 
 /**
  * Options for the useBulkClose hook.
@@ -52,7 +52,9 @@ export interface UseBulkCloseReturn {
  * })
  * ```
  */
-export function useBulkClose(options: UseBulkCloseOptions = {}): UseBulkCloseReturn {
+export function useBulkClose(
+  options: UseBulkCloseOptions = {},
+): UseBulkCloseReturn {
   const { onSuccess, onPartialSuccess, onError, closeReason } = options;
 
   const [isLoading, setIsLoading] = useState(false);
@@ -102,7 +104,9 @@ export function useBulkClose(options: UseBulkCloseOptions = {}): UseBulkCloseRet
 
       try {
         // Close all issues in parallel
-        const results = await Promise.allSettled(ids.map((id) => closeIssue(id, closeReason)));
+        const results = await Promise.allSettled(
+          ids.map((id) => closeIssue(id, closeReason)),
+        );
 
         // Guard against unmount
         if (!mountedRef.current) return;
@@ -114,7 +118,7 @@ export function useBulkClose(options: UseBulkCloseOptions = {}): UseBulkCloseRet
         results.forEach((result, index) => {
           const id = ids[index];
           if (id !== undefined) {
-            if (result.status === 'fulfilled') {
+            if (result.status === "fulfilled") {
               closedIds.push(id);
             } else {
               failedIdsList.push(id);
@@ -132,11 +136,11 @@ export function useBulkClose(options: UseBulkCloseOptions = {}): UseBulkCloseRet
         } else if (closedIds.length === 0) {
           // All failed - find first rejected result to get error message
           const firstRejected = results.find(
-            (r): r is PromiseRejectedResult => r.status === 'rejected'
+            (r): r is PromiseRejectedResult => r.status === "rejected",
           );
           const errorMessage = firstRejected
             ? (firstRejected.reason as Error).message
-            : 'All issues failed to close';
+            : "All issues failed to close";
           setError(errorMessage);
           onErrorRef.current?.(new Error(errorMessage), failedIdsList);
         } else {
@@ -148,9 +152,13 @@ export function useBulkClose(options: UseBulkCloseOptions = {}): UseBulkCloseRet
       } catch (err) {
         // Unexpected error (shouldn't happen with allSettled, but be safe)
         if (!mountedRef.current) return;
-        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        const errorMessage =
+          err instanceof Error ? err.message : "Unknown error";
         setError(errorMessage);
-        onErrorRef.current?.(err instanceof Error ? err : new Error(errorMessage), ids);
+        onErrorRef.current?.(
+          err instanceof Error ? err : new Error(errorMessage),
+          ids,
+        );
       } finally {
         if (mountedRef.current) {
           setIsLoading(false);
@@ -158,7 +166,7 @@ export function useBulkClose(options: UseBulkCloseOptions = {}): UseBulkCloseRet
       }
     },
     // Only closeReason is a dependency; callbacks use refs to avoid stale closures
-    [closeReason]
+    [closeReason],
   );
 
   /**
@@ -175,14 +183,14 @@ export function useBulkClose(options: UseBulkCloseOptions = {}): UseBulkCloseRet
    */
   const createBulkAction = useCallback(
     (actionOptions?: { label?: string }): BulkAction => ({
-      id: 'close',
-      label: actionOptions?.label ?? 'Close',
-      variant: 'danger',
+      id: "close",
+      label: actionOptions?.label ?? "Close",
+      variant: "danger",
       loading: isLoading,
       disabled: isLoading,
       onClick: bulkClose,
     }),
-    [isLoading, bulkClose]
+    [isLoading, bulkClose],
   );
 
   return {

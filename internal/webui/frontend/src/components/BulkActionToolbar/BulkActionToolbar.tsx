@@ -4,9 +4,9 @@
  * action buttons and a selection count.
  */
 
-import { useCallback } from 'react';
+import { useCallback } from "react";
 
-import styles from './BulkActionToolbar.module.css';
+import styles from "./BulkActionToolbar.module.css";
 
 /**
  * Action configuration for the bulk action toolbar.
@@ -25,7 +25,7 @@ export interface BulkAction {
   /** Whether the action is disabled */
   disabled?: boolean;
   /** Button variant: primary (filled), secondary (outline), or danger (red) */
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: "primary" | "secondary" | "danger";
 }
 
 /**
@@ -69,7 +69,7 @@ export function BulkActionToolbar({
       if (action.disabled || action.loading) return;
       action.onClick(selectedIds);
     },
-    [selectedIds]
+    [selectedIds],
   );
 
   // Don't render if nothing is selected
@@ -78,13 +78,15 @@ export function BulkActionToolbar({
   }
 
   const count = selectedIds.size;
-  const rootClassName = className ? `${styles.toolbar} ${className}` : styles.toolbar;
+  const rootClassName = className
+    ? `${styles.toolbar} ${className}`
+    : styles.toolbar;
 
   return (
     <div
       className={rootClassName}
       role="toolbar"
-      aria-label={`Bulk actions for ${count} selected issue${count !== 1 ? 's' : ''}`}
+      aria-label={`Bulk actions for ${count} selected issue${count !== 1 ? "s" : ""}`}
       data-testid="bulk-action-toolbar"
     >
       {/* Selection count */}
@@ -98,14 +100,14 @@ export function BulkActionToolbar({
           <button
             key={action.id}
             type="button"
-            className={`${styles.actionButton} ${styles[action.variant ?? 'secondary']}`}
+            className={`${styles.actionButton} ${styles[action.variant ?? "secondary"]}`}
             onClick={() => handleActionClick(action)}
             disabled={action.disabled || action.loading}
             aria-label={action.label}
             data-testid={`bulk-action-${action.id}`}
           >
             {action.icon && <span className={styles.icon}>{action.icon}</span>}
-            <span>{action.loading ? 'Loading...' : action.label}</span>
+            <span>{action.loading ? "Loading..." : action.label}</span>
           </button>
         ))}
 

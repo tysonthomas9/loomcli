@@ -18,6 +18,9 @@ type commandExecutor func(dir, name string, args ...string) CommandResult
 // execCommand is the package-level executor (swappable for tests)
 var execCommand commandExecutor = defaultExecCommand
 
+// lookPath is the package-level LookPath function (swappable for tests)
+var lookPath = exec.LookPath
+
 func defaultExecCommand(dir, name string, args ...string) CommandResult {
 	cmd := exec.Command(name, args...) //nolint:gosec // G204 — caller controls command name
 	cmd.Dir = dir

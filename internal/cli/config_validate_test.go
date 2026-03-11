@@ -652,3 +652,48 @@ func TestValidateProjectConfig_ZeroRestartValues(t *testing.T) {
 		t.Errorf("expected no errors for zero values, got: %s", r.FormatIssues())
 	}
 }
+
+func TestValidateProjectConfig_DeterministicRoleOrder(t *testing.T) {
+	dc := &DaemonConfig{
+		Roles: map[string]RoleConfig{
+			"gamma": {TaskFilter: "invalid"},
+			"alpha": {TaskFilter: "invalid"},
+			"beta":  {TaskFilter: "invalid"},
+		},
+	}
+
+	for i := 0; i < 10; i++ {
+		r := ValidateProjectConfig(dc, t.TempDir())
+		var errorFields []string
+		for _, issue := range r.Issues {
+			if issue.Severity == "error" {
+				errorFields = append(errorFields, issue.Field)
+			}
+		}
+		if len(errorFields) != 3 {
+			t.Fatalf("iteration %d: expected 3 errors, got %d", i, len(errorFields))
+		}
+		if errorFields[0] != "roles.alpha.task_filter" ||
+			errorFields[1] != "roles.beta.task_filter" ||
+			errorFields[2] != "roles.gamma.task_filter" {
+			t.Fatalf("iteration %d: expected alphabetical order [alpha, beta, gamma], got %v", i, errorFields)
+		}
+	}
+}
+
+func TestValidateProjectConfig_DeterministicTaskFilterList(t *testing.T) {
+	dc := &DaemonConfig{
+		Roles: map[string]RoleConfig{
+			"myrole": {TaskFilter: "bogus"},
+		},
+	}
+
+	r := ValidateProjectConfig(dc, t.TempDir())
+	if len(r.Issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d", len(r.Issues))
+	}
+	msg := r.Issues[0].Message
+	if !strings.Contains(msg, "any, has_design, needs_design") {
+		t.Errorf("expected sorted filter list 'any, has_design, needs_design' in message, got: %s", msg)
+	}
+}

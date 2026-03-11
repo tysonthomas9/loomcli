@@ -39,7 +39,7 @@
   flex-shrink: 0;
 }
 
-.statusDot[data-pulsing='true'] {
+.statusDot[data-pulsing="true"] {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -115,7 +115,7 @@
   pointer-events: none;
 }
 
-.loadingBanner[data-visible='true'] {
+.loadingBanner[data-visible="true"] {
   background-color: rgba(59, 130, 246, 0.15);
   border-bottom: 1px solid rgba(59, 130, 246, 0.3);
   color: #93c5fd;

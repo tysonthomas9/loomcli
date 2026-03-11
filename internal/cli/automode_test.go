@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -342,6 +344,50 @@ func TestSetupSignalHandler(t *testing.T) {
 	shutdown := SetupSignalHandler()
 	if shutdown == nil {
 		t.Error("SetupSignalHandler() returned nil channel")
+	}
+}
+
+func TestSetupSignalHandler_StopsSignalDelivery(t *testing.T) {
+	// Verify that SetupSignalHandler closes the shutdown channel on SIGINT
+	// and that signal.Stop is called (freeing the signal for re-registration).
+	shutdown := SetupSignalHandler()
+
+	// Send SIGINT to ourselves.
+	p, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("FindProcess: %v", err)
+	}
+	if err := p.Signal(syscall.SIGINT); err != nil {
+		t.Fatalf("Signal: %v", err)
+	}
+
+	// The shutdown channel should be closed promptly.
+	select {
+	case <-shutdown:
+		// expected
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown channel was not closed after SIGINT")
+	}
+
+	// After the handler runs, signal.Stop should have been called on the
+	// internal channel.  Verify by registering a *new* listener for SIGINT
+	// and confirming it receives the signal independently (i.e. the old
+	// registration is no longer consuming it).
+	verifyCh := make(chan os.Signal, 1)
+	signal.Notify(verifyCh, syscall.SIGINT)
+	defer signal.Stop(verifyCh)
+
+	if err := p.Signal(syscall.SIGINT); err != nil {
+		t.Fatalf("Signal (second): %v", err)
+	}
+
+	select {
+	case sig := <-verifyCh:
+		if sig != syscall.SIGINT {
+			t.Errorf("expected SIGINT, got %v", sig)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("new signal listener did not receive SIGINT; signal.Stop may not have been called")
 	}
 }
 

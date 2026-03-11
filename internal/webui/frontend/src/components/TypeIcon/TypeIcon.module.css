@@ -10,26 +10,26 @@
 }
 
 /* Type-specific icon colors */
-.typeIcon[data-type='bug'] {
+.typeIcon[data-type="bug"] {
   color: var(--color-danger);
 }
 
-.typeIcon[data-type='feature'] {
+.typeIcon[data-type="feature"] {
   color: var(--color-primary);
 }
 
-.typeIcon[data-type='task'] {
+.typeIcon[data-type="task"] {
   color: var(--color-success);
 }
 
-.typeIcon[data-type='epic'] {
+.typeIcon[data-type="epic"] {
   color: var(--color-type-epic);
 }
 
-.typeIcon[data-type='chore'] {
+.typeIcon[data-type="chore"] {
   color: var(--color-text-muted);
 }
 
-.typeIcon[data-type='unknown'] {
+.typeIcon[data-type="unknown"] {
   color: var(--color-text-muted);
 }

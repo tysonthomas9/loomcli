@@ -160,7 +160,7 @@ linters:
       - path: "internal/cli/daemon_cmd\\.go"
         linters: [funlen, cyclop]
       - path: "internal/cli/daemon(_supervisor)?\\.go"
-        linters: [cyclop, gocognit]
+        linters: [funlen, cyclop, gocognit]
       - path: "internal/cli/prompts\\.go"
         linters: [funlen]
       - path: "internal/cli/push\\.go"

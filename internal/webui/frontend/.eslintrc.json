@@ -1,0 +1,3 @@
+{
+  "ignorePatterns": ["dist", "node_modules", "coverage", "vite.config.ts", "eslint.config.js", "playwright.config.ts", "playwright-report", "test-results"]
+}

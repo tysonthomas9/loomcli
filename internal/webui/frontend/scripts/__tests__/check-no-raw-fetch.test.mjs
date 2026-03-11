@@ -184,7 +184,7 @@ describe("scanAll", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("scans components, hooks, and utils directories", () => {
+  it("scans all src/ subdirectories except excluded ones", () => {
     writeSource(root, "src/components/Foo.ts", `fetch("/api");`);
     writeSource(root, "src/hooks/useBar.ts", `globalThis.fetch("/api");`);
     writeSource(root, "src/utils/helper.ts", `fetch("/api");`);
@@ -203,6 +203,32 @@ describe("scanAll", () => {
     expect(result.scannedCount).toBe(1);
   });
 
+  it("does not scan src/__tests__/ directory", () => {
+    writeSource(root, "src/__tests__/setup.ts", `fetch("/api");`);
+    writeSource(root, "src/components/Foo.ts", "const x = 1;");
+
+    const result = scanAll(root);
+    expect(result.violations).toHaveLength(0);
+    expect(result.scannedCount).toBe(1);
+  });
+
+  it("scans new directories added under src/", () => {
+    writeSource(root, "src/stores/store.ts", `fetch("/api");`);
+    writeSource(root, "src/services/svc.ts", `fetch("/api");`);
+
+    const result = scanAll(root);
+    expect(result.violations).toHaveLength(2);
+    expect(result.scannedCount).toBe(2);
+  });
+
+  it("scans top-level files in src/", () => {
+    writeSource(root, "src/App.tsx", `fetch("/api");`);
+
+    const result = scanAll(root);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].relPath).toBe("src/App.tsx");
+  });
+
   it("returns 0 violations for clean codebase", () => {
     writeSource(root, "src/components/Foo.ts", "const x = 1;");
     writeSource(root, "src/hooks/useBar.ts", "const y = 2;");
@@ -213,13 +239,10 @@ describe("scanAll", () => {
     expect(result.scannedCount).toBe(3);
   });
 
-  it("skips missing scan directories gracefully", () => {
-    // Only create components, not hooks or utils
-    writeSource(root, "src/components/Foo.ts", "const x = 1;");
-
+  it("handles missing src/ directory gracefully", () => {
     const result = scanAll(root);
     expect(result.violations).toHaveLength(0);
-    expect(result.scannedCount).toBe(1);
+    expect(result.scannedCount).toBe(0);
   });
 
   it("scans nested directories", () => {

@@ -3,12 +3,12 @@
  * Wraps useAgents() so a single polling loop serves all consumers.
  */
 
-import { createContext, useContext, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, type ReactNode } from "react";
 
-import type { LoomAgentStatus } from '@/types';
+import type { LoomAgentStatus } from "@/types";
 
-import { useAgents } from './useAgents';
-import type { UseAgentsResult } from './useAgents';
+import { useAgents } from "./useAgents";
+import type { UseAgentsResult } from "./useAgents";
 
 /**
  * Context value exposed by AgentProvider.
@@ -39,7 +39,7 @@ export function AgentProvider({ children }: AgentProviderProps): JSX.Element {
     (name: string): LoomAgentStatus | undefined => {
       return agentsResult.agents.find((a) => a.name === name);
     },
-    [agentsResult.agents]
+    [agentsResult.agents],
   );
 
   const value: AgentContextValue = {
@@ -47,13 +47,21 @@ export function AgentProvider({ children }: AgentProviderProps): JSX.Element {
     getAgentByName,
   };
 
-  return <AgentContext.Provider value={value}>{children}</AgentContext.Provider>;
+  return (
+    <AgentContext.Provider value={value}>{children}</AgentContext.Provider>
+  );
 }
 
 /** Default no-op value returned when useAgentContext is called outside a provider. */
 const NO_AGENT_CONTEXT: AgentContextValue = {
   agents: [],
-  tasks: { needs_planning: 0, ready_to_implement: 0, in_progress: 0, need_review: 0, backlog: 0 },
+  tasks: {
+    needs_planning: 0,
+    ready_to_implement: 0,
+    in_progress: 0,
+    need_review: 0,
+    backlog: 0,
+  },
   taskLists: {
     needsPlanning: [],
     readyToImplement: [],
@@ -62,11 +70,25 @@ const NO_AGENT_CONTEXT: AgentContextValue = {
     backlog: [],
   },
   agentTasks: {},
-  sync: { db_synced: true, db_last_sync: '', git_needs_push: 0, git_needs_pull: 0 },
-  stats: { open: 0, closed: 0, total: 0, completion: 0, remaining: 0, in_progress: 0, review: 0, blocked: 0 },
+  sync: {
+    db_synced: true,
+    db_last_sync: "",
+    git_needs_push: 0,
+    git_needs_pull: 0,
+  },
+  stats: {
+    open: 0,
+    closed: 0,
+    total: 0,
+    completion: 0,
+    remaining: 0,
+    in_progress: 0,
+    review: 0,
+    blocked: 0,
+  },
   isLoading: false,
   isConnected: false,
-  connectionState: 'never_connected',
+  connectionState: "never_connected",
   wasEverConnected: false,
   retryCountdown: 0,
   error: null,

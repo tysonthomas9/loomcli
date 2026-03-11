@@ -3,12 +3,12 @@
  * with an expandable dropdown listing the blocked issues for quick navigation.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from "react";
 
-import { useBlockedIssues } from '@/hooks';
-import type { Priority } from '@/types';
+import { useBlockedIssues } from "@/hooks";
+import type { Priority } from "@/types";
 
-import styles from './BlockedSummary.module.css';
+import styles from "./BlockedSummary.module.css";
 
 /**
  * Props for the BlockedSummary component.
@@ -64,29 +64,32 @@ export function BlockedSummary({
     if (!isOpen) return;
 
     function handleClickOutside(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false);
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [isOpen]);
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setIsOpen(false);
-      } else if (event.key === 'Enter' || event.key === ' ') {
+      } else if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         setIsOpen((prev) => !prev);
         onBadgeClick?.();
       }
     },
-    [onBadgeClick]
+    [onBadgeClick],
   );
 
   const handleBadgeClick = useCallback(() => {
@@ -99,16 +102,18 @@ export function BlockedSummary({
       onIssueClick?.(issueId);
       setIsOpen(false);
     },
-    [onIssueClick]
+    [onIssueClick],
   );
 
   // Truncate title for display
   const truncateTitle = (title: string, maxLength: number = 30): string => {
     if (title.length <= maxLength) return title;
-    return title.slice(0, maxLength - 1) + '…';
+    return title.slice(0, maxLength - 1) + "…";
   };
 
-  const rootClassName = [styles.blockedSummary, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.blockedSummary, className]
+    .filter(Boolean)
+    .join(" ");
 
   const displayedIssues = blockedIssues?.slice(0, maxDisplayed) ?? [];
   const remainingCount = blockedCount - maxDisplayed;
@@ -123,7 +128,7 @@ export function BlockedSummary({
         aria-expanded={isOpen}
         aria-haspopup="menu"
         aria-label={`${blockedCount} blocked issues`}
-        data-has-blocked={hasBlocked ? 'true' : 'false'}
+        data-has-blocked={hasBlocked ? "true" : "false"}
       >
         <svg
           className={styles.icon}
@@ -144,15 +149,23 @@ export function BlockedSummary({
       </button>
 
       {isOpen && (
-        <div className={styles.dropdown} role="menu" aria-label="Blocked issues list">
+        <div
+          className={styles.dropdown}
+          role="menu"
+          aria-label="Blocked issues list"
+        >
           <div className={styles.header}>
-            {blockedCount} Blocked Issue{blockedCount !== 1 ? 's' : ''}
+            {blockedCount} Blocked Issue{blockedCount !== 1 ? "s" : ""}
           </div>
 
           <div className={styles.list}>
-            {loading && !blockedIssues && <div className={styles.loading}>Loading...</div>}
+            {loading && !blockedIssues && (
+              <div className={styles.loading}>Loading...</div>
+            )}
 
-            {error && <div className={styles.error}>Failed to load blocked issues</div>}
+            {error && (
+              <div className={styles.error}>Failed to load blocked issues</div>
+            )}
 
             {!loading && !error && blockedCount === 0 && (
               <div className={styles.empty}>No blocked issues</div>
@@ -168,18 +181,22 @@ export function BlockedSummary({
               >
                 <div className={styles.issueHeader}>
                   <span className={styles.issueId}>{issue.id}</span>
-                  <span className={styles.issueTitle}>{truncateTitle(issue.title)}</span>
+                  <span className={styles.issueTitle}>
+                    {truncateTitle(issue.title)}
+                  </span>
                   <PriorityBadge priority={issue.priority} />
                 </div>
                 <div className={styles.blockedByText}>
                   Blocked by {issue.blocked_by_count} issue
-                  {issue.blocked_by_count !== 1 ? 's' : ''}
+                  {issue.blocked_by_count !== 1 ? "s" : ""}
                 </div>
               </button>
             ))}
 
             {remainingCount > 0 && (
-              <div className={styles.moreText}>and {remainingCount} more...</div>
+              <div className={styles.moreText}>
+                and {remainingCount} more...
+              </div>
             )}
           </div>
 
@@ -189,7 +206,7 @@ export function BlockedSummary({
               className={styles.footer}
               onClick={() => {
                 // This would typically trigger a filter to show all blocked
-                onIssueClick?.('__show_all_blocked__');
+                onIssueClick?.("__show_all_blocked__");
                 setIsOpen(false);
               }}
               role="menuitem"

@@ -2,6 +2,7 @@ package agenterr
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -36,7 +37,7 @@ func ClassifyFromLog(logPath string, exitCode int, backend string) *AgentError {
 		class := classifyByExitCode(exitCode)
 		result = &classifyResult{
 			Class:   class,
-			Message: classifyByExitCodeMessage(class),
+			Message: classifyByExitCodeMessage(exitCode),
 		}
 	}
 
@@ -113,13 +114,13 @@ func classifyByExitCode(exitCode int) ErrorClass {
 	}
 }
 
-func classifyByExitCodeMessage(class ErrorClass) string {
-	switch class {
-	case Timeout:
-		return "process killed by signal 9 (SIGKILL)"
-	case Transient:
-		return "process terminated by signal 15 (SIGTERM)"
+func classifyByExitCodeMessage(exitCode int) string {
+	switch exitCode {
+	case 137:
+		return "process killed by signal 9 (SIGKILL), exit code 137"
+	case 143:
+		return "process terminated by signal 15 (SIGTERM), exit code 143"
 	default:
-		return "unclassified error"
+		return fmt.Sprintf("unclassified error (exit code %d)", exitCode)
 	}
 }

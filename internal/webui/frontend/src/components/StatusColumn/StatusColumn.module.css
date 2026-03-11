@@ -32,41 +32,41 @@
 }
 
 /* Status-specific header accent colors */
-.statusColumn[data-status='open'] .header {
+.statusColumn[data-status="open"] .header {
   border-bottom-color: var(--color-border);
 }
 
-.statusColumn[data-status='in_progress'] .header {
+.statusColumn[data-status="in_progress"] .header {
   border-bottom-color: var(--color-border);
 }
 
-.statusColumn[data-status='closed'] .header {
+.statusColumn[data-status="closed"] .header {
   border-bottom-color: var(--color-border);
 }
 
-.statusColumn[data-status='blocked'] .header {
+.statusColumn[data-status="blocked"] .header {
   border-bottom-color: var(--color-border);
 }
 
 /* Deferred uses secondary color to indicate inactive/low-priority */
-.statusColumn[data-status='deferred'] .header {
+.statusColumn[data-status="deferred"] .header {
   border-bottom-color: var(--color-border);
 }
 
-.statusColumn[data-status='review'] .header {
+.statusColumn[data-status="review"] .header {
   border-bottom-color: var(--color-border);
 }
 
 /* New 5-column layout column IDs */
-.statusColumn[data-status='ready'] .header {
+.statusColumn[data-status="ready"] .header {
   border-bottom-color: var(--color-border);
 }
 
-.statusColumn[data-status='backlog'] .header {
+.statusColumn[data-status="backlog"] .header {
   border-bottom-color: var(--color-border);
 }
 
-.statusColumn[data-status='done'] .header {
+.statusColumn[data-status="done"] .header {
   border-bottom-color: var(--color-border);
 }
 
@@ -183,18 +183,18 @@
  * Backlog column styling (blocked by deps, blocked status, or deferred)
  * ================================= */
 
-.statusColumn[data-column-type='backlog'] {
+.statusColumn[data-column-type="backlog"] {
   background-color: #e3e0d6;
 }
 
-.statusColumn[data-column-type='backlog'] .header {
+.statusColumn[data-column-type="backlog"] .header {
   border-bottom-color: var(--color-border);
 }
 
-.statusColumn[data-column-type='backlog'] .title {
+.statusColumn[data-column-type="backlog"] .title {
   color: #777777;
 }
 
-.statusColumn[data-column-type='backlog'] .count {
+.statusColumn[data-column-type="backlog"] .count {
   background-color: #dedace;
 }

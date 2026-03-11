@@ -2,5 +2,5 @@
  * FilterBar component exports.
  */
 
-export { FilterBar } from './FilterBar';
-export type { FilterBarProps, GroupByOption } from './FilterBar';
+export { FilterBar } from "./FilterBar";
+export type { FilterBarProps, GroupByOption } from "./FilterBar";

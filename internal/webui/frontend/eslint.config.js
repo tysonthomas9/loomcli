@@ -2,6 +2,7 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import react from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
+import importX from "eslint-plugin-import-x";
 import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
@@ -12,6 +13,7 @@ export default tseslint.config(
     plugins: {
       react,
       "react-hooks": reactHooks,
+      "import-x": importX,
     },
     languageOptions: {
       ecmaVersion: 2020,
@@ -43,6 +45,24 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
       "@typescript-eslint/no-explicit-any": "warn",
+
+      // Import rules
+      "import-x/no-unused-modules": [
+        "warn",
+        {
+          unusedExports: true,
+          missingExports: false,
+          ignoreExports: [
+            "src/components/index.ts",
+            "src/components/*/index.ts",
+            "src/components/**/index.ts",
+            "src/hooks/index.ts",
+            "src/api/index.ts",
+            "src/types/index.ts",
+            "src/styles/index.ts",
+          ],
+        },
+      ],
     },
   },
   {

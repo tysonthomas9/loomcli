@@ -4,11 +4,11 @@
  * issue counts, and bottleneck detection.
  */
 
-import { memo, useMemo } from 'react';
+import { memo, useMemo } from "react";
 
-import type { LoomStats, BlockedIssue, Issue } from '@/types';
+import type { LoomStats, BlockedIssue, Issue } from "@/types";
 
-import styles from './ProjectHealthPanel.module.css';
+import styles from "./ProjectHealthPanel.module.css";
 
 /**
  * Bottleneck issue with blocking count.
@@ -31,7 +31,7 @@ export interface ProjectHealthPanelProps {
   /** Whether data is loading */
   isLoading: boolean;
   /** Callback when a bottleneck issue is clicked */
-  onBottleneckClick?: (issue: Pick<Issue, 'id' | 'title'>) => void;
+  onBottleneckClick?: (issue: Pick<Issue, "id" | "title">) => void;
   /** Additional CSS class name */
   className?: string;
 }
@@ -47,13 +47,18 @@ function deriveBottlenecks(blockedIssues: BlockedIssue[] | null): Bottleneck[] {
   }
 
   // Build frequency map: blockerId -> { count, title, priority }
-  const blockerMap = new Map<string, { count: number; title: string; priority: number }>();
+  const blockerMap = new Map<
+    string,
+    { count: number; title: string; priority: number }
+  >();
 
   for (const issue of blockedIssues) {
     // Use blocked_by_details if available, otherwise fall back to blocked_by IDs
     const details = issue.blocked_by_details || [];
     const blockerInfos =
-      details.length > 0 ? details : issue.blocked_by.map((id) => ({ id, title: id, priority: 2 }));
+      details.length > 0
+        ? details
+        : issue.blocked_by.map((id) => ({ id, title: id, priority: 2 }));
 
     for (const blocker of blockerInfos) {
       const existing = blockerMap.get(blocker.id);
@@ -99,9 +104,14 @@ function ProjectHealthPanelComponent({
   onBottleneckClick,
   className,
 }: ProjectHealthPanelProps): JSX.Element {
-  const bottlenecks = useMemo(() => deriveBottlenecks(blockedIssues), [blockedIssues]);
+  const bottlenecks = useMemo(
+    () => deriveBottlenecks(blockedIssues),
+    [blockedIssues],
+  );
 
-  const rootClassName = className ? `${styles.panel} ${className}` : styles.panel;
+  const rootClassName = className
+    ? `${styles.panel} ${className}`
+    : styles.panel;
 
   // Calculate percentage for progress bar
   const completionPercent = Math.round(stats.completion);
@@ -145,7 +155,9 @@ function ProjectHealthPanelComponent({
         <h3 className={styles.sectionLabel}>
           Bottlenecks
           {bottlenecks.length > 0 && (
-            <span className={styles.bottleneckCount}>({bottlenecks.length})</span>
+            <span className={styles.bottleneckCount}>
+              ({bottlenecks.length})
+            </span>
           )}
         </h3>
         {isLoading ? (
@@ -159,18 +171,29 @@ function ProjectHealthPanelComponent({
                 <button
                   type="button"
                   className={
-                    index === 0 ? styles.bottleneckButtonHighlighted : styles.bottleneckButton
+                    index === 0
+                      ? styles.bottleneckButtonHighlighted
+                      : styles.bottleneckButton
                   }
                   onClick={() =>
-                    onBottleneckClick?.({ id: bottleneck.id, title: bottleneck.title })
+                    onBottleneckClick?.({
+                      id: bottleneck.id,
+                      title: bottleneck.title,
+                    })
                   }
                   disabled={!onBottleneckClick}
-                  aria-current={index === 0 ? 'true' : undefined}
-                  title={bottleneck.title !== bottleneck.id ? bottleneck.title : undefined}
+                  aria-current={index === 0 ? "true" : undefined}
+                  title={
+                    bottleneck.title !== bottleneck.id
+                      ? bottleneck.title
+                      : undefined
+                  }
                 >
                   <span className={styles.bottleneckId}>{bottleneck.id}</span>
                   {bottleneck.title !== bottleneck.id && (
-                    <span className={styles.bottleneckTitle}>{bottleneck.title}</span>
+                    <span className={styles.bottleneckTitle}>
+                      {bottleneck.title}
+                    </span>
                   )}
                   <span className={styles.bottleneckBlockCount}>
                     blocks {bottleneck.blockingCount}
