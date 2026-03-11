@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -146,18 +145,13 @@ func runConfigInit(cmd *cobra.Command, args []string) {
 }
 
 func runConfigShow(cmd *cobra.Command, args []string) {
-	cfg, err := LoadConfig()
+	configPath := GetConfigPath()
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	if cfg == nil {
-		fmt.Printf("No config file found at %s. Run 'loom config init' to create one.\n", GetConfigPath())
-		return
-	}
-
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("No config file found at %s. Run 'loom config init' to create one.\n", configPath)
+			return
+		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
