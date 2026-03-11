@@ -88,6 +88,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 
 	// Terminal token and WebSocket endpoints for authenticated terminal relay
 	if termManager != nil {
+		mux.HandleFunc("GET /api/terminal/sessions", handleListTerminalSessions(termManager))
 		if termAuth != nil {
 			mux.HandleFunc("GET /api/terminal/token", handleTerminalToken(termAuth))
 			mux.HandleFunc("GET /api/agents/{name}/terminal/token", handleGetAgentTerminalToken(termAuth))
