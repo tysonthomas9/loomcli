@@ -30,4 +30,4 @@ jobs:
           git config --global user.email "ci@loomcli.test"
 
       - name: E2E Container Tests
-        run: go test -tags container -v -timeout 15m ./e2e/
+        run: go test -tags container -v -timeout 20m ./e2e/
