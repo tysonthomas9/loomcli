@@ -151,9 +151,9 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 // tmuxAttach spawns a tmux attach-session process with a PTY.
 func (m *TerminalManager) tmuxAttach(name string) (*exec.Cmd, *os.File, error) {
 	cmd := exec.Command(m.tmuxPath, "attach-session", "-t", name)
-	// Ensure TERM is set so tmux can determine terminal capabilities.
-	// Without this, tmux 3.6+ on macOS exits immediately with status 1.
-	if os.Getenv("TERM") == "" {
+	// Ensure TERM is set to a capable terminal type so tmux can operate.
+	// With TERM unset or set to "dumb", tmux 3.6+ exits immediately with status 1.
+	if term := os.Getenv("TERM"); term == "" || term == "dumb" {
 		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	}
 	ptmx, err := pty.Start(cmd)
