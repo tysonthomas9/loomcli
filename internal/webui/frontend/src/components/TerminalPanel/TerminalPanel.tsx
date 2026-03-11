@@ -372,10 +372,8 @@ export function TerminalPanel({
           `/api/terminal/token?session=${TERMINAL_SESSION}`, // allow-url
         );
         const token = tokenResp?.token ?? "";
-        await post(
-          `/api/terminal/restart?session=${TERMINAL_SESSION}&token=${encodeURIComponent(token)}`,
-          {},
-        ); // allow-url
+        // prettier-ignore
+        await post(`/api/terminal/restart?session=${TERMINAL_SESSION}&token=${encodeURIComponent(token)}`, {}); // allow-url
       } catch {
         // Restart may fail if daemon unavailable; proceed with reconnect anyway
       }

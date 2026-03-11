@@ -111,12 +111,12 @@ describe("MonitorDashboard", () => {
     expect(dashboard).toHaveClass("custom-class");
   });
 
-  it("renders panels in correct order: Project Health, Agent Activity", () => {
+  it("renders panels in correct order: Project Health, Agent Activity, Usage", () => {
     render(<MonitorDashboard />);
 
     const headings = screen.getAllByRole("heading", { level: 2 });
     const panelNames = headings.map((h) => h.textContent);
-    expect(panelNames).toEqual(["Project Health", "Agent Activity"]);
+    expect(panelNames).toEqual(["Project Health", "Agent Activity", "Usage"]);
   });
 
   it("renders AgentActivityPanel", () => {

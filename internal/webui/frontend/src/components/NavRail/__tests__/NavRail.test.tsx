@@ -26,17 +26,23 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Settings")).toBeInTheDocument();
     });
 
+    it("renders an Observability button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Observability")).toBeInTheDocument();
+    });
+
     it("does not render a Monitor button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       expect(screen.queryByLabelText("Monitor")).not.toBeInTheDocument();
     });
 
-    it("renders exactly two navigation buttons", () => {
+    it("renders exactly three navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(2);
+      expect(buttons).toHaveLength(3);
     });
 
     it("renders tooltips for each button", () => {
@@ -44,6 +50,9 @@ describe("NavRail", () => {
 
       expect(
         screen.getByRole("tooltip", { name: "Kanban" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("tooltip", { name: "Observability" }),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("tooltip", { name: "Settings" }),

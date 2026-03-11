@@ -14,13 +14,14 @@ import { ViewSwitcher, DEFAULT_VIEW } from "../ViewSwitcher";
 
 describe("ViewSwitcher", () => {
   describe("rendering", () => {
-    it("renders all four view tabs", () => {
+    it("renders all five view tabs", () => {
       render(<ViewSwitcher activeView="kanban" onChange={() => {}} />);
 
       expect(screen.getByTestId("view-tab-kanban")).toBeInTheDocument();
       expect(screen.getByTestId("view-tab-table")).toBeInTheDocument();
       expect(screen.getByTestId("view-tab-graph")).toBeInTheDocument();
       expect(screen.getByTestId("view-tab-monitor")).toBeInTheDocument();
+      expect(screen.getByTestId("view-tab-observability")).toBeInTheDocument();
     });
 
     it("does not render a settings tab (settings is not a switcher view)", () => {
@@ -37,6 +38,7 @@ describe("ViewSwitcher", () => {
       expect(screen.getByText("Table")).toBeInTheDocument();
       expect(screen.getByText("Graph")).toBeInTheDocument();
       expect(screen.getByText("Monitor")).toBeInTheDocument();
+      expect(screen.getByText("Observability")).toBeInTheDocument();
     });
 
     it("marks active tab with aria-selected=true", () => {
@@ -117,6 +119,7 @@ describe("ViewSwitcher", () => {
       expect(screen.getByTestId("view-tab-table")).toBeDisabled();
       expect(screen.getByTestId("view-tab-graph")).toBeDisabled();
       expect(screen.getByTestId("view-tab-monitor")).toBeDisabled();
+      expect(screen.getByTestId("view-tab-observability")).toBeDisabled();
     });
   });
 
@@ -143,7 +146,7 @@ describe("ViewSwitcher", () => {
 
     it("wraps around at the end", () => {
       const onChange = vi.fn();
-      render(<ViewSwitcher activeView="monitor" onChange={onChange} />);
+      render(<ViewSwitcher activeView="observability" onChange={onChange} />);
 
       const switcher = screen.getByTestId("view-switcher");
       fireEvent.keyDown(switcher, { key: "ArrowRight" });
@@ -158,7 +161,7 @@ describe("ViewSwitcher", () => {
       const switcher = screen.getByTestId("view-switcher");
       fireEvent.keyDown(switcher, { key: "ArrowLeft" });
 
-      expect(onChange).toHaveBeenCalledWith("monitor");
+      expect(onChange).toHaveBeenCalledWith("observability");
     });
 
     it("navigates to first tab with Home", () => {
@@ -178,7 +181,7 @@ describe("ViewSwitcher", () => {
       const switcher = screen.getByTestId("view-switcher");
       fireEvent.keyDown(switcher, { key: "End" });
 
-      expect(onChange).toHaveBeenCalledWith("monitor");
+      expect(onChange).toHaveBeenCalledWith("observability");
     });
 
     it("ignores keyboard navigation when disabled", () => {
@@ -199,7 +202,7 @@ describe("ViewSwitcher", () => {
       );
 
       const tabs = container.querySelectorAll('[role="tab"]');
-      expect(tabs.length).toBe(4);
+      expect(tabs.length).toBe(5);
 
       // CSS Modules mangles class names, so we check for partial match
       tabs.forEach((tab) => {
@@ -248,7 +251,7 @@ describe("ViewSwitcher", () => {
       render(<ViewSwitcher activeView="kanban" onChange={() => {}} />);
 
       const tabs = screen.getAllByRole("tab");
-      expect(tabs).toHaveLength(4);
+      expect(tabs).toHaveLength(5);
     });
 
     it("tabs have aria-controls pointing to main-content", () => {

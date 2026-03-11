@@ -169,7 +169,7 @@ describe("ErrorIndicators", () => {
     it("renders agents sorted by restart count descending", () => {
       const restartsByAgent = { alpha: 1, beta: 5, gamma: 3 };
 
-      render(
+      const { container } = render(
         <ErrorIndicators
           errorRatePct={10}
           restartCount24h={9}
@@ -187,7 +187,7 @@ describe("ErrorIndicators", () => {
     it("filters out agents with 0 restarts", () => {
       const restartsByAgent = { alpha: 3, beta: 0, gamma: 1 };
 
-      render(
+      const { container } = render(
         <ErrorIndicators
           errorRatePct={5}
           restartCount24h={4}
@@ -201,7 +201,7 @@ describe("ErrorIndicators", () => {
     });
 
     it("does not render agent list when restartsByAgent is empty", () => {
-      render(
+      const { container } = render(
         <ErrorIndicators
           errorRatePct={5}
           restartCount24h={1}
