@@ -42,3 +42,4 @@ export * from "./Toast";
 export * from "./AssigneePrompt";
 export * from "./TalkToLeadButton";
 export * from "./TerminalPanel";
+export * from "./ThemeToggle";

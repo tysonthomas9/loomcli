@@ -6,9 +6,23 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <meta name="color-scheme" content="light dark" />
     <title>Loom</title>
   </head>
   <body>
+    <script>
+      // Prevent flash of wrong theme before React hydrates
+      (function() {
+        try {
+          var t = localStorage.getItem('theme-preference');
+          var theme = (t === 'light' || t === 'dark') ? t
+            : window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark'
+            : 'light';
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+        } catch(e) {}
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

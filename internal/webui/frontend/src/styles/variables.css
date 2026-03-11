@@ -206,3 +206,67 @@
   --z-modal: 400;
   --z-toast: 500;
 }
+
+/* ===========================
+ * Dark Theme Overrides
+ * Applied via [data-theme="dark"] on <html>
+ * =========================== */
+[data-theme="dark"] {
+  /* Core palette */
+  --bg-color: #1a1a2e;
+  --bg-card: #232336;
+  --line-color: #3a3a52;
+  --text-primary: #e2e2e8;
+  --text-secondary: #a0a0b0;
+  --accent-bg: #1e2a4a;
+  --accent-text: #60a5fa;
+
+  /* Kanban column backgrounds */
+  --color-column-bg: #1e1e32;
+  --color-column-bg-muted: #1a1a2c;
+
+  /* Neutral colors */
+  --color-bg: var(--bg-card);
+  --color-bg-card: #282842;
+  --color-bg-secondary: var(--bg-color);
+  --color-bg-tertiary: #2a2a40;
+  --color-bg-hover: #2e2e48;
+  --color-bg-active: #35354f;
+  --color-surface-subtle: #262640;
+  --color-bg-subtle: var(--color-surface-subtle);
+  --color-border: var(--line-color);
+  --color-border-light: #32324a;
+  --color-border-hover: #4a4a68;
+  --color-text: var(--text-primary);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: #8888a0;
+  --color-text-muted: #6a6a82;
+  --color-text-inverse: #1a1a2e;
+  --color-highlight: #854d0e;
+  --color-focus: #3b82f6;
+  --color-bg-primary: var(--bg-card);
+  --color-panel-bg: #1e1e32;
+  --color-primary: #3b82f6; /* blue-500, brighter on dark backgrounds */
+  --color-primary-hover: #3b82f6;
+
+  /* Semantic background colors (darker variants) */
+  --color-primary-bg: #1e2a4a;
+  --color-success-bg: #14332a;
+  --color-warning-bg: #332b14;
+  --color-danger-bg: #331a1a;
+  --color-info-bg: #143033;
+  --color-bg-warning: #332b14;
+
+  /* Skeleton loading */
+  --color-skeleton-bg: var(--color-bg-tertiary);
+  --color-skeleton-shimmer: #33334d;
+
+  /* Shadows (more opaque on dark backgrounds) */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md:
+    0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg:
+    0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+  --panel-shadow-strong: 0 25px 50px -12px rgb(0 0 0 / 50%);
+}

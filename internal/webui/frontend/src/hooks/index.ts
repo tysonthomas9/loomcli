@@ -127,3 +127,6 @@ export type {
   UseObservabilityMetricsOptions,
   UseObservabilityMetricsResult,
 } from "./useObservabilityMetrics";
+
+export { useTheme } from "./useTheme";
+export type { Theme, UseThemeReturn } from "./useTheme";

@@ -289,6 +289,11 @@ vi.mock("@/hooks", () => ({
     resize: vi.fn(),
     sendInput: vi.fn(),
   })),
+  useTheme: vi.fn(() => ({
+    theme: "light" as const,
+    toggleTheme: vi.fn(),
+    setTheme: vi.fn(),
+  })),
 }));
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)

@@ -35,6 +35,7 @@ import {
   BulkActionToolbar,
   TalkToLeadButton,
   NavRail,
+  ThemeToggle,
 } from "@/components";
 import type { BlockedInfo } from "@/components/KanbanBoard";
 import {
@@ -50,6 +51,7 @@ import {
   useRecentAssignees,
   useSelection,
   useAgents,
+  useTheme,
 } from "@/hooks";
 import type { Issue, Status } from "@/types";
 
@@ -89,6 +91,9 @@ const TerminalPanel = lazy(() =>
 );
 
 function App() {
+  // Theme state
+  const { theme, toggleTheme } = useTheme();
+
   // View state must be read before useIssues to determine fetch mode
   const [activeView, setActiveView] = useViewState();
 
@@ -560,6 +565,7 @@ function App() {
 
   const headerActions = (
     <div className={styles.headerActions}>
+      <ThemeToggle theme={theme} onToggle={toggleTheme} />
       <ConnectionStatus
         state={connectionState}
         onRetry={retryConnection}
