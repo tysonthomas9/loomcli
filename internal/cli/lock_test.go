@@ -2,10 +2,12 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAcquireLock(t *testing.T) {
@@ -629,6 +631,68 @@ func TestReadLockFile(t *testing.T) {
 				tt.checkInfo(t, info)
 			}
 		})
+	}
+}
+
+// ============================================================================
+// TOCTOU Race Condition Tests
+// ============================================================================
+
+func TestAcquireLockStale_ConcurrentRetry(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, LockFileName)
+
+	staleLock := `{"pid":999999999,"command":"stale","agent_name":"dead-agent","started_at":"2024-01-01T00:00:00Z"}`
+	if err := os.WriteFile(lockPath, []byte(staleLock), 0644); err != nil {
+		t.Fatalf("failed to write stale lock: %v", err)
+	}
+
+	go func() {
+		for {
+			_, err := os.Stat(lockPath)
+			if os.IsNotExist(err) {
+				secondStale := `{"pid":999999998,"command":"stale2","agent_name":"dead-agent-2","started_at":"2024-01-01T00:00:00Z"}`
+				os.WriteFile(lockPath, []byte(secondStale), 0644)
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	err := AcquireLock(tmpDir, "new-command", "new-agent")
+	if err != nil {
+		t.Fatalf("AcquireLock should succeed after retrying stale lock race: %v", err)
+	}
+	defer ReleaseLock(tmpDir)
+
+	info, running, err := CheckLock(tmpDir)
+	if err != nil {
+		t.Fatalf("CheckLock failed: %v", err)
+	}
+	if !running {
+		t.Error("expected running process after acquiring lock")
+	}
+	if info.PID != os.Getpid() {
+		t.Errorf("expected PID %d, got %d", os.Getpid(), info.PID)
+	}
+}
+
+func TestAcquireLockStale_RetryFindsLiveAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockPath := filepath.Join(tmpDir, LockFileName)
+
+	liveLock := fmt.Sprintf(`{"pid":%d,"command":"live-cmd","agent_name":"live-agent","started_at":"2024-01-01T00:00:00Z"}`, os.Getpid())
+	if err := os.WriteFile(lockPath, []byte(liveLock), 0644); err != nil {
+		t.Fatalf("failed to write live lock: %v", err)
+	}
+
+	err := AcquireLock(tmpDir, "new-command", "new-agent")
+	if err == nil {
+		ReleaseLock(tmpDir)
+		t.Fatal("AcquireLock should fail when lock is held by live agent")
+	}
+	if !strings.Contains(err.Error(), "agent already running") {
+		t.Errorf("expected 'agent already running' error, got: %v", err)
 	}
 }
 
