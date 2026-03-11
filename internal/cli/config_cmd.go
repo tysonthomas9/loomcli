@@ -146,7 +146,7 @@ func runConfigInit(cmd *cobra.Command, args []string) {
 
 func runConfigShow(cmd *cobra.Command, args []string) {
 	configPath := GetConfigPath()
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) // #nosec G304 — path from GetConfigPath(), not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Printf("No config file found at %s. Run 'loom config init' to create one.\n", configPath)
