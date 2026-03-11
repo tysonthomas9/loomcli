@@ -50,7 +50,9 @@ export function useTheme(): UseThemeReturn {
   });
 
   // Track whether user has an explicit preference
-  const [hasExplicit, setHasExplicit] = useState(() => getStoredTheme() !== null);
+  const [hasExplicit, setHasExplicit] = useState(
+    () => getStoredTheme() !== null,
+  );
 
   // Apply theme to DOM on mount and changes
   useEffect(() => {

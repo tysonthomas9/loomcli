@@ -20,17 +20,21 @@ function createMockMatchMedia(prefersDark: boolean) {
   const mql = {
     matches: prefersDark,
     media: "(prefers-color-scheme: dark)",
-    addEventListener: vi.fn((event: string, handler: (e: MediaQueryListEvent) => void) => {
-      if (event === "change") {
-        listeners.push(handler);
-      }
-    }),
-    removeEventListener: vi.fn((event: string, handler: (e: MediaQueryListEvent) => void) => {
-      if (event === "change") {
-        const idx = listeners.indexOf(handler);
-        if (idx >= 0) listeners.splice(idx, 1);
-      }
-    }),
+    addEventListener: vi.fn(
+      (event: string, handler: (e: MediaQueryListEvent) => void) => {
+        if (event === "change") {
+          listeners.push(handler);
+        }
+      },
+    ),
+    removeEventListener: vi.fn(
+      (event: string, handler: (e: MediaQueryListEvent) => void) => {
+        if (event === "change") {
+          const idx = listeners.indexOf(handler);
+          if (idx >= 0) listeners.splice(idx, 1);
+        }
+      },
+    ),
     onchange: null,
     addListener: vi.fn(),
     removeListener: vi.fn(),
@@ -295,7 +299,10 @@ describe("useTheme", () => {
       const { result } = renderHook(() => useTheme());
 
       // Listener should be registered initially (no explicit preference)
-      expect(mql.addEventListener).toHaveBeenCalledWith("change", expect.any(Function));
+      expect(mql.addEventListener).toHaveBeenCalledWith(
+        "change",
+        expect.any(Function),
+      );
 
       // User explicitly sets a theme
       act(() => {
@@ -321,7 +328,10 @@ describe("useTheme", () => {
 
       unmount();
 
-      expect(mql.removeEventListener).toHaveBeenCalledWith("change", expect.any(Function));
+      expect(mql.removeEventListener).toHaveBeenCalledWith(
+        "change",
+        expect.any(Function),
+      );
     });
   });
 
@@ -330,9 +340,11 @@ describe("useTheme", () => {
       const { matchMediaMock } = createMockMatchMedia(false);
       window.matchMedia = matchMediaMock;
 
-      const getItemSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-        throw new Error("SecurityError: localStorage not available");
-      });
+      const getItemSpy = vi
+        .spyOn(Storage.prototype, "getItem")
+        .mockImplementation(() => {
+          throw new Error("SecurityError: localStorage not available");
+        });
 
       const { result } = renderHook(() => useTheme());
 
@@ -348,9 +360,11 @@ describe("useTheme", () => {
 
       const { result } = renderHook(() => useTheme());
 
-      const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-        throw new Error("QuotaExceededError");
-      });
+      const setItemSpy = vi
+        .spyOn(Storage.prototype, "setItem")
+        .mockImplementation(() => {
+          throw new Error("QuotaExceededError");
+        });
 
       // Should not throw
       act(() => {
@@ -368,9 +382,11 @@ describe("useTheme", () => {
 
       const { result } = renderHook(() => useTheme());
 
-      const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-        throw new Error("QuotaExceededError");
-      });
+      const setItemSpy = vi
+        .spyOn(Storage.prototype, "setItem")
+        .mockImplementation(() => {
+          throw new Error("QuotaExceededError");
+        });
 
       // Should not throw
       act(() => {
