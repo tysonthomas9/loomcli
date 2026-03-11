@@ -4,11 +4,17 @@
  * Allows users to add and remove blocking dependencies.
  */
 
-import { useState, useCallback, useRef, useEffect, type KeyboardEvent } from 'react';
+import {
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  type KeyboardEvent,
+} from "react";
 
-import type { IssueWithDependencyMetadata, DependencyType } from '@/types';
+import type { IssueWithDependencyMetadata, DependencyType } from "@/types";
 
-import styles from './DependencySection.module.css';
+import styles from "./DependencySection.module.css";
 
 /**
  * Props for the DependencySection component.
@@ -46,7 +52,7 @@ export function DependencySection({
   className,
 }: DependencySectionProps): JSX.Element {
   const [isAdding, setIsAdding] = useState(false);
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +73,7 @@ export function DependencySection({
 
   const handleCancelAdd = useCallback(() => {
     setIsAdding(false);
-    setInputValue('');
+    setInputValue("");
     setError(null);
   }, []);
 
@@ -75,19 +81,19 @@ export function DependencySection({
     const trimmedId = inputValue.trim();
 
     if (!trimmedId) {
-      setError('Please enter an issue ID');
+      setError("Please enter an issue ID");
       return;
     }
 
     // Prevent self-dependency
     if (trimmedId === issueId) {
-      setError('Cannot add self as dependency');
+      setError("Cannot add self as dependency");
       return;
     }
 
     // Check if already a dependency
     if (dependencies.some((dep) => dep.id === trimmedId)) {
-      setError('Already a dependency');
+      setError("Already a dependency");
       return;
     }
 
@@ -95,12 +101,13 @@ export function DependencySection({
     setSavingId(trimmedId);
 
     try {
-      await onAddDependency(trimmedId, 'blocks');
+      await onAddDependency(trimmedId, "blocks");
       // Success - reset form
       setIsAdding(false);
-      setInputValue('');
+      setInputValue("");
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to add dependency';
+      const message =
+        err instanceof Error ? err.message : "Failed to add dependency";
       setError(message);
     } finally {
       setSavingId(null);
@@ -117,29 +124,32 @@ export function DependencySection({
       try {
         await onRemoveDependency(depId);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to remove dependency';
+        const message =
+          err instanceof Error ? err.message : "Failed to remove dependency";
         setError(message);
       } finally {
         setRemovingId(null);
       }
     },
-    [disabled, removingId, onRemoveDependency]
+    [disabled, removingId, onRemoveDependency],
   );
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
+      if (e.key === "Enter") {
         e.preventDefault();
         handleAdd();
-      } else if (e.key === 'Escape') {
+      } else if (e.key === "Escape") {
         e.preventDefault();
         handleCancelAdd();
       }
     },
-    [handleAdd, handleCancelAdd]
+    [handleAdd, handleCancelAdd],
   );
 
-  const rootClassName = [styles.dependencySection, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.dependencySection, className]
+    .filter(Boolean)
+    .join(" ");
   const isBusy = savingId !== null || removingId !== null;
 
   return (
@@ -158,7 +168,13 @@ export function DependencySection({
             aria-label="Add dependency"
             data-testid="add-dependency-button"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              aria-hidden="true"
+            >
               <path
                 d="M7 2V12M2 7H12"
                 stroke="currentColor"
@@ -173,7 +189,11 @@ export function DependencySection({
 
       {/* Error display */}
       {error && (
-        <div className={styles.error} role="alert" data-testid="dependency-error">
+        <div
+          className={styles.error}
+          role="alert"
+          data-testid="dependency-error"
+        >
           {error}
         </div>
       )}
@@ -210,7 +230,7 @@ export function DependencySection({
               disabled={savingId !== null || !inputValue.trim()}
               data-testid="confirm-add-dependency"
             >
-              {savingId !== null ? 'Adding...' : 'Add'}
+              {savingId !== null ? "Adding..." : "Add"}
             </button>
           </div>
         </div>
@@ -220,19 +240,22 @@ export function DependencySection({
       {dependencies.length > 0 ? (
         <ul className={styles.dependencyList} data-testid="dependency-list">
           {dependencies.map((dep) => {
-            const statusClass = dep.status === 'closed' ? styles.dependencyClosed : '';
+            const statusClass =
+              dep.status === "closed" ? styles.dependencyClosed : "";
             const isRemoving = removingId === dep.id;
 
             return (
               <li
                 key={dep.id}
-                className={`${styles.dependencyItem} ${statusClass} ${isRemoving ? styles.removing : ''}`}
+                className={`${styles.dependencyItem} ${statusClass} ${isRemoving ? styles.removing : ""}`}
                 data-testid={`dependency-item-${dep.id}`}
               >
                 <span className={styles.dependencyId}>{dep.id}</span>
                 <span className={styles.dependencyTitle}>{dep.title}</span>
                 {dep.dependency_type && (
-                  <span className={styles.dependencyType}>{dep.dependency_type}</span>
+                  <span className={styles.dependencyType}>
+                    {dep.dependency_type}
+                  </span>
                 )}
                 {!disabled && (
                   <button

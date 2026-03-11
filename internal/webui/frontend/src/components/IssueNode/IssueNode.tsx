@@ -3,20 +3,20 @@
  * Displays an issue as a node with connection handles.
  */
 
-import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { memo } from 'react';
+import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { memo } from "react";
 
-import { BlockedBadge } from '@/components/BlockedBadge';
-import type { IssueNode as IssueNodeType } from '@/types';
-import { formatIssueId } from '@/utils/formatIssueId';
+import { BlockedBadge } from "@/components/BlockedBadge";
+import type { IssueNode as IssueNodeType } from "@/types";
+import { formatIssueId } from "@/utils/formatIssueId";
 
-import styles from './IssueNode.module.css';
+import styles from "./IssueNode.module.css";
 
 export interface IssueNodeProps extends NodeProps<IssueNodeType> {
   // NodeProps provides: id, data, selected, dragging, etc.
   // Extended with chain highlighting
   /** Whether this node is part of a highlighted blocking chain */
-  'data-in-chain'?: boolean;
+  "data-in-chain"?: boolean;
 }
 
 /**
@@ -31,7 +31,12 @@ function getPriorityLevel(priority: number | undefined): 0 | 1 | 2 | 3 | 4 {
 /**
  * IssueNode renders an issue as a React Flow node in the dependency graph.
  */
-function IssueNodeComponent({ data, selected, sourcePosition, targetPosition }: IssueNodeProps): JSX.Element {
+function IssueNodeComponent({
+  data,
+  selected,
+  sourcePosition,
+  targetPosition,
+}: IssueNodeProps): JSX.Element {
   const {
     title,
     priority,
@@ -45,22 +50,29 @@ function IssueNodeComponent({ data, selected, sourcePosition, targetPosition }: 
     isRootBlocker,
   } = data;
   const displayId = formatIssueId(issue.id);
-  const displayTitle = title || 'Untitled';
+  const displayTitle = title || "Untitled";
   const priorityLevel = getPriorityLevel(priority);
 
-  const rootClassName = selected ? `${styles.issueNode} ${styles.selected}` : styles.issueNode;
+  const rootClassName = selected
+    ? `${styles.issueNode} ${styles.selected}`
+    : styles.issueNode;
 
   return (
     <article
       className={rootClassName}
       data-priority={priorityLevel}
-      data-status={status || 'unknown'}
+      data-status={status || "unknown"}
       data-is-ready={isReady}
       data-is-root-blocker={isRootBlocker}
       aria-label={`Issue: ${displayTitle}`}
     >
       {/* Target handle for incoming dependencies */}
-      <Handle type="target" position={targetPosition ?? Position.Left} className={styles.handle} id="target" />
+      <Handle
+        type="target"
+        position={targetPosition ?? Position.Left}
+        className={styles.handle}
+        id="target"
+      />
 
       {/* Blocked count badge - positioned at top-right corner */}
       {blockedCount > 0 && (
@@ -97,7 +109,12 @@ function IssueNodeComponent({ data, selected, sourcePosition, targetPosition }: 
       </footer>
 
       {/* Source handle for outgoing dependencies */}
-      <Handle type="source" position={sourcePosition ?? Position.Right} className={styles.handle} id="source" />
+      <Handle
+        type="source"
+        position={sourcePosition ?? Position.Right}
+        className={styles.handle}
+        id="source"
+      />
     </article>
   );
 }

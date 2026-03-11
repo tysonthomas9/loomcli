@@ -3,10 +3,10 @@
  * Fetches config on mount, supports optimistic updates with rollback.
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from "react";
 
-import { getBackendConfig, updateBackendConfig } from '@/api/config';
-import type { BackendConfigData } from '@/api/config';
+import { getBackendConfig, updateBackendConfig } from "@/api/config";
+import type { BackendConfigData } from "@/api/config";
 
 /**
  * Return type for the useBackendConfig hook.
@@ -56,7 +56,8 @@ export function useBackendConfig(): UseBackendConfigReturn {
       }
     } catch (err) {
       if (mountedRef.current) {
-        const message = err instanceof Error ? err.message : 'Failed to load backend config';
+        const message =
+          err instanceof Error ? err.message : "Failed to load backend config";
         setError(message);
       }
     } finally {
@@ -71,35 +72,41 @@ export function useBackendConfig(): UseBackendConfigReturn {
     fetchConfig();
   }, [fetchConfig]);
 
-  const updateBackend = useCallback(async (backend: string): Promise<boolean> => {
-    if (!config) return false;
+  const updateBackend = useCallback(
+    async (backend: string): Promise<boolean> => {
+      if (!config) return false;
 
-    // Optimistic update
-    const previousConfig = config;
-    setConfig({ ...config, backend });
-    setIsSaving(true);
-    setError(null);
+      // Optimistic update
+      const previousConfig = config;
+      setConfig({ ...config, backend });
+      setIsSaving(true);
+      setError(null);
 
-    try {
-      const updated = await updateBackendConfig(backend);
-      if (mountedRef.current) {
-        setConfig(updated);
+      try {
+        const updated = await updateBackendConfig(backend);
+        if (mountedRef.current) {
+          setConfig(updated);
+        }
+        return true;
+      } catch (err) {
+        if (mountedRef.current) {
+          // Rollback
+          setConfig(previousConfig);
+          const message =
+            err instanceof Error
+              ? err.message
+              : "Failed to save backend config";
+          setError(message);
+        }
+        return false;
+      } finally {
+        if (mountedRef.current) {
+          setIsSaving(false);
+        }
       }
-      return true;
-    } catch (err) {
-      if (mountedRef.current) {
-        // Rollback
-        setConfig(previousConfig);
-        const message = err instanceof Error ? err.message : 'Failed to save backend config';
-        setError(message);
-      }
-      return false;
-    } finally {
-      if (mountedRef.current) {
-        setIsSaving(false);
-      }
-    }
-  }, [config]);
+    },
+    [config],
+  );
 
   return {
     config,

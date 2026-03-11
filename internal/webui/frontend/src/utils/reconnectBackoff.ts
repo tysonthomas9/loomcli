@@ -37,7 +37,7 @@ export interface ReconnectState {
  */
 export function calculateBackoffDelay(
   attempt: number,
-  config: ReconnectConfig = DEFAULT_RECONNECT_CONFIG
+  config: ReconnectConfig = DEFAULT_RECONNECT_CONFIG,
 ): number {
   const raw = Math.min(config.baseDelay * 2 ** attempt, config.maxDelay);
   const jitterMin = 1 - config.jitterFactor / 2;
@@ -56,7 +56,7 @@ export function calculateBackoffDelay(
 export function startAutoReconnect(
   connectFn: () => boolean,
   onStateChange: (state: ReconnectState) => void,
-  config: ReconnectConfig = DEFAULT_RECONNECT_CONFIG
+  config: ReconnectConfig = DEFAULT_RECONNECT_CONFIG,
 ): () => void {
   let cancelled = false;
   let timerId: ReturnType<typeof setTimeout> | null = null;

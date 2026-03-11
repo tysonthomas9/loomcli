@@ -29,7 +29,9 @@ export type ApiResult<T> = ApiResponse<T> | ApiError;
 /**
  * Type guard to check if result is successful.
  */
-export function isApiSuccess<T>(result: ApiResult<T>): result is ApiResponse<T> {
+export function isApiSuccess<T>(
+  result: ApiResult<T>,
+): result is ApiResponse<T> {
   return result.success === true;
 }
 

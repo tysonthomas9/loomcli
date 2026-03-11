@@ -3,16 +3,22 @@
  * Opens from the right side, covering 50% of the screen.
  */
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from "react";
 
-import type { LoomTaskInfo } from '@/types';
+import type { LoomTaskInfo } from "@/types";
 
-import styles from './TaskDrawer.module.css';
+import styles from "./TaskDrawer.module.css";
 
 /**
  * Category type for work queue items.
  */
-export type TaskCategory = 'plan' | 'impl' | 'review' | 'inProgress' | 'blocked' | 'done';
+export type TaskCategory =
+  | "plan"
+  | "impl"
+  | "review"
+  | "inProgress"
+  | "blocked"
+  | "done";
 
 /**
  * Props for the TaskDrawer component.
@@ -36,17 +42,17 @@ export interface TaskDrawerProps {
 function getPriorityColor(priority: number): string {
   switch (priority) {
     case 0:
-      return 'var(--color-priority-critical, #dc2626)';
+      return "var(--color-priority-critical, #dc2626)";
     case 1:
-      return 'var(--color-priority-high, #ea580c)';
+      return "var(--color-priority-high, #ea580c)";
     case 2:
-      return 'var(--color-priority-medium, #ca8a04)';
+      return "var(--color-priority-medium, #ca8a04)";
     case 3:
-      return 'var(--color-priority-low, #2563eb)';
+      return "var(--color-priority-low, #2563eb)";
     case 4:
-      return 'var(--color-priority-backlog, #6b7280)';
+      return "var(--color-priority-backlog, #6b7280)";
     default:
-      return 'var(--color-priority-medium, #ca8a04)';
+      return "var(--color-priority-medium, #ca8a04)";
   }
 }
 
@@ -63,27 +69,27 @@ export function TaskDrawer({
   // Handle escape key to close drawer
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === "Escape" && isOpen) {
         onClose();
       }
     },
-    [isOpen, onClose]
+    [isOpen, onClose],
   );
 
   useEffect(() => {
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
   // Prevent body scroll when drawer is open
   useEffect(() => {
     if (isOpen) {
-      document.body.style.overflow = 'hidden';
+      document.body.style.overflow = "hidden";
     } else {
-      document.body.style.overflow = '';
+      document.body.style.overflow = "";
     }
     return () => {
-      document.body.style.overflow = '';
+      document.body.style.overflow = "";
     };
   }, [isOpen]);
 
@@ -97,7 +103,12 @@ export function TaskDrawer({
       <div className={styles.overlay} onClick={onClose} aria-hidden="true" />
 
       {/* Drawer */}
-      <div className={styles.drawer} role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <div
+        className={styles.drawer}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="drawer-title"
+      >
         {/* Header */}
         <div className={styles.header}>
           <h2 id="drawer-title" className={styles.title}>

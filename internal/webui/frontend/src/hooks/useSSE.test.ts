@@ -1,11 +1,11 @@
 /**
  * @vitest-environment jsdom
  */
-import { renderHook, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { useSSE } from './useSSE';
-import type { MutationPayload } from '../api/sse';
+import { useSSE } from "./useSSE";
+import type { MutationPayload } from "../api/sse";
 
 // Mock EventSource class with static constants matching the real EventSource API
 class MockEventSource {
@@ -21,7 +21,8 @@ class MockEventSource {
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
 
-  private eventListeners: Map<string, ((e: MessageEvent) => void)[]> = new Map();
+  private eventListeners: Map<string, ((e: MessageEvent) => void)[]> =
+    new Map();
 
   constructor(url: string) {
     this.url = url;
@@ -61,11 +62,16 @@ class MockEventSource {
   }
 
   simulateMutation(data: unknown, lastEventId?: string): void {
-    const listeners = this.eventListeners.get('mutation') ?? [];
+    const listeners = this.eventListeners.get("mutation") ?? [];
     // Parse timestamp from data if lastEventId not provided
     const parsed = data as { timestamp?: string };
-    const eventId = lastEventId ?? (parsed.timestamp ? String(Date.parse(parsed.timestamp)) : '');
-    const event = { data: JSON.stringify(data), lastEventId: eventId } as MessageEvent;
+    const eventId =
+      lastEventId ??
+      (parsed.timestamp ? String(Date.parse(parsed.timestamp)) : "");
+    const event = {
+      data: JSON.stringify(data),
+      lastEventId: eventId,
+    } as MessageEvent;
     for (const listener of listeners) {
       listener(event);
     }
@@ -80,7 +86,7 @@ class MockEventSource {
   }
 }
 
-describe('useSSE', () => {
+describe("useSSE", () => {
   let originalEventSource: typeof EventSource;
 
   beforeEach(() => {
@@ -94,28 +100,28 @@ describe('useSSE', () => {
     vi.restoreAllMocks();
   });
 
-  describe('Initialization', () => {
-    it('returns expected shape with all methods and state', () => {
+  describe("Initialization", () => {
+    it("returns expected shape with all methods and state", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
-      expect(result.current).toHaveProperty('state');
-      expect(result.current).toHaveProperty('lastError');
-      expect(result.current).toHaveProperty('isConnected');
-      expect(result.current).toHaveProperty('reconnectAttempts');
-      expect(result.current).toHaveProperty('lastEventId');
-      expect(result.current).toHaveProperty('connect');
-      expect(result.current).toHaveProperty('disconnect');
-      expect(result.current).toHaveProperty('retryNow');
+      expect(result.current).toHaveProperty("state");
+      expect(result.current).toHaveProperty("lastError");
+      expect(result.current).toHaveProperty("isConnected");
+      expect(result.current).toHaveProperty("reconnectAttempts");
+      expect(result.current).toHaveProperty("lastEventId");
+      expect(result.current).toHaveProperty("connect");
+      expect(result.current).toHaveProperty("disconnect");
+      expect(result.current).toHaveProperty("retryNow");
 
-      expect(typeof result.current.connect).toBe('function');
-      expect(typeof result.current.disconnect).toBe('function');
-      expect(typeof result.current.retryNow).toBe('function');
+      expect(typeof result.current.connect).toBe("function");
+      expect(typeof result.current.disconnect).toBe("function");
+      expect(typeof result.current.retryNow).toBe("function");
     });
 
-    it('initial state is disconnected', () => {
+    it("initial state is disconnected", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
-      expect(result.current.state).toBe('disconnected');
+      expect(result.current.state).toBe("disconnected");
       expect(result.current.isConnected).toBe(false);
       expect(result.current.lastError).toBeNull();
       expect(result.current.reconnectAttempts).toBe(0);
@@ -123,24 +129,24 @@ describe('useSSE', () => {
     });
   });
 
-  describe('Auto-connect option', () => {
-    it('when true connects on mount', () => {
+  describe("Auto-connect option", () => {
+    it("when true connects on mount", () => {
       renderHook(() => useSSE({ autoConnect: true }));
 
       // EventSource should be created automatically
       expect(MockEventSource.instances.length).toBe(1);
-      expect(MockEventSource.lastInstance?.url).toContain('/api/events');
+      expect(MockEventSource.lastInstance?.url).toContain("/api/events");
     });
 
-    it('when false does not connect on mount', () => {
+    it("when false does not connect on mount", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       // No EventSource should be created
       expect(MockEventSource.instances.length).toBe(0);
-      expect(result.current.state).toBe('disconnected');
+      expect(result.current.state).toBe("disconnected");
     });
 
-    it('defaults to true', () => {
+    it("defaults to true", () => {
       renderHook(() => useSSE());
 
       // EventSource should be created automatically (default autoConnect: true)
@@ -148,8 +154,8 @@ describe('useSSE', () => {
     });
   });
 
-  describe('Connection lifecycle', () => {
-    it('connect() creates EventSource', () => {
+  describe("Connection lifecycle", () => {
+    it("connect() creates EventSource", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -157,29 +163,29 @@ describe('useSSE', () => {
       });
 
       expect(MockEventSource.lastInstance).toBeDefined();
-      expect(MockEventSource.lastInstance?.url).toContain('/api/events');
+      expect(MockEventSource.lastInstance?.url).toContain("/api/events");
     });
 
-    it('state transitions from disconnected to connecting to connected', () => {
+    it("state transitions from disconnected to connecting to connected", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
-      expect(result.current.state).toBe('disconnected');
+      expect(result.current.state).toBe("disconnected");
 
       act(() => {
         result.current.connect();
       });
 
-      expect(result.current.state).toBe('connecting');
+      expect(result.current.state).toBe("connecting");
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
       });
 
-      expect(result.current.state).toBe('connected');
+      expect(result.current.state).toBe("connected");
       expect(result.current.isConnected).toBe(true);
     });
 
-    it('disconnect() closes EventSource and updates state', () => {
+    it("disconnect() closes EventSource and updates state", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -196,12 +202,14 @@ describe('useSSE', () => {
         result.current.disconnect();
       });
 
-      expect(result.current.state).toBe('disconnected');
+      expect(result.current.state).toBe("disconnected");
       expect(result.current.isConnected).toBe(false);
     });
 
-    it('component unmount calls destroy and cleans up', () => {
-      const { result, unmount } = renderHook(() => useSSE({ autoConnect: false }));
+    it("component unmount calls destroy and cleans up", () => {
+      const { result, unmount } = renderHook(() =>
+        useSSE({ autoConnect: false }),
+      );
 
       act(() => {
         result.current.connect();
@@ -220,8 +228,8 @@ describe('useSSE', () => {
     });
   });
 
-  describe('State reactivity', () => {
-    it('state changes trigger re-renders', () => {
+  describe("State reactivity", () => {
+    it("state changes trigger re-renders", () => {
       const renderCount = { count: 0 };
       const { result } = renderHook(() => {
         renderCount.count++;
@@ -245,28 +253,28 @@ describe('useSSE', () => {
       expect(renderCount.count).toBeGreaterThan(afterConnectCount);
     });
 
-    it('isConnected computed correctly based on state', () => {
+    it("isConnected computed correctly based on state", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       expect(result.current.isConnected).toBe(false);
-      expect(result.current.state).toBe('disconnected');
+      expect(result.current.state).toBe("disconnected");
 
       act(() => {
         result.current.connect();
       });
 
-      expect(result.current.state).toBe('connecting');
+      expect(result.current.state).toBe("connecting");
       expect(result.current.isConnected).toBe(false);
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
       });
 
-      expect(result.current.state).toBe('connected');
+      expect(result.current.state).toBe("connected");
       expect(result.current.isConnected).toBe(true);
     });
 
-    it('lastError updates on errors', () => {
+    it("lastError updates on errors", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -281,10 +289,10 @@ describe('useSSE', () => {
         MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
       });
 
-      expect(result.current.lastError).toBe('Connection closed');
+      expect(result.current.lastError).toBe("Connection closed");
     });
 
-    it('lastError is cleared on successful connection', () => {
+    it("lastError is cleared on successful connection", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -300,7 +308,7 @@ describe('useSSE', () => {
         MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
       });
 
-      expect(result.current.lastError).toBe('Connection closed');
+      expect(result.current.lastError).toBe("Connection closed");
 
       // Simulate successful reconnection
       act(() => {
@@ -310,7 +318,7 @@ describe('useSSE', () => {
       expect(result.current.lastError).toBeNull();
     });
 
-    it('reconnectAttempts updates reactively', () => {
+    it("reconnectAttempts updates reactively", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -336,7 +344,7 @@ describe('useSSE', () => {
       expect(result.current.reconnectAttempts).toBe(2);
     });
 
-    it('reconnectAttempts resets to 0 on successful connection', () => {
+    it("reconnectAttempts resets to 0 on successful connection", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -363,14 +371,14 @@ describe('useSSE', () => {
     });
   });
 
-  describe('Callbacks', () => {
-    it('onMutation called with payload', () => {
+  describe("Callbacks", () => {
+    it("onMutation called with payload", () => {
       const onMutation = vi.fn();
       const { result } = renderHook(() =>
         useSSE({
           autoConnect: false,
           onMutation,
-        })
+        }),
       );
 
       act(() => {
@@ -382,10 +390,10 @@ describe('useSSE', () => {
       });
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-123',
-        title: 'Test Issue',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-123",
+        title: "Test Issue",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
       act(() => {
@@ -395,11 +403,11 @@ describe('useSSE', () => {
       expect(onMutation).toHaveBeenCalledWith(mutation);
     });
 
-    it('lastEventId is updated when mutation is received', () => {
+    it("lastEventId is updated when mutation is received", () => {
       const { result } = renderHook(() =>
         useSSE({
           autoConnect: false,
-        })
+        }),
       );
 
       // Initially undefined
@@ -414,10 +422,10 @@ describe('useSSE', () => {
       });
 
       const mutation: MutationPayload = {
-        type: 'create',
-        issue_id: 'beads-123',
-        title: 'Test Issue',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "beads-123",
+        title: "Test Issue",
+        timestamp: "2025-01-23T12:00:00Z",
       };
 
       act(() => {
@@ -425,16 +433,18 @@ describe('useSSE', () => {
       });
 
       // lastEventId should be set to the timestamp in ms
-      expect(result.current.lastEventId).toBe(Date.parse('2025-01-23T12:00:00Z'));
+      expect(result.current.lastEventId).toBe(
+        Date.parse("2025-01-23T12:00:00Z"),
+      );
     });
 
-    it('onError called with error message', () => {
+    it("onError called with error message", () => {
       const onError = vi.fn();
       const { result } = renderHook(() =>
         useSSE({
           autoConnect: false,
           onError,
-        })
+        }),
       );
 
       act(() => {
@@ -449,44 +459,44 @@ describe('useSSE', () => {
         MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
       });
 
-      expect(onError).toHaveBeenCalledWith('Connection closed');
+      expect(onError).toHaveBeenCalledWith("Connection closed");
     });
 
-    it('onStateChange called on transitions', () => {
+    it("onStateChange called on transitions", () => {
       const onStateChange = vi.fn();
       const { result } = renderHook(() =>
         useSSE({
           autoConnect: false,
           onStateChange,
-        })
+        }),
       );
 
       act(() => {
         result.current.connect();
       });
 
-      expect(onStateChange).toHaveBeenCalledWith('connecting');
+      expect(onStateChange).toHaveBeenCalledWith("connecting");
 
       act(() => {
         MockEventSource.lastInstance?.simulateOpen();
       });
 
-      expect(onStateChange).toHaveBeenCalledWith('connected');
+      expect(onStateChange).toHaveBeenCalledWith("connected");
 
       act(() => {
         result.current.disconnect();
       });
 
-      expect(onStateChange).toHaveBeenCalledWith('disconnected');
+      expect(onStateChange).toHaveBeenCalledWith("disconnected");
     });
 
-    it('callbacks are not called after unmount', () => {
+    it("callbacks are not called after unmount", () => {
       const onMutation = vi.fn();
       const { result, unmount } = renderHook(() =>
         useSSE({
           autoConnect: false,
           onMutation,
-        })
+        }),
       );
 
       act(() => {
@@ -504,10 +514,10 @@ describe('useSSE', () => {
       // Try to send a message after unmount
       act(() => {
         esInstance?.simulateMutation({
-          type: 'create',
-          issue_id: 'beads-456',
-          title: 'Should not be received',
-          timestamp: '2025-01-23T12:00:00Z',
+          type: "create",
+          issue_id: "beads-456",
+          title: "Should not be received",
+          timestamp: "2025-01-23T12:00:00Z",
         });
       });
 
@@ -516,48 +526,54 @@ describe('useSSE', () => {
     });
   });
 
-  describe('Since parameter passing', () => {
-    it('passes since parameter to client on auto-connect', () => {
+  describe("Since parameter passing", () => {
+    it("passes since parameter to client on auto-connect", () => {
       renderHook(() =>
         useSSE({
           autoConnect: true,
           since: 1706011200000,
-        })
+        }),
       );
 
-      expect(MockEventSource.lastInstance?.url).toContain('since=1706011200000');
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "since=1706011200000",
+      );
     });
 
-    it('passes since parameter to client on manual connect', () => {
+    it("passes since parameter to client on manual connect", () => {
       const { result } = renderHook(() =>
         useSSE({
           autoConnect: false,
           since: 1706011200000,
-        })
+        }),
       );
 
       act(() => {
         result.current.connect();
       });
 
-      expect(MockEventSource.lastInstance?.url).toContain('since=1706011200000');
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "since=1706011200000",
+      );
     });
 
-    it('uses updated since value when it changes', () => {
+    it("uses updated since value when it changes", () => {
       const { rerender, result } = renderHook(
         ({ since }: { since: number | undefined }) =>
           useSSE({
             autoConnect: false,
             since,
           }),
-        { initialProps: { since: 1706011200000 } }
+        { initialProps: { since: 1706011200000 } },
       );
 
       act(() => {
         result.current.connect();
       });
 
-      expect(MockEventSource.lastInstance?.url).toContain('since=1706011200000');
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "since=1706011200000",
+      );
 
       // Disconnect and update since
       act(() => {
@@ -570,13 +586,17 @@ describe('useSSE', () => {
         result.current.connect();
       });
 
-      expect(MockEventSource.lastInstance?.url).toContain('since=1706100000000');
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "since=1706100000000",
+      );
     });
   });
 
-  describe('Methods stability', () => {
-    it('methods are stable across renders', () => {
-      const { result, rerender } = renderHook(() => useSSE({ autoConnect: false }));
+  describe("Methods stability", () => {
+    it("methods are stable across renders", () => {
+      const { result, rerender } = renderHook(() =>
+        useSSE({ autoConnect: false }),
+      );
 
       const initialConnect = result.current.connect;
       const initialDisconnect = result.current.disconnect;
@@ -590,8 +610,8 @@ describe('useSSE', () => {
     });
   });
 
-  describe('retryNow', () => {
-    it('triggers immediate reconnection when in reconnecting state', () => {
+  describe("retryNow", () => {
+    it("triggers immediate reconnection when in reconnecting state", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -607,7 +627,7 @@ describe('useSSE', () => {
         MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
       });
 
-      expect(result.current.state).toBe('reconnecting');
+      expect(result.current.state).toBe("reconnecting");
       expect(MockEventSource.instances.length).toBe(1);
 
       // Call retryNow
@@ -617,10 +637,10 @@ describe('useSSE', () => {
 
       // Should have created a new EventSource immediately
       expect(MockEventSource.instances.length).toBe(2);
-      expect(result.current.state).toBe('connecting');
+      expect(result.current.state).toBe("connecting");
     });
 
-    it('resets reconnectAttempts to 0', () => {
+    it("resets reconnectAttempts to 0", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -651,30 +671,30 @@ describe('useSSE', () => {
     });
   });
 
-  describe('SSR compatibility', () => {
+  describe("SSR compatibility", () => {
     // Note: These tests verify the hook's SSR guard behavior.
     // The actual SSR check `typeof window === 'undefined'` cannot be fully tested
     // in jsdom since window exists and React needs it for cleanup.
     // These tests verify the hook works correctly in jsdom environment.
 
-    it('works when autoConnect is false (SSR-safe pattern)', () => {
+    it("works when autoConnect is false (SSR-safe pattern)", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       // Should have initial state and no EventSource created
-      expect(result.current.state).toBe('disconnected');
+      expect(result.current.state).toBe("disconnected");
       expect(result.current.isConnected).toBe(false);
       expect(MockEventSource.instances.length).toBe(0);
 
       // Hook should still return all expected methods
-      expect(typeof result.current.connect).toBe('function');
-      expect(typeof result.current.disconnect).toBe('function');
-      expect(typeof result.current.retryNow).toBe('function');
+      expect(typeof result.current.connect).toBe("function");
+      expect(typeof result.current.disconnect).toBe("function");
+      expect(typeof result.current.retryNow).toBe("function");
     });
 
-    it('manual connect works after mount (typical SSR hydration pattern)', () => {
+    it("manual connect works after mount (typical SSR hydration pattern)", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
-      expect(result.current.state).toBe('disconnected');
+      expect(result.current.state).toBe("disconnected");
       expect(MockEventSource.instances.length).toBe(0);
 
       // Simulate client-side hydration by manually connecting
@@ -683,13 +703,15 @@ describe('useSSE', () => {
       });
 
       expect(MockEventSource.instances.length).toBe(1);
-      expect(result.current.state).toBe('connecting');
+      expect(result.current.state).toBe("connecting");
     });
   });
 
-  describe('Cleanup on unmount', () => {
-    it('destroys client on unmount', () => {
-      const { result, unmount } = renderHook(() => useSSE({ autoConnect: false }));
+  describe("Cleanup on unmount", () => {
+    it("destroys client on unmount", () => {
+      const { result, unmount } = renderHook(() =>
+        useSSE({ autoConnect: false }),
+      );
 
       act(() => {
         result.current.connect();
@@ -708,13 +730,13 @@ describe('useSSE', () => {
       expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
     });
 
-    it('does not call callbacks after unmount even on state changes', () => {
+    it("does not call callbacks after unmount even on state changes", () => {
       const onStateChange = vi.fn();
       const { result, unmount } = renderHook(() =>
         useSSE({
           autoConnect: false,
           onStateChange,
-        })
+        }),
       );
 
       act(() => {
@@ -741,16 +763,18 @@ describe('useSSE', () => {
     });
   });
 
-  describe('Unmount during connecting state', () => {
-    it('cleans up EventSource when unmounted during connecting state', () => {
-      const { result, unmount } = renderHook(() => useSSE({ autoConnect: false }));
+  describe("Unmount during connecting state", () => {
+    it("cleans up EventSource when unmounted during connecting state", () => {
+      const { result, unmount } = renderHook(() =>
+        useSSE({ autoConnect: false }),
+      );
 
       act(() => {
         result.current.connect();
       });
 
       // State should be connecting (EventSource created but not yet open)
-      expect(result.current.state).toBe('connecting');
+      expect(result.current.state).toBe("connecting");
       const esInstance = MockEventSource.lastInstance;
       expect(esInstance).toBeDefined();
 
@@ -761,7 +785,7 @@ describe('useSSE', () => {
       expect(esInstance?.readyState).toBe(MockEventSource.CLOSED);
     });
 
-    it('no state update callbacks fire after unmount during connecting', () => {
+    it("no state update callbacks fire after unmount during connecting", () => {
       const onStateChange = vi.fn();
       const onMutation = vi.fn();
       const { result, unmount } = renderHook(() =>
@@ -769,7 +793,7 @@ describe('useSSE', () => {
           autoConnect: false,
           onStateChange,
           onMutation,
-        })
+        }),
       );
 
       act(() => {
@@ -784,10 +808,10 @@ describe('useSSE', () => {
       // Try to open and send mutations after unmount
       esInstance?.simulateOpen();
       esInstance?.simulateMutation({
-        type: 'create',
-        issue_id: 'post-unmount',
-        title: 'Should not trigger callback',
-        timestamp: '2025-01-23T12:00:00Z',
+        type: "create",
+        issue_id: "post-unmount",
+        title: "Should not trigger callback",
+        timestamp: "2025-01-23T12:00:00Z",
       });
 
       expect(onStateChange).not.toHaveBeenCalled();
@@ -795,8 +819,8 @@ describe('useSSE', () => {
     });
   });
 
-  describe('Rapid connect/disconnect cycles', () => {
-    it('handles rapid connect→disconnect→connect cycle', () => {
+  describe("Rapid connect/disconnect cycles", () => {
+    it("handles rapid connect→disconnect→connect cycle", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -819,10 +843,10 @@ describe('useSSE', () => {
       expect(firstInstance?.readyState).toBe(MockEventSource.CLOSED);
       // Second instance should be created (new EventSource)
       expect(secondInstance).not.toBe(firstInstance);
-      expect(result.current.state).toBe('connecting');
+      expect(result.current.state).toBe("connecting");
     });
 
-    it('handles rapid connect→disconnect→connect→open cycle', () => {
+    it("handles rapid connect→disconnect→connect→open cycle", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       act(() => {
@@ -846,11 +870,11 @@ describe('useSSE', () => {
       // First instance should be closed
       expect(firstInstance?.readyState).toBe(MockEventSource.CLOSED);
       // Should be connected via the second instance
-      expect(result.current.state).toBe('connected');
+      expect(result.current.state).toBe("connected");
       expect(result.current.isConnected).toBe(true);
     });
 
-    it('five rapid connect/disconnect cycles produce clean state', () => {
+    it("five rapid connect/disconnect cycles produce clean state", () => {
       const { result } = renderHook(() => useSSE({ autoConnect: false }));
 
       for (let i = 0; i < 5; i++) {
@@ -863,7 +887,7 @@ describe('useSSE', () => {
       }
 
       // Final state should be disconnected
-      expect(result.current.state).toBe('disconnected');
+      expect(result.current.state).toBe("disconnected");
       expect(result.current.isConnected).toBe(false);
 
       // All previous instances should be closed

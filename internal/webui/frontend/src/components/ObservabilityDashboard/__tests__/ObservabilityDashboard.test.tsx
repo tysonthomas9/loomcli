@@ -6,19 +6,21 @@
  * Unit tests for ObservabilityDashboard container component.
  */
 
-import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import '@testing-library/jest-dom';
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import "@testing-library/jest-dom";
 
-import type { MetricsSnapshot } from '@/types';
-import type { UseObservabilityMetricsResult } from '@/hooks/useObservabilityMetrics';
+import type { MetricsSnapshot } from "@/types";
+import type { UseObservabilityMetricsResult } from "@/hooks/useObservabilityMetrics";
 
 /**
  * Create a complete mock MetricsSnapshot for testing.
  */
-function createMetrics(overrides: Partial<MetricsSnapshot> = {}): MetricsSnapshot {
+function createMetrics(
+  overrides: Partial<MetricsSnapshot> = {},
+): MetricsSnapshot {
   return {
-    timestamp: '2026-03-05T12:00:00Z',
+    timestamp: "2026-03-05T12:00:00Z",
     tasks_completed_last_hour: 8,
     tasks_completed_24h: 120,
     avg_task_duration_sec: 95,
@@ -28,11 +30,21 @@ function createMetrics(overrides: Partial<MetricsSnapshot> = {}): MetricsSnapsho
     restarts_by_agent: { alpha: 1, beta: 1 },
     agent_utilization: { alpha: 0.8, beta: 0.5 },
     tasks_by_role: { developer: 80, reviewer: 40 },
-    tasks_by_epic: { 'epic-auth': 50, 'epic-ui': 30 },
+    tasks_by_epic: { "epic-auth": 50, "epic-ui": 30 },
     tasks_by_agent: { alpha: 70, beta: 50 },
     hourly_completions: [
-      { hour: '2026-03-05T10:00:00Z', completed: 5, failed: 1, avg_duration: 60 },
-      { hour: '2026-03-05T11:00:00Z', completed: 3, failed: 0, avg_duration: 45 },
+      {
+        hour: "2026-03-05T10:00:00Z",
+        completed: 5,
+        failed: 1,
+        avg_duration: 60,
+      },
+      {
+        hour: "2026-03-05T11:00:00Z",
+        completed: 3,
+        failed: 0,
+        avg_duration: 45,
+      },
     ],
     total_tasks_completed: 200,
     total_tasks_failed: 10,
@@ -43,66 +55,67 @@ function createMetrics(overrides: Partial<MetricsSnapshot> = {}): MetricsSnapsho
 
 let mockHookResult: UseObservabilityMetricsResult;
 
-vi.mock('@/hooks', () => ({
+vi.mock("@/hooks", () => ({
   useObservabilityMetrics: () => mockHookResult,
 }));
 
-describe('ObservabilityDashboard', () => {
+describe("ObservabilityDashboard", () => {
   beforeEach(() => {
     mockHookResult = {
       metrics: createMetrics(),
       isLoading: false,
       error: null,
       isConnected: true,
-      lastUpdated: new Date('2026-03-05T12:00:00Z'),
+      lastUpdated: new Date("2026-03-05T12:00:00Z"),
       refetch: vi.fn(),
     };
   });
 
   // Dynamic import to ensure mock is set up before module loads
   async function renderDashboard(className?: string) {
-    const { ObservabilityDashboard } = await import('../ObservabilityDashboard');
+    const { ObservabilityDashboard } =
+      await import("../ObservabilityDashboard");
     return render(<ObservabilityDashboard className={className} />);
   }
 
-  describe('rendering all panels', () => {
-    it('renders MetricsCards values', async () => {
+  describe("rendering all panels", () => {
+    it("renders MetricsCards values", async () => {
       await renderDashboard();
 
-      expect(screen.getByText('Tasks / Hour')).toBeInTheDocument();
-      expect(screen.getByText('8')).toBeInTheDocument();
-      expect(screen.getByText('Avg Duration')).toBeInTheDocument();
-      expect(screen.getByText('Lines / Hour')).toBeInTheDocument();
-      expect(screen.getByText('Error Rate')).toBeInTheDocument();
+      expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
+      expect(screen.getByText("8")).toBeInTheDocument();
+      expect(screen.getByText("Avg Duration")).toBeInTheDocument();
+      expect(screen.getByText("Lines / Hour")).toBeInTheDocument();
+      expect(screen.getByText("Error Rate")).toBeInTheDocument();
     });
 
-    it('renders Task Timeline section', async () => {
+    it("renders Task Timeline section", async () => {
       await renderDashboard();
 
-      expect(screen.getByText('Hourly Completions (24h)')).toBeInTheDocument();
+      expect(screen.getByText("Hourly Completions (24h)")).toBeInTheDocument();
     });
 
-    it('renders Agent Utilization section', async () => {
+    it("renders Agent Utilization section", async () => {
       await renderDashboard();
 
-      expect(screen.getByLabelText('Agent Utilization')).toBeInTheDocument();
+      expect(screen.getByLabelText("Agent Utilization")).toBeInTheDocument();
     });
 
-    it('renders Errors & Restarts section', async () => {
+    it("renders Errors & Restarts section", async () => {
       await renderDashboard();
 
-      expect(screen.getByLabelText('Errors & Restarts')).toBeInTheDocument();
+      expect(screen.getByLabelText("Errors & Restarts")).toBeInTheDocument();
     });
 
-    it('renders Epic Progress section', async () => {
+    it("renders Epic Progress section", async () => {
       await renderDashboard();
 
-      expect(screen.getByLabelText('Epic Progress')).toBeInTheDocument();
+      expect(screen.getByLabelText("Epic Progress")).toBeInTheDocument();
     });
   });
 
-  describe('loading state', () => {
-    it('shows loading message when isLoading=true and no metrics yet', async () => {
+  describe("loading state", () => {
+    it("shows loading message when isLoading=true and no metrics yet", async () => {
       mockHookResult = {
         metrics: null,
         isLoading: true,
@@ -114,10 +127,12 @@ describe('ObservabilityDashboard', () => {
 
       await renderDashboard();
 
-      expect(screen.getByText('Loading observability data...')).toBeInTheDocument();
+      expect(
+        screen.getByText("Loading observability data..."),
+      ).toBeInTheDocument();
     });
 
-    it('does not show loading state when metrics exist even if isLoading', async () => {
+    it("does not show loading state when metrics exist even if isLoading", async () => {
       mockHookResult = {
         metrics: createMetrics(),
         isLoading: true,
@@ -129,50 +144,19 @@ describe('ObservabilityDashboard', () => {
 
       await renderDashboard();
 
-      expect(screen.queryByText('Loading observability data...')).not.toBeInTheDocument();
-      expect(screen.getByText('Tasks / Hour')).toBeInTheDocument();
+      expect(
+        screen.queryByText("Loading observability data..."),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
     });
   });
 
-  describe('error state', () => {
-    it('shows error message when error and no metrics', async () => {
+  describe("error state", () => {
+    it("shows error message when error and no metrics", async () => {
       mockHookResult = {
         metrics: null,
         isLoading: false,
-        error: new Error('Network failure'),
-        isConnected: false,
-        lastUpdated: null,
-        refetch: vi.fn(),
-      };
-
-      await renderDashboard();
-
-      expect(screen.getByText('Failed to load metrics: Network failure')).toBeInTheDocument();
-    });
-
-    it('does not show error state when metrics exist despite error', async () => {
-      mockHookResult = {
-        metrics: createMetrics(),
-        isLoading: false,
-        error: new Error('Stale data'),
-        isConnected: false,
-        lastUpdated: new Date(),
-        refetch: vi.fn(),
-      };
-
-      await renderDashboard();
-
-      expect(screen.queryByText(/Failed to load metrics/)).not.toBeInTheDocument();
-      expect(screen.getByText('Tasks / Hour')).toBeInTheDocument();
-    });
-  });
-
-  describe('503 state', () => {
-    it('shows observability-not-configured message for 503 errors', async () => {
-      mockHookResult = {
-        metrics: null,
-        isLoading: false,
-        error: new Error('Observability metrics: 503 Service Unavailable'),
+        error: new Error("Network failure"),
         isConnected: false,
         lastUpdated: null,
         refetch: vi.fn(),
@@ -181,29 +165,68 @@ describe('ObservabilityDashboard', () => {
       await renderDashboard();
 
       expect(
-        screen.getByText(/Observability is not yet configured/)
+        screen.getByText("Failed to load metrics: Network failure"),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show error state when metrics exist despite error", async () => {
+      mockHookResult = {
+        metrics: createMetrics(),
+        isLoading: false,
+        error: new Error("Stale data"),
+        isConnected: false,
+        lastUpdated: new Date(),
+        refetch: vi.fn(),
+      };
+
+      await renderDashboard();
+
+      expect(
+        screen.queryByText(/Failed to load metrics/),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
+    });
+  });
+
+  describe("503 state", () => {
+    it("shows observability-not-configured message for 503 errors", async () => {
+      mockHookResult = {
+        metrics: null,
+        isLoading: false,
+        error: new Error("Observability metrics: 503 Service Unavailable"),
+        isConnected: false,
+        lastUpdated: null,
+        refetch: vi.fn(),
+      };
+
+      await renderDashboard();
+
+      expect(
+        screen.getByText(/Observability is not yet configured/),
       ).toBeInTheDocument();
     });
   });
 
-  describe('stale data indicator', () => {
-    it('shows stale data indicator when disconnected but have metrics', async () => {
+  describe("stale data indicator", () => {
+    it("shows stale data indicator when disconnected but have metrics", async () => {
       mockHookResult = {
         metrics: createMetrics(),
         isLoading: false,
         error: null,
         isConnected: false,
-        lastUpdated: new Date('2026-03-05T12:00:00Z'),
+        lastUpdated: new Date("2026-03-05T12:00:00Z"),
         refetch: vi.fn(),
       };
 
       await renderDashboard();
 
       expect(screen.getByText(/Data may be stale/)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument();
     });
 
-    it('does not show stale indicator when connected', async () => {
+    it("does not show stale indicator when connected", async () => {
       mockHookResult = {
         metrics: createMetrics(),
         isLoading: false,
@@ -219,11 +242,11 @@ describe('ObservabilityDashboard', () => {
     });
   });
 
-  describe('className', () => {
-    it('applies custom className', async () => {
-      const { container } = await renderDashboard('my-custom-class');
+  describe("className", () => {
+    it("applies custom className", async () => {
+      const { container } = await renderDashboard("my-custom-class");
 
-      expect(container.firstChild).toHaveClass('my-custom-class');
+      expect(container.firstChild).toHaveClass("my-custom-class");
     });
   });
 });

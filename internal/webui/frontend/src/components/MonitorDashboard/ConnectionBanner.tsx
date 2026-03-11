@@ -3,7 +3,7 @@
  * Shows last updated time, retry countdown, and manual retry button.
  */
 
-import styles from './ConnectionBanner.module.css';
+import styles from "./ConnectionBanner.module.css";
 
 /**
  * Props for the ConnectionBanner component.
@@ -32,14 +32,14 @@ function formatRelativeTime(date: Date): string {
   const diffHour = Math.floor(diffMin / 60);
 
   if (diffSec < 60) {
-    return 'just now';
+    return "just now";
   } else if (diffMin < 60) {
-    return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
+    return `${diffMin} minute${diffMin === 1 ? "" : "s"} ago`;
   } else if (diffHour < 24) {
-    return `${diffHour} hour${diffHour === 1 ? '' : 's'} ago`;
+    return `${diffHour} hour${diffHour === 1 ? "" : "s"} ago`;
   } else {
     const diffDay = Math.floor(diffHour / 24);
-    return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
+    return `${diffDay} day${diffDay === 1 ? "" : "s"} ago`;
   }
 }
 
@@ -53,17 +53,20 @@ export function ConnectionBanner({
   onRetry,
   className,
 }: ConnectionBannerProps): JSX.Element {
-  const rootClassName = [styles.banner, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.banner, className].filter(Boolean).join(" ");
 
-  const relativeTime = lastUpdated ? formatRelativeTime(lastUpdated) : 'unknown';
-  const isStale = lastUpdated && new Date().getTime() - lastUpdated.getTime() > 5 * 60 * 1000;
+  const relativeTime = lastUpdated
+    ? formatRelativeTime(lastUpdated)
+    : "unknown";
+  const isStale =
+    lastUpdated && new Date().getTime() - lastUpdated.getTime() > 5 * 60 * 1000;
 
   return (
     <div
       className={rootClassName}
       role="alert"
       aria-live="polite"
-      data-stale={isStale ? 'true' : undefined}
+      data-stale={isStale ? "true" : undefined}
     >
       <span className={styles.icon} aria-hidden="true">
         ⚠️
@@ -84,7 +87,7 @@ export function ConnectionBanner({
           disabled={isReconnecting}
           aria-label="Retry connection now"
         >
-          {isReconnecting ? 'Connecting...' : 'Retry Now'}
+          {isReconnecting ? "Connecting..." : "Retry Now"}
         </button>
       </div>
     </div>

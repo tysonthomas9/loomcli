@@ -3,11 +3,11 @@
  * Individual toast notification with icon, message, and dismiss button.
  */
 
-import { useCallback } from 'react';
+import { useCallback } from "react";
 
-import type { ToastType } from '@/hooks/useToast';
+import type { ToastType } from "@/hooks/useToast";
 
-import styles from './Toast.module.css';
+import styles from "./Toast.module.css";
 
 /**
  * Props for the Toast component.
@@ -28,11 +28,17 @@ export interface ToastProps {
 /**
  * Icon component for each toast type.
  */
-function TypeIcon({ type, className }: { type: ToastType; className?: string }): JSX.Element {
+function TypeIcon({
+  type,
+  className,
+}: {
+  type: ToastType;
+  className?: string;
+}): JSX.Element {
   const iconClass = className ? `${className} ${styles.icon}` : styles.icon;
 
   switch (type) {
-    case 'success':
+    case "success":
       return (
         <svg
           className={iconClass}
@@ -50,7 +56,7 @@ function TypeIcon({ type, className }: { type: ToastType; className?: string }):
           <path d="M9 12l2 2 4-4" />
         </svg>
       );
-    case 'error':
+    case "error":
       return (
         <svg
           className={iconClass}
@@ -69,7 +75,7 @@ function TypeIcon({ type, className }: { type: ToastType; className?: string }):
           <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
       );
-    case 'warning':
+    case "warning":
       return (
         <svg
           className={iconClass}
@@ -88,7 +94,7 @@ function TypeIcon({ type, className }: { type: ToastType; className?: string }):
           <line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
       );
-    case 'info':
+    case "info":
     default:
       return (
         <svg
@@ -137,18 +143,26 @@ function CloseIcon(): JSX.Element {
  * Toast displays an individual notification with type-specific styling.
  * Includes an icon, message text, and dismiss button.
  */
-export function Toast({ id, message, type, onDismiss, className }: ToastProps): JSX.Element {
+export function Toast({
+  id,
+  message,
+  type,
+  onDismiss,
+  className,
+}: ToastProps): JSX.Element {
   const handleDismiss = useCallback(() => {
     onDismiss(id);
   }, [id, onDismiss]);
 
-  const rootClassName = [styles.toast, styles[type], className].filter(Boolean).join(' ');
+  const rootClassName = [styles.toast, styles[type], className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
       className={rootClassName}
       role="alert"
-      aria-live={type === 'error' ? 'assertive' : 'polite'}
+      aria-live={type === "error" ? "assertive" : "polite"}
       data-testid={`toast-${type}`}
     >
       <TypeIcon type={type} />

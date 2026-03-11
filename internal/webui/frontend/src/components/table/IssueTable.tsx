@@ -3,16 +3,16 @@
  * Foundational component for Phase 4 List/Table View.
  */
 
-import { useMemo } from 'react';
+import { useMemo } from "react";
 
-import type { BlockedInfo } from '@/components/KanbanBoard';
-import { useSort, SortDirection } from '@/hooks';
-import type { Issue } from '@/types';
+import type { BlockedInfo } from "@/components/KanbanBoard";
+import { useSort, SortDirection } from "@/hooks";
+import type { Issue } from "@/types";
 
-import { ColumnDef, DEFAULT_ISSUE_COLUMNS } from './columns';
-import { IssueRow } from './IssueRow';
-import { TableHeader, SortState } from './TableHeader';
-import './IssueTable.css';
+import { ColumnDef, DEFAULT_ISSUE_COLUMNS } from "./columns";
+import { IssueRow } from "./IssueRow";
+import { TableHeader, SortState } from "./TableHeader";
+import "./IssueTable.css";
 
 export interface IssueTableProps {
   /** Array of issues to display */
@@ -79,7 +79,7 @@ export function IssueTable({
     data: filteredIssues,
     columns,
     initialKey: sortable ? (initialSort?.key ?? null) : null,
-    initialDirection: initialSort?.direction ?? 'asc',
+    initialDirection: initialSort?.direction ?? "asc",
   });
 
   // Use sorted data when sortable, otherwise filtered issues
@@ -88,10 +88,12 @@ export function IssueTable({
   // Use hook state and handlers when sortable, otherwise provide stable defaults
   // Note: Even when sortable=false, TableHeader still handles UI state internally
   // but the data won't actually be sorted since we pass the original issues array
-  const sortState: SortState = sortable ? hookSortState : { key: null, direction: 'asc' };
+  const sortState: SortState = sortable
+    ? hookSortState
+    : { key: null, direction: "asc" };
   const handleSort = sortable ? hookHandleSort : () => {};
 
-  const tableClassName = ['issue-table', className].filter(Boolean).join(' ');
+  const tableClassName = ["issue-table", className].filter(Boolean).join(" ");
 
   return (
     <div className="issue-table__wrapper">
@@ -116,13 +118,18 @@ export function IssueTable({
           ) : (
             displayData.map((issue) => {
               const blockedInfo = blockedIssues?.get(issue.id);
-              const isBlocked = blockedInfo !== undefined && blockedInfo.blockedByCount > 0;
+              const isBlocked =
+                blockedInfo !== undefined && blockedInfo.blockedByCount > 0;
               return (
                 <IssueRow
                   key={issue.id}
                   issue={issue}
                   columns={columns}
-                  isSelected={showCheckbox ? selectedIds?.has(issue.id) : selectedId === issue.id}
+                  isSelected={
+                    showCheckbox
+                      ? selectedIds?.has(issue.id)
+                      : selectedId === issue.id
+                  }
                   isClickable={!!onRowClick}
                   onClick={onRowClick}
                   showCheckbox={showCheckbox}

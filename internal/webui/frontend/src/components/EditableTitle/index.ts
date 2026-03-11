@@ -1,2 +1,2 @@
-export { EditableTitle } from './EditableTitle';
-export type { EditableTitleProps } from './EditableTitle';
+export { EditableTitle } from "./EditableTitle";
+export type { EditableTitleProps } from "./EditableTitle";

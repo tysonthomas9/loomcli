@@ -12,6 +12,12 @@ export {
   getStateColor,
   getPriorityColor,
   getStatusColor,
-} from './colors';
+} from "./colors";
 
-export type { StateColor, StatusColor, PriorityColor, SemanticColor, TypeColor } from './colors';
+export type {
+  StateColor,
+  StatusColor,
+  PriorityColor,
+  SemanticColor,
+  TypeColor,
+} from "./colors";

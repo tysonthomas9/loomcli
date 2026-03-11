@@ -3,12 +3,12 @@
  * Interactive dropdown for changing issue type (bug, feature, task, epic, chore) with icons.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from "react";
 
-import { TypeIcon } from '@/components/TypeIcon';
-import type { IssueType, KnownIssueType } from '@/types';
+import { TypeIcon } from "@/components/TypeIcon";
+import type { IssueType, KnownIssueType } from "@/types";
 
-import styles from './TypeDropdown.module.css';
+import styles from "./TypeDropdown.module.css";
 
 /**
  * Type option configuration.
@@ -24,11 +24,11 @@ interface TypeOption {
  * Type options for the dropdown.
  */
 const TYPE_OPTIONS: TypeOption[] = [
-  { value: 'bug', label: 'Bug' },
-  { value: 'feature', label: 'Feature' },
-  { value: 'task', label: 'Task' },
-  { value: 'epic', label: 'Epic' },
-  { value: 'chore', label: 'Chore' },
+  { value: "bug", label: "Bug" },
+  { value: "feature", label: "Feature" },
+  { value: "task", label: "Task" },
+  { value: "epic", label: "Epic" },
+  { value: "chore", label: "Chore" },
 ];
 
 /**
@@ -51,8 +51,8 @@ export interface TypeDropdownProps {
  * Format issue type to human-readable string.
  */
 function formatIssueType(type: IssueType | undefined): string {
-  if (!type) return 'Task';
-  return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  if (!type) return "Task";
+  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /**
@@ -72,7 +72,9 @@ export function TypeDropdown({
 }: TypeDropdownProps): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [optimisticType, setOptimisticType] = useState<IssueType | undefined>(type);
+  const [optimisticType, setOptimisticType] = useState<IssueType | undefined>(
+    type,
+  );
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -89,14 +91,17 @@ export function TypeDropdown({
     if (!isOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false);
         setFocusedIndex(-1);
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
   // Handle escape key to close
@@ -104,15 +109,15 @@ export function TypeDropdown({
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setIsOpen(false);
         setFocusedIndex(-1);
         triggerRef.current?.focus();
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
   const handleTriggerClick = useCallback(() => {
@@ -121,7 +126,9 @@ export function TypeDropdown({
     setIsOpen((prev) => !prev);
     if (!isOpen) {
       // Set initial focus to current type when opening
-      const currentIndex = TYPE_OPTIONS.findIndex((opt) => opt.value === optimisticType);
+      const currentIndex = TYPE_OPTIONS.findIndex(
+        (opt) => opt.value === optimisticType,
+      );
       setFocusedIndex(currentIndex >= 0 ? currentIndex : 0);
     }
   }, [disabled, isSaving, isOpen, optimisticType]);
@@ -147,18 +154,19 @@ export function TypeDropdown({
       } catch (err) {
         // Rollback on error
         setOptimisticType(previousType);
-        const message = err instanceof Error ? err.message : 'Failed to update type';
+        const message =
+          err instanceof Error ? err.message : "Failed to update type";
         setError(message);
       }
     },
-    [type, onSave]
+    [type, onSave],
   );
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (!isOpen) {
         // Open on Enter or Space when closed
-        if (event.key === 'Enter' || event.key === ' ') {
+        if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           handleTriggerClick();
         }
@@ -166,40 +174,48 @@ export function TypeDropdown({
       }
 
       switch (event.key) {
-        case 'ArrowDown':
+        case "ArrowDown":
           event.preventDefault();
-          setFocusedIndex((prev) => Math.min(prev + 1, TYPE_OPTIONS.length - 1));
+          setFocusedIndex((prev) =>
+            Math.min(prev + 1, TYPE_OPTIONS.length - 1),
+          );
           break;
-        case 'ArrowUp':
+        case "ArrowUp":
           event.preventDefault();
           setFocusedIndex((prev) => Math.max(prev - 1, 0));
           break;
-        case 'Enter':
-        case ' ': {
+        case "Enter":
+        case " ": {
           event.preventDefault();
           const selectedOption = TYPE_OPTIONS[focusedIndex];
-          if (focusedIndex >= 0 && focusedIndex < TYPE_OPTIONS.length && selectedOption) {
+          if (
+            focusedIndex >= 0 &&
+            focusedIndex < TYPE_OPTIONS.length &&
+            selectedOption
+          ) {
             handleSelect(selectedOption.value);
           }
           break;
         }
-        case 'Home':
+        case "Home":
           event.preventDefault();
           setFocusedIndex(0);
           break;
-        case 'End':
+        case "End":
           event.preventDefault();
           setFocusedIndex(TYPE_OPTIONS.length - 1);
           break;
       }
     },
-    [isOpen, focusedIndex, handleTriggerClick, handleSelect]
+    [isOpen, focusedIndex, handleTriggerClick, handleSelect],
   );
 
-  const displayType = optimisticType ?? 'task';
+  const displayType = optimisticType ?? "task";
   const displayLabel = formatIssueType(optimisticType);
   const isDisabled = disabled || isSaving;
-  const rootClassName = [styles.typeDropdown, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.typeDropdown, className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div ref={containerRef} className={rootClassName}>
@@ -217,7 +233,11 @@ export function TypeDropdown({
         aria-label={`Type: ${displayLabel}. Click to change.`}
         data-testid="type-dropdown-trigger"
       >
-        <TypeIcon type={displayType} size={14} className={styles.triggerIcon ?? ''} />
+        <TypeIcon
+          type={displayType}
+          size={14}
+          className={styles.triggerIcon ?? ""}
+        />
         <span className={styles.triggerText}>{displayLabel}</span>
         <span className={styles.dropdownArrow} aria-hidden="true">
           ▾
@@ -244,7 +264,11 @@ export function TypeDropdown({
               onClick={() => handleSelect(option.value)}
               data-testid={`type-option-${option.value}`}
             >
-              <TypeIcon type={option.value} size={16} className={styles.optionIcon ?? ''} />
+              <TypeIcon
+                type={option.value}
+                size={16}
+                className={styles.optionIcon ?? ""}
+              />
               <span className={styles.optionText}>{option.label}</span>
               {option.value === optimisticType && (
                 <span className={styles.checkmark} aria-hidden="true">
@@ -257,7 +281,11 @@ export function TypeDropdown({
       )}
 
       {isSaving && (
-        <span className={styles.savingIndicator} aria-label="Saving..." data-testid="type-saving" />
+        <span
+          className={styles.savingIndicator}
+          aria-label="Saving..."
+          data-testid="type-saving"
+        />
       )}
 
       {error && (

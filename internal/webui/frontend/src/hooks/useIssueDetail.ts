@@ -3,10 +3,10 @@
  * Used when clicking a node to open the detail panel.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from "react";
 
-import { getIssue } from '@/api/issues';
-import type { IssueDetails } from '@/types';
+import { getIssue } from "@/api/issues";
+import type { IssueDetails } from "@/types";
 
 /**
  * Return type for the useIssueDetail hook.

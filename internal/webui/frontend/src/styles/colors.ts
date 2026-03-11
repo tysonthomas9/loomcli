@@ -14,11 +14,11 @@
  */
 export const StateColors = {
   /** Color for blocked issues (waiting on dependencies) */
-  blocked: '#ef4444', // red-500
+  blocked: "#ef4444", // red-500
   /** Color for ready issues (no blockers, can be worked on) */
-  ready: '#22c55e', // green-500
+  ready: "#22c55e", // green-500
   /** Color for closed/completed issues */
-  closed: '#10b981', // emerald-500 (same as status-closed)
+  closed: "#10b981", // emerald-500 (same as status-closed)
 } as const;
 
 /**
@@ -26,10 +26,10 @@ export const StateColors = {
  * Used for status badges and indicators.
  */
 export const StatusColors = {
-  open: '#3b82f6', // blue-500
-  in_progress: '#f59e0b', // amber-500
-  review: '#8b5cf6', // purple-500
-  closed: '#10b981', // emerald-500
+  open: "#3b82f6", // blue-500
+  in_progress: "#f59e0b", // amber-500
+  review: "#8b5cf6", // purple-500
+  closed: "#10b981", // emerald-500
 } as const;
 
 /**
@@ -37,29 +37,29 @@ export const StatusColors = {
  * Used for priority badges and indicators.
  */
 export const PriorityColors = {
-  0: '#dc2626', // red-600, critical
-  1: '#ea580c', // orange-600, high
-  2: '#ca8a04', // yellow-600, medium
-  3: '#2563eb', // blue-600, normal
-  4: '#6b7280', // gray-500, low/backlog
+  0: "#dc2626", // red-600, critical
+  1: "#ea580c", // orange-600, high
+  2: "#ca8a04", // yellow-600, medium
+  3: "#2563eb", // blue-600, normal
+  4: "#6b7280", // gray-500, low/backlog
 } as const;
 
 /**
  * Semantic colors for general UI elements.
  */
 export const SemanticColors = {
-  primary: '#3b82f6', // blue-500
-  success: '#22c55e', // green-500
-  warning: '#f59e0b', // amber-500
-  danger: '#ef4444', // red-500
-  info: '#06b6d4', // cyan-500
+  primary: "#3b82f6", // blue-500
+  success: "#22c55e", // green-500
+  warning: "#f59e0b", // amber-500
+  danger: "#ef4444", // red-500
+  info: "#06b6d4", // cyan-500
 } as const;
 
 /**
  * Issue type colors.
  */
 export const TypeColors = {
-  epic: '#8b5cf6', // purple-500
+  epic: "#8b5cf6", // purple-500
 } as const;
 
 /**
@@ -67,8 +67,10 @@ export const TypeColors = {
  */
 export type StateColor = (typeof StateColors)[keyof typeof StateColors];
 export type StatusColor = (typeof StatusColors)[keyof typeof StatusColors];
-export type PriorityColor = (typeof PriorityColors)[keyof typeof PriorityColors];
-export type SemanticColor = (typeof SemanticColors)[keyof typeof SemanticColors];
+export type PriorityColor =
+  (typeof PriorityColors)[keyof typeof PriorityColors];
+export type SemanticColor =
+  (typeof SemanticColors)[keyof typeof SemanticColors];
 export type TypeColor = (typeof TypeColors)[keyof typeof TypeColors];
 
 /**
@@ -97,7 +99,9 @@ export function getStateColor(state: keyof typeof StateColors): StateColor {
  * const badgeColor = getPriorityColor(0); // '#dc2626' (critical)
  * ```
  */
-export function getPriorityColor(priority: keyof typeof PriorityColors): PriorityColor {
+export function getPriorityColor(
+  priority: keyof typeof PriorityColors,
+): PriorityColor {
   return PriorityColors[priority];
 }
 

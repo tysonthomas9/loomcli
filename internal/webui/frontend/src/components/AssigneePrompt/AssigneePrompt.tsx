@@ -4,9 +4,9 @@
  * Remembers recent names for quick selection.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from "react";
 
-import styles from './AssigneePrompt.module.css';
+import styles from "./AssigneePrompt.module.css";
 
 /**
  * Props for the AssigneePrompt component.
@@ -39,14 +39,14 @@ export function AssigneePrompt({
   onSkip,
   recentNames,
 }: AssigneePromptProps): JSX.Element {
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
   // Reset input and focus when opening
   useEffect(() => {
     if (isOpen) {
-      setInputValue('');
+      setInputValue("");
       // Focus input after modal transition
       const timer = setTimeout(() => {
         inputRef.current?.focus();
@@ -60,14 +60,14 @@ export function AssigneePrompt({
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         event.preventDefault();
         onSkip();
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onSkip]);
 
   // Handle form submission
@@ -80,7 +80,7 @@ export function AssigneePrompt({
         onConfirm(`[H] ${trimmed}`);
       }
     },
-    [inputValue, onConfirm]
+    [inputValue, onConfirm],
   );
 
   // Handle recent name click
@@ -89,7 +89,7 @@ export function AssigneePrompt({
       // Add [H] prefix to distinguish human assignees
       onConfirm(`[H] ${name}`);
     },
-    [onConfirm]
+    [onConfirm],
   );
 
   // Prevent clicks inside modal from closing it
@@ -99,10 +99,16 @@ export function AssigneePrompt({
 
   const isInputEmpty = !inputValue.trim();
 
-  const overlayClassName = [styles.overlay, isOpen && styles.open].filter(Boolean).join(' ');
+  const overlayClassName = [styles.overlay, isOpen && styles.open]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div className={overlayClassName} aria-hidden={!isOpen} data-testid="assignee-prompt-overlay">
+    <div
+      className={overlayClassName}
+      aria-hidden={!isOpen}
+      data-testid="assignee-prompt-overlay"
+    >
       <div
         ref={modalRef}
         className={styles.modal}
@@ -145,7 +151,7 @@ export function AssigneePrompt({
             {/* Name input */}
             <div className={styles.inputGroup}>
               <label htmlFor="assignee-name" className={styles.label}>
-                {recentNames.length > 0 ? 'Or enter a new name' : 'Your name'}
+                {recentNames.length > 0 ? "Or enter a new name" : "Your name"}
               </label>
               <input
                 ref={inputRef}

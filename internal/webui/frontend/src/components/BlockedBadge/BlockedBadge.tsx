@@ -6,12 +6,19 @@
  * - "blocks": Shows "Blocks X issues" (for Graph nodes)
  */
 
-import { useState, useCallback, useRef, useLayoutEffect, useEffect, memo } from 'react';
-import { createPortal } from 'react-dom';
+import {
+  useState,
+  useCallback,
+  useRef,
+  useLayoutEffect,
+  useEffect,
+  memo,
+} from "react";
+import { createPortal } from "react-dom";
 
-import type { BlockerRef } from '@/types';
+import type { BlockerRef } from "@/types";
 
-import styles from './BlockedBadge.module.css';
+import styles from "./BlockedBadge.module.css";
 
 /**
  * Props for the BlockedBadge component.
@@ -24,7 +31,7 @@ export interface BlockedBadgeProps {
   /** Detailed blocker info with titles (preferred over issueIds when available) */
   issueDetails?: BlockerRef[];
   /** Variant determines the semantic: "blockedBy" (default) or "blocks" */
-  variant?: 'blockedBy' | 'blocks';
+  variant?: "blockedBy" | "blocks";
   /** Optional click handler */
   onClick?: () => void;
   /** Additional CSS class name */
@@ -36,7 +43,7 @@ export interface BlockedBadgeProps {
  */
 function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen) + '...';
+  return str.slice(0, maxLen) + "...";
 }
 
 /**
@@ -44,14 +51,17 @@ function truncate(str: string, maxLen: number): string {
  * Shows "id: title" when details are available, otherwise just IDs.
  * Shows first 5, then "and N more..." if there are more.
  */
-function formatIssueList(issueIds: string[], issueDetails?: BlockerRef[]): string[] {
+function formatIssueList(
+  issueIds: string[],
+  issueDetails?: BlockerRef[],
+): string[] {
   const maxDisplay = 5;
 
   // Build display strings: prefer details with titles when available
   let items: string[];
   if (issueDetails && issueDetails.length > 0) {
     items = issueDetails.map((d) =>
-      d.title ? `${d.id}: ${truncate(d.title, 45)}` : d.id
+      d.title ? `${d.id}: ${truncate(d.title, 45)}` : d.id,
     );
   } else {
     items = issueIds;
@@ -74,14 +84,19 @@ function BlockedBadgeComponent({
   count,
   issueIds = [],
   issueDetails,
-  variant = 'blockedBy',
+  variant = "blockedBy",
   onClick,
   className,
 }: BlockedBadgeProps): JSX.Element | null {
   const [showTooltip, setShowTooltip] = useState(false);
   const badgeRef = useRef<HTMLSpanElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
-  const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0, arrowLeft: 0, ready: false });
+  const [tooltipPos, setTooltipPos] = useState({
+    top: 0,
+    left: 0,
+    arrowLeft: 0,
+    ready: false,
+  });
 
   const handleShow = useCallback(() => {
     setShowTooltip(true);
@@ -107,11 +122,17 @@ function BlockedBadgeComponent({
     let left = badgeCenterX - tooltipRect.width / 2;
 
     // Clamp to viewport edges
-    left = Math.max(margin, Math.min(left, viewportWidth - tooltipRect.width - margin));
+    left = Math.max(
+      margin,
+      Math.min(left, viewportWidth - tooltipRect.width - margin),
+    );
 
     // Clamp arrow to stay within tooltip bounds
     const arrowPad = 12; // 6px border width on each side
-    const arrowLeft = Math.max(arrowPad, Math.min(badgeCenterX - left, tooltipRect.width - arrowPad));
+    const arrowLeft = Math.max(
+      arrowPad,
+      Math.min(badgeCenterX - left, tooltipRect.width - arrowPad),
+    );
 
     setTooltipPos({ top, left, arrowLeft, ready: true });
   }, [showTooltip]);
@@ -121,23 +142,23 @@ function BlockedBadgeComponent({
     if (!showTooltip) return;
 
     const close = () => setShowTooltip(false);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
     return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
     };
   }, [showTooltip]);
 
   // Keyboard handler for accessibility
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (onClick && (event.key === 'Enter' || event.key === ' ')) {
+      if (onClick && (event.key === "Enter" || event.key === " ")) {
         event.preventDefault();
         onClick();
       }
     },
-    [onClick]
+    [onClick],
   );
 
   // Don't render if count is 0
@@ -145,14 +166,16 @@ function BlockedBadgeComponent({
     return null;
   }
 
-  const rootClassName = className ? `${styles.blockedBadge} ${className}` : styles.blockedBadge;
+  const rootClassName = className
+    ? `${styles.blockedBadge} ${className}`
+    : styles.blockedBadge;
 
   const issueList = formatIssueList(issueIds, issueDetails);
-  const isBlockedBy = variant === 'blockedBy';
+  const isBlockedBy = variant === "blockedBy";
   const ariaLabel = isBlockedBy
-    ? `Blocked by ${count} issue${count === 1 ? '' : 's'}`
-    : `Blocks ${count} issue${count === 1 ? '' : 's'}`;
-  const tooltipHeader = isBlockedBy ? 'Blocked by:' : 'Blocks:';
+    ? `Blocked by ${count} issue${count === 1 ? "" : "s"}`
+    : `Blocks ${count} issue${count === 1 ? "" : "s"}`;
+  const tooltipHeader = isBlockedBy ? "Blocked by:" : "Blocks:";
 
   return (
     <span
@@ -174,29 +197,33 @@ function BlockedBadgeComponent({
       </span>
       <span className={styles.count}>{count}</span>
 
-      {showTooltip && issueList.length > 0 && createPortal(
-        <div
-          ref={tooltipRef}
-          className={styles.tooltip}
-          role="tooltip"
-          style={{
-            top: tooltipPos.top,
-            left: tooltipPos.left,
-            visibility: tooltipPos.ready ? 'visible' : 'hidden',
-            '--arrow-left': `${tooltipPos.arrowLeft}px`,
-          } as React.CSSProperties}
-        >
-          <div className={styles.tooltipHeader}>{tooltipHeader}</div>
-          <ul className={styles.tooltipList}>
-            {issueList.map((id, index) => (
-              <li key={index} className={styles.tooltipItem}>
-                {id}
-              </li>
-            ))}
-          </ul>
-        </div>,
-        document.body
-      )}
+      {showTooltip &&
+        issueList.length > 0 &&
+        createPortal(
+          <div
+            ref={tooltipRef}
+            className={styles.tooltip}
+            role="tooltip"
+            style={
+              {
+                top: tooltipPos.top,
+                left: tooltipPos.left,
+                visibility: tooltipPos.ready ? "visible" : "hidden",
+                "--arrow-left": `${tooltipPos.arrowLeft}px`,
+              } as React.CSSProperties
+            }
+          >
+            <div className={styles.tooltipHeader}>{tooltipHeader}</div>
+            <ul className={styles.tooltipList}>
+              {issueList.map((id, index) => (
+                <li key={index} className={styles.tooltipItem}>
+                  {id}
+                </li>
+              ))}
+            </ul>
+          </div>,
+          document.body,
+        )}
     </span>
   );
 }

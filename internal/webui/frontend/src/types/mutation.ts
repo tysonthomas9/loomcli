@@ -3,25 +3,25 @@
  * Provides strongly-typed representation of mutation events for the React layer.
  */
 
-import type { ISODateString } from './common';
-import type { MutationType, MutationPayload } from '../api/sse';
+import type { ISODateString } from "./common";
+import type { MutationType, MutationPayload } from "../api/sse";
 
 // Re-export mutation types from SSE for convenient imports
-export type { MutationType, MutationPayload } from '../api/sse';
+export type { MutationType, MutationPayload } from "../api/sse";
 
 /**
  * Mutation type constants.
  * Maps to Go mutation types in the backend.
  */
-export const MutationCreate: MutationType = 'create';
-export const MutationUpdate: MutationType = 'update';
-export const MutationDelete: MutationType = 'delete';
-export const MutationComment: MutationType = 'comment';
-export const MutationStatus: MutationType = 'status';
-export const MutationBonded: MutationType = 'bonded';
-export const MutationSquashed: MutationType = 'squashed';
-export const MutationBurned: MutationType = 'burned';
-export const MutationRefresh: MutationType = 'refresh';
+export const MutationCreate: MutationType = "create";
+export const MutationUpdate: MutationType = "update";
+export const MutationDelete: MutationType = "delete";
+export const MutationComment: MutationType = "comment";
+export const MutationStatus: MutationType = "status";
+export const MutationBonded: MutationType = "bonded";
+export const MutationSquashed: MutationType = "squashed";
+export const MutationBurned: MutationType = "burned";
+export const MutationRefresh: MutationType = "refresh";
 
 /**
  * Application-level mutation event.

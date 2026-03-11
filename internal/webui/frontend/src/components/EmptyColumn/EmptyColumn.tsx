@@ -3,9 +3,9 @@
  * Displays a centered message with an icon when a StatusColumn has no issues.
  */
 
-import type { Status } from '@/types';
+import type { Status } from "@/types";
 
-import styles from './EmptyColumn.module.css';
+import styles from "./EmptyColumn.module.css";
 
 /**
  * Props for the EmptyColumn component.
@@ -27,33 +27,33 @@ export interface EmptyColumnProps {
  */
 function getDefaultMessage(status?: Status | string): string {
   switch (status) {
-    case 'open':
-      return 'No open issues';
-    case 'in_progress':
-      return 'No issues in progress';
-    case 'closed':
-      return 'No closed issues';
-    case 'blocked':
-      return 'No blocked issues';
-    case 'deferred':
-      return 'No deferred issues';
-    case 'tombstone':
-      return 'No archived issues';
-    case 'pinned':
-      return 'No pinned issues';
-    case 'hooked':
-      return 'No hooked issues';
-    case 'review':
-      return 'No issues in review';
+    case "open":
+      return "No open issues";
+    case "in_progress":
+      return "No issues in progress";
+    case "closed":
+      return "No closed issues";
+    case "blocked":
+      return "No blocked issues";
+    case "deferred":
+      return "No deferred issues";
+    case "tombstone":
+      return "No archived issues";
+    case "pinned":
+      return "No pinned issues";
+    case "hooked":
+      return "No hooked issues";
+    case "review":
+      return "No issues in review";
     // New 5-column layout column IDs
-    case 'ready':
-      return 'No ready issues';
-    case 'backlog':
-      return 'No blocked or deferred issues';
-    case 'done':
-      return 'No completed issues';
+    case "ready":
+      return "No ready issues";
+    case "backlog":
+      return "No blocked or deferred issues";
+    case "done":
+      return "No completed issues";
     default:
-      return 'No issues';
+      return "No issues";
   }
 }
 
@@ -69,13 +69,28 @@ export function EmptyColumn({
 }: EmptyColumnProps): JSX.Element {
   const displayMessage = message ?? getDefaultMessage(status);
 
-  const rootClassName = className ? `${styles.emptyColumn} ${className}` : styles.emptyColumn;
+  const rootClassName = className
+    ? `${styles.emptyColumn} ${className}`
+    : styles.emptyColumn;
 
   return (
     <div className={rootClassName} role="status" aria-label={displayMessage}>
       {showIcon && (
-        <svg className={styles.icon} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
+        <svg
+          className={styles.icon}
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
+          <rect
+            x="3"
+            y="5"
+            width="18"
+            height="14"
+            rx="2"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
           <path d="M3 10h18" stroke="currentColor" strokeWidth="1.5" />
         </svg>
       )}

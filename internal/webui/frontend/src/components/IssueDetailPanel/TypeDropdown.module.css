@@ -42,7 +42,7 @@
 }
 
 /* Saving state - pulsing animation */
-.trigger[data-saving='true'] {
+.trigger[data-saving="true"] {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -103,12 +103,12 @@
   background-color: var(--color-bg-secondary);
 }
 
-.option[data-selected='true'] {
+.option[data-selected="true"] {
   background-color: var(--color-bg-tertiary);
   font-weight: 500;
 }
 
-.option[data-focused='true'] {
+.option[data-focused="true"] {
   background-color: var(--color-bg-secondary);
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;

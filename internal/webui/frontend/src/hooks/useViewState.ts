@@ -3,19 +3,26 @@
  * Provides centralized view state management for switching between Kanban, Table, and Graph views.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from "react";
 
-import { type ViewMode, DEFAULT_VIEW } from '@/components/ViewSwitcher';
+import { type ViewMode, DEFAULT_VIEW } from "@/components/ViewSwitcher";
 
 /**
  * Valid view modes for validation.
  */
-const VALID_VIEWS: ViewMode[] = ['kanban', 'table', 'graph', 'monitor', 'observability', 'settings'];
+const VALID_VIEWS: ViewMode[] = [
+  "kanban",
+  "table",
+  "graph",
+  "monitor",
+  "observability",
+  "settings",
+];
 
 /**
  * URL parameter name for view.
  */
-const VIEW_PARAM = 'view';
+const VIEW_PARAM = "view";
 
 /**
  * Options for useViewState hook.
@@ -34,7 +41,9 @@ export type UseViewStateReturn = [ViewMode, (view: ViewMode) => void];
  * Check if running in browser environment.
  */
 function isBrowser(): boolean {
-  return typeof window !== 'undefined' && typeof window.location !== 'undefined';
+  return (
+    typeof window !== "undefined" && typeof window.location !== "undefined"
+  );
 }
 
 /**
@@ -83,7 +92,7 @@ function updateViewUrl(view: ViewMode): void {
     ? `${window.location.pathname}?${queryString}`
     : window.location.pathname;
 
-  window.history.replaceState(null, '', newUrl);
+  window.history.replaceState(null, "", newUrl);
 }
 
 /**
@@ -103,7 +112,9 @@ function updateViewUrl(view: ViewMode): void {
  * }
  * ```
  */
-export function useViewState(options: UseViewStateOptions = {}): UseViewStateReturn {
+export function useViewState(
+  options: UseViewStateOptions = {},
+): UseViewStateReturn {
   const { syncUrl = true } = options;
 
   // Initialize state from URL if syncing and in browser
@@ -129,8 +140,8 @@ export function useViewState(options: UseViewStateOptions = {}): UseViewStateRet
       setViewState(parseViewFromUrl());
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, [syncUrl]);
 
   // Memoized setter

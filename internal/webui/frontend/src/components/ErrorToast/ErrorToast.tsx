@@ -4,9 +4,9 @@
  * Used to show rollback error messages when Kanban drag-and-drop status changes fail.
  */
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from "react";
 
-import styles from './ErrorToast.module.css';
+import styles from "./ErrorToast.module.css";
 
 /**
  * Props for the ErrorToast component.
@@ -55,7 +55,7 @@ export function ErrorToast({
   onDismiss,
   duration = 5000,
   className,
-  testId = 'error-toast',
+  testId = "error-toast",
 }: ErrorToastProps): JSX.Element {
   // Auto-dismiss after duration
   useEffect(() => {
@@ -76,14 +76,16 @@ export function ErrorToast({
   // Handle keyboard dismiss (Escape key)
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         onDismiss();
       }
     },
-    [onDismiss]
+    [onDismiss],
   );
 
-  const rootClassName = className ? `${styles.toast} ${className}` : styles.toast;
+  const rootClassName = className
+    ? `${styles.toast} ${className}`
+    : styles.toast;
 
   return (
     <div

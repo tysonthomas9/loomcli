@@ -3,10 +3,10 @@
  * Provides on-demand and polling-based access to token usage summaries.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from "react";
 
-import { fetchUsage } from '@/api';
-import type { UsageResponse, UsageParams } from '@/types';
+import { fetchUsage } from "@/api";
+import type { UsageResponse, UsageParams } from "@/types";
 
 /** Options for the useUsage hook. */
 export interface UseUsageOptions {

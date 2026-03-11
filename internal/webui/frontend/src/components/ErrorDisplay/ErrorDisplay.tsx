@@ -3,14 +3,18 @@
  * Displays error messages with optional retry functionality.
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
 
-import styles from './ErrorDisplay.module.css';
+import styles from "./ErrorDisplay.module.css";
 
 /**
  * Variant presets for common error scenarios.
  */
-export type ErrorDisplayVariant = 'fetch-error' | 'connection-error' | 'unknown-error' | 'custom';
+export type ErrorDisplayVariant =
+  | "fetch-error"
+  | "connection-error"
+  | "unknown-error"
+  | "custom";
 
 /**
  * Props for the ErrorDisplay component.
@@ -41,22 +45,26 @@ export interface ErrorDisplayProps {
 /**
  * Default content for each variant.
  */
-const VARIANT_DEFAULTS: Record<ErrorDisplayVariant, { title: string; description: string }> = {
-  'fetch-error': {
-    title: 'Failed to load data',
-    description: 'There was a problem fetching the data. Please try again.',
+const VARIANT_DEFAULTS: Record<
+  ErrorDisplayVariant,
+  { title: string; description: string }
+> = {
+  "fetch-error": {
+    title: "Failed to load data",
+    description: "There was a problem fetching the data. Please try again.",
   },
-  'connection-error': {
-    title: 'Connection lost',
-    description: 'Unable to connect to the server. Please check your connection.',
+  "connection-error": {
+    title: "Connection lost",
+    description:
+      "Unable to connect to the server. Please check your connection.",
   },
-  'unknown-error': {
-    title: 'Something went wrong',
-    description: 'An unexpected error occurred. Please try again later.',
+  "unknown-error": {
+    title: "Something went wrong",
+    description: "An unexpected error occurred. Please try again later.",
   },
   custom: {
-    title: 'Error',
-    description: '',
+    title: "Error",
+    description: "",
   },
 };
 
@@ -111,13 +119,13 @@ function DefaultIcon(): JSX.Element {
  * ```
  */
 export function ErrorDisplay({
-  variant = 'fetch-error',
+  variant = "fetch-error",
   title,
   description,
   error,
   onRetry,
   isRetrying = false,
-  retryLabel = 'Try again',
+  retryLabel = "Try again",
   showDetails = false,
   icon,
   className,
@@ -126,7 +134,9 @@ export function ErrorDisplay({
   const displayTitle = title ?? defaults.title;
   const displayDescription = description ?? defaults.description;
 
-  const rootClassName = className ? `${styles.errorDisplay} ${className}` : styles.errorDisplay;
+  const rootClassName = className
+    ? `${styles.errorDisplay} ${className}`
+    : styles.errorDisplay;
 
   return (
     <div
@@ -138,7 +148,9 @@ export function ErrorDisplay({
     >
       <div className={styles.iconWrapper}>{icon ?? <DefaultIcon />}</div>
       <h3 className={styles.title}>{displayTitle}</h3>
-      {displayDescription && <p className={styles.description}>{displayDescription}</p>}
+      {displayDescription && (
+        <p className={styles.description}>{displayDescription}</p>
+      )}
 
       {showDetails && error?.message && (
         <details className={styles.details}>
@@ -156,7 +168,7 @@ export function ErrorDisplay({
             className={styles.retryButton}
             data-testid="retry-button"
           >
-            {isRetrying ? 'Retrying...' : retryLabel}
+            {isRetrying ? "Retrying..." : retryLabel}
           </button>
         </div>
       )}

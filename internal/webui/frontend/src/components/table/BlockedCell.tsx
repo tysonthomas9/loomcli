@@ -4,7 +4,7 @@
  * Includes hover tooltip showing first 5 blocker IDs.
  */
 
-import type { MouseEvent } from 'react';
+import type { MouseEvent } from "react";
 
 /**
  * Props for BlockedCell component.
@@ -22,10 +22,16 @@ export interface BlockedCellProps {
  * BlockedCell renders the blocked column cell content.
  * Shows a badge with count when blocked, dash when not.
  */
-export function BlockedCell({ blockedByCount, blockedBy = [], onClick }: BlockedCellProps) {
+export function BlockedCell({
+  blockedByCount,
+  blockedBy = [],
+  onClick,
+}: BlockedCellProps) {
   // Not blocked - show dash
   if (blockedByCount === 0) {
-    return <span className="issue-table__blocked issue-table__blocked--none">—</span>;
+    return (
+      <span className="issue-table__blocked issue-table__blocked--none">—</span>
+    );
   }
 
   // Build tooltip text (defensive for undefined blockedBy)
@@ -34,8 +40,8 @@ export function BlockedCell({ blockedByCount, blockedBy = [], onClick }: Blocked
   const displayedBlockers = blockerList.slice(0, maxTooltipItems);
   const remaining = blockerList.length - maxTooltipItems;
 
-  let tooltipText = 'Blocked by:\n';
-  tooltipText += displayedBlockers.map((id) => `• ${id}`).join('\n');
+  let tooltipText = "Blocked by:\n";
+  tooltipText += displayedBlockers.map((id) => `• ${id}`).join("\n");
   if (remaining > 0) {
     tooltipText += `\nand ${remaining} more...`;
   }
@@ -46,7 +52,7 @@ export function BlockedCell({ blockedByCount, blockedBy = [], onClick }: Blocked
   };
 
   // Format count (show 99+ for large numbers)
-  const displayCount = blockedByCount > 99 ? '99+' : blockedByCount;
+  const displayCount = blockedByCount > 99 ? "99+" : blockedByCount;
 
   return (
     <button
@@ -54,7 +60,7 @@ export function BlockedCell({ blockedByCount, blockedBy = [], onClick }: Blocked
       className="issue-table__blocked issue-table__blocked--active"
       title={tooltipText}
       onClick={handleClick}
-      aria-label={`Blocked by ${blockedByCount} issue${blockedByCount === 1 ? '' : 's'}`}
+      aria-label={`Blocked by ${blockedByCount} issue${blockedByCount === 1 ? "" : "s"}`}
     >
       <span className="issue-table__blocked-icon" aria-hidden="true">
         ⛔

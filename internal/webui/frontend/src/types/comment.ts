@@ -2,7 +2,7 @@
  * Comment type for issue comments.
  */
 
-import type { ISODateString } from './common';
+import type { ISODateString } from "./common";
 
 /**
  * Comment on an issue.

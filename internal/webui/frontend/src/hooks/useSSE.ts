@@ -8,14 +8,14 @@
  * - Automatic catch-up of missed events on reconnect
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from "react";
 
 import {
   BeadsSSEClient,
   type SSEClientOptions,
   type ConnectionState,
   type MutationPayload,
-} from '../api/sse';
+} from "../api/sse";
 
 /**
  * Options for the useSSE hook.
@@ -75,10 +75,16 @@ export interface UseSSEReturn {
  * ```
  */
 export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
-  const { autoConnect = true, since, onMutation, onError, onStateChange } = options;
+  const {
+    autoConnect = true,
+    since,
+    onMutation,
+    onError,
+    onStateChange,
+  } = options;
 
   // Reactive state
-  const [state, setState] = useState<ConnectionState>('disconnected');
+  const [state, setState] = useState<ConnectionState>("disconnected");
   const [lastError, setLastError] = useState<string | null>(null);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [lastEventId, setLastEventId] = useState<number | undefined>(undefined);
@@ -113,7 +119,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
   // Create client on mount
   useEffect(() => {
     // Guard against SSR (no window)
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     mountedRef.current = true;
 
@@ -136,7 +142,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
         if (!mountedRef.current) return;
         setState(newState);
         // Clear error on successful connection
-        if (newState === 'connected') {
+        if (newState === "connected") {
           setLastError(null);
         }
         onStateChangeRef.current?.(newState);
@@ -177,7 +183,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
   }, []);
 
   // Computed values
-  const isConnected = state === 'connected';
+  const isConnected = state === "connected";
 
   return {
     state,

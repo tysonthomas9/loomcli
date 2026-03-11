@@ -7,9 +7,9 @@
  * - The count of blocked descendants
  */
 
-import { useMemo } from 'react';
+import { useMemo } from "react";
 
-import type { DependencyEdge } from '@/types';
+import type { DependencyEdge } from "@/types";
 
 /**
  * Result of computing a blocked chain for an issue.
@@ -42,7 +42,7 @@ function computeBlockersRecursive(
   issueId: string,
   edgeMap: Map<string, DependencyEdge[]>,
   visited: Set<string>,
-  depth: number
+  depth: number,
 ): Set<string> {
   if (depth > MAX_DEPTH || visited.has(issueId)) {
     return new Set();
@@ -63,7 +63,7 @@ function computeBlockersRecursive(
         blockerId,
         edgeMap,
         new Set(visited),
-        depth + 1
+        depth + 1,
       );
       for (const id of transitiveBlockers) {
         blockers.add(id);
@@ -88,7 +88,7 @@ function computeBlockedByRecursive(
   issueId: string,
   reverseEdgeMap: Map<string, DependencyEdge[]>,
   visited: Set<string>,
-  depth: number
+  depth: number,
 ): Set<string> {
   if (depth > MAX_DEPTH || visited.has(issueId)) {
     return new Set();
@@ -109,7 +109,7 @@ function computeBlockedByRecursive(
         blockedId,
         reverseEdgeMap,
         new Set(visited),
-        depth + 1
+        depth + 1,
       );
       for (const id of transitiveBlocked) {
         blockedBy.add(id);
@@ -167,11 +167,19 @@ function buildEdgeMaps(edges: DependencyEdge[]): {
  * @param edges - All dependency edges in the graph
  * @returns BlockedChainResult with blockers, blockedBy, and blockedCount
  */
-export function getBlockedChain(issueId: string, edges: DependencyEdge[]): BlockedChainResult {
+export function getBlockedChain(
+  issueId: string,
+  edges: DependencyEdge[],
+): BlockedChainResult {
   const { edgeMap, reverseEdgeMap } = buildEdgeMaps(edges);
 
   const blockers = computeBlockersRecursive(issueId, edgeMap, new Set(), 0);
-  const blockedBy = computeBlockedByRecursive(issueId, reverseEdgeMap, new Set(), 0);
+  const blockedBy = computeBlockedByRecursive(
+    issueId,
+    reverseEdgeMap,
+    new Set(),
+    0,
+  );
 
   return {
     blockers,
@@ -190,13 +198,18 @@ export function getBlockedChain(issueId: string, edges: DependencyEdge[]): Block
  */
 export function computeAllBlockedCounts(
   issueIds: string[],
-  edges: DependencyEdge[]
+  edges: DependencyEdge[],
 ): Map<string, number> {
   const { reverseEdgeMap } = buildEdgeMaps(edges);
   const counts = new Map<string, number>();
 
   for (const issueId of issueIds) {
-    const blockedBy = computeBlockedByRecursive(issueId, reverseEdgeMap, new Set(), 0);
+    const blockedBy = computeBlockedByRecursive(
+      issueId,
+      reverseEdgeMap,
+      new Set(),
+      0,
+    );
     counts.set(issueId, blockedBy.size);
   }
 
@@ -244,8 +257,11 @@ export function useBlockedChain({
 }: UseBlockedChainOptions): UseBlockedChainReturn {
   // Memoize edge maps for efficient lookups
   const { edgeMap, reverseEdgeMap } = useMemo(
-    () => (enabled ? buildEdgeMaps(edges) : { edgeMap: new Map(), reverseEdgeMap: new Map() }),
-    [edges, enabled]
+    () =>
+      enabled
+        ? buildEdgeMaps(edges)
+        : { edgeMap: new Map(), reverseEdgeMap: new Map() },
+    [edges, enabled],
   );
 
   const getChain = useMemo(
@@ -255,8 +271,18 @@ export function useBlockedChain({
           return { blockers: new Set(), blockedBy: new Set(), blockedCount: 0 };
         }
 
-        const blockers = computeBlockersRecursive(issueId, edgeMap, new Set(), 0);
-        const blockedBy = computeBlockedByRecursive(issueId, reverseEdgeMap, new Set(), 0);
+        const blockers = computeBlockersRecursive(
+          issueId,
+          edgeMap,
+          new Set(),
+          0,
+        );
+        const blockedBy = computeBlockedByRecursive(
+          issueId,
+          reverseEdgeMap,
+          new Set(),
+          0,
+        );
 
         return {
           blockers,
@@ -264,7 +290,7 @@ export function useBlockedChain({
           blockedCount: blockedBy.size,
         };
       },
-    [edgeMap, reverseEdgeMap, enabled]
+    [edgeMap, reverseEdgeMap, enabled],
   );
 
   const getChainIds = useMemo(
@@ -276,7 +302,7 @@ export function useBlockedChain({
         for (const id of chain.blockedBy) ids.add(id);
         return ids;
       },
-    [getChain]
+    [getChain],
   );
 
   return { getChain, getChainIds };

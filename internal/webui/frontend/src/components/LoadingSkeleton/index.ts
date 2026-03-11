@@ -2,10 +2,10 @@
  * LoadingSkeleton component exports.
  */
 
-export { LoadingSkeleton } from './LoadingSkeleton';
+export { LoadingSkeleton } from "./LoadingSkeleton";
 export type {
   LoadingSkeletonProps,
   LoadingSkeletonCardProps,
   LoadingSkeletonColumnProps,
   SkeletonShape,
-} from './LoadingSkeleton';
+} from "./LoadingSkeleton";

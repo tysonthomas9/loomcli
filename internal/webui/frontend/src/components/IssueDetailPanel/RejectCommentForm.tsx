@@ -3,9 +3,15 @@
  * Inline form for collecting feedback when rejecting an issue from the side panel.
  */
 
-import { useState, useRef, useCallback, type FormEvent, type KeyboardEvent } from 'react';
+import {
+  useState,
+  useRef,
+  useCallback,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 
-import styles from './RejectCommentForm.module.css';
+import styles from "./RejectCommentForm.module.css";
 
 /**
  * Props for the RejectCommentForm component.
@@ -38,7 +44,7 @@ export function RejectCommentForm({
   isSubmitting = false,
   error = null,
 }: RejectCommentFormProps): JSX.Element {
-  const [text, setText] = useState('');
+  const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = useCallback(
@@ -51,7 +57,7 @@ export function RejectCommentForm({
 
       onSubmit(trimmedText);
     },
-    [text, isSubmitting, onSubmit]
+    [text, isSubmitting, onSubmit],
   );
 
   const handleCancel = useCallback(
@@ -60,30 +66,33 @@ export function RejectCommentForm({
       e?.stopPropagation();
       onCancel();
     },
-    [onCancel]
+    [onCancel],
   );
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
       // Cmd/Ctrl+Enter to submit
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         e.stopPropagation();
         handleSubmit();
       }
       // Escape to cancel
-      if (e.key === 'Escape') {
+      if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         handleCancel();
       }
     },
-    [handleSubmit, handleCancel]
+    [handleSubmit, handleCancel],
   );
 
-  const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
-  }, []);
+  const handleTextChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      setText(e.target.value);
+    },
+    [],
+  );
 
   const canSubmit = text.trim().length > 0 && !isSubmitting;
 
@@ -94,7 +103,10 @@ export function RejectCommentForm({
       data-testid="reject-comment-form"
       aria-label={`Rejection feedback for issue ${issueId}`}
     >
-      <label className={styles.label} htmlFor={`panel-reject-textarea-${issueId}`}>
+      <label
+        className={styles.label}
+        htmlFor={`panel-reject-textarea-${issueId}`}
+      >
         Why are you rejecting this?
       </label>
       <textarea
@@ -131,7 +143,7 @@ export function RejectCommentForm({
           disabled={!canSubmit}
           data-testid="reject-submit"
         >
-          {isSubmitting ? 'Submitting...' : 'Reject'}
+          {isSubmitting ? "Submitting..." : "Reject"}
         </button>
       </div>
     </form>

@@ -6,7 +6,7 @@
  * Unit tests for reconnectBackoff utility.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import {
   calculateBackoffDelay,
@@ -14,10 +14,10 @@ import {
   DEFAULT_RECONNECT_CONFIG,
   type ReconnectConfig,
   type ReconnectState,
-} from '../reconnectBackoff';
+} from "../reconnectBackoff";
 
-describe('calculateBackoffDelay', () => {
-  it('returns correct base delay for attempt 0 (~1000ms ±25%)', () => {
+describe("calculateBackoffDelay", () => {
+  it("returns correct base delay for attempt 0 (~1000ms ±25%)", () => {
     // With default jitterFactor=0.5, range is [1-0.25, 1+0.25] = [0.75, 1.25]
     // So for attempt 0: baseDelay * 2^0 = 1000, jittered to [750, 1250]
     for (let i = 0; i < 50; i++) {
@@ -27,7 +27,7 @@ describe('calculateBackoffDelay', () => {
     }
   });
 
-  it('delay doubles each attempt: attempt 1 ~2000ms, attempt 2 ~4000ms', () => {
+  it("delay doubles each attempt: attempt 1 ~2000ms, attempt 2 ~4000ms", () => {
     for (let i = 0; i < 50; i++) {
       const delay1 = calculateBackoffDelay(1);
       expect(delay1).toBeGreaterThanOrEqual(1500);
@@ -39,7 +39,7 @@ describe('calculateBackoffDelay', () => {
     }
   });
 
-  it('delay is capped at maxDelay (30000ms) for high attempt numbers', () => {
+  it("delay is capped at maxDelay (30000ms) for high attempt numbers", () => {
     // 2^20 * 1000 = 1048576000, but capped at 30000
     // Jittered: [30000*0.75, 30000*1.25] = [22500, 37500]
     for (let i = 0; i < 50; i++) {
@@ -49,7 +49,7 @@ describe('calculateBackoffDelay', () => {
     }
   });
 
-  it('jitter stays within expected bounds over many iterations', () => {
+  it("jitter stays within expected bounds over many iterations", () => {
     const config: ReconnectConfig = {
       ...DEFAULT_RECONNECT_CONFIG,
       jitterFactor: 0.5,
@@ -72,7 +72,7 @@ describe('calculateBackoffDelay', () => {
     expect(max - min).toBeGreaterThan(100);
   });
 
-  it('custom config values work', () => {
+  it("custom config values work", () => {
     const config: ReconnectConfig = {
       baseDelay: 500,
       maxDelay: 5000,
@@ -89,7 +89,7 @@ describe('calculateBackoffDelay', () => {
   });
 });
 
-describe('startAutoReconnect', () => {
+describe("startAutoReconnect", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -106,7 +106,7 @@ describe('startAutoReconnect', () => {
     jitterFactor: 0,
   };
 
-  it('calls connectFn on first scheduled attempt', () => {
+  it("calls connectFn on first scheduled attempt", () => {
     const connectFn = vi.fn().mockReturnValue(true);
     const onStateChange = vi.fn();
 
@@ -121,7 +121,7 @@ describe('startAutoReconnect', () => {
     expect(connectFn).toHaveBeenCalledTimes(1);
   });
 
-  it('increments attempt counter on each failure', () => {
+  it("increments attempt counter on each failure", () => {
     const connectFn = vi.fn().mockReturnValue(false);
     const onStateChange = vi.fn();
 
@@ -129,7 +129,7 @@ describe('startAutoReconnect', () => {
 
     // Attempt 0 scheduled: onStateChange called with attempt=0
     expect(onStateChange).toHaveBeenCalledWith(
-      expect.objectContaining({ attempt: 0, gaveUp: false })
+      expect.objectContaining({ attempt: 0, gaveUp: false }),
     );
 
     // Advance past attempt 0 delay (1000ms)
@@ -138,7 +138,7 @@ describe('startAutoReconnect', () => {
 
     // After failure, attempt increments to 1 and scheduleNext is called again
     expect(onStateChange).toHaveBeenCalledWith(
-      expect.objectContaining({ attempt: 1, gaveUp: false })
+      expect.objectContaining({ attempt: 1, gaveUp: false }),
     );
 
     // Advance past attempt 1 delay (2000ms)
@@ -147,15 +147,19 @@ describe('startAutoReconnect', () => {
 
     // After second failure, attempt increments to 2
     expect(onStateChange).toHaveBeenCalledWith(
-      expect.objectContaining({ attempt: 2, gaveUp: false })
+      expect.objectContaining({ attempt: 2, gaveUp: false }),
     );
   });
 
-  it('cancel function stops the loop (no more connectFn calls)', () => {
+  it("cancel function stops the loop (no more connectFn calls)", () => {
     const connectFn = vi.fn().mockReturnValue(false);
     const onStateChange = vi.fn();
 
-    const cancel = startAutoReconnect(connectFn, onStateChange, deterministicConfig);
+    const cancel = startAutoReconnect(
+      connectFn,
+      onStateChange,
+      deterministicConfig,
+    );
 
     // Cancel before the first timer fires
     cancel();
@@ -166,12 +170,12 @@ describe('startAutoReconnect', () => {
     expect(connectFn).not.toHaveBeenCalled();
   });
 
-  it('state callback receives correct attempt numbers and nextRetryAt', () => {
+  it("state callback receives correct attempt numbers and nextRetryAt", () => {
     const connectFn = vi.fn().mockReturnValue(false);
     const onStateChange = vi.fn();
 
     // Set Date.now() to a known value
-    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+    vi.setSystemTime(new Date("2025-01-01T00:00:00.000Z"));
 
     startAutoReconnect(connectFn, onStateChange, deterministicConfig);
 
@@ -193,7 +197,7 @@ describe('startAutoReconnect', () => {
     expect(secondState.gaveUp).toBe(false);
   });
 
-  it('stops after maxAttempts and reports gaveUp=true', () => {
+  it("stops after maxAttempts and reports gaveUp=true", () => {
     const connectFn = vi.fn().mockReturnValue(false);
     const onStateChange = vi.fn();
 
@@ -220,7 +224,8 @@ describe('startAutoReconnect', () => {
 
     // After 3 failures, attempt is now 3 which equals maxAttempts
     // onStateChange should have been called with gaveUp=true
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0];
+    const lastCall =
+      onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0];
     expect(lastCall.attempt).toBe(3);
     expect(lastCall.nextRetryAt).toBeNull();
     expect(lastCall.gaveUp).toBe(true);
@@ -230,11 +235,15 @@ describe('startAutoReconnect', () => {
     expect(connectFn).toHaveBeenCalledTimes(3);
   });
 
-  it('does not call connectFn after cancel', () => {
+  it("does not call connectFn after cancel", () => {
     const connectFn = vi.fn().mockReturnValue(false);
     const onStateChange = vi.fn();
 
-    const cancel = startAutoReconnect(connectFn, onStateChange, deterministicConfig);
+    const cancel = startAutoReconnect(
+      connectFn,
+      onStateChange,
+      deterministicConfig,
+    );
 
     // Let the first attempt fire
     vi.advanceTimersByTime(1000);

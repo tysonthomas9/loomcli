@@ -58,7 +58,8 @@
   outline: none;
   border-color: var(--color-primary);
   background-color: var(--color-bg);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--color-primary) 20%, transparent);
 }
 
 .searchInput:focus-within .icon {
@@ -104,7 +105,9 @@
 
 /* Adjust input padding when clear button visible */
 .hasValue .input {
-  padding-right: calc(var(--space-2) + 24px + var(--space-2)); /* clear button offset */
+  padding-right: calc(
+    var(--space-2) + 24px + var(--space-2)
+  ); /* clear button offset */
 }
 
 /* Size variants - Small */

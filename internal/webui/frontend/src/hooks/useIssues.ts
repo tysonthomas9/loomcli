@@ -6,15 +6,20 @@
  * handling initial data fetching, real-time updates via SSE, and optimistic updates.
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
-import type { ConnectionState, GraphFilter } from '@/api';
-import { getReadyIssues, getKanbanIssues, updateIssue as apiUpdateIssue, fetchGraphIssues } from '@/api';
-import type { Issue, WorkFilter, Status } from '@/types';
+import type { ConnectionState, GraphFilter } from "@/api";
+import {
+  getReadyIssues,
+  getKanbanIssues,
+  updateIssue as apiUpdateIssue,
+  fetchGraphIssues,
+} from "@/api";
+import type { Issue, WorkFilter, Status } from "@/types";
 
-import { useMutationHandler } from './useMutationHandler';
-import { useSSE } from './useSSE';
-import { useToast } from './useToast';
+import { useMutationHandler } from "./useMutationHandler";
+import { useSSE } from "./useSSE";
+import { useToast } from "./useToast";
 
 // Threshold for triggering a full refetch after reconnection
 // If we had this many consecutive reconnect attempts, assume we may have missed events
@@ -27,7 +32,7 @@ export interface UseIssuesOptions {
   /** Initial filter for fetching issues (default: all ready issues) */
   filter?: WorkFilter;
   /** Data source mode: 'ready' for ready issues, 'graph' for all issues with deps, 'kanban' for enriched kanban view */
-  mode?: 'ready' | 'graph' | 'kanban';
+  mode?: "ready" | "graph" | "kanban";
   /** Filter options when mode is 'graph' */
   graphFilter?: GraphFilter;
   /** Auto-fetch on mount (default: true) */
@@ -102,7 +107,7 @@ export interface UseIssuesReturn {
 export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
   const {
     filter,
-    mode = 'ready',
+    mode = "ready",
     graphFilter,
     autoFetch = true,
     autoConnect = true,
@@ -138,8 +143,12 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     },
     onMutationSkipped: (mutation, reason) => {
       // Debug logging for development
-      if (process.env.NODE_ENV === 'development') {
-        console.debug('[useIssues] Mutation skipped:', mutation.issue_id, reason);
+      if (process.env.NODE_ENV === "development") {
+        console.debug(
+          "[useIssues] Mutation skipped:",
+          mutation.issue_id,
+          reason,
+        );
       }
     },
   });
@@ -155,7 +164,8 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     retryNow,
   } = useSSE({
     autoConnect,
-    since: fetchTimestampRef.current > 0 ? fetchTimestampRef.current : undefined,
+    since:
+      fetchTimestampRef.current > 0 ? fetchTimestampRef.current : undefined,
     onMutation: handleMutation,
   });
 
@@ -163,7 +173,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
   const { showToast } = useToast();
 
   // Track previous state for detecting reconnection
-  const prevStateRef = useRef<ConnectionState>('disconnected');
+  const prevStateRef = useRef<ConnectionState>("disconnected");
   const maxReconnectAttemptsRef = useRef<number>(0);
 
   // Fetch issues from API
@@ -178,9 +188,9 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
 
     try {
       let data: Issue[];
-      if (mode === 'kanban') {
+      if (mode === "kanban") {
         data = await getKanbanIssues(filter);
-      } else if (mode === 'graph') {
+      } else if (mode === "graph") {
         data = await fetchGraphIssues(graphFilter);
       } else {
         data = await getReadyIssues(filter);
@@ -198,8 +208,11 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
         for (const issue of data) {
           // Skip issues with empty IDs (defensive: backend should always provide IDs)
           if (!issue.id) {
-            if (process.env.NODE_ENV === 'development') {
-              console.warn('[useIssues] Skipping API issue with empty id:', issue.title);
+            if (process.env.NODE_ENV === "development") {
+              console.warn(
+                "[useIssues] Skipping API issue with empty id:",
+                issue.title,
+              );
             }
             continue;
           }
@@ -217,7 +230,10 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
           if (!apiIssue) {
             // Keep if created during fetch (SSE create mutation)
             const createdTime = Date.parse(currentIssue.created_at);
-            if (!isNaN(createdTime) && createdTime >= fetchTimestampRef.current) {
+            if (
+              !isNaN(createdTime) &&
+              createdTime >= fetchTimestampRef.current
+            ) {
               mergedMap.set(id, currentIssue);
             }
             continue;
@@ -235,7 +251,8 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       });
     } catch (err) {
       if (!mountedRef.current) return;
-      const message = err instanceof Error ? err.message : 'Failed to fetch issues';
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch issues";
       setError(message);
     } finally {
       if (mountedRef.current) {
@@ -269,18 +286,18 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     prevStateRef.current = connectionState;
 
     // Detect transition from reconnecting → connected
-    if (prevState === 'reconnecting' && connectionState === 'connected') {
+    if (prevState === "reconnecting" && connectionState === "connected") {
       // If we had multiple reconnect attempts, assume we may have missed events
       if (maxReconnectAttemptsRef.current >= TOO_FAR_BEHIND_THRESHOLD) {
-        if (process.env.NODE_ENV === 'development') {
+        if (process.env.NODE_ENV === "development") {
           console.debug(
-            '[useIssues] Connection restored after',
+            "[useIssues] Connection restored after",
             maxReconnectAttemptsRef.current,
-            'attempts. Triggering full refetch.'
+            "attempts. Triggering full refetch.",
           );
         }
-        showToast('Connection restored. Refreshing data...', {
-          type: 'info',
+        showToast("Connection restored. Refreshing data...", {
+          type: "info",
           duration: 3000,
         });
         void refetch();
@@ -330,7 +347,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
         throw err;
       }
     },
-    [issuesMap]
+    [issuesMap],
   );
 
   // Get single issue by ID

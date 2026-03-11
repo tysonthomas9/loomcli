@@ -14,7 +14,7 @@
   --text-secondary: #4b5563;
   --accent-bg: #e7ecff;
   --accent-text: #2563eb;
-  --font-main: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-main: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --unified-header-height: 60px;
 
   /* ===========================
@@ -131,8 +131,8 @@
    * =========================== */
   --font-family-base: var(--font-main);
   --font-family-mono:
-    ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-    'Courier New', monospace;
+    ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
   --font-mono: var(--font-family-mono);
 
   /* ===========================
@@ -185,8 +185,10 @@
    * Shadows
    * =========================== */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-md:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
 
   /* ===========================
    * Transitions

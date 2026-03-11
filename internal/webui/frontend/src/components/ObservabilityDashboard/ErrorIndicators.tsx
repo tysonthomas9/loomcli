@@ -1,4 +1,4 @@
-import styles from './ErrorIndicators.module.css';
+import styles from "./ErrorIndicators.module.css";
 
 export interface ErrorIndicatorsProps {
   errorRatePct: number;
@@ -7,9 +7,9 @@ export interface ErrorIndicatorsProps {
 }
 
 function getSeverity(errorRate: number): string {
-  if (errorRate <= 5) return 'ok';
-  if (errorRate <= 15) return 'warning';
-  return 'critical';
+  if (errorRate <= 5) return "ok";
+  if (errorRate <= 15) return "warning";
+  return "critical";
 }
 
 export function ErrorIndicators({
@@ -34,18 +34,26 @@ export function ErrorIndicators({
   return (
     <div className={styles.container}>
       <div className={styles.summary}>
-        <span className={styles.badge} data-severity={getSeverity(errorRatePct)}>
+        <span
+          className={styles.badge}
+          data-severity={getSeverity(errorRatePct)}
+        >
           {errorRatePct.toFixed(1)}% error rate
         </span>
-        <span className={styles.badge} data-severity={restartCount24h > 0 ? 'warning' : 'ok'}>
-          {restartCount24h} restart{restartCount24h !== 1 ? 's' : ''} (24h)
+        <span
+          className={styles.badge}
+          data-severity={restartCount24h > 0 ? "warning" : "ok"}
+        >
+          {restartCount24h} restart{restartCount24h !== 1 ? "s" : ""} (24h)
         </span>
       </div>
       {agentEntries.length > 0 && (
         <div className={styles.agentList}>
           {agentEntries.map(([agent, count]) => (
             <div key={agent} className={styles.agentRow}>
-              <span className={styles.agentName} title={agent}>{agent}</span>
+              <span className={styles.agentName} title={agent}>
+                {agent}
+              </span>
               <span className={styles.restartCount}>{count}</span>
             </div>
           ))}

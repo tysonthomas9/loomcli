@@ -3,22 +3,26 @@
  * Provides a simpler push model compared to WebSocket with built-in browser reconnection.
  */
 
-import { getAuthToken, getAuthState, initAuth } from './client';
+import { getAuthToken, getAuthState, initAuth } from "./client";
 
 // Connection states for real-time event streaming
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+export type ConnectionState =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "reconnecting";
 
 // Mutation types from the backend
 export type MutationType =
-  | 'create'
-  | 'update'
-  | 'delete'
-  | 'comment'
-  | 'status'
-  | 'bonded'
-  | 'squashed'
-  | 'burned'
-  | 'refresh';
+  | "create"
+  | "update"
+  | "delete"
+  | "comment"
+  | "status"
+  | "bonded"
+  | "squashed"
+  | "burned"
+  | "refresh";
 
 // Server → Client: Mutation payload
 export interface MutationPayload {
@@ -54,7 +58,7 @@ export interface SSEClientOptions {
  */
 export class BeadsSSEClient {
   private eventSource: EventSource | null = null;
-  private state: ConnectionState = 'disconnected';
+  private state: ConnectionState = "disconnected";
   private reconnectAttempts = 0;
   private lastEventId: number | undefined;
   private manualDisconnect = false;
@@ -77,15 +81,15 @@ export class BeadsSSEClient {
    * @param since Optional timestamp (ms) to receive events since that time
    */
   async connect(since?: number): Promise<void> {
-    if (this.state === 'connected' || this.state === 'connecting') {
+    if (this.state === "connected" || this.state === "connecting") {
       return;
     }
 
     this.manualDisconnect = false;
-    this.setState('connecting');
+    this.setState("connecting");
 
     // If auth previously failed, try re-acquiring token before connecting
-    if (getAuthToken() === null && getAuthState() === 'failed') {
+    if (getAuthToken() === null && getAuthState() === "failed") {
       await initAuth({ maxRetries: 0 }).catch(() => {
         // Best-effort; proceed even if re-auth fails (auth may be disabled)
       });
@@ -99,16 +103,18 @@ export class BeadsSSEClient {
       this.eventSource = new EventSource(url);
       this.eventSource.onopen = () => this.handleOpen();
       this.eventSource.onerror = () => this.handleError();
-      this.eventSource.addEventListener('mutation', (e) => this.handleMutation(e as MessageEvent));
-      this.eventSource.addEventListener('connected', () => {
+      this.eventSource.addEventListener("mutation", (e) =>
+        this.handleMutation(e as MessageEvent),
+      );
+      this.eventSource.addEventListener("connected", () => {
         // Server sends 'connected' event on successful connection
         // State already set by onopen, so just log for debugging
-        if (process.env.NODE_ENV === 'development') {
-          console.debug('[SSE] Received connected event');
+        if (process.env.NODE_ENV === "development") {
+          console.debug("[SSE] Received connected event");
         }
       });
     } catch (err) {
-      console.error('[SSE] Failed to create EventSource:', err);
+      console.error("[SSE] Failed to create EventSource:", err);
       this.handleError();
     }
   }
@@ -124,7 +130,7 @@ export class BeadsSSEClient {
       this.eventSource = null;
     }
 
-    this.setState('disconnected');
+    this.setState("disconnected");
   }
 
   /**
@@ -156,7 +162,7 @@ export class BeadsSSEClient {
    * Resets the reconnect counter on manual retry.
    */
   retryNow(): void {
-    if (this.state !== 'reconnecting') {
+    if (this.state !== "reconnecting") {
       return;
     }
 
@@ -193,7 +199,7 @@ export class BeadsSSEClient {
 
   private handleOpen(): void {
     const wasReconnecting = this.reconnectAttempts > 0;
-    this.setState('connected');
+    this.setState("connected");
     this.reconnectAttempts = 0;
     // Only notify about reconnect counter reset if we were actually reconnecting
     if (wasReconnecting) {
@@ -209,22 +215,30 @@ export class BeadsSSEClient {
 
     // EventSource has three readyStates: CONNECTING(0), OPEN(1), CLOSED(2)
     // Browser automatically retries on error, so we track attempts
-    if (this.eventSource && this.eventSource.readyState === EventSource.CONNECTING) {
+    if (
+      this.eventSource &&
+      this.eventSource.readyState === EventSource.CONNECTING
+    ) {
       // Browser is reconnecting
       this.reconnectAttempts++;
-      this.setState('reconnecting');
+      this.setState("reconnecting");
       this.onReconnect?.(this.reconnectAttempts);
-    } else if (this.eventSource && this.eventSource.readyState === EventSource.CLOSED) {
+    } else if (
+      this.eventSource &&
+      this.eventSource.readyState === EventSource.CLOSED
+    ) {
       // Connection permanently closed
       this.reconnectAttempts++;
-      this.setState('reconnecting');
+      this.setState("reconnecting");
       this.onReconnect?.(this.reconnectAttempts);
-      this.onError?.('Connection closed');
+      this.onError?.("Connection closed");
     }
 
     // Log warning after multiple failures
     if (this.reconnectAttempts === 5) {
-      console.warn('[SSE] Multiple connection failures, will continue retrying');
+      console.warn(
+        "[SSE] Multiple connection failures, will continue retrying",
+      );
     }
   }
 
@@ -234,7 +248,7 @@ export class BeadsSSEClient {
       mutation = JSON.parse(event.data as string);
     } catch {
       // Invalid JSON - log and skip
-      console.warn('[SSE] Received malformed mutation event');
+      console.warn("[SSE] Received malformed mutation event");
       return;
     }
 
@@ -261,11 +275,11 @@ export function getSSEUrl(since?: number): string {
   const base = `${window.location.origin}/api/events`;
   const params = new URLSearchParams();
   if (since !== undefined) {
-    params.set('since', String(since));
+    params.set("since", String(since));
   }
   const token = getAuthToken();
   if (token) {
-    params.set('token', token);
+    params.set("token", token);
   }
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;

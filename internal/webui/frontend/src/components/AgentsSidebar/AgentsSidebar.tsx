@@ -4,22 +4,28 @@
  * Includes work queue summary, project stats, and sync status.
  */
 
-import type { ReactNode } from 'react';
-import { useState, useCallback, useEffect } from 'react';
+import type { ReactNode } from "react";
+import { useState, useCallback, useEffect } from "react";
 
-import { useAgentContext } from '@/hooks';
-import type { LoomTaskInfo, WorktreeSyncDetail } from '@/types';
+import { useAgentContext } from "@/hooks";
+import type { LoomTaskInfo, WorktreeSyncDetail } from "@/types";
 
-import { AgentCard } from '../AgentCard';
-import { TaskDrawer } from '../TaskDrawer';
-import type { TaskCategory } from '../TaskDrawer';
-import styles from './AgentsSidebar.module.css';
+import { AgentCard } from "../AgentCard";
+import { TaskDrawer } from "../TaskDrawer";
+import type { TaskCategory } from "../TaskDrawer";
+import styles from "./AgentsSidebar.module.css";
 
-function buildSyncTooltip(details: WorktreeSyncDetail[] | undefined, direction: string): string {
-  if (!details || details.length === 0) return '';
+function buildSyncTooltip(
+  details: WorktreeSyncDetail[] | undefined,
+  direction: string,
+): string {
+  if (!details || details.length === 0) return "";
   return details
-    .map(d => `${d.name}: ${d.count} commit${d.count !== 1 ? 's' : ''} ${direction}`)
-    .join('\n');
+    .map(
+      (d) =>
+        `${d.name}: ${d.count} commit${d.count !== 1 ? "s" : ""} ${direction}`,
+    )
+    .join("\n");
 }
 
 /**
@@ -38,8 +44,8 @@ export interface AgentsSidebarProps {
   viewSwitcher?: ReactNode;
 }
 
-const COLLAPSE_STORAGE_KEY = 'agents-sidebar-collapsed';
-const WORK_QUEUE_STORAGE_KEY = 'agents-sidebar-work-queue-expanded';
+const COLLAPSE_STORAGE_KEY = "agents-sidebar-collapsed";
+const WORK_QUEUE_STORAGE_KEY = "agents-sidebar-work-queue-expanded";
 
 /**
  * AgentsSidebar displays a collapsible panel with agent status cards.
@@ -55,7 +61,7 @@ export function AgentsSidebar({
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
       const stored = localStorage.getItem(COLLAPSE_STORAGE_KEY);
-      return stored !== null ? stored === 'true' : defaultCollapsed;
+      return stored !== null ? stored === "true" : defaultCollapsed;
     } catch {
       return defaultCollapsed;
     }
@@ -65,17 +71,29 @@ export function AgentsSidebar({
   const [isWorkQueueExpanded, setIsWorkQueueExpanded] = useState(() => {
     try {
       const stored = localStorage.getItem(WORK_QUEUE_STORAGE_KEY);
-      return stored !== null ? stored === 'true' : true;
+      return stored !== null ? stored === "true" : true;
     } catch {
       return true;
     }
   });
 
   // Track which category drawer is open
-  const [selectedCategory, setSelectedCategory] = useState<TaskCategory | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<TaskCategory | null>(
+    null,
+  );
 
-  const { agents, tasks, taskLists, agentTasks, sync, stats, isLoading, isConnected, wasEverConnected, lastUpdated } =
-    useAgentContext();
+  const {
+    agents,
+    tasks,
+    taskLists,
+    agentTasks,
+    sync,
+    stats,
+    isLoading,
+    isConnected,
+    wasEverConnected,
+    lastUpdated,
+  } = useAgentContext();
 
   // Persist collapsed state
   useEffect(() => {
@@ -113,22 +131,25 @@ export function AgentsSidebar({
   }, []);
 
   // Get tasks and title for the selected category
-  const getDrawerData = useCallback((): { title: string; tasks: LoomTaskInfo[] } => {
+  const getDrawerData = useCallback((): {
+    title: string;
+    tasks: LoomTaskInfo[];
+  } => {
     switch (selectedCategory) {
-      case 'plan':
-        return { title: 'Backlog', tasks: taskLists.needsPlanning };
-      case 'impl':
-        return { title: 'Open', tasks: taskLists.readyToImplement };
-      case 'review':
-        return { title: 'Needs Review', tasks: taskLists.needsReview };
-      case 'inProgress':
-        return { title: 'In Progress', tasks: taskLists.inProgress };
-      case 'blocked':
-        return { title: 'Blocked', tasks: taskLists.backlog };
-      case 'done':
-        return { title: 'Done', tasks: [] };
+      case "plan":
+        return { title: "Backlog", tasks: taskLists.needsPlanning };
+      case "impl":
+        return { title: "Open", tasks: taskLists.readyToImplement };
+      case "review":
+        return { title: "Needs Review", tasks: taskLists.needsReview };
+      case "inProgress":
+        return { title: "In Progress", tasks: taskLists.inProgress };
+      case "blocked":
+        return { title: "Blocked", tasks: taskLists.backlog };
+      case "done":
+        return { title: "Done", tasks: [] };
       default:
-        return { title: '', tasks: [] };
+        return { title: "", tasks: [] };
     }
   }, [selectedCategory, taskLists]);
 
@@ -136,28 +157,37 @@ export function AgentsSidebar({
 
   const collapsed = collapsible ? isCollapsed : false;
 
-  const rootClassName = [styles.sidebar, collapsed && styles.collapsed, className]
+  const rootClassName = [
+    styles.sidebar,
+    collapsed && styles.collapsed,
+    className,
+  ]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
 
   // Count active agents (working or planning)
   const activeCount = agents.filter(
-    (a) => a.status.startsWith('working:') || a.status.startsWith('planning:')
+    (a) => a.status.startsWith("working:") || a.status.startsWith("planning:"),
   ).length;
 
   // Check if there are sync warnings
-  const hasSyncWarning = sync.git_needs_push > 0 || sync.git_needs_pull > 0 || !sync.db_synced;
+  const hasSyncWarning =
+    sync.git_needs_push > 0 || sync.git_needs_pull > 0 || !sync.db_synced;
 
   return (
     <aside className={rootClassName} data-collapsed={isCollapsed}>
-      {!collapsed && viewSwitcher && <div className={styles.viewSwitcherSlot}>{viewSwitcher}</div>}
+      {!collapsed && viewSwitcher && (
+        <div className={styles.viewSwitcherSlot}>{viewSwitcher}</div>
+      )}
       {collapsible ? (
         <button
           type="button"
           className={styles.toggleButton}
           onClick={handleToggle}
           aria-expanded={!isCollapsed}
-          aria-label={isCollapsed ? 'Expand agents sidebar' : 'Collapse agents sidebar'}
+          aria-label={
+            isCollapsed ? "Expand agents sidebar" : "Collapse agents sidebar"
+          }
         >
           {!collapsed && (
             <>
@@ -165,7 +195,7 @@ export function AgentsSidebar({
               <span className={styles.sectionCount}>{agents.length}</span>
             </>
           )}
-          <span className={styles.toggleIcon}>{collapsed ? '>' : '<'}</span>
+          <span className={styles.toggleIcon}>{collapsed ? ">" : "<"}</span>
         </button>
       ) : (
         <div className={styles.headerRow}>
@@ -198,7 +228,9 @@ export function AgentsSidebar({
                   key={agent.name}
                   agent={agent}
                   taskTitle={agentTasks[agent.name]?.title}
-                  {...(onAgentClick !== undefined && { onClick: () => onAgentClick(agent.name) })}
+                  {...(onAgentClick !== undefined && {
+                    onClick: () => onAgentClick(agent.name),
+                  })}
                 />
               ))}
             </div>
@@ -212,9 +244,11 @@ export function AgentsSidebar({
                 onClick={handleWorkQueueToggle}
                 role="button"
                 tabIndex={0}
-                onKeyDown={(e) => e.key === 'Enter' && handleWorkQueueToggle()}
+                onKeyDown={(e) => e.key === "Enter" && handleWorkQueueToggle()}
               >
-                <span className={styles.workQueueToggle}>{isWorkQueueExpanded ? 'v' : '>'}</span>
+                <span className={styles.workQueueToggle}>
+                  {isWorkQueueExpanded ? "v" : ">"}
+                </span>
                 <span>Work Queue</span>
               </div>
               {isWorkQueueExpanded && (
@@ -223,7 +257,7 @@ export function AgentsSidebar({
                     <button
                       type="button"
                       className={styles.queueItem}
-                      onClick={() => handleCategoryClick('impl')}
+                      onClick={() => handleCategoryClick("impl")}
                       disabled={tasks.ready_to_implement === 0}
                     >
                       <span className={styles.queueLabel}>Open</span>
@@ -237,7 +271,7 @@ export function AgentsSidebar({
                     <button
                       type="button"
                       className={styles.queueItem}
-                      onClick={() => handleCategoryClick('blocked')}
+                      onClick={() => handleCategoryClick("blocked")}
                       disabled={tasks.backlog === 0}
                     >
                       <span className={styles.queueLabel}>Blocked</span>
@@ -246,7 +280,7 @@ export function AgentsSidebar({
                     <button
                       type="button"
                       className={styles.queueItem}
-                      onClick={() => handleCategoryClick('inProgress')}
+                      onClick={() => handleCategoryClick("inProgress")}
                       disabled={(tasks.in_progress ?? 0) === 0}
                     >
                       <span className={styles.queueLabel}>In Progress</span>
@@ -260,11 +294,14 @@ export function AgentsSidebar({
                     <button
                       type="button"
                       className={styles.queueItem}
-                      onClick={() => handleCategoryClick('review')}
+                      onClick={() => handleCategoryClick("review")}
                       disabled={tasks.need_review === 0}
                     >
                       <span className={styles.queueLabel}>Needs Review</span>
-                      <span className={styles.queueCount} data-highlight={tasks.need_review > 0}>
+                      <span
+                        className={styles.queueCount}
+                        data-highlight={tasks.need_review > 0}
+                      >
                         {tasks.need_review}
                       </span>
                     </button>
@@ -289,11 +326,13 @@ export function AgentsSidebar({
             {isConnected && stats.total > 0 && (
               <div className={styles.statsRow}>
                 <span className={styles.statItem}>
-                  <span className={styles.statValue}>{stats.remaining}</span> remaining
+                  <span className={styles.statValue}>{stats.remaining}</span>{" "}
+                  remaining
                 </span>
                 <span className={styles.statSeparator}>·</span>
                 <span className={styles.statItem}>
-                  <span className={styles.statValue}>{stats.closed}</span> closed
+                  <span className={styles.statValue}>{stats.closed}</span>{" "}
+                  closed
                 </span>
                 <span className={styles.statSeparator}>·</span>
                 <span className={styles.statItem}>
@@ -310,7 +349,7 @@ export function AgentsSidebar({
                 {sync.git_needs_push > 0 && (
                   <span
                     className={styles.syncWarning}
-                    title={buildSyncTooltip(sync.git_push_details, 'ahead')}
+                    title={buildSyncTooltip(sync.git_push_details, "ahead")}
                   >
                     {sync.git_needs_push} unpushed
                   </span>
@@ -321,28 +360,36 @@ export function AgentsSidebar({
                 {sync.git_needs_pull > 0 && (
                   <span
                     className={styles.syncWarning}
-                    title={buildSyncTooltip(sync.git_pull_details, 'behind')}
+                    title={buildSyncTooltip(sync.git_pull_details, "behind")}
                   >
                     {sync.git_needs_pull} unpulled
                   </span>
                 )}
-                {(sync.git_needs_push > 0 || sync.git_needs_pull > 0) && !sync.db_synced && (
-                  <span className={styles.syncSeparator}>·</span>
+                {(sync.git_needs_push > 0 || sync.git_needs_pull > 0) &&
+                  !sync.db_synced && (
+                    <span className={styles.syncSeparator}>·</span>
+                  )}
+                {!sync.db_synced && (
+                  <span className={styles.syncWarning}>DB not synced</span>
                 )}
-                {!sync.db_synced && <span className={styles.syncWarning}>DB not synced</span>}
               </div>
             )}
 
             {/* Timestamp */}
             {lastUpdated && (
-              <span className={styles.timestamp}>Updated {lastUpdated.toLocaleTimeString()}</span>
+              <span className={styles.timestamp}>
+                Updated {lastUpdated.toLocaleTimeString()}
+              </span>
             )}
           </div>
         </div>
       )}
 
       {collapsed && activeCount > 0 && (
-        <div className={styles.collapsedBadge} title={`${activeCount} active agent(s)`}>
+        <div
+          className={styles.collapsedBadge}
+          title={`${activeCount} active agent(s)`}
+        >
           {activeCount}
         </div>
       )}

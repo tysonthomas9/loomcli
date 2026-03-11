@@ -42,7 +42,7 @@
 }
 
 /* Saving state - pulsing animation */
-.trigger[data-saving='true'] {
+.trigger[data-saving="true"] {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -99,12 +99,12 @@
   background-color: var(--color-bg-secondary);
 }
 
-.option[data-selected='true'] {
+.option[data-selected="true"] {
   background-color: var(--color-bg-tertiary);
   font-weight: 500;
 }
 
-.option[data-focused='true'] {
+.option[data-focused="true"] {
   background-color: var(--color-bg-secondary);
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
@@ -128,23 +128,23 @@
   flex-shrink: 0;
 }
 
-.colorDot[data-priority='0'] {
+.colorDot[data-priority="0"] {
   background-color: var(--color-priority-0);
 }
 
-.colorDot[data-priority='1'] {
+.colorDot[data-priority="1"] {
   background-color: var(--color-priority-1);
 }
 
-.colorDot[data-priority='2'] {
+.colorDot[data-priority="2"] {
   background-color: var(--color-priority-2);
 }
 
-.colorDot[data-priority='3'] {
+.colorDot[data-priority="3"] {
   background-color: var(--color-priority-3);
 }
 
-.colorDot[data-priority='4'] {
+.colorDot[data-priority="4"] {
   background-color: var(--color-priority-4);
 }
 

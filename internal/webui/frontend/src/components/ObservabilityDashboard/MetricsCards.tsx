@@ -1,4 +1,4 @@
-import styles from './MetricsCards.module.css';
+import styles from "./MetricsCards.module.css";
 
 export interface MetricsCardsProps {
   tasksPerHour: number;
@@ -27,7 +27,9 @@ export function MetricsCards({
         <span className={styles.cardLabel}>Tasks / Hour</span>
       </div>
       <div className={styles.card}>
-        <span className={styles.cardValue}>{formatDuration(avgDurationSec)}</span>
+        <span className={styles.cardValue}>
+          {formatDuration(avgDurationSec)}
+        </span>
         <span className={styles.cardLabel}>Avg Duration</span>
       </div>
       <div className={styles.card}>
@@ -35,7 +37,9 @@ export function MetricsCards({
         <span className={styles.cardLabel}>Lines / Hour</span>
       </div>
       <div className={styles.card}>
-        <span className={`${styles.cardValue} ${errorRatePct > 10 ? styles.error : ''}`}>
+        <span
+          className={`${styles.cardValue} ${errorRatePct > 10 ? styles.error : ""}`}
+        >
           {errorRatePct.toFixed(1)}%
         </span>
         <span className={styles.cardLabel}>Error Rate</span>

@@ -2,7 +2,7 @@
  * Entity reference types for HOP (Human-Operated Protocol) tracking.
  */
 
-import type { ISODateString } from './common';
+import type { ISODateString } from "./common";
 
 /**
  * Structured reference to an entity (human, agent, or org).
@@ -19,7 +19,7 @@ export interface EntityRef {
 /**
  * Validation outcome values.
  */
-export type ValidationOutcome = 'accepted' | 'rejected' | 'revision_requested';
+export type ValidationOutcome = "accepted" | "rejected" | "revision_requested";
 
 /**
  * Validation record for work approval.
@@ -45,7 +45,7 @@ export interface BondRef {
 /**
  * Bond type constants.
  */
-export const BondTypeSequential = 'sequential';
-export const BondTypeParallel = 'parallel';
-export const BondTypeConditional = 'conditional';
-export const BondTypeRoot = 'root';
+export const BondTypeSequential = "sequential";
+export const BondTypeParallel = "parallel";
+export const BondTypeConditional = "conditional";
+export const BondTypeRoot = "root";

@@ -1,6 +1,6 @@
-import type { HourlyBucket } from '@/types';
+import type { HourlyBucket } from "@/types";
 
-import styles from './TaskTimeline.module.css';
+import styles from "./TaskTimeline.module.css";
 
 export interface TaskTimelineProps {
   hourlyCompletions: HourlyBucket[];
@@ -8,23 +8,28 @@ export interface TaskTimelineProps {
 
 function formatHourLabel(hour: string): string {
   const date = new Date(hour);
-  if (isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString([], { hour: '2-digit', hour12: false });
+  if (isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", hour12: false });
 }
 
-export function TaskTimeline({ hourlyCompletions }: TaskTimelineProps): JSX.Element {
-  const hasData = hourlyCompletions.length > 0 &&
+export function TaskTimeline({
+  hourlyCompletions,
+}: TaskTimelineProps): JSX.Element {
+  const hasData =
+    hourlyCompletions.length > 0 &&
     hourlyCompletions.some((b) => b.completed > 0 || b.failed > 0);
 
   if (!hasData) {
     return (
-      <div className={styles.emptyState}>No task completions in the last 24 hours</div>
+      <div className={styles.emptyState}>
+        No task completions in the last 24 hours
+      </div>
     );
   }
 
   const maxValue = Math.max(
     ...hourlyCompletions.map((b) => b.completed + b.failed),
-    1
+    1,
   );
 
   return (
@@ -53,7 +58,7 @@ export function TaskTimeline({ hourlyCompletions }: TaskTimelineProps): JSX.Elem
               )}
             </div>
             <span className={styles.hourLabel}>
-              {showLabel ? formatHourLabel(bucket.hour) : ''}
+              {showLabel ? formatHourLabel(bucket.hour) : ""}
             </span>
           </div>
         );

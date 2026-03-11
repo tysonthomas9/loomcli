@@ -241,7 +241,7 @@
   color: var(--color-text-primary);
 }
 
-.queueCount[data-highlight='true'] {
+.queueCount[data-highlight="true"] {
   color: var(--color-status-working);
 }
 

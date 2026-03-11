@@ -6,10 +6,18 @@
  * search across all views.
  */
 
-import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  useMemo,
+  lazy,
+  Suspense,
+} from "react";
 
-import { updateIssue, addComment, closeIssue } from '@/api';
-import { getReviewType } from '@/utils/issueCategory';
+import { updateIssue, addComment, closeIssue } from "@/api";
+import { getReviewType } from "@/utils/issueCategory";
 import {
   AppLayout,
   SwimLaneBoard,
@@ -27,8 +35,8 @@ import {
   BulkActionToolbar,
   TalkToLeadButton,
   NavRail,
-} from '@/components';
-import type { BlockedInfo } from '@/components/KanbanBoard';
+} from "@/components";
+import type { BlockedInfo } from "@/components/KanbanBoard";
 import {
   useIssues,
   useViewState,
@@ -42,34 +50,42 @@ import {
   useRecentAssignees,
   useSelection,
   useAgents,
-} from '@/hooks';
-import type { Issue, Status } from '@/types';
+} from "@/hooks";
+import type { Issue, Status } from "@/types";
 
-import styles from './App.module.css';
+import styles from "./App.module.css";
 
 // Lazy load GraphView (React Flow ~100KB)
 const GraphView = lazy(() =>
-  import('@/components/GraphView').then((m) => ({ default: m.GraphView }))
+  import("@/components/GraphView").then((m) => ({ default: m.GraphView })),
 );
 
 // Lazy load MonitorDashboard (multi-agent operator view)
 const MonitorDashboard = lazy(() =>
-  import('@/components/MonitorDashboard').then((m) => ({ default: m.MonitorDashboard }))
+  import("@/components/MonitorDashboard").then((m) => ({
+    default: m.MonitorDashboard,
+  })),
 );
 
 // Lazy load SettingsView (backend config settings)
 const SettingsView = lazy(() =>
-  import('@/components/SettingsView').then((m) => ({ default: m.SettingsView }))
+  import("@/components/SettingsView").then((m) => ({
+    default: m.SettingsView,
+  })),
 );
 
 // Lazy load ObservabilityDashboard (observability metrics view)
 const ObservabilityDashboard = lazy(() =>
-  import('@/components/ObservabilityDashboard').then((m) => ({ default: m.ObservabilityDashboard }))
+  import("@/components/ObservabilityDashboard").then((m) => ({
+    default: m.ObservabilityDashboard,
+  })),
 );
 
 // Lazy load TerminalPanel (xterm.js ~100KB)
 const TerminalPanel = lazy(() =>
-  import('@/components/TerminalPanel').then((m) => ({ default: m.TerminalPanel }))
+  import("@/components/TerminalPanel").then((m) => ({
+    default: m.TerminalPanel,
+  })),
 );
 
 function App() {
@@ -85,13 +101,20 @@ function App() {
     refetch,
     updateIssueStatus,
     retryConnection,
-  } = useIssues({ mode: activeView === 'graph' ? 'graph' : activeView === 'kanban' ? 'kanban' : 'ready' });
+  } = useIssues({
+    mode:
+      activeView === "graph"
+        ? "graph"
+        : activeView === "kanban"
+          ? "kanban"
+          : "ready",
+  });
 
   // Filter state with URL synchronization
   const [filters, filterActions] = useFilterState();
 
   // Local search state with debouncing
-  const [searchValue, setSearchValue] = useState(filters.search ?? '');
+  const [searchValue, setSearchValue] = useState(filters.search ?? "");
   const debouncedSearch = useDebounce(searchValue, 300);
 
   // Sync debounced search to filter state
@@ -101,7 +124,7 @@ function App() {
 
   // Sync search value from filter state (e.g., when Clear filters is clicked)
   useEffect(() => {
-    const filterSearch = filters.search ?? '';
+    const filterSearch = filters.search ?? "";
     // Only sync if it's an external change (differs from both local states)
     if (filterSearch !== searchValue && filterSearch !== debouncedSearch) {
       setSearchValue(filterSearch);
@@ -119,11 +142,13 @@ function App() {
   const { filteredIssues } = useIssueFilter(issues, filterOptions);
 
   // Only fetch blocked issues separately when NOT in kanban mode (kanban mode includes it inline)
-  const { data: blockedIssuesData } = useBlockedIssues({ enabled: activeView !== 'kanban' });
+  const { data: blockedIssuesData } = useBlockedIssues({
+    enabled: activeView !== "kanban",
+  });
 
   // Derive blockedIssuesMap from enriched issue data (kanban mode) or separate fetch
   const blockedIssuesMap = useMemo(() => {
-    if (activeView === 'kanban') {
+    if (activeView === "kanban") {
       // In kanban mode, blocked info is already in the issue data
       const map = new Map<string, BlockedInfo>();
       for (const issue of issues) {
@@ -155,8 +180,12 @@ function App() {
   const mountedRef = useRef(true);
 
   // Timeout refs for panel close animations (prevents race conditions)
-  const issuePanelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const agentPanelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const issuePanelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const agentPanelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Helper to clear a timeout ref safely
   const clearTimeoutRef = useCallback(
@@ -166,7 +195,7 @@ function App() {
         ref.current = null;
       }
     },
-    []
+    [],
   );
 
   // Bulk selection state for Table view
@@ -192,7 +221,9 @@ function App() {
 
   // Agent detail panel state
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
-  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(null);
+  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(
+    null,
+  );
 
   // Terminal panel state
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
@@ -220,7 +251,7 @@ function App() {
     async (issueId: string, newStatus: Status, oldStatus: Status) => {
       // Check if dragging from Ready (open) to In Progress (in_progress)
       // If so, show the assignee prompt instead of updating immediately
-      if (oldStatus === 'open' && newStatus === 'in_progress') {
+      if (oldStatus === "open" && newStatus === "in_progress") {
         setPendingDragData({ issueId, newStatus, oldStatus });
         return;
       }
@@ -230,11 +261,12 @@ function App() {
         await updateIssueStatus(issueId, newStatus);
       } catch (err) {
         if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : 'Failed to update status';
-        showToast(message, { type: 'error' });
+        const message =
+          err instanceof Error ? err.message : "Failed to update status";
+        showToast(message, { type: "error" });
       }
     },
-    [updateIssueStatus, showToast]
+    [updateIssueStatus, showToast],
   );
 
   // Handle assignee prompt confirmation
@@ -246,7 +278,7 @@ function App() {
       setPendingDragData(null);
 
       // Extract the name without [H] prefix for storing in recent (we add it back when selecting)
-      const nameWithoutPrefix = assignee.replace(/^\[H\]\s*/, '');
+      const nameWithoutPrefix = assignee.replace(/^\[H\]\s*/, "");
       addRecentAssignee(nameWithoutPrefix);
 
       try {
@@ -254,11 +286,12 @@ function App() {
         await updateIssue(issueId, { status: newStatus, assignee });
       } catch (err) {
         if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : 'Failed to update status';
-        showToast(message, { type: 'error' });
+        const message =
+          err instanceof Error ? err.message : "Failed to update status";
+        showToast(message, { type: "error" });
       }
     },
-    [pendingDragData, addRecentAssignee, showToast]
+    [pendingDragData, addRecentAssignee, showToast],
   );
 
   // Handle assignee prompt skip
@@ -273,14 +306,15 @@ function App() {
       await updateIssueStatus(issueId, newStatus);
     } catch (err) {
       if (!mountedRef.current) return;
-      const message = err instanceof Error ? err.message : 'Failed to update status';
-      showToast(message, { type: 'error' });
+      const message =
+        err instanceof Error ? err.message : "Failed to update status";
+      showToast(message, { type: "error" });
     }
   }, [pendingDragData, updateIssueStatus, showToast]);
 
   // Handle search clear to sync both local and filter state
   const handleSearchClear = useCallback(() => {
-    setSearchValue('');
+    setSearchValue("");
     filterActions.setSearch(undefined);
   }, [filterActions]);
 
@@ -315,7 +349,14 @@ function App() {
       setIsPanelOpen(true);
       fetchIssue(issue.id);
     },
-    [selectedIssueId, isPanelOpen, isAgentPanelOpen, isTerminalOpen, fetchIssue, clearTimeoutRef]
+    [
+      selectedIssueId,
+      isPanelOpen,
+      isAgentPanelOpen,
+      isTerminalOpen,
+      fetchIssue,
+      clearTimeoutRef,
+    ],
   );
 
   // Handle panel close
@@ -336,27 +377,28 @@ function App() {
       try {
         const reviewType = getReviewType(issue);
 
-        if (reviewType === 'code') {
+        if (reviewType === "code") {
           // Code review: Close the issue (PR was reviewed and approved)
-          await closeIssue(issue.id, 'PR approved after code review');
+          await closeIssue(issue.id, "PR approved after code review");
           await refetch();
-        } else if (reviewType === 'plan') {
+        } else if (reviewType === "plan") {
           // Plan review: Move to open (ready for implementation)
-          await updateIssueStatus(issue.id, 'open');
-        } else if (reviewType === 'help') {
+          await updateIssueStatus(issue.id, "open");
+        } else if (reviewType === "help") {
           // Needs help: Move to in_progress (unblock)
-          await updateIssueStatus(issue.id, 'in_progress');
+          await updateIssueStatus(issue.id, "in_progress");
         }
 
         // Close the detail panel and clean up after successful approve
         handlePanelClose();
       } catch (err) {
         if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : 'Failed to approve';
-        showToast(message, { type: 'error' });
+        const message =
+          err instanceof Error ? err.message : "Failed to approve";
+        showToast(message, { type: "error" });
       }
     },
-    [updateIssueStatus, refetch, handlePanelClose, showToast]
+    [updateIssueStatus, refetch, handlePanelClose, showToast],
   );
 
   // Handle reject button submission on review cards
@@ -366,13 +408,13 @@ function App() {
         const reviewType = getReviewType(issue);
 
         // Add feedback comment
-        const prefix = reviewType === 'code' ? 'CODE REVIEW' : 'FEEDBACK';
+        const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
         await addComment(issue.id, `${prefix}: ${comment}`);
 
         // Add needs-revision label and set status to open
         await updateIssue(issue.id, {
-          status: 'open',
-          add_labels: ['needs-revision'],
+          status: "open",
+          add_labels: ["needs-revision"],
         });
 
         // Refetch to reflect label/status changes and close panel
@@ -380,13 +422,12 @@ function App() {
         handlePanelClose();
       } catch (err) {
         if (!mountedRef.current) return;
-        const message = err instanceof Error ? err.message : 'Failed to reject';
-        showToast(message, { type: 'error' });
+        const message = err instanceof Error ? err.message : "Failed to reject";
+        showToast(message, { type: "error" });
       }
     },
-    [refetch, handlePanelClose, showToast]
+    [refetch, handlePanelClose, showToast],
   );
-
 
   // Handle agent click from AgentsSidebar or MonitorDashboard
   const handleAgentClick = useCallback(
@@ -414,7 +455,7 @@ function App() {
       setSelectedAgentName(agentName);
       setIsAgentPanelOpen(true);
     },
-    [isPanelOpen, isTerminalOpen, clearIssue, clearTimeoutRef]
+    [isPanelOpen, isTerminalOpen, clearIssue, clearTimeoutRef],
   );
 
   // Handle agent panel close
@@ -455,7 +496,13 @@ function App() {
       }
       setIsTerminalOpen(true);
     }
-  }, [isTerminalOpen, isPanelOpen, isAgentPanelOpen, clearIssue, clearTimeoutRef]);
+  }, [
+    isTerminalOpen,
+    isPanelOpen,
+    isAgentPanelOpen,
+    clearIssue,
+    clearTimeoutRef,
+  ]);
 
   // Handle terminal panel close
   const handleTerminalClose = useCallback(() => {
@@ -480,7 +527,7 @@ function App() {
         fetchIssue(taskId);
       }, 300);
     },
-    [fetchIssue, clearTimeoutRef]
+    [fetchIssue, clearTimeoutRef],
   );
 
   const headerNavigation = (
@@ -540,7 +587,10 @@ function App() {
           />
         }
       >
-        <div className={styles.loadingContainer} data-testid="loading-container">
+        <div
+          className={styles.loadingContainer}
+          data-testid="loading-container"
+        >
           <LoadingSkeleton.Column />
           <LoadingSkeleton.Column />
           <LoadingSkeleton.Column />
@@ -590,19 +640,23 @@ function App() {
         />
       }
     >
-      {activeView === 'kanban' && (
+      {activeView === "kanban" && (
         <div className={styles.kanbanShell}>
           <SwimLaneBoard
             issues={filteredIssues}
             groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
             onDragEnd={handleDragEnd}
             onIssueClick={handleIssueClick}
-            {...(blockedIssuesMap !== undefined && { blockedIssues: blockedIssuesMap })}
-            {...(filters.showBlocked !== undefined && { showBlocked: filters.showBlocked })}
+            {...(blockedIssuesMap !== undefined && {
+              blockedIssues: blockedIssuesMap,
+            })}
+            {...(filters.showBlocked !== undefined && {
+              showBlocked: filters.showBlocked,
+            })}
           />
         </div>
       )}
-      {activeView === 'table' && (
+      {activeView === "table" && (
         <>
           <IssueTable
             issues={filteredIssues}
@@ -612,18 +666,25 @@ function App() {
             onSelectionChange={toggleSelection}
             onRowClick={handleIssueClick}
             {...(selectedIssueId !== null && { selectedId: selectedIssueId })}
-            {...(blockedIssuesMap !== undefined && { blockedIssues: blockedIssuesMap })}
-            {...(filters.showBlocked !== undefined && { showBlocked: filters.showBlocked })}
+            {...(blockedIssuesMap !== undefined && {
+              blockedIssues: blockedIssuesMap,
+            })}
+            {...(filters.showBlocked !== undefined && {
+              showBlocked: filters.showBlocked,
+            })}
           />
-          <BulkActionToolbar selectedIds={selectedIds} onClearSelection={clearSelection} />
+          <BulkActionToolbar
+            selectedIds={selectedIds}
+            onClearSelection={clearSelection}
+          />
         </>
       )}
-      {activeView === 'graph' && (
+      {activeView === "graph" && (
         <Suspense fallback={<LoadingSkeleton.Graph />}>
           <GraphView issues={filteredIssues} onNodeClick={handleIssueClick} />
         </Suspense>
       )}
-      {activeView === 'monitor' && (
+      {activeView === "monitor" && (
         <Suspense fallback={<LoadingSkeleton.Monitor />}>
           <MonitorDashboard
             onViewChange={setActiveView}
@@ -632,12 +693,12 @@ function App() {
           />
         </Suspense>
       )}
-      {activeView === 'observability' && (
+      {activeView === "observability" && (
         <Suspense fallback={<LoadingSkeleton.Column />}>
           <ObservabilityDashboard />
         </Suspense>
       )}
-      {activeView === 'settings' && (
+      {activeView === "settings" && (
         <Suspense fallback={<LoadingSkeleton.Column />}>
           <SettingsView />
         </Suspense>
@@ -660,7 +721,10 @@ function App() {
         onClose={handleAgentPanelClose}
         onTaskClick={handleAgentTaskClick}
       />
-      <TalkToLeadButton onClick={handleTalkToLeadClick} isActive={isTerminalOpen} />
+      <TalkToLeadButton
+        onClick={handleTalkToLeadClick}
+        isActive={isTerminalOpen}
+      />
       <AssigneePrompt
         isOpen={pendingDragData !== null}
         onConfirm={handleAssigneeConfirm}

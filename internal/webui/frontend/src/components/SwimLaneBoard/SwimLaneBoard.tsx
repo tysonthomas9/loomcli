@@ -15,27 +15,35 @@ import {
   useSensors,
   type DragStartEvent,
   type DragEndEvent,
-} from '@dnd-kit/core';
-import { useState, useMemo, useCallback, useEffect } from 'react';
+} from "@dnd-kit/core";
+import { useState, useMemo, useCallback, useEffect } from "react";
 
-import { DraggableIssueCard } from '@/components/DraggableIssueCard';
-import type { BlockedInfo } from '@/components/KanbanBoard';
-import { KanbanBoard } from '@/components/KanbanBoard';
-import { DEFAULT_COLUMNS, createColumns } from '@/components/KanbanBoard/columnConfigs';
-import type { KanbanColumnConfig } from '@/components/KanbanBoard/types';
-import { formatStatusLabel } from '@/utils/statusFormat';
-import { SwimLane } from '@/components/SwimLane';
-import type { FilterState } from '@/hooks/useFilterState';
-import type { Issue, Status } from '@/types';
+import { DraggableIssueCard } from "@/components/DraggableIssueCard";
+import type { BlockedInfo } from "@/components/KanbanBoard";
+import { KanbanBoard } from "@/components/KanbanBoard";
+import {
+  DEFAULT_COLUMNS,
+  createColumns,
+} from "@/components/KanbanBoard/columnConfigs";
+import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
+import { formatStatusLabel } from "@/utils/statusFormat";
+import { SwimLane } from "@/components/SwimLane";
+import type { FilterState } from "@/hooks/useFilterState";
+import type { Issue, Status } from "@/types";
 
-import { groupIssuesByField, sortLanes, type GroupByField, type LaneGroup } from './groupingUtils';
-import styles from './SwimLaneBoard.module.css';
+import {
+  groupIssuesByField,
+  sortLanes,
+  type GroupByField,
+  type LaneGroup,
+} from "./groupingUtils";
+import styles from "./SwimLaneBoard.module.css";
 
 /**
  * Storage key prefix for collapsed lanes state.
  * Combined with groupBy for unique key per grouping mode.
  */
-const STORAGE_KEY_PREFIX = 'swimlane-collapsed-';
+const STORAGE_KEY_PREFIX = "swimlane-collapsed-";
 
 /**
  * Helper to get storage key for a groupBy mode.
@@ -48,14 +56,14 @@ function getStorageKey(groupBy: GroupByField): string {
  * Helper to load collapsed lanes from localStorage.
  */
 function loadCollapsedLanes(groupBy: GroupByField): Set<string> {
-  if (groupBy === 'none') return new Set();
+  if (groupBy === "none") return new Set();
   try {
     const stored = localStorage.getItem(getStorageKey(groupBy));
     if (stored) {
       const parsed: unknown = JSON.parse(stored);
       if (
         Array.isArray(parsed) &&
-        parsed.every((item): item is string => typeof item === 'string')
+        parsed.every((item): item is string => typeof item === "string")
       ) {
         return new Set(parsed);
       }
@@ -70,7 +78,7 @@ function loadCollapsedLanes(groupBy: GroupByField): Set<string> {
  * Helper to save collapsed lanes to localStorage.
  */
 function saveCollapsedLanes(groupBy: GroupByField, lanes: Set<string>): void {
-  if (groupBy === 'none') return;
+  if (groupBy === "none") return;
   try {
     localStorage.setItem(getStorageKey(groupBy), JSON.stringify([...lanes]));
   } catch {
@@ -87,7 +95,9 @@ function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
     id: s,
     label: formatStatusLabel(s),
     filter: (issue: Issue) =>
-      s === 'open' ? issue.status === s || issue.status === undefined : issue.status === s,
+      s === "open"
+        ? issue.status === s || issue.status === undefined
+        : issue.status === s,
     targetStatus: s,
   }));
 }
@@ -117,7 +127,7 @@ export interface SwimLaneBoardProps {
   /** Whether to show blocked issues (default: true) */
   showBlocked?: boolean;
   /** Sort lanes by 'title' or 'count' (default: 'title') */
-  sortLanesBy?: 'title' | 'count';
+  sortLanesBy?: "title" | "count";
   /** Default collapsed state for new lanes (default: false) */
   defaultCollapsed?: boolean;
   /** Maximum cards to show per column in swim lanes (default: 5) */
@@ -140,7 +150,7 @@ export function SwimLaneBoard({
   className,
   blockedIssues,
   showBlocked = true,
-  sortLanesBy = 'title',
+  sortLanesBy = "title",
   defaultCollapsed = false,
   cardLimit,
 }: SwimLaneBoardProps): JSX.Element {
@@ -149,12 +159,12 @@ export function SwimLaneBoard({
   const columns = useMemo(() => {
     if (propColumns) return propColumns;
     if (statuses) return statusesToColumns(statuses);
-    if (groupBy !== 'none') return createColumns({ includeEpics: true });
+    if (groupBy !== "none") return createColumns({ includeEpics: true });
     return DEFAULT_COLUMNS;
   }, [propColumns, statuses, groupBy]);
 
   // When groupBy='none', delegate to KanbanBoard
-  if (groupBy === 'none') {
+  if (groupBy === "none") {
     // Build props conditionally to satisfy exactOptionalPropertyTypes
     const kanbanProps = {
       issues,
@@ -203,8 +213,8 @@ function SwimLaneBoardContent({
   sortLanesBy,
   defaultCollapsed,
   cardLimit,
-}: Omit<SwimLaneBoardProps, 'filters' | 'groupBy' | 'statuses'> & {
-  groupBy: Exclude<GroupByField, 'none'>;
+}: Omit<SwimLaneBoardProps, "filters" | "groupBy" | "statuses"> & {
+  groupBy: Exclude<GroupByField, "none">;
   columns: KanbanColumnConfig[];
 }): JSX.Element {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
@@ -213,7 +223,9 @@ function SwimLaneBoardContent({
   // When defaultCollapsed=true, this tracks lanes that were EXPANDED (toggled to open).
   // When defaultCollapsed=false, this tracks lanes that were COLLAPSED (toggled to closed).
   // Initialize from localStorage for persistence across page refreshes.
-  const [toggledLanes, setToggledLanes] = useState<Set<string>>(() => loadCollapsedLanes(groupBy));
+  const [toggledLanes, setToggledLanes] = useState<Set<string>>(() =>
+    loadCollapsedLanes(groupBy),
+  );
 
   // Persist toggledLanes to localStorage when it changes
   useEffect(() => {
@@ -230,7 +242,7 @@ function SwimLaneBoardContent({
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
     }),
-    useSensor(KeyboardSensor)
+    useSensor(KeyboardSensor),
   );
 
   // Filter issues based on blocked visibility
@@ -242,7 +254,7 @@ function SwimLaneBoardContent({
   // Group and sort lanes
   const lanes = useMemo((): LaneGroup[] => {
     const grouped = groupIssuesByField(filteredIssues, groupBy);
-    return sortLanes(grouped, sortLanesBy ?? 'title');
+    return sortLanes(grouped, sortLanesBy ?? "title");
   }, [filteredIssues, groupBy, sortLanesBy]);
 
   // Toggle lane collapse state - adds/removes from toggled set
@@ -266,7 +278,7 @@ function SwimLaneBoardContent({
       // If defaultCollapsed=false, lanes start expanded, toggling closes them
       return defaultCollapsed ? !isToggled : isToggled;
     },
-    [toggledLanes, defaultCollapsed]
+    [toggledLanes, defaultCollapsed],
   );
 
   // Expand all lanes
@@ -309,7 +321,7 @@ function SwimLaneBoardContent({
         }
       }
     },
-    [blockedIssues, columns]
+    [blockedIssues, columns],
   );
 
   // Handle drag end - enforce restrictions and notify parent of status change
@@ -340,7 +352,7 @@ function SwimLaneBoardContent({
       // Only process if target column has a targetStatus defined
       if (targetColumn?.targetStatus) {
         const newStatus = targetColumn.targetStatus;
-        const oldStatus = issue.status ?? 'open';
+        const oldStatus = issue.status ?? "open";
 
         // Only call callback if status actually changed
         if (newStatus !== oldStatus) {
@@ -348,10 +360,12 @@ function SwimLaneBoardContent({
         }
       }
     },
-    [onDragEnd, columns, sourceColumnId]
+    [onDragEnd, columns, sourceColumnId],
   );
 
-  const rootClassName = [styles.swimLaneBoard, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.swimLaneBoard, className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <DndContext
@@ -363,7 +377,11 @@ function SwimLaneBoardContent({
       <div className={rootClassName} data-testid="swim-lane-board">
         {/* Expand/Collapse All toolbar - only show when there are multiple lanes */}
         {lanes.length > 1 && (
-          <div className={styles.toolbar} role="toolbar" aria-label="Lane controls">
+          <div
+            className={styles.toolbar}
+            role="toolbar"
+            aria-label="Lane controls"
+          >
             <button
               type="button"
               className={styles.toolbarButton}

@@ -7,13 +7,13 @@
 
 // --- Constants (match Go taskfilter.go) ---
 
-export const NEEDS_REVISION_LABEL = 'needs-revision';
+export const NEEDS_REVISION_LABEL = "needs-revision";
 
 // --- Types ---
 
-export type OpenStatus = 'needs_plan' | 'ready';
+export type OpenStatus = "needs_plan" | "ready";
 
-export type ReviewType = 'plan' | 'code' | 'help';
+export type ReviewType = "plan" | "code" | "help";
 
 // --- Predicate interfaces ---
 
@@ -46,9 +46,9 @@ export function hasNeedsRevision(issue: { labels?: string[] }): boolean {
  */
 export function getOpenStatus(issue: OpenStatusCheckable): OpenStatus {
   if (issue.design && !hasNeedsRevision(issue)) {
-    return 'ready';
+    return "ready";
   }
-  return 'needs_plan';
+  return "needs_plan";
 }
 
 // --- Review type (was reviewType.ts — moved here unchanged) ---
@@ -58,7 +58,7 @@ export function getOpenStatus(issue: OpenStatusCheckable): OpenStatus {
  */
 export function isPRUrl(ref?: string | null): boolean {
   if (!ref) return false;
-  return ref.includes('/pull/') || ref.includes('/pulls/');
+  return ref.includes("/pull/") || ref.includes("/pulls/");
 }
 
 /**
@@ -66,23 +66,23 @@ export function isPRUrl(ref?: string | null): boolean {
  * Returns null if the issue doesn't need review.
  */
 export function getReviewType(issue: ReviewCheckable): ReviewType | null {
-  const isReviewStatus = issue.status === 'review';
-  const isBlockedWithNotes = issue.status === 'blocked' && !!issue.notes;
+  const isReviewStatus = issue.status === "review";
+  const isBlockedWithNotes = issue.status === "blocked" && !!issue.notes;
   const hasExternalPR = isPRUrl(issue.external_ref);
 
   // Code review: status=review AND external_ref is a PR URL
   if (isReviewStatus && hasExternalPR) {
-    return 'code';
+    return "code";
   }
 
   // Plan review: status=review AND no PR URL
   if (isReviewStatus) {
-    return 'plan';
+    return "plan";
   }
 
   // Needs help: Blocked with notes
   if (isBlockedWithNotes) {
-    return 'help';
+    return "help";
   }
 
   return null;

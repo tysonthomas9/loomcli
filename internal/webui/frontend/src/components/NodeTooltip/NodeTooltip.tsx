@@ -5,12 +5,12 @@
  * when hovering over nodes in the dependency graph.
  */
 
-import { memo, useMemo } from 'react';
+import { memo, useMemo } from "react";
 
-import type { Issue } from '@/types';
-import { formatIssueId } from '@/utils/formatIssueId';
+import type { Issue } from "@/types";
+import { formatIssueId } from "@/utils/formatIssueId";
 
-import styles from './NodeTooltip.module.css';
+import styles from "./NodeTooltip.module.css";
 
 /**
  * Position for the tooltip relative to the viewport.
@@ -36,8 +36,8 @@ export interface NodeTooltipProps {
  * Get priority label from numeric value.
  */
 function getPriorityLabel(priority: number | undefined): string {
-  if (priority === undefined || priority === null) return 'P4';
-  if (priority < 0 || priority > 4) return 'P4';
+  if (priority === undefined || priority === null) return "P4";
+  if (priority < 0 || priority > 4) return "P4";
   return `P${priority}`;
 }
 
@@ -45,16 +45,16 @@ function getPriorityLabel(priority: number | undefined): string {
  * Get status display text.
  */
 function getStatusDisplay(status: string | undefined): string {
-  if (!status) return 'Open';
+  if (!status) return "Open";
   switch (status) {
-    case 'in_progress':
-      return 'In Progress';
-    case 'open':
-      return 'Open';
-    case 'closed':
-      return 'Closed';
-    case 'blocked':
-      return 'Blocked';
+    case "in_progress":
+      return "In Progress";
+    case "open":
+      return "Open";
+    case "closed":
+      return "Closed";
+    case "blocked":
+      return "Blocked";
     default:
       return status.charAt(0).toUpperCase() + status.slice(1);
   }
@@ -69,7 +69,7 @@ function calculateAdjustedPosition(position: TooltipPosition): {
   flipX: boolean;
   flipY: boolean;
 } {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return { x: position.x, y: position.y, flipX: false, flipY: false };
   }
 
@@ -79,9 +79,11 @@ function calculateAdjustedPosition(position: TooltipPosition): {
   const MARGIN = 8;
 
   // Check if tooltip would go off right edge
-  const flipX = position.x + TOOLTIP_WIDTH + OFFSET + MARGIN > window.innerWidth;
+  const flipX =
+    position.x + TOOLTIP_WIDTH + OFFSET + MARGIN > window.innerWidth;
   // Check if tooltip would go off bottom edge
-  const flipY = position.y + TOOLTIP_HEIGHT + OFFSET + MARGIN > window.innerHeight;
+  const flipY =
+    position.y + TOOLTIP_HEIGHT + OFFSET + MARGIN > window.innerHeight;
 
   const x = flipX ? position.x - OFFSET : position.x + OFFSET;
   const y = flipY ? position.y - OFFSET : position.y + OFFSET;
@@ -109,14 +111,16 @@ function NodeTooltipComponent({
   }
 
   const displayId = formatIssueId(issue.id);
-  const displayTitle = issue.title || 'Untitled';
+  const displayTitle = issue.title || "Untitled";
   const priorityLabel = getPriorityLabel(issue.priority);
   const statusDisplay = getStatusDisplay(issue.status);
   // Ensure priority is in valid range (0-4) for CSS data-priority attribute
   const rawPriority = issue.priority ?? 4;
   const priority = rawPriority < 0 || rawPriority > 4 ? 4 : rawPriority;
 
-  const rootClassName = className ? `${styles.nodeTooltip} ${className}` : styles.nodeTooltip;
+  const rootClassName = className
+    ? `${styles.nodeTooltip} ${className}`
+    : styles.nodeTooltip;
 
   return (
     <div
@@ -124,7 +128,7 @@ function NodeTooltipComponent({
       style={{
         left: adjustedPosition.x,
         top: adjustedPosition.y,
-        transform: `translate(${adjustedPosition.flipX ? '-100%' : '0'}, ${adjustedPosition.flipY ? '-100%' : '0'})`,
+        transform: `translate(${adjustedPosition.flipX ? "-100%" : "0"}, ${adjustedPosition.flipY ? "-100%" : "0"})`,
       }}
       data-testid="node-tooltip"
       role="tooltip"
@@ -138,7 +142,10 @@ function NodeTooltipComponent({
 
       {/* Status and Priority badges */}
       <div className={styles.badges}>
-        <span className={styles.statusBadge} data-status={issue.status || 'open'}>
+        <span
+          className={styles.statusBadge}
+          data-status={issue.status || "open"}
+        >
           {statusDisplay}
         </span>
         <span className={styles.priorityBadge} data-priority={priority}>
@@ -148,7 +155,9 @@ function NodeTooltipComponent({
 
       {/* Description preview */}
       <p className={styles.description}>
-        {issue.description || <span className={styles.noDescription}>No description</span>}
+        {issue.description || (
+          <span className={styles.noDescription}>No description</span>
+        )}
       </p>
 
       {/* Assignee */}

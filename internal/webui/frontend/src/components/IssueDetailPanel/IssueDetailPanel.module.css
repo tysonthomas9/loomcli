@@ -296,7 +296,7 @@
   min-width: 0;
 }
 
-.logsContainer > [data-testid='log-viewer'] {
+.logsContainer > [data-testid="log-viewer"] {
   flex: 1;
   min-height: 0;
   min-width: 0;
@@ -379,13 +379,13 @@
   color: var(--color-text-secondary);
 }
 
-.priorityBadge[data-priority='0'],
-.priorityBadge[data-priority='1'] {
+.priorityBadge[data-priority="0"],
+.priorityBadge[data-priority="1"] {
   background-color: var(--color-danger-bg);
   color: var(--color-danger);
 }
 
-.priorityBadge[data-priority='2'] {
+.priorityBadge[data-priority="2"] {
   background-color: var(--color-warning-bg);
   color: var(--color-warning);
 }

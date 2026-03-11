@@ -1,19 +1,19 @@
 /**
  * @vitest-environment jsdom
  */
-import { renderHook, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { fetchAgents, fetchStatus, fetchTasks } from '@/api';
-import type { FetchStatusResult } from '@/api/agents';
-import type { LoomTaskLists } from '@/types';
+import { fetchAgents, fetchStatus, fetchTasks } from "@/api";
+import type { FetchStatusResult } from "@/api/agents";
+import type { LoomTaskLists } from "@/types";
 
-import { useAgents } from '../useAgents';
+import { useAgents } from "../useAgents";
 
 // Import the mocked functions for test manipulation
 
 // Mock the agent API functions
-vi.mock('@/api', () => ({
+vi.mock("@/api", () => ({
   fetchAgents: vi.fn(),
   fetchStatus: vi.fn(),
   fetchTasks: vi.fn(),
@@ -25,7 +25,9 @@ const mockFetchTasks = vi.mocked(fetchTasks);
 /**
  * Helper to create a mock FetchStatusResult.
  */
-function createMockStatusResult(overrides?: Partial<FetchStatusResult>): FetchStatusResult {
+function createMockStatusResult(
+  overrides?: Partial<FetchStatusResult>,
+): FetchStatusResult {
   return {
     agents: [],
     tasks: {
@@ -38,7 +40,7 @@ function createMockStatusResult(overrides?: Partial<FetchStatusResult>): FetchSt
     agentTasks: {},
     sync: {
       db_synced: true,
-      db_last_sync: '',
+      db_last_sync: "",
       git_needs_push: 0,
       git_needs_pull: 0,
     },
@@ -95,12 +97,12 @@ function setupSuccessThenFail() {
  * Helper to make subsequent fetches fail.
  */
 function makeNextFetchFail() {
-  mockFetchAgents.mockRejectedValueOnce(new Error('Connection refused'));
-  mockFetchStatus.mockRejectedValueOnce(new Error('Connection refused'));
-  mockFetchTasks.mockRejectedValueOnce(new Error('Connection refused'));
+  mockFetchAgents.mockRejectedValueOnce(new Error("Connection refused"));
+  mockFetchStatus.mockRejectedValueOnce(new Error("Connection refused"));
+  mockFetchTasks.mockRejectedValueOnce(new Error("Connection refused"));
 }
 
-describe('useAgents', () => {
+describe("useAgents", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     mockFetchAgents.mockReset();
@@ -113,16 +115,18 @@ describe('useAgents', () => {
     vi.restoreAllMocks();
   });
 
-  describe('retry scheduling race condition prevention', () => {
-    it('creates only one set of retry timers even with rapid error state changes', async () => {
+  describe("retry scheduling race condition prevention", () => {
+    it("creates only one set of retry timers even with rapid error state changes", async () => {
       // Track all setTimeout and setInterval calls
-      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
-      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+      const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+      const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
 
       // First fetch succeeds (establishes wasEverConnected = true)
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       // Wait for initial successful fetch
       await flushPromises();
@@ -147,9 +151,11 @@ describe('useAgents', () => {
 
       // Count retry-related timer calls. Use exact 5000ms match for retry timeout
       // to exclude withTimeout calls (15000ms) from the count.
-      const retryTimeouts = setTimeoutSpy.mock.calls.filter((call) => (call[1] as number) === 5000);
+      const retryTimeouts = setTimeoutSpy.mock.calls.filter(
+        (call) => (call[1] as number) === 5000,
+      );
       const retryIntervals = setIntervalSpy.mock.calls.filter(
-        (call) => (call[1] as number) === 1000
+        (call) => (call[1] as number) === 1000,
       );
 
       // Should have exactly one retry timeout (5s delay) and one countdown interval (1s)
@@ -160,14 +166,16 @@ describe('useAgents', () => {
       setIntervalSpy.mockRestore();
     });
 
-    it('does not create duplicate timers when error changes while retry is already scheduled', async () => {
-      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
-      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    it("does not create duplicate timers when error changes while retry is already scheduled", async () => {
+      const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+      const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
 
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
       expect(result.current.isConnected).toBe(true);
@@ -185,10 +193,10 @@ describe('useAgents', () => {
 
       // Use exact delay match (5000ms) to exclude withTimeout calls (15000ms)
       const firstTimeoutCount = setTimeoutSpy.mock.calls.filter(
-        (call) => (call[1] as number) === 5000
+        (call) => (call[1] as number) === 5000,
       ).length;
       const firstIntervalCount = setIntervalSpy.mock.calls.filter(
-        (call) => (call[1] as number) === 1000
+        (call) => (call[1] as number) === 1000,
       ).length;
 
       expect(firstTimeoutCount).toBe(1);
@@ -203,10 +211,10 @@ describe('useAgents', () => {
       await flushPromises();
 
       const secondTimeoutCount = setTimeoutSpy.mock.calls.filter(
-        (call) => (call[1] as number) === 5000
+        (call) => (call[1] as number) === 5000,
       ).length;
       const secondIntervalCount = setIntervalSpy.mock.calls.filter(
-        (call) => (call[1] as number) === 1000
+        (call) => (call[1] as number) === 1000,
       ).length;
 
       // After the second failure and refetch, the retry effect will run again.
@@ -219,7 +227,7 @@ describe('useAgents', () => {
       setIntervalSpy.mockRestore();
     });
 
-    it('refs are set synchronously after timer creation to prevent race', async () => {
+    it("refs are set synchronously after timer creation to prevent race", async () => {
       // This test validates the core fix: refs are set in the same synchronous block
       // as timer creation. We verify this by checking that after the retry effect runs,
       // the retry countdown is properly set (which means the interval is running).
@@ -227,7 +235,9 @@ describe('useAgents', () => {
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
       expect(result.current.isConnected).toBe(true);
@@ -252,12 +262,14 @@ describe('useAgents', () => {
     });
   });
 
-  describe('retry countdown', () => {
-    it('counts down from the initial delay after disconnect', async () => {
+  describe("retry countdown", () => {
+    it("counts down from the initial delay after disconnect", async () => {
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
       expect(result.current.isConnected).toBe(true);
@@ -290,11 +302,13 @@ describe('useAgents', () => {
       expect(result.current.retryCountdown).toBe(1);
     });
 
-    it('triggers a retry fetch when countdown expires', async () => {
+    it("triggers a retry fetch when countdown expires", async () => {
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
       expect(result.current.isConnected).toBe(true);
@@ -319,14 +333,18 @@ describe('useAgents', () => {
       await flushPromises();
 
       // fetchAgents should have been called again (the retry)
-      expect(mockFetchAgents.mock.calls.length).toBeGreaterThan(callCountBeforeRetry);
+      expect(mockFetchAgents.mock.calls.length).toBeGreaterThan(
+        callCountBeforeRetry,
+      );
     });
 
-    it('uses exponential backoff for successive retries', async () => {
+    it("uses exponential backoff for successive retries", async () => {
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
       expect(result.current.isConnected).toBe(true);
@@ -361,11 +379,13 @@ describe('useAgents', () => {
       expect(result.current.retryCountdown).toBe(20);
     });
 
-    it('caps retry delay at MAX_RETRY_DELAY (60s)', async () => {
+    it("caps retry delay at MAX_RETRY_DELAY (60s)", async () => {
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
 
@@ -395,12 +415,14 @@ describe('useAgents', () => {
     });
   });
 
-  describe('retryNow', () => {
-    it('cancels countdown and retries immediately', async () => {
+  describe("retryNow", () => {
+    it("cancels countdown and retries immediately", async () => {
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
 
@@ -426,11 +448,13 @@ describe('useAgents', () => {
       expect(result.current.isConnected).toBe(true);
     });
 
-    it('resets backoff delay on manual retry', async () => {
+    it("resets backoff delay on manual retry", async () => {
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
 
@@ -462,14 +486,16 @@ describe('useAgents', () => {
     });
   });
 
-  describe('retry only when previously connected', () => {
-    it('does not schedule retry if never connected', async () => {
+  describe("retry only when previously connected", () => {
+    it("does not schedule retry if never connected", async () => {
       // All fetches fail - never establishes connection
-      mockFetchAgents.mockRejectedValue(new Error('Connection refused'));
-      mockFetchStatus.mockRejectedValue(new Error('Connection refused'));
-      mockFetchTasks.mockRejectedValue(new Error('Connection refused'));
+      mockFetchAgents.mockRejectedValue(new Error("Connection refused"));
+      mockFetchStatus.mockRejectedValue(new Error("Connection refused"));
+      mockFetchTasks.mockRejectedValue(new Error("Connection refused"));
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
 
@@ -479,24 +505,28 @@ describe('useAgents', () => {
     });
   });
 
-  describe('connection state', () => {
-    it('returns connected when fetch succeeds', async () => {
+  describe("connection state", () => {
+    it("returns connected when fetch succeeds", async () => {
       mockFetchAgents.mockResolvedValue([]);
       mockFetchStatus.mockResolvedValue(createMockStatusResult());
       mockFetchTasks.mockResolvedValue(createMockTaskLists());
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
 
-      expect(result.current.connectionState).toBe('connected');
+      expect(result.current.connectionState).toBe("connected");
     });
 
-    it('returns reconnecting when countdown is active', async () => {
+    it("returns reconnecting when countdown is active", async () => {
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
 
@@ -507,30 +537,34 @@ describe('useAgents', () => {
       });
       await flushPromises();
 
-      expect(result.current.connectionState).toBe('reconnecting');
+      expect(result.current.connectionState).toBe("reconnecting");
     });
 
-    it('returns never_connected when first fetch has not completed', async () => {
+    it("returns never_connected when first fetch has not completed", async () => {
       // Never resolves
       mockFetchAgents.mockImplementation(() => new Promise(() => {}));
       mockFetchStatus.mockImplementation(() => new Promise(() => {}));
       mockFetchTasks.mockImplementation(() => new Promise(() => {}));
 
-      const { result } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
-      expect(result.current.connectionState).toBe('never_connected');
+      expect(result.current.connectionState).toBe("never_connected");
     });
   });
 
-  describe('cleanup', () => {
-    it('clears retry timers on unmount', async () => {
-      const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
-      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+  describe("cleanup", () => {
+    it("clears retry timers on unmount", async () => {
+      const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+      const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
 
       // First fetch succeeds
       setupSuccessThenFail();
 
-      const { result, unmount } = renderHook(() => useAgents({ pollInterval: 0, enabled: true }));
+      const { result, unmount } = renderHook(() =>
+        useAgents({ pollInterval: 0, enabled: true }),
+      );
 
       await flushPromises();
 

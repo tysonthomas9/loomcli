@@ -3,10 +3,10 @@
  * Compact single-row layout with circular avatar, status dot, and commit count.
  */
 
-import type { LoomAgentStatus, ParsedLoomStatus } from '@/types';
-import { parseLoomStatus } from '@/types';
+import type { LoomAgentStatus, ParsedLoomStatus } from "@/types";
+import { parseLoomStatus } from "@/types";
 
-import styles from './AgentCard.module.css';
+import styles from "./AgentCard.module.css";
 
 /**
  * Props for the AgentCard component.
@@ -26,14 +26,14 @@ export interface AgentCardProps {
  * Pastel color palette for agent avatars.
  */
 const AVATAR_COLORS = [
-  '#9DC08B', // sage green
-  '#F59E87', // peach
-  '#B6B2DF', // lavender
-  '#95CBE9', // sky blue
-  '#F5C28E', // apricot
-  '#E8A5B3', // rose
-  '#A5D4C8', // mint
-  '#D4A5D8', // orchid
+  "#9DC08B", // sage green
+  "#F59E87", // peach
+  "#B6B2DF", // lavender
+  "#95CBE9", // sky blue
+  "#F5C28E", // apricot
+  "#E8A5B3", // rose
+  "#A5D4C8", // mint
+  "#D4A5D8", // orchid
 ];
 
 /**
@@ -44,7 +44,7 @@ export function getAvatarColor(name: string): string {
   for (let i = 0; i < name.length; i++) {
     hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
   }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? '#9DC08B';
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#9DC08B";
 }
 
 /**
@@ -63,23 +63,23 @@ function shouldUseWhiteText(hex: string): boolean {
 /**
  * Get status dot color based on parsed status type.
  */
-export function getStatusDotColor(type: ParsedLoomStatus['type']): string {
+export function getStatusDotColor(type: ParsedLoomStatus["type"]): string {
   switch (type) {
-    case 'working':
-    case 'planning':
-    case 'dirty':
-    case 'changes':
-      return 'var(--color-status-working, #facc15)';
-    case 'error':
-      return 'var(--color-status-error, #ef4444)';
-    case 'done':
-      return 'var(--color-status-done, #22c55e)';
-    case 'review':
-      return 'var(--color-status-review, #3b82f6)';
-    case 'idle':
-    case 'ready':
+    case "working":
+    case "planning":
+    case "dirty":
+    case "changes":
+      return "var(--color-status-working, #facc15)";
+    case "error":
+      return "var(--color-status-error, #ef4444)";
+    case "done":
+      return "var(--color-status-done, #22c55e)";
+    case "review":
+      return "var(--color-status-review, #3b82f6)";
+    case "idle":
+    case "ready":
     default:
-      return 'var(--color-status-idle, #9ca3af)';
+      return "var(--color-status-idle, #9ca3af)";
   }
 }
 
@@ -88,57 +88,62 @@ export function getStatusDotColor(type: ParsedLoomStatus['type']): string {
  */
 export function getStatusLabel(parsed: ParsedLoomStatus): string {
   switch (parsed.type) {
-    case 'working':
-      return 'Working';
-    case 'planning':
-      return 'Planning';
-    case 'done':
-      return 'Done';
-    case 'review':
-      return 'Review';
-    case 'idle':
-      return 'Idle';
-    case 'error':
-      return 'Error';
-    case 'dirty':
-      return 'Uncommitted changes';
-    case 'changes':
-      return `${parsed.changeCount ?? 0} change${parsed.changeCount === 1 ? '' : 's'}`;
-    case 'ready':
+    case "working":
+      return "Working";
+    case "planning":
+      return "Planning";
+    case "done":
+      return "Done";
+    case "review":
+      return "Review";
+    case "idle":
+      return "Idle";
+    case "error":
+      return "Error";
+    case "dirty":
+      return "Uncommitted changes";
+    case "changes":
+      return `${parsed.changeCount ?? 0} change${parsed.changeCount === 1 ? "" : "s"}`;
+    case "ready":
     default:
-      return 'Ready';
+      return "Ready";
   }
 }
 
 /**
  * AgentCard displays a single agent's status in a compact row with circular avatar.
  */
-export function AgentCard({ agent, taskTitle, className, onClick }: AgentCardProps): JSX.Element {
+export function AgentCard({
+  agent,
+  taskTitle,
+  className,
+  onClick,
+}: AgentCardProps): JSX.Element {
   const parsed = parseLoomStatus(agent.status);
   const avatarColor = getAvatarColor(agent.name);
   const dotColor = getStatusDotColor(parsed.type);
   const statusLabel = getStatusLabel(parsed);
-  const isError = parsed.type === 'error';
-  const initial = agent.name.charAt(0) || '?';
-  const textColor = shouldUseWhiteText(avatarColor) ? '#fff' : '#1f2937';
+  const isError = parsed.type === "error";
+  const initial = agent.name.charAt(0) || "?";
+  const textColor = shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
-    : 'Agent';
+    : "Agent";
 
-  const rootClassName = [styles.card, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.card, className].filter(Boolean).join(" ");
 
   return (
     <div
       className={rootClassName}
       data-status={parsed.type}
       onClick={onClick}
-      role={onClick ? 'button' : undefined}
+      role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
       aria-label={onClick ? `Agent: ${agent.name}` : undefined}
       onKeyDown={
         onClick
           ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
+              if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
                 onClick();
               }
@@ -178,8 +183,12 @@ export function AgentCard({ agent, taskTitle, className, onClick }: AgentCardPro
                   : `${agent.behind} commits behind`
             }
           >
-            {agent.ahead > 0 && <span className={styles.commitCount}>+{agent.ahead}</span>}
-            {agent.behind > 0 && <span className={styles.behindCount}>-{agent.behind}</span>}
+            {agent.ahead > 0 && (
+              <span className={styles.commitCount}>+{agent.ahead}</span>
+            )}
+            {agent.behind > 0 && (
+              <span className={styles.behindCount}>-{agent.behind}</span>
+            )}
           </div>
         )}
         <span

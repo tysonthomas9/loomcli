@@ -9,20 +9,20 @@
  * task status categories from the loom server API.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import type { LoomTaskLists } from '@/types';
+import type { LoomTaskLists } from "@/types";
 
-import { getAuthToken } from '../client';
+import { getAuthToken } from "../client";
 import {
   fetchAgents,
   fetchStatus,
   fetchTasks,
   checkLoomHealth,
   type FetchStatusResult,
-} from '../agents';
+} from "../agents";
 
-vi.mock('../client', () => ({
+vi.mock("../client", () => ({
   getAuthToken: vi.fn(),
 }));
 
@@ -31,16 +31,28 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 const mockGetAuthToken = vi.mocked(getAuthToken);
 
-describe('fetchAgents', () => {
+describe("fetchAgents", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAuthToken.mockReturnValue(null);
   });
 
-  it('returns agents array on successful response', async () => {
+  it("returns agents array on successful response", async () => {
     const agents = [
-      { name: 'nova', branch: 'feature-x', status: 'ready', ahead: 0, behind: 0 },
-      { name: 'ember', branch: 'main', status: 'working:bd-123', ahead: 1, behind: 0 },
+      {
+        name: "nova",
+        branch: "feature-x",
+        status: "ready",
+        ahead: 0,
+        behind: 0,
+      },
+      {
+        name: "ember",
+        branch: "main",
+        status: "working:bd-123",
+        ahead: 1,
+        behind: 0,
+      },
     ];
 
     mockFetch.mockResolvedValueOnce({
@@ -52,10 +64,10 @@ describe('fetchAgents', () => {
 
     expect(result).toEqual(agents);
     expect(result).toHaveLength(2);
-    expect(result[0].name).toBe('nova');
+    expect(result[0].name).toBe("nova");
   });
 
-  it('returns empty array when API returns null agents', async () => {
+  it("returns empty array when API returns null agents", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ agents: null }),
@@ -66,34 +78,38 @@ describe('fetchAgents', () => {
     expect(result).toEqual([]);
   });
 
-  it('throws error on network failure (does not return empty array)', async () => {
-    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+  it("throws error on network failure (does not return empty array)", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
-    await expect(fetchAgents()).rejects.toThrow('Network error');
+    await expect(fetchAgents()).rejects.toThrow("Network error");
   });
 
-  it('throws error on non-OK HTTP response', async () => {
+  it("throws error on non-OK HTTP response", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 503,
-      statusText: 'Service Unavailable',
+      statusText: "Service Unavailable",
     });
 
-    await expect(fetchAgents()).rejects.toThrow('Loom agents: 503 Service Unavailable');
+    await expect(fetchAgents()).rejects.toThrow(
+      "Loom agents: 503 Service Unavailable",
+    );
   });
 
-  it('throws error on server error (500)', async () => {
+  it("throws error on server error (500)", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 500,
-      statusText: 'Internal Server Error',
+      statusText: "Internal Server Error",
     });
 
-    await expect(fetchAgents()).rejects.toThrow('Loom agents: 500 Internal Server Error');
+    await expect(fetchAgents()).rejects.toThrow(
+      "Loom agents: 500 Internal Server Error",
+    );
   });
 
-  it('includes Authorization header when auth token is available', async () => {
-    mockGetAuthToken.mockReturnValue('test-token-123');
+  it("includes Authorization header when auth token is available", async () => {
+    mockGetAuthToken.mockReturnValue("test-token-123");
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ agents: [] }),
@@ -103,12 +119,12 @@ describe('fetchAgents', () => {
 
     const [, options] = mockFetch.mock.calls[0];
     expect(options.headers).toEqual({
-      Accept: 'application/json',
-      Authorization: 'Bearer test-token-123',
+      Accept: "application/json",
+      Authorization: "Bearer test-token-123",
     });
   });
 
-  it('omits Authorization header when auth token is not available', async () => {
+  it("omits Authorization header when auth token is not available", async () => {
     mockGetAuthToken.mockReturnValue(null);
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -119,19 +135,19 @@ describe('fetchAgents', () => {
 
     const [, options] = mockFetch.mock.calls[0];
     expect(options.headers).toEqual({
-      Accept: 'application/json',
+      Accept: "application/json",
     });
   });
 });
 
-describe('checkLoomHealth', () => {
+describe("checkLoomHealth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAuthToken.mockReturnValue(null);
   });
 
-  it('includes Authorization header when auth token is available', async () => {
-    mockGetAuthToken.mockReturnValue('health-token');
+  it("includes Authorization header when auth token is available", async () => {
+    mockGetAuthToken.mockReturnValue("health-token");
     mockFetch.mockResolvedValueOnce({ ok: true });
 
     const result = await checkLoomHealth();
@@ -139,35 +155,35 @@ describe('checkLoomHealth', () => {
     expect(result).toBe(true);
     const [, options] = mockFetch.mock.calls[0];
     expect(options.headers).toEqual({
-      Accept: 'application/json',
-      Authorization: 'Bearer health-token',
+      Accept: "application/json",
+      Authorization: "Bearer health-token",
     });
   });
 });
 
-describe('checkLoomHealth', () => {
+describe("checkLoomHealth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns true when health endpoint responds ok', async () => {
+  it("returns true when health endpoint responds ok", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ status: 'ok' }),
+      json: async () => ({ status: "ok" }),
     });
 
     const result = await checkLoomHealth();
 
     expect(result).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(mockFetch.mock.calls[0][0]).toContain('/health');
+    expect(mockFetch.mock.calls[0][0]).toContain("/health");
   });
 
-  it('returns false when health endpoint responds not-ok', async () => {
+  it("returns false when health endpoint responds not-ok", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 503,
-      statusText: 'Service Unavailable',
+      statusText: "Service Unavailable",
     });
 
     const result = await checkLoomHealth();
@@ -175,16 +191,19 @@ describe('checkLoomHealth', () => {
     expect(result).toBe(false);
   });
 
-  it('returns false on network error (error is swallowed)', async () => {
-    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+  it("returns false on network error (error is swallowed)", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
     const result = await checkLoomHealth();
 
     expect(result).toBe(false);
   });
 
-  it('returns false on AbortError (timeout is swallowed)', async () => {
-    const abortError = new DOMException('The operation was aborted', 'AbortError');
+  it("returns false on AbortError (timeout is swallowed)", async () => {
+    const abortError = new DOMException(
+      "The operation was aborted",
+      "AbortError",
+    );
     mockFetch.mockRejectedValueOnce(abortError);
 
     const result = await checkLoomHealth();
@@ -193,7 +212,7 @@ describe('checkLoomHealth', () => {
   });
 });
 
-describe('fetchStatus', () => {
+describe("fetchStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAuthToken.mockReturnValue(null);
@@ -204,7 +223,7 @@ describe('fetchStatus', () => {
     vi.useRealTimers();
   });
 
-  it('successfully fetches status from API', async () => {
+  it("successfully fetches status from API", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -219,7 +238,7 @@ describe('fetchStatus', () => {
         agent_tasks: null,
         sync: {
           db_synced: true,
-          db_last_sync: '2024-01-15T12:00:00Z',
+          db_last_sync: "2024-01-15T12:00:00Z",
         },
         stats: {
           open: 15,
@@ -227,7 +246,7 @@ describe('fetchStatus', () => {
           total: 40,
           completion: 62.5,
         },
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
@@ -240,7 +259,7 @@ describe('fetchStatus', () => {
     expect(result.tasks.backlog).toBe(4);
   });
 
-  it('passes through backlog field directly from API', async () => {
+  it("passes through backlog field directly from API", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -255,7 +274,7 @@ describe('fetchStatus', () => {
         agent_tasks: null,
         sync: {
           db_synced: true,
-          db_last_sync: '2024-01-15T12:00:00Z',
+          db_last_sync: "2024-01-15T12:00:00Z",
         },
         stats: {
           open: 0,
@@ -263,17 +282,17 @@ describe('fetchStatus', () => {
           total: 10,
           completion: 0,
         },
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
     const result = await fetchStatus();
 
-    expect(result.tasks).toHaveProperty('backlog');
+    expect(result.tasks).toHaveProperty("backlog");
     expect(result.tasks.backlog).toBe(10);
   });
 
-  it('returns tasks.backlog as 0 when backlog is 0', async () => {
+  it("returns tasks.backlog as 0 when backlog is 0", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -288,7 +307,7 @@ describe('fetchStatus', () => {
         agent_tasks: null,
         sync: {
           db_synced: true,
-          db_last_sync: '2024-01-15T12:00:00Z',
+          db_last_sync: "2024-01-15T12:00:00Z",
         },
         stats: {
           open: 11,
@@ -296,7 +315,7 @@ describe('fetchStatus', () => {
           total: 36,
           completion: 69.4,
         },
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
@@ -305,7 +324,7 @@ describe('fetchStatus', () => {
     expect(result.tasks.backlog).toBe(0);
   });
 
-  it('preserves all other task status counts', async () => {
+  it("preserves all other task status counts", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -320,7 +339,7 @@ describe('fetchStatus', () => {
         agent_tasks: null,
         sync: {
           db_synced: true,
-          db_last_sync: '2024-01-15T12:00:00Z',
+          db_last_sync: "2024-01-15T12:00:00Z",
         },
         stats: {
           open: 53,
@@ -328,7 +347,7 @@ describe('fetchStatus', () => {
           total: 153,
           completion: 65.4,
         },
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
@@ -342,8 +361,10 @@ describe('fetchStatus', () => {
     expect(result.tasks.backlog).toBe(5);
   });
 
-  it('returns complete FetchStatusResult with all properties', async () => {
-    const agents = [{ name: 'nova', branch: 'main', status: 'ready', ahead: 0, behind: 0 }];
+  it("returns complete FetchStatusResult with all properties", async () => {
+    const agents = [
+      { name: "nova", branch: "main", status: "ready", ahead: 0, behind: 0 },
+    ];
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -356,10 +377,17 @@ describe('fetchStatus', () => {
           need_review: 4,
           backlog: 5,
         },
-        agent_tasks: { nova: { id: 'bd-123', title: 'Test', priority: 1, status: 'in_progress' } },
+        agent_tasks: {
+          nova: {
+            id: "bd-123",
+            title: "Test",
+            priority: 1,
+            status: "in_progress",
+          },
+        },
         sync: {
           db_synced: true,
-          db_last_sync: '2024-01-15T12:00:00Z',
+          db_last_sync: "2024-01-15T12:00:00Z",
         },
         stats: {
           open: 15,
@@ -367,54 +395,74 @@ describe('fetchStatus', () => {
           total: 40,
           completion: 62.5,
         },
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
     const result: FetchStatusResult = await fetchStatus();
 
-    expect(result).toHaveProperty('agents');
-    expect(result).toHaveProperty('tasks');
-    expect(result).toHaveProperty('agentTasks');
-    expect(result).toHaveProperty('sync');
-    expect(result).toHaveProperty('stats');
-    expect(result).toHaveProperty('timestamp');
+    expect(result).toHaveProperty("agents");
+    expect(result).toHaveProperty("tasks");
+    expect(result).toHaveProperty("agentTasks");
+    expect(result).toHaveProperty("sync");
+    expect(result).toHaveProperty("stats");
+    expect(result).toHaveProperty("timestamp");
 
     expect(result.agents).toEqual(agents);
     expect(result.tasks.backlog).toBe(5);
-    expect(result.timestamp).toBe('2024-01-15T12:30:00Z');
+    expect(result.timestamp).toBe("2024-01-15T12:30:00Z");
   });
 
-  it('throws error on non-ok HTTP response', async () => {
+  it("throws error on non-ok HTTP response", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 500,
-      statusText: 'Internal Server Error',
+      statusText: "Internal Server Error",
     });
 
-    await expect(fetchStatus()).rejects.toThrow('Loom server returned 500');
+    await expect(fetchStatus()).rejects.toThrow("Loom server returned 500");
   });
 
-  it('throws error on network failure', async () => {
-    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+  it("throws error on network failure", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
-    await expect(fetchStatus()).rejects.toThrow('Network error');
+    await expect(fetchStatus()).rejects.toThrow("Network error");
   });
 });
 
-describe('fetchTasks', () => {
+describe("fetchTasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAuthToken.mockReturnValue(null);
   });
 
-  it('successfully fetches task lists from API', async () => {
+  it("successfully fetches task lists from API", async () => {
     const taskLists = {
-      needsPlanning: [{ id: 'bd-001', title: 'Plan feature', priority: 2, status: 'open' }],
-      readyToImplement: [{ id: 'bd-002', title: 'Implement feature', priority: 1, status: 'open' }],
-      inProgress: [{ id: 'bd-003', title: 'In progress task', priority: 0, status: 'in_progress' }],
-      needsReview: [{ id: 'bd-004', title: 'Review code', priority: 1, status: 'review' }],
-      backlog: [{ id: 'bd-005', title: 'Blocked task', priority: 3, status: 'blocked' }],
+      needsPlanning: [
+        { id: "bd-001", title: "Plan feature", priority: 2, status: "open" },
+      ],
+      readyToImplement: [
+        {
+          id: "bd-002",
+          title: "Implement feature",
+          priority: 1,
+          status: "open",
+        },
+      ],
+      inProgress: [
+        {
+          id: "bd-003",
+          title: "In progress task",
+          priority: 0,
+          status: "in_progress",
+        },
+      ],
+      needsReview: [
+        { id: "bd-004", title: "Review code", priority: 1, status: "review" },
+      ],
+      backlog: [
+        { id: "bd-005", title: "Blocked task", priority: 3, status: "blocked" },
+      ],
     };
 
     mockFetch.mockResolvedValueOnce({
@@ -432,7 +480,7 @@ describe('fetchTasks', () => {
         in_progress: taskLists.inProgress,
         needs_review: taskLists.needsReview,
         backlog: taskLists.backlog,
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
@@ -445,10 +493,20 @@ describe('fetchTasks', () => {
     expect(result.backlog).toEqual(taskLists.backlog);
   });
 
-  it('passes through backlog field directly from API', async () => {
+  it("passes through backlog field directly from API", async () => {
     const backlogTasks = [
-      { id: 'bd-100', title: 'First blocked task', priority: 2, status: 'blocked' },
-      { id: 'bd-101', title: 'Second blocked task', priority: 3, status: 'blocked' },
+      {
+        id: "bd-100",
+        title: "First blocked task",
+        priority: 2,
+        status: "blocked",
+      },
+      {
+        id: "bd-101",
+        title: "Second blocked task",
+        priority: 3,
+        status: "blocked",
+      },
     ];
 
     mockFetch.mockResolvedValueOnce({
@@ -466,17 +524,17 @@ describe('fetchTasks', () => {
         in_progress: null,
         needs_review: null,
         backlog: backlogTasks,
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
     const result: LoomTaskLists = await fetchTasks();
 
-    expect(result).toHaveProperty('backlog');
+    expect(result).toHaveProperty("backlog");
     expect(result.backlog).toEqual(backlogTasks);
   });
 
-  it('returns empty backlog array when API sends null', async () => {
+  it("returns empty backlog array when API sends null", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -492,7 +550,7 @@ describe('fetchTasks', () => {
         in_progress: null,
         needs_review: null,
         backlog: null,
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
@@ -501,12 +559,12 @@ describe('fetchTasks', () => {
     expect(result.backlog).toEqual([]);
   });
 
-  it('returns backlog array with multiple tasks', async () => {
+  it("returns backlog array with multiple tasks", async () => {
     const backlogTasks = Array.from({ length: 5 }, (_, i) => ({
       id: `bd-${200 + i}`,
       title: `Blocked task ${i + 1}`,
       priority: Math.floor(Math.random() * 5),
-      status: 'blocked' as const,
+      status: "blocked" as const,
     }));
 
     mockFetch.mockResolvedValueOnce({
@@ -524,7 +582,7 @@ describe('fetchTasks', () => {
         in_progress: null,
         needs_review: null,
         backlog: backlogTasks,
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
@@ -534,16 +592,24 @@ describe('fetchTasks', () => {
     expect(result.backlog).toEqual(backlogTasks);
   });
 
-  it('preserves all other task lists', async () => {
+  it("preserves all other task lists", async () => {
     const taskLists = {
-      needsPlanning: [{ id: 'bd-010', title: 'Plan', priority: 1, status: 'open' }],
-      readyToImplement: [
-        { id: 'bd-020', title: 'Ready 1', priority: 0, status: 'open' },
-        { id: 'bd-021', title: 'Ready 2', priority: 1, status: 'open' },
+      needsPlanning: [
+        { id: "bd-010", title: "Plan", priority: 1, status: "open" },
       ],
-      inProgress: [{ id: 'bd-030', title: 'Working', priority: 0, status: 'in_progress' }],
-      needsReview: [{ id: 'bd-040', title: 'Review', priority: 1, status: 'review' }],
-      backlog: [{ id: 'bd-050', title: 'Blocked', priority: 2, status: 'blocked' }],
+      readyToImplement: [
+        { id: "bd-020", title: "Ready 1", priority: 0, status: "open" },
+        { id: "bd-021", title: "Ready 2", priority: 1, status: "open" },
+      ],
+      inProgress: [
+        { id: "bd-030", title: "Working", priority: 0, status: "in_progress" },
+      ],
+      needsReview: [
+        { id: "bd-040", title: "Review", priority: 1, status: "review" },
+      ],
+      backlog: [
+        { id: "bd-050", title: "Blocked", priority: 2, status: "blocked" },
+      ],
     };
 
     mockFetch.mockResolvedValueOnce({
@@ -561,7 +627,7 @@ describe('fetchTasks', () => {
         in_progress: taskLists.inProgress,
         needs_review: taskLists.needsReview,
         backlog: taskLists.backlog,
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
@@ -575,13 +641,28 @@ describe('fetchTasks', () => {
     expect(result.backlog).toEqual(taskLists.backlog);
   });
 
-  it('returns complete LoomTaskLists with all properties', async () => {
+  it("returns complete LoomTaskLists with all properties", async () => {
     const taskLists = {
-      needsPlanning: [{ id: 'bd-001', title: 'Plan', priority: 2, status: 'open' }],
-      readyToImplement: [{ id: 'bd-002', title: 'Implement', priority: 1, status: 'open' }],
-      inProgress: [{ id: 'bd-003', title: 'In progress', priority: 0, status: 'in_progress' }],
-      needsReview: [{ id: 'bd-004', title: 'Review', priority: 1, status: 'review' }],
-      backlog: [{ id: 'bd-005', title: 'Blocked', priority: 3, status: 'blocked' }],
+      needsPlanning: [
+        { id: "bd-001", title: "Plan", priority: 2, status: "open" },
+      ],
+      readyToImplement: [
+        { id: "bd-002", title: "Implement", priority: 1, status: "open" },
+      ],
+      inProgress: [
+        {
+          id: "bd-003",
+          title: "In progress",
+          priority: 0,
+          status: "in_progress",
+        },
+      ],
+      needsReview: [
+        { id: "bd-004", title: "Review", priority: 1, status: "review" },
+      ],
+      backlog: [
+        { id: "bd-005", title: "Blocked", priority: 3, status: "blocked" },
+      ],
     };
 
     mockFetch.mockResolvedValueOnce({
@@ -599,42 +680,42 @@ describe('fetchTasks', () => {
         in_progress: taskLists.inProgress,
         needs_review: taskLists.needsReview,
         backlog: taskLists.backlog,
-        timestamp: '2024-01-15T12:30:00Z',
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
     const result: LoomTaskLists = await fetchTasks();
 
-    expect(result).toHaveProperty('needsPlanning');
-    expect(result).toHaveProperty('readyToImplement');
-    expect(result).toHaveProperty('inProgress');
-    expect(result).toHaveProperty('needsReview');
-    expect(result).toHaveProperty('backlog');
+    expect(result).toHaveProperty("needsPlanning");
+    expect(result).toHaveProperty("readyToImplement");
+    expect(result).toHaveProperty("inProgress");
+    expect(result).toHaveProperty("needsReview");
+    expect(result).toHaveProperty("backlog");
   });
 
-  it('throws error on non-ok HTTP response', async () => {
+  it("throws error on non-ok HTTP response", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 404,
-      statusText: 'Not Found',
+      statusText: "Not Found",
     });
 
-    await expect(fetchTasks()).rejects.toThrow('Loom server returned 404');
+    await expect(fetchTasks()).rejects.toThrow("Loom server returned 404");
   });
 
-  it('throws error on network failure', async () => {
-    mockFetch.mockRejectedValueOnce(new Error('Connection timeout'));
+  it("throws error on network failure", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("Connection timeout"));
 
-    await expect(fetchTasks()).rejects.toThrow('Connection timeout');
+    await expect(fetchTasks()).rejects.toThrow("Connection timeout");
   });
 });
 
-describe('checkLoomHealth', () => {
+describe("checkLoomHealth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns true when server responds with ok', async () => {
+  it("returns true when server responds with ok", async () => {
     mockFetch.mockResolvedValueOnce({ ok: true });
 
     const result = await checkLoomHealth();
@@ -642,7 +723,7 @@ describe('checkLoomHealth', () => {
     expect(result).toBe(true);
   });
 
-  it('returns false when server responds with non-ok status', async () => {
+  it("returns false when server responds with non-ok status", async () => {
     mockFetch.mockResolvedValueOnce({ ok: false, status: 503 });
 
     const result = await checkLoomHealth();
@@ -650,16 +731,18 @@ describe('checkLoomHealth', () => {
     expect(result).toBe(false);
   });
 
-  it('returns false on network error (error swallowing)', async () => {
-    mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+  it("returns false on network error (error swallowing)", async () => {
+    mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
     const result = await checkLoomHealth();
 
     expect(result).toBe(false);
   });
 
-  it('returns false on abort error', async () => {
-    mockFetch.mockRejectedValueOnce(new DOMException('The operation was aborted', 'AbortError'));
+  it("returns false on abort error", async () => {
+    mockFetch.mockRejectedValueOnce(
+      new DOMException("The operation was aborted", "AbortError"),
+    );
 
     const result = await checkLoomHealth();
 
@@ -667,7 +750,7 @@ describe('checkLoomHealth', () => {
   });
 });
 
-describe('fetchWithTimeout via fetchAgents', () => {
+describe("fetchWithTimeout via fetchAgents", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -677,7 +760,7 @@ describe('fetchWithTimeout via fetchAgents', () => {
     vi.useRealTimers();
   });
 
-  it('clears timeout after successful response', async () => {
+  it("clears timeout after successful response", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ agents: [] }),
@@ -688,7 +771,7 @@ describe('fetchWithTimeout via fetchAgents', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('passes AbortSignal to fetch', async () => {
+  it("passes AbortSignal to fetch", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ agents: [] }),
@@ -702,13 +785,13 @@ describe('fetchWithTimeout via fetchAgents', () => {
   });
 });
 
-describe('API field consistency', () => {
+describe("API field consistency", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAuthToken.mockReturnValue(null);
   });
 
-  it('both fetchStatus and fetchTasks use consistent backlog field name', async () => {
+  it("both fetchStatus and fetchTasks use consistent backlog field name", async () => {
     // fetchStatus returns backlog directly
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -722,9 +805,18 @@ describe('API field consistency', () => {
           backlog: 7,
         },
         agent_tasks: null,
-        sync: { db_synced: true, db_last_sync: '2024-01-15T12:00:00Z' },
-        stats: { open: 7, closed: 0, total: 7, completion: 0, remaining: 7, in_progress: 0, review: 0, blocked: 0 },
-        timestamp: '2024-01-15T12:30:00Z',
+        sync: { db_synced: true, db_last_sync: "2024-01-15T12:00:00Z" },
+        stats: {
+          open: 7,
+          closed: 0,
+          total: 7,
+          completion: 0,
+          remaining: 7,
+          in_progress: 0,
+          review: 0,
+          blocked: 0,
+        },
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
@@ -747,14 +839,16 @@ describe('API field consistency', () => {
         ready_to_implement: null,
         in_progress: null,
         needs_review: null,
-        backlog: [{ id: 'bd-100', title: 'Blocked', priority: 0, status: 'blocked' }],
-        timestamp: '2024-01-15T12:30:00Z',
+        backlog: [
+          { id: "bd-100", title: "Blocked", priority: 0, status: "blocked" },
+        ],
+        timestamp: "2024-01-15T12:30:00Z",
       }),
     });
 
     const tasksResult = await fetchTasks();
 
     expect(tasksResult.backlog).toHaveLength(1);
-    expect(tasksResult.backlog[0].id).toBe('bd-100');
+    expect(tasksResult.backlog[0].id).toBe("bd-100");
   });
 });

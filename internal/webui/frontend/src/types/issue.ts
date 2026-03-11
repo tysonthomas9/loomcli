@@ -2,13 +2,13 @@
  * Core Issue type and related types.
  */
 
-import type { AgentState, MolType, WorkType } from './agent';
-import type { Comment } from './comment';
-import type { ISODateString, Priority, Duration } from './common';
-import type { Dependency, DependencyType } from './dependency';
-import type { EntityRef, Validation, BondRef } from './entity';
-import type { IssueType } from './issueType';
-import type { Status } from './status';
+import type { AgentState, MolType, WorkType } from "./agent";
+import type { Comment } from "./comment";
+import type { ISODateString, Priority, Duration } from "./common";
+import type { Dependency, DependencyType } from "./dependency";
+import type { EntityRef, Validation, BondRef } from "./entity";
+import type { IssueType } from "./issueType";
+import type { Status } from "./status";
 
 /**
  * Core Issue interface.
@@ -161,7 +161,7 @@ export interface GraphDependency {
  * Maps to Go GraphIssue struct from /api/issues/graph.
  * Uses Omit to override the dependencies field type.
  */
-export interface GraphIssue extends Omit<Issue, 'dependencies'> {
+export interface GraphIssue extends Omit<Issue, "dependencies"> {
   // Simplified dependency format from graph API
   dependencies?: GraphDependency[];
 }
@@ -173,7 +173,7 @@ export interface GraphIssue extends Omit<Issue, 'dependencies'> {
  */
 export interface IssueDetails extends Omit<
   Issue,
-  'dependencies' | 'labels' | 'comments' | 'parent'
+  "dependencies" | "labels" | "comments" | "parent"
 > {
   labels?: string[];
   dependencies?: IssueWithDependencyMetadata[];

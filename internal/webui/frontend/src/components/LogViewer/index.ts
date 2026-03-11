@@ -1,2 +1,2 @@
-export { LogViewer } from './LogViewer';
-export type { LogViewerProps } from './LogViewer';
+export { LogViewer } from "./LogViewer";
+export type { LogViewerProps } from "./LogViewer";

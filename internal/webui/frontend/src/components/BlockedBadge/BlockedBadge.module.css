@@ -22,15 +22,15 @@
 }
 
 /* Interactive state when clickable */
-.blockedBadge[role='button'] {
+.blockedBadge[role="button"] {
   cursor: pointer;
 }
 
-.blockedBadge[role='button']:hover {
+.blockedBadge[role="button"]:hover {
   transform: scale(1.05);
 }
 
-.blockedBadge[role='button']:focus-visible {
+.blockedBadge[role="button"]:focus-visible {
   outline: 2px solid var(--color-text-inverse);
   outline-offset: 1px;
 }
@@ -61,7 +61,7 @@
 
 /* Tooltip arrow — positioned dynamically via --arrow-left */
 .tooltip::before {
-  content: '';
+  content: "";
   position: absolute;
   bottom: 100%;
   left: var(--arrow-left, 50%);
@@ -94,7 +94,7 @@
 }
 
 .tooltipItem::before {
-  content: '\2022';
+  content: "\2022";
   margin-right: var(--space-2);
   color: var(--color-text-muted);
 }

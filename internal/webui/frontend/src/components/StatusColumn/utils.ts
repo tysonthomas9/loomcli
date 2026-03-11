@@ -16,15 +16,23 @@
  */
 export function getStatusColor(status: string): string {
   // Convert snake_case to kebab-case for CSS variable naming
-  const kebabStatus = status.replace(/_/g, '-');
+  const kebabStatus = status.replace(/_/g, "-");
 
   // Known statuses and column IDs have specific color variables
-  const knownStatuses = ['open', 'in-progress', 'review', 'closed', 'ready', 'backlog', 'done'];
+  const knownStatuses = [
+    "open",
+    "in-progress",
+    "review",
+    "closed",
+    "ready",
+    "backlog",
+    "done",
+  ];
 
   if (knownStatuses.includes(kebabStatus)) {
     return `var(--color-status-${kebabStatus})`;
   }
 
   // Default to secondary text color for unknown statuses
-  return 'var(--color-text-secondary)';
+  return "var(--color-text-secondary)";
 }

@@ -20,17 +20,17 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.badge[data-severity='ok'] {
+.badge[data-severity="ok"] {
   background: color-mix(in srgb, var(--color-success) 15%, transparent);
   color: var(--color-success);
 }
 
-.badge[data-severity='warning'] {
+.badge[data-severity="warning"] {
   background: color-mix(in srgb, var(--color-warning) 15%, transparent);
   color: var(--color-warning);
 }
 
-.badge[data-severity='critical'] {
+.badge[data-severity="critical"] {
   background: color-mix(in srgb, var(--color-danger) 15%, transparent);
   color: var(--color-danger);
 }

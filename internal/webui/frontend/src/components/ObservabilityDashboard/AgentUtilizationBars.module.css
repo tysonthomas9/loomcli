@@ -34,15 +34,15 @@
   transition: width 0.3s ease;
 }
 
-.barFill[data-level='high'] {
+.barFill[data-level="high"] {
   background: var(--color-success);
 }
 
-.barFill[data-level='medium'] {
+.barFill[data-level="medium"] {
   background: var(--color-warning);
 }
 
-.barFill[data-level='low'] {
+.barFill[data-level="low"] {
   background: var(--color-danger);
 }
 

@@ -3,7 +3,7 @@
  * in the dependency graph. Shows priority levels, status states, and edge types.
  */
 
-import styles from './GraphLegend.module.css';
+import styles from "./GraphLegend.module.css";
 
 /**
  * Props for the GraphLegend component.
@@ -19,31 +19,43 @@ export interface GraphLegendProps {
 
 /** Priority legend items */
 const PRIORITY_ITEMS = [
-  { level: 0, label: 'Critical', color: 'var(--color-priority-0)' },
-  { level: 1, label: 'High', color: 'var(--color-priority-1)' },
-  { level: 2, label: 'Medium', color: 'var(--color-priority-2)' },
-  { level: 3, label: 'Normal', color: 'var(--color-priority-3)' },
-  { level: 4, label: 'Low', color: 'var(--color-priority-4)' },
+  { level: 0, label: "Critical", color: "var(--color-priority-0)" },
+  { level: 1, label: "High", color: "var(--color-priority-1)" },
+  { level: 2, label: "Medium", color: "var(--color-priority-2)" },
+  { level: 3, label: "Normal", color: "var(--color-priority-3)" },
+  { level: 4, label: "Low", color: "var(--color-priority-4)" },
 ] as const;
 
 /** Status legend items */
 const STATUS_ITEMS = [
-  { status: 'open', label: 'Open', color: 'var(--color-status-open)' },
-  { status: 'in_progress', label: 'In Progress', color: 'var(--color-status-in-progress)' },
-  { status: 'blocked', label: 'Blocked', color: 'var(--color-blocked)' },
-  { status: 'closed', label: 'Closed', color: 'var(--color-status-closed)' },
+  { status: "open", label: "Open", color: "var(--color-status-open)" },
+  {
+    status: "in_progress",
+    label: "In Progress",
+    color: "var(--color-status-in-progress)",
+  },
+  { status: "blocked", label: "Blocked", color: "var(--color-blocked)" },
+  { status: "closed", label: "Closed", color: "var(--color-status-closed)" },
 ] as const;
 
 /** Edge type legend items */
 const EDGE_ITEMS = [
-  { type: 'blocking', label: 'Blocking', style: 'dashed' as const },
-  { type: 'normal', label: 'Dependency', style: 'solid' as const },
+  { type: "blocking", label: "Blocking", style: "dashed" as const },
+  { type: "normal", label: "Dependency", style: "solid" as const },
 ] as const;
 
 /** Special indicator legend items */
 const INDICATOR_ITEMS = [
-  { type: 'rootBlocker', label: 'Root Blocker', description: 'Blocks others, not blocked' },
-  { type: 'blockedBadge', label: 'Blocked Count', description: 'Number blocked by this' },
+  {
+    type: "rootBlocker",
+    label: "Root Blocker",
+    description: "Blocks others, not blocked",
+  },
+  {
+    type: "blockedBadge",
+    label: "Blocked Count",
+    description: "Number blocked by this",
+  },
 ] as const;
 
 /**
@@ -71,7 +83,9 @@ export function GraphLegend({
   onToggle,
   className,
 }: GraphLegendProps): JSX.Element {
-  const rootClassName = className ? `${styles.graphLegend} ${className}` : styles.graphLegend;
+  const rootClassName = className
+    ? `${styles.graphLegend} ${className}`
+    : styles.graphLegend;
 
   return (
     <aside className={rootClassName} data-testid="graph-legend">
@@ -132,7 +146,11 @@ export function GraphLegend({
             <dl className={styles.list}>
               {EDGE_ITEMS.map((item) => (
                 <div key={item.type} className={styles.legendItem}>
-                  <dt className={styles.edgeSwatch} data-style={item.style} aria-hidden="true" />
+                  <dt
+                    className={styles.edgeSwatch}
+                    data-style={item.style}
+                    aria-hidden="true"
+                  />
                   <dd>{item.label}</dd>
                 </div>
               ))}
@@ -145,7 +163,11 @@ export function GraphLegend({
             <dl className={styles.list}>
               {INDICATOR_ITEMS.map((item) => (
                 <div key={item.type} className={styles.legendItem}>
-                  <dt className={styles.indicatorSwatch} data-type={item.type} aria-hidden="true" />
+                  <dt
+                    className={styles.indicatorSwatch}
+                    data-type={item.type}
+                    aria-hidden="true"
+                  />
                   <dd title={item.description}>{item.label}</dd>
                 </div>
               ))}

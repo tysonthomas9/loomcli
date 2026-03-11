@@ -11,12 +11,12 @@ import {
   useEffect,
   useRef,
   type ReactNode,
-} from 'react';
+} from "react";
 
 /**
  * Toast type for styling.
  */
-export type ToastType = 'success' | 'error' | 'warning' | 'info';
+export type ToastType = "success" | "error" | "warning" | "info";
 
 /**
  * Options for showing a toast.
@@ -60,17 +60,17 @@ function generateId(): string {
 
 // Toast reducer actions
 type ToastAction =
-  | { type: 'ADD'; payload: Toast }
-  | { type: 'REMOVE'; payload: string }
-  | { type: 'CLEAR' };
+  | { type: "ADD"; payload: Toast }
+  | { type: "REMOVE"; payload: string }
+  | { type: "CLEAR" };
 
 function toastReducer(state: Toast[], action: ToastAction): Toast[] {
   switch (action.type) {
-    case 'ADD':
+    case "ADD":
       return [...state, action.payload];
-    case 'REMOVE':
+    case "REMOVE":
       return state.filter((toast) => toast.id !== action.payload);
-    case 'CLEAR':
+    case "CLEAR":
       return [];
     default:
       return state;
@@ -92,11 +92,16 @@ export interface ToastProviderProps {
 /**
  * ToastProvider wraps the app and provides toast context to all children.
  */
-export function ToastProvider({ children, maxToasts = 5 }: ToastProviderProps): JSX.Element {
+export function ToastProvider({
+  children,
+  maxToasts = 5,
+}: ToastProviderProps): JSX.Element {
   const [toasts, dispatch] = useReducer(toastReducer, []);
 
   // Track auto-dismiss timeouts
-  const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
 
   // Cleanup all timeouts on unmount
   useEffect(() => {
@@ -116,18 +121,18 @@ export function ToastProvider({ children, maxToasts = 5 }: ToastProviderProps): 
       clearTimeout(timeoutId);
       timeoutsRef.current.delete(id);
     }
-    dispatch({ type: 'REMOVE', payload: id });
+    dispatch({ type: "REMOVE", payload: id });
   }, []);
 
   const showToast = useCallback(
     (message: string, options?: ToastOptions): string => {
-      const type = options?.type ?? 'info';
+      const type = options?.type ?? "info";
       const duration = options?.duration ?? 5000;
 
       const id = generateId();
       const toast: Toast = { id, message, type, duration };
 
-      dispatch({ type: 'ADD', payload: toast });
+      dispatch({ type: "ADD", payload: toast });
 
       // Set up auto-dismiss if duration > 0
       if (duration > 0) {
@@ -139,7 +144,7 @@ export function ToastProvider({ children, maxToasts = 5 }: ToastProviderProps): 
 
       return id;
     },
-    [dismissToast]
+    [dismissToast],
   );
 
   const dismissAll = useCallback(() => {
@@ -148,7 +153,7 @@ export function ToastProvider({ children, maxToasts = 5 }: ToastProviderProps): 
       clearTimeout(timeoutId);
     }
     timeoutsRef.current.clear();
-    dispatch({ type: 'CLEAR' });
+    dispatch({ type: "CLEAR" });
   }, []);
 
   // Enforce maxToasts limit - remove oldest when exceeded
@@ -157,7 +162,9 @@ export function ToastProvider({ children, maxToasts = 5 }: ToastProviderProps): 
   useEffect(() => {
     if (toasts.length > maxToasts) {
       // Get the IDs to remove (oldest first)
-      const idsToRemove = toasts.slice(0, toasts.length - maxToasts).map((t) => t.id);
+      const idsToRemove = toasts
+        .slice(0, toasts.length - maxToasts)
+        .map((t) => t.id);
       for (const id of idsToRemove) {
         dismissToast(id);
       }
@@ -172,7 +179,9 @@ export function ToastProvider({ children, maxToasts = 5 }: ToastProviderProps): 
     dismissAll,
   };
 
-  return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
+  return (
+    <ToastContext.Provider value={value}>{children}</ToastContext.Provider>
+  );
 }
 
 /**
@@ -200,7 +209,7 @@ export function ToastProvider({ children, maxToasts = 5 }: ToastProviderProps): 
 export function useToast(): ToastContextValue {
   const context = useContext(ToastContext);
   if (context === undefined) {
-    throw new Error('useToast must be used within a ToastProvider');
+    throw new Error("useToast must be used within a ToastProvider");
   }
   return context;
 }

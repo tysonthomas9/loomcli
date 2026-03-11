@@ -2,21 +2,21 @@
  * Filter types for list/query operations.
  */
 
-import type { MolType } from './agent';
-import type { Status } from './status';
+import type { MolType } from "./agent";
+import type { Status } from "./status";
 
 /**
  * Sort policy for ready work.
  * Maps to Go types.SortPolicy.
  */
-export type SortPolicy = 'hybrid' | 'priority' | 'oldest' | '';
+export type SortPolicy = "hybrid" | "priority" | "oldest" | "";
 
 /**
  * Sort policy constants.
  */
-export const SortPolicyHybrid: SortPolicy = 'hybrid';
-export const SortPolicyPriority: SortPolicy = 'priority';
-export const SortPolicyOldest: SortPolicy = 'oldest';
+export const SortPolicyHybrid: SortPolicy = "hybrid";
+export const SortPolicyPriority: SortPolicy = "priority";
+export const SortPolicyOldest: SortPolicy = "oldest";
 
 /**
  * Filter for ready work queries.
@@ -37,4 +37,3 @@ export interface WorkFilter {
   include_deferred?: boolean;
   include_mol_steps?: boolean;
 }
-

@@ -3,15 +3,15 @@
  * Provides memoized sorting with type-safe comparisons.
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from "react";
 
-import type { ColumnDef } from '@/components/table/columns';
-import { getCellValue } from '@/components/table/columns';
+import type { ColumnDef } from "@/components/table/columns";
+import { getCellValue } from "@/components/table/columns";
 
 /**
  * Sort direction type.
  */
-export type SortDirection = 'asc' | 'desc';
+export type SortDirection = "asc" | "desc";
 
 /**
  * Current sort state.
@@ -55,7 +55,7 @@ export interface UseSortReturn<T> {
  * Check if a value is a valid ISO date string.
  */
 function isDateString(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
+  if (typeof value !== "string") return false;
   // Quick check for ISO date format (YYYY-MM-DD)
   if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return false;
   const date = new Date(value);
@@ -66,7 +66,11 @@ function isDateString(value: unknown): value is string {
  * Compare two values for sorting.
  * Handles strings, numbers, dates, and null/undefined values.
  */
-function compareValues(a: unknown, b: unknown, direction: SortDirection): number {
+function compareValues(
+  a: unknown,
+  b: unknown,
+  direction: SortDirection,
+): number {
   // Handle null/undefined - always sort to end
   if (a == null && b == null) return 0;
   if (a == null) return 1;
@@ -74,25 +78,27 @@ function compareValues(a: unknown, b: unknown, direction: SortDirection): number
 
   let comparison = 0;
 
-  if (typeof a === 'string' && typeof b === 'string') {
+  if (typeof a === "string" && typeof b === "string") {
     // Check for date strings first
     if (isDateString(a) && isDateString(b)) {
       comparison = new Date(a).getTime() - new Date(b).getTime();
     } else {
       // Case-insensitive string comparison
-      comparison = a.localeCompare(b, undefined, { sensitivity: 'base' });
+      comparison = a.localeCompare(b, undefined, { sensitivity: "base" });
     }
-  } else if (typeof a === 'number' && typeof b === 'number') {
+  } else if (typeof a === "number" && typeof b === "number") {
     comparison = a - b;
-  } else if (typeof a === 'boolean' && typeof b === 'boolean') {
+  } else if (typeof a === "boolean" && typeof b === "boolean") {
     // true before false in ascending order
     comparison = a === b ? 0 : a ? -1 : 1;
   } else {
     // Fallback to string comparison
-    comparison = String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
+    comparison = String(a).localeCompare(String(b), undefined, {
+      sensitivity: "base",
+    });
   }
 
-  return direction === 'desc' ? -comparison : comparison;
+  return direction === "desc" ? -comparison : comparison;
 }
 
 /**
@@ -131,7 +137,12 @@ function compareValues(a: unknown, b: unknown, direction: SortDirection): number
  * ```
  */
 export function useSort<T>(options: UseSortOptions<T>): UseSortReturn<T> {
-  const { data, columns, initialKey = null, initialDirection = 'asc' } = options;
+  const {
+    data,
+    columns,
+    initialKey = null,
+    initialDirection = "asc",
+  } = options;
 
   // Validate initialKey exists in columns
   const validInitialKey = useMemo(() => {
@@ -183,24 +194,24 @@ export function useSort<T>(options: UseSortOptions<T>): UseSortReturn<T> {
       setSortState((prev) => {
         // If clicking a different column, sort ascending
         if (prev.key !== columnId) {
-          return { key: columnId, direction: 'asc' };
+          return { key: columnId, direction: "asc" };
         }
 
         // If currently ascending, switch to descending
-        if (prev.direction === 'asc') {
-          return { key: columnId, direction: 'desc' };
+        if (prev.direction === "asc") {
+          return { key: columnId, direction: "desc" };
         }
 
         // If currently descending, clear sort
-        return { key: null, direction: 'asc' };
+        return { key: null, direction: "asc" };
       });
     },
-    [columns]
+    [columns],
   );
 
   // Clear sort
   const clearSort = useCallback(() => {
-    setSortState({ key: null, direction: 'asc' });
+    setSortState({ key: null, direction: "asc" });
   }, []);
 
   return {

@@ -3,24 +3,26 @@
  * Fetches metrics via useObservabilityMetrics and renders 5 presentational panels.
  */
 
-import { useObservabilityMetrics } from '@/hooks';
+import { useObservabilityMetrics } from "@/hooks";
 
-import { AgentUtilizationBars } from './AgentUtilizationBars';
-import { EpicProgress } from './EpicProgress';
-import { ErrorIndicators } from './ErrorIndicators';
-import { MetricsCards } from './MetricsCards';
-import styles from './ObservabilityDashboard.module.css';
-import { TaskTimeline } from './TaskTimeline';
+import { AgentUtilizationBars } from "./AgentUtilizationBars";
+import { EpicProgress } from "./EpicProgress";
+import { ErrorIndicators } from "./ErrorIndicators";
+import { MetricsCards } from "./MetricsCards";
+import styles from "./ObservabilityDashboard.module.css";
+import { TaskTimeline } from "./TaskTimeline";
 
 export interface ObservabilityDashboardProps {
   className?: string;
 }
 
-export function ObservabilityDashboard({ className }: ObservabilityDashboardProps): JSX.Element {
+export function ObservabilityDashboard({
+  className,
+}: ObservabilityDashboardProps): JSX.Element {
   const { metrics, isLoading, error, isConnected, lastUpdated, refetch } =
     useObservabilityMetrics({ pollInterval: 30000 });
 
-  const rootClassName = [styles.dashboard, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.dashboard, className].filter(Boolean).join(" ");
 
   if (isLoading && !metrics) {
     return (
@@ -31,12 +33,12 @@ export function ObservabilityDashboard({ className }: ObservabilityDashboardProp
   }
 
   if (error && !metrics) {
-    const is503 = error.message.includes('503');
+    const is503 = error.message.includes("503");
     return (
       <div className={rootClassName}>
         <div className={styles.emptyState}>
           {is503
-            ? 'Observability is not yet configured. Events will appear once the observability system is initialized.'
+            ? "Observability is not yet configured. Events will appear once the observability system is initialized."
             : `Failed to load metrics: ${error.message}`}
         </div>
       </div>
@@ -49,7 +51,10 @@ export function ObservabilityDashboard({ className }: ObservabilityDashboardProp
     <div className={rootClassName}>
       {!isConnected && m && (
         <div className={styles.staleIndicator}>
-          Data may be stale{lastUpdated ? ` (last updated ${lastUpdated.toLocaleTimeString()})` : ''}
+          Data may be stale
+          {lastUpdated
+            ? ` (last updated ${lastUpdated.toLocaleTimeString()})`
+            : ""}
           <button className={styles.retryButton} onClick={() => void refetch()}>
             Retry
           </button>

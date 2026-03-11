@@ -3,11 +3,11 @@
  * Processes create, update, delete, status, and other mutation types to keep the UI in sync.
  */
 
-import { produce } from 'immer';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { produce } from "immer";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { MutationPayload } from '../api/sse';
-import type { Issue } from '../types/issue';
+import type { MutationPayload } from "../api/sse";
+import type { Issue } from "../types/issue";
 import {
   MutationCreate,
   MutationUpdate,
@@ -15,7 +15,7 @@ import {
   MutationStatus,
   MutationBonded,
   MutationRefresh,
-} from '../types/mutation';
+} from "../types/mutation";
 
 /**
  * Options for the useMutationHandler hook.
@@ -26,7 +26,9 @@ export interface UseMutationHandlerOptions {
 
   /** Callback to update issue state (supports functional updates for race condition safety) */
   setIssues: (
-    issues: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)
+    issues:
+      | Map<string, Issue>
+      | ((prev: Map<string, Issue>) => Map<string, Issue>),
   ) => void;
 
   /** Callback when an issue is created */
@@ -87,7 +89,7 @@ function createIssueFromMutation(mutation: MutationPayload): Issue {
   const now = mutation.timestamp;
   const issue: Issue = {
     id: mutation.issue_id,
-    title: mutation.title ?? 'Untitled',
+    title: mutation.title ?? "Untitled",
     priority: 2, // Default priority
     created_at: now,
     updated_at: now,
@@ -170,9 +172,18 @@ function applyBondedToIssue(issue: Issue, mutation: MutationPayload): Issue {
  * }
  * ```
  */
-export function useMutationHandler(options: UseMutationHandlerOptions): UseMutationHandlerReturn {
-  const { issues, setIssues, onIssueCreated, onIssueUpdated, onIssueDeleted, onMutationSkipped, onRefreshRequired } =
-    options;
+export function useMutationHandler(
+  options: UseMutationHandlerOptions,
+): UseMutationHandlerReturn {
+  const {
+    issues,
+    setIssues,
+    onIssueCreated,
+    onIssueUpdated,
+    onIssueDeleted,
+    onMutationSkipped,
+    onRefreshRequired,
+  } = options;
 
   // Track mutation stats
   const [mutationCount, setMutationCount] = useState(0);
@@ -236,8 +247,11 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
 
       // Guard against mutations with empty issue_id (defensive: prevents 'unknown' cards)
       if (!issue_id) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[useMutationHandler] Skipping mutation with empty issue_id:', mutation);
+        if (process.env.NODE_ENV === "development") {
+          console.warn(
+            "[useMutationHandler] Skipping mutation with empty issue_id:",
+            mutation,
+          );
         }
         return;
       }
@@ -251,7 +265,7 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
           if (isStaleMutation(mutation, existingIssue)) {
             onMutationSkippedRef.current?.(
               mutation,
-              'Stale create mutation (issue already exists with newer timestamp)'
+              "Stale create mutation (issue already exists with newer timestamp)",
             );
             return;
           }
@@ -282,12 +296,15 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
       if (type === MutationDelete) {
         const existingIssueForDelete = issues.get(issue_id);
         if (!existingIssueForDelete) {
-          onMutationSkippedRef.current?.(mutation, 'Issue not found for delete mutation');
+          onMutationSkippedRef.current?.(
+            mutation,
+            "Issue not found for delete mutation",
+          );
           return;
         }
         // Check for stale delete mutation
         if (isStaleMutation(mutation, existingIssueForDelete)) {
-          onMutationSkippedRef.current?.(mutation, 'Stale delete mutation');
+          onMutationSkippedRef.current?.(mutation, "Stale delete mutation");
           return;
         }
         // Use functional update to avoid race conditions
@@ -305,13 +322,19 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
       // For all other mutations, issue must exist
       const existingIssue = issues.get(issue_id);
       if (!existingIssue) {
-        onMutationSkippedRef.current?.(mutation, `Issue not found for ${type} mutation`);
+        onMutationSkippedRef.current?.(
+          mutation,
+          `Issue not found for ${type} mutation`,
+        );
         return;
       }
 
       // Check for stale mutation
       if (isStaleMutation(mutation, existingIssue)) {
-        onMutationSkippedRef.current?.(mutation, 'Stale mutation (older than current issue)');
+        onMutationSkippedRef.current?.(
+          mutation,
+          "Stale mutation (older than current issue)",
+        );
         return;
       }
 
@@ -352,7 +375,7 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
     // Note: `issues` is intentionally NOT in deps because stale checks use closure value
     // (acceptable since stale checks only skip mutations), but state updates use functional
     // form with `prev` to ensure each mutation operates on the latest state.
-    [issues, setIssues]
+    [issues, setIssues],
   );
 
   /**
@@ -364,7 +387,7 @@ export function useMutationHandler(options: UseMutationHandlerOptions): UseMutat
         handleMutation(mutation);
       });
     },
-    [handleMutation]
+    [handleMutation],
   );
 
   return {

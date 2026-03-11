@@ -3,9 +3,9 @@
  * Shows mini avatar with status dot, agent name, and activity text.
  */
 
-import type { ParsedLoomStatus } from '@/types';
+import type { ParsedLoomStatus } from "@/types";
 
-import styles from './AgentRow.module.css';
+import styles from "./AgentRow.module.css";
 
 /**
  * Props for the AgentRow component.
@@ -34,8 +34,8 @@ export function AgentRow({
   activity,
 }: AgentRowProps): JSX.Element {
   // Strip [H] prefix for human assignees
-  const displayName = agentName.replace(/^\[H\]\s*/, '');
-  const initial = displayName.charAt(0).toUpperCase() || '?';
+  const displayName = agentName.replace(/^\[H\]\s*/, "");
+  const initial = displayName.charAt(0).toUpperCase() || "?";
 
   return (
     <div className={styles.agentRow}>

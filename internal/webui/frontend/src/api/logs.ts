@@ -2,7 +2,7 @@
  * API functions for log streaming endpoints.
  */
 
-import { get, getAuthToken } from './client';
+import { get, getAuthToken } from "./client";
 
 /**
  * Response from GET /api/tasks/{id}/logs
@@ -25,7 +25,7 @@ interface AgentTerminalInfoResponse {
   success: boolean;
   data?: {
     agent: string;
-    mode: 'tmux' | 'archive';
+    mode: "tmux" | "archive";
   };
   error?: string;
 }
@@ -57,17 +57,20 @@ export async function getTaskLogPhases(taskId: string): Promise<string[]> {
   const headers: Record<string, string> = {};
   const token = getAuthToken();
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/logs`, { headers });
+  const response = await fetch(
+    `/api/tasks/${encodeURIComponent(taskId)}/logs`,
+    { headers },
+  );
 
   if (!response.ok) {
     if (response.status === 404) {
       // No logs yet for this task
       return [];
     }
-    throw new Error('Failed to fetch log phases');
+    throw new Error("Failed to fetch log phases");
   }
 
   const data: LogPhaseResponse = await response.json();
@@ -79,43 +82,46 @@ export async function getTaskLogPhases(taskId: string): Promise<string[]> {
  */
 export async function getTaskLogContent(
   taskId: string,
-  phase: 'planning' | 'implementation',
-  lines = 500
+  phase: "planning" | "implementation",
+  lines = 500,
 ): Promise<{ lines: string[]; lineCount: number }> {
   const headers: Record<string, string> = {};
   const token = getAuthToken();
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   const response = await fetch(
     `/api/tasks/${encodeURIComponent(taskId)}/logs/${encodeURIComponent(phase)}?lines=${lines}`,
-    { headers }
+    { headers },
   );
 
   if (!response.ok) {
     if (response.status === 404) {
       return { lines: [], lineCount: 0 };
     }
-    throw new Error('Failed to fetch task logs');
+    throw new Error("Failed to fetch task logs");
   }
 
   const data: TaskLogContentResponse = await response.json();
   return {
     lines: Array.isArray(data.data?.lines) ? data.data.lines : [],
-    lineCount: typeof data.data?.line_count === 'number' ? data.data.line_count : 0,
+    lineCount:
+      typeof data.data?.line_count === "number" ? data.data.line_count : 0,
   };
 }
 
 /**
  * Fetch whether agent logs should use live tmux streaming or archive fallback.
  */
-export async function getAgentTerminalInfo(agentName: string): Promise<'tmux' | 'archive'> {
+export async function getAgentTerminalInfo(
+  agentName: string,
+): Promise<"tmux" | "archive"> {
   const response = await get<AgentTerminalInfoResponse>(
-    `/api/agents/${encodeURIComponent(agentName)}/terminal/info`
+    `/api/agents/${encodeURIComponent(agentName)}/terminal/info`,
   );
   if (!response.success || !response.data) {
-    throw new Error(response.error || 'Failed to fetch agent terminal info');
+    throw new Error(response.error || "Failed to fetch agent terminal info");
   }
   return response.data.mode;
 }
@@ -123,12 +129,14 @@ export async function getAgentTerminalInfo(agentName: string): Promise<'tmux' | 
 /**
  * Fetch one-time WebSocket auth token for agent terminal stream.
  */
-export async function getAgentTerminalToken(agentName: string): Promise<string> {
+export async function getAgentTerminalToken(
+  agentName: string,
+): Promise<string> {
   const response = await get<AgentTerminalTokenResponse>(
-    `/api/agents/${encodeURIComponent(agentName)}/terminal/token`
+    `/api/agents/${encodeURIComponent(agentName)}/terminal/token`,
   );
   if (!response.success || !response.data) {
-    throw new Error(response.error || 'Failed to fetch agent terminal token');
+    throw new Error(response.error || "Failed to fetch agent terminal token");
   }
   return response.data.token;
 }
@@ -136,13 +144,16 @@ export async function getAgentTerminalToken(agentName: string): Promise<string> 
 /**
  * Build WebSocket URL for agent terminal stream.
  */
-export function getAgentTerminalWsUrl(agentName: string, token: string): string {
+export function getAgentTerminalWsUrl(
+  agentName: string,
+  token: string,
+): string {
   const location =
-    typeof window !== 'undefined'
+    typeof window !== "undefined"
       ? window.location
       : (globalThis as { location?: Location }).location;
-  const proto = location?.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = location?.host || 'localhost';
+  const proto = location?.protocol === "https:" ? "wss:" : "ws:";
+  const host = location?.host || "localhost";
   return `${proto}//${host}/api/agents/${encodeURIComponent(agentName)}/terminal/ws?token=${encodeURIComponent(token)}`;
 }
 
@@ -154,7 +165,7 @@ export function getAgentTerminalWsUrl(agentName: string, token: string): string 
 export async function getAgentLogArchive(
   agentName: string,
   lines = 500,
-  beforeLine?: number
+  beforeLine?: number,
 ): Promise<{ lines: string[]; lineCount: number; startLine: number }> {
   let url = `/api/agents/${encodeURIComponent(agentName)}/logs?lines=${lines}`;
   if (beforeLine !== undefined) {
@@ -162,11 +173,17 @@ export async function getAgentLogArchive(
   }
   const response = await get<AgentLogContentResponse>(url);
   if (!response.success || !response.data) {
-    throw new Error(response.error || 'Failed to fetch agent log archive');
+    throw new Error(response.error || "Failed to fetch agent log archive");
   }
   return {
     lines: Array.isArray(response.data.lines) ? response.data.lines : [],
-    lineCount: typeof response.data.line_count === 'number' ? response.data.line_count : 0,
-    startLine: typeof response.data.start_line === 'number' ? response.data.start_line : 1,
+    lineCount:
+      typeof response.data.line_count === "number"
+        ? response.data.line_count
+        : 0,
+    startLine:
+      typeof response.data.start_line === "number"
+        ? response.data.start_line
+        : 1,
   };
 }

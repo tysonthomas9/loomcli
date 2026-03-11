@@ -13,19 +13,19 @@ import type {
   LoomTaskLists,
   LoomSyncInfo,
   LoomStats,
-} from '@/types';
-import { getAuthToken } from './client';
+} from "@/types";
+import { getAuthToken } from "./client";
 
 /**
  * Default loom server URL.
  * Can be overridden via environment variable or config.
  */
-const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? '/api/loom';
+const LOOM_SERVER_URL = import.meta.env.VITE_LOOM_SERVER_URL ?? "/api/loom";
 const LOOM_REQUEST_TIMEOUT_MS = 15000;
 
 function buildLoomHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
-    Accept: 'application/json',
+    Accept: "application/json",
   };
   const token = getAuthToken();
   if (token) {
@@ -37,7 +37,7 @@ function buildLoomHeaders(): Record<string, string> {
 async function fetchWithTimeout(
   input: RequestInfo,
   init: RequestInit,
-  timeoutMs = LOOM_REQUEST_TIMEOUT_MS
+  timeoutMs = LOOM_REQUEST_TIMEOUT_MS,
 ) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -55,7 +55,7 @@ async function fetchWithTimeout(
  */
 export async function fetchAgents(): Promise<LoomAgentStatus[]> {
   const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/agents`, {
-    method: 'GET',
+    method: "GET",
     headers: buildLoomHeaders(),
   });
 
@@ -73,7 +73,7 @@ export async function fetchAgents(): Promise<LoomAgentStatus[]> {
 export async function checkLoomHealth(): Promise<boolean> {
   try {
     const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/health`, {
-      method: 'GET',
+      method: "GET",
       headers: buildLoomHeaders(),
     });
     return response.ok;
@@ -100,12 +100,14 @@ export interface FetchStatusResult {
  */
 export async function fetchStatus(): Promise<FetchStatusResult> {
   const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/status`, {
-    method: 'GET',
+    method: "GET",
     headers: buildLoomHeaders(),
   });
 
   if (!response.ok) {
-    throw new Error(`Loom server returned ${response.status}: ${response.statusText}`);
+    throw new Error(
+      `Loom server returned ${response.status}: ${response.statusText}`,
+    );
   }
 
   const data: LoomStatusResponse = await response.json();
@@ -125,12 +127,14 @@ export async function fetchStatus(): Promise<FetchStatusResult> {
  */
 export async function fetchTasks(): Promise<LoomTaskLists> {
   const response = await fetchWithTimeout(`${LOOM_SERVER_URL}/api/tasks`, {
-    method: 'GET',
+    method: "GET",
     headers: buildLoomHeaders(),
   });
 
   if (!response.ok) {
-    throw new Error(`Loom server returned ${response.status}: ${response.statusText}`);
+    throw new Error(
+      `Loom server returned ${response.status}: ${response.statusText}`,
+    );
   }
 
   const data: LoomTasksResponse = await response.json();

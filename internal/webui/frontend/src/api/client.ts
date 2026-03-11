@@ -1,13 +1,20 @@
-const API_BASE_URL = '';
+const API_BASE_URL = "";
 const DEFAULT_TIMEOUT = 30000;
 
 // Auth token stored in memory (not localStorage) for XSS safety
 let authToken: string | null = null;
 
 // Auth state tracking
-export type AuthState = 'initializing' | 'authenticated' | 'disabled' | 'failed';
-let authState: AuthState = 'initializing';
-type AuthStateListener = { callback: (state: AuthState) => void; active: boolean };
+export type AuthState =
+  | "initializing"
+  | "authenticated"
+  | "disabled"
+  | "failed";
+let authState: AuthState = "initializing";
+type AuthStateListener = {
+  callback: (state: AuthState) => void;
+  active: boolean;
+};
 const authStateListeners: AuthStateListener[] = [];
 
 // Promise deduplication for concurrent re-auth attempts
@@ -17,10 +24,10 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public statusText: string,
-    public body?: unknown
+    public body?: unknown,
   ) {
     super(`API Error: ${status} ${statusText}`);
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 }
 
@@ -52,7 +59,9 @@ export function getAuthState(): AuthState {
  * Register a callback for auth state changes.
  * Returns an unsubscribe function.
  */
-export function onAuthStateChange(callback: (state: AuthState) => void): () => void {
+export function onAuthStateChange(
+  callback: (state: AuthState) => void,
+): () => void {
   const listener: AuthStateListener = { callback, active: true };
   authStateListeners.push(listener);
   return () => {
@@ -77,7 +86,7 @@ function isTransientFailure(error: unknown, status?: number): boolean {
  * Retries up to maxRetries times with exponential backoff for transient failures.
  */
 export async function initAuth(
-  options: { maxRetries?: number } = {}
+  options: { maxRetries?: number } = {},
 ): Promise<void> {
   const maxRetries = options.maxRetries ?? 3;
 
@@ -91,38 +100,43 @@ export async function initAuth(
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
           const response = await fetch(`${API_BASE_URL}/api/auth/token`, {
-            headers: { Accept: 'application/json' },
+            headers: { Accept: "application/json" },
           });
 
           if (response.ok) {
             const data = (await response.json()) as { token: string };
             authToken = data.token;
-            setAuthState('authenticated');
+            setAuthState("authenticated");
             return;
           }
 
           // 404 means auth is disabled on the server
           if (response.status === 404) {
-            setAuthState('disabled');
+            setAuthState("disabled");
             return;
           }
 
           // Non-retryable client errors (403, etc.) - stop immediately
           if (response.status >= 400 && response.status < 500) {
-            setAuthState('disabled');
+            setAuthState("disabled");
             return;
           }
 
           // Server error (5xx) - retry if we have attempts left
-          if (isTransientFailure(null, response.status) && attempt < maxRetries) {
+          if (
+            isTransientFailure(null, response.status) &&
+            attempt < maxRetries
+          ) {
             const delay = 500 * Math.pow(2, attempt); // 500ms, 1s, 2s
             await new Promise((resolve) => setTimeout(resolve, delay));
             continue;
           }
 
           // Exhausted retries on server error
-          console.error(`[Auth] Token acquisition failed after ${attempt + 1} attempts`);
-          setAuthState('failed');
+          console.error(
+            `[Auth] Token acquisition failed after ${attempt + 1} attempts`,
+          );
+          setAuthState("failed");
           return;
         } catch (error) {
           // Network error - retry if we have attempts left
@@ -133,8 +147,10 @@ export async function initAuth(
           }
 
           // Exhausted retries on network error
-          console.error(`[Auth] Token acquisition failed after ${attempt + 1} attempts`);
-          setAuthState('failed');
+          console.error(
+            `[Auth] Token acquisition failed after ${attempt + 1} attempts`,
+          );
+          setAuthState("failed");
           return;
         }
       }
@@ -158,7 +174,7 @@ async function fetchApi<T>(
   path: string,
   body?: unknown,
   options: RequestOptions = {},
-  _retried = false
+  _retried = false,
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = options.timeout ?? DEFAULT_TIMEOUT;
@@ -177,17 +193,17 @@ async function fetchApi<T>(
 
   try {
     const headers: Record<string, string> = {
-      Accept: 'application/json',
+      Accept: "application/json",
       ...options.headers,
     };
 
     // Inject auth token if available
-    if (authToken && !headers['Authorization']) {
-      headers['Authorization'] = `Bearer ${authToken}`;
+    if (authToken && !headers["Authorization"]) {
+      headers["Authorization"] = `Bearer ${authToken}`;
     }
 
     if (body !== undefined) {
-      headers['Content-Type'] = 'application/json';
+      headers["Content-Type"] = "application/json";
     }
 
     const requestBody = body !== undefined ? JSON.stringify(body) : null;
@@ -229,25 +245,31 @@ async function fetchApi<T>(
   } catch (error) {
     clearTimeoutCleanup();
     if (error instanceof ApiError) throw error;
-    if (error instanceof DOMException && error.name === 'AbortError') {
+    if (error instanceof DOMException && error.name === "AbortError") {
       if (timedOut) {
-        throw new ApiError(0, 'Request timeout');
+        throw new ApiError(0, "Request timeout");
       }
       // User-provided signal was aborted - re-throw as-is
       throw error;
     }
-    throw new ApiError(0, 'Network error', error);
+    throw new ApiError(0, "Network error", error);
   }
 }
 
 export const get = <T>(path: string, options?: RequestOptions): Promise<T> =>
-  fetchApi<T>('GET', path, undefined, options);
+  fetchApi<T>("GET", path, undefined, options);
 
-export const post = <T>(path: string, body: unknown, options?: RequestOptions): Promise<T> =>
-  fetchApi<T>('POST', path, body, options);
+export const post = <T>(
+  path: string,
+  body: unknown,
+  options?: RequestOptions,
+): Promise<T> => fetchApi<T>("POST", path, body, options);
 
-export const patch = <T>(path: string, body: unknown, options?: RequestOptions): Promise<T> =>
-  fetchApi<T>('PATCH', path, body, options);
+export const patch = <T>(
+  path: string,
+  body: unknown,
+  options?: RequestOptions,
+): Promise<T> => fetchApi<T>("PATCH", path, body, options);
 
 export const del = <T>(path: string, options?: RequestOptions): Promise<T> =>
-  fetchApi<T>('DELETE', path, undefined, options);
+  fetchApi<T>("DELETE", path, undefined, options);

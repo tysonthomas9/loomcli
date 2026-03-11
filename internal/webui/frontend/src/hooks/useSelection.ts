@@ -3,7 +3,7 @@
  * Provides memoized selection with type-safe operations.
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 
 /**
  * Options for the useSelection hook.
@@ -150,7 +150,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
         return next;
       });
     },
-    [notifyChange]
+    [notifyChange],
   );
 
   // Select all visible items
@@ -202,7 +202,7 @@ export function useSelection(options: UseSelectionOptions): UseSelectionReturn {
         return prev;
       });
     },
-    [notifyChange]
+    [notifyChange],
   );
 
   // Clear all selection

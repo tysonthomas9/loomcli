@@ -9,21 +9,21 @@
  * the backend dropdown, save button behavior, and agent override table.
  */
 
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import '@testing-library/jest-dom';
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import "@testing-library/jest-dom";
 
-import type { UseBackendConfigReturn } from '@/hooks/useBackendConfig';
-import type { BackendConfigData } from '@/api/config';
+import type { UseBackendConfigReturn } from "@/hooks/useBackendConfig";
+import type { BackendConfigData } from "@/api/config";
 
-import { SettingsView } from '../SettingsView';
+import { SettingsView } from "../SettingsView";
 
 // Mock the hooks used by SettingsView
-vi.mock('@/hooks/useBackendConfig', () => ({
+vi.mock("@/hooks/useBackendConfig", () => ({
   useBackendConfig: vi.fn(),
 }));
 
-vi.mock('@/hooks/useToast', () => ({
+vi.mock("@/hooks/useToast", () => ({
   useToast: vi.fn(() => ({
     showToast: vi.fn(),
     toasts: [],
@@ -32,8 +32,8 @@ vi.mock('@/hooks/useToast', () => ({
   })),
 }));
 
-import { useBackendConfig } from '@/hooks/useBackendConfig';
-import { useToast } from '@/hooks/useToast';
+import { useBackendConfig } from "@/hooks/useBackendConfig";
+import { useToast } from "@/hooks/useToast";
 
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
 const mockUseToast = vi.mocked(useToast);
@@ -41,11 +41,13 @@ const mockUseToast = vi.mocked(useToast);
 /**
  * Helper to create a mock BackendConfigData.
  */
-function createMockConfig(overrides?: Partial<BackendConfigData>): BackendConfigData {
+function createMockConfig(
+  overrides?: Partial<BackendConfigData>,
+): BackendConfigData {
   return {
-    backend: 'anthropic',
-    source: 'project',
-    available: ['anthropic', 'openai', 'local'],
+    backend: "anthropic",
+    source: "project",
+    available: ["anthropic", "openai", "local"],
     agents: [],
     ...overrides,
   };
@@ -55,7 +57,7 @@ function createMockConfig(overrides?: Partial<BackendConfigData>): BackendConfig
  * Helper to create a mock UseBackendConfigReturn.
  */
 function createMockHookReturn(
-  overrides?: Partial<UseBackendConfigReturn>
+  overrides?: Partial<UseBackendConfigReturn>,
 ): UseBackendConfigReturn {
   return {
     config: createMockConfig(),
@@ -68,7 +70,7 @@ function createMockHookReturn(
   };
 }
 
-describe('SettingsView', () => {
+describe("SettingsView", () => {
   const mockShowToast = vi.fn();
 
   beforeEach(() => {
@@ -81,242 +83,254 @@ describe('SettingsView', () => {
     });
   });
 
-  describe('loading state', () => {
-    it('renders loading skeleton while fetching', () => {
+  describe("loading state", () => {
+    it("renders loading skeleton while fetching", () => {
       mockUseBackendConfig.mockReturnValue(
-        createMockHookReturn({ config: null, isLoading: true })
+        createMockHookReturn({ config: null, isLoading: true }),
       );
 
       render(<SettingsView />);
 
-      expect(screen.getByTestId('settings-view')).toBeInTheDocument();
-      expect(screen.getByText('Settings')).toBeInTheDocument();
-      expect(screen.getByText('Project Default Backend')).toBeInTheDocument();
+      expect(screen.getByTestId("settings-view")).toBeInTheDocument();
+      expect(screen.getByText("Settings")).toBeInTheDocument();
+      expect(screen.getByText("Project Default Backend")).toBeInTheDocument();
       // LoadingSkeleton renders with aria-hidden
-      const settingsView = screen.getByTestId('settings-view');
+      const settingsView = screen.getByTestId("settings-view");
       const skeleton = settingsView.querySelector('[aria-hidden="true"]');
       expect(skeleton).toBeInTheDocument();
     });
   });
 
-  describe('error state', () => {
-    it('renders error display when fetch fails and no config', () => {
+  describe("error state", () => {
+    it("renders error display when fetch fails and no config", () => {
       mockUseBackendConfig.mockReturnValue(
-        createMockHookReturn({ config: null, isLoading: false, error: 'Server error' })
+        createMockHookReturn({
+          config: null,
+          isLoading: false,
+          error: "Server error",
+        }),
       );
 
       render(<SettingsView />);
 
-      expect(screen.getByTestId('settings-view')).toBeInTheDocument();
-      expect(screen.getByText('Backend configuration unavailable')).toBeInTheDocument();
+      expect(screen.getByTestId("settings-view")).toBeInTheDocument();
+      expect(
+        screen.getByText("Backend configuration unavailable"),
+      ).toBeInTheDocument();
     });
   });
 
-  describe('backend dropdown', () => {
-    it('renders backend dropdown with current value selected', () => {
+  describe("backend dropdown", () => {
+    it("renders backend dropdown with current value selected", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
-          config: createMockConfig({ backend: 'openai' }),
-        })
+          config: createMockConfig({ backend: "openai" }),
+        }),
       );
 
       render(<SettingsView />);
 
-      const select = screen.getByTestId('backend-select') as HTMLSelectElement;
+      const select = screen.getByTestId("backend-select") as HTMLSelectElement;
       expect(select).toBeInTheDocument();
-      expect(select.value).toBe('openai');
+      expect(select.value).toBe("openai");
     });
 
-    it('renders available backend options in dropdown', () => {
+    it("renders available backend options in dropdown", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
           config: createMockConfig({
-            available: ['anthropic', 'openai', 'local', 'azure'],
+            available: ["anthropic", "openai", "local", "azure"],
           }),
-        })
+        }),
       );
 
       render(<SettingsView />);
 
-      const select = screen.getByTestId('backend-select') as HTMLSelectElement;
-      const options = within(select).getAllByRole('option');
+      const select = screen.getByTestId("backend-select") as HTMLSelectElement;
+      const options = within(select).getAllByRole("option");
 
       expect(options).toHaveLength(4);
-      expect(options[0]).toHaveTextContent('anthropic');
-      expect(options[1]).toHaveTextContent('openai');
-      expect(options[2]).toHaveTextContent('local');
-      expect(options[3]).toHaveTextContent('azure');
+      expect(options[0]).toHaveTextContent("anthropic");
+      expect(options[1]).toHaveTextContent("openai");
+      expect(options[2]).toHaveTextContent("local");
+      expect(options[3]).toHaveTextContent("azure");
     });
 
-    it('renders source tag with config source', () => {
+    it("renders source tag with config source", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
-          config: createMockConfig({ source: 'project' }),
-        })
+          config: createMockConfig({ source: "project" }),
+        }),
       );
 
       render(<SettingsView />);
 
-      expect(screen.getByText('From project loom.yaml')).toBeInTheDocument();
+      expect(screen.getByText("From project loom.yaml")).toBeInTheDocument();
     });
 
     it('renders "Default" source tag when source is not project', () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
-          config: createMockConfig({ source: 'default' }),
-        })
+          config: createMockConfig({ source: "default" }),
+        }),
       );
 
       render(<SettingsView />);
 
-      expect(screen.getByText('Default')).toBeInTheDocument();
+      expect(screen.getByText("Default")).toBeInTheDocument();
     });
   });
 
-  describe('save button', () => {
-    it('save button disabled when no changes', () => {
+  describe("save button", () => {
+    it("save button disabled when no changes", () => {
       mockUseBackendConfig.mockReturnValue(createMockHookReturn());
 
       render(<SettingsView />);
 
-      const saveButton = screen.getByTestId('save-button');
+      const saveButton = screen.getByTestId("save-button");
       expect(saveButton).toBeDisabled();
     });
 
-    it('save button enabled after dropdown change', () => {
+    it("save button enabled after dropdown change", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
-          config: createMockConfig({ backend: 'anthropic' }),
-        })
+          config: createMockConfig({ backend: "anthropic" }),
+        }),
       );
 
       render(<SettingsView />);
 
-      const select = screen.getByTestId('backend-select');
-      fireEvent.change(select, { target: { value: 'openai' } });
+      const select = screen.getByTestId("backend-select");
+      fireEvent.change(select, { target: { value: "openai" } });
 
-      const saveButton = screen.getByTestId('save-button');
+      const saveButton = screen.getByTestId("save-button");
       expect(saveButton).not.toBeDisabled();
     });
 
-    it('calls updateBackend on save button click', async () => {
+    it("calls updateBackend on save button click", async () => {
       const mockUpdateBackend = vi.fn().mockResolvedValue(undefined);
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
-          config: createMockConfig({ backend: 'anthropic' }),
+          config: createMockConfig({ backend: "anthropic" }),
           updateBackend: mockUpdateBackend,
-        })
+        }),
       );
 
       render(<SettingsView />);
 
       // Change dropdown value
-      const select = screen.getByTestId('backend-select');
-      fireEvent.change(select, { target: { value: 'openai' } });
+      const select = screen.getByTestId("backend-select");
+      fireEvent.change(select, { target: { value: "openai" } });
 
       // Click save
-      const saveButton = screen.getByTestId('save-button');
+      const saveButton = screen.getByTestId("save-button");
       await act(async () => {
         fireEvent.click(saveButton);
       });
 
-      expect(mockUpdateBackend).toHaveBeenCalledWith('openai');
+      expect(mockUpdateBackend).toHaveBeenCalledWith("openai");
     });
 
     it('shows "Saving..." text when isSaving is true', () => {
       mockUseBackendConfig.mockReturnValue(
-        createMockHookReturn({ isSaving: true })
+        createMockHookReturn({ isSaving: true }),
       );
 
       render(<SettingsView />);
 
-      const saveButton = screen.getByTestId('save-button');
-      expect(saveButton).toHaveTextContent('Saving...');
+      const saveButton = screen.getByTestId("save-button");
+      expect(saveButton).toHaveTextContent("Saving...");
     });
 
-    it('save button disabled when isSaving is true', () => {
+    it("save button disabled when isSaving is true", () => {
       mockUseBackendConfig.mockReturnValue(
-        createMockHookReturn({ isSaving: true })
+        createMockHookReturn({ isSaving: true }),
       );
 
       render(<SettingsView />);
 
-      const saveButton = screen.getByTestId('save-button');
+      const saveButton = screen.getByTestId("save-button");
       expect(saveButton).toBeDisabled();
     });
   });
 
-  describe('agent override table', () => {
-    it('renders agent override table when agents have overrides', () => {
+  describe("agent override table", () => {
+    it("renders agent override table when agents have overrides", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
           config: createMockConfig({
             agents: [
-              { worktree: 'feature-a', role: 'coder', backend: 'openai' },
-              { worktree: 'feature-b', role: 'reviewer', backend: 'local' },
+              { worktree: "feature-a", role: "coder", backend: "openai" },
+              { worktree: "feature-b", role: "reviewer", backend: "local" },
             ],
           }),
-        })
+        }),
       );
 
       render(<SettingsView />);
 
-      const table = screen.getByTestId('agent-overrides-table');
+      const table = screen.getByTestId("agent-overrides-table");
       expect(table).toBeInTheDocument();
 
       // Check table headers
-      expect(screen.getByText('Worktree')).toBeInTheDocument();
-      expect(screen.getByText('Role')).toBeInTheDocument();
-      expect(screen.getByText('Backend')).toBeInTheDocument();
+      expect(screen.getByText("Worktree")).toBeInTheDocument();
+      expect(screen.getByText("Role")).toBeInTheDocument();
+      expect(screen.getByText("Backend")).toBeInTheDocument();
 
       // Check table data
-      expect(screen.getByText('feature-a')).toBeInTheDocument();
-      expect(screen.getByText('coder')).toBeInTheDocument();
-      expect(screen.getByText('feature-b')).toBeInTheDocument();
-      expect(screen.getByText('reviewer')).toBeInTheDocument();
+      expect(screen.getByText("feature-a")).toBeInTheDocument();
+      expect(screen.getByText("coder")).toBeInTheDocument();
+      expect(screen.getByText("feature-b")).toBeInTheDocument();
+      expect(screen.getByText("reviewer")).toBeInTheDocument();
     });
 
-    it('hides agent table when no overrides', () => {
+    it("hides agent table when no overrides", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
           config: createMockConfig({
             agents: [
-              { worktree: 'feature-a', role: 'coder', backend: '' },
-              { worktree: 'feature-b', role: 'reviewer', backend: '' },
+              { worktree: "feature-a", role: "coder", backend: "" },
+              { worktree: "feature-b", role: "reviewer", backend: "" },
             ],
           }),
-        })
+        }),
       );
 
       render(<SettingsView />);
 
-      expect(screen.queryByTestId('agent-overrides-table')).not.toBeInTheDocument();
-      expect(screen.getByTestId('no-overrides-message')).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("agent-overrides-table"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("no-overrides-message")).toBeInTheDocument();
     });
 
-    it('shows empty message when agents list empty', () => {
+    it("shows empty message when agents list empty", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
           config: createMockConfig({ agents: [] }),
-        })
+        }),
       );
 
       render(<SettingsView />);
 
-      expect(screen.queryByTestId('agent-overrides-table')).not.toBeInTheDocument();
-      expect(screen.getByTestId('no-overrides-message')).toBeInTheDocument();
-      expect(screen.getByText('No per-agent overrides configured.')).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("agent-overrides-table"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("no-overrides-message")).toBeInTheDocument();
+      expect(
+        screen.getByText("No per-agent overrides configured."),
+      ).toBeInTheDocument();
     });
   });
 
-  describe('className prop', () => {
-    it('applies custom className', () => {
+  describe("className prop", () => {
+    it("applies custom className", () => {
       mockUseBackendConfig.mockReturnValue(createMockHookReturn());
 
       render(<SettingsView className="custom-settings" />);
 
-      const settingsView = screen.getByTestId('settings-view');
-      expect(settingsView).toHaveClass('custom-settings');
+      const settingsView = screen.getByTestId("settings-view");
+      expect(settingsView).toHaveClass("custom-settings");
     });
   });
 });

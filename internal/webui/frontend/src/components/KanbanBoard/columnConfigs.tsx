@@ -10,7 +10,7 @@
  * - Done: Closed issues
  */
 
-import type { KanbanColumnConfig } from './types';
+import type { KanbanColumnConfig } from "./types";
 
 const ClockIcon = (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -22,7 +22,14 @@ const ClockIcon = (
       strokeLinecap="round"
       strokeLinejoin="round"
     />
-    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <circle
+      cx="12"
+      cy="12"
+      r="9"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
   </svg>
 );
 
@@ -30,70 +37,73 @@ const ClockIcon = (
  * Default kanban columns for multi-agent workflows.
  * Order matters: filter functions are evaluated in order, issue belongs to first match.
  */
-export function createColumns(options?: { includeEpics?: boolean }): KanbanColumnConfig[] {
+export function createColumns(options?: {
+  includeEpics?: boolean;
+}): KanbanColumnConfig[] {
   const includeEpics = options?.includeEpics === true;
   return [
     {
-      id: 'backlog',
-      label: 'Backlog',
+      id: "backlog",
+      label: "Backlog",
       filter: (issue) =>
-        (includeEpics || issue.issue_type !== 'epic') &&
-        issue.status === 'deferred',
+        (includeEpics || issue.issue_type !== "epic") &&
+        issue.status === "deferred",
       droppableDisabled: true, // Cannot drop TO backlog (auto-calculated)
-      allowedDropTargets: ['done'], // Can only drag FROM backlog to Done
-      style: 'muted',
+      allowedDropTargets: ["done"], // Can only drag FROM backlog to Done
+      style: "muted",
     },
     {
-      id: 'ready',
-      label: 'Open',
+      id: "ready",
+      label: "Open",
       headerIcon: ClockIcon,
       filter: (issue, blockedInfo) =>
-        (includeEpics || issue.issue_type !== 'epic') &&
-        (issue.status === 'open' || issue.status === undefined) &&
+        (includeEpics || issue.issue_type !== "epic") &&
+        (issue.status === "open" || issue.status === undefined) &&
         (!blockedInfo || blockedInfo.blockedByCount === 0),
-      targetStatus: 'open',
-      allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
-      style: 'normal',
+      targetStatus: "open",
+      allowedDropTargets: ["ready", "in_progress", "review", "done"],
+      style: "normal",
     },
     {
-      id: 'blocked',
-      label: 'Blocked',
+      id: "blocked",
+      label: "Blocked",
       filter: (issue, blockedInfo) =>
-        (includeEpics || issue.issue_type !== 'epic') &&
-        (((issue.status === 'open' || issue.status === undefined) &&
+        (includeEpics || issue.issue_type !== "epic") &&
+        (((issue.status === "open" || issue.status === undefined) &&
           !!blockedInfo &&
           blockedInfo.blockedByCount > 0) ||
-          issue.status === 'blocked'),
+          issue.status === "blocked"),
       droppableDisabled: true, // Cannot drop TO blocked (auto-calculated)
-      allowedDropTargets: ['done'], // Can only drag FROM blocked to Done
-      style: 'muted',
+      allowedDropTargets: ["done"], // Can only drag FROM blocked to Done
+      style: "muted",
     },
     {
-      id: 'in_progress',
-      label: 'In Progress',
+      id: "in_progress",
+      label: "In Progress",
       filter: (issue) =>
-        (includeEpics || issue.issue_type !== 'epic') && issue.status === 'in_progress',
-      targetStatus: 'in_progress',
-      allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
-      style: 'normal',
+        (includeEpics || issue.issue_type !== "epic") &&
+        issue.status === "in_progress",
+      targetStatus: "in_progress",
+      allowedDropTargets: ["ready", "in_progress", "review", "done"],
+      style: "normal",
     },
     {
-      id: 'review',
-      label: 'Needs Review',
+      id: "review",
+      label: "Needs Review",
       filter: (issue) =>
-        (includeEpics || issue.issue_type !== 'epic') &&
-        issue.status === 'review',
-      targetStatus: 'review',
-      allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
-      style: 'normal',
+        (includeEpics || issue.issue_type !== "epic") &&
+        issue.status === "review",
+      targetStatus: "review",
+      allowedDropTargets: ["ready", "in_progress", "review", "done"],
+      style: "normal",
     },
     {
-      id: 'done',
-      label: 'Done',
-      filter: (issue) => issue.status === 'closed',
-      targetStatus: 'closed',
-      allowedDropTargets: ['ready', 'in_progress', 'review', 'done'],
-      style: 'normal',
+      id: "done",
+      label: "Done",
+      filter: (issue) => issue.status === "closed",
+      targetStatus: "closed",
+      allowedDropTargets: ["ready", "in_progress", "review", "done"],
+      style: "normal",
       defaultLimit: 10,
     },
   ];

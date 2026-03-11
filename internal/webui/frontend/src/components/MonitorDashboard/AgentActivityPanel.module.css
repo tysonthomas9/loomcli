@@ -50,36 +50,36 @@
   flex-shrink: 0;
 }
 
-.summaryDot[data-type='active'] {
+.summaryDot[data-type="active"] {
   background-color: var(--color-status-working);
 }
 
-.summaryDot[data-type='idle'] {
+.summaryDot[data-type="idle"] {
   background-color: var(--color-status-done);
 }
 
-.summaryDot[data-type='error'] {
+.summaryDot[data-type="error"] {
   background-color: var(--color-status-error);
 }
 
-.summaryDot[data-type='sync'] {
+.summaryDot[data-type="sync"] {
   background-color: var(--color-status-dirty);
 }
 
 /* Summary type colors */
-.summaryItem[data-type='active'] .summaryCount {
+.summaryItem[data-type="active"] .summaryCount {
   color: var(--color-status-working);
 }
 
-.summaryItem[data-type='idle'] .summaryCount {
+.summaryItem[data-type="idle"] .summaryCount {
   color: var(--color-text-tertiary);
 }
 
-.summaryItem[data-type='error'] .summaryCount {
+.summaryItem[data-type="error"] .summaryCount {
   color: var(--color-status-error);
 }
 
-.summaryItem[data-type='sync'] .summaryCount {
+.summaryItem[data-type="sync"] .summaryCount {
   color: var(--color-warning);
 }
 

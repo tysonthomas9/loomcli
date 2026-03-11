@@ -3,23 +3,23 @@
  * Header area with ID, status badge, priority, and close button for IssueDetailPanel.
  */
 
-import type { Issue, IssueDetails, Priority } from '@/types';
-import type { Status } from '@/types/status';
+import type { Issue, IssueDetails, Priority } from "@/types";
+import type { Status } from "@/types/status";
 
-import { EditableTitle } from '../EditableTitle';
-import { formatStatusLabel } from '@/utils/statusFormat';
-import { StatusDropdown } from '../StatusDropdown';
-import styles from './IssueHeader.module.css';
+import { EditableTitle } from "../EditableTitle";
+import { formatStatusLabel } from "@/utils/statusFormat";
+import { StatusDropdown } from "../StatusDropdown";
+import styles from "./IssueHeader.module.css";
 
 /**
  * Priority display info.
  */
 const PRIORITY_LABELS: Record<number, { short: string; full: string }> = {
-  0: { short: 'P0', full: 'Critical' },
-  1: { short: 'P1', full: 'High' },
-  2: { short: 'P2', full: 'Medium' },
-  3: { short: 'P3', full: 'Normal' },
-  4: { short: 'P4', full: 'Backlog' },
+  0: { short: "P0", full: "Critical" },
+  1: { short: "P1", full: "High" },
+  2: { short: "P2", full: "Medium" },
+  3: { short: "P3", full: "Normal" },
+  4: { short: "P4", full: "Backlog" },
 };
 
 /**
@@ -56,7 +56,7 @@ export interface IssueHeaderProps {
  * Format status with fallback to 'Open'.
  */
 function formatStatus(status?: string): string {
-  if (!status) return 'Open';
+  if (!status) return "Open";
   return formatStatusLabel(status);
 }
 
@@ -85,10 +85,10 @@ export function IssueHeader({
 }: IssueHeaderProps): JSX.Element {
   const rootClassName = [styles.issueHeader, sticky && styles.sticky, className]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
 
   const priority = issue.priority as Priority;
-  const defaultPriorityInfo = { short: 'P2', full: 'Medium' };
+  const defaultPriorityInfo = { short: "P2", full: "Medium" };
   const priorityInfo = PRIORITY_LABELS[priority] ?? defaultPriorityInfo;
 
   return (
@@ -99,14 +99,14 @@ export function IssueHeader({
         </span>
         {onStatusChange ? (
           <StatusDropdown
-            status={issue.status ?? 'open'}
+            status={issue.status ?? "open"}
             onStatusChange={onStatusChange}
             isSaving={isSavingStatus ?? false}
           />
         ) : (
           <span
             className={styles.statusBadge}
-            data-status={issue.status ?? 'open'}
+            data-status={issue.status ?? "open"}
             role="status"
             data-testid="issue-status-badge"
           >
@@ -130,11 +130,19 @@ export function IssueHeader({
             type="button"
             className={styles.fullscreenButton}
             onClick={onToggleFullscreen}
-            aria-label={isFullscreen ? 'Collapse to panel' : 'Expand to fullscreen'}
+            aria-label={
+              isFullscreen ? "Collapse to panel" : "Expand to fullscreen"
+            }
             data-testid="header-fullscreen-button"
           >
             {isFullscreen ? (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
                 <path
                   d="M10 2v4h4M6 14v-4H2M10 6L14 2M6 10l-4 4"
                   stroke="currentColor"
@@ -144,7 +152,13 @@ export function IssueHeader({
                 />
               </svg>
             ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
                 <path
                   d="M14 2h-4M14 2v4M14 2l-4 4M2 14h4M2 14v-4M2 14l4-4"
                   stroke="currentColor"
@@ -162,7 +176,13 @@ export function IssueHeader({
           aria-label="Close panel"
           data-testid="header-close-button"
         >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 20 20"
+            fill="none"
+            aria-hidden="true"
+          >
             <path
               d="M15 5L5 15M5 5l10 10"
               stroke="currentColor"
@@ -173,7 +193,11 @@ export function IssueHeader({
         </button>
       </div>
       {onTitleSave ? (
-        <EditableTitle title={issue.title} onSave={onTitleSave} isSaving={isSavingTitle ?? false} />
+        <EditableTitle
+          title={issue.title}
+          onSave={onTitleSave}
+          isSaving={isSavingTitle ?? false}
+        />
       ) : (
         <h2 className={styles.title} data-testid="issue-title">
           {issue.title}

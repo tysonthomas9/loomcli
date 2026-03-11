@@ -43,11 +43,11 @@
 }
 
 /* Badge with blocked issues - use red color */
-.badge[data-has-blocked='true'] {
+.badge[data-has-blocked="true"] {
   color: var(--color-blocked);
 }
 
-.badge[data-has-blocked='true']:hover {
+.badge[data-has-blocked="true"]:hover {
   background: color-mix(in srgb, var(--color-blocked) 10%, transparent);
 }
 
@@ -170,24 +170,24 @@
   color: var(--color-text-inverse);
 }
 
-.priorityBadge[data-priority='0'] {
+.priorityBadge[data-priority="0"] {
   background: var(--color-priority-0);
 }
 
-.priorityBadge[data-priority='1'] {
+.priorityBadge[data-priority="1"] {
   background: var(--color-priority-1);
 }
 
-.priorityBadge[data-priority='2'] {
+.priorityBadge[data-priority="2"] {
   background: var(--color-priority-2);
   color: var(--color-text); /* Dark text for yellow background */
 }
 
-.priorityBadge[data-priority='3'] {
+.priorityBadge[data-priority="3"] {
   background: var(--color-priority-3);
 }
 
-.priorityBadge[data-priority='4'] {
+.priorityBadge[data-priority="4"] {
   background: var(--color-priority-4);
 }
 

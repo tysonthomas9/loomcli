@@ -3,10 +3,10 @@
  * Polls GET /api/observability/metrics at a configurable interval (default 30s).
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from "react";
 
-import { fetchObservabilityMetrics } from '@/api';
-import type { MetricsSnapshot } from '@/types';
+import { fetchObservabilityMetrics } from "@/api";
+import type { MetricsSnapshot } from "@/types";
 
 export interface UseObservabilityMetricsOptions {
   /** Poll interval in ms (default: 30000) */
@@ -25,7 +25,7 @@ export interface UseObservabilityMetricsResult {
 }
 
 export function useObservabilityMetrics(
-  options?: UseObservabilityMetricsOptions
+  options?: UseObservabilityMetricsOptions,
 ): UseObservabilityMetricsResult {
   const { pollInterval = 30000, enabled = true } = options ?? {};
 
@@ -85,17 +85,17 @@ export function useObservabilityMetrics(
     }
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === "visible") {
         fetchInProgressRef.current = false;
         void fetchData();
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       mountedRef.current = false;
       if (intervalId) clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [enabled, pollInterval, fetchData]);
 

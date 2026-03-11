@@ -17,19 +17,19 @@ import {
   useSensors,
   type DragStartEvent,
   type DragEndEvent,
-} from '@dnd-kit/core';
-import { useState, useMemo, useCallback } from 'react';
+} from "@dnd-kit/core";
+import { useState, useMemo, useCallback } from "react";
 
-import { DraggableIssueCard } from '@/components/DraggableIssueCard';
-import { EmptyColumn } from '@/components/EmptyColumn';
-import { StatusColumn } from '@/components/StatusColumn';
-import { formatStatusLabel } from '@/utils/statusFormat';
-import type { FilterState } from '@/hooks/useFilterState';
-import type { BlockerRef, Issue, Status } from '@/types';
+import { DraggableIssueCard } from "@/components/DraggableIssueCard";
+import { EmptyColumn } from "@/components/EmptyColumn";
+import { StatusColumn } from "@/components/StatusColumn";
+import { formatStatusLabel } from "@/utils/statusFormat";
+import type { FilterState } from "@/hooks/useFilterState";
+import type { BlockerRef, Issue, Status } from "@/types";
 
-import { DEFAULT_COLUMNS } from './columnConfigs';
-import styles from './KanbanBoard.module.css';
-import type { KanbanColumnConfig } from './types';
+import { DEFAULT_COLUMNS } from "./columnConfigs";
+import styles from "./KanbanBoard.module.css";
+import type { KanbanColumnConfig } from "./types";
 
 /**
  * Blocked issue info for lookup.
@@ -73,7 +73,9 @@ function statusesToColumns(statuses: Status[]): KanbanColumnConfig[] {
     id: s,
     label: formatStatusLabel(s),
     filter: (issue: Issue) =>
-      s === 'open' ? issue.status === s || issue.status === undefined : issue.status === s,
+      s === "open"
+        ? issue.status === s || issue.status === undefined
+        : issue.status === s,
     targetStatus: s,
   }));
 }
@@ -96,7 +98,9 @@ export function KanbanBoard({
 }: KanbanBoardProps): JSX.Element {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
-  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
+  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Resolve columns: props.columns > props.statuses (legacy) > DEFAULT_COLUMNS
   const columns = useMemo(() => {
@@ -110,7 +114,7 @@ export function KanbanBoard({
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
     }),
-    useSensor(KeyboardSensor)
+    useSensor(KeyboardSensor),
   );
 
   // Filter issues based on active filters and blocked visibility
@@ -126,7 +130,10 @@ export function KanbanBoard({
 
     return result.filter((issue) => {
       // Priority filter (exact match)
-      if (filters.priority !== undefined && issue.priority !== filters.priority) {
+      if (
+        filters.priority !== undefined &&
+        issue.priority !== filters.priority
+      ) {
         return false;
       }
 
@@ -144,7 +151,7 @@ export function KanbanBoard({
       }
 
       // Search filter (case-insensitive title match)
-      if (filters.search !== undefined && filters.search !== '') {
+      if (filters.search !== undefined && filters.search !== "") {
         const searchLower = filters.search.toLowerCase();
         const titleLower = issue.title.toLowerCase();
         if (!titleLower.includes(searchLower)) {
@@ -192,7 +199,7 @@ export function KanbanBoard({
         }
       }
     },
-    [blockedIssues, columns]
+    [blockedIssues, columns],
   );
 
   // Handle drag end - enforce restrictions and notify parent of status change
@@ -223,7 +230,7 @@ export function KanbanBoard({
       // Only process if target column has a targetStatus defined
       if (targetColumn?.targetStatus) {
         const newStatus = targetColumn.targetStatus;
-        const oldStatus = issue.status ?? 'open';
+        const oldStatus = issue.status ?? "open";
 
         // Only call callback if status actually changed
         if (newStatus !== oldStatus) {
@@ -231,10 +238,12 @@ export function KanbanBoard({
         }
       }
     },
-    [onDragEnd, columns, sourceColumnId]
+    [onDragEnd, columns, sourceColumnId],
   );
 
-  const rootClassName = className ? `${styles.board} ${className}` : styles.board;
+  const rootClassName = className
+    ? `${styles.board} ${className}`
+    : styles.board;
 
   return (
     <DndContext
@@ -247,54 +256,61 @@ export function KanbanBoard({
         {columns.map((col) => {
           const allColIssues = issuesByColumn.get(col.id) ?? [];
           const columnClassName =
-            col.style === 'muted'
+            col.style === "muted"
               ? styles.mutedColumn
-              : col.style === 'highlighted'
+              : col.style === "highlighted"
                 ? styles.highlightedColumn
                 : undefined;
 
           // Determine column type for special columns
-          const isBacklogColumn = col.id === 'backlog';
-          const isBlockedColumn = col.id === 'blocked';
+          const isBacklogColumn = col.id === "backlog";
+          const isBlockedColumn = col.id === "blocked";
           const isMutedColumn = isBacklogColumn || isBlockedColumn;
-          const columnType = isBacklogColumn ? ('backlog' as const) : undefined;
+          const columnType = isBacklogColumn ? ("backlog" as const) : undefined;
 
           // Apply display limit for columns with defaultLimit
           const isExpanded = expandedColumns.has(col.id);
-          const hasLimit = col.defaultLimit !== undefined && col.defaultLimit > 0;
-          const isTruncated = hasLimit && !isExpanded && allColIssues.length > col.defaultLimit!;
+          const hasLimit =
+            col.defaultLimit !== undefined && col.defaultLimit > 0;
+          const isTruncated =
+            hasLimit && !isExpanded && allColIssues.length > col.defaultLimit!;
           const colIssues = isTruncated
             ? allColIssues
                 .slice()
                 .sort((a, b) => {
-                  const timeB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-                  const timeA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-                  return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+                  const timeB = b.updated_at
+                    ? new Date(b.updated_at).getTime()
+                    : 0;
+                  const timeA = a.updated_at
+                    ? new Date(a.updated_at).getTime()
+                    : 0;
+                  return (
+                    (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA)
+                  );
                 })
                 .slice(0, col.defaultLimit!)
             : allColIssues;
 
           // Footer action for truncated columns
-          const footerAction = hasLimit && allColIssues.length > col.defaultLimit! ? (
-            <button
-              type="button"
-              onClick={() => {
-                setExpandedColumns((prev) => {
-                  const next = new Set(prev);
-                  if (isExpanded) {
-                    next.delete(col.id);
-                  } else {
-                    next.add(col.id);
-                  }
-                  return next;
-                });
-              }}
-            >
-              {isExpanded
-                ? 'Show recent'
-                : `Show all ${allColIssues.length}`}
-            </button>
-          ) : undefined;
+          const footerAction =
+            hasLimit && allColIssues.length > col.defaultLimit! ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setExpandedColumns((prev) => {
+                    const next = new Set(prev);
+                    if (isExpanded) {
+                      next.delete(col.id);
+                    } else {
+                      next.add(col.id);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                {isExpanded ? "Show recent" : `Show all ${allColIssues.length}`}
+              </button>
+            ) : undefined;
 
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const statusColumnProps = {
@@ -305,7 +321,9 @@ export function KanbanBoard({
             ...(col.droppableDisabled !== undefined && {
               droppableDisabled: col.droppableDisabled,
             }),
-            ...(columnClassName !== undefined && { className: columnClassName }),
+            ...(columnClassName !== undefined && {
+              className: columnClassName,
+            }),
             ...(columnType !== undefined && { columnType }),
             ...(footerAction !== undefined && { footerAction }),
           };
@@ -322,7 +340,9 @@ export function KanbanBoard({
                       key={issue.id}
                       issue={issue}
                       columnId={col.id}
-                      {...(onIssueClick !== undefined && { onClick: onIssueClick })}
+                      {...(onIssueClick !== undefined && {
+                        onClick: onIssueClick,
+                      })}
                       {...(blockedInfo !== undefined && {
                         blockedByCount: blockedInfo.blockedByCount,
                         blockedBy: blockedInfo.blockedBy,
@@ -343,7 +363,8 @@ export function KanbanBoard({
         {activeIssue &&
           (() => {
             const blockedInfo = blockedIssues?.get(activeIssue.id);
-            const isMutedCard = sourceColumnId === 'backlog' || sourceColumnId === 'blocked';
+            const isMutedCard =
+              sourceColumnId === "backlog" || sourceColumnId === "blocked";
             return (
               <DraggableIssueCard
                 issue={activeIssue}

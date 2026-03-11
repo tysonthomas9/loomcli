@@ -3,7 +3,7 @@
  * Shows agent cards with status colors, summary counts, and sync warnings.
  */
 
-import { useMemo } from 'react';
+import { useMemo } from "react";
 
 import type {
   LoomAgentStatus,
@@ -11,11 +11,11 @@ import type {
   LoomTaskInfo,
   LoomConnectionState,
   ParsedLoomStatus,
-} from '@/types';
-import { parseLoomStatus } from '@/types';
+} from "@/types";
+import { parseLoomStatus } from "@/types";
 
-import { AgentCard } from '../AgentCard';
-import styles from './AgentActivityPanel.module.css';
+import { AgentCard } from "../AgentCard";
+import styles from "./AgentActivityPanel.module.css";
 
 /**
  * Props for the AgentActivityPanel component.
@@ -64,9 +64,9 @@ function computeSummary(agents: LoomAgentStatus[]): AgentSummary {
   for (const agent of agents) {
     const parsed: ParsedLoomStatus = parseLoomStatus(agent.status);
 
-    if (parsed.type === 'working' || parsed.type === 'planning') {
+    if (parsed.type === "working" || parsed.type === "planning") {
       summary.active++;
-    } else if (parsed.type === 'error') {
+    } else if (parsed.type === "error") {
       summary.error++;
     } else {
       summary.idle++;
@@ -99,17 +99,18 @@ export function AgentActivityPanel({
   // Note: _sync and _lastUpdated are passed for future use (e.g., displaying sync warnings)
   const summary = useMemo(() => computeSummary(agents), [agents]);
 
-  const rootClassName = [styles.panel, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.panel, className].filter(Boolean).join(" ");
 
   // Scenario 1: Never connected - show "Start loom serve" message
-  if (connectionState === 'never_connected' && !isLoading) {
+  if (connectionState === "never_connected" && !isLoading) {
     return (
       <div className={rootClassName} data-testid="agent-activity-panel">
         <div className={styles.empty} role="status" aria-live="polite">
           <span className={styles.emptyIcon}>🔌</span>
           <span className={styles.emptyText}>Loom server not running</span>
           <span className={styles.emptyHint}>
-            Start with: <code className={styles.code}>loom serve --port 8081</code>
+            Start with:{" "}
+            <code className={styles.code}>loom serve --port 8081</code>
           </span>
           {onRetry && (
             <button className={styles.retryButton} onClick={onRetry}>
@@ -133,12 +134,14 @@ export function AgentActivityPanel({
   }
 
   // Scenario 3: Reconnecting - show spinner overlay with countdown
-  if (connectionState === 'reconnecting' && agents.length === 0) {
+  if (connectionState === "reconnecting" && agents.length === 0) {
     return (
       <div className={rootClassName} data-testid="agent-activity-panel">
         <div className={styles.reconnecting} role="status" aria-live="polite">
           <span className={styles.spinner} aria-hidden="true" />
-          <span className={styles.emptyText}>Reconnecting to loom server...</span>
+          <span className={styles.emptyText}>
+            Reconnecting to loom server...
+          </span>
           {retryCountdown > 0 && (
             <span className={styles.countdown}>Retry in {retryCountdown}s</span>
           )}
@@ -183,15 +186,27 @@ export function AgentActivityPanel({
   return (
     <div className={rootClassName} data-testid="agent-activity-panel">
       {/* Summary bar */}
-      <div className={styles.summary} role="status" aria-label="Agent activity summary">
+      <div
+        className={styles.summary}
+        role="status"
+        aria-label="Agent activity summary"
+      >
         <span className={styles.summaryItem} data-type="active">
-          <span className={styles.summaryDot} data-type="active" aria-hidden="true" />
+          <span
+            className={styles.summaryDot}
+            data-type="active"
+            aria-hidden="true"
+          />
           <span className={styles.summaryCount}>{summary.active}</span>
           <span className={styles.summaryLabel}>active</span>
         </span>
         <span className={styles.summarySeparator}>·</span>
         <span className={styles.summaryItem} data-type="idle">
-          <span className={styles.summaryDot} data-type="idle" aria-hidden="true" />
+          <span
+            className={styles.summaryDot}
+            data-type="idle"
+            aria-hidden="true"
+          />
           <span className={styles.summaryCount}>{summary.idle}</span>
           <span className={styles.summaryLabel}>idle</span>
         </span>
@@ -199,7 +214,11 @@ export function AgentActivityPanel({
           <>
             <span className={styles.summarySeparator}>·</span>
             <span className={styles.summaryItem} data-type="error">
-              <span className={styles.summaryDot} data-type="error" aria-hidden="true" />
+              <span
+                className={styles.summaryDot}
+                data-type="error"
+                aria-hidden="true"
+              />
               <span className={styles.summaryCount}>{summary.error}</span>
               <span className={styles.summaryLabel}>error</span>
             </span>
@@ -209,7 +228,11 @@ export function AgentActivityPanel({
           <>
             <span className={styles.summarySeparator}>·</span>
             <span className={styles.summaryItem} data-type="sync">
-              <span className={styles.summaryDot} data-type="sync" aria-hidden="true" />
+              <span
+                className={styles.summaryDot}
+                data-type="sync"
+                aria-hidden="true"
+              />
               <span className={styles.summaryCount}>{summary.needsPush}</span>
               <span className={styles.summaryLabel}>need push</span>
             </span>
@@ -220,7 +243,9 @@ export function AgentActivityPanel({
       {/* Agent grid */}
       <div className={styles.agentGrid}>
         {agents.map((agent) => {
-          const handleClick = onAgentClick ? () => onAgentClick(agent.name) : undefined;
+          const handleClick = onAgentClick
+            ? () => onAgentClick(agent.name)
+            : undefined;
           return (
             <AgentCard
               key={agent.name}

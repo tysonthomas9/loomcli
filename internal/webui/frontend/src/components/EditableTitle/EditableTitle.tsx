@@ -3,9 +3,15 @@
  * Inline editable heading that switches between display and edit modes.
  */
 
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  type KeyboardEvent,
+} from "react";
 
-import styles from './EditableTitle.module.css';
+import styles from "./EditableTitle.module.css";
 
 export interface EditableTitleProps {
   /** Current title value */
@@ -66,7 +72,7 @@ export function EditableTitle({
 
     // Validate: non-empty
     if (!trimmedTitle) {
-      setError('Title cannot be empty');
+      setError("Title cannot be empty");
       // Use setTimeout to avoid focus/blur race condition
       setTimeout(() => inputRef.current?.focus(), 0);
       return;
@@ -85,7 +91,8 @@ export function EditableTitle({
       setIsEditing(false);
     } catch (err) {
       // Show error to user and stay in edit mode
-      const message = err instanceof Error ? err.message : 'Failed to save title';
+      const message =
+        err instanceof Error ? err.message : "Failed to save title";
       setError(message);
       // Use setTimeout to avoid focus/blur race condition
       setTimeout(() => inputRef.current?.focus(), 0);
@@ -94,28 +101,30 @@ export function EditableTitle({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
+      if (e.key === "Enter") {
         e.preventDefault();
         saveTitle();
-      } else if (e.key === 'Escape') {
+      } else if (e.key === "Escape") {
         e.preventDefault();
         cancelEdit();
       }
     },
-    [saveTitle, cancelEdit]
+    [saveTitle, cancelEdit],
   );
 
   const handleDisplayKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === 'Enter' || e.key === ' ') {
+      if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         enterEditMode();
       }
     },
-    [enterEditMode]
+    [enterEditMode],
   );
 
-  const rootClassName = [styles.editableTitle, className].filter(Boolean).join(' ');
+  const rootClassName = [styles.editableTitle, className]
+    .filter(Boolean)
+    .join(" ");
 
   if (isEditing) {
     return (

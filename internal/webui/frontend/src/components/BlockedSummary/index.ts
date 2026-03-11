@@ -1,2 +1,2 @@
-export { BlockedSummary } from './BlockedSummary';
-export type { BlockedSummaryProps } from './BlockedSummary';
+export { BlockedSummary } from "./BlockedSummary";
+export type { BlockedSummaryProps } from "./BlockedSummary";
