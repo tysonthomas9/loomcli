@@ -272,6 +272,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				HSTSEnabled:    serveHSTS,
 				DevMode:        serveDev,
 				DevFrontendDir: serveDevFrontDir,
+				GitOps:         NewGitOps(),
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true
