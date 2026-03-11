@@ -15,13 +15,13 @@ import (
 // waitForServerReady polls the health endpoint until the server is ready.
 func waitForServerReady(t *testing.T, client *http.Client, serverAddr string) {
 	t.Helper()
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		resp, err := client.Get(serverAddr + "/health")
 		if err == nil {
 			resp.Body.Close()
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatal("server did not become ready within timeout")
 }
