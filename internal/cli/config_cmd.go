@@ -127,6 +127,7 @@ func runConfigInit(cmd *cobra.Command, args []string) {
 	}
 
 	cfg := &LoomConfig{
+		Version:          CurrentConfigVersion,
 		DefaultWorkspace: wsName,
 		Workspaces: map[string]WorkspaceConfig{
 			wsName: {
