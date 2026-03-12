@@ -275,6 +275,98 @@ func TestMakefileDevTargetDependsOnDevCheck(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// gate-e2e-full tests
+// ---------------------------------------------------------------------------
+
+// TestMakefileGateE2EFullPhonyDeclaration verifies that gate-e2e-full is
+// declared as a .PHONY target.
+func TestMakefileGateE2EFullPhonyDeclaration(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/Makefile")
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+	content := string(data)
+
+	found := false
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(line, ".PHONY") && strings.Contains(line, "gate-e2e-full") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf(".PHONY declaration missing target %q", "gate-e2e-full")
+	}
+}
+
+// TestMakefileGateE2EFullDependsOnGateE2E verifies that the gate-e2e-full
+// target has gate-e2e as a prerequisite by inspecting the Makefile source.
+func TestMakefileGateE2EFullDependsOnGateE2E(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/Makefile")
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+
+	found := false
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "gate-e2e-full:") && strings.Contains(line, "gate-e2e") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Makefile 'gate-e2e-full' target should depend on 'gate-e2e'")
+	}
+}
+
+// TestMakefileGateE2EFullRecipe verifies that the gate-e2e-full target
+// runs go test with the container build tag against the e2e package.
+func TestMakefileGateE2EFullRecipe(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(repoRoot(t) + "/Makefile")
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+	content := string(data)
+
+	checks := []struct {
+		name   string
+		substr string
+	}{
+		{"container build tag", "-tags container"},
+		{"e2e package", "./e2e/"},
+		{"timeout", "-timeout 15m"},
+	}
+
+	for _, c := range checks {
+		if !strings.Contains(content, c.substr) {
+			t.Errorf("gate-e2e-full recipe should contain %s (%q)", c.name, c.substr)
+		}
+	}
+}
+
+// TestMakeHelp_IncludesGateE2EFullTarget verifies that `make help` output
+// mentions the gate-e2e-full target with a description of Docker container tests.
+func TestMakeHelp_IncludesGateE2EFullTarget(t *testing.T) {
+	t.Parallel()
+
+	out := runMake(t, "help")
+
+	if !strings.Contains(out, "gate-e2e-full") {
+		t.Errorf("make help output missing %q\nOutput:\n%s", "gate-e2e-full", out)
+	}
+	// Also verify the help text distinguishes it from gate-e2e
+	if !strings.Contains(out, "gate-e2e") {
+		t.Errorf("make help output missing %q\nOutput:\n%s", "gate-e2e", out)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // .gitignore tests
 // ---------------------------------------------------------------------------
 

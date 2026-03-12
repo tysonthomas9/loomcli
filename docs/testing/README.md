@@ -85,10 +85,15 @@ npm run test:visual:update
 ### Quality Gate (Pre-push)
 
 ```bash
+# Standard gate (Go + frontend checks)
 make gate
-```
 
-This runs: `go build` + `go vet` + `go test -race -timeout 15m ./...`
+# Gate + Playwright API e2e tests (no Docker required)
+make gate-e2e
+
+# Gate + API e2e + Docker container tests (requires Docker)
+make gate-e2e-full
+```
 
 ## Test Coverage
 

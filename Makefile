@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover
+.PHONY: all build test test-integration test-all lint lint-frontend test-frontend test-e2e test-e2e-api test-e2e-api-local test-e2e-integration clean install install-bd help frontend frontend-ensure sync-beads update-beads check check-go check-frontend gate gate-e2e gate-e2e-full hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec test-coverage test-frontend-coverage test-race-cover test-integration-race-cover
 
 # Default target
 all: build
@@ -190,6 +190,12 @@ gate-e2e: gate
 	@$(MAKE) test-e2e-api
 	@echo "=== E2E Gate PASSED ==="
 
+# Full quality gate — gate-e2e + Docker container tests
+gate-e2e-full: gate-e2e
+	@echo "=== Container E2E Gate ==="
+	@go test -tags container -v -timeout 15m ./e2e/
+	@echo "=== Container E2E Gate PASSED ==="
+
 # Install git hooks (pre-push quality gate + pre-commit checks, applies to all worktrees)
 hooks:
 	@cp scripts/hooks/pre-push .git/hooks/pre-push
@@ -251,7 +257,8 @@ help:
 	@echo "  make check-go     - Go-only quality gate (skips frontend rebuild if dist/ exists)"
 	@echo "  make check-frontend - Frontend-only quality gate"
 	@echo "  make gate         - Alias for make check"
-	@echo "  make gate-e2e     - Quality gate + self-contained e2e tests"
+	@echo "  make gate-e2e     - Quality gate + Playwright API e2e tests (no Docker)"
+	@echo "  make gate-e2e-full - Quality gate + API e2e + Docker container tests"
 	@echo "  make hooks        - Install git hooks (pre-push gate)"
 	@echo "  make dev          - Start default dev flow (same as make dev-loom)"
 	@echo "  make dev-loom     - Start loom serve --dev + frontend dist watcher"
