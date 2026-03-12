@@ -341,6 +341,150 @@ func TestNullLabelsEdgeCase(t *testing.T) {
 	}
 }
 
+func TestDetectEditorSecondCLI(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	// Zed on linux has two CLI commands: "zed" and "zeditor".
+	// First fails, second succeeds.
+	lookPathFn = mockLookPath(map[string]string{"zeditor": "/usr/bin/zeditor"})
+	statFn = mockStat(nil)
+
+	d, ok := detectEditor(findEditor("zed"), "linux")
+	if !ok {
+		t.Fatal("expected Zed to be detected via second CLI command")
+	}
+	if d.ResolvedPath != "/usr/bin/zeditor" {
+		t.Errorf("resolved path = %q, want /usr/bin/zeditor", d.ResolvedPath)
+	}
+	if d.Method != "cli" {
+		t.Errorf("method = %q, want cli", d.Method)
+	}
+}
+
+func TestDetectEditorSecondApp(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	// IntelliJ on darwin has two app paths; first fails, second found.
+	lookPathFn = mockLookPath(nil)
+	statFn = mockStat(map[string]bool{"/Applications/IntelliJ IDEA CE.app": true})
+
+	d, ok := detectEditor(findEditor("intellij"), "darwin")
+	if !ok {
+		t.Fatal("expected IntelliJ to be detected via second app path")
+	}
+	if d.ResolvedPath != "/Applications/IntelliJ IDEA CE.app" {
+		t.Errorf("resolved path = %q, want /Applications/IntelliJ IDEA CE.app", d.ResolvedPath)
+	}
+	if d.Method != "app" {
+		t.Errorf("method = %q, want app", d.Method)
+	}
+}
+
+func TestAllEditorsDetectableForOS(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	// Collect all CLI commands and app paths across all editors for darwin.
+	allCLIs := make(map[string]string)
+	allApps := make(map[string]bool)
+	var expectedCount int
+	for _, e := range Registry {
+		pc, ok := e.Platforms["darwin"]
+		if !ok {
+			continue
+		}
+		expectedCount++
+		if len(pc.CLICommands) > 0 {
+			for _, cmd := range pc.CLICommands {
+				allCLIs[cmd] = "/usr/bin/" + cmd
+			}
+		} else if len(pc.AppPaths) > 0 {
+			allApps[pc.AppPaths[0]] = true
+		}
+	}
+
+	lookPathFn = mockLookPath(allCLIs)
+	statFn = mockStat(allApps)
+
+	detected := DetectedEditorsForOS("darwin")
+	if len(detected) != expectedCount {
+		t.Errorf("expected %d detected editors on darwin, got %d", expectedCount, len(detected))
+	}
+}
+
+func TestEditorIDs(t *testing.T) {
+	expected := map[string]bool{
+		"vscode":         true,
+		"cursor":         true,
+		"zed":            true,
+		"intellij":       true,
+		"pycharm":        true,
+		"xcode":          true,
+		"sublime":        true,
+		"rider":          true,
+		"android-studio": true,
+		"sourcetree":     true,
+		"windsurf":       true,
+		"antigravity":    true,
+		"fork":           true,
+	}
+
+	for _, e := range Registry {
+		if !expected[e.ID] {
+			t.Errorf("unexpected editor ID in registry: %q", e.ID)
+		}
+		delete(expected, e.ID)
+	}
+	for id := range expected {
+		t.Errorf("expected editor ID missing from registry: %q", id)
+	}
+}
+
+func TestDetectedEditorsLinux(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(map[string]string{
+		"code":    "/usr/bin/code",
+		"idea":    "/usr/bin/idea",
+		"pycharm": "/usr/bin/pycharm",
+	})
+	statFn = mockStat(nil)
+
+	detected := DetectedEditorsForOS("linux")
+	if len(detected) != 3 {
+		t.Fatalf("expected 3 detected editors on linux, got %d", len(detected))
+	}
+
+	ids := make(map[string]bool)
+	for _, d := range detected {
+		ids[d.ID] = true
+	}
+	for _, want := range []string{"vscode", "intellij", "pycharm"} {
+		if !ids[want] {
+			t.Errorf("expected %q to be detected on linux", want)
+		}
+	}
+}
+
 // findEditor looks up an editor by ID in the Registry.
 func findEditor(id string) Editor {
 	for _, e := range Registry {
