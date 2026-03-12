@@ -97,7 +97,7 @@ make gate-e2e-full
 
 ## Test Coverage
 
-- **CI threshold**: 25% minimum (hard fail), 40% warning
+- **CI threshold**: 70% minimum (enforced via `scripts/check-coverage.sh`)
 - **Coverage tool**: Codecov (uploaded from Ubuntu CI runs)
 - **Local coverage**: `TEST_COVER=1 ./scripts/test.sh`
 
