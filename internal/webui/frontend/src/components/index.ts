@@ -30,6 +30,7 @@ export * from "./GraphLegend";
 // SettingsView is NOT exported here - it's lazy loaded in App.tsx
 // Import directly from '@/components/GraphView' if needed
 export * from "./NodeTooltip";
+export * from "./OpenInEditor";
 export * from "./ViewSwitcher";
 export * from "./SwimLane";
 export * from "./SwimLaneBoard";
