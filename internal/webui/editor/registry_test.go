@@ -1,0 +1,352 @@
+package editor
+
+import (
+	"errors"
+	"os"
+	"testing"
+)
+
+var errNotFound = errors.New("not found")
+
+// mockLookPath returns a function that resolves only the given set of commands.
+func mockLookPath(available map[string]string) func(string) (string, error) {
+	return func(cmd string) (string, error) {
+		if p, ok := available[cmd]; ok {
+			return p, nil
+		}
+		return "", errNotFound
+	}
+}
+
+// mockStat returns a function that succeeds only for the given set of paths.
+func mockStat(available map[string]bool) func(string) (os.FileInfo, error) {
+	return func(path string) (os.FileInfo, error) {
+		if available[path] {
+			return nil, nil
+		}
+		return nil, errNotFound
+	}
+}
+
+func TestDetectEditorViaCLI(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(map[string]string{"code": "/usr/bin/code"})
+	statFn = mockStat(nil)
+
+	d, ok := detectEditor(Registry[0], "darwin") // VS Code
+	if !ok {
+		t.Fatal("expected VS Code to be detected via CLI")
+	}
+	if d.ResolvedPath != "/usr/bin/code" {
+		t.Errorf("resolved path = %q, want /usr/bin/code", d.ResolvedPath)
+	}
+	if d.Method != "cli" {
+		t.Errorf("method = %q, want cli", d.Method)
+	}
+	if d.ID != "vscode" {
+		t.Errorf("ID = %q, want vscode", d.ID)
+	}
+}
+
+func TestDetectEditorViaAppPath(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(nil)
+	statFn = mockStat(map[string]bool{"/Applications/Visual Studio Code.app": true})
+
+	d, ok := detectEditor(Registry[0], "darwin")
+	if !ok {
+		t.Fatal("expected VS Code to be detected via app path")
+	}
+	if d.ResolvedPath != "/Applications/Visual Studio Code.app" {
+		t.Errorf("resolved path = %q, want /Applications/Visual Studio Code.app", d.ResolvedPath)
+	}
+	if d.Method != "app" {
+		t.Errorf("method = %q, want app", d.Method)
+	}
+}
+
+func TestDetectEditorNotFound(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(nil)
+	statFn = mockStat(nil)
+
+	_, ok := detectEditor(Registry[0], "darwin")
+	if ok {
+		t.Fatal("expected VS Code to not be detected")
+	}
+}
+
+func TestDetectEditorCLIPreferredOverApp(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(map[string]string{"code": "/usr/local/bin/code"})
+	statFn = mockStat(map[string]bool{"/Applications/Visual Studio Code.app": true})
+
+	d, ok := detectEditor(Registry[0], "darwin")
+	if !ok {
+		t.Fatal("expected VS Code to be detected")
+	}
+	if d.Method != "cli" {
+		t.Errorf("expected CLI to be preferred, got method = %q", d.Method)
+	}
+	if d.ResolvedPath != "/usr/local/bin/code" {
+		t.Errorf("resolved path = %q, want /usr/local/bin/code", d.ResolvedPath)
+	}
+}
+
+func TestDetectEditorUnknownGOOS(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(map[string]string{"code": "/usr/bin/code"})
+	statFn = mockStat(nil)
+
+	_, ok := detectEditor(Registry[0], "freebsd")
+	if ok {
+		t.Fatal("expected no detection on unsupported GOOS")
+	}
+}
+
+func TestDetectedEditorsForOS(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	// Only VS Code and Zed CLI available.
+	lookPathFn = mockLookPath(map[string]string{
+		"code": "/usr/bin/code",
+		"zed":  "/usr/bin/zed",
+	})
+	statFn = mockStat(nil)
+
+	detected := DetectedEditorsForOS("darwin")
+	if len(detected) != 2 {
+		t.Fatalf("expected 2 detected editors, got %d", len(detected))
+	}
+	if detected[0].ID != "vscode" {
+		t.Errorf("first detected editor = %q, want vscode", detected[0].ID)
+	}
+	if detected[1].ID != "zed" {
+		t.Errorf("second detected editor = %q, want zed", detected[1].ID)
+	}
+}
+
+func TestDetectedEditorsForOSEmpty(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(nil)
+	statFn = mockStat(nil)
+
+	detected := DetectedEditorsForOS("darwin")
+	if len(detected) != 0 {
+		t.Fatalf("expected 0 detected editors, got %d", len(detected))
+	}
+}
+
+func TestDetectedEditorsForOSUnknownPlatform(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(map[string]string{"code": "/usr/bin/code"})
+	statFn = mockStat(nil)
+
+	detected := DetectedEditorsForOS("freebsd")
+	if len(detected) != 0 {
+		t.Fatalf("expected 0 detected editors on unknown GOOS, got %d", len(detected))
+	}
+}
+
+func TestRegistryCompleteness(t *testing.T) {
+	if len(Registry) != 13 {
+		t.Fatalf("expected 13 editors in registry, got %d", len(Registry))
+	}
+
+	ids := make(map[string]bool)
+	for _, e := range Registry {
+		if e.ID == "" {
+			t.Error("editor has empty ID")
+		}
+		if e.DisplayName == "" {
+			t.Errorf("editor %q has empty DisplayName", e.ID)
+		}
+		if e.IconName == "" {
+			t.Errorf("editor %q has empty IconName", e.ID)
+		}
+		if len(e.Platforms) == 0 {
+			t.Errorf("editor %q has no platform configs", e.ID)
+		}
+		if ids[e.ID] {
+			t.Errorf("duplicate editor ID %q", e.ID)
+		}
+		ids[e.ID] = true
+
+		// Every editor must have at least one platform with at least one detection method.
+		hasDetection := false
+		for _, pc := range e.Platforms {
+			if len(pc.CLICommands) > 0 || len(pc.AppPaths) > 0 {
+				hasDetection = true
+				break
+			}
+		}
+		if !hasDetection {
+			t.Errorf("editor %q has no detection methods on any platform", e.ID)
+		}
+	}
+}
+
+func TestXcodeDetectedViaCLI(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(map[string]string{"xed": "/usr/bin/xed"})
+	statFn = mockStat(nil)
+
+	d, ok := detectEditor(findEditor("xcode"), "darwin")
+	if !ok {
+		t.Fatal("expected Xcode to be detected via xed CLI")
+	}
+	if d.ResolvedPath != "/usr/bin/xed" {
+		t.Errorf("resolved path = %q, want /usr/bin/xed", d.ResolvedPath)
+	}
+	if d.Method != "cli" {
+		t.Errorf("method = %q, want cli", d.Method)
+	}
+}
+
+func TestForkDetectedViaCLI(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(map[string]string{"fork": "/usr/local/bin/fork"})
+	statFn = mockStat(nil)
+
+	d, ok := detectEditor(findEditor("fork"), "darwin")
+	if !ok {
+		t.Fatal("expected Fork to be detected via fork CLI")
+	}
+	if d.ResolvedPath != "/usr/local/bin/fork" {
+		t.Errorf("resolved path = %q, want /usr/local/bin/fork", d.ResolvedPath)
+	}
+	if d.Method != "cli" {
+		t.Errorf("method = %q, want cli", d.Method)
+	}
+}
+
+func TestForkWindowsLaunchMethodOverride(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	lookPathFn = mockLookPath(nil)
+	// Simulate expanded path (env var already resolved).
+	statFn = mockStat(map[string]bool{"/fake/local/Fork/Fork.exe": true})
+
+	forkEditor := findEditor("fork")
+	// Override the windows app path for testing (avoid env var dependency).
+	testEditor := Editor{
+		ID:          forkEditor.ID,
+		DisplayName: forkEditor.DisplayName,
+		IconName:    forkEditor.IconName,
+		Platforms: map[string]PlatformConfig{
+			"windows": {
+				AppPaths:     []string{"/fake/local/Fork/Fork.exe"},
+				LaunchMethod: "app",
+			},
+		},
+	}
+
+	d, ok := detectEditor(testEditor, "windows")
+	if !ok {
+		t.Fatal("expected Fork to be detected on Windows via app path")
+	}
+	if d.Method != "app" {
+		t.Errorf("method = %q, want app (LaunchMethod override)", d.Method)
+	}
+}
+
+func TestNullLabelsEdgeCase(t *testing.T) {
+	origLookPath := lookPathFn
+	origStat := statFn
+	t.Cleanup(func() {
+		lookPathFn = origLookPath
+		statFn = origStat
+	})
+
+	// Editor with empty platform config (no CLI commands, no app paths).
+	e := Editor{
+		ID:          "test-empty",
+		DisplayName: "Test",
+		IconName:    "test",
+		Platforms: map[string]PlatformConfig{
+			"darwin": {},
+		},
+	}
+
+	lookPathFn = mockLookPath(nil)
+	statFn = mockStat(nil)
+
+	_, ok := detectEditor(e, "darwin")
+	if ok {
+		t.Fatal("expected editor with empty platform config to not be detected")
+	}
+}
+
+// findEditor looks up an editor by ID in the Registry.
+func findEditor(id string) Editor {
+	for _, e := range Registry {
+		if e.ID == id {
+			return e
+		}
+	}
+	panic("editor not found: " + id)
+}
