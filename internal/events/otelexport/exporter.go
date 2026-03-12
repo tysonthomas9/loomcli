@@ -192,8 +192,14 @@ func (e *Exporter) handleTaskClaimed(ev events.Event) {
 	)
 
 	e.mu.Lock()
+	prev := e.activeTaskSpans[ev.Agent]
 	e.activeTaskSpans[ev.Agent] = span
 	e.mu.Unlock()
+
+	if prev != nil {
+		prev.SetStatus(codes.Error, "superseded")
+		prev.End()
+	}
 }
 
 func (e *Exporter) handleTaskCompleted(ev events.Event) {
@@ -259,8 +265,14 @@ func (e *Exporter) handleAgentStarted(ev events.Event) {
 	)
 
 	e.mu.Lock()
+	prev := e.activeAgentSpans[ev.Agent]
 	e.activeAgentSpans[ev.Agent] = span
 	e.mu.Unlock()
+
+	if prev != nil {
+		prev.SetStatus(codes.Error, "superseded")
+		prev.End()
+	}
 }
 
 func (e *Exporter) handleAgentStopped(ev events.Event) {
@@ -284,6 +296,16 @@ func (e *Exporter) handleAgentRestarted(ev events.Event) {
 		AttrRole.String(ev.Role),
 	}
 	e.agentRestart.Add(context.Background(), 1, metric.WithAttributes(attrs...))
+
+	e.mu.Lock()
+	taskSpan := e.activeTaskSpans[ev.Agent]
+	delete(e.activeTaskSpans, ev.Agent)
+	e.mu.Unlock()
+
+	if taskSpan != nil {
+		taskSpan.SetStatus(codes.Error, "agent_restarted")
+		taskSpan.End()
+	}
 }
 
 // Stop flushes all pending exports and ends any active spans.
