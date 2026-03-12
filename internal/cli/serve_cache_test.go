@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-func TestCachedCollector_CacheHit(t *testing.T) {
+func TestCachedValue_CacheHit(t *testing.T) {
 	var calls atomic.Int32
 	data := &MonitorData{Timestamp: time.Now()}
 
-	c := newCachedCollector(5*time.Second, func() *MonitorData {
+	c := newCachedValue[*MonitorData](5*time.Second, func() *MonitorData {
 		calls.Add(1)
 		return data
 	})
@@ -35,9 +35,9 @@ func TestCachedCollector_CacheHit(t *testing.T) {
 	}
 }
 
-func TestCachedCollector_CacheExpiry(t *testing.T) {
+func TestCachedValue_CacheExpiry(t *testing.T) {
 	var calls atomic.Int32
-	c := newCachedCollector(10*time.Millisecond, func() *MonitorData {
+	c := newCachedValue[*MonitorData](10*time.Millisecond, func() *MonitorData {
 		calls.Add(1)
 		return &MonitorData{Timestamp: time.Now()}
 	})
@@ -58,10 +58,10 @@ func TestCachedCollector_CacheExpiry(t *testing.T) {
 	}
 }
 
-func TestCachedCollector_ConcurrentCoalescing(t *testing.T) {
+func TestCachedValue_ConcurrentCoalescing(t *testing.T) {
 	var calls atomic.Int32
 	// Simulate a slow collection
-	c := newCachedCollector(5*time.Second, func() *MonitorData {
+	c := newCachedValue[*MonitorData](5*time.Second, func() *MonitorData {
 		calls.Add(1)
 		time.Sleep(50 * time.Millisecond)
 		return &MonitorData{Timestamp: time.Now()}
@@ -94,9 +94,9 @@ func TestCachedCollector_ConcurrentCoalescing(t *testing.T) {
 	}
 }
 
-func TestCachedCollector_ExpiryAfterCoalescing(t *testing.T) {
+func TestCachedValue_ExpiryAfterCoalescing(t *testing.T) {
 	var calls atomic.Int32
-	c := newCachedCollector(10*time.Millisecond, func() *MonitorData {
+	c := newCachedValue[*MonitorData](10*time.Millisecond, func() *MonitorData {
 		calls.Add(1)
 		return &MonitorData{Timestamp: time.Now()}
 	})
@@ -123,5 +123,27 @@ func TestCachedCollector_ExpiryAfterCoalescing(t *testing.T) {
 	c.get()
 	if calls.Load() != 2 {
 		t.Fatalf("expected 2 calls after expiry, got %d", calls.Load())
+	}
+}
+
+func TestCachedValue_NonPointerType(t *testing.T) {
+	var calls atomic.Int32
+	c := newCachedValue[int](5*time.Second, func() int {
+		calls.Add(1)
+		return 42
+	})
+
+	got := c.get()
+	if got != 42 {
+		t.Fatalf("expected 42, got %d", got)
+	}
+
+	// Second call: cache hit
+	got2 := c.get()
+	if got2 != 42 {
+		t.Fatalf("expected 42, got %d", got2)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected 1 call, got %d", calls.Load())
 	}
 }

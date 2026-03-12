@@ -155,7 +155,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Cache collectMonitorData results to avoid redundant shell-outs from
 	// concurrent API requests. The frontend polls 3 endpoints every 5s;
 	// without this cache each poll cycle spawns ~60-90 subprocesses.
-	collector := newCachedCollector(2*time.Second, func() *MonitorData {
+	collector := newCachedValue[*MonitorData](2*time.Second, func() *MonitorData {
 		return collectMonitorData(50, monitorBranch)
 	})
 	collectDataFunc = collector.get
@@ -352,7 +352,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	mux.HandleFunc("GET /api/usage", handleUsage)
 	mux.HandleFunc("GET /metrics", handleMetrics)
 	eventsDir := resolveEventsDir()
-	mux.HandleFunc("GET /api/observability/metrics", handleObservabilityMetrics(eventsDir))
+	mux.HandleFunc("GET /api/observability/metrics", handleObservabilityMetrics(eventsDir, newMetricsCache(eventsDir)))
 	mux.HandleFunc("GET /api/observability/events", handleObservabilityEvents(eventsDir))
 
 	// Wrap with CORS middleware

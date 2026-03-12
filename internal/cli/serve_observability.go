@@ -41,8 +41,21 @@ type EventReadOpts struct {
 	Since   string
 }
 
-// handleObservabilityMetrics returns a MetricsSnapshot built by replaying JSONL files.
-func handleObservabilityMetrics(eventsDir string) http.HandlerFunc {
+// newMetricsCache creates a TTL cache for observability metrics snapshots.
+func newMetricsCache(eventsDir string) *cachedValue[*events.MetricsSnapshot] {
+	return newCachedValue[*events.MetricsSnapshot](30*time.Second, func() *events.MetricsSnapshot {
+		store := events.NewMetricsStore(nil, events.DefaultRetention)
+		if err := replayAllEvents(store, eventsDir); err != nil {
+			log.Printf("observability metrics: replay error: %v", err)
+		}
+		snap := store.Snapshot()
+		return &snap
+	})
+}
+
+// handleObservabilityMetrics returns a MetricsSnapshot from a TTL cache,
+// avoiding expensive disk replay on every request.
+func handleObservabilityMetrics(eventsDir string, cache *cachedValue[*events.MetricsSnapshot]) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if eventsDir == "" {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -53,15 +66,10 @@ func handleObservabilityMetrics(eventsDir string) http.HandlerFunc {
 			return
 		}
 
-		store := events.NewMetricsStore(nil, events.DefaultRetention)
-		if err := replayAllEvents(store, eventsDir); err != nil {
-			log.Printf("observability metrics: replay error: %v", err)
-		}
-
-		snap := store.Snapshot()
+		snap := cache.get()
 		writeJSON(w, ObservabilityMetricsResponse{
 			Success: true,
-			Data:    &snap,
+			Data:    snap,
 		})
 	}
 }
