@@ -269,7 +269,7 @@ func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
 	orig := claudeNonInteractiveInvoker
 	var called bool
 	var gotWorkDir, gotPrompt, gotAgent string
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		called = true
 		gotWorkDir = workDir
 		gotPrompt = prompt
@@ -280,7 +280,7 @@ func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
 
 	b := &ClaudeBackend{}
 	shutdown := make(chan struct{})
-	err := b.InvokeNonInteractive("/work", "task prompt", "agent2", shutdown)
+	err := b.InvokeNonInteractive("/work", "task prompt", "agent2", shutdown, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

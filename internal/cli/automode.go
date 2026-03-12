@@ -226,13 +226,10 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		// Set up usage collector before invocation
 		backendName := GetBackendName()
 		collector := usage.NewCollector(backendName, opts.AgentName)
-		activeUsageCollector = collector
 		startedAt := time.Now()
 
-		err = InvokeAgentNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown)
+		err = InvokeAgentNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown, collector)
 
-		// Clear collector and record usage
-		activeUsageCollector = nil
 		endedAt := time.Now()
 		recordSessionUsage(usageStore, collector, opts.WorktreePath, opts.ParentID, startedAt, endedAt, err)
 

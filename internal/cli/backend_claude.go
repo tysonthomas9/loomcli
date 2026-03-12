@@ -24,8 +24,8 @@ func (c *ClaudeBackend) InvokeInteractive(workDir, prompt, agentName string) err
 	return claudeInvoker(workDir, prompt, agentName)
 }
 
-func (c *ClaudeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
-	return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
+func (c *ClaudeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return claudeNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
 }
 
 // Meta returns descriptive metadata about the Claude backend.
@@ -176,11 +176,6 @@ func init() {
 // debugStreamParsing enables verbose output for JSON parsing errors
 var debugStreamParsing = os.Getenv("LOOM_DEBUG_STREAM") != ""
 
-// activeUsageCollector is set by the automode loop before each invocation
-// and cleared after. The scanner loop reads it during stream parsing.
-// Access is sequential (set → invoke blocks → clear) so no mutex is needed.
-var activeUsageCollector *usage.Collector
-
 // claudeInvoker is the function used to invoke Claude (mockable for tests)
 var claudeInvoker = defaultClaudeInvoker
 
@@ -211,10 +206,10 @@ func defaultClaudeInvoker(workDir, prompt, agentName string) error {
 }
 
 // claudeNonInteractiveInvoker is the function used for non-interactive Claude invocation (mockable for tests)
-var claudeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}) error = defaultClaudeNonInteractiveInvoker
+var claudeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultClaudeNonInteractiveInvoker
 
 // defaultClaudeNonInteractiveInvoker is the real non-interactive Claude invocation
-func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	cmd := exec.Command("claude", "-p", "--verbose", "--output-format", "stream-json",
 		"--dangerously-skip-permissions")
 	cmd.Dir = workDir
@@ -272,8 +267,8 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	for scanner.Scan() {
 		line := scanner.Text()
 		displayStreamEvent(line)
-		if activeUsageCollector != nil {
-			collectClaudeStreamUsage(line, activeUsageCollector)
+		if collector != nil {
+			collectClaudeStreamUsage(line, collector)
 		}
 	}
 

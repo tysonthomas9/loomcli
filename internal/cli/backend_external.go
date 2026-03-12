@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // externalCmdTimeout is the maximum time allowed for external backend
@@ -62,7 +64,7 @@ func (e *ExternalBackend) InvokeInteractive(workDir, prompt, agentName string) e
 	return err
 }
 
-func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 	cmd := exec.Command(e.binPath, "invoke", "--non-interactive")
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)

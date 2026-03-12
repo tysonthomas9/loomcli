@@ -76,7 +76,7 @@ func TestOpenCodeInvokeNonInteractive_MockInvoker(t *testing.T) {
 	var gotWorkDir, gotPrompt, gotAgentName string
 	var gotShutdown <-chan struct{}
 	orig := openCodeNonInteractiveInvoker
-	openCodeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	openCodeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		gotWorkDir = workDir
 		gotPrompt = prompt
 		gotAgentName = agentName
@@ -87,7 +87,7 @@ func TestOpenCodeInvokeNonInteractive_MockInvoker(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	b := &OpenCodeBackend{}
-	err := b.InvokeNonInteractive("/work", "task prompt", "agent2", shutdown)
+	err := b.InvokeNonInteractive("/work", "task prompt", "agent2", shutdown, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,13 +108,13 @@ func TestOpenCodeInvokeNonInteractive_MockInvoker(t *testing.T) {
 func TestOpenCodeInvokeNonInteractive_MockInvokerError(t *testing.T) {
 	expectedErr := errors.New("opencode non-interactive failed")
 	orig := openCodeNonInteractiveInvoker
-	openCodeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	openCodeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		return expectedErr
 	}
 	t.Cleanup(func() { openCodeNonInteractiveInvoker = orig })
 
 	b := &OpenCodeBackend{}
-	err := b.InvokeNonInteractive("/work", "prompt", "", make(chan struct{}))
+	err := b.InvokeNonInteractive("/work", "prompt", "", make(chan struct{}), nil)
 	if err != expectedErr {
 		t.Errorf("expected error %v, got %v", expectedErr, err)
 	}
@@ -203,7 +203,7 @@ func TestOpenCodeBackendInvokeNonInteractive(t *testing.T) {
 	var called bool
 	var gotShutdown <-chan struct{}
 	orig := openCodeNonInteractiveInvoker
-	openCodeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	openCodeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		called = true
 		gotShutdown = shutdown
 		return nil
@@ -212,7 +212,7 @@ func TestOpenCodeBackendInvokeNonInteractive(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	b := &OpenCodeBackend{}
-	err := b.InvokeNonInteractive("/work", "task", "agent2", shutdown)
+	err := b.InvokeNonInteractive("/work", "task", "agent2", shutdown, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

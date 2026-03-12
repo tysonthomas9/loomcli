@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // Backend is the interface that all AI coding agent backends must implement.
@@ -17,7 +19,7 @@ import (
 type Backend interface {
 	Name() string
 	InvokeInteractive(workDir, prompt, agentName string) error
-	InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error
+	InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error
 }
 
 var (
@@ -140,7 +142,7 @@ func InvokeAgent(workDir, prompt, agentName string) error {
 }
 
 // InvokeAgentNonInteractive dispatches a non-interactive invocation to the active backend.
-func InvokeAgentNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+func InvokeAgentNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	backendMu.RLock()
 	name := activeBackend
 	b, ok := backends[name]
@@ -148,7 +150,7 @@ func InvokeAgentNonInteractive(workDir, prompt, agentName string, shutdown <-cha
 	if !ok {
 		return fmt.Errorf("backend %q not registered", name)
 	}
-	return b.InvokeNonInteractive(workDir, prompt, agentName, shutdown)
+	return b.InvokeNonInteractive(workDir, prompt, agentName, shutdown, collector)
 }
 
 // InvokeAgentForConflicts runs the active backend to resolve merge conflicts.

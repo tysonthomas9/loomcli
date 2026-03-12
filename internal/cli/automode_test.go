@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // setTmuxRemainOnExit sets remain-on-exit globally so tmux panes stay alive
@@ -1439,7 +1441,7 @@ func TestRunAutoModeLoop_ShutdownImmediately(t *testing.T) {
 
 	// Track if Claude was invoked
 	claudeInvoked := false
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeInvoked = true
 		return nil
 	}
@@ -1498,7 +1500,7 @@ func TestRunAutoModeLoop_MaxTasksLimit(t *testing.T) {
 
 	// Track Claude invocations
 	claudeInvocations := 0
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeInvocations++
 		// Simulate task claiming by writing a TaskID to the lock file
 		UpdateLockTask(workDir, fmt.Sprintf("mock-%d", claudeInvocations), "Mock Task")
@@ -1563,7 +1565,7 @@ func TestRunAutoModeLoop_WithoutTmux(t *testing.T) {
 	}
 
 	claudeInvocations := 0
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeInvocations++
 		UpdateLockTask(workDir, fmt.Sprintf("mock-%d", claudeInvocations), "Mock Task")
 		return nil
@@ -1618,7 +1620,7 @@ func TestRunAutoModeLoop_GracefulShutdownNoTasks(t *testing.T) {
 	}
 
 	claudeInvoked := false
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeInvoked = true
 		return nil
 	}
@@ -1674,7 +1676,7 @@ func TestRunAutoModeLoop_NoTasks(t *testing.T) {
 	}
 
 	claudeInvoked := false
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeInvoked = true
 		return nil
 	}
@@ -1746,7 +1748,7 @@ func TestRunAutoModeLoop_TaskExecution(t *testing.T) {
 	}
 
 	promptsReceived := []string{}
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		promptsReceived = append(promptsReceived, prompt)
 		return nil
 	}
@@ -1806,7 +1808,7 @@ func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
 
 	// Always return error
 	errorCount := 0
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		errorCount++
 		return fmt.Errorf("simulated error %d", errorCount)
 	}
@@ -1862,7 +1864,7 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 	}
 
 	var receivedPrompt string
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		receivedPrompt = prompt
 		// Simulate task claiming by writing a TaskID to the lock file
 		UpdateLockTask(workDir, "mock-plan-1", "Mock Plan Task")
@@ -1920,7 +1922,7 @@ func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
 	}
 
 	var receivedPrompt string
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		receivedPrompt = prompt
 		// Simulate task claiming by writing a TaskID to the lock file
 		UpdateLockTask(workDir, "mock-task-1", "Mock Task")
@@ -1979,7 +1981,7 @@ func TestRunAutoModeLoop_ErrorRecovery(t *testing.T) {
 
 	// Pattern: error, error, success, error, error, error (should exit on 6th)
 	callNum := 0
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		callNum++
 		// Errors on calls 1, 2, 4, 5, 6
 		// Success on call 3
@@ -2039,7 +2041,7 @@ func TestRunAutoModeLoop_BdCommandError(t *testing.T) {
 	}
 
 	claudeInvoked := false
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeInvoked = true
 		return nil
 	}
@@ -2103,7 +2105,7 @@ func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
 	}
 
 	claudeInvocations := 0
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeInvocations++
 		return fmt.Errorf("error")
 	}
@@ -2530,7 +2532,7 @@ func TestRunAutoModeLoop_CustomPromptGen(t *testing.T) {
 	}
 
 	var receivedPrompt string
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		receivedPrompt = prompt
 		// Simulate task claiming
 		UpdateLockTask(workDir, "mock-custom-1", "Mock Custom Task")
@@ -2600,7 +2602,7 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 	}
 
 	var receivedPrompt string
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		receivedPrompt = prompt
 		// Simulate task claiming
 		UpdateLockTask(workDir, "mock-fallback-1", "Mock Fallback Task")
@@ -2665,7 +2667,7 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 	}
 
 	var receivedPrompt string
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		receivedPrompt = prompt
 		UpdateLockTask(workDir, "mock-taskcheck-1", "Mock Task")
 		return nil
@@ -3178,14 +3180,14 @@ func TestRunAutoModeLoop_CodexPlanAgentType(t *testing.T) {
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() { claudeNonInteractiveInvoker = oldClaude })
 	claudeCalled := false
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeCalled = true
 		return nil
 	}
 
 	// Mock codex invoker to capture args
 	var receivedPrompt, receivedWorkDir, receivedAgentName string
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		receivedWorkDir = workDir
 		receivedPrompt = prompt
 		receivedAgentName = agentName
@@ -3263,13 +3265,13 @@ func TestRunAutoModeLoop_CodexMaxTasks(t *testing.T) {
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() { claudeNonInteractiveInvoker = oldClaude })
 	claudeCalled := false
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeCalled = true
 		return nil
 	}
 
 	codexInvocations := 0
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		codexInvocations++
 		UpdateLockTask(workDir, fmt.Sprintf("mock-codex-%d", codexInvocations), "Mock Codex Task")
 		return nil
@@ -3333,13 +3335,13 @@ func TestRunAutoModeLoop_CodexConsecutiveErrors(t *testing.T) {
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() { claudeNonInteractiveInvoker = oldClaude })
 	claudeCalled := false
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeCalled = true
 		return nil
 	}
 
 	errorCount := 0
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		errorCount++
 		return fmt.Errorf("codex simulated error %d", errorCount)
 	}
@@ -3403,13 +3405,13 @@ func TestRunAutoModeLoop_CodexErrorRecovery(t *testing.T) {
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() { claudeNonInteractiveInvoker = oldClaude })
 	claudeCalled := false
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeCalled = true
 		return nil
 	}
 
 	callNum := 0
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		callNum++
 		if callNum == 3 {
 			UpdateLockTask(workDir, "mock-codex-recovery", "Mock Codex Recovery Task")
@@ -4172,7 +4174,7 @@ func TestRunAutoModeLoop_ConsecutiveNoProgress(t *testing.T) {
 	// Agent succeeds but does NOT claim a task (no UpdateLockTask call)
 	shutdown := make(chan struct{})
 	claudeInvocations := 0
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdownCh <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdownCh <-chan struct{}, _ *usage.Collector) error {
 		claudeInvocations++
 		// Don't write a TaskID — simulates agent that exits without claiming work.
 		// After first invocation, send shutdown during the backoff to exit promptly.
@@ -4234,7 +4236,7 @@ func TestRunAutoModeLoop_NoProgressCounterResetOnSuccess(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	callNum := 0
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdownCh <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdownCh <-chan struct{}, _ *usage.Collector) error {
 		callNum++
 		if callNum == 1 {
 			// First call: no progress (don't claim)
@@ -4661,7 +4663,7 @@ func TestRunAutoModeLoop_LockStateTransitions(t *testing.T) {
 
 	// In the mock invoker: read lock file and verify State == StateActive
 	var stateBeforeAgent string
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		info, err := ReadLockFile(workDir)
 		if err != nil {
 			t.Errorf("ReadLockFile failed during agent invocation: %v", err)
@@ -4738,7 +4740,7 @@ func TestRunAutoModeLoop_ClearsTaskIDBeforeEachSession(t *testing.T) {
 
 	callNum := 0
 	taskIDOnEntry := make([]string, 0, 2)
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		callNum++
 		// Read the current TaskID to see if it was cleared before invocation
 		info, err := ReadLockFile(workDir)
@@ -4996,7 +4998,7 @@ func TestRunAutoModeLoop_ThreeConsecutiveNoProgressExits(t *testing.T) {
 
 	// Agent succeeds but does NOT claim a task (no UpdateLockTask call)
 	claudeInvocations := 0
-	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	claudeNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		claudeInvocations++
 		// Don't write a TaskID — simulates agent that exits without claiming work
 		return nil

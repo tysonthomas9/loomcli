@@ -23,15 +23,15 @@ func (c *CodexBackend) InvokeInteractive(workDir, prompt, agentName string) erro
 	return codexInvoker(workDir, prompt, agentName)
 }
 
-func (c *CodexBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
-	return codexNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
+func (c *CodexBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return codexNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
 }
 
 // codexInvoker is the function used to invoke Codex interactively (mockable for tests)
 var codexInvoker = defaultCodexInvoker
 
 // codexNonInteractiveInvoker is the function used for non-interactive Codex invocation (mockable for tests)
-var codexNonInteractiveInvoker = defaultCodexNonInteractiveInvoker
+var codexNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultCodexNonInteractiveInvoker
 
 // buildCodexInteractiveCmd constructs the exec.Cmd for interactive Codex invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
@@ -86,7 +86,7 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 	return cmd.Run()
 }
 
-func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	cmd := exec.Command("codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox")
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
@@ -143,8 +143,8 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	for scanner.Scan() {
 		line := scanner.Text()
 		fmt.Println(line)
-		if activeUsageCollector != nil {
-			collectCodexStreamUsage(line, activeUsageCollector)
+		if collector != nil {
+			collectCodexStreamUsage(line, collector)
 		}
 	}
 

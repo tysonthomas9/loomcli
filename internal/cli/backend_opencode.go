@@ -21,15 +21,15 @@ func (o *OpenCodeBackend) InvokeInteractive(workDir, prompt, agentName string) e
 	return openCodeInvoker(workDir, prompt, agentName)
 }
 
-func (o *OpenCodeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
-	return openCodeNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
+func (o *OpenCodeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return openCodeNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
 }
 
 // openCodeInvoker is the function used to invoke OpenCode interactively (mockable for tests)
 var openCodeInvoker = defaultOpenCodeInvoker
 
 // openCodeNonInteractiveInvoker is the function used for non-interactive OpenCode invocation (mockable for tests)
-var openCodeNonInteractiveInvoker = defaultOpenCodeNonInteractiveInvoker
+var openCodeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultOpenCodeNonInteractiveInvoker
 
 // buildOpenCodeInteractiveCmd constructs the exec.Cmd for interactive OpenCode invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
@@ -56,7 +56,7 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 	return cmd.Run()
 }
 
-func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	cmd := exec.Command("opencode", "run", "--format", "json")
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
@@ -113,8 +113,8 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	for scanner.Scan() {
 		line := scanner.Text()
 		fmt.Println(line)
-		if activeUsageCollector != nil {
-			collectOpenCodeStreamUsage(line, activeUsageCollector)
+		if collector != nil {
+			collectOpenCodeStreamUsage(line, collector)
 		}
 	}
 
