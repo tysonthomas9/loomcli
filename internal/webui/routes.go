@@ -5,6 +5,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
 
@@ -109,6 +110,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("GET /api/agents/{name}/git/status", handleGitStatus(gitOps))
 		mux.HandleFunc("PATCH /api/agents/{name}/git/target", handleGitTargetUpdate(gitOps))
 	}
+
+	// Editor endpoints for external editor detection and launch
+	editorCache := newDefaultEditorCache()
+	mux.HandleFunc("GET /api/editors", handleListEditors(editorCache))
+	mux.HandleFunc("POST /api/editors/open", handleOpenEditor(editorCache, editor.LaunchEditor))
 
 	// Log streaming endpoints
 	mux.HandleFunc("GET /api/agents/{name}/logs", handleGetAgentLog())
