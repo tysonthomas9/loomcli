@@ -15,9 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
-const (
-	dashboardWidth = 70 // Width of the monitor dashboard box
-)
+const dashboardWidth = 70 // Width of the monitor dashboard box
 
 var (
 	monitorNoWatch  bool
@@ -94,6 +92,7 @@ type AgentStatus struct {
 	Ahead         int            `json:"ahead"`                    // commits ahead of integration branch
 	Behind        int            `json:"behind"`                   // commits behind integration branch
 	Path          string         `json:"path,omitempty"`           // worktree path relative to repo root
+	WorktreePath  string         `json:"worktree_path,omitempty"`  // absolute filesystem path to worktree
 	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
 	Workspace     string         `json:"workspace"`                // workspace name (empty in legacy mode)
 	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
@@ -470,6 +469,7 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			Workspace:     wt.Workspace,
 			Role:          daemonInfo.Role,
 			DaemonManaged: daemonInfo.Managed,
+			WorktreePath:  wt.Path,
 		}
 
 		// Set relative worktree path (e.g., "worktrees/cobalt")

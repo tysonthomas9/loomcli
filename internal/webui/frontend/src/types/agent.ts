@@ -102,6 +102,8 @@ export interface LoomAgentStatus {
   behind: number;
   /** Worktree path relative to repo root (e.g., "worktrees/cobalt") */
   path?: string;
+  /** Absolute filesystem path to the agent's worktree */
+  worktree_path?: string;
   /** Role from daemon config (e.g., "plan", "task") */
   role?: string;
   /** Recent commits ahead of integration branch */
