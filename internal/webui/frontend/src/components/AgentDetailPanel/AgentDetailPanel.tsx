@@ -11,6 +11,7 @@ import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
 
 import { LogViewer } from "../LogViewer";
+import { OpenInEditor } from "../OpenInEditor";
 import styles from "./AgentDetailPanel.module.css";
 
 /**
@@ -480,6 +481,11 @@ export function AgentDetailPanel({
                       </>
                     )}
                   </dl>
+                  {agent.worktree_path && (
+                    <div className={styles.openInSection}>
+                      <OpenInEditor path={agent.worktree_path} />
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

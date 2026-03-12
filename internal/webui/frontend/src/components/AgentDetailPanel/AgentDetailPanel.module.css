@@ -570,6 +570,10 @@
   line-height: 1.25;
 }
 
+.openInSection {
+  margin-top: 14px;
+}
+
 /* ============= Not Found State ============= */
 
 .notFound {

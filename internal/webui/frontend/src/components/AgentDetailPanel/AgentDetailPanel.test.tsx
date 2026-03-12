@@ -4,7 +4,7 @@
 
 /**
  * Unit tests for AgentDetailPanel component.
- * Focuses on the Path field rendering in the Agent Info section.
+ * Covers Path field rendering and OpenInEditor integration in the Agent Info section.
  */
 
 import { render, screen } from "@testing-library/react";
@@ -35,6 +35,13 @@ vi.mock("@/hooks", () => ({
 // Mock LogViewer to avoid terminal rendering complexity
 vi.mock("../LogViewer", () => ({
   LogViewer: () => <div data-testid="log-viewer-mock" />,
+}));
+
+// Mock OpenInEditor to avoid its hook dependencies (useEditors)
+vi.mock("../OpenInEditor", () => ({
+  OpenInEditor: ({ path }: { path: string }) => (
+    <div data-testid="open-in-editor" data-path={path} />
+  ),
 }));
 
 /** Helper to build a minimal agent object. */
@@ -105,6 +112,31 @@ describe("AgentDetailPanel", () => {
       expect(
         screen.getAllByText("feature-branch").length,
       ).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe("OpenInEditor in Agent Info section", () => {
+    it("renders OpenInEditor when agent has worktree_path", () => {
+      renderPanel({ worktree_path: "/home/user/worktrees/falcon" });
+
+      const openInEditor = screen.getByTestId("open-in-editor");
+      expect(openInEditor).toBeInTheDocument();
+      expect(openInEditor).toHaveAttribute(
+        "data-path",
+        "/home/user/worktrees/falcon",
+      );
+    });
+
+    it("does not render OpenInEditor when worktree_path is undefined", () => {
+      renderPanel({ worktree_path: undefined });
+
+      expect(screen.queryByTestId("open-in-editor")).not.toBeInTheDocument();
+    });
+
+    it("does not render OpenInEditor when worktree_path is empty string", () => {
+      renderPanel({ worktree_path: "" });
+
+      expect(screen.queryByTestId("open-in-editor")).not.toBeInTheDocument();
     });
   });
 });

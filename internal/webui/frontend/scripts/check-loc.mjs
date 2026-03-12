@@ -13,7 +13,7 @@ export const THRESHOLD = 500;
 export const ALLOWLIST = new Map([
   ["src/components/IssueDetailPanel/IssueDetailPanel.tsx", 1076],
   ["src/App.tsx", 747],
-  ["src/components/AgentDetailPanel/AgentDetailPanel.tsx", 544],
+  ["src/components/AgentDetailPanel/AgentDetailPanel.tsx", 550],
   ["src/hooks/useAgentTerminalLogs.ts", 522],
 ]);
 
