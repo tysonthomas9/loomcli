@@ -62,6 +62,14 @@ export { fetchUsage } from "./usage";
 // Observability API functions (loom server)
 export { fetchObservabilityMetrics } from "./observability";
 
+// Editor API functions
+export {
+  fetchEditors,
+  refreshEditors,
+  getCachedEditors,
+  openInEditor,
+} from "./editors";
+
 // Log streaming API functions
 export {
   getTaskLogPhases,

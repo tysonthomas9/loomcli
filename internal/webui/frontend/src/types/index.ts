@@ -215,6 +215,9 @@ export type {
   ObservabilityMetricsResponse,
 } from "./observability";
 
+// Editor types
+export type { EditorInfo } from "./editor";
+
 // Graph types (React Flow)
 export type {
   IssueNodeData,
