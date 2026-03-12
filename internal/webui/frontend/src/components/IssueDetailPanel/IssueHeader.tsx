@@ -1,6 +1,6 @@
 /**
  * IssueHeader component.
- * Header area with ID, status badge, priority, and close button for IssueDetailPanel.
+ * Header area with ID, status badge, priority, close button, and title for IssueDetailPanel.
  */
 
 import type { Issue, IssueDetails, Priority } from "@/types";
@@ -46,10 +46,6 @@ export interface IssueHeaderProps {
   sticky?: boolean;
   /** Additional CSS class name */
   className?: string;
-  /** Whether the panel is in fullscreen mode */
-  isFullscreen?: boolean;
-  /** Callback to toggle fullscreen mode */
-  onToggleFullscreen?: () => void;
 }
 
 /**
@@ -68,6 +64,7 @@ function formatStatus(status?: string): string {
  * - Priority badge (optional)
  * - Close button
  * - Title (editable when onTitleSave provided)
+
  */
 export function IssueHeader({
   issue,
@@ -80,8 +77,6 @@ export function IssueHeader({
   onPriorityClick,
   sticky,
   className,
-  isFullscreen,
-  onToggleFullscreen,
 }: IssueHeaderProps): JSX.Element {
   const rootClassName = [styles.issueHeader, sticky && styles.sticky, className]
     .filter(Boolean)
@@ -123,51 +118,6 @@ export function IssueHeader({
             data-testid="header-priority-badge"
           >
             {priorityInfo.short}
-          </button>
-        )}
-        {onToggleFullscreen && (
-          <button
-            type="button"
-            className={styles.fullscreenButton}
-            onClick={onToggleFullscreen}
-            aria-label={
-              isFullscreen ? "Collapse to panel" : "Expand to fullscreen"
-            }
-            data-testid="header-fullscreen-button"
-          >
-            {isFullscreen ? (
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M10 2v4h4M6 14v-4H2M10 6L14 2M6 10l-4 4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            ) : (
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M14 2h-4M14 2v4M14 2l-4 4M2 14h4M2 14v-4M2 14l4-4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
           </button>
         )}
         <button

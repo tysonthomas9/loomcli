@@ -234,10 +234,6 @@ interface DefaultContentProps {
   onApprove?: (issue: Issue) => void | Promise<void>;
   /** Callback when reject is submitted with comment */
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
-  /** Whether the panel is in fullscreen mode */
-  isFullscreen?: boolean;
-  /** Callback to toggle fullscreen mode */
-  onToggleFullscreen?: () => void;
 }
 
 /**
@@ -252,8 +248,6 @@ function DefaultContent({
   onIssueUpdate,
   onApprove,
   onReject,
-  isFullscreen,
-  onToggleFullscreen,
 }: DefaultContentProps): JSX.Element {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
@@ -557,8 +551,6 @@ function DefaultContent({
           isSavingStatus={isSavingStatus}
           showPriority={true}
           sticky={true}
-          isFullscreen={isFullscreen ?? false}
-          {...(onToggleFullscreen && { onToggleFullscreen })}
         />
 
         {/* Metadata Bar */}
@@ -730,105 +722,6 @@ function DefaultContent({
       ) : (
         /* Scrollable Content (Details tab) */
         <div className={styles.scrollableContent}>
-          {isFullscreen && issue.design ? (
-            /* Two-column layout in fullscreen when design exists */
-            <div className={styles.twoColumnLayout}>
-              <div className={styles.leftColumn}>
-                <div className={styles.detailContent}>
-                  {/* Priority/Type dropdowns for editing */}
-                  <div className={styles.statusRow}>
-                    <PriorityDropdown
-                      priority={issue.priority as Priority}
-                      onSave={handlePrioritySave}
-                      isSaving={isSavingPriority}
-                    />
-                    <TypeDropdown
-                      type={issue.issue_type}
-                      onSave={handleTypeSave}
-                      isSaving={isSavingType}
-                    />
-                  </div>
-
-                  {/* Description */}
-                  <section className={styles.section}>
-                    <h3 className={styles.sectionTitle}>Description</h3>
-                    <EditableDescription
-                      description={issue.description}
-                      isEditable={true}
-                      onSave={async (newDescription) => {
-                        const updatedIssue = await updateIssue(issue.id, {
-                          description: newDescription,
-                        });
-                        onIssueUpdate?.(updatedIssue);
-                      }}
-                    />
-                  </section>
-
-                  {/* Dependencies (blocking this issue) - editable */}
-                  {hasDetails && (
-                    <DependencySection
-                      issueId={issue.id}
-                      dependencies={dependencies ?? []}
-                      onAddDependency={handleAddDependency}
-                      onRemoveDependency={handleRemoveDependency}
-                      disabled={isLoading}
-                    />
-                  )}
-
-                  {/* Dependents (this issue blocks) */}
-                  {dependents && dependents.length > 0 && (
-                    <section className={styles.section}>
-                      <h3 className={styles.sectionTitle}>
-                        Blocks ({dependents.length})
-                      </h3>
-                      <ul className={styles.dependencyList}>
-                        {dependents.map(renderDependencyItem)}
-                      </ul>
-                    </section>
-                  )}
-
-                  {/* Comments */}
-                  <CommentsSection comments={localComments} />
-                  <CommentForm
-                    issueId={issue.id}
-                    onCommentAdded={handleCommentAdded}
-                  />
-
-                  {/* Labels */}
-                  {issue.labels && issue.labels.length > 0 && (
-                    <section className={styles.section}>
-                      <h3 className={styles.sectionTitle}>Labels</h3>
-                      <div className={styles.labels}>
-                        {issue.labels.map((label) => (
-                          <span key={label} className={styles.label}>
-                            {label}
-                          </span>
-                        ))}
-                      </div>
-                    </section>
-                  )}
-                </div>
-              </div>
-              <div className={styles.rightColumn}>
-                <div className={styles.detailContent}>
-                  {/* Design (always expanded in fullscreen) */}
-                  <section className={styles.section}>
-                    <h3 className={styles.sectionTitle}>Design</h3>
-                    <MarkdownRenderer content={issue.design} />
-                  </section>
-
-                  {/* Notes */}
-                  {issue.notes && (
-                    <section className={styles.section}>
-                      <h3 className={styles.sectionTitle}>Notes</h3>
-                      <MarkdownRenderer content={issue.notes} />
-                    </section>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* Single-column layout (panel mode or fullscreen without design) */
             <div className={styles.detailContent}>
               {/* Priority/Type dropdowns for editing */}
               <div className={styles.statusRow}>
@@ -925,7 +818,6 @@ function DefaultContent({
                 </section>
               )}
             </div>
-          )}
         </div>
       )}
 
@@ -963,36 +855,20 @@ export function IssueDetailPanel({
   onReject,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const handleToggleFullscreen = useCallback(() => {
-    setIsFullscreen((prev) => !prev);
-  }, []);
-
-  // Reset fullscreen when panel closes
-  useEffect(() => {
-    if (!isOpen) {
-      setIsFullscreen(false);
-    }
-  }, [isOpen]);
-
-  // Handle Escape key: fullscreen -> panel, panel -> close
+  // Handle Escape key to close panel
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        if (isFullscreen) {
-          setIsFullscreen(false);
-        } else {
-          onClose();
-        }
+        onClose();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, isFullscreen, onClose]);
+  }, [isOpen, onClose]);
 
   // Lock body scroll when open, restoring previous value on close.
   // Note: Only ONE panel should be open at a time. Multiple concurrent panels
@@ -1029,7 +905,6 @@ export function IssueDetailPanel({
   const rootClassName = [
     styles.overlay,
     isOpen && styles.open,
-    isFullscreen && styles.fullscreen,
     className,
   ]
     .filter(Boolean)
@@ -1042,8 +917,6 @@ export function IssueDetailPanel({
       isLoading={isLoading ?? false}
       error={error ?? null}
       onClose={onClose}
-      isFullscreen={isFullscreen}
-      onToggleFullscreen={handleToggleFullscreen}
       {...(onApprove !== undefined && { onApprove })}
       {...(onReject !== undefined && { onReject })}
     />

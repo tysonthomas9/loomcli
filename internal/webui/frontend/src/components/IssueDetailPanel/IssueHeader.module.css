@@ -110,34 +110,6 @@
   color: var(--color-text-muted);
 }
 
-/* Fullscreen toggle button */
-.fullscreenButton {
-  margin-left: auto;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition:
-    background-color var(--transition-fast),
-    color var(--transition-fast);
-}
-
-.fullscreenButton:hover {
-  background-color: var(--color-bg-hover);
-  color: var(--color-text);
-}
-
-.fullscreenButton:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
 .closeButton {
   margin-left: auto;
   width: 28px;
@@ -163,10 +135,6 @@
 .closeButton:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
-}
-
-.fullscreenButton + .closeButton {
-  margin-left: 0;
 }
 
 .title {
