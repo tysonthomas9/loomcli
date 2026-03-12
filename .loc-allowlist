@@ -4,8 +4,6 @@
 # Remove entries as files are refactored below threshold.
 894 internal/cli/monitor.go
 728 internal/webui/fleet_handlers.go
-907 internal/cli/serve.go
-1091 internal/cli/daemon.go
 703 internal/rpc/protocol.go
 690 internal/cli/worktree.go
 656 internal/webui/log_streamer.go
