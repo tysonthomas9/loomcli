@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -133,37 +132,6 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 	}
 
 	return d, nil
-}
-
-// resolveRoleConfig looks up a role by name, supporting both built-in and custom roles.
-func (d *Daemon) resolveRoleConfig(roleName string, agentIndex int) (RoleConfig, error) {
-	// Check for built-in roles first
-	if builtInRoles[roleName] {
-		return RoleConfig{Description: fmt.Sprintf("Built-in %s agent", roleName)}, nil
-	}
-
-	// Look up custom role in config
-	rc, ok := d.config.ResolveRole(roleName)
-	if !ok {
-		return RoleConfig{}, fmt.Errorf("agent[%d]: role %q not found (not a built-in role and not defined in config.Roles)", agentIndex, roleName)
-	}
-
-	// Custom roles require a prompt file
-	if rc.PromptFile == "" {
-		return RoleConfig{}, fmt.Errorf("agent[%d]: custom role %q missing prompt_file", agentIndex, roleName)
-	}
-
-	// Resolve prompt file path relative to project dir
-	promptPath := rc.PromptFile
-	if !filepath.IsAbs(promptPath) {
-		promptPath = filepath.Join(d.projectDir, promptPath)
-	}
-	if _, err := os.Stat(promptPath); err != nil {
-		return RoleConfig{}, fmt.Errorf("agent[%d]: prompt file %q not found: %w", agentIndex, promptPath, err)
-	}
-	rc.PromptFile = promptPath
-
-	return rc, nil
 }
 
 // resetWorktreeBranches moves all worktrees back to their default

@@ -100,16 +100,24 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	// Choose the appropriate task checker based on agent type
 	var hasAvailableTasks func() (bool, error)
 	var generatePrompt func(string, *WorkspaceConfig) string
-	if opts.CustomPromptGen != nil && opts.CustomTaskCheck != nil {
+
+	// Task check: custom overrides default
+	if opts.CustomTaskCheck != nil {
 		hasAvailableTasks = opts.CustomTaskCheck
-		generatePrompt = opts.CustomPromptGen
 	} else if opts.AgentType == "plan" {
 		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID) }
+	} else {
+		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
+	}
+
+	// Prompt gen: custom overrides default
+	if opts.CustomPromptGen != nil {
+		generatePrompt = opts.CustomPromptGen
+	} else if opts.AgentType == "plan" {
 		generatePrompt = func(name string, ws *WorkspaceConfig) string {
 			return GeneratePlanningPrompt(name, ws, opts.ParentID)
 		}
 	} else {
-		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
 		generatePrompt = func(name string, ws *WorkspaceConfig) string {
 			return GenerateTaskPrompt(name, ws, opts.ParentID, GetBackendName())
 		}

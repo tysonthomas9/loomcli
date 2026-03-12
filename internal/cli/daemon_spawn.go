@@ -72,6 +72,24 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		cmd.Env = append(cmd.Env, "LOOM_READ_ONLY=1")
 	}
 
+	// Propagate routing constraints as env vars for subprocess task routing
+	if len(ap.roleConfig.Skills) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_SKILLS=%s", strings.Join(ap.roleConfig.Skills, ",")))
+	}
+	if len(ap.roleConfig.PathPatterns) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_PATH_PATTERNS=%s", strings.Join(ap.roleConfig.PathPatterns, ",")))
+	}
+	if ap.roleConfig.MaxPriority != nil {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_MAX_PRIORITY=%d", *ap.roleConfig.MaxPriority))
+	}
+	if ap.roleConfig.TaskFilter != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_TASK_FILTER=%s", ap.roleConfig.TaskFilter))
+	}
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE=%s", ap.entry.Role))
+	if len(ap.entry.PathPatterns) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_PATH_PATTERNS=%s", strings.Join(ap.entry.PathPatterns, ",")))
+	}
+
 	return cmd
 }
 

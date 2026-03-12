@@ -197,7 +197,7 @@ func HasAnyAvailableTasks(parentID string) (bool, error) {
 func BuildRouterTaskCheck(rc RoleConfig, ae AgentEntry, parentID string) func() (bool, error) {
 	constraints := MergeRoleConstraints(rc, ae)
 	// If no routing fields are set, return nil to use defaults
-	if len(constraints.Skills) == 0 && len(constraints.PathPatterns) == 0 && constraints.MaxPriority == nil {
+	if len(constraints.Skills) == 0 && len(constraints.PathPatterns) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" {
 		return nil
 	}
 	return func() (bool, error) {

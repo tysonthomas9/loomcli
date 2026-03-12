@@ -102,17 +102,21 @@ func runTask(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Build router-based task check from daemon env vars (nil when no routing env vars set)
+	routerCheck := RouterTaskCheckFromEnv(taskParentID)
+
 	// AUTO MODE with tmux - daemon manages lock, not parent
 	if taskAutoMode && IsTmuxAvailable() {
 		shutdown := SetupSignalHandler()
 		RunAutoModeTmux(AutoModeOptions{
-			Interval:     taskInterval,
-			MaxTasks:     taskMaxTasks,
-			IdleTimeout:  taskIdleTimeout,
-			AgentType:    "task",
-			AgentName:    agentName,
-			WorktreePath: worktreePath,
-			ParentID:     taskParentID,
+			Interval:        taskInterval,
+			MaxTasks:        taskMaxTasks,
+			IdleTimeout:     taskIdleTimeout,
+			AgentType:       "task",
+			AgentName:       agentName,
+			WorktreePath:    worktreePath,
+			ParentID:        taskParentID,
+			CustomTaskCheck: routerCheck,
 		}, shutdown)
 		return
 	}
@@ -129,20 +133,20 @@ func runTask(cmd *cobra.Command, args []string) {
 		fmt.Println("[auto] tmux not found, using JSON streaming mode")
 		shutdown := SetupSignalHandler()
 		RunAutoModeLoop(AutoModeOptions{
-			Interval:     taskInterval,
-			MaxTasks:     taskMaxTasks,
-			IdleTimeout:  taskIdleTimeout,
-			AgentType:    "task",
-			AgentName:    agentName,
-			WorktreePath: worktreePath,
-			ParentID:     taskParentID,
+			Interval:        taskInterval,
+			MaxTasks:        taskMaxTasks,
+			IdleTimeout:     taskIdleTimeout,
+			AgentType:       "task",
+			AgentName:       agentName,
+			WorktreePath:    worktreePath,
+			ParentID:        taskParentID,
+			CustomTaskCheck: routerCheck,
 		}, shutdown)
 		return
 	}
 
-	// SINGLE TASK MODE (original behavior)
-	// Check if there are tasks available for implementation
-	available, err := HasAvailableImplementationTasks(taskParentID)
+	// SINGLE TASK MODE - check if there are tasks available for implementation
+	available, err := checkTaskAvailability(routerCheck, func() (bool, error) { return HasAvailableImplementationTasks(taskParentID) })
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
 		os.Exit(1)

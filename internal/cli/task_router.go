@@ -2,7 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -163,6 +166,59 @@ func SelectBestTask(issues []BdIssue, constraints RoleConstraints, unclosedIDs m
 	})
 
 	return &matches[0]
+}
+
+// checkTaskAvailability uses routerCheck if non-nil, otherwise falls back to defaultCheck.
+func checkTaskAvailability(routerCheck, defaultCheck func() (bool, error)) (bool, error) {
+	if routerCheck != nil {
+		return routerCheck()
+	}
+	return defaultCheck()
+}
+
+// RouterTaskCheckFromEnv builds a router-based task check from daemon env vars.
+// Returns nil when no routing env vars are set (backward compatible default).
+func RouterTaskCheckFromEnv(parentID string) func() (bool, error) {
+	return BuildRouterTaskCheck(RoleConfigFromEnv(), AgentEntryFromEnv(), parentID)
+}
+
+// RoleConfigFromEnv reconstructs a partial RoleConfig from LOOM_ROLE_* environment
+// variables set by the daemon's buildCommand.
+func RoleConfigFromEnv() RoleConfig {
+	var rc RoleConfig
+	if v := os.Getenv("LOOM_ROLE_SKILLS"); v != "" {
+		rc.Skills = strings.Split(v, ",")
+	}
+	if v := os.Getenv("LOOM_ROLE_PATH_PATTERNS"); v != "" {
+		rc.PathPatterns = strings.Split(v, ",")
+	}
+	if v := os.Getenv("LOOM_ROLE_MAX_PRIORITY"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			rc.MaxPriority = &p
+		} else {
+			log.Printf("[router] Warning: invalid LOOM_ROLE_MAX_PRIORITY %q: %v", v, err)
+		}
+	}
+	if v := os.Getenv("LOOM_ROLE_TASK_FILTER"); v != "" {
+		rc.TaskFilter = v
+	}
+	return rc
+}
+
+// AgentEntryFromEnv reconstructs a partial AgentEntry from LOOM_AGENT_*
+// and LOOM_ROLE environment variables set by the daemon's buildCommand.
+func AgentEntryFromEnv() AgentEntry {
+	var ae AgentEntry
+	if v := os.Getenv("LOOM_AGENT_PATH_PATTERNS"); v != "" {
+		ae.PathPatterns = strings.Split(v, ",")
+	}
+	if v := os.Getenv("BD_ACTOR"); v != "" {
+		ae.Worktree = v
+	}
+	if v := os.Getenv("LOOM_ROLE"); v != "" {
+		ae.Role = v
+	}
+	return ae
 }
 
 // countSkillMatches returns the number of role skills that appear in the issue's labels.

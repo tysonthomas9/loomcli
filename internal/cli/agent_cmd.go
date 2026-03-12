@@ -91,6 +91,11 @@ func runAgent(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Override with router-based check if daemon env vars provide routing constraints
+	if routerCheck := BuildRouterTaskCheck(RoleConfigFromEnv(), AgentEntryFromEnv(), agentParentID); routerCheck != nil {
+		taskCheckFn = routerCheck
+	}
+
 	// Resolve worktree/workspace path
 	target, err := ResolveAgentTarget(argName)
 	if err != nil {

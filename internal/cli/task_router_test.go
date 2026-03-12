@@ -1,6 +1,8 @@
 package cli
 
-import "testing"
+import (
+	"testing"
+)
 
 // --- MergeRoleConstraints tests ---
 
@@ -628,5 +630,98 @@ func TestCountSkillMatches(t *testing.T) {
 				t.Errorf("countSkillMatches() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// --- RoleConfigFromEnv tests ---
+
+func TestRoleConfigFromEnv(t *testing.T) {
+	t.Setenv("LOOM_ROLE_SKILLS", "go,daemon")
+	t.Setenv("LOOM_ROLE_PATH_PATTERNS", "internal/**,cmd/**")
+	t.Setenv("LOOM_ROLE_MAX_PRIORITY", "2")
+	t.Setenv("LOOM_ROLE_TASK_FILTER", "needs_plan")
+
+	rc := RoleConfigFromEnv()
+
+	if len(rc.Skills) != 2 || rc.Skills[0] != "go" || rc.Skills[1] != "daemon" {
+		t.Errorf("Skills = %v, want [go daemon]", rc.Skills)
+	}
+	if len(rc.PathPatterns) != 2 || rc.PathPatterns[0] != "internal/**" {
+		t.Errorf("PathPatterns = %v, want [internal/** cmd/**]", rc.PathPatterns)
+	}
+	if rc.MaxPriority == nil || *rc.MaxPriority != 2 {
+		t.Errorf("MaxPriority = %v, want 2", rc.MaxPriority)
+	}
+	if rc.TaskFilter != "needs_plan" {
+		t.Errorf("TaskFilter = %q, want %q", rc.TaskFilter, "needs_plan")
+	}
+}
+
+func TestRoleConfigFromEnv_Empty(t *testing.T) {
+	// Ensure no LOOM_ROLE_* env vars are set
+	t.Setenv("LOOM_ROLE_SKILLS", "")
+	t.Setenv("LOOM_ROLE_PATH_PATTERNS", "")
+	t.Setenv("LOOM_ROLE_MAX_PRIORITY", "")
+	t.Setenv("LOOM_ROLE_TASK_FILTER", "")
+
+	rc := RoleConfigFromEnv()
+
+	if len(rc.Skills) != 0 {
+		t.Errorf("Skills = %v, want empty", rc.Skills)
+	}
+	if len(rc.PathPatterns) != 0 {
+		t.Errorf("PathPatterns = %v, want empty", rc.PathPatterns)
+	}
+	if rc.MaxPriority != nil {
+		t.Errorf("MaxPriority = %v, want nil", rc.MaxPriority)
+	}
+	if rc.TaskFilter != "" {
+		t.Errorf("TaskFilter = %q, want empty", rc.TaskFilter)
+	}
+}
+
+func TestRoleConfigFromEnv_InvalidMaxPriority(t *testing.T) {
+	t.Setenv("LOOM_ROLE_MAX_PRIORITY", "notanumber")
+
+	rc := RoleConfigFromEnv()
+
+	if rc.MaxPriority != nil {
+		t.Errorf("MaxPriority = %v, want nil for invalid input", rc.MaxPriority)
+	}
+}
+
+func TestAgentEntryFromEnv(t *testing.T) {
+	t.Setenv("LOOM_AGENT_PATH_PATTERNS", "cmd/**,pkg/**")
+	t.Setenv("BD_ACTOR", "falcon")
+	t.Setenv("LOOM_ROLE", "task")
+
+	ae := AgentEntryFromEnv()
+
+	if len(ae.PathPatterns) != 2 || ae.PathPatterns[0] != "cmd/**" {
+		t.Errorf("PathPatterns = %v, want [cmd/** pkg/**]", ae.PathPatterns)
+	}
+	if ae.Worktree != "falcon" {
+		t.Errorf("Worktree = %q, want %q", ae.Worktree, "falcon")
+	}
+	if ae.Role != "task" {
+		t.Errorf("Role = %q, want %q", ae.Role, "task")
+	}
+}
+
+func TestAgentEntryFromEnv_Empty(t *testing.T) {
+	t.Setenv("LOOM_AGENT_PATH_PATTERNS", "")
+	t.Setenv("BD_ACTOR", "")
+	t.Setenv("LOOM_ROLE", "")
+
+	ae := AgentEntryFromEnv()
+
+	if len(ae.PathPatterns) != 0 {
+		t.Errorf("PathPatterns = %v, want empty", ae.PathPatterns)
+	}
+	if ae.Worktree != "" {
+		t.Errorf("Worktree = %q, want empty", ae.Worktree)
+	}
+	if ae.Role != "" {
+		t.Errorf("Role = %q, want empty", ae.Role)
 	}
 }

@@ -2615,7 +2615,7 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 		AgentType:    "task",
 		AgentName:    "fallback-agent",
 		WorktreePath: tmpDir,
-		// Only set CustomPromptGen, NOT CustomTaskCheck — should fall back to AgentType
+		// Only set CustomPromptGen, NOT CustomTaskCheck — CustomPromptGen works independently
 		CustomPromptGen: func(agentName string, ws *WorkspaceConfig) string {
 			return "custom prompt for " + agentName
 		},
@@ -2634,22 +2634,17 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 		t.Fatal("RunAutoModeLoop did not exit")
 	}
 
-	// Should receive the default task prompt (NOT the custom prompt)
-	// because CustomTaskCheck is nil, so both custom fields are ignored
-	expectedPrompt := GenerateTaskPrompt("fallback-agent", nil, "", "claude")
-	if receivedPrompt != expectedPrompt {
-		t.Errorf("Received prompt %q, want default task prompt %q", receivedPrompt, expectedPrompt)
-	}
-
-	// Verify custom prompt was NOT used
+	// CustomPromptGen is decoupled from CustomTaskCheck, so the custom prompt
+	// should be used even when CustomTaskCheck is nil (default task check used).
 	customPrompt := "custom prompt for fallback-agent"
-	if receivedPrompt == customPrompt {
-		t.Error("Received custom prompt instead of default task prompt — fallback did not work")
+	if receivedPrompt != customPrompt {
+		t.Errorf("Received prompt %q, want custom prompt %q", receivedPrompt, customPrompt)
 	}
 }
 
 func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
-	// When only CustomTaskCheck is set (not CustomPromptGen), should fall back to AgentType
+	// When only CustomTaskCheck is set (not CustomPromptGen), CustomTaskCheck is used
+	// for task availability, and the default AgentType-based prompt gen is used.
 	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
