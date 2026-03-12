@@ -133,3 +133,6 @@ export type { Theme, UseThemeReturn } from "./useTheme";
 
 export { useEditors } from "./useEditors";
 export type { UseEditorsResult } from "./useEditors";
+
+export { useTerminalSessions } from "./useTerminalSessions";
+export type { UseTerminalSessionsReturn } from "./useTerminalSessions";

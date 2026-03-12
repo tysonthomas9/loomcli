@@ -83,3 +83,11 @@ export {
   getAgentTerminalWsUrl,
   getAgentLogArchive,
 } from "./logs";
+
+// Terminal API functions
+export {
+  listTerminalSessions,
+  fetchTerminalToken,
+  buildTerminalWsUrl,
+} from "./terminal";
+export type { TerminalSessionInfo } from "./terminal";
