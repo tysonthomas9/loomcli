@@ -1,0 +1,82 @@
+[
+  {
+    "id": "no-design-no-labels",
+    "issue": { "design": "", "labels": [] },
+    "expected": {
+      "has_needs_revision": false,
+      "needs_plan": true,
+      "ready_to_implement": false,
+      "ts_open_status": "needs_plan"
+    }
+  },
+  {
+    "id": "has-design-no-labels",
+    "issue": { "design": "some plan", "labels": [] },
+    "expected": {
+      "has_needs_revision": false,
+      "needs_plan": false,
+      "ready_to_implement": true,
+      "ts_open_status": "ready"
+    }
+  },
+  {
+    "id": "has-design-needs-revision",
+    "issue": { "design": "some plan", "labels": ["needs-revision"] },
+    "expected": {
+      "has_needs_revision": true,
+      "needs_plan": true,
+      "ready_to_implement": false,
+      "ts_open_status": "needs_plan"
+    }
+  },
+  {
+    "id": "no-design-needs-revision",
+    "issue": { "design": "", "labels": ["needs-revision"] },
+    "expected": {
+      "has_needs_revision": true,
+      "needs_plan": true,
+      "ready_to_implement": false,
+      "ts_open_status": "needs_plan"
+    }
+  },
+  {
+    "id": "has-design-other-labels",
+    "issue": { "design": "plan text", "labels": ["bug", "urgent"] },
+    "expected": {
+      "has_needs_revision": false,
+      "needs_plan": false,
+      "ready_to_implement": true,
+      "ts_open_status": "ready"
+    }
+  },
+  {
+    "id": "needs-revision-among-other-labels",
+    "issue": { "design": "plan text", "labels": ["bug", "needs-revision"] },
+    "expected": {
+      "has_needs_revision": true,
+      "needs_plan": true,
+      "ready_to_implement": false,
+      "ts_open_status": "needs_plan"
+    }
+  },
+  {
+    "id": "null-labels",
+    "issue": { "design": "plan text" },
+    "expected": {
+      "has_needs_revision": false,
+      "needs_plan": false,
+      "ready_to_implement": true,
+      "ts_open_status": "ready"
+    }
+  },
+  {
+    "id": "null-labels-no-design",
+    "issue": { "design": "" },
+    "expected": {
+      "has_needs_revision": false,
+      "needs_plan": true,
+      "ready_to_implement": false,
+      "ts_open_status": "needs_plan"
+    }
+  }
+]
