@@ -9,7 +9,6 @@
 656 internal/webui/log_streamer.go
 635 internal/cli/push.go
 631 internal/cli/automode_tmux.go
-630 internal/webui/handlers_deps.go
 593 internal/rpc/client.go
 593 internal/cli/init.go
 574 internal/cli/daemon_cmd.go

@@ -127,7 +127,7 @@ linters:
       - path: "internal/webui/handlers_issues\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/handlers_deps\\.go"
-        linters: [funlen, cyclop, gocognit]
+        linters: [funlen, gocognit]
       - path: "internal/webui/handlers_health\\.go"
         linters: [funlen, cyclop, gocognit]
       # types.go — tracked by loomcli-6yk.6
