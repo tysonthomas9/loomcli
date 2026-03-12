@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sync/atomic"
 	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -87,6 +86,8 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	}
 	cmd.Stderr = os.Stderr
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
 	fmt.Println("")
 
@@ -96,17 +97,12 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	}
 
 	// Monitor for shutdown signal
-	var exited atomic.Bool
-	done := make(chan struct{})
+	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
 		case <-shutdown:
-			// Only signal if process hasn't exited yet to avoid
-			// sending SIGTERM to a reused PID.
-			if !exited.Load() {
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-			}
-		case <-done:
+			guard.Signal(syscall.SIGTERM)
+		case <-guard.Done():
 		}
 	}()
 
@@ -123,8 +119,7 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	}
 
 	runErr := cmd.Wait()
-	exited.Store(true) // Mark exited before closing done channel
-	close(done)        // Signal goroutine to exit
+	guard.WaitAndMark()
 	r.Close()
 	return runErr
 }

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -295,7 +294,7 @@ func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
 
 // TestShutdownRace_NoSignalAfterExit verifies that no SIGTERM is sent when
 // the shutdown channel is triggered after the process has already exited.
-// This reproduces the race condition that the atomic.Bool guard prevents:
+// This reproduces the race condition that the processGuard prevents:
 // without the guard, sending SIGTERM to a reaped PID could hit an unrelated
 // process that reused the same PID.
 func TestShutdownRace_NoSignalAfterExit(t *testing.T) {
@@ -307,20 +306,14 @@ func TestShutdownRace_NoSignalAfterExit(t *testing.T) {
 		t.Fatalf("failed to start process: %v", err)
 	}
 
-	// Replicate the pattern from invokeClaudeNonInteractive.
-	var exited atomic.Bool
-	var signalSent atomic.Bool
+	guard := newProcessGuard(cmd.Process)
 	shutdown := make(chan struct{})
-	done := make(chan struct{})
 
 	go func() {
 		select {
 		case <-shutdown:
-			if !exited.Load() {
-				signalSent.Store(true)
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-			}
-		case <-done:
+			guard.Signal(syscall.SIGTERM)
+		case <-guard.Done():
 		}
 	}()
 
@@ -328,20 +321,17 @@ func TestShutdownRace_NoSignalAfterExit(t *testing.T) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("process exited with error: %v", err)
 	}
-	exited.Store(true)
-	close(done)
+	guard.WaitAndMark()
 
 	// Now trigger shutdown after the process is already gone.
-	// The goroutine has already returned via <-done, but to be thorough
-	// we also close shutdown to exercise the guard in case of scheduling
-	// variation.
 	close(shutdown)
 
 	// Give a small window for any stray goroutine to run.
 	time.Sleep(10 * time.Millisecond)
 
-	if signalSent.Load() {
-		t.Error("SIGTERM was sent after the process already exited; the atomic guard should have prevented this")
+	// Verify Signal returns false after WaitAndMark.
+	if guard.Signal(syscall.SIGTERM) {
+		t.Error("Signal returned true after WaitAndMark; the guard should have prevented this")
 	}
 }
 
@@ -357,17 +347,14 @@ func TestShutdownRace_SignalDuringRun(t *testing.T) {
 		t.Fatalf("failed to start process: %v", err)
 	}
 
-	var exited atomic.Bool
+	guard := newProcessGuard(cmd.Process)
 	shutdown := make(chan struct{})
-	done := make(chan struct{})
 
 	go func() {
 		select {
 		case <-shutdown:
-			if !exited.Load() {
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-			}
-		case <-done:
+			guard.Signal(syscall.SIGTERM)
+		case <-guard.Done():
 		}
 	}()
 
@@ -383,10 +370,9 @@ func TestShutdownRace_SignalDuringRun(t *testing.T) {
 
 	select {
 	case err := <-waitDone:
-		exited.Store(true)
-		close(done)
+		guard.WaitAndMark()
 
-		// On Linux, SIGTERM causes an exit with a signal-based error.
+		// On Linux/Darwin, SIGTERM causes an exit with a signal-based error.
 		if err == nil {
 			t.Fatal("expected process to be killed by SIGTERM, but it exited cleanly")
 		}
@@ -406,8 +392,7 @@ func TestShutdownRace_SignalDuringRun(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		// Kill the process to avoid leaking it, then fail.
 		_ = cmd.Process.Kill()
-		exited.Store(true)
-		close(done)
+		guard.WaitAndMark()
 		t.Fatal("timed out waiting for process to be terminated by SIGTERM")
 	}
 }

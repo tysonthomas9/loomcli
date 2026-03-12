@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -92,21 +91,20 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 	}
 	cmd.Stderr = os.Stderr
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	if err := cmd.Start(); err != nil {
 		r.Close()
 		return fmt.Errorf("failed to start %s: %w", e.binPath, err)
 	}
 
 	// Monitor for shutdown signal
-	var exited atomic.Bool
-	done := make(chan struct{})
+	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
 		case <-shutdown:
-			if !exited.Load() {
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-			}
-		case <-done:
+			guard.Signal(syscall.SIGTERM)
+		case <-guard.Done():
 		}
 	}()
 
@@ -119,8 +117,7 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 	}
 
 	runErr := cmd.Wait()
-	exited.Store(true)
-	close(done)
+	guard.WaitAndMark()
 	r.Close()
 	return runErr
 }

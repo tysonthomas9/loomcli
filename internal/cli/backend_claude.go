@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync/atomic"
 	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -101,21 +100,20 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	if err := cmd.Start(); err != nil {
 		r.Close()
 		return nil, fmt.Errorf("failed to start claude: %w", err)
 	}
 
 	// Monitor context cancellation
-	var exited atomic.Bool
-	done := make(chan struct{})
+	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
 		case <-ctx.Done():
-			if !exited.Load() {
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-			}
-		case <-done:
+			guard.Signal(syscall.SIGTERM)
+		case <-guard.Done():
 		}
 	}()
 
@@ -123,8 +121,7 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 		ReadCloser: stdout,
 		cmd:        cmd,
 		stdinPipe:  r,
-		exited:     &exited,
-		done:       done,
+		guard:      guard,
 	}, nil
 }
 
@@ -133,21 +130,16 @@ type streamReadCloser struct {
 	io.ReadCloser
 	cmd       *exec.Cmd
 	stdinPipe *os.File
-	exited    *atomic.Bool
-	done      chan struct{}
+	guard     *processGuard
 }
 
 func (s *streamReadCloser) Close() error {
 	readErr := s.ReadCloser.Close()
-	// Mark exited before Wait so the context goroutine won't SIGTERM a reused PID.
-	s.exited.Store(true)
+	// Wait for the process to finish FIRST, then mark exited. This ordering
+	// ensures the context-cancellation goroutine can still send SIGTERM if the
+	// process hangs after stdout is closed.
 	waitErr := s.cmd.Wait()
-	// Guard against double-close.
-	select {
-	case <-s.done:
-	default:
-		close(s.done)
-	}
+	s.guard.WaitAndMark()
 	s.stdinPipe.Close()
 	if readErr != nil {
 		return readErr
@@ -253,6 +245,8 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	}
 	cmd.Stderr = os.Stderr
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	fmt.Println("Launching Claude agent (non-interactive)...")
 	fmt.Println("")
 
@@ -262,18 +256,12 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	}
 
 	// Monitor for shutdown signal
-	var exited atomic.Bool
-	done := make(chan struct{})
+	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
 		case <-shutdown:
-			// Only signal if process hasn't exited yet to avoid
-			// sending SIGTERM to a reused PID.
-			if !exited.Load() {
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-			}
-		case <-done:
-			// Normal completion
+			guard.Signal(syscall.SIGTERM)
+		case <-guard.Done():
 		}
 	}()
 
@@ -290,8 +278,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	}
 
 	runErr := cmd.Wait()
-	exited.Store(true) // Mark exited before closing done channel
-	close(done)        // Signal goroutine to exit
+	guard.WaitAndMark()
 	r.Close()
 	return runErr
 }

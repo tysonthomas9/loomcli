@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -117,6 +116,8 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	}
 	cmd.Stderr = os.Stderr
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	fmt.Println("Launching Codex agent (non-interactive)...")
 	fmt.Println("")
 
@@ -126,17 +127,12 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	}
 
 	// Monitor for shutdown signal
-	var exited atomic.Bool
-	done := make(chan struct{})
+	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
 		case <-shutdown:
-			// Only signal if process hasn't exited yet to avoid
-			// sending SIGTERM to a reused PID.
-			if !exited.Load() {
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-			}
-		case <-done:
+			guard.Signal(syscall.SIGTERM)
+		case <-guard.Done():
 		}
 	}()
 
@@ -153,8 +149,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	}
 
 	runErr := cmd.Wait()
-	exited.Store(true) // Mark exited before closing done channel
-	close(done)        // Signal goroutine to exit
+	guard.WaitAndMark()
 	r.Close()
 	return runErr
 }
