@@ -134,12 +134,12 @@ func fetchUnclosedIDSetAndMap(client *rpc.Client) (map[string]bool, map[string]*
 	return unclosedIDs, issueMap
 }
 
-// getUnclosedBlockerRefs returns BlockerRef entries for each "blocks" dependency
+// getUnclosedBlockerRefs returns BlockerRef entries for each blocking dependency
 // that points to an unclosed issue. Populates title/priority from issueMap.
 func getUnclosedBlockerRefs(deps []*types.Dependency, unclosedIDs map[string]bool, issueMap map[string]*types.IssueWithCounts) []types.BlockerRef {
 	var refs []types.BlockerRef
 	for _, dep := range deps {
-		if dep.Type == types.DepBlocks && unclosedIDs[dep.DependsOnID] {
+		if dep.Type.AffectsReadyWork() && unclosedIDs[dep.DependsOnID] {
 			ref := types.BlockerRef{ID: dep.DependsOnID}
 			if blocker, ok := issueMap[dep.DependsOnID]; ok {
 				ref.Title = blocker.Issue.Title

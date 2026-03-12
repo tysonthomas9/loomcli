@@ -59,12 +59,23 @@ func IsWorkableTask(issue BdIssue) bool {
 
 // --- Level 3: Agent predicates (with context from unclosed issue set) ---
 
+// affectsReadyWork reports whether a plain-string dependency type blocks work
+// completion. Mirrors types.DependencyType.AffectsReadyWork() for the cli
+// package's Dependency struct whose Type field is a plain string.
+// SYNC: Must stay aligned with internal/types/relations.go:AffectsReadyWork()
+func affectsReadyWork(depType string) bool {
+	return depType == "blocks" ||
+		depType == "parent-child" ||
+		depType == "conditional-blocks" ||
+		depType == "waits-for"
+}
+
 // HasUnclosedBlockers returns true if any blocking dependency is still unclosed.
 // unclosedIDs is a set of issue IDs that have NOT been closed yet.
 // A blocker is only considered resolved when its issue is closed.
 func HasUnclosedBlockers(deps []Dependency, unclosedIDs map[string]bool) bool {
 	for _, dep := range deps {
-		if dep.Type == "blocks" && unclosedIDs[dep.DependsOnID] {
+		if affectsReadyWork(dep.Type) && unclosedIDs[dep.DependsOnID] {
 			return true
 		}
 	}
