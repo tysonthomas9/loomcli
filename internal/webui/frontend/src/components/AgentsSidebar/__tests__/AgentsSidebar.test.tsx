@@ -7,7 +7,7 @@
  * Focuses on the viewSwitcher slot behavior and sync status rendering.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import "@testing-library/jest-dom";
@@ -267,6 +267,82 @@ describe("AgentsSidebar", () => {
       // Should say "1 commit ahead" (singular), not "1 commits ahead"
       expect(title).toContain("1 commit ahead");
       expect(title).not.toContain("1 commits");
+    });
+  });
+
+  describe("work queue backlog button", () => {
+    it("renders the Backlog button with needs_planning count when expanded", () => {
+      mockContextOverride = {
+        tasks: {
+          needs_planning: 3,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          backlog: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const backlogButton = screen.getByRole("button", { name: /backlog/i });
+      expect(backlogButton).toBeInTheDocument();
+      expect(screen.getByText("3")).toBeInTheDocument();
+    });
+
+    it("is disabled when needs_planning is 0", () => {
+      // defaultMockContext already has needs_planning: 0
+      render(<AgentsSidebar />);
+
+      const backlogButton = screen.getByRole("button", { name: /backlog/i });
+      expect(backlogButton).toBeDisabled();
+    });
+
+    it("is enabled and clickable when needs_planning > 0", () => {
+      mockContextOverride = {
+        tasks: {
+          needs_planning: 5,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          backlog: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const backlogButton = screen.getByRole("button", { name: /backlog/i });
+      expect(backlogButton).not.toBeDisabled();
+
+      // Clicking should not throw
+      fireEvent.click(backlogButton);
+    });
+
+    it("sets data-highlight attribute correctly based on count", () => {
+      // When needs_planning is 0, data-highlight should be "false"
+      render(<AgentsSidebar />);
+
+      const backlogButton = screen.getByRole("button", { name: /backlog/i });
+      const zeroCount = within(backlogButton).getByText("0");
+      expect(zeroCount).toHaveAttribute("data-highlight", "false");
+    });
+
+    it("sets data-highlight to true when needs_planning > 0", () => {
+      mockContextOverride = {
+        tasks: {
+          needs_planning: 2,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          backlog: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const countSpan = screen.getByText("2", {
+        selector: 'button span[data-highlight="true"]',
+      });
+      expect(countSpan).toHaveAttribute("data-highlight", "true");
     });
   });
 });

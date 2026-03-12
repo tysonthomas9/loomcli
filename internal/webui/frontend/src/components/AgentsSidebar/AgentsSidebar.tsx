@@ -257,6 +257,20 @@ export function AgentsSidebar({
                     <button
                       type="button"
                       className={styles.queueItem}
+                      onClick={() => handleCategoryClick("plan")}
+                      disabled={tasks.needs_planning === 0}
+                    >
+                      <span className={styles.queueLabel}>Backlog</span>
+                      <span
+                        className={styles.queueCount}
+                        data-highlight={tasks.needs_planning > 0}
+                      >
+                        {tasks.needs_planning}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.queueItem}
                       onClick={() => handleCategoryClick("impl")}
                       disabled={tasks.ready_to_implement === 0}
                     >
