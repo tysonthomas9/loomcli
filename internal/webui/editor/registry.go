@@ -28,6 +28,10 @@ type DetectedEditor struct {
 	Method       string // "cli" or "app" — how it was detected
 }
 
+// newCommandFn is the function used to create exec commands.
+// It is a variable so tests can override it.
+var newCommandFn = exec.Command
+
 // lookPathFn is the function used to locate CLI commands.
 // It is a variable so tests can override it.
 var lookPathFn = exec.LookPath
