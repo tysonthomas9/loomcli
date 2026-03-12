@@ -1060,6 +1060,29 @@ func TestRenderPrompt_InvalidOverrideFallback(t *testing.T) {
 	}
 }
 
+func TestRenderPrompt_OverrideFallbackOnBadExecution(t *testing.T) {
+	overrideDir := filepath.Join(t.TempDir(), "project")
+	promptDir := filepath.Join(overrideDir, "loom-prompts")
+	if err := os.MkdirAll(promptDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Template that parses but fails Execute: calls a method on a string field
+	badTemplate := "Hello {{call .SafetyBlock}}"
+	if err := os.WriteFile(filepath.Join(promptDir, "lead.md"), []byte(badTemplate), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	promptOverrideDir = overrideDir
+	t.Cleanup(func() { promptOverrideDir = "" })
+
+	// Should NOT panic — should fall back to embedded default
+	result := renderPrompt("lead", promptTemplateData{SafetyBlock: "test"})
+	if !strings.Contains(result, "INTERACTIVE MODE: Project Lead") {
+		t.Errorf("expected fallback to embedded template, got: %s", result[:min(100, len(result))])
+	}
+}
+
 func TestRenderPrompt_OverrideNotFound(t *testing.T) {
 	// When no override exists, embedded template is used
 	result := renderPrompt("lead", promptTemplateData{})
