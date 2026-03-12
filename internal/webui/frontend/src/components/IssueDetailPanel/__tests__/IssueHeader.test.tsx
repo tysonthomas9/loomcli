@@ -240,5 +240,4 @@ describe("IssueHeader", () => {
       expect(header.className).not.toMatch(/_sticky_/);
     });
   });
-
 });

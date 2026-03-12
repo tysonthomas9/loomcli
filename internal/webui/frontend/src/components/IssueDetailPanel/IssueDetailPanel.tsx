@@ -26,6 +26,7 @@ import type {
 import type { Status } from "@/types/status";
 import { getReviewType } from "@/utils/issueCategory";
 
+import { AssigneeDropdown } from "./AssigneeDropdown";
 import { CommentForm } from "./CommentForm";
 import { CommentsSection } from "./CommentsSection";
 import { DependencySection } from "./DependencySection";
@@ -253,6 +254,7 @@ function DefaultContent({
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [isSavingPriority, setIsSavingPriority] = useState(false);
   const [isSavingType, setIsSavingType] = useState(false);
+  const [isSavingAssignee, setIsSavingAssignee] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
@@ -410,6 +412,23 @@ function DefaultContent({
         onIssueUpdate?.(updatedIssue);
       } finally {
         setIsSavingType(false);
+      }
+    },
+    [issue, onIssueUpdate],
+  );
+
+  const handleAssigneeSave = useCallback(
+    async (newAssignee: string) => {
+      if (!issue) return;
+
+      setIsSavingAssignee(true);
+      try {
+        const updatedIssue = await updateIssue(issue.id, {
+          assignee: newAssignee,
+        });
+        onIssueUpdate?.(updatedIssue);
+      } finally {
+        setIsSavingAssignee(false);
       }
     },
     [issue, onIssueUpdate],
@@ -722,102 +741,107 @@ function DefaultContent({
       ) : (
         /* Scrollable Content (Details tab) */
         <div className={styles.scrollableContent}>
-            <div className={styles.detailContent}>
-              {/* Priority/Type dropdowns for editing */}
-              <div className={styles.statusRow}>
-                <PriorityDropdown
-                  priority={issue.priority as Priority}
-                  onSave={handlePrioritySave}
-                  isSaving={isSavingPriority}
-                />
-                <TypeDropdown
-                  type={issue.issue_type}
-                  onSave={handleTypeSave}
-                  isSaving={isSavingType}
-                />
-              </div>
-
-              {/* Description */}
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>Description</h3>
-                <EditableDescription
-                  description={issue.description}
-                  isEditable={true}
-                  onSave={async (newDescription) => {
-                    const updatedIssue = await updateIssue(issue.id, {
-                      description: newDescription,
-                    });
-                    onIssueUpdate?.(updatedIssue);
-                  }}
-                />
-              </section>
-
-              {/* Design (collapsible, markdown rendered) */}
-              {issue.design && (
-                <CollapsibleSection
-                  title="Design"
-                  defaultExpanded={!shouldCollapseDesign}
-                  testId="design-section"
-                >
-                  <MarkdownRenderer content={issue.design} />
-                </CollapsibleSection>
-              )}
-
-              {/* Notes (collapsible) */}
-              {issue.notes && (
-                <CollapsibleSection
-                  title="Notes"
-                  defaultExpanded={!shouldCollapseNotes}
-                  testId="notes-section"
-                >
-                  <MarkdownRenderer content={issue.notes} />
-                </CollapsibleSection>
-              )}
-
-              {/* Dependencies (blocking this issue) - editable */}
-              {hasDetails && (
-                <DependencySection
-                  issueId={issue.id}
-                  dependencies={dependencies ?? []}
-                  onAddDependency={handleAddDependency}
-                  onRemoveDependency={handleRemoveDependency}
-                  disabled={isLoading}
-                />
-              )}
-
-              {/* Dependents (this issue blocks) */}
-              {dependents && dependents.length > 0 && (
-                <section className={styles.section}>
-                  <h3 className={styles.sectionTitle}>
-                    Blocks ({dependents.length})
-                  </h3>
-                  <ul className={styles.dependencyList}>
-                    {dependents.map(renderDependencyItem)}
-                  </ul>
-                </section>
-              )}
-
-              {/* Comments */}
-              <CommentsSection comments={localComments} />
-              <CommentForm
-                issueId={issue.id}
-                onCommentAdded={handleCommentAdded}
+          <div className={styles.detailContent}>
+            {/* Priority/Type dropdowns for editing */}
+            <div className={styles.statusRow}>
+              <PriorityDropdown
+                priority={issue.priority as Priority}
+                onSave={handlePrioritySave}
+                isSaving={isSavingPriority}
               />
-
-              {/* Labels */}
-              {issue.labels && issue.labels.length > 0 && (
-                <section className={styles.section}>
-                  <h3 className={styles.sectionTitle}>Labels</h3>
-                  <div className={styles.labels}>
-                    {issue.labels.map((label) => (
-                      <span key={label} className={styles.label}>
-                        {label}
-                      </span>
-                    ))}
-                  </div>
-                </section>
-              )}
+              <TypeDropdown
+                type={issue.issue_type}
+                onSave={handleTypeSave}
+                isSaving={isSavingType}
+              />
+              <AssigneeDropdown
+                assignee={issue.assignee}
+                onSave={handleAssigneeSave}
+                isSaving={isSavingAssignee}
+              />
             </div>
+
+            {/* Description */}
+            <section className={styles.section}>
+              <h3 className={styles.sectionTitle}>Description</h3>
+              <EditableDescription
+                description={issue.description}
+                isEditable={true}
+                onSave={async (newDescription) => {
+                  const updatedIssue = await updateIssue(issue.id, {
+                    description: newDescription,
+                  });
+                  onIssueUpdate?.(updatedIssue);
+                }}
+              />
+            </section>
+
+            {/* Design (collapsible, markdown rendered) */}
+            {issue.design && (
+              <CollapsibleSection
+                title="Design"
+                defaultExpanded={!shouldCollapseDesign}
+                testId="design-section"
+              >
+                <MarkdownRenderer content={issue.design} />
+              </CollapsibleSection>
+            )}
+
+            {/* Notes (collapsible) */}
+            {issue.notes && (
+              <CollapsibleSection
+                title="Notes"
+                defaultExpanded={!shouldCollapseNotes}
+                testId="notes-section"
+              >
+                <MarkdownRenderer content={issue.notes} />
+              </CollapsibleSection>
+            )}
+
+            {/* Dependencies (blocking this issue) - editable */}
+            {hasDetails && (
+              <DependencySection
+                issueId={issue.id}
+                dependencies={dependencies ?? []}
+                onAddDependency={handleAddDependency}
+                onRemoveDependency={handleRemoveDependency}
+                disabled={isLoading}
+              />
+            )}
+
+            {/* Dependents (this issue blocks) */}
+            {dependents && dependents.length > 0 && (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>
+                  Blocks ({dependents.length})
+                </h3>
+                <ul className={styles.dependencyList}>
+                  {dependents.map(renderDependencyItem)}
+                </ul>
+              </section>
+            )}
+
+            {/* Comments */}
+            <CommentsSection comments={localComments} />
+            <CommentForm
+              issueId={issue.id}
+              onCommentAdded={handleCommentAdded}
+            />
+
+            {/* Labels */}
+            {issue.labels && issue.labels.length > 0 && (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>Labels</h3>
+                <div className={styles.labels}>
+                  {issue.labels.map((label) => (
+                    <span key={label} className={styles.label}>
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
         </div>
       )}
 
@@ -902,11 +926,7 @@ export function IssueDetailPanel({
   }, [isOpen]);
 
   // Build root class name
-  const rootClassName = [
-    styles.overlay,
-    isOpen && styles.open,
-    className,
-  ]
+  const rootClassName = [styles.overlay, isOpen && styles.open, className]
     .filter(Boolean)
     .join(" ");
 
