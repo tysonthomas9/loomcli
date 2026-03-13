@@ -1359,6 +1359,119 @@ func TestHandleSSE_NoCatchUpWhenSinceZero(t *testing.T) {
 	}
 }
 
+// writeDeadlineRecorder wraps httptest.ResponseRecorder to track SetWriteDeadline calls.
+// http.NewResponseController discovers SetWriteDeadline via the Unwrap pattern.
+type writeDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlineSet   bool
+	deadlineValue time.Time
+}
+
+// Unwrap lets other ResponseController capabilities reach the underlying
+// ResponseRecorder. SetWriteDeadline is found via direct interface assertion.
+func (w *writeDeadlineRecorder) Unwrap() http.ResponseWriter {
+	return w.ResponseRecorder
+}
+
+// SetWriteDeadline is discovered by http.NewResponseController.
+func (w *writeDeadlineRecorder) SetWriteDeadline(t time.Time) error {
+	w.deadlineSet = true
+	w.deadlineValue = t
+	return nil
+}
+
+// Flush delegates to the underlying recorder so SSE streaming works.
+func (w *writeDeadlineRecorder) Flush() {
+	w.ResponseRecorder.Flush()
+}
+
+// TestHandleSSE_WriteDeadlineDisabled verifies that handleSSE calls
+// SetWriteDeadline(time.Time{}) during setup to disable the write timeout
+// for the long-lived SSE connection.
+func TestHandleSSE_WriteDeadlineDisabled(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	handler := handleSSE(hub, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req = req.WithContext(ctx)
+	rr := &writeDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
+
+	if !rr.deadlineSet {
+		t.Error("expected SetWriteDeadline to be called")
+	}
+	if !rr.deadlineValue.IsZero() {
+		t.Errorf("expected SetWriteDeadline called with zero time, got %v", rr.deadlineValue)
+	}
+}
+
+// TestHandleSSE_StreamsMutationFromHub verifies the main event loop: after
+// connection, a mutation broadcast through the hub appears in the response body.
+func TestHandleSSE_StreamsMutationFromHub(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	handler := handleSSE(hub, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	// Wait for handler to register with hub
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.ClientCount() < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if hub.ClientCount() < 1 {
+		t.Fatal("client not registered in hub")
+	}
+
+	// Broadcast a mutation
+	hub.Broadcast(&MutationPayload{
+		Type:      "create",
+		IssueID:   "bd-stream-test",
+		Title:     "Stream Test",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+
+	// Give the handler time to write the mutation
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "event: connected") {
+		t.Error("expected 'event: connected' in response body")
+	}
+	if !strings.Contains(body, "event: mutation") {
+		t.Error("expected 'event: mutation' in response body")
+	}
+	if !strings.Contains(body, "bd-stream-test") {
+		t.Error("expected broadcast issue ID 'bd-stream-test' in response body")
+	}
+}
+
 // TestHandleSSE_SendChannelClosed tests that the handler exits cleanly
 // when the hub is stopped and closes all client send channels.
 func TestHandleSSE_SendChannelClosed(t *testing.T) {
