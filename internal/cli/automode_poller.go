@@ -188,7 +188,7 @@ func HasAnyAvailableTasks(parentID string) (bool, error) {
 
 // BuildRouterTaskCheck creates a CustomTaskCheck function that uses the task router's
 // SelectBestTask instead of the generic Has*Tasks functions. Returns nil if the role
-// has no routing constraints (Skills, PathPatterns, MaxPriority all unset), signaling
+// has no routing constraints (Skills, MaxPriority, and TaskFilter all unset), signaling
 // the caller to use default task checking.
 //
 // Wire-up: The daemon passes routing constraints as env vars; the subprocess (loom agent)
@@ -197,7 +197,7 @@ func HasAnyAvailableTasks(parentID string) (bool, error) {
 func BuildRouterTaskCheck(rc RoleConfig, ae AgentEntry, parentID string) func() (bool, error) {
 	constraints := MergeRoleConstraints(rc, ae)
 	// If no routing fields are set, return nil to use defaults
-	if len(constraints.Skills) == 0 && len(constraints.PathPatterns) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" {
+	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" {
 		return nil
 	}
 	return func() (bool, error) {

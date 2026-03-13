@@ -14,7 +14,7 @@ import (
 type RoleConstraints struct {
 	TaskFilter   string   // "needs_plan", "has_design", "any", or "" (defaults to "has_design")
 	Backend      string   // resolved backend name
-	PathPatterns []string // carried through for downstream use (not used in scoring)
+	PathPatterns []string // not used in routing decisions; carried through for subprocess env var propagation
 	Skills       []string // skill labels this role handles
 	MaxPriority  *int     // reject tasks with priority > this value (nil = no cap)
 	ReadOnly     bool     // informational, carried through for downstream use
