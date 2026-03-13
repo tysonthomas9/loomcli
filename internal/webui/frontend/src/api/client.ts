@@ -271,5 +271,11 @@ export const patch = <T>(
   options?: RequestOptions,
 ): Promise<T> => fetchApi<T>("PATCH", path, body, options);
 
+export const put = <T>(
+  path: string,
+  body: unknown,
+  options?: RequestOptions,
+): Promise<T> => fetchApi<T>("PUT", path, body, options);
+
 export const del = <T>(path: string, options?: RequestOptions): Promise<T> =>
   fetchApi<T>("DELETE", path, undefined, options);

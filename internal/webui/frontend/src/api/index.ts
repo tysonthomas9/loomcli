@@ -2,6 +2,7 @@ export {
   ApiError,
   get,
   post,
+  put,
   patch,
   del,
   initAuth,
@@ -112,3 +113,7 @@ export {
   buildTerminalWsUrl,
 } from "./terminal";
 export type { TerminalSessionInfo } from "./terminal";
+
+// File API functions (agent worktree file operations)
+export { listWorktreeDir, readWorktreeFile, writeWorktreeFile } from "./files";
+export type { FileEntry, DirListData, FileReadData } from "./files";
