@@ -47,6 +47,7 @@ type Issue struct {
 	// ===== External Integration =====
 	ExternalRef  *string `json:"external_ref,omitempty"`  // e.g., "gh-9", "jira-ABC"
 	SourceSystem string  `json:"source_system,omitempty"` // Adapter/system that created this issue (federation)
+	SourceRepo   string  `json:"source_repo,omitempty"`   // Which repo owns this issue (multi-repo support)
 
 	// ===== Compaction Metadata =====
 	CompactionLevel   int        `json:"compaction_level,omitempty"`
@@ -55,7 +56,6 @@ type Issue struct {
 	OriginalSize      int        `json:"original_size,omitempty"`
 
 	// ===== Internal Routing (not exported to JSONL) =====
-	SourceRepo     string `json:"-"` // Which repo owns this issue (multi-repo support)
 	IDPrefix       string `json:"-"` // Override prefix for ID generation (appends to config prefix)
 	PrefixOverride string `json:"-"` // Completely replace config prefix (for cross-rig creation)
 

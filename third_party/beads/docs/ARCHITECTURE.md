@@ -309,7 +309,7 @@ Each issue in `.beads/issues.jsonl` is a JSON object with the following fields. 
 | `delete_reason` | string | Why deleted (optional) |
 | `original_type` | string | Issue type before deletion (optional) |
 
-**Note:** Fields with `json:"-"` tags (like `content_hash`, `source_repo`, `id_prefix`) are internal and never exported to JSONL.
+**Note:** Fields with `json:"-"` tags (like `content_hash`, `id_prefix`) are internal and never exported to JSONL.
 
 ## Directory Structure
 
