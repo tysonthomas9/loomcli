@@ -9,6 +9,7 @@ import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState, useCallback } from "react";
 
 import { get, post } from "@/api/client";
+import { useTerminalFont } from "@/hooks/useTerminalFont";
 import {
   startAutoReconnect,
   DEFAULT_RECONNECT_CONFIG,
@@ -42,16 +43,11 @@ async function fetchTerminalToken(): Promise<string | null> {
   }
 }
 
-/**
- * Build the WebSocket URL for the terminal relay endpoint.
- */
+/** Build the WebSocket URL for the terminal relay endpoint. */
 function buildWsUrl(token: string | null): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${TERMINAL_SESSION}`; // allow-url
-  if (token) {
-    url += `&token=${encodeURIComponent(token)}`;
-  }
-  return url;
+  const base = `${proto}//${window.location.host}/api/terminal/ws?session=${TERMINAL_SESSION}`; // allow-url
+  return token ? `${base}&token=${encodeURIComponent(token)}` : base;
 }
 
 /**
@@ -157,9 +153,7 @@ function connectWebSocket(
   };
 }
 
-/**
- * Format seconds remaining for the reconnect countdown.
- */
+/** Format seconds remaining for the reconnect countdown. */
 function formatCountdown(nextRetryAt: number): string {
   const remaining = Math.max(0, Math.ceil((nextRetryAt - Date.now()) / 1000));
   return `${remaining}s`;
@@ -176,6 +170,8 @@ export function TerminalPanel({
   const wsCleanupRef = useRef<(() => void) | null>(null);
   const reconnectCancelRef = useRef<(() => void) | null>(null);
   const panelRef = useRef<HTMLElement>(null);
+
+  const { fontFamily, fontSize } = useTerminalFont();
 
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
@@ -221,8 +217,8 @@ export function TerminalPanel({
 
     const terminal = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontSize,
+      fontFamily,
       scrollback: 5000,
       smoothScrollDuration: 120,
       theme: {
@@ -321,7 +317,16 @@ export function TerminalPanel({
       setConnectionState("disconnected");
       setReconnectState({ attempt: 0, nextRetryAt: null, gaveUp: false });
     };
-  }, [isOpen]);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- font values read at creation; dynamic updates handled below
+
+  // Dynamic font update: apply changes without recreating the terminal
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.fontSize = fontSize;
+    terminal.options.fontFamily = fontFamily;
+    fitAddonRef.current?.fit();
+  }, [fontSize, fontFamily]);
 
   // Reconnect handler: cancel auto-reconnect, reset state, connect fresh
   const handleReconnect = useCallback(() => {

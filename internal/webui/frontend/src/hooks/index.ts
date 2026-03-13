@@ -152,3 +152,13 @@ export type { UseFileTreeReturn } from "./useFileTree";
 
 export { useFileContent } from "./useFileContent";
 export type { UseFileContentReturn } from "./useFileContent";
+
+export {
+  useTerminalFont,
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_FONT_SIZE,
+  FONT_FAMILY_OPTIONS,
+  FONT_SIZE_OPTIONS,
+  CUSTOM_FONT_SENTINEL,
+} from "./useTerminalFont";
+export type { UseTerminalFontReturn } from "./useTerminalFont";

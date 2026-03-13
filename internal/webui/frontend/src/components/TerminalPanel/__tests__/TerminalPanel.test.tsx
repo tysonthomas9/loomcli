@@ -23,6 +23,7 @@ vi.mock("@xterm/xterm", () => {
     loadAddon = vi.fn();
     cols = 80;
     rows = 24;
+    options: Record<string, unknown> = {};
   }
   return { Terminal: MockTerminal };
 });
@@ -43,6 +44,15 @@ vi.mock("@xterm/addon-web-links", () => {
 });
 
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
+
+vi.mock("@/hooks/useTerminalFont", () => ({
+  useTerminalFont: vi.fn(() => ({
+    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    fontSize: 14,
+    setFontFamily: vi.fn(),
+    setFontSize: vi.fn(),
+  })),
+}));
 
 class MockWebSocket {
   static CONNECTING = 0;

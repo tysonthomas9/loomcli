@@ -8,6 +8,13 @@ import { useState } from "react";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
+import {
+  useTerminalFont,
+  FONT_FAMILY_OPTIONS,
+  FONT_SIZE_OPTIONS,
+  CUSTOM_FONT_SENTINEL,
+  DEFAULT_FONT_FAMILY,
+} from "@/hooks/useTerminalFont";
 import { useToast } from "@/hooks/useToast";
 
 import styles from "./SettingsView.module.css";
@@ -21,6 +28,20 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
     useBackendConfig();
   const { showToast } = useToast();
   const [selectedBackend, setSelectedBackend] = useState<string | null>(null);
+
+  const { fontFamily, fontSize, setFontFamily, setFontSize } =
+    useTerminalFont();
+
+  // Track whether the user has explicitly opened the custom font input
+  const [customFontMode, setCustomFontMode] = useState(false);
+
+  // Determine if current fontFamily matches a preset option
+  const isPresetFont = FONT_FAMILY_OPTIONS.some(
+    (opt) => opt.value !== CUSTOM_FONT_SENTINEL && opt.value === fontFamily,
+  );
+  const fontSelectValue =
+    isPresetFont && !customFontMode ? fontFamily : CUSTOM_FONT_SENTINEL;
+  const showCustomFontInput = customFontMode || !isPresetFont;
 
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)
@@ -174,6 +195,79 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
               No per-agent overrides configured.
             </p>
           )}
+        </div>
+      </div>
+
+      {/* Terminal Font */}
+      <div className={styles.panel} data-testid="terminal-font-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Terminal Font</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="font-family-select">
+              Font Family
+            </label>
+            <p className={styles.description}>
+              The font used in terminal views.
+            </p>
+            <select
+              id="font-family-select"
+              className={styles.select}
+              value={fontSelectValue}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === CUSTOM_FONT_SENTINEL) {
+                  setCustomFontMode(true);
+                } else {
+                  setCustomFontMode(false);
+                  setFontFamily(val);
+                }
+              }}
+              data-testid="font-family-select"
+            >
+              {FONT_FAMILY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {showCustomFontInput && (
+              <input
+                type="text"
+                className={styles.input}
+                value={isPresetFont ? "" : fontFamily}
+                onChange={(e) => setFontFamily(e.target.value)}
+                onBlur={(e) => {
+                  if (!e.target.value.trim()) {
+                    setCustomFontMode(false);
+                    setFontFamily(DEFAULT_FONT_FAMILY);
+                  }
+                }}
+                placeholder='e.g. "Fira Code", monospace'
+                data-testid="font-family-custom-input"
+              />
+            )}
+          </div>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="font-size-select">
+              Font Size
+            </label>
+            <p className={styles.description}>Terminal text size in pixels.</p>
+            <select
+              id="font-size-select"
+              className={styles.select}
+              value={fontSize}
+              onChange={(e) => setFontSize(Number(e.target.value))}
+              data-testid="font-size-select"
+            >
+              {FONT_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}px
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
     </div>
