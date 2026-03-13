@@ -264,6 +264,8 @@ type ListArgs struct {
 
 	// Staleness control (bd-dpkdm)
 	AllowStale bool `json:"allow_stale,omitempty"` // Skip staleness check, return potentially stale data
+
+	SourceRepos []string `json:"source_repos,omitempty"` // Filter to issues from these source repos
 }
 
 // CountArgs represents arguments for the count operation
@@ -302,6 +304,8 @@ type CountArgs struct {
 
 	// Grouping option (only one can be specified)
 	GroupBy string `json:"group_by,omitempty"` // "status", "priority", "type", "assignee", "label"
+
+	SourceRepos []string `json:"source_repos,omitempty"` // Filter to issues from these source repos
 }
 
 // ShowArgs represents arguments for the show operation
@@ -327,6 +331,7 @@ type ReadyArgs struct {
 	ParentID        string   `json:"parent_id,omitempty"`        // Filter to descendants of this bead/epic
 	MolType         string   `json:"mol_type,omitempty"`         // Filter by molecule type: swarm, patrol, or work
 	IncludeDeferred bool     `json:"include_deferred,omitempty"` // Include issues with future defer_until (GH#820)
+	SourceRepos     []string `json:"source_repos,omitempty"`     // Filter to issues from these source repos
 }
 
 // BlockedArgs represents arguments for the blocked operation
