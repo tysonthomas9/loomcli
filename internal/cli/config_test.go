@@ -273,6 +273,88 @@ func TestRepoConfig_ResolveAbsPath_Absolute(t *testing.T) {
 	}
 }
 
+func TestRepoConfigGroupsParsing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	yamlData := `workspaces:
+  ws:
+    path: /tmp/ws
+    repos:
+      - name: myrepo
+        path: /tmp/ws/myrepo
+        groups:
+          - backend
+          - infra
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	repo := cfg.Workspaces["ws"].Repos[0]
+	if len(repo.Groups) != 2 {
+		t.Fatalf("len(Groups) = %d, want 2", len(repo.Groups))
+	}
+	if repo.Groups[0] != "backend" || repo.Groups[1] != "infra" {
+		t.Errorf("Groups = %v, want [backend infra]", repo.Groups)
+	}
+}
+
+func TestRepoConfigSourceRepoIDDefaulting(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	yamlData := `workspaces:
+  ws:
+    path: /tmp/ws
+    repos:
+      - name: myrepo
+        path: /tmp/ws/myrepo
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	repo := cfg.Workspaces["ws"].Repos[0]
+	if repo.SourceRepoID != "myrepo" {
+		t.Errorf("SourceRepoID = %q, want %q (defaulted from Name)", repo.SourceRepoID, "myrepo")
+	}
+}
+
+func TestRepoConfigSourceRepoIDExplicit(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	yamlData := `workspaces:
+  ws:
+    path: /tmp/ws
+    repos:
+      - name: myrepo
+        path: /tmp/ws/myrepo
+        source_repo_id: custom-id
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	repo := cfg.Workspaces["ws"].Repos[0]
+	if repo.SourceRepoID != "custom-id" {
+		t.Errorf("SourceRepoID = %q, want %q (explicit value preserved)", repo.SourceRepoID, "custom-id")
+	}
+}
+
 func TestRepoConfig_ResolveAbsPath_EmptyWorkspace(t *testing.T) {
 	rc := RepoConfig{Path: "repos/myrepo"}
 	got := rc.ResolveAbsPath("")

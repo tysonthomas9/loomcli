@@ -25,10 +25,12 @@ type WorkspaceConfig struct {
 
 // RepoConfig defines a single repository within a workspace
 type RepoConfig struct {
-	Name          string `yaml:"name" json:"name"`                                         // Display name / identifier
-	Path          string `yaml:"path" json:"path"`                                         // Path to the repo (absolute or relative to workspace)
-	DefaultBranch string `yaml:"default_branch,omitempty" json:"default_branch,omitempty"` // Override default branch (defaults to "main")
-	Remote        string `yaml:"remote,omitempty" json:"remote,omitempty"`                 // Git remote name (defaults to "origin")
+	Name          string   `yaml:"name" json:"name"`                                         // Display name / identifier
+	Path          string   `yaml:"path" json:"path"`                                         // Path to the repo (absolute or relative to workspace)
+	DefaultBranch string   `yaml:"default_branch,omitempty" json:"default_branch,omitempty"` // Override default branch (defaults to "main")
+	Remote        string   `yaml:"remote,omitempty" json:"remote,omitempty"`                 // Git remote name (defaults to "origin")
+	Groups        []string `yaml:"groups,omitempty" json:"groups,omitempty"`                 // Logical groups (e.g., backend, infra)
+	SourceRepoID  string   `yaml:"source_repo_id,omitempty" json:"source_repo_id,omitempty"` // Stable identifier for server-side filtering (defaults to Name)
 }
 
 // ResolveAbsPath returns the absolute path for this repo.
@@ -112,7 +114,12 @@ func LoadConfig() (*LoomConfig, error) {
 			if err := ValidateRemoteName(repo.Remote); err != nil {
 				return nil, fmt.Errorf("invalid config %s: workspace %q repo %d (%q): %w", path, wsName, i, repo.Name, err)
 			}
+			// Default SourceRepoID to Name if not explicitly set
+			if repo.SourceRepoID == "" {
+				ws.Repos[i].SourceRepoID = repo.Name
+			}
 		}
+		cfg.Workspaces[wsName] = ws
 	}
 
 	if cfg.Version < CurrentConfigVersion {

@@ -697,3 +697,157 @@ func TestValidateProjectConfig_DeterministicTaskFilterList(t *testing.T) {
 		t.Errorf("expected sorted filter list 'any, has_design, needs_design' in message, got: %s", msg)
 	}
 }
+
+func TestValidateGlobalConfig_ValidGroups(t *testing.T) {
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: t.TempDir(),
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: "/tmp/repo1", Groups: []string{"backend", "infra", "a", "123"}},
+				},
+			},
+		},
+	}
+	r := ValidateGlobalConfig(cfg)
+	for _, issue := range r.Issues {
+		if strings.Contains(issue.Field, "groups") && issue.Severity == "error" {
+			t.Errorf("unexpected group error: %s: %s", issue.Field, issue.Message)
+		}
+	}
+}
+
+func TestValidateGlobalConfig_InvalidGroupName(t *testing.T) {
+	tests := []struct {
+		name  string
+		group string
+	}{
+		{"uppercase", "Backend"},
+		{"space", "my group"},
+		{"special chars", "infra!"},
+		{"empty", ""},
+		{"starts with hyphen", "-backend"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &LoomConfig{
+				Workspaces: map[string]WorkspaceConfig{
+					"ws": {
+						Path: t.TempDir(),
+						Repos: []RepoConfig{
+							{Name: "repo1", Path: "/tmp/repo1", Groups: []string{tt.group}},
+						},
+					},
+				},
+			}
+			r := ValidateGlobalConfig(cfg)
+			found := false
+			for _, issue := range r.Issues {
+				if strings.Contains(issue.Field, "groups") && issue.Severity == "error" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected error for group name %q, got: %s", tt.group, r.FormatIssues())
+			}
+		})
+	}
+}
+
+func TestValidateGlobalConfig_DuplicateSourceRepoID(t *testing.T) {
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: t.TempDir(),
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: "/tmp/repo1", SourceRepoID: "shared-id"},
+					{Name: "repo2", Path: "/tmp/repo2", SourceRepoID: "shared-id"},
+				},
+			},
+		},
+	}
+	r := ValidateGlobalConfig(cfg)
+	if !r.HasErrors() {
+		t.Error("expected error for duplicate source_repo_id")
+	}
+	found := false
+	for _, issue := range r.Issues {
+		if strings.Contains(issue.Field, "source_repo_id") && strings.Contains(issue.Message, "duplicate") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected duplicate source_repo_id error, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateGlobalConfig_DuplicateImplicitSourceRepoID(t *testing.T) {
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: t.TempDir(),
+				Repos: []RepoConfig{
+					{Name: "myrepo", Path: "/tmp/repo1"},
+					{Name: "myrepo", Path: "/tmp/repo2"},
+				},
+			},
+		},
+	}
+	r := ValidateGlobalConfig(cfg)
+	if !r.HasErrors() {
+		t.Error("expected error for duplicate implicit source_repo_id (same Name)")
+	}
+}
+
+func TestValidateGlobalConfig_SourceRepoIDUniqueAcrossWorkspaces(t *testing.T) {
+	// Repos in different workspaces CAN share the same source_repo_id
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"ws1": {
+				Path: t.TempDir(),
+				Repos: []RepoConfig{
+					{Name: "repo1", Path: "/tmp/repo1", SourceRepoID: "shared-id"},
+				},
+			},
+			"ws2": {
+				Path: t.TempDir(),
+				Repos: []RepoConfig{
+					{Name: "repo2", Path: "/tmp/repo2", SourceRepoID: "shared-id"},
+				},
+			},
+		},
+	}
+	r := ValidateGlobalConfig(cfg)
+	for _, issue := range r.Issues {
+		if strings.Contains(issue.Field, "source_repo_id") && issue.Severity == "error" {
+			t.Errorf("unexpected error for cross-workspace source_repo_id: %s", issue.Message)
+		}
+	}
+}
+
+func TestIsValidGroupName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"lowercase", "backend", true},
+		{"with hyphen", "my-group", true},
+		{"numeric", "123", true},
+		{"alphanumeric", "group1", true},
+		{"single char", "a", true},
+		{"empty", "", false},
+		{"uppercase", "Backend", false},
+		{"with space", "my group", false},
+		{"with underscore", "my_group", false},
+		{"starts with hyphen", "-group", false},
+		{"with dot", "my.group", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidGroupName(tt.input); got != tt.want {
+				t.Errorf("isValidGroupName(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

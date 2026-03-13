@@ -204,7 +204,7 @@ func ValidateGlobalConfig(cfg *LoomConfig) *ValidationResult {
 		}
 	}
 
-	// Workspace path existence (warnings only)
+	// Workspace validation
 	for name, ws := range cfg.Workspaces {
 		field := fmt.Sprintf("workspaces.%s", name)
 		if ws.Path != "" {
@@ -216,24 +216,71 @@ func ValidateGlobalConfig(cfg *LoomConfig) *ValidationResult {
 					"%q is not a directory", ws.Path))
 			}
 		}
-
-		// Repo path existence (warnings only)
-		for i, repo := range ws.Repos {
-			repoField := fmt.Sprintf("%s.repos[%d]", field, i)
-			if repo.Path != "" {
-				repoPath := repo.Path
-				if !filepath.IsAbs(repoPath) && ws.Path != "" {
-					repoPath = filepath.Join(ws.Path, repoPath)
-				}
-				if _, err := os.Stat(repoPath); err != nil {
-					r.addWarning(repoField+".path", fmt.Sprintf(
-						"%q does not exist", repo.Path))
-				}
-			}
-		}
+		validateWorkspaceRepos(r, field, ws)
 	}
 
 	return r
+}
+
+// validateWorkspaceRepos validates repos within a workspace for path existence,
+// group name format, and SourceRepoID uniqueness.
+func validateWorkspaceRepos(r *ValidationResult, wsField string, ws WorkspaceConfig) {
+	seenSourceRepoIDs := make(map[string]string) // sourceRepoID -> "repoName"
+	for i, repo := range ws.Repos {
+		repoField := fmt.Sprintf("%s.repos[%d]", wsField, i)
+
+		// Repo path existence (warnings only)
+		if repo.Path != "" {
+			repoPath := repo.Path
+			if !filepath.IsAbs(repoPath) && ws.Path != "" {
+				repoPath = filepath.Join(ws.Path, repoPath)
+			}
+			if _, err := os.Stat(repoPath); err != nil {
+				r.addWarning(repoField+".path", fmt.Sprintf(
+					"%q does not exist", repo.Path))
+			}
+		}
+
+		// Group name validation
+		for j, group := range repo.Groups {
+			if !isValidGroupName(group) {
+				r.addError(fmt.Sprintf("%s.groups[%d]", repoField, j), fmt.Sprintf(
+					"%q is invalid; group names must be lowercase alphanumeric with hyphens, starting with alphanumeric", group))
+			}
+		}
+
+		// SourceRepoID uniqueness (use Name as effective ID if not set)
+		effectiveID := repo.SourceRepoID
+		if effectiveID == "" {
+			effectiveID = repo.Name
+		}
+		if effectiveID != "" {
+			if otherRepo, ok := seenSourceRepoIDs[effectiveID]; ok {
+				r.addError(repoField+".source_repo_id", fmt.Sprintf(
+					"source_repo_id %q is a duplicate (also used by repo %q)", effectiveID, otherRepo))
+			} else {
+				seenSourceRepoIDs[effectiveID] = repo.Name
+			}
+		}
+	}
+}
+
+// isValidGroupName checks that a group name is lowercase alphanumeric with hyphens,
+// starting with an alphanumeric character.
+func isValidGroupName(name string) bool {
+	if name == "" {
+		return false
+	}
+	first := name[0]
+	if !((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')) {
+		return false
+	}
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // isValidWorktreeName checks that a worktree name contains only safe characters.
