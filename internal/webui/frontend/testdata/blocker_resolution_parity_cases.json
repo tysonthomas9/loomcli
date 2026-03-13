@@ -1,0 +1,114 @@
+[
+  {
+    "id": "blocks-open-blocker",
+    "description": "blocks dep on open blocker -> blocked",
+    "blocker_status": "open",
+    "dep_type": "blocks",
+    "expected_blocked": true
+  },
+  {
+    "id": "blocks-in_progress-blocker",
+    "description": "blocks dep on in_progress blocker -> blocked (not resolved until closed)",
+    "blocker_status": "in_progress",
+    "dep_type": "blocks",
+    "expected_blocked": true
+  },
+  {
+    "id": "blocks-review-blocker",
+    "description": "blocks dep on review blocker -> blocked",
+    "blocker_status": "review",
+    "dep_type": "blocks",
+    "expected_blocked": true
+  },
+  {
+    "id": "blocks-blocked-blocker",
+    "description": "blocks dep on blocked blocker -> blocked",
+    "blocker_status": "blocked",
+    "dep_type": "blocks",
+    "expected_blocked": true
+  },
+  {
+    "id": "blocks-deferred-blocker",
+    "description": "blocks dep on deferred blocker -> blocked",
+    "blocker_status": "deferred",
+    "dep_type": "blocks",
+    "expected_blocked": true
+  },
+  {
+    "id": "blocks-closed-blocker",
+    "description": "blocks dep on closed blocker -> NOT blocked (resolved)",
+    "blocker_status": "closed",
+    "dep_type": "blocks",
+    "expected_blocked": false
+  },
+  {
+    "id": "parent-child-open-blocker",
+    "description": "parent-child dep on open blocker -> blocked (AffectsReadyWork)",
+    "blocker_status": "open",
+    "dep_type": "parent-child",
+    "expected_blocked": true
+  },
+  {
+    "id": "parent-child-closed-blocker",
+    "description": "parent-child dep on closed blocker -> NOT blocked",
+    "blocker_status": "closed",
+    "dep_type": "parent-child",
+    "expected_blocked": false
+  },
+  {
+    "id": "conditional-blocks-open-blocker",
+    "description": "conditional-blocks dep on open blocker -> blocked",
+    "blocker_status": "open",
+    "dep_type": "conditional-blocks",
+    "expected_blocked": true
+  },
+  {
+    "id": "conditional-blocks-closed-blocker",
+    "description": "conditional-blocks dep on closed blocker -> NOT blocked",
+    "blocker_status": "closed",
+    "dep_type": "conditional-blocks",
+    "expected_blocked": false
+  },
+  {
+    "id": "waits-for-in_progress-blocker",
+    "description": "waits-for dep on in_progress blocker -> blocked",
+    "blocker_status": "in_progress",
+    "dep_type": "waits-for",
+    "expected_blocked": true
+  },
+  {
+    "id": "waits-for-closed-blocker",
+    "description": "waits-for dep on closed blocker -> NOT blocked",
+    "blocker_status": "closed",
+    "dep_type": "waits-for",
+    "expected_blocked": false
+  },
+  {
+    "id": "related-open-not-blocking",
+    "description": "related dep on open issue -> NOT blocked (non-blocking type)",
+    "blocker_status": "open",
+    "dep_type": "related",
+    "expected_blocked": false
+  },
+  {
+    "id": "replies-to-open-not-blocking",
+    "description": "replies-to dep on open issue -> NOT blocked",
+    "blocker_status": "open",
+    "dep_type": "replies-to",
+    "expected_blocked": false
+  },
+  {
+    "id": "discovered-from-open-not-blocking",
+    "description": "discovered-from dep on open issue -> NOT blocked",
+    "blocker_status": "open",
+    "dep_type": "discovered-from",
+    "expected_blocked": false
+  },
+  {
+    "id": "tracks-open-not-blocking",
+    "description": "tracks dep on open issue -> NOT blocked",
+    "blocker_status": "open",
+    "dep_type": "tracks",
+    "expected_blocked": false
+  }
+]
