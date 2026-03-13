@@ -1136,7 +1136,7 @@ func TestCollectTaskStatus(t *testing.T) {
 			wantNeedsPlanningLen: 1,
 		},
 		{
-			name: "top 5 limit for NeedsPlanning",
+			name: "all NeedsPlanning tasks returned",
 			readyOutput: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Task 2", Status: "open", Design: ""},
@@ -1149,11 +1149,11 @@ func TestCollectTaskStatus(t *testing.T) {
 			inProgressOutput:     "[]",
 			needReviewOutput:     "[]",
 			blockedOutput:        "[]",
-			wantNeedsPlanning:    7, // Count is 7
-			wantNeedsPlanningLen: 5, // But only 5 stored
+			wantNeedsPlanning:    7,
+			wantNeedsPlanningLen: 7, // All tasks returned
 		},
 		{
-			name: "top 5 limit for ReadyToImplement",
+			name: "all ReadyToImplement tasks returned",
 			readyOutput: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task 1", Status: "open", Design: "plan"},
 				{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
@@ -1165,8 +1165,8 @@ func TestCollectTaskStatus(t *testing.T) {
 			inProgressOutput:        "[]",
 			needReviewOutput:        "[]",
 			blockedOutput:           "[]",
-			wantReadyToImplement:    6, // Count is 6
-			wantReadyToImplementLen: 5, // But only 5 stored
+			wantReadyToImplement:    6,
+			wantReadyToImplementLen: 6, // All tasks returned
 		},
 		{
 			name:                 "JSON parsing error handled gracefully",

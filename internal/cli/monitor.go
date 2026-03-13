@@ -60,11 +60,11 @@ type MonitorData struct {
 	Timestamp          time.Time
 	Agents             []AgentStatus
 	Tasks              TaskSummary
-	NeedsPlanningTasks []TaskInfo          // Ready tasks without design (top 5)
-	ReadyToImplement   []TaskInfo          // Ready tasks with design (top 5)
-	ReviewTasks        []TaskInfo          // top 5 need review tasks
+	NeedsPlanningTasks []TaskInfo          // Ready tasks without design
+	ReadyToImplement   []TaskInfo          // Ready tasks with design
+	ReviewTasks        []TaskInfo          // need review tasks
 	InProgressTasks    []TaskInfo          // all in_progress tasks
-	BacklogTasks       []TaskInfo          // backlog tasks (top 20)
+	BacklogTasks       []TaskInfo          // backlog tasks
 	AgentTasks         map[string]TaskInfo // agent name -> current task (from assignee)
 	TaskConflicts      map[string][]string // TaskID -> agent names (if multiple agents claim same task)
 	SyncStatus         SyncInfo
@@ -626,8 +626,6 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	if readyErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(readyOutput), &issues) == nil {
-			needsPlanningCount := 0
-			readyToImplementCount := 0
 			for _, issue := range issues {
 				// Skip non-open tasks - they appear in their own sections
 				if !IsOpen(issue) {
@@ -644,25 +642,19 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 				// SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
 				if ReadyToImplement(issue) {
 					summary.ReadyToImplement++
-					if readyToImplementCount < 5 {
-						readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
-							ID:       issue.ID,
-							Title:    issue.Title,
-							Priority: issue.Priority,
-						})
-						readyToImplementCount++
-					}
+					readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
+						ID:       issue.ID,
+						Title:    issue.Title,
+						Priority: issue.Priority,
+					})
 				} else {
 					// NeedsPlan: no design OR needs-revision label
 					summary.NeedsPlanning++
-					if needsPlanningCount < 5 {
-						needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
-							ID:       issue.ID,
-							Title:    issue.Title,
-							Priority: issue.Priority,
-						})
-						needsPlanningCount++
-					}
+					needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
+						ID:       issue.ID,
+						Title:    issue.Title,
+						Priority: issue.Priority,
+					})
 				}
 			}
 		}
@@ -689,7 +681,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		}
 	}
 
-	// Process need review tasks (top 5)
+	// Process need review tasks
 	// Note: Don't add to agentTasks - these tasks have status=review meaning
 	// the planning agent finished and released its lock. The assignee field
 	// still points to the planning agent but it's no longer running.
@@ -698,10 +690,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		if json.Unmarshal([]byte(needReviewOutput), &issues) == nil {
 			// All tasks with status=review are review tasks
 			summary.NeedReview = len(issues)
-			for i, issue := range issues {
-				if i >= 5 {
-					break
-				}
+			for _, issue := range issues {
 				reviewTasks = append(reviewTasks, TaskInfo{
 					ID:       issue.ID,
 					Title:    issue.Title,
@@ -716,11 +705,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		var issues []BdIssue
 		if json.Unmarshal([]byte(backlogOutput), &issues) == nil {
 			summary.Backlog = len(issues)
-			// Store up to 20 backlog tasks for display
-			for i, issue := range issues {
-				if i >= 20 {
-					break
-				}
+			for _, issue := range issues {
 				backlogTasks = append(backlogTasks, TaskInfo{
 					ID:       issue.ID,
 					Title:    issue.Title,

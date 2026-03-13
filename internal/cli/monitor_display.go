@@ -70,49 +70,25 @@ func renderDashboard(data *MonitorData) string {
 		data.Tasks.NeedsPlanning, data.Tasks.ReadyToImplement, data.Tasks.NeedReview, data.Tasks.InProgress, data.Tasks.Backlog)
 	sb.WriteString(renderBoxLine(taskSummary))
 
-	// Needs Planning tasks (top 5)
+	// Needs Planning tasks
 	sb.WriteString(renderBoxLine(""))
 	sb.WriteString(renderBoxLine(fmt.Sprintf("  NEEDS PLANNING (%d):", data.Tasks.NeedsPlanning)))
-	if len(data.NeedsPlanningTasks) > 0 {
-		for _, task := range data.NeedsPlanningTasks {
-			renderTaskLine(&sb, task)
-		}
-	} else {
-		sb.WriteString(renderBoxLine("    (none)"))
-	}
+	renderTaskSection(&sb, data.NeedsPlanningTasks)
 
-	// Need review tasks (top 5)
+	// Need review tasks
 	sb.WriteString(renderBoxLine(""))
 	sb.WriteString(renderBoxLine(fmt.Sprintf("  NEEDS REVIEW (%d):", data.Tasks.NeedReview)))
-	if len(data.ReviewTasks) > 0 {
-		for _, task := range data.ReviewTasks {
-			renderTaskLine(&sb, task)
-		}
-	} else {
-		sb.WriteString(renderBoxLine("    (none)"))
-	}
+	renderTaskSection(&sb, data.ReviewTasks)
 
-	// Ready to Implement tasks (top 5)
+	// Ready to Implement tasks
 	sb.WriteString(renderBoxLine(""))
 	sb.WriteString(renderBoxLine(fmt.Sprintf("  READY TO IMPLEMENT (%d):", data.Tasks.ReadyToImplement)))
-	if len(data.ReadyToImplement) > 0 {
-		for _, task := range data.ReadyToImplement {
-			renderTaskLine(&sb, task)
-		}
-	} else {
-		sb.WriteString(renderBoxLine("    (none)"))
-	}
+	renderTaskSection(&sb, data.ReadyToImplement)
 
-	// In progress tasks (all)
+	// In progress tasks
 	sb.WriteString(renderBoxLine(""))
 	sb.WriteString(renderBoxLine(fmt.Sprintf("  IN PROGRESS (%d):", data.Tasks.InProgress)))
-	if len(data.InProgressTasks) > 0 {
-		for _, task := range data.InProgressTasks {
-			renderTaskLine(&sb, task)
-		}
-	} else {
-		sb.WriteString(renderBoxLine("    (none)"))
-	}
+	renderTaskSection(&sb, data.InProgressTasks)
 
 	// Sync section
 	sb.WriteString(renderBoxSeparator())
@@ -150,6 +126,26 @@ func renderDashboard(data *MonitorData) string {
 	sb.WriteString(renderBoxBottom())
 
 	return sb.String()
+}
+
+// renderTaskSection renders a list of tasks, showing at most 10 in the CLI.
+// Tasks beyond the limit are summarized as "and N more...".
+func renderTaskSection(sb *strings.Builder, tasks []TaskInfo) {
+	if len(tasks) == 0 {
+		sb.WriteString(renderBoxLine("    (none)"))
+		return
+	}
+	const displayLimit = 10
+	display := tasks
+	if len(tasks) > displayLimit {
+		display = tasks[:displayLimit]
+	}
+	for _, task := range display {
+		renderTaskLine(sb, task)
+	}
+	if remaining := len(tasks) - displayLimit; remaining > 0 {
+		sb.WriteString(renderBoxLine(fmt.Sprintf("    ... and %d more", remaining)))
+	}
 }
 
 func renderTaskLine(sb *strings.Builder, task TaskInfo) {
