@@ -106,6 +106,10 @@ export interface LoomAgentStatus {
   commits?: LoomCommitDetail[];
   /** Uncommitted file changes */
   changes?: LoomFileChange[];
+  /** Absolute path to the agent's working directory */
+  path?: string;
+  /** Absolute path to the agent's worktree */
+  worktree_path?: string;
 }
 
 /**
