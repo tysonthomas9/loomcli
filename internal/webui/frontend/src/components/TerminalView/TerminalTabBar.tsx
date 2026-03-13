@@ -4,7 +4,7 @@
  * Follows WAI-ARIA tabs pattern with keyboard navigation.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import styles from "./TerminalTabBar.module.css";
 
@@ -22,6 +22,7 @@ export interface TerminalTabBarProps {
   onNewTab: () => void;
   onToggleFullHeight: () => void;
   isFullHeight: boolean;
+  onTabRename?: (tabId: string, newLabel: string) => void;
 }
 
 export function TerminalTabBar({
@@ -32,9 +33,14 @@ export function TerminalTabBar({
   onNewTab,
   onToggleFullHeight,
   isFullHeight,
+  onTabRename,
 }: TerminalTabBarProps): JSX.Element {
   const tabRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const tabListRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [draftLabel, setDraftLabel] = useState("");
 
   const setTabRef = useCallback(
     (id: string) => (el: HTMLDivElement | null) => {
@@ -59,6 +65,58 @@ export function TerminalTabBar({
       activeEl.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   }, [activeTabId]);
+
+  // Clear editing state if the tab being edited is removed
+  useEffect(() => {
+    if (editingTabId && !tabs.some((t) => t.id === editingTabId)) {
+      setEditingTabId(null);
+    }
+  }, [tabs, editingTabId]);
+
+  // Focus and select input when entering edit mode
+  useEffect(() => {
+    if (editingTabId && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingTabId]);
+
+  const enterEditMode = useCallback(
+    (tabId: string, currentLabel: string) => {
+      if (!onTabRename) return;
+      setEditingTabId(tabId);
+      setDraftLabel(currentLabel);
+    },
+    [onTabRename],
+  );
+
+  const confirmEdit = useCallback(() => {
+    if (!editingTabId) return;
+    const trimmed = draftLabel.trim();
+    const originalTab = tabs.find((t) => t.id === editingTabId);
+    if (trimmed && trimmed !== originalTab?.label) {
+      onTabRename?.(editingTabId, trimmed);
+    }
+    setEditingTabId(null);
+  }, [editingTabId, draftLabel, tabs, onTabRename]);
+
+  const cancelEdit = useCallback(() => {
+    setEditingTabId(null);
+  }, []);
+
+  const handleEditKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        confirmEdit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        cancelEdit();
+      }
+    },
+    [confirmEdit, cancelEdit],
+  );
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -142,7 +200,31 @@ export function TerminalTabBar({
                 data-testid={`terminal-tab-status-${tab.id}`}
                 aria-label={`Connection: ${tab.connectionState}`}
               />
-              {tab.label}
+              {editingTabId === tab.id ? (
+                <input
+                  ref={inputRef}
+                  type="text"
+                  className={styles.tabLabelInput}
+                  value={draftLabel}
+                  onChange={(e) => setDraftLabel(e.target.value)}
+                  onBlur={confirmEdit}
+                  onKeyDown={handleEditKeyDown}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Rename tab"
+                  data-testid={`terminal-tab-rename-input-${tab.id}`}
+                />
+              ) : (
+                <span
+                  className={styles.tabLabel}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    enterEditMode(tab.id, tab.label);
+                  }}
+                  data-testid={`terminal-tab-label-${tab.id}`}
+                >
+                  {tab.label}
+                </span>
+              )}
               {tabs.length > 1 && (
                 <button
                   type="button"

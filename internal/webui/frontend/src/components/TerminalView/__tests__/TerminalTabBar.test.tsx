@@ -374,6 +374,176 @@ describe("TerminalTabBar", () => {
     });
   });
 
+  describe("tab rename", () => {
+    it("double-click shows rename input with current label", () => {
+      const onTabRename = vi.fn();
+      render(<TerminalTabBar {...defaultProps} onTabRename={onTabRename} />);
+
+      const label = screen.getByTestId("terminal-tab-label-tab-1");
+      fireEvent.doubleClick(label);
+
+      const input = screen.getByTestId("terminal-tab-rename-input-tab-1");
+      expect(input).toBeInTheDocument();
+      expect(input).toHaveValue("Terminal 1");
+    });
+
+    it("Enter confirms rename and calls onTabRename", () => {
+      const onTabRename = vi.fn();
+      render(<TerminalTabBar {...defaultProps} onTabRename={onTabRename} />);
+
+      const label = screen.getByTestId("terminal-tab-label-tab-1");
+      fireEvent.doubleClick(label);
+
+      const input = screen.getByTestId("terminal-tab-rename-input-tab-1");
+      fireEvent.change(input, { target: { value: "My Terminal" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(onTabRename).toHaveBeenCalledWith("tab-1", "My Terminal");
+      expect(
+        screen.queryByTestId("terminal-tab-rename-input-tab-1"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("Escape cancels rename without calling onTabRename", () => {
+      const onTabRename = vi.fn();
+      render(<TerminalTabBar {...defaultProps} onTabRename={onTabRename} />);
+
+      const label = screen.getByTestId("terminal-tab-label-tab-1");
+      fireEvent.doubleClick(label);
+
+      const input = screen.getByTestId("terminal-tab-rename-input-tab-1");
+      fireEvent.change(input, { target: { value: "Changed" } });
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      expect(onTabRename).not.toHaveBeenCalled();
+      expect(
+        screen.queryByTestId("terminal-tab-rename-input-tab-1"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("blur confirms rename", () => {
+      const onTabRename = vi.fn();
+      render(<TerminalTabBar {...defaultProps} onTabRename={onTabRename} />);
+
+      const label = screen.getByTestId("terminal-tab-label-tab-1");
+      fireEvent.doubleClick(label);
+
+      const input = screen.getByTestId("terminal-tab-rename-input-tab-1");
+      fireEvent.change(input, { target: { value: "Blurred Name" } });
+      fireEvent.blur(input);
+
+      expect(onTabRename).toHaveBeenCalledWith("tab-1", "Blurred Name");
+    });
+
+    it("empty label reverts without calling onTabRename", () => {
+      const onTabRename = vi.fn();
+      render(<TerminalTabBar {...defaultProps} onTabRename={onTabRename} />);
+
+      const label = screen.getByTestId("terminal-tab-label-tab-1");
+      fireEvent.doubleClick(label);
+
+      const input = screen.getByTestId("terminal-tab-rename-input-tab-1");
+      fireEvent.change(input, { target: { value: "" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(onTabRename).not.toHaveBeenCalled();
+    });
+
+    it("unchanged label skips onTabRename callback", () => {
+      const onTabRename = vi.fn();
+      render(<TerminalTabBar {...defaultProps} onTabRename={onTabRename} />);
+
+      const label = screen.getByTestId("terminal-tab-label-tab-1");
+      fireEvent.doubleClick(label);
+
+      const input = screen.getByTestId("terminal-tab-rename-input-tab-1");
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(onTabRename).not.toHaveBeenCalled();
+    });
+
+    it("clicking input does not switch tab", () => {
+      const onTabChange = vi.fn();
+      const onTabRename = vi.fn();
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          onTabChange={onTabChange}
+          onTabRename={onTabRename}
+        />,
+      );
+
+      const label = screen.getByTestId("terminal-tab-label-tab-2");
+      fireEvent.doubleClick(label);
+
+      const input = screen.getByTestId("terminal-tab-rename-input-tab-2");
+      onTabChange.mockClear();
+      fireEvent.click(input);
+
+      expect(onTabChange).not.toHaveBeenCalled();
+    });
+
+    it("without onTabRename prop, double-click does not enter edit mode", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const label = screen.getByTestId("terminal-tab-label-tab-1");
+      fireEvent.doubleClick(label);
+
+      expect(
+        screen.queryByTestId("terminal-tab-rename-input-tab-1"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("keyboard nav suppressed during edit", () => {
+      const onTabChange = vi.fn();
+      const onTabRename = vi.fn();
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          onTabChange={onTabChange}
+          onTabRename={onTabRename}
+        />,
+      );
+
+      const label = screen.getByTestId("terminal-tab-label-tab-1");
+      fireEvent.doubleClick(label);
+
+      const input = screen.getByTestId("terminal-tab-rename-input-tab-1");
+      onTabChange.mockClear();
+      fireEvent.keyDown(input, { key: "ArrowRight" });
+
+      expect(onTabChange).not.toHaveBeenCalled();
+    });
+
+    it("only one tab editable at a time", () => {
+      const onTabRename = vi.fn();
+      render(<TerminalTabBar {...defaultProps} onTabRename={onTabRename} />);
+
+      // Start editing tab-1
+      fireEvent.doubleClick(screen.getByTestId("terminal-tab-label-tab-1"));
+      expect(
+        screen.getByTestId("terminal-tab-rename-input-tab-1"),
+      ).toBeInTheDocument();
+
+      // Double-click tab-2 — tab-1 should exit edit mode
+      // Note: tab-1 confirmEdit fires on blur when focus moves to tab-2's double-click
+      // but since we're using fireEvent, we need to simulate this manually
+      const input1 = screen.getByTestId("terminal-tab-rename-input-tab-1");
+      fireEvent.blur(input1);
+
+      // Now tab-1's input should be gone (confirmEdit reverts since unchanged)
+      expect(
+        screen.queryByTestId("terminal-tab-rename-input-tab-1"),
+      ).not.toBeInTheDocument();
+
+      // Double-click tab-2
+      fireEvent.doubleClick(screen.getByTestId("terminal-tab-label-tab-2"));
+      expect(
+        screen.getByTestId("terminal-tab-rename-input-tab-2"),
+      ).toBeInTheDocument();
+    });
+  });
+
   describe("edge cases", () => {
     it("renders just the new-tab button when tabs array is empty", () => {
       render(<TerminalTabBar {...defaultProps} tabs={[]} activeTabId="" />);
