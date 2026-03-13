@@ -224,6 +224,12 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		default:
 		}
 
+		// Acquire concurrency slot for this role (blocks if at limit)
+		if !d.concurrency.Acquire(ap.entry.Role) {
+			log.Printf("[daemon] Agent %s: concurrency tracker closed, exiting", ap.entry.Worktree)
+			return
+		}
+
 		// 1. Pre-flight recovery
 		if err := d.recoverAgent(ap, 0); err != nil {
 			log.Printf("[daemon] Agent %s: pre-flight recovery failed: %v", ap.entry.Worktree, err)
@@ -255,6 +261,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		log.Printf("[daemon] Agent %s: ensuring branch %s", ap.entry.Worktree, targetBranch)
 		if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, "origin/main"); err != nil {
 			log.Printf("[daemon] Agent %s: branch setup failed: %v", ap.entry.Worktree, err)
+			d.concurrency.Release(ap.entry.Role)
 			if !d.handleRestartAfterError(ap) {
 				return
 			}
@@ -264,6 +271,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		// 3. Spawn subprocess
 		if err := d.spawnAgent(ap); err != nil {
 			log.Printf("[daemon] Agent %s: spawn failed: %v", ap.entry.Worktree, err)
+			d.concurrency.Release(ap.entry.Role)
 			if !d.handleRestartAfterError(ap) {
 				return
 			}
@@ -298,6 +306,9 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 5.6. Release epic assignment so next iteration re-evaluates
 		d.epicAssigner.ReleaseWorktree(ap.entry.Worktree)
+
+		// 5.7. Release concurrency slot so waiting agents can proceed
+		d.concurrency.Release(ap.entry.Role)
 
 		// 6. Epic exhaustion check and reassignment
 		if err := d.handleEpicTransition(ap); err != nil {

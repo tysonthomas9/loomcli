@@ -1390,6 +1390,111 @@ func TestBuildCommand_CustomRoleMinimal(t *testing.T) {
 	}
 }
 
+// TestSuperviseAgent_AcquiresAndReleasesOnShutdown tests that superviseAgent
+// acquires a concurrency slot and the tracker can be closed to unblock it.
+func TestSuperviseAgent_AcquiresAndReleasesOnShutdown(t *testing.T) {
+	maxConc := 1
+	d := &Daemon{
+		config: &DaemonConfig{
+			Daemon: DaemonSettings{
+				RestartPolicy: RestartPolicy{
+					MaxRetries:     intPtr(0),
+					BackoffInitial: intPtr(1),
+					BackoffMax:     intPtr(1),
+				},
+			},
+			Roles: map[string]RoleConfig{
+				"plan": {MaxConcurrency: &maxConc},
+			},
+		},
+		shutdown:     make(chan struct{}),
+		concurrency:  NewConcurrencyTracker(map[string]RoleConfig{"plan": {MaxConcurrency: &maxConc}}),
+		epicAssigner: NewEpicAssigner(),
+	}
+
+	// Pre-acquire the only slot so the next Acquire will block
+	if !d.concurrency.Acquire("plan") {
+		t.Fatal("failed to pre-acquire slot")
+	}
+	if d.concurrency.ActiveCount("plan") != 1 {
+		t.Fatalf("ActiveCount = %d, want 1", d.concurrency.ActiveCount("plan"))
+	}
+
+	ap := &AgentProcess{
+		entry:        AgentEntry{Worktree: "test-conc", Role: "plan"},
+		worktreePath: t.TempDir(),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		d.superviseAgent(ap)
+		close(done)
+	}()
+
+	// superviseAgent should be blocked on Acquire (or will be shortly).
+	// Close the tracker to unblock — Close() is safe regardless of timing:
+	// if the goroutine hasn't reached Acquire yet, it will see closed=true immediately.
+	d.concurrency.Close()
+
+	select {
+	case <-done:
+		// Success - superviseAgent exited because Acquire returned false
+	case <-time.After(5 * time.Second):
+		t.Fatal("superviseAgent did not exit after concurrency tracker closed")
+	}
+
+	// Verify the goroutine never acquired a slot (Acquire returned false)
+	if got := d.concurrency.ActiveCount("plan"); got != 1 {
+		t.Errorf("ActiveCount after goroutine exit = %d, want 1 (only pre-acquired setup slot)", got)
+	}
+}
+
+// TestSuperviseAgent_ReleasesOnBranchSetupFailure verifies that a concurrency
+// slot is released when branch setup fails.
+func TestSuperviseAgent_ReleasesOnBranchSetupFailure(t *testing.T) {
+	maxConc := 2
+	tracker := NewConcurrencyTracker(map[string]RoleConfig{"plan": {MaxConcurrency: &maxConc}})
+
+	d := &Daemon{
+		config: &DaemonConfig{
+			Daemon: DaemonSettings{
+				RestartPolicy: RestartPolicy{
+					MaxRetries:     intPtr(0), // no retries - will exit after first failure
+					BackoffInitial: intPtr(0),
+					BackoffMax:     intPtr(0),
+				},
+			},
+		},
+		shutdown:     make(chan struct{}),
+		concurrency:  tracker,
+		epicAssigner: NewEpicAssigner(),
+	}
+
+	ap := &AgentProcess{
+		entry:        AgentEntry{Worktree: "test-branch-fail", Role: "plan"},
+		worktreePath: "/nonexistent/path/that/will/fail", // branch setup will fail
+	}
+
+	done := make(chan struct{})
+	go func() {
+		d.superviseAgent(ap)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// superviseAgent exited
+	case <-time.After(10 * time.Second):
+		t.Fatal("superviseAgent did not exit")
+	}
+
+	// Verify the concurrency slot was released
+	count := tracker.ActiveCount("plan")
+	if count != 0 {
+		t.Errorf("ActiveCount after exit = %d, want 0 (slot should be released)", count)
+	}
+}
+
 // TestBuildCommand_BuiltInRoleWithBackendAndEpic verifies command construction
 // for a built-in role with Backend and assignedEpicID set.
 func TestBuildCommand_BuiltInRoleWithBackendAndEpic(t *testing.T) {
