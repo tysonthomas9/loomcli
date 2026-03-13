@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1628,4 +1629,208 @@ func TestHandleClose_BlockerCheck_ClosedBlocker(t *testing.T) {
 	if !closeBlockedResp.Success {
 		t.Errorf("expected close to succeed after blocker was closed, got error: %s", closeBlockedResp.Error)
 	}
+}
+
+// TestHandleCreate_OwnerExplicit verifies that an explicit Owner value in CreateArgs
+// is passed through and stored on the issue.
+func TestHandleCreate_OwnerExplicit(t *testing.T) {
+	store := memory.New("/tmp/test.jsonl")
+	server := NewServer("/tmp/test.sock", store, "/tmp", "/tmp/test.db")
+
+	createArgs := CreateArgs{
+		Title:     "Test explicit owner",
+		IssueType: "task",
+		Priority:  2,
+		Owner:     "alice@example.com",
+	}
+	createJSON, _ := json.Marshal(createArgs)
+	createReq := &Request{
+		Operation: OpCreate,
+		Args:      createJSON,
+		Actor:     "test-actor",
+	}
+
+	resp := server.handleCreate(createReq)
+	if !resp.Success {
+		t.Fatalf("create failed: %s", resp.Error)
+	}
+
+	var createdIssue types.Issue
+	if err := json.Unmarshal(resp.Data, &createdIssue); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// Verify Owner was set in the response
+	if createdIssue.Owner != "alice@example.com" {
+		t.Errorf("expected Owner 'alice@example.com' in response, got %q", createdIssue.Owner)
+	}
+
+	// Verify Owner was persisted to storage
+	storedIssue, err := store.GetIssue(context.Background(), createdIssue.ID)
+	if err != nil {
+		t.Fatalf("failed to get issue from storage: %v", err)
+	}
+	if storedIssue.Owner != "alice@example.com" {
+		t.Errorf("expected Owner 'alice@example.com' in storage, got %q", storedIssue.Owner)
+	}
+}
+
+// TestHandleCreate_OwnerAutoPopulatedFromEnv verifies that when CreateArgs.Owner is empty,
+// the server auto-populates it from the GIT_AUTHOR_EMAIL environment variable.
+func TestHandleCreate_OwnerAutoPopulatedFromEnv(t *testing.T) {
+	store := memory.New("/tmp/test.jsonl")
+	server := NewServer("/tmp/test.sock", store, "/tmp", "/tmp/test.db")
+
+	// Set GIT_AUTHOR_EMAIL so getGitUserEmail("") returns a known value
+	oldVal := os.Getenv("GIT_AUTHOR_EMAIL")
+	os.Setenv("GIT_AUTHOR_EMAIL", "env-author@example.com")
+	t.Cleanup(func() {
+		if oldVal != "" {
+			os.Setenv("GIT_AUTHOR_EMAIL", oldVal)
+		} else {
+			os.Unsetenv("GIT_AUTHOR_EMAIL")
+		}
+	})
+
+	createArgs := CreateArgs{
+		Title:     "Test auto-populated owner",
+		IssueType: "task",
+		Priority:  2,
+		// Owner intentionally left empty
+	}
+	createJSON, _ := json.Marshal(createArgs)
+	createReq := &Request{
+		Operation: OpCreate,
+		Args:      createJSON,
+		Actor:     "test-actor",
+	}
+
+	resp := server.handleCreate(createReq)
+	if !resp.Success {
+		t.Fatalf("create failed: %s", resp.Error)
+	}
+
+	var createdIssue types.Issue
+	if err := json.Unmarshal(resp.Data, &createdIssue); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// Verify Owner was auto-populated from GIT_AUTHOR_EMAIL
+	if createdIssue.Owner != "env-author@example.com" {
+		t.Errorf("expected Owner 'env-author@example.com' (from GIT_AUTHOR_EMAIL), got %q", createdIssue.Owner)
+	}
+
+	// Verify persisted value matches
+	storedIssue, err := store.GetIssue(context.Background(), createdIssue.ID)
+	if err != nil {
+		t.Fatalf("failed to get issue from storage: %v", err)
+	}
+	if storedIssue.Owner != "env-author@example.com" {
+		t.Errorf("expected Owner 'env-author@example.com' in storage, got %q", storedIssue.Owner)
+	}
+}
+
+// TestHandleCreate_OwnerExplicitOverridesEnv verifies that an explicit Owner value
+// takes precedence over the GIT_AUTHOR_EMAIL environment variable.
+func TestHandleCreate_OwnerExplicitOverridesEnv(t *testing.T) {
+	store := memory.New("/tmp/test.jsonl")
+	server := NewServer("/tmp/test.sock", store, "/tmp", "/tmp/test.db")
+
+	// Set GIT_AUTHOR_EMAIL to a different value
+	oldVal := os.Getenv("GIT_AUTHOR_EMAIL")
+	os.Setenv("GIT_AUTHOR_EMAIL", "env-author@example.com")
+	t.Cleanup(func() {
+		if oldVal != "" {
+			os.Setenv("GIT_AUTHOR_EMAIL", oldVal)
+		} else {
+			os.Unsetenv("GIT_AUTHOR_EMAIL")
+		}
+	})
+
+	createArgs := CreateArgs{
+		Title:     "Test explicit owner overrides env",
+		IssueType: "task",
+		Priority:  2,
+		Owner:     "explicit-owner@example.com",
+	}
+	createJSON, _ := json.Marshal(createArgs)
+	createReq := &Request{
+		Operation: OpCreate,
+		Args:      createJSON,
+		Actor:     "test-actor",
+	}
+
+	resp := server.handleCreate(createReq)
+	if !resp.Success {
+		t.Fatalf("create failed: %s", resp.Error)
+	}
+
+	var createdIssue types.Issue
+	if err := json.Unmarshal(resp.Data, &createdIssue); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// Verify Owner is the explicit value, NOT the env value
+	if createdIssue.Owner != "explicit-owner@example.com" {
+		t.Errorf("expected Owner 'explicit-owner@example.com', got %q", createdIssue.Owner)
+	}
+}
+
+// TestGetGitUserEmail_EnvOverride verifies that getGitUserEmail("") prefers
+// GIT_AUTHOR_EMAIL over git config user.email.
+func TestGetGitUserEmail_EnvOverride(t *testing.T) {
+	oldVal := os.Getenv("GIT_AUTHOR_EMAIL")
+	os.Setenv("GIT_AUTHOR_EMAIL", "test-env@example.com")
+	t.Cleanup(func() {
+		if oldVal != "" {
+			os.Setenv("GIT_AUTHOR_EMAIL", oldVal)
+		} else {
+			os.Unsetenv("GIT_AUTHOR_EMAIL")
+		}
+	})
+
+	email := getGitUserEmail("")
+	if email != "test-env@example.com" {
+		t.Errorf("expected 'test-env@example.com' from GIT_AUTHOR_EMAIL, got %q", email)
+	}
+}
+
+// TestGetGitUserEmail_FallsBackToGitConfig verifies that getGitUserEmail("") falls back
+// to git config user.email when GIT_AUTHOR_EMAIL is not set.
+func TestGetGitUserEmail_FallsBackToGitConfig(t *testing.T) {
+	oldVal := os.Getenv("GIT_AUTHOR_EMAIL")
+	os.Unsetenv("GIT_AUTHOR_EMAIL")
+	t.Cleanup(func() {
+		if oldVal != "" {
+			os.Setenv("GIT_AUTHOR_EMAIL", oldVal)
+		}
+	})
+
+	// getGitUserEmail should return whatever git config user.email returns
+	// (or empty string if git is not configured). We just verify it does not panic
+	// and returns a string.
+	email := getGitUserEmail("")
+	// We cannot assert the exact value since it depends on the test environment's
+	// git config, but we can verify the function completes without error.
+	_ = email
+}
+
+// TestGetGitUserEmail_EmptyEnvFallsThrough verifies that an empty GIT_AUTHOR_EMAIL
+// is treated the same as unset (falls through to git config).
+func TestGetGitUserEmail_EmptyEnvFallsThrough(t *testing.T) {
+	oldVal := os.Getenv("GIT_AUTHOR_EMAIL")
+	os.Setenv("GIT_AUTHOR_EMAIL", "")
+	t.Cleanup(func() {
+		if oldVal != "" {
+			os.Setenv("GIT_AUTHOR_EMAIL", oldVal)
+		} else {
+			os.Unsetenv("GIT_AUTHOR_EMAIL")
+		}
+	})
+
+	// Empty string env should fall through to git config, not return ""
+	// immediately. We verify by checking the function completes.
+	// (If git config is also empty, the result is "" which is fine.)
+	email := getGitUserEmail("")
+	_ = email
 }

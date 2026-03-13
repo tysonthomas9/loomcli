@@ -153,6 +153,13 @@ var createCmd = &cobra.Command{
 			FatalError("--event-category, --event-actor, --event-target, and --event-payload flags require --type=event")
 		}
 
+		// Owner flag (explicit override for git user.email default)
+		ownerFlag, _ := cmd.Flags().GetString("owner")
+		owner := ownerFlag
+		if owner == "" {
+			owner = getOwner()
+		}
+
 		// Parse --due flag (GH#820)
 		// Uses layered parsing: compact duration → NLP → date-only → RFC3339
 		var dueAt *time.Time
@@ -203,7 +210,7 @@ var createCmd = &cobra.Command{
 				ExternalRef:        externalRefPtr,
 				Ephemeral:          wisp,
 				CreatedBy:          getActorWithGit(),
-				Owner:              getOwner(),
+				Owner:              owner,
 				MolType:            molType,
 				RoleType:           roleType,
 				Rig:                agentRig,
@@ -275,7 +282,7 @@ var createCmd = &cobra.Command{
 								// Found a matching route - auto-route to that rig
 								rigName := routing.ExtractProjectFromPath(route.Path)
 								if rigName != "" {
-									createInRig(cmd, rigName, explicitID, title, description, issueType, priority, design, acceptance, notes, assignee, labels, externalRef, wisp)
+									createInRig(cmd, rigName, explicitID, title, description, issueType, priority, design, acceptance, notes, assignee, labels, externalRef, wisp, owner)
 									return
 								}
 							}
@@ -295,7 +302,7 @@ var createCmd = &cobra.Command{
 			targetRig = prefixOverride
 		}
 		if targetRig != "" {
-			createInRig(cmd, targetRig, explicitID, title, description, issueType, priority, design, acceptance, notes, assignee, labels, externalRef, wisp)
+			createInRig(cmd, targetRig, explicitID, title, description, issueType, priority, design, acceptance, notes, assignee, labels, externalRef, wisp, owner)
 			return
 		}
 
@@ -505,7 +512,7 @@ var createCmd = &cobra.Command{
 				WaitsForGate:       waitsForGate,
 				Ephemeral:          wisp,
 				CreatedBy:          getActorWithGit(),
-				Owner:              getOwner(),
+				Owner:              owner,
 				MolType:            string(molType),
 				RoleType:           roleType,
 				Rig:                agentRig,
@@ -565,7 +572,7 @@ var createCmd = &cobra.Command{
 			EstimatedMinutes:   estimatedMinutes,
 			Ephemeral:          wisp,
 			CreatedBy:          getActorWithGit(),
-			Owner:              getOwner(),
+			Owner:              owner,
 			MolType:            molType,
 			RoleType:           roleType,
 			Rig:                agentRig,
@@ -923,13 +930,14 @@ func init() {
 	//   --defer=tomorrow    Hidden until tomorrow
 	createCmd.Flags().String("due", "", "Due date/time. Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15")
 	createCmd.Flags().String("defer", "", "Defer until date (issue hidden from bd ready until then). Same formats as --due")
+	createCmd.Flags().String("owner", "", "Owner email (defaults to git user.email)")
 	// Note: --json flag is defined as a persistent flag in main.go, not here
 	rootCmd.AddCommand(createCmd)
 }
 
 // createInRig creates an issue in a different rig using --rig flag or auto-routing.
 // This bypasses the normal daemon/direct flow and directly creates in the target rig.
-func createInRig(cmd *cobra.Command, rigName, explicitID, title, description, issueType string, priority int, design, acceptance, notes, assignee string, labels []string, externalRef string, wisp bool) {
+func createInRig(cmd *cobra.Command, rigName, explicitID, title, description, issueType string, priority int, design, acceptance, notes, assignee string, labels []string, externalRef string, wisp bool, owner string) {
 	ctx := rootCtx
 
 	// Find the town-level beads directory (where routes.jsonl lives)
@@ -1018,7 +1026,7 @@ func createInRig(cmd *cobra.Command, rigName, explicitID, title, description, is
 		ExternalRef:        externalRefPtr,
 		Ephemeral:          wisp,
 		CreatedBy:          getActorWithGit(),
-		Owner:              getOwner(),
+		Owner:              owner,
 		// Event fields (bd-xwvo fix)
 		EventKind: eventCategory,
 		Actor:     eventActor,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -13,6 +14,24 @@ import (
 	"github.com/steveyegge/beads/internal/util"
 	"github.com/steveyegge/beads/internal/utils"
 )
+
+// getGitUserEmail returns the git user.email from config, or empty string if unavailable.
+// NOTE: This mirrors getOwner() in cmd/bd/main.go. Keep the two in sync.
+func getGitUserEmail(workspacePath string) string {
+	if authorEmail := os.Getenv("GIT_AUTHOR_EMAIL"); authorEmail != "" {
+		return authorEmail
+	}
+	cmd := exec.Command("git", "config", "user.email")
+	if workspacePath != "" {
+		cmd.Dir = workspacePath
+	}
+	if out, err := cmd.Output(); err == nil {
+		if email := strings.TrimSpace(string(out)); email != "" {
+			return email
+		}
+	}
+	return ""
+}
 
 // containsLabel checks if a label exists in the list
 func containsLabel(labels []string, label string) bool {
@@ -287,6 +306,12 @@ func (s *Server) handleCreate(req *Request) Response {
 		}
 	}
 
+	// Auto-populate owner from git config if not explicitly provided
+	owner := createArgs.Owner
+	if owner == "" {
+		owner = getGitUserEmail(s.workspacePath)
+	}
+
 	issue := &types.Issue{
 		ID:                 issueID,
 		Title:              createArgs.Title,
@@ -307,7 +332,7 @@ func (s *Server) handleCreate(req *Request) Response {
 		// ID generation
 		IDPrefix:  createArgs.IDPrefix,
 		CreatedBy: createArgs.CreatedBy,
-		Owner:     createArgs.Owner,
+		Owner:     owner,
 		// Molecule type
 		MolType: types.MolType(createArgs.MolType),
 		// Agent identity fields

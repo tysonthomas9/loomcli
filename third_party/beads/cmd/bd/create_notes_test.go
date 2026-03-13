@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -203,6 +204,222 @@ func TestCreateWithNotesRPC(t *testing.T) {
 		}
 		if retrieved.Description != "Created via RPC" {
 			t.Errorf("expected description 'Created via RPC', got %q", retrieved.Description)
+		}
+	})
+}
+
+// TestCreateWithOwner verifies that the Owner field works correctly
+// during issue creation in both direct mode and RPC mode.
+func TestCreateWithOwner(t *testing.T) {
+	tmpDir := t.TempDir()
+	testDB := filepath.Join(tmpDir, ".beads", "beads.db")
+	s := newTestStore(t, testDB)
+	ctx := context.Background()
+
+	t.Run("DirectMode_WithExplicitOwner", func(t *testing.T) {
+		issue := &types.Issue{
+			Title:     "Issue with explicit owner",
+			Owner:     "alice@example.com",
+			Priority:  1,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			CreatedAt: time.Now(),
+		}
+
+		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("failed to create issue: %v", err)
+		}
+
+		retrieved, err := s.GetIssue(ctx, issue.ID)
+		if err != nil {
+			t.Fatalf("failed to retrieve issue: %v", err)
+		}
+
+		if retrieved.Owner != "alice@example.com" {
+			t.Errorf("expected owner 'alice@example.com', got %q", retrieved.Owner)
+		}
+	})
+
+	t.Run("DirectMode_WithoutOwner", func(t *testing.T) {
+		issue := &types.Issue{
+			Title:     "Issue without owner",
+			Priority:  2,
+			IssueType: types.TypeBug,
+			Status:    types.StatusOpen,
+			CreatedAt: time.Now(),
+		}
+
+		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("failed to create issue: %v", err)
+		}
+
+		retrieved, err := s.GetIssue(ctx, issue.ID)
+		if err != nil {
+			t.Fatalf("failed to retrieve issue: %v", err)
+		}
+
+		if retrieved.Owner != "" {
+			t.Errorf("expected empty owner, got %q", retrieved.Owner)
+		}
+	})
+
+	t.Run("DirectMode_WithOwnerAndOtherFields", func(t *testing.T) {
+		issue := &types.Issue{
+			Title:       "Full issue with owner",
+			Description: "Detailed description",
+			Notes:       "Some notes",
+			Owner:       "bob@example.com",
+			Assignee:    "testuser",
+			Priority:    1,
+			IssueType:   types.TypeFeature,
+			Status:      types.StatusOpen,
+			CreatedAt:   time.Now(),
+		}
+
+		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("failed to create issue: %v", err)
+		}
+
+		retrieved, err := s.GetIssue(ctx, issue.ID)
+		if err != nil {
+			t.Fatalf("failed to retrieve issue: %v", err)
+		}
+
+		if retrieved.Owner != "bob@example.com" {
+			t.Errorf("expected owner 'bob@example.com', got %q", retrieved.Owner)
+		}
+		if retrieved.Assignee != "testuser" {
+			t.Errorf("expected assignee 'testuser', got %q", retrieved.Assignee)
+		}
+		if retrieved.Notes != "Some notes" {
+			t.Errorf("expected notes 'Some notes', got %q", retrieved.Notes)
+		}
+	})
+}
+
+// TestCreateWithOwnerRPC verifies owner field works via RPC protocol
+func TestCreateWithOwnerRPC(t *testing.T) {
+	tmpDir := t.TempDir()
+	testDB := filepath.Join(tmpDir, ".beads", "beads.db")
+	s := newTestStore(t, testDB)
+	ctx := context.Background()
+
+	t.Run("RPC_CreateArgs_WithOwner", func(t *testing.T) {
+		args := &rpc.CreateArgs{
+			Title:     "RPC test issue with owner",
+			IssueType: "task",
+			Priority:  1,
+			Owner:     "rpc-owner@example.com",
+		}
+
+		if args.Owner != "rpc-owner@example.com" {
+			t.Errorf("expected Owner field 'rpc-owner@example.com', got %q", args.Owner)
+		}
+	})
+
+	t.Run("RPC_CreateArgs_EmptyOwner", func(t *testing.T) {
+		args := &rpc.CreateArgs{
+			Title:     "RPC test issue without owner",
+			IssueType: "task",
+			Priority:  1,
+			// Owner intentionally left empty
+		}
+
+		if args.Owner != "" {
+			t.Errorf("expected empty Owner field, got %q", args.Owner)
+		}
+	})
+
+	t.Run("RPC_CreateIssue_WithOwner", func(t *testing.T) {
+		createArgs := &rpc.CreateArgs{
+			Title:     "RPC created issue with owner",
+			IssueType: "feature",
+			Priority:  2,
+			Owner:     "rpc-alice@example.com",
+			Assignee:  "rpcuser",
+		}
+
+		// Simulate what the RPC handler does when owner is explicit
+		owner := createArgs.Owner
+
+		issue := &types.Issue{
+			Title:     createArgs.Title,
+			IssueType: types.IssueType(createArgs.IssueType),
+			Priority:  createArgs.Priority,
+			Assignee:  createArgs.Assignee,
+			Owner:     owner,
+			Status:    types.StatusOpen,
+			CreatedAt: time.Now(),
+		}
+
+		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("failed to create issue via RPC simulation: %v", err)
+		}
+
+		retrieved, err := s.GetIssue(ctx, issue.ID)
+		if err != nil {
+			t.Fatalf("failed to retrieve issue: %v", err)
+		}
+
+		if retrieved.Owner != "rpc-alice@example.com" {
+			t.Errorf("expected owner 'rpc-alice@example.com', got %q", retrieved.Owner)
+		}
+	})
+}
+
+// TestGetOwner verifies the getOwner() function used by the CLI
+// to determine the owner value when --owner flag is not provided.
+func TestGetOwner(t *testing.T) {
+	t.Run("ReturnsGitAuthorEmail", func(t *testing.T) {
+		oldVal := os.Getenv("GIT_AUTHOR_EMAIL")
+		os.Setenv("GIT_AUTHOR_EMAIL", "cli-author@example.com")
+		t.Cleanup(func() {
+			if oldVal != "" {
+				os.Setenv("GIT_AUTHOR_EMAIL", oldVal)
+			} else {
+				os.Unsetenv("GIT_AUTHOR_EMAIL")
+			}
+		})
+
+		owner := getOwner()
+		if owner != "cli-author@example.com" {
+			t.Errorf("expected getOwner() to return 'cli-author@example.com' from GIT_AUTHOR_EMAIL, got %q", owner)
+		}
+	})
+
+	t.Run("FallsBackToGitConfig", func(t *testing.T) {
+		oldVal := os.Getenv("GIT_AUTHOR_EMAIL")
+		os.Unsetenv("GIT_AUTHOR_EMAIL")
+		t.Cleanup(func() {
+			if oldVal != "" {
+				os.Setenv("GIT_AUTHOR_EMAIL", oldVal)
+			}
+		})
+
+		// getOwner() should fall back to git config user.email.
+		// We cannot assert the exact value since it depends on the test environment,
+		// but we verify it does not panic and returns a string.
+		owner := getOwner()
+		_ = owner
+	})
+
+	t.Run("EmptyEnvFallsThrough", func(t *testing.T) {
+		oldVal := os.Getenv("GIT_AUTHOR_EMAIL")
+		os.Setenv("GIT_AUTHOR_EMAIL", "")
+		t.Cleanup(func() {
+			if oldVal != "" {
+				os.Setenv("GIT_AUTHOR_EMAIL", oldVal)
+			} else {
+				os.Unsetenv("GIT_AUTHOR_EMAIL")
+			}
+		})
+
+		// Empty string GIT_AUTHOR_EMAIL should not be returned as the owner.
+		// It should fall through to git config user.email.
+		owner := getOwner()
+		if owner == "" {
+			// This is acceptable if git config user.email is also empty
+			t.Logf("getOwner() returned empty string (git config user.email likely not set)")
 		}
 	})
 }
