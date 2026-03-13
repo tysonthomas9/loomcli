@@ -66,6 +66,14 @@ type RoleConfig struct {
 }
 
 // AgentEntry defines a single agent assignment.
+//
+// Multi-repo routing fields:
+//
+//	repos: ["backend", "frontend"]         # explicit repo names this agent handles
+//	repo_groups: ["infra", "data"]         # bind to groups defined in RepoConfig
+//	cross_repo: true                       # agent can pick up tasks spanning repos
+//
+// An agent with neither repos nor repo_groups can work on any repo (backward compatible).
 type AgentEntry struct {
 	Worktree         string   `yaml:"worktree"`
 	Role             string   `yaml:"role"`
@@ -74,6 +82,9 @@ type AgentEntry struct {
 	Backend          string   `yaml:"backend,omitempty"`
 	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
 	PathPatterns     []string `yaml:"path_patterns,omitempty"`
+	Repos            []string `yaml:"repos,omitempty"`
+	RepoGroups       []string `yaml:"repo_groups,omitempty"`
+	CrossRepo        bool     `yaml:"cross_repo,omitempty"`
 }
 
 // ProjectFile represents the project-local loom.yaml.

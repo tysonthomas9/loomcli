@@ -125,6 +125,23 @@ func validateAgentEntries(r *ValidationResult, agents []AgentEntry, roles map[st
 
 		// Agent-level backend override
 		validateBackendName(r, field+".backend", a.Backend)
+
+		// Validate Repos entries are non-empty strings
+		for j, repo := range a.Repos {
+			if repo == "" {
+				r.addError(fmt.Sprintf("%s.repos[%d]", field, j), "repo name must not be empty")
+			}
+		}
+
+		// Validate RepoGroups entries are non-empty and valid format
+		for j, rg := range a.RepoGroups {
+			if rg == "" {
+				r.addError(fmt.Sprintf("%s.repo_groups[%d]", field, j), "repo group name must not be empty")
+			} else if !isValidGroupName(rg) {
+				r.addError(fmt.Sprintf("%s.repo_groups[%d]", field, j), fmt.Sprintf(
+					"%q is invalid; group names must be lowercase alphanumeric with hyphens, starting with alphanumeric", rg))
+			}
+		}
 	}
 }
 

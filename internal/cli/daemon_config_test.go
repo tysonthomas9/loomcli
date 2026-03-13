@@ -1055,6 +1055,121 @@ agents:
 	}
 }
 
+func TestLoadProjectFile_WithReposAndRepoGroups(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `agents:
+  - worktree: falcon
+    role: plan
+    repos: [backend, frontend]
+    repo_groups: [infra, data]
+    cross_repo: true
+  - worktree: nova
+    role: task
+`
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	pf, err := LoadProjectFile(dir)
+	if err != nil {
+		t.Fatalf("LoadProjectFile() error = %v", err)
+	}
+	if pf == nil {
+		t.Fatal("LoadProjectFile() returned nil")
+	}
+	if len(pf.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(pf.Agents))
+	}
+
+	a0 := pf.Agents[0]
+	if !reflect.DeepEqual(a0.Repos, []string{"backend", "frontend"}) {
+		t.Errorf("agents[0].Repos = %v, want [backend frontend]", a0.Repos)
+	}
+	if !reflect.DeepEqual(a0.RepoGroups, []string{"infra", "data"}) {
+		t.Errorf("agents[0].RepoGroups = %v, want [infra data]", a0.RepoGroups)
+	}
+	if !a0.CrossRepo {
+		t.Error("agents[0].CrossRepo = false, want true")
+	}
+
+	// Agent without new fields should have zero values
+	a1 := pf.Agents[1]
+	if a1.Repos != nil {
+		t.Errorf("agents[1].Repos = %v, want nil", a1.Repos)
+	}
+	if a1.RepoGroups != nil {
+		t.Errorf("agents[1].RepoGroups = %v, want nil", a1.RepoGroups)
+	}
+	if a1.CrossRepo {
+		t.Error("agents[1].CrossRepo = true, want false")
+	}
+}
+
+func TestAgentEntry_ReposRepoGroups_YAMLRoundtrip(t *testing.T) {
+	original := AgentEntry{
+		Worktree:   "falcon",
+		Role:       "plan",
+		Repos:      []string{"backend", "frontend"},
+		RepoGroups: []string{"infra"},
+		CrossRepo:  true,
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Verify YAML contains the new fields
+	yamlStr := string(data)
+	if !strings.Contains(yamlStr, "repos:") {
+		t.Errorf("marshaled YAML does not contain 'repos:': %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "repo_groups:") {
+		t.Errorf("marshaled YAML does not contain 'repo_groups:': %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "cross_repo: true") {
+		t.Errorf("marshaled YAML does not contain 'cross_repo: true': %s", yamlStr)
+	}
+
+	var decoded AgentEntry
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if !reflect.DeepEqual(decoded.Repos, original.Repos) {
+		t.Errorf("Repos = %v, want %v", decoded.Repos, original.Repos)
+	}
+	if !reflect.DeepEqual(decoded.RepoGroups, original.RepoGroups) {
+		t.Errorf("RepoGroups = %v, want %v", decoded.RepoGroups, original.RepoGroups)
+	}
+	if decoded.CrossRepo != original.CrossRepo {
+		t.Errorf("CrossRepo = %v, want %v", decoded.CrossRepo, original.CrossRepo)
+	}
+}
+
+func TestAgentEntry_ReposRepoGroups_OmittedWhenEmpty(t *testing.T) {
+	original := AgentEntry{
+		Worktree: "nova",
+		Role:     "task",
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	yamlStr := string(data)
+	if strings.Contains(yamlStr, "repos:") {
+		t.Errorf("marshaled YAML contains 'repos:' but should be omitted: %s", yamlStr)
+	}
+	if strings.Contains(yamlStr, "repo_groups:") {
+		t.Errorf("marshaled YAML contains 'repo_groups:' but should be omitted: %s", yamlStr)
+	}
+	if strings.Contains(yamlStr, "cross_repo:") {
+		t.Errorf("marshaled YAML contains 'cross_repo:' but should be omitted: %s", yamlStr)
+	}
+}
+
 func TestLoadProjectFile_BackwardCompatibility(t *testing.T) {
 	dir := t.TempDir()
 	// Config using only original fields — no new fields present
