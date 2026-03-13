@@ -1,6 +1,7 @@
 /**
  * GitTab component for AgentDetailPanel.
- * Shows branch header, commit log, working tree changes, and conflict warnings.
+ * Shows git action bar, branch header, commit log, working tree changes,
+ * and conflict warnings.
  */
 
 import { useState, useEffect } from "react";
@@ -8,9 +9,13 @@ import { useState, useEffect } from "react";
 import { fetchDiffCommits } from "@/api/diff";
 import type { DiffCommit } from "@/api/diff";
 import { useGitStatus } from "@/hooks/useGitStatus";
+import { useGitActions } from "@/hooks/useGitActions";
 import type { LoomAgentStatus } from "@/types";
+import { parseLoomStatus } from "@/types";
 
 import panelStyles from "./AgentDetailPanel.module.css";
+import { GitActionBar } from "./GitActionBar";
+import { TargetBranchSelector } from "./TargetBranchSelector";
 import styles from "./GitTab.module.css";
 
 interface GitTabProps {
@@ -36,10 +41,21 @@ function relativeTime(iso: string): string {
 }
 
 export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
-  const { status: gitStatus, error: gitError } = useGitStatus({
+  const {
+    status: gitStatus,
+    error: gitError,
+    refetch,
+  } = useGitStatus({
     agentName: agent.name,
     enabled: isActive ?? true,
   });
+
+  const actions = useGitActions({
+    agentName: agent.name,
+    onStatusChange: refetch,
+  });
+
+  const parsedStatus = parseLoomStatus(agent.status);
 
   // Rich commit data from diff endpoint
   const [diffCommits, setDiffCommits] = useState<DiffCommit[] | null>(null);
@@ -86,13 +102,26 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
 
   return (
     <>
+      {/* Git Action Bar */}
+      <GitActionBar
+        agentName={agent.name}
+        gitStatus={gitStatus}
+        agentStatus={parsedStatus}
+        actions={actions}
+      />
+
       {/* Branch Header */}
       <div className={panelStyles.section}>
         <h3 className={panelStyles.sectionTitle}>Branch</h3>
         <div className={styles.branchHeader}>
           <span className={styles.branchName}>{branch}</span>
           <span className={styles.branchArrow}>&rarr;</span>
-          <span className={styles.targetBranch}>{targetBranch}</span>
+          <TargetBranchSelector
+            currentTarget={targetBranch}
+            isWorkspace={false}
+            onUpdate={actions.updateTarget}
+            loading={actions.targetState.isLoading}
+          />
         </div>
         <div className={styles.badgeRow}>
           {ahead > 0 && (

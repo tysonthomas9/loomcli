@@ -74,9 +74,26 @@ export {
 export { fetchDiffCommits, fetchDiffFiles, fetchDiffFile } from "./diff";
 export type { DiffCommit, DiffFile, DiffFileContent } from "./diff";
 
-// Git status API functions
-export { fetchGitStatus } from "./git";
-export type { GitStatus } from "./git";
+// Git API functions
+export {
+  fetchGitStatus,
+  gitPush,
+  gitPull,
+  gitSync,
+  gitCreatePR,
+  gitReset,
+  gitUpdateTarget,
+} from "./git";
+export type {
+  GitStatus,
+  GitPushResult,
+  GitPullResult,
+  GitSyncResult,
+  GitPRResult,
+  GitResetResult,
+  GitResetLockedResponse,
+  GitTargetResult,
+} from "./git";
 
 // Log streaming API functions
 export {

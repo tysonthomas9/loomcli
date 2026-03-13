@@ -23,13 +23,37 @@ let mockGitStatusReturn: {
   status: GitStatus | null;
   loading: boolean;
   error: Error | null;
+  refetch: () => Promise<void>;
 };
+
+const mockRefetch = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/hooks/useGitStatus", () => ({
   useGitStatus: (opts: { agentName: string | null; enabled: boolean }) => {
     lastGitStatusOptions = opts;
     return mockGitStatusReturn;
   },
+}));
+
+// Mock useGitActions to provide a no-op actions object
+const mockActions = {
+  push: vi.fn(),
+  pull: vi.fn(),
+  sync: vi.fn(),
+  createPR: vi.fn(),
+  reset: vi.fn(),
+  updateTarget: vi.fn(),
+  pushState: { isLoading: false, error: null },
+  pullState: { isLoading: false, error: null },
+  syncState: { isLoading: false, error: null },
+  prState: { isLoading: false, error: null },
+  resetState: { isLoading: false, error: null },
+  targetState: { isLoading: false, error: null },
+  anyLoading: false,
+};
+
+vi.mock("@/hooks/useGitActions", () => ({
+  useGitActions: () => mockActions,
 }));
 
 // Mock fetchDiffCommits to avoid real API calls
@@ -56,6 +80,7 @@ function resetMocks() {
     status: null,
     loading: false,
     error: null,
+    refetch: mockRefetch,
   };
   mockDiffCommitsResult = Promise.resolve([]);
 }

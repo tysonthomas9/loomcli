@@ -19,6 +19,7 @@ export interface UseGitStatusReturn {
   status: GitStatus | null;
   loading: boolean;
   error: Error | null;
+  refetch: () => Promise<void>;
 }
 
 export function useGitStatus({
@@ -79,5 +80,5 @@ export function useGitStatus({
     };
   }, [enabled, agentName, doFetch]);
 
-  return { status, loading, error };
+  return { status, loading, error, refetch: doFetch };
 }

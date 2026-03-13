@@ -1,0 +1,202 @@
+/**
+ * GitActionBar styles.
+ */
+
+/* ============= Action Bar ============= */
+
+.actionBarWrapper {
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.actionBar {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  flex-wrap: wrap;
+}
+
+/* ============= Buttons ============= */
+
+.actionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.actionBtn:hover:not(:disabled) {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-dark, var(--color-border));
+}
+
+.actionBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.actionBtn[data-variant="danger"] {
+  color: var(--color-danger, #ef4444);
+  border-color: color-mix(
+    in srgb,
+    var(--color-danger, #ef4444) 30%,
+    var(--color-border)
+  );
+}
+
+.actionBtn[data-variant="danger"]:hover:not(:disabled) {
+  background-color: rgba(239, 68, 68, 0.08);
+  border-color: var(--color-danger, #ef4444);
+}
+
+.actionBtnSecondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.actionBtnSecondary:hover:not(:disabled) {
+  background-color: var(--color-bg-hover);
+}
+
+.actionBtnSecondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ============= Spinner ============= */
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary, currentColor);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ============= Inline Forms ============= */
+
+.inlineForm {
+  padding: 10px 20px 12px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.inlineLabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.inlineInput {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  transition: border-color var(--transition-fast);
+}
+
+.inlineInput:focus {
+  outline: none;
+  border-color: var(--color-primary, #3b82f6);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.inlineFormActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ============= Warning Text ============= */
+
+.warningText {
+  font-size: 13px;
+  color: var(--color-danger, #ef4444);
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
+/* ============= Target Branch ============= */
+
+.targetSelector {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.targetInput {
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  width: 140px;
+  transition: border-color var(--transition-fast);
+}
+
+.targetInput:focus {
+  outline: none;
+  border-color: var(--color-primary, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+}
+
+.targetBtnSmall {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background-color: var(--color-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.targetBtnSmall:hover:not(:disabled) {
+  background-color: var(--color-bg-hover);
+}
+
+.targetBtnSmall:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

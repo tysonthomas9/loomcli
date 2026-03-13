@@ -139,3 +139,10 @@ export type { UseTerminalSessionsReturn } from "./useTerminalSessions";
 
 export { useGitStatus } from "./useGitStatus";
 export type { UseGitStatusOptions, UseGitStatusReturn } from "./useGitStatus";
+
+export { useGitActions } from "./useGitActions";
+export type {
+  UseGitActionsOptions,
+  UseGitActionsReturn,
+  GitActionState,
+} from "./useGitActions";
