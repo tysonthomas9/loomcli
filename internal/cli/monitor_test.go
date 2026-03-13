@@ -1136,7 +1136,7 @@ func TestCollectTaskStatus(t *testing.T) {
 			wantNeedsPlanningLen: 1,
 		},
 		{
-			name: "all NeedsPlanning tasks returned",
+			name: "top 5 limit for NeedsPlanning",
 			readyOutput: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Task 2", Status: "open", Design: ""},
@@ -1149,11 +1149,11 @@ func TestCollectTaskStatus(t *testing.T) {
 			inProgressOutput:     "[]",
 			needReviewOutput:     "[]",
 			blockedOutput:        "[]",
-			wantNeedsPlanning:    7,
-			wantNeedsPlanningLen: 7, // All tasks returned
+			wantNeedsPlanning:    7, // Count is 7
+			wantNeedsPlanningLen: 5, // But only 5 stored
 		},
 		{
-			name: "all ReadyToImplement tasks returned",
+			name: "top 5 limit for ReadyToImplement",
 			readyOutput: mustJSON([]BdIssue{
 				{ID: "T-1", Title: "Task 1", Status: "open", Design: "plan"},
 				{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
@@ -1165,8 +1165,8 @@ func TestCollectTaskStatus(t *testing.T) {
 			inProgressOutput:        "[]",
 			needReviewOutput:        "[]",
 			blockedOutput:           "[]",
-			wantReadyToImplement:    6,
-			wantReadyToImplementLen: 6, // All tasks returned
+			wantReadyToImplement:    6, // Count is 6
+			wantReadyToImplementLen: 5, // But only 5 stored
 		},
 		{
 			name:                 "JSON parsing error handled gracefully",
@@ -1215,7 +1215,7 @@ func TestCollectTaskStatus(t *testing.T) {
 				return CommandResult{}
 			}
 
-			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, agentTasks := collectTaskStatus(100)
+			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, _, agentTasks := collectTaskStatus(100)
 
 			if summary.NeedsPlanning != tt.wantNeedsPlanning {
 				t.Errorf("NeedsPlanning = %d, want %d", summary.NeedsPlanning, tt.wantNeedsPlanning)
@@ -2431,218 +2431,6 @@ func TestRenderDashboardLegacyModeNoWorkspace(t *testing.T) {
 	if !strings.Contains(output, "nova") {
 		t.Error("expected 'nova' in output")
 	}
-}
-
-func TestAgentStatusPathField(t *testing.T) {
-	// Verify Path field in AgentStatus JSON serialization (omitempty behavior)
-	t.Run("path included when set", func(t *testing.T) {
-		agent := AgentStatus{
-			Name:   "cobalt",
-			Branch: "cobalt",
-			Status: "ready",
-			Path:   "worktrees/cobalt",
-		}
-
-		data, err := json.Marshal(agent)
-		if err != nil {
-			t.Fatalf("failed to marshal AgentStatus: %v", err)
-		}
-
-		jsonStr := string(data)
-		if !strings.Contains(jsonStr, `"path":"worktrees/cobalt"`) {
-			t.Errorf("expected path field in JSON, got: %s", jsonStr)
-		}
-	})
-
-	t.Run("path omitted when empty", func(t *testing.T) {
-		agent := AgentStatus{
-			Name:   "nova",
-			Branch: "nova",
-			Status: "ready",
-			Path:   "",
-		}
-
-		data, err := json.Marshal(agent)
-		if err != nil {
-			t.Fatalf("failed to marshal AgentStatus: %v", err)
-		}
-
-		jsonStr := string(data)
-		if strings.Contains(jsonStr, `"path"`) {
-			t.Errorf("expected path field to be omitted when empty, got: %s", jsonStr)
-		}
-	})
-
-	t.Run("round-trip with path set", func(t *testing.T) {
-		agent := AgentStatus{
-			Name:   "falcon",
-			Branch: "falcon",
-			Status: "ready",
-			Path:   "worktrees/falcon",
-		}
-
-		data, err := json.Marshal(agent)
-		if err != nil {
-			t.Fatalf("failed to marshal AgentStatus: %v", err)
-		}
-
-		var decoded AgentStatus
-		if err := json.Unmarshal(data, &decoded); err != nil {
-			t.Fatalf("failed to unmarshal AgentStatus: %v", err)
-		}
-		if decoded.Path != "worktrees/falcon" {
-			t.Errorf("expected path 'worktrees/falcon' after round-trip, got %q", decoded.Path)
-		}
-	})
-
-	t.Run("round-trip with path empty", func(t *testing.T) {
-		agent := AgentStatus{
-			Name:   "spark",
-			Branch: "spark",
-			Status: "ready",
-		}
-
-		data, err := json.Marshal(agent)
-		if err != nil {
-			t.Fatalf("failed to marshal AgentStatus: %v", err)
-		}
-
-		var decoded AgentStatus
-		if err := json.Unmarshal(data, &decoded); err != nil {
-			t.Fatalf("failed to unmarshal AgentStatus: %v", err)
-		}
-		if decoded.Path != "" {
-			t.Errorf("expected empty path after round-trip, got %q", decoded.Path)
-		}
-	})
-
-	t.Run("deserialization from JSON with path", func(t *testing.T) {
-		jsonStr := `{"name":"atlas","branch":"atlas","status":"ready","ahead":0,"behind":0,"path":"worktrees/atlas","workspace":""}`
-		var decoded AgentStatus
-		if err := json.Unmarshal([]byte(jsonStr), &decoded); err != nil {
-			t.Fatalf("failed to unmarshal AgentStatus from JSON: %v", err)
-		}
-		if decoded.Path != "worktrees/atlas" {
-			t.Errorf("expected path 'worktrees/atlas', got %q", decoded.Path)
-		}
-	})
-
-	t.Run("deserialization from JSON without path", func(t *testing.T) {
-		jsonStr := `{"name":"atlas","branch":"atlas","status":"ready","ahead":0,"behind":0,"workspace":""}`
-		var decoded AgentStatus
-		if err := json.Unmarshal([]byte(jsonStr), &decoded); err != nil {
-			t.Fatalf("failed to unmarshal AgentStatus from JSON: %v", err)
-		}
-		if decoded.Path != "" {
-			t.Errorf("expected empty path when not in JSON, got %q", decoded.Path)
-		}
-	})
-}
-
-func TestAgentStatusWorktreePathField(t *testing.T) {
-	// Verify WorktreePath field in AgentStatus JSON serialization (omitempty behavior)
-	t.Run("worktree_path included when set", func(t *testing.T) {
-		agent := AgentStatus{
-			Name:         "cobalt",
-			Branch:       "cobalt",
-			Status:       "ready",
-			WorktreePath: "/home/user/repo/worktrees/cobalt",
-		}
-
-		data, err := json.Marshal(agent)
-		if err != nil {
-			t.Fatalf("failed to marshal AgentStatus: %v", err)
-		}
-
-		jsonStr := string(data)
-		if !strings.Contains(jsonStr, `"worktree_path":"/home/user/repo/worktrees/cobalt"`) {
-			t.Errorf("expected worktree_path field in JSON, got: %s", jsonStr)
-		}
-	})
-
-	t.Run("worktree_path omitted when empty", func(t *testing.T) {
-		agent := AgentStatus{
-			Name:         "nova",
-			Branch:       "nova",
-			Status:       "ready",
-			WorktreePath: "",
-		}
-
-		data, err := json.Marshal(agent)
-		if err != nil {
-			t.Fatalf("failed to marshal AgentStatus: %v", err)
-		}
-
-		jsonStr := string(data)
-		if strings.Contains(jsonStr, `"worktree_path"`) {
-			t.Errorf("expected worktree_path field to be omitted when empty, got: %s", jsonStr)
-		}
-	})
-
-	t.Run("round-trip with worktree_path set", func(t *testing.T) {
-		agent := AgentStatus{
-			Name:         "falcon",
-			Branch:       "falcon",
-			Status:       "ready",
-			WorktreePath: "/home/user/repo/worktrees/falcon",
-		}
-
-		data, err := json.Marshal(agent)
-		if err != nil {
-			t.Fatalf("failed to marshal AgentStatus: %v", err)
-		}
-
-		var decoded AgentStatus
-		if err := json.Unmarshal(data, &decoded); err != nil {
-			t.Fatalf("failed to unmarshal AgentStatus: %v", err)
-		}
-		if decoded.WorktreePath != "/home/user/repo/worktrees/falcon" {
-			t.Errorf("expected worktree_path '/home/user/repo/worktrees/falcon' after round-trip, got %q", decoded.WorktreePath)
-		}
-	})
-
-	t.Run("round-trip with worktree_path empty", func(t *testing.T) {
-		agent := AgentStatus{
-			Name:   "spark",
-			Branch: "spark",
-			Status: "ready",
-		}
-
-		data, err := json.Marshal(agent)
-		if err != nil {
-			t.Fatalf("failed to marshal AgentStatus: %v", err)
-		}
-
-		var decoded AgentStatus
-		if err := json.Unmarshal(data, &decoded); err != nil {
-			t.Fatalf("failed to unmarshal AgentStatus: %v", err)
-		}
-		if decoded.WorktreePath != "" {
-			t.Errorf("expected empty worktree_path after round-trip, got %q", decoded.WorktreePath)
-		}
-	})
-
-	t.Run("deserialization from JSON with worktree_path", func(t *testing.T) {
-		jsonStr := `{"name":"atlas","branch":"atlas","status":"ready","ahead":0,"behind":0,"workspace":"","worktree_path":"/tmp/repo/worktrees/atlas"}`
-		var decoded AgentStatus
-		if err := json.Unmarshal([]byte(jsonStr), &decoded); err != nil {
-			t.Fatalf("failed to unmarshal AgentStatus from JSON: %v", err)
-		}
-		if decoded.WorktreePath != "/tmp/repo/worktrees/atlas" {
-			t.Errorf("expected worktree_path '/tmp/repo/worktrees/atlas', got %q", decoded.WorktreePath)
-		}
-	})
-
-	t.Run("deserialization from JSON without worktree_path", func(t *testing.T) {
-		jsonStr := `{"name":"atlas","branch":"atlas","status":"ready","ahead":0,"behind":0,"workspace":""}`
-		var decoded AgentStatus
-		if err := json.Unmarshal([]byte(jsonStr), &decoded); err != nil {
-			t.Fatalf("failed to unmarshal AgentStatus from JSON: %v", err)
-		}
-		if decoded.WorktreePath != "" {
-			t.Errorf("expected empty worktree_path when not in JSON, got %q", decoded.WorktreePath)
-		}
-	})
 }
 
 func TestAgentStatusWorkspaceField(t *testing.T) {

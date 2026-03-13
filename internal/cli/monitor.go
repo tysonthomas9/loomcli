@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,7 +14,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
-const dashboardWidth = 70 // Width of the monitor dashboard box
+const (
+	dashboardWidth = 70 // Width of the monitor dashboard box
+)
 
 var (
 	monitorNoWatch  bool
@@ -60,11 +61,12 @@ type MonitorData struct {
 	Timestamp          time.Time
 	Agents             []AgentStatus
 	Tasks              TaskSummary
-	NeedsPlanningTasks []TaskInfo          // Ready tasks without design
-	ReadyToImplement   []TaskInfo          // Ready tasks with design
-	ReviewTasks        []TaskInfo          // need review tasks
+	NeedsPlanningTasks []TaskInfo          // Ready tasks without design (top 5)
+	ReadyToImplement   []TaskInfo          // Ready tasks with design (top 5)
+	ReviewTasks        []TaskInfo          // top 5 need review tasks
 	InProgressTasks    []TaskInfo          // all in_progress tasks
-	BacklogTasks       []TaskInfo          // backlog tasks
+	BacklogTasks       []TaskInfo          // backlog tasks (top 20)
+	ClosedTasks        []TaskInfo          // closed tasks (top 50)
 	AgentTasks         map[string]TaskInfo // agent name -> current task (from assignee)
 	TaskConflicts      map[string][]string // TaskID -> agent names (if multiple agents claim same task)
 	SyncStatus         SyncInfo
@@ -91,8 +93,6 @@ type AgentStatus struct {
 	Status        string         `json:"status"`                   // "ready", "3 changes", "running (plan, 5m ago)"
 	Ahead         int            `json:"ahead"`                    // commits ahead of integration branch
 	Behind        int            `json:"behind"`                   // commits behind integration branch
-	Path          string         `json:"path,omitempty"`           // worktree path relative to repo root
-	WorktreePath  string         `json:"worktree_path,omitempty"`  // absolute filesystem path to worktree
 	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
 	Workspace     string         `json:"workspace"`                // workspace name (empty in legacy mode)
 	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
@@ -306,7 +306,7 @@ func collectMonitorData(readyLimit int, branch string) *MonitorData {
 	}()
 
 	// Collect tasks (internally parallel) to get agent-task mapping
-	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.AgentTasks = collectTaskStatus(readyLimit)
+	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.ClosedTasks, data.AgentTasks = collectTaskStatus(readyLimit)
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
@@ -440,13 +440,11 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 		return nil, nil
 	}
 
-	// Load daemon-managed agents (if any) and determine repo root for relative paths
+	// Load daemon-managed agents (if any)
 	var daemonManaged map[string]DaemonAgentInfo
-	repoRoot := ""
 	if projectDir, err2 := os.Getwd(); err2 == nil {
 		daemonStatePath := ResolveDaemonStatePath(projectDir)
 		daemonManaged = loadDaemonManagedAgents(daemonStatePath)
-		repoRoot = projectDir
 	}
 
 	var agents []AgentStatus
@@ -469,14 +467,6 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			Workspace:     wt.Workspace,
 			Role:          daemonInfo.Role,
 			DaemonManaged: daemonInfo.Managed,
-			WorktreePath:  wt.Path,
-		}
-
-		// Set relative worktree path (e.g., "worktrees/cobalt")
-		if repoRoot != "" {
-			if rel, err2 := filepath.Rel(repoRoot, wt.Path); err2 == nil && !strings.HasPrefix(rel, "..") {
-				agent.Path = filepath.ToSlash(rel)
-			}
 		}
 
 		// Check for running agent (lock status)
@@ -577,23 +567,24 @@ func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string)
 	return ahead, behind
 }
 
-func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
+func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
 	var summary TaskSummary
 	var needsPlanningTasks []TaskInfo
 	var readyToImplementTasks []TaskInfo
 	var reviewTasks []TaskInfo
 	var inProgressTasks []TaskInfo
 	var backlogTasks []TaskInfo
+	var closedTasks []TaskInfo
 	agentTasks := make(map[string]TaskInfo)
 
-	// Run all 4 bd commands in parallel
+	// Run all 5 bd commands in parallel
 	var (
-		readyOutput, inProgressOutput, needReviewOutput, backlogOutput string
-		readyErr, inProgressErr, needReviewErr, backlogErr             error
-		wg                                                             sync.WaitGroup
+		readyOutput, inProgressOutput, needReviewOutput, backlogOutput, closedOutput string
+		readyErr, inProgressErr, needReviewErr, backlogErr, closedErr                error
+		wg                                                                           sync.WaitGroup
 	)
 
-	wg.Add(4)
+	wg.Add(5)
 
 	go func() {
 		defer wg.Done()
@@ -615,6 +606,11 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		backlogOutput, backlogErr = runBdCommand("blocked", "--json")
 	}()
 
+	go func() {
+		defer wg.Done()
+		closedOutput, closedErr = runBdCommand("list", "--status=closed", "--json", "--limit", "50")
+	}()
+
 	wg.Wait()
 
 	// Build unclosed issue ID set from existing responses for accurate blocker filtering.
@@ -626,6 +622,8 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	if readyErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(readyOutput), &issues) == nil {
+			needsPlanningCount := 0
+			readyToImplementCount := 0
 			for _, issue := range issues {
 				// Skip non-open tasks - they appear in their own sections
 				if !IsOpen(issue) {
@@ -642,19 +640,25 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 				// SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
 				if ReadyToImplement(issue) {
 					summary.ReadyToImplement++
-					readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
-						ID:       issue.ID,
-						Title:    issue.Title,
-						Priority: issue.Priority,
-					})
+					if readyToImplementCount < 5 {
+						readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
+							ID:       issue.ID,
+							Title:    issue.Title,
+							Priority: issue.Priority,
+						})
+						readyToImplementCount++
+					}
 				} else {
 					// NeedsPlan: no design OR needs-revision label
 					summary.NeedsPlanning++
-					needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
-						ID:       issue.ID,
-						Title:    issue.Title,
-						Priority: issue.Priority,
-					})
+					if needsPlanningCount < 5 {
+						needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
+							ID:       issue.ID,
+							Title:    issue.Title,
+							Priority: issue.Priority,
+						})
+						needsPlanningCount++
+					}
 				}
 			}
 		}
@@ -681,7 +685,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		}
 	}
 
-	// Process need review tasks
+	// Process need review tasks (top 5)
 	// Note: Don't add to agentTasks - these tasks have status=review meaning
 	// the planning agent finished and released its lock. The assignee field
 	// still points to the planning agent but it's no longer running.
@@ -690,7 +694,10 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		if json.Unmarshal([]byte(needReviewOutput), &issues) == nil {
 			// All tasks with status=review are review tasks
 			summary.NeedReview = len(issues)
-			for _, issue := range issues {
+			for i, issue := range issues {
+				if i >= 5 {
+					break
+				}
 				reviewTasks = append(reviewTasks, TaskInfo{
 					ID:       issue.ID,
 					Title:    issue.Title,
@@ -705,7 +712,11 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		var issues []BdIssue
 		if json.Unmarshal([]byte(backlogOutput), &issues) == nil {
 			summary.Backlog = len(issues)
-			for _, issue := range issues {
+			// Store up to 20 backlog tasks for display
+			for i, issue := range issues {
+				if i >= 20 {
+					break
+				}
 				backlogTasks = append(backlogTasks, TaskInfo{
 					ID:       issue.ID,
 					Title:    issue.Title,
@@ -716,7 +727,25 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		}
 	}
 
-	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, agentTasks
+	// Process closed tasks (top 50)
+	if closedErr == nil {
+		var issues []BdIssue
+		if json.Unmarshal([]byte(closedOutput), &issues) == nil {
+			for i, issue := range issues {
+				if i >= 50 {
+					break
+				}
+				closedTasks = append(closedTasks, TaskInfo{
+					ID:       issue.ID,
+					Title:    issue.Title,
+					Priority: issue.Priority,
+					Status:   issue.Status,
+				})
+			}
+		}
+	}
+
+	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks
 }
 
 // collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).

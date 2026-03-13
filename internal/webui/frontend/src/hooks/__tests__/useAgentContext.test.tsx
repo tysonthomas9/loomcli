@@ -142,6 +142,7 @@ describe("useAgentContext", () => {
         needsReview: [],
         inProgress: [],
         backlog: [],
+        done: [],
       });
     });
 

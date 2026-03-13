@@ -53,6 +53,7 @@ type TasksResponse struct {
 	NeedsReview      []TaskInfo  `json:"needs_review"`
 	InProgress       []TaskInfo  `json:"in_progress"`
 	Backlog          []TaskInfo  `json:"backlog"`
+	Closed           []TaskInfo  `json:"closed"`
 	Timestamp        time.Time   `json:"timestamp"`
 }
 
@@ -149,6 +150,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 		NeedsReview:      data.ReviewTasks,
 		InProgress:       data.InProgressTasks,
 		Backlog:          data.BacklogTasks,
+		Closed:           data.ClosedTasks,
 		Timestamp:        data.Timestamp,
 	})
 }

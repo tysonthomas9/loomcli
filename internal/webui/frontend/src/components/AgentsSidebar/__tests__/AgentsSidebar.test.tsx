@@ -29,6 +29,7 @@ const defaultMockContext = {
     needsReview: [],
     inProgress: [],
     backlog: [],
+    done: [],
   },
   agentTasks: {},
   sync: {

@@ -122,6 +122,7 @@ const DEFAULT_TASK_LISTS: LoomTaskLists = {
   needsReview: [],
   inProgress: [],
   backlog: [],
+  done: [],
 };
 
 // Retry backoff configuration

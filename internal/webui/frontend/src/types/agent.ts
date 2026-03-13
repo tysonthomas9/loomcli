@@ -100,10 +100,6 @@ export interface LoomAgentStatus {
   ahead: number;
   /** Commits behind integration branch */
   behind: number;
-  /** Worktree path relative to repo root (e.g., "worktrees/cobalt") */
-  path?: string;
-  /** Absolute filesystem path to the agent's worktree */
-  worktree_path?: string;
   /** Role from daemon config (e.g., "plan", "task") */
   role?: string;
   /** Recent commits ahead of integration branch */
@@ -228,6 +224,7 @@ export interface LoomTasksResponse {
   needs_review: LoomTaskInfo[] | null;
   in_progress: LoomTaskInfo[] | null;
   backlog: LoomTaskInfo[] | null;
+  closed: LoomTaskInfo[] | null;
   timestamp: string;
 }
 
@@ -240,6 +237,7 @@ export interface LoomTaskLists {
   needsReview: LoomTaskInfo[];
   inProgress: LoomTaskInfo[];
   backlog: LoomTaskInfo[];
+  done: LoomTaskInfo[];
 }
 
 /**
