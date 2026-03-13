@@ -8,8 +8,10 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: 0;
-  overflow: visible; /* Let parent handle scrolling */
-  flex: 0 0 auto; /* Size to content, let parent scroll */
+  overflow-y: auto; /* Allow scrolling between swim lanes */
+  overflow-x: hidden;
+  flex: 1 1 0; /* Fill available space to constrain column height */
+  min-height: 0; /* Allow flex item to shrink below content height */
 }
 
 /**
