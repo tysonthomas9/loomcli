@@ -11,7 +11,7 @@ import (
 
 // ExpandEnvVars expands environment variable references in a string.
 // Supported syntax:
-//   - ${VAR}          — replaced with os.Getenv("VAR"); error if empty/unset
+//   - ${VAR}          — replaced with the variable's value; error if unset (empty-but-set is valid)
 //   - ${VAR:-default} — replaced with os.Getenv("VAR") if non-empty, otherwise "default"
 //   - ${VAR:?message} — replaced with os.Getenv("VAR"); error with "message" if empty/unset
 //   - $$              — literal $
@@ -92,7 +92,7 @@ func expandExpr(expr string, start int) (string, error) {
 		return "", fmt.Errorf("empty variable name at position %d", start)
 	}
 
-	val := os.Getenv(varName)
+	val, found := os.LookupEnv(varName)
 	if val != "" {
 		return val, nil
 	}
@@ -102,7 +102,10 @@ func expandExpr(expr string, start int) (string, error) {
 		return defaultVal, nil
 	case exprError:
 		return "", fmt.Errorf("required variable %s: %s", varName, defaultVal)
-	default:
+	default: // exprRequired
+		if found {
+			return "", nil
+		}
 		return "", fmt.Errorf("environment variable %q is not set", varName)
 	}
 }
