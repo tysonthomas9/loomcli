@@ -109,6 +109,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 
 	// Git operation endpoints for worktrees
 	if gitOps != nil {
+		mux.HandleFunc("POST /api/git/push-all", handleGitPushAll(gitOps))
 		mux.HandleFunc("POST /api/agents/{name}/git/push", handleGitPush(gitOps))
 		mux.HandleFunc("POST /api/agents/{name}/git/pull", handleGitPull(gitOps))
 		mux.HandleFunc("POST /api/agents/{name}/git/sync", handleGitSync(gitOps))

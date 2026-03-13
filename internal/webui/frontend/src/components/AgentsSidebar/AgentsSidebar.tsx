@@ -82,6 +82,10 @@ export function AgentsSidebar({
     null,
   );
 
+  // Push All state
+  const [isPushing, setIsPushing] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+
   const {
     agents,
     tasks,
@@ -130,6 +134,31 @@ export function AgentsSidebar({
     setSelectedCategory(null);
   }, []);
 
+  const handlePushAll = useCallback(async () => {
+    setIsPushing(true);
+    setPushError(null);
+    try {
+      const resp = await fetch("/api/git/push-all", { method: "POST" });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => null);
+        setPushError(data?.error || `Push failed (${resp.status})`);
+        return;
+      }
+      const data = await resp.json();
+      if (data.failed > 0) {
+        const failedNames = data.results
+          .filter((r: { success: boolean }) => !r.success)
+          .map((r: { name: string }) => r.name)
+          .join(", ");
+        setPushError(`Failed: ${failedNames}`);
+      }
+    } catch {
+      setPushError("Network error");
+    } finally {
+      setIsPushing(false);
+    }
+  }, []);
+
   // Get tasks and title for the selected category
   const getDrawerData = useCallback((): {
     title: string;
@@ -170,9 +199,8 @@ export function AgentsSidebar({
     (a) => a.status.startsWith("working:") || a.status.startsWith("planning:"),
   ).length;
 
-  // Check if there are sync warnings
-  const hasSyncWarning =
-    sync.git_needs_push > 0 || sync.git_needs_pull > 0 || !sync.db_synced;
+  // Check if there are sync warnings for the footer (push count moved to banner)
+  const hasSyncWarning = sync.git_needs_pull > 0 || !sync.db_synced;
 
   return (
     <aside className={rootClassName} data-collapsed={isCollapsed}>
@@ -253,6 +281,32 @@ export function AgentsSidebar({
               </div>
               {isWorkQueueExpanded && (
                 <div className={styles.workQueueContent}>
+                  {sync.git_needs_push > 0 && (
+                    <>
+                      <div className={styles.syncBanner}>
+                        <span
+                          className={styles.syncBannerText}
+                          title={buildSyncTooltip(
+                            sync.git_push_details,
+                            "ahead",
+                          )}
+                        >
+                          {sync.git_needs_push} need push
+                        </span>
+                        <button
+                          type="button"
+                          className={styles.pushButton}
+                          onClick={handlePushAll}
+                          disabled={isPushing}
+                        >
+                          {isPushing ? "Pushing..." : "Push All"}
+                        </button>
+                      </div>
+                      {pushError && (
+                        <div className={styles.pushError}>{pushError}</div>
+                      )}
+                    </>
+                  )}
                   <div className={styles.queueGrid}>
                     <button
                       type="button"
@@ -357,20 +411,9 @@ export function AgentsSidebar({
               </div>
             )}
 
-            {/* Sync status row */}
+            {/* Sync status row (push count moved to Work Queue banner) */}
             {isConnected && hasSyncWarning && (
               <div className={styles.syncStatus}>
-                {sync.git_needs_push > 0 && (
-                  <span
-                    className={styles.syncWarning}
-                    title={buildSyncTooltip(sync.git_push_details, "ahead")}
-                  >
-                    {sync.git_needs_push} unpushed
-                  </span>
-                )}
-                {sync.git_needs_push > 0 && sync.git_needs_pull > 0 && (
-                  <span className={styles.syncSeparator}>·</span>
-                )}
                 {sync.git_needs_pull > 0 && (
                   <span
                     className={styles.syncWarning}
@@ -379,10 +422,9 @@ export function AgentsSidebar({
                     {sync.git_needs_pull} unpulled
                   </span>
                 )}
-                {(sync.git_needs_push > 0 || sync.git_needs_pull > 0) &&
-                  !sync.db_synced && (
-                    <span className={styles.syncSeparator}>·</span>
-                  )}
+                {sync.git_needs_pull > 0 && !sync.db_synced && (
+                  <span className={styles.syncSeparator}>·</span>
+                )}
                 {!sync.db_synced && (
                   <span className={styles.syncWarning}>DB not synced</span>
                 )}

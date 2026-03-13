@@ -30,6 +30,9 @@ type GitOps interface {
 
 	// SetRepoDefaultBranch updates the target branch for a named repo.
 	SetRepoDefaultBranch(repoName, branch string) error
+
+	// ListAgentWorktrees returns all agent worktrees.
+	ListAgentWorktrees() ([]AgentWorktree, error)
 }
 
 // AgentWorktree contains resolved worktree info for an agent.

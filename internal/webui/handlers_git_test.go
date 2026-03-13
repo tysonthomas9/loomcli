@@ -11,15 +11,16 @@ import (
 
 // mockGitOps implements GitOps for testing.
 type mockGitOps struct {
-	resolveFunc          func(name string) (*AgentWorktree, error)
-	pushFunc             func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error)
-	pullFunc             func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error)
-	createPRFunc         func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error)
-	resetFunc            func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error)
-	statusFunc           func(worktreePath, targetBranch string) (*GitStatusResult, error)
-	getCurrentBranchFunc func(worktreePath string) (string, error)
-	checkGhInstalledFunc func() error
-	setRepoDefaultFunc   func(repoName, branch string) error
+	resolveFunc            func(name string) (*AgentWorktree, error)
+	pushFunc               func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error)
+	pullFunc               func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error)
+	createPRFunc           func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error)
+	resetFunc              func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error)
+	statusFunc             func(worktreePath, targetBranch string) (*GitStatusResult, error)
+	getCurrentBranchFunc   func(worktreePath string) (string, error)
+	checkGhInstalledFunc   func() error
+	setRepoDefaultFunc     func(repoName, branch string) error
+	listAgentWorktreesFunc func() ([]AgentWorktree, error)
 }
 
 func (m *mockGitOps) ResolveAgentWorktree(name string) (*AgentWorktree, error) {
@@ -83,6 +84,13 @@ func (m *mockGitOps) SetRepoDefaultBranch(repoName, branch string) error {
 		return m.setRepoDefaultFunc(repoName, branch)
 	}
 	return nil
+}
+
+func (m *mockGitOps) ListAgentWorktrees() ([]AgentWorktree, error) {
+	if m.listAgentWorktreesFunc != nil {
+		return m.listAgentWorktreesFunc()
+	}
+	return nil, nil
 }
 
 // testWorktree returns a standard AgentWorktree used across tests.
@@ -1101,5 +1109,198 @@ func TestGitHandlers_ContentType(t *testing.T) {
 				t.Errorf("Content-Type = %q, want %q", ct, "application/json")
 			}
 		})
+	}
+}
+
+// --- Push All tests ---
+
+func TestGitPushAll_Success(t *testing.T) {
+	ops := &mockGitOps{
+		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
+			return []AgentWorktree{
+				{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: "origin"},
+				{Name: "nova", Path: "/tmp/wt/nova", Branch: "nova", DefaultBranch: "main", Remote: "origin"},
+			}, nil
+		},
+		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
+			return &GitPushResult{Success: true, Message: "merged"}, nil
+		},
+	}
+	handler := handleGitPushAll(ops)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp pushAllResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.Pushed != 2 {
+		t.Errorf("pushed = %d, want 2", resp.Pushed)
+	}
+	if resp.Failed != 0 {
+		t.Errorf("failed = %d, want 0", resp.Failed)
+	}
+	if len(resp.Results) != 2 {
+		t.Errorf("results count = %d, want 2", len(resp.Results))
+	}
+}
+
+func TestGitPushAll_PartialFailure(t *testing.T) {
+	ops := &mockGitOps{
+		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
+			return []AgentWorktree{
+				{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: "origin"},
+				{Name: "nova", Path: "/tmp/wt/nova", Branch: "nova", DefaultBranch: "main", Remote: "origin"},
+			}, nil
+		},
+		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
+			if sourceBranch == "nova" {
+				return nil, errors.New("remote unreachable")
+			}
+			return &GitPushResult{Success: true, Message: "merged"}, nil
+		},
+	}
+	handler := handleGitPushAll(ops)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp pushAllResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.Pushed != 1 {
+		t.Errorf("pushed = %d, want 1", resp.Pushed)
+	}
+	if resp.Failed != 1 {
+		t.Errorf("failed = %d, want 1", resp.Failed)
+	}
+}
+
+func TestGitPushAll_EmptyWorktreeList(t *testing.T) {
+	ops := &mockGitOps{
+		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
+			return []AgentWorktree{}, nil
+		},
+	}
+	handler := handleGitPushAll(ops)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp pushAllResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.Pushed != 0 {
+		t.Errorf("pushed = %d, want 0", resp.Pushed)
+	}
+	if resp.Failed != 0 {
+		t.Errorf("failed = %d, want 0", resp.Failed)
+	}
+}
+
+func TestGitPushAll_AllUpToDate(t *testing.T) {
+	ops := &mockGitOps{
+		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
+			return []AgentWorktree{
+				{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: "origin"},
+			}, nil
+		},
+		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
+			return &GitPushResult{Success: true, AlreadyUpToDate: true, Message: "already up to date"}, nil
+		},
+	}
+	handler := handleGitPushAll(ops)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp pushAllResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.Pushed != 0 {
+		t.Errorf("pushed = %d, want 0", resp.Pushed)
+	}
+	if resp.Failed != 0 {
+		t.Errorf("failed = %d, want 0", resp.Failed)
+	}
+	if len(resp.Results) != 1 {
+		t.Errorf("results count = %d, want 1", len(resp.Results))
+	}
+	if !resp.Results[0].Success {
+		t.Error("expected first result to be success")
+	}
+}
+
+func TestGitPushAll_ListError(t *testing.T) {
+	ops := &mockGitOps{
+		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
+			return nil, errors.New("config not found")
+		},
+	}
+	handler := handleGitPushAll(ops)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestGitPushAll_DefaultRemote(t *testing.T) {
+	var capturedRemote string
+	ops := &mockGitOps{
+		listAgentWorktreesFunc: func() ([]AgentWorktree, error) {
+			return []AgentWorktree{
+				{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: ""},
+			}, nil
+		},
+		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
+			capturedRemote = remote
+			return &GitPushResult{Success: true, Message: "merged"}, nil
+		},
+	}
+	handler := handleGitPushAll(ops)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if capturedRemote != "origin" {
+		t.Errorf("remote = %q, want %q", capturedRemote, "origin")
 	}
 }

@@ -80,6 +80,80 @@ func handleGitPush(ops GitOps) http.HandlerFunc {
 	}
 }
 
+// --- Push All ---
+
+type pushAllWorktreeResult struct {
+	Name    string `json:"name"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type pushAllResponse struct {
+	Results []pushAllWorktreeResult `json:"results"`
+	Pushed  int                     `json:"pushed"`
+	Failed  int                     `json:"failed"`
+}
+
+// handleGitPushAll handles POST /api/git/push-all
+// Pushes all agent worktree branches to their target branches.
+func handleGitPushAll(ops GitOps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		worktrees, err := ops.ListAgentWorktrees()
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, fmt.Sprintf("listing worktrees: %v", err))
+			return
+		}
+
+		var results []pushAllWorktreeResult
+		pushed, failed := 0, 0
+
+		for _, wt := range worktrees {
+			remote := wt.Remote
+			if remote == "" {
+				remote = "origin"
+			}
+			result, pushErr := ops.Push(wt.Path, wt.Branch, wt.DefaultBranch, remote)
+			if pushErr != nil {
+				results = append(results, pushAllWorktreeResult{
+					Name:  wt.Name,
+					Error: pushErr.Error(),
+				})
+				failed++
+				continue
+			}
+			if result.AlreadyUpToDate {
+				results = append(results, pushAllWorktreeResult{
+					Name:    wt.Name,
+					Success: true,
+					Message: "already up to date",
+				})
+				continue
+			}
+			if !result.Success {
+				results = append(results, pushAllWorktreeResult{
+					Name:  wt.Name,
+					Error: result.Message,
+				})
+				failed++
+				continue
+			}
+			results = append(results, pushAllWorktreeResult{
+				Name:    wt.Name,
+				Success: true,
+				Message: result.Message,
+			})
+			pushed++
+		}
+
+		respondJSON(w, http.StatusOK, pushAllResponse{
+			Results: results,
+			Pushed:  pushed,
+			Failed:  failed,
+		})
+	}
+}
+
 // --- Pull ---
 
 type gitPullRequest struct {

@@ -143,6 +143,38 @@ func (g *GitOpsImpl) SetRepoDefaultBranch(repoName, branch string) error {
 	return resolver.SetRepoDefaultBranch(repoName, branch)
 }
 
+func (g *GitOpsImpl) ListAgentWorktrees() ([]webui.AgentWorktree, error) {
+	resolver, err := NewResolver()
+	if err != nil {
+		return nil, fmt.Errorf("creating resolver: %v", err)
+	}
+
+	worktrees, err := resolver.DiscoverWorktrees()
+	if err != nil {
+		return nil, fmt.Errorf("discovering worktrees: %v", err)
+	}
+
+	result := make([]webui.AgentWorktree, 0, len(worktrees))
+	for _, wt := range worktrees {
+		aw := webui.AgentWorktree{
+			Name:          wt.Name,
+			Path:          wt.Path,
+			Branch:        wt.Branch,
+			DefaultBranch: "main",
+		}
+		if wt.Repo != nil {
+			if wt.Repo.DefaultBranch != "" {
+				aw.DefaultBranch = wt.Repo.DefaultBranch
+			}
+			aw.Remote = wt.Repo.Remote
+			aw.RepoName = wt.Repo.Name
+			aw.IsWorkspace = true
+		}
+		result = append(result, aw)
+	}
+	return result, nil
+}
+
 // isLockedError checks if err is a LockedError and extracts it.
 func isLockedError(err error, target **LockedError) bool {
 	le, ok := err.(*LockedError)
