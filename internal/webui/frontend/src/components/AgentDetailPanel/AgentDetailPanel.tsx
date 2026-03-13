@@ -13,6 +13,7 @@ import { parseLoomStatus } from "@/types";
 import { LogViewer } from "../LogViewer";
 import { OpenInEditor } from "../OpenInEditor";
 import styles from "./AgentDetailPanel.module.css";
+import { GitTab } from "./GitTab";
 
 /**
  * Props for the AgentDetailPanel component.
@@ -127,7 +128,7 @@ function getPriorityLabel(priority: number): string {
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = "info" | "logs";
+type TabType = "info" | "logs" | "git";
 
 export function AgentDetailPanel({
   isOpen,
@@ -329,6 +330,17 @@ export function AgentDetailPanel({
                 >
                   Logs
                 </button>
+                <button
+                  type="button"
+                  className={`${styles.tab} ${activeTab === "git" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("git")}
+                  aria-selected={activeTab === "git"}
+                  role="tab"
+                  id="agent-panel-tab-git"
+                  aria-controls="agent-panel-tabpanel-git"
+                >
+                  Git
+                </button>
               </div>
             </div>
 
@@ -488,7 +500,7 @@ export function AgentDetailPanel({
                   )}
                 </div>
               </div>
-            ) : (
+            ) : activeTab === "logs" ? (
               /* Logs Tab */
               <div
                 className={styles.logsContainer}
@@ -534,6 +546,16 @@ export function AgentDetailPanel({
                     ? { onTerminalData: sendLogInput }
                     : {})}
                 />
+              </div>
+            ) : (
+              /* Git Tab */
+              <div
+                className={styles.scrollableContent}
+                id="agent-panel-tabpanel-git"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-git"
+              >
+                <GitTab agent={agent} isActive={activeTab === "git"} />
               </div>
             )}
           </>

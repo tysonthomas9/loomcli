@@ -7,7 +7,7 @@
  * Covers Path field rendering and OpenInEditor integration in the Agent Info section.
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -41,6 +41,13 @@ vi.mock("../LogViewer", () => ({
 vi.mock("../OpenInEditor", () => ({
   OpenInEditor: ({ path }: { path: string }) => (
     <div data-testid="open-in-editor" data-path={path} />
+  ),
+}));
+
+// Mock GitTab to avoid its hook dependencies (useGitStatus, fetchDiffCommits)
+vi.mock("./GitTab", () => ({
+  GitTab: ({ agent }: { agent: { name: string } }) => (
+    <div data-testid="git-tab-mock" data-agent={agent.name} />
   ),
 }));
 
@@ -137,6 +144,94 @@ describe("AgentDetailPanel", () => {
       renderPanel({ worktree_path: "" });
 
       expect(screen.queryByTestId("open-in-editor")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Git tab in tab bar", () => {
+    it("renders Git tab button in the tab bar", () => {
+      renderPanel();
+
+      const gitTab = screen.getByRole("tab", { name: "Git" });
+      expect(gitTab).toBeInTheDocument();
+    });
+
+    it("renders all three tabs: Info, Logs, Git", () => {
+      renderPanel();
+
+      expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+    });
+
+    it("Info tab is selected by default", () => {
+      renderPanel();
+
+      const infoTab = screen.getByRole("tab", { name: "Info" });
+      expect(infoTab).toHaveAttribute("aria-selected", "true");
+
+      const gitTab = screen.getByRole("tab", { name: "Git" });
+      expect(gitTab).toHaveAttribute("aria-selected", "false");
+    });
+
+    it("switches to Git tab content when Git tab is clicked", () => {
+      renderPanel();
+
+      // Git tab content should not be visible initially
+      expect(screen.queryByTestId("git-tab-mock")).not.toBeInTheDocument();
+
+      // Click Git tab
+      fireEvent.click(screen.getByRole("tab", { name: "Git" }));
+
+      // Git tab content should now be visible
+      expect(screen.getByTestId("git-tab-mock")).toBeInTheDocument();
+
+      // Git tab should be selected
+      expect(screen.getByRole("tab", { name: "Git" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+
+      // Info tab should no longer be selected
+      expect(screen.getByRole("tab", { name: "Info" })).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+    });
+
+    it("passes the correct agent to GitTab component", () => {
+      renderPanel({ name: "nova" });
+
+      // Click Git tab to render GitTab
+      fireEvent.click(screen.getByRole("tab", { name: "Git" }));
+
+      const gitTabMock = screen.getByTestId("git-tab-mock");
+      expect(gitTabMock).toHaveAttribute("data-agent", "nova");
+    });
+
+    it("Git tab panel has correct ARIA attributes", () => {
+      renderPanel();
+
+      // Click Git tab
+      fireEvent.click(screen.getByRole("tab", { name: "Git" }));
+
+      const tabPanel = document.getElementById("agent-panel-tabpanel-git");
+      expect(tabPanel).toBeInTheDocument();
+      expect(tabPanel).toHaveAttribute("role", "tabpanel");
+      expect(tabPanel).toHaveAttribute(
+        "aria-labelledby",
+        "agent-panel-tab-git",
+      );
+    });
+
+    it("Git tab button has correct ARIA attributes", () => {
+      renderPanel();
+
+      const gitTab = screen.getByRole("tab", { name: "Git" });
+      expect(gitTab).toHaveAttribute("id", "agent-panel-tab-git");
+      expect(gitTab).toHaveAttribute(
+        "aria-controls",
+        "agent-panel-tabpanel-git",
+      );
     });
   });
 });

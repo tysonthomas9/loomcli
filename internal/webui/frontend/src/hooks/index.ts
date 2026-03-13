@@ -136,3 +136,6 @@ export type { UseEditorsResult } from "./useEditors";
 
 export { useTerminalSessions } from "./useTerminalSessions";
 export type { UseTerminalSessionsReturn } from "./useTerminalSessions";
+
+export { useGitStatus } from "./useGitStatus";
+export type { UseGitStatusOptions, UseGitStatusReturn } from "./useGitStatus";
