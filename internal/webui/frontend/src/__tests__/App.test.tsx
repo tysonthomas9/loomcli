@@ -177,6 +177,11 @@ vi.mock("@/components/TerminalView", () => ({
   ),
 }));
 
+// Mock FileExplorer to avoid CodeMirror dependencies in jsdom
+vi.mock("@/components/FileExplorer", () => ({
+  FileExplorer: () => <div data-testid="file-explorer">File Explorer</div>,
+}));
+
 // Create hoisted mock for useViewState to allow per-test control
 const { mockUseViewState, mockSetActiveView } = vi.hoisted(() => ({
   mockUseViewState: vi.fn(),
@@ -1989,6 +1994,30 @@ describe("App", () => {
       await waitFor(() => {
         expect(screen.getByTestId("monitor-dashboard")).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("FileExplorer lazy loading integration", () => {
+    it('renders FileExplorer when activeView is "files"', async () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      vi.mocked(useViewState).mockReturnValue(["files", mockSetActiveView]);
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("file-explorer")).toBeInTheDocument();
+      });
+    });
+
+    it('does not render FileExplorer when activeView is "kanban"', () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      vi.mocked(useViewState).mockReturnValue(["kanban", mockSetActiveView]);
+
+      render(<App />);
+
+      expect(screen.queryByTestId("file-explorer")).not.toBeInTheDocument();
     });
   });
 
