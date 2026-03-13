@@ -14,9 +14,10 @@ import (
 
 // AgentProcess tracks a single supervised agent subprocess.
 type AgentProcess struct {
-	entry        AgentEntry // config from loom.yaml
-	roleConfig   RoleConfig // resolved role configuration
-	worktreePath string     // resolved worktree path
+	entry        AgentEntry  // config from loom.yaml
+	roleConfig   RoleConfig  // resolved role configuration
+	worktreePath string      // resolved worktree path
+	repoConfig   *RepoConfig // per-repo config (nil in non-workspace mode)
 
 	cmd         *exec.Cmd // current subprocess (nil when not running)
 	pid         int       // PID of current subprocess (0 when not running)
@@ -36,6 +37,33 @@ type AgentProcess struct {
 	currentBackendIdx int // 0=primary, 1+=fallback index into entry.FallbackBackends
 
 	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx
+}
+
+// resolveRemote returns the git remote name for this agent.
+// Uses repoConfig.Remote if available, otherwise defaults to "origin".
+func (ap *AgentProcess) resolveRemote() string {
+	if ap.repoConfig != nil && ap.repoConfig.Remote != "" {
+		return ap.repoConfig.Remote
+	}
+	return "origin"
+}
+
+// resolveRemoteBranch returns the full remote/branch ref for this agent
+// (e.g. "origin/main"). Uses repoConfig if available, otherwise defaults
+// to "origin/main".
+func (ap *AgentProcess) resolveRemoteBranch() string {
+	if ap.repoConfig != nil {
+		remote := ap.repoConfig.Remote
+		if remote == "" {
+			remote = "origin"
+		}
+		branch := ap.repoConfig.DefaultBranch
+		if branch == "" {
+			branch = "main"
+		}
+		return remote + "/" + branch
+	}
+	return "origin/main"
 }
 
 // SupervisedAgentStatus is a snapshot of a supervised agent's state for external inspection.
@@ -260,7 +288,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			targetBranch = epicBranchName(epicID)
 		}
 		log.Printf("[daemon] Agent %s: ensuring branch %s", ap.entry.Worktree, targetBranch)
-		if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, "origin/main"); err != nil {
+		if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, ap.resolveRemote(), ap.resolveRemoteBranch()); err != nil {
 			log.Printf("[daemon] Agent %s: branch setup failed: %v", ap.entry.Worktree, err)
 			d.concurrency.Release(ap.entry.Role)
 			if !d.handleRestartAfterError(ap) {

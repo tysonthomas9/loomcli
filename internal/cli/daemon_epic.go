@@ -226,7 +226,7 @@ func (d *Daemon) handleEpicTransition(ap *AgentProcess) error {
 		ap.entry.Worktree, currentEpicID, newEpicID)
 
 	targetBranch := epicBranchName(newEpicID)
-	if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, "origin/main"); err != nil {
+	if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, ap.resolveRemote(), ap.resolveRemoteBranch()); err != nil {
 		log.Printf("[daemon] Agent %s: branch switch to %s failed: %v",
 			ap.entry.Worktree, targetBranch, err)
 		// Roll back the assignment since branch switch failed
@@ -253,7 +253,7 @@ func (d *Daemon) switchToNonEpicMode(ap *AgentProcess) error {
 
 	// Switch to agent-name branch
 	targetBranch := ap.entry.Worktree
-	if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, "origin/main"); err != nil {
+	if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, ap.resolveRemote(), ap.resolveRemoteBranch()); err != nil {
 		log.Printf("[daemon] Agent %s: branch switch to %s failed: %v",
 			ap.entry.Worktree, targetBranch, err)
 		return err
