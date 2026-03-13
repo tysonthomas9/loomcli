@@ -28,7 +28,8 @@ export * from "./GraphControls";
 export * from "./GraphLegend";
 // GraphView is NOT exported here - it's lazy loaded in App.tsx
 // SettingsView is NOT exported here - it's lazy loaded in App.tsx
-// Import directly from '@/components/GraphView' if needed
+// CodeMirrorEditor is NOT exported here - it's lazy loaded by consumers
+// Import directly from '@/components/CodeMirrorEditor' for code splitting
 export * from "./NodeTooltip";
 export * from "./OpenInEditor";
 export * from "./ViewSwitcher";

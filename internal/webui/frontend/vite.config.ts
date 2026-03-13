@@ -30,6 +30,17 @@ export default defineConfig(({ mode }) => ({
         manualChunks: {
           react: ["react", "react-dom"],
           "react-flow": ["@xyflow/react"],
+          codemirror: [
+            "@codemirror/state",
+            "@codemirror/view",
+            "@codemirror/commands",
+            "@codemirror/language",
+            "@codemirror/search",
+            "@codemirror/lang-go",
+            "@codemirror/lang-json",
+            "@codemirror/lang-yaml",
+            "@codemirror/lang-markdown",
+          ],
         },
       },
     },
