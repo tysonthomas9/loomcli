@@ -7,13 +7,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
-import {
-  updateIssue,
-  addDependency,
-  removeDependency,
-  getTaskLogPhases,
-} from "@/api";
-import { useTaskLogPolling } from "@/hooks";
+import { updateIssue, addDependency, removeDependency } from "@/api";
+import { useAgentTerminalLogs } from "@/hooks";
 import type {
   Issue,
   IssueDetails,
@@ -225,6 +220,7 @@ function renderDependencyItem(dep: IssueWithDependencyMetadata): JSX.Element {
  */
 interface DefaultContentProps {
   issue: Issue | IssueDetails | null;
+  isOpen: boolean;
   isLoading: boolean;
   error: string | null;
   onClose: () => void;
@@ -242,6 +238,7 @@ interface DefaultContentProps {
  */
 function DefaultContent({
   issue,
+  isOpen,
   isLoading,
   error,
   onClose,
@@ -261,68 +258,42 @@ function DefaultContent({
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
 
-  // Log tab state (only for task-type issues)
-  type LogTabType = "details" | "planning" | "implementation";
-  const [activeLogTab, setActiveLogTab] = useState<LogTabType>("details");
-  const [availablePhases, setAvailablePhases] = useState<string[]>([]);
+  // Tab state
+  type TabType = "details" | "logs";
+  const [activeTab, setActiveTab] = useState<TabType>("details");
 
-  // Check if this is a task-type issue (log tabs only apply to tasks)
-  const isTaskType = issue?.issue_type === "task";
+  // Agent-based log connection
+  const agentName = issue?.assignee || null;
+  const hasAgent = !!agentName;
 
-  // Fetch available log phases when issue changes
-  useEffect(() => {
-    if (!issue || !isTaskType) {
-      setAvailablePhases([]);
-      setActiveLogTab("details");
-      return;
-    }
-
-    let cancelled = false;
-    getTaskLogPhases(issue.id)
-      .then((phases) => {
-        if (!cancelled) {
-          setAvailablePhases(phases);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAvailablePhases([]);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-    // issue is intentionally excluded - we only need to refetch when ID changes or type changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [issue?.id, isTaskType]);
-
-  // Reset tab when issue changes
-  useEffect(() => {
-    setActiveLogTab("details");
-  }, [issue?.id]);
-
-  // Determine which log URL to connect to
-  const shouldConnectToLogs =
-    isTaskType &&
-    ((activeLogTab === "planning" && !issue?.design) ||
-      activeLogTab === "implementation");
-  const activeLogPhase: "planning" | "implementation" | null =
-    issue && shouldConnectToLogs
-      ? (activeLogTab as "planning" | "implementation")
-      : null;
-
-  // Task log snapshot polling hook
   const {
+    mode: logMode,
     chunks: logChunks,
     state: logConnectionState,
     error: logError,
     resetVersion: logResetVersion,
-  } = useTaskLogPolling({
-    taskId: issue?.id ?? null,
-    phase: activeLogPhase,
-    enabled: Boolean(issue) && shouldConnectToLogs,
+    refresh: refreshLogs,
+    resize: resizeLogs,
+    sendInput: sendLogInput,
+    loadOlderLogs,
+    hasMoreLines,
+    isLoadingMore,
+  } = useAgentTerminalLogs({
+    agentName,
+    enabled: isOpen && activeTab === "logs" && hasAgent,
   });
+
+  // Reset tab when issue changes
+  useEffect(() => {
+    setActiveTab("details");
+  }, [issue?.id]);
+
+  // Reset tab when agent removed while on logs tab
+  useEffect(() => {
+    if (activeTab === "logs" && !hasAgent) {
+      setActiveTab("details");
+    }
+  }, [activeTab, hasAgent]);
 
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);
@@ -681,66 +652,87 @@ function DefaultContent({
         status={issue.status}
       />
 
-      {/* Log Tab Bar (only for task-type issues with available phases) */}
-      {isTaskType &&
-        (availablePhases.length > 0 || activeLogTab !== "details") && (
-          <div className={styles.logTabBar}>
-            <button
-              type="button"
-              className={`${styles.logTab} ${activeLogTab === "details" ? styles.activeLogTab : ""}`}
-              onClick={() => setActiveLogTab("details")}
-              aria-selected={activeLogTab === "details"}
-              role="tab"
-            >
-              Details
-            </button>
-            {availablePhases.includes("planning") && (
-              <button
-                type="button"
-                className={`${styles.logTab} ${activeLogTab === "planning" ? styles.activeLogTab : ""}`}
-                onClick={() => setActiveLogTab("planning")}
-                aria-selected={activeLogTab === "planning"}
-                role="tab"
-              >
-                Planning
-              </button>
-            )}
-            {availablePhases.includes("implementation") && (
-              <button
-                type="button"
-                className={`${styles.logTab} ${activeLogTab === "implementation" ? styles.activeLogTab : ""}`}
-                onClick={() => setActiveLogTab("implementation")}
-                aria-selected={activeLogTab === "implementation"}
-                role="tab"
-              >
-                Implementation
-              </button>
-            )}
-          </div>
+      {/* Tab Bar */}
+      <div
+        className={styles.tabBar}
+        role="tablist"
+        aria-label="Issue detail tabs"
+      >
+        <button
+          type="button"
+          role="tab"
+          className={`${styles.tab} ${activeTab === "details" ? styles.activeTab : ""}`}
+          aria-selected={activeTab === "details"}
+          aria-controls="issue-panel-tabpanel-details"
+          id="issue-panel-tab-details"
+          onClick={() => setActiveTab("details")}
+        >
+          Details
+        </button>
+        {hasAgent && (
+          <button
+            type="button"
+            role="tab"
+            className={`${styles.tab} ${activeTab === "logs" ? styles.activeTab : ""}`}
+            aria-selected={activeTab === "logs"}
+            aria-controls="issue-panel-tabpanel-logs"
+            id="issue-panel-tab-logs"
+            onClick={() => setActiveTab("logs")}
+          >
+            Logs
+          </button>
         )}
+      </div>
 
-      {/* Planning tab with design content (shown when design field exists) */}
-      {activeLogTab === "planning" && issue?.design ? (
-        <div className={styles.scrollableContent}>
-          <div className={styles.detailContent}>
-            <MarkdownRenderer content={issue.design} />
+      {activeTab === "logs" && hasAgent ? (
+        <div
+          className={styles.logsContainer}
+          role="tabpanel"
+          id="issue-panel-tabpanel-logs"
+          aria-labelledby="issue-panel-tab-logs"
+        >
+          <div className={styles.logsMetaRow}>
+            <span className={styles.logsModeBadge} data-mode={logMode}>
+              {logMode === "tmux"
+                ? "Live (tmux)"
+                : logMode === "archive"
+                  ? "Archive snapshot"
+                  : logMode === "loading"
+                    ? "Loading logs..."
+                    : "Idle"}
+            </span>
+            {logMode === "archive" && (
+              <button
+                type="button"
+                className={styles.logsRefreshButton}
+                onClick={refreshLogs}
+              >
+                Refresh
+              </button>
+            )}
           </div>
-        </div>
-      ) : /* Log Viewer (shown when Planning fallback or Implementation tab is active) */
-      shouldConnectToLogs ? (
-        <div className={styles.logsContainer}>
           <LogViewer
             chunks={logChunks}
             connectionState={logConnectionState}
             error={logError}
             height="100%"
+            autoScroll={logMode !== "tmux"}
             resetVersion={logResetVersion}
-            mode="static"
+            mode={logMode === "tmux" ? "interactive" : "static"}
+            onTerminalResize={resizeLogs}
+            onScrollToTop={logMode === "archive" ? loadOlderLogs : undefined}
+            isLoadingMore={isLoadingMore}
+            hasMoreOlder={logMode === "archive" ? hasMoreLines : false}
+            {...(logMode === "tmux" ? { onTerminalData: sendLogInput } : {})}
           />
         </div>
       ) : (
-        /* Scrollable Content (Details tab) */
-        <div className={styles.scrollableContent}>
+        <div
+          className={styles.scrollableContent}
+          role="tabpanel"
+          id="issue-panel-tabpanel-details"
+          aria-labelledby="issue-panel-tab-details"
+        >
           <div className={styles.detailContent}>
             {/* Priority/Type dropdowns for editing */}
             <div className={styles.statusRow}>
@@ -934,6 +926,7 @@ export function IssueDetailPanel({
   const content = children ?? (
     <DefaultContent
       issue={issue}
+      isOpen={isOpen}
       isLoading={isLoading ?? false}
       error={error ?? null}
       onClose={onClose}

@@ -28,14 +28,19 @@ import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import { IssueDetailPanel } from "../IssueDetailPanel";
 
 // Create hoisted mocks
-const { mockGetTaskLogPhases, mockUseTaskLogPolling } = vi.hoisted(() => ({
-  mockGetTaskLogPhases: vi.fn().mockResolvedValue([]),
-  mockUseTaskLogPolling: vi.fn(() => ({
+const { mockUseAgentTerminalLogs } = vi.hoisted(() => ({
+  mockUseAgentTerminalLogs: vi.fn(() => ({
+    mode: "idle" as const,
     chunks: [],
     state: "disconnected" as const,
     error: null,
     resetVersion: 0,
     refresh: vi.fn(),
+    resize: vi.fn(),
+    sendInput: vi.fn(),
+    loadOlderLogs: vi.fn(),
+    hasMoreLines: false,
+    isLoadingMore: false,
   })),
 }));
 
@@ -44,15 +49,14 @@ vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
-  getTaskLogPhases: mockGetTaskLogPhases,
 }));
 
-// Mock the task log polling hook
+// Mock the agent terminal logs hook
 vi.mock("@/hooks", async (importOriginal) => {
   const orig = await importOriginal<typeof import("@/hooks")>();
   return {
     ...orig,
-    useTaskLogPolling: mockUseTaskLogPolling,
+    useAgentTerminalLogs: mockUseAgentTerminalLogs,
   };
 });
 
@@ -948,124 +952,42 @@ describe("IssueDetailPanel", () => {
     });
   });
 
-  describe("Planning tab with design markdown", () => {
-    it("shows tab bar for task-type issues when phases are available", async () => {
-      mockGetTaskLogPhases.mockResolvedValue(["planning"]);
+  describe("Details/Logs tabs", () => {
+    it("always shows Details tab", () => {
       const mockIssue = createTestIssueDetails({
-        issue_type: "task",
-        design: "# My Design\n\nSome design content",
+        description: "Test description",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-
-      // Wait for phases to load and tab bar to appear
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: "Details" }),
-        ).toBeInTheDocument();
-        expect(
-          screen.getByRole("tab", { name: "Planning" }),
-        ).toBeInTheDocument();
-      });
+      expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
     });
 
-    it("does not show tab bar for non-task issue types", async () => {
-      mockGetTaskLogPhases.mockResolvedValue([]);
+    it("shows Logs tab when issue has an assignee", () => {
       const mockIssue = createTestIssueDetails({
-        issue_type: "bug",
-        design: "Some design content",
+        assignee: "agent-1",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-
-      // Give time for any async operations to settle
-      await waitFor(() => {
-        expect(
-          screen.queryByRole("tab", { name: "Planning" }),
-        ).not.toBeInTheDocument();
-      });
+      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
     });
 
-    it("shows MarkdownRenderer on Planning tab when design exists", async () => {
-      mockGetTaskLogPhases.mockResolvedValue(["planning"]);
+    it("does not show Logs tab when issue has no assignee", () => {
       const mockIssue = createTestIssueDetails({
-        issue_type: "task",
-        design: "# Design Heading\n\nDesign paragraph content",
+        assignee: undefined,
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-
-      // Wait for Planning tab to appear, then click it
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: "Planning" }),
-        ).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByRole("tab", { name: "Planning" }));
-
-      // Should render markdown content (MarkdownRenderer uses data-testid="markdown-content")
-      expect(screen.getByTestId("markdown-content")).toBeInTheDocument();
-      // Heading from design markdown should be rendered as h1
-      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-        "Design Heading",
-      );
-      // LogViewer should NOT be present
-      expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("tab", { name: "Logs" }),
+      ).not.toBeInTheDocument();
     });
 
-    it("shows LogViewer on Planning tab when design is absent", async () => {
-      mockGetTaskLogPhases.mockResolvedValue(["planning"]);
+    it("defaults to Details tab and shows detail content", () => {
       const mockIssue = createTestIssueDetails({
-        issue_type: "task",
-        design: undefined,
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-
-      // Wait for Planning tab to appear, then click it
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: "Planning" }),
-        ).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByRole("tab", { name: "Planning" }));
-
-      // Should render LogViewer (not MarkdownRenderer)
-      expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
-      expect(screen.queryByTestId("markdown-content")).not.toBeInTheDocument();
-    });
-
-    it("shows LogViewer on Implementation tab", async () => {
-      mockGetTaskLogPhases.mockResolvedValue(["planning", "implementation"]);
-      const mockIssue = createTestIssueDetails({
-        issue_type: "task",
-        design: "# Some design",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-
-      // Wait for Implementation tab to appear, then click it
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: "Implementation" }),
-        ).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByRole("tab", { name: "Implementation" }));
-
-      // Should render LogViewer for implementation
-      expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
-      expect(screen.queryByTestId("markdown-content")).not.toBeInTheDocument();
-    });
-
-    it("defaults to Details tab and shows detail content", async () => {
-      mockGetTaskLogPhases.mockResolvedValue(["planning"]);
-      const mockIssue = createTestIssueDetails({
-        issue_type: "task",
+        assignee: "agent-1",
         description: "Test issue description",
         design: "# Design content",
       });
@@ -1073,129 +995,78 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
 
-      // Wait for tab bar to render
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: "Details" }),
-        ).toBeInTheDocument();
-      });
-
-      // Details tab should be selected by default
       const detailsTab = screen.getByRole("tab", { name: "Details" });
       expect(detailsTab).toHaveAttribute("aria-selected", "true");
-
-      // Should NOT show LogViewer or markdown-content on details tab
-      // (design section on details tab uses a collapsible section, not top-level markdown-content)
       expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument();
     });
 
-    it("switches back from Planning to Details tab correctly", async () => {
-      mockGetTaskLogPhases.mockResolvedValue(["planning"]);
+    it("shows LogViewer on Logs tab", () => {
       const mockIssue = createTestIssueDetails({
-        issue_type: "task",
-        description: "My description",
+        assignee: "agent-1",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+      expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
+    });
+
+    it("switches back from Logs to Details tab correctly", () => {
+      const mockIssue = createTestIssueDetails({
+        assignee: "agent-1",
         design: "# My Design",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
 
-      // Wait for tabs
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: "Planning" }),
-        ).toBeInTheDocument();
-      });
-
-      // Switch to Planning tab
-      fireEvent.click(screen.getByRole("tab", { name: "Planning" }));
-      expect(screen.getByTestId("markdown-content")).toBeInTheDocument();
+      // Switch to Logs tab
+      fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+      expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
 
       // Switch back to Details tab
       fireEvent.click(screen.getByRole("tab", { name: "Details" }));
-
-      // LogViewer and top-level markdown should not be present
       expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument();
-      // The design section should reappear in the collapsible details view
       expect(screen.getByTestId("design-section")).toBeInTheDocument();
     });
 
-    it("renders design markdown content with list items on Planning tab", async () => {
-      mockGetTaskLogPhases.mockResolvedValue(["planning"]);
-      const mockIssue = createTestIssueDetails({
-        issue_type: "task",
-        design: "## Overview\n\n- Step 1\n- Step 2\n- Step 3",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-
-      // Switch to Planning tab
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: "Planning" }),
-        ).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByRole("tab", { name: "Planning" }));
-
-      // Markdown should render the heading and list within the markdown-content area
-      const markdownContent = screen.getByTestId("markdown-content");
-      expect(
-        within(markdownContent).getByRole("heading", { level: 2 }),
-      ).toHaveTextContent("Overview");
-      expect(within(markdownContent).getByText("Step 1")).toBeInTheDocument();
-      expect(within(markdownContent).getByText("Step 2")).toBeInTheDocument();
-      expect(within(markdownContent).getByText("Step 3")).toBeInTheDocument();
+    it("shows Logs tab for all issue types with an assignee", () => {
+      const issueTypes = ["bug", "feature", "task", "epic"] as const;
+      for (const type of issueTypes) {
+        const mockIssue = createTestIssueDetails({
+          issue_type: type,
+          assignee: "agent-1",
+        });
+        const { unmount } = render(
+          <IssueDetailPanel
+            isOpen={true}
+            issue={mockIssue}
+            onClose={() => {}}
+          />,
+        );
+        expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
+        unmount();
+      }
     });
 
-    it("does not show Planning tab when phases do not include planning", async () => {
-      mockGetTaskLogPhases.mockResolvedValue(["implementation"]);
+    it("passes agentName from assignee to useAgentTerminalLogs", () => {
       const mockIssue = createTestIssueDetails({
-        issue_type: "task",
-        design: "# Some design",
+        assignee: "my-agent",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
 
-      // Wait for tab bar to appear
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: "Details" }),
-        ).toBeInTheDocument();
-      });
+      // Switch to Logs tab to enable the hook
+      fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
 
-      // Planning tab should not be rendered
-      expect(
-        screen.queryByRole("tab", { name: "Planning" }),
-      ).not.toBeInTheDocument();
-      // But Implementation tab should be there
-      expect(
-        screen.getByRole("tab", { name: "Implementation" }),
-      ).toBeInTheDocument();
-    });
-
-    it("shows empty design content on Planning tab when design is empty string", async () => {
-      mockGetTaskLogPhases.mockResolvedValue(["planning"]);
-      const mockIssue = createTestIssueDetails({
-        issue_type: "task",
-        design: "",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      expect(mockUseAgentTerminalLogs).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentName: "my-agent",
+          enabled: true,
+        }),
       );
-
-      // Wait for Planning tab
-      await waitFor(() => {
-        expect(
-          screen.getByRole("tab", { name: "Planning" }),
-        ).toBeInTheDocument();
-      });
-      fireEvent.click(screen.getByRole("tab", { name: "Planning" }));
-
-      // Empty string is falsy, so it should fall back to LogViewer
-      expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
-      expect(screen.queryByTestId("markdown-content")).not.toBeInTheDocument();
     });
   });
 });
