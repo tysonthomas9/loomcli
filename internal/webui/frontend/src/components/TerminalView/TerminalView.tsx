@@ -7,8 +7,10 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 
+import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 import { useTerminalSessions } from "@/hooks/useTerminalSessions";
 
+import { NotesBar } from "./NotesBar";
 import { SearchBar } from "./SearchBar";
 import { SessionNamePrompt } from "./SessionNamePrompt";
 import type {
@@ -36,6 +38,11 @@ export function TerminalView({
   isActive = true,
 }: TerminalViewProps): JSX.Element {
   const { sessions, isLoading } = useTerminalSessions();
+  const {
+    tabs: tabMetadata,
+    updateNotes,
+    isLoading: metaLoading,
+  } = useTerminalMetadata();
 
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -230,7 +237,7 @@ export function TerminalView({
                 key={tab.id}
                 className={styles.terminalPane}
                 style={{
-                  display: tab.id === activeTabId ? "block" : "none",
+                  display: tab.id === activeTabId ? "flex" : "none",
                 }}
                 role="tabpanel"
                 id={`terminal-panel-${tab.id}`}
@@ -243,6 +250,14 @@ export function TerminalView({
                   onConnectionStateChange={(state) =>
                     handleConnectionStateChange(tab.id, state)
                   }
+                />
+                <NotesBar
+                  notes={
+                    tabMetadata.find((m) => m.session_name === tab.sessionName)
+                      ?.notes ?? ""
+                  }
+                  onSave={(text) => updateNotes(tab.sessionName, text)}
+                  isLoading={metaLoading}
                 />
               </div>
             ))}

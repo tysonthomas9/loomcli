@@ -1,3 +1,5 @@
+export { NotesBar } from "./NotesBar";
+export type { NotesBarProps } from "./NotesBar";
 export { TerminalInstance } from "./TerminalInstance";
 export type {
   TerminalInstanceProps,

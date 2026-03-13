@@ -29,6 +29,7 @@
   height: 100%;
   position: absolute;
   inset: 0;
+  flex-direction: column;
 }
 
 .loading {

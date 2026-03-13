@@ -34,6 +34,29 @@ vi.mock("@/hooks/useTerminalSessions", () => ({
   useTerminalSessions: () => mockHook,
 }));
 
+const mockMetadataHook = vi.hoisted(() => ({
+  tabs: [] as Array<{
+    session_name: string;
+    label: string;
+    notes: string;
+    sort_order: number;
+    created_at: string;
+    updated_at: string;
+  }>,
+  isLoading: false,
+  error: null as Error | null,
+  updateLabel: vi.fn(),
+  updateNotes: vi.fn().mockResolvedValue(undefined),
+  reorderTabs: vi.fn(),
+  deleteTab: vi.fn(),
+  refetch: vi.fn(),
+  handleMutation: vi.fn(),
+}));
+
+vi.mock("@/hooks/useTerminalMetadata", () => ({
+  useTerminalMetadata: () => mockMetadataHook,
+}));
+
 // ── Mock sibling components ──────────────────────────────────────────────────
 
 vi.mock("../TerminalInstance", () => ({
@@ -84,6 +107,20 @@ vi.mock("../TerminalTabBar", () => ({
 }));
 
 // Mock CSS modules
+vi.mock("../NotesBar.module.css", () => ({
+  default: {
+    notesBar: "notesBar",
+    collapsed: "collapsed",
+    noteIcon: "noteIcon",
+    summaryText: "summaryText",
+    placeholder: "placeholder",
+    expanded: "expanded",
+    textarea: "textarea",
+    hint: "hint",
+    savingIndicator: "savingIndicator",
+  },
+}));
+
 vi.mock("../TerminalView.module.css", () => ({
   default: {
     container: "container",
@@ -382,14 +419,14 @@ describe("TerminalView", () => {
   // ── Render tests ───────────────────────────────────────────────────────────
 
   describe("render tests", () => {
-    it("only active tab terminal pane has display:block", () => {
+    it("only active tab terminal pane is visible (display:flex)", () => {
       setHook(DEFAULT_SESSIONS, false);
       render(<TerminalView />);
 
       const pane1 = screen
         .getByTestId("terminal-instance-session-1")
         .closest('[role="tabpanel"]')!;
-      expect(pane1).toHaveStyle({ display: "block" });
+      expect(pane1).toHaveStyle({ display: "flex" });
     });
 
     it("inactive tab panes have display:none", () => {
