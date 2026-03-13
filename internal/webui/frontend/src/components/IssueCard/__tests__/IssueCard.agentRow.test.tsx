@@ -204,7 +204,7 @@ describe("IssueCard AgentRow integration", () => {
   });
 
   describe("AgentRow not shown in other columns", () => {
-    it.each(["open", "review", "done", "backlog", "blocked"])(
+    it.each(["open", "done", "backlog", "blocked"])(
       'does not render AgentRow for columnId="%s"',
       (columnId) => {
         const agent = createMockAgent({ name: "nova" });
@@ -256,6 +256,44 @@ describe("IssueCard AgentRow integration", () => {
 
       const agentRow = container.querySelector('[class*="agentRow"]');
       expect(agentRow).not.toBeInTheDocument();
+    });
+  });
+
+  describe("review column with assignee", () => {
+    it("renders AgentRow when columnId is review and assignee exists", () => {
+      setupAgentContext(undefined);
+      const issue = createTestIssue({ assignee: "nova" });
+      const { container } = render(
+        <IssueCard issue={issue} columnId="review" />,
+      );
+      // AgentRow renders
+      expect(screen.getByText("nova")).toBeInTheDocument();
+      expect(screen.getByText("N")).toBeInTheDocument();
+      // Shows static activity text, not live status
+      expect(screen.getByText("Submitted for review")).toBeInTheDocument();
+      // No status dot (agent is no longer actively working this task)
+      const dot = container.querySelector('[class*="statusDot"]');
+      expect(dot).not.toBeInTheDocument();
+    });
+
+    it("does not render AgentRow on review card without assignee", () => {
+      setupAgentContext(undefined);
+      const issue = createTestIssue({ assignee: undefined });
+      const { container } = render(
+        <IssueCard issue={issue} columnId="review" />,
+      );
+      const agentRow = container.querySelector('[class*="agentRow"]');
+      expect(agentRow).not.toBeInTheDocument();
+    });
+
+    it("does not show live agent status on review cards even when agent is found", () => {
+      const agent = createMockAgent({ name: "nova" });
+      setupAgentContext(agent);
+      const issue = createTestIssue({ assignee: "nova" });
+      render(<IssueCard issue={issue} columnId="review" />);
+      // Should show static text, not the live "Working" label
+      expect(screen.getByText("Submitted for review")).toBeInTheDocument();
+      expect(screen.queryByText("Working")).not.toBeInTheDocument();
     });
   });
 
