@@ -103,6 +103,21 @@ const TOP_ITEMS: NavItem[] = [
     ),
   },
   {
+    id: "files",
+    label: "Files",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M3 7V5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
+  {
     id: "terminal",
     label: "Terminal",
     icon: (

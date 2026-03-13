@@ -17,7 +17,8 @@ export type ViewMode =
   | "monitor"
   | "observability"
   | "terminal"
-  | "settings";
+  | "settings"
+  | "files";
 
 /**
  * Default view when none is specified.

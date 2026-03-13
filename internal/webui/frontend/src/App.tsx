@@ -90,6 +90,13 @@ const TerminalView = lazy(() =>
   })),
 );
 
+// Lazy load FileExplorer (CodeMirror 6 ~100KB)
+const FileExplorer = lazy(() =>
+  import("@/components/FileExplorer").then((m) => ({
+    default: m.FileExplorer,
+  })),
+);
+
 function App() {
   // Theme state
   const { theme, toggleTheme } = useTheme();
@@ -657,6 +664,11 @@ function App() {
       {activeView === "settings" && (
         <Suspense fallback={<LoadingSkeleton.Column />}>
           <SettingsView />
+        </Suspense>
+      )}
+      {activeView === "files" && (
+        <Suspense fallback={<LoadingSkeleton.Column />}>
+          <FileExplorer />
         </Suspense>
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

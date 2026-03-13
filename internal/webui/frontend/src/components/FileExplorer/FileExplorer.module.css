@@ -1,0 +1,282 @@
+/* === Layout === */
+.container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.treePanel {
+  width: 320px;
+  min-width: 240px;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+/* === Toolbar (agent select + filter) === */
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.agentSelect {
+  width: 100%;
+  padding: 6px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family-mono);
+  cursor: pointer;
+}
+
+.agentSelect:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.filterInput {
+  width: 100%;
+  padding: 6px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.filterInput::placeholder {
+  color: var(--color-text-muted);
+}
+
+.filterInput:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* === Tree === */
+.treeScroll {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-1) 0;
+}
+
+.tree {
+  /* role="tree" container */
+}
+
+.treeNode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 3px var(--space-2);
+  padding-right: var(--space-3);
+  border: none;
+  background: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family-mono);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.treeNode:hover {
+  background: var(--color-bg-hover);
+}
+
+.treeNode[data-selected] {
+  background: var(--color-bg-active);
+  color: var(--color-primary);
+}
+
+.treeNode:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform 200ms ease;
+  transform: rotate(0deg);
+}
+
+.chevronExpanded {
+  transform: rotate(90deg);
+}
+
+.fileIconSpacer {
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.treeNode[data-dir] .icon {
+  color: var(--color-primary);
+}
+
+.fileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.highlight {
+  background-color: var(--color-highlight);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* === FileViewer overlay (matches IssueDetailPanel pattern) === */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background-color: rgba(0, 0, 0, 0);
+  visibility: hidden;
+  transition:
+    background-color var(--transition-slow),
+    visibility 0s var(--transition-slow);
+}
+
+.overlayOpen {
+  background-color: rgb(0 0 0 / 32%);
+  visibility: visible;
+  transition:
+    background-color var(--transition-slow),
+    visibility 0s;
+}
+
+.viewerPanel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(100%, var(--panel-width-max));
+  max-width: var(--panel-width-max);
+  background-color: var(--color-panel-bg);
+  box-shadow: var(--panel-shadow-strong);
+  transform: translateX(100%);
+  transition: transform var(--transition-slow);
+  display: flex;
+  flex-direction: column;
+}
+
+.overlayOpen .viewerPanel {
+  transform: translateX(0);
+}
+
+@media (width <= 520px) {
+  .viewerPanel {
+    width: 100%;
+  }
+}
+
+.viewerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  min-height: 48px;
+}
+
+.viewerPath {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.closeButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  margin-left: var(--space-2);
+  transition: background-color var(--transition-fast);
+}
+
+.closeButton:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.closeButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.viewerContent {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* === Shared states === */
+.loading {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.error {
+  padding: var(--space-4);
+  color: var(--color-status-closed);
+  font-size: var(--font-size-sm);
+}
+
+.empty {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.binaryNotice {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+}
+
+/* === Responsive === */
+@media (width <= 640px) {
+  .treePanel {
+    width: 100%;
+    max-width: none;
+    border-right: none;
+  }
+}
