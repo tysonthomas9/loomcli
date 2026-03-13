@@ -38,17 +38,29 @@ describe("NavRail", () => {
       expect(screen.queryByLabelText("Monitor")).not.toBeInTheDocument();
     });
 
+    it("renders a List button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("List")).toBeInTheDocument();
+    });
+
     it("renders a Terminal button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       expect(screen.getByLabelText("Terminal")).toBeInTheDocument();
     });
 
-    it("renders exactly four navigation buttons", () => {
+    it("renders exactly six navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(4);
+      expect(buttons).toHaveLength(6);
+    });
+
+    it("renders a Files button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Files")).toBeInTheDocument();
     });
 
     it("renders tooltips for each button", () => {
@@ -57,8 +69,12 @@ describe("NavRail", () => {
       expect(
         screen.getByRole("tooltip", { name: "Kanban" }),
       ).toBeInTheDocument();
+      expect(screen.getByRole("tooltip", { name: "List" })).toBeInTheDocument();
       expect(
         screen.getByRole("tooltip", { name: "Observability" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("tooltip", { name: "Files" }),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("tooltip", { name: "Terminal" }),
@@ -118,6 +134,16 @@ describe("NavRail", () => {
 
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenCalledWith("kanban");
+    });
+
+    it('calls onChange with "table" when List button is clicked', () => {
+      const onChange = vi.fn();
+      render(<NavRail activeView="kanban" onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("List"));
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith("table");
     });
 
     it('calls onChange with "settings" when Settings button is clicked', () => {

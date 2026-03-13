@@ -65,6 +65,21 @@ const TOP_ITEMS: NavItem[] = [
     ),
   },
   {
+    id: "table",
+    label: "List",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M4 6h16M4 12h16M4 18h16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+  {
     id: "observability",
     label: "Observability",
     icon: (
@@ -98,6 +113,21 @@ const TOP_ITEMS: NavItem[] = [
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: "files",
+    label: "Files",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M3 7V5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
         />
       </svg>
     ),
