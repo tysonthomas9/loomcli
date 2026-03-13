@@ -1,4 +1,4 @@
-import { get, ApiError } from "./client";
+import { get, patch, del, ApiError } from "./client";
 
 // ============= Types =============
 
@@ -76,4 +76,58 @@ export function buildTerminalWsUrl(
     url += `&token=${encodeURIComponent(token)}`;
   }
   return url;
+}
+
+// ============= Tab Metadata Types =============
+
+export interface TabMetadata {
+  session_name: string;
+  label: string;
+  notes: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============= Tab Metadata API Functions =============
+
+/**
+ * List all tab metadata from GET /api/terminal/tabs.
+ */
+export async function listTabMetadata(): Promise<TabMetadata[]> {
+  const response = await get<ApiResult<TabMetadata[]>>("/api/terminal/tabs");
+  return unwrap(response);
+}
+
+/**
+ * Get metadata for a single tab from GET /api/terminal/tabs/{session}.
+ */
+export async function getTabMetadata(session: string): Promise<TabMetadata> {
+  const response = await get<ApiResult<TabMetadata>>(
+    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+  );
+  return unwrap(response);
+}
+
+/**
+ * Partially update tab metadata via PATCH /api/terminal/tabs/{session}.
+ */
+export async function patchTabMetadata(
+  session: string,
+  fields: Partial<{ label: string; notes: string; sort_order: number }>,
+): Promise<TabMetadata> {
+  const response = await patch<ApiResult<TabMetadata>>(
+    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+    fields,
+  );
+  return unwrap(response);
+}
+
+/**
+ * Delete tab metadata via DELETE /api/terminal/tabs/{session}.
+ */
+export async function deleteTabMetadata(session: string): Promise<void> {
+  await del<ApiResult<undefined>>(
+    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+  );
 }

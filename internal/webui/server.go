@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 const (
@@ -312,6 +313,15 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Fleet registration endpoint will return 503 until a fleet API key is configured")
 	}
 
+	// Initialize tab metadata store for terminal tab persistence
+	var tabMetaStore *tabmeta.Store
+	if config.FleetRedis != nil {
+		tmClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
+		tabMetaStore = tabmeta.NewStore(tmClient, nil)
+		defer func() { _ = tabMetaStore.Close() }()
+		log.Printf("Tab metadata store initialized (Redis: %s)", config.FleetRedis.Address)
+	}
+
 	// Load or generate API key for authentication
 	var apiKey string
 	if config.AuthEnabled {
@@ -340,7 +350,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, tabMetaStore)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.

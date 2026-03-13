@@ -3,17 +3,23 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { ApiError, get } from "./client";
+import { ApiError, get, patch, del } from "./client";
 import {
   listTerminalSessions,
   fetchTerminalToken,
   buildTerminalWsUrl,
+  listTabMetadata,
+  getTabMetadata,
+  patchTabMetadata,
+  deleteTabMetadata,
 } from "./terminal";
-import type { TerminalSessionInfo } from "./terminal";
+import type { TerminalSessionInfo, TabMetadata } from "./terminal";
 
 // Mock the client module
 vi.mock("./client", () => ({
   get: vi.fn(),
+  patch: vi.fn(),
+  del: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       public status: number,
@@ -27,6 +33,8 @@ vi.mock("./client", () => ({
 }));
 
 const mockGet = get as ReturnType<typeof vi.fn>;
+const mockPatch = patch as ReturnType<typeof vi.fn>;
+const mockDel = del as ReturnType<typeof vi.fn>;
 
 describe("terminal API", () => {
   beforeEach(() => {
@@ -127,6 +135,110 @@ describe("terminal API", () => {
       const token = await fetchTerminalToken("my-session");
 
       expect(token).toBeNull();
+    });
+  });
+
+  // ============= listTabMetadata =============
+
+  describe("listTabMetadata", () => {
+    it("returns tab metadata on success", async () => {
+      const tabs: TabMetadata[] = [
+        {
+          session_name: "session-1",
+          label: "Session 1",
+          notes: "",
+          sort_order: 0,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ];
+
+      mockGet.mockResolvedValue({ success: true, data: tabs });
+
+      const result = await listTabMetadata();
+      expect(result).toEqual(tabs);
+      expect(mockGet).toHaveBeenCalledWith("/api/terminal/tabs");
+    });
+
+    it("throws on failure response", async () => {
+      mockGet.mockResolvedValue({
+        success: false,
+        error: "no Redis",
+      });
+
+      await expect(listTabMetadata()).rejects.toThrow(ApiError);
+    });
+  });
+
+  // ============= getTabMetadata =============
+
+  describe("getTabMetadata", () => {
+    it("returns tab metadata for a session", async () => {
+      const tab: TabMetadata = {
+        session_name: "test",
+        label: "Test",
+        notes: "notes",
+        sort_order: 1,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      };
+
+      mockGet.mockResolvedValue({ success: true, data: tab });
+
+      const result = await getTabMetadata("test");
+      expect(result).toEqual(tab);
+      expect(mockGet).toHaveBeenCalledWith("/api/terminal/tabs/test");
+    });
+
+    it("URL-encodes the session name", async () => {
+      mockGet.mockResolvedValue({
+        success: true,
+        data: {
+          session_name: "my-tab",
+          label: "My Tab",
+          notes: "",
+          sort_order: 0,
+          created_at: "",
+          updated_at: "",
+        },
+      });
+
+      await getTabMetadata("my-tab");
+      expect(mockGet).toHaveBeenCalledWith("/api/terminal/tabs/my-tab");
+    });
+  });
+
+  // ============= patchTabMetadata =============
+
+  describe("patchTabMetadata", () => {
+    it("sends partial update", async () => {
+      const updated: TabMetadata = {
+        session_name: "test",
+        label: "Updated",
+        notes: "",
+        sort_order: 1,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-02T00:00:00Z",
+      };
+
+      mockPatch.mockResolvedValue({ success: true, data: updated });
+
+      const result = await patchTabMetadata("test", { label: "Updated" });
+      expect(result).toEqual(updated);
+      expect(mockPatch).toHaveBeenCalledWith("/api/terminal/tabs/test", {
+        label: "Updated",
+      });
+    });
+  });
+
+  // ============= deleteTabMetadata =============
+
+  describe("deleteTabMetadata", () => {
+    it("sends delete request", async () => {
+      mockDel.mockResolvedValue({ success: true });
+
+      await deleteTabMetadata("test");
+      expect(mockDel).toHaveBeenCalledWith("/api/terminal/tabs/test");
     });
   });
 
