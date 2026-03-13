@@ -1223,7 +1223,7 @@ func (s *SQLiteStorage) UpdateIssueID(ctx context.Context, oldID, newID string, 
 func (s *SQLiteStorage) RenameDependencyPrefix(ctx context.Context, oldPrefix, newPrefix string) error {
 	// Update issue_id column
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE dependencies 
+		UPDATE dependencies
 		SET issue_id = ? || substr(issue_id, length(?) + 1)
 		WHERE issue_id LIKE ? || '%'
 	`, newPrefix, oldPrefix, oldPrefix)
@@ -2106,6 +2106,19 @@ func (s *SQLiteStorage) SearchIssues(ctx context.Context, query string, filter t
 	if filter.Overdue {
 		whereClauses = append(whereClauses, "due_at IS NOT NULL AND due_at < ? AND status != ?")
 		args = append(args, time.Now().Format(time.RFC3339), types.StatusClosed)
+	}
+
+	// Source repo filtering (IN semantics)
+	if len(filter.SourceRepos) > 0 {
+		if len(filter.SourceRepos) > 100 {
+			return nil, fmt.Errorf("source_repos filter supports at most 100 values, got %d", len(filter.SourceRepos))
+		}
+		placeholders := make([]string, len(filter.SourceRepos))
+		for i, repo := range filter.SourceRepos {
+			placeholders[i] = "?"
+			args = append(args, repo)
+		}
+		whereClauses = append(whereClauses, fmt.Sprintf("source_repo IN (%s)", strings.Join(placeholders, ",")))
 	}
 
 	whereSQL := ""

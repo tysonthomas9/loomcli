@@ -1264,6 +1264,11 @@ func (s *Server) handleList(req *Request) Response {
 		filter.MolType = &molType
 	}
 
+	// Source repo filtering
+	if len(listArgs.SourceRepos) > 0 {
+		filter.SourceRepos = listArgs.SourceRepos
+	}
+
 	// Status exclusion (for default non-closed behavior, GH#788)
 	if len(listArgs.ExcludeStatus) > 0 {
 		for _, s := range listArgs.ExcludeStatus {
@@ -1502,6 +1507,11 @@ func (s *Server) handleCount(req *Request) Response {
 	// Priority range
 	filter.PriorityMin = countArgs.PriorityMin
 	filter.PriorityMax = countArgs.PriorityMax
+
+	// Source repo filtering
+	if len(countArgs.SourceRepos) > 0 {
+		filter.SourceRepos = countArgs.SourceRepos
+	}
 
 	ctx, cancel := s.reqCtx(req)
 	defer cancel()
@@ -1771,6 +1781,9 @@ func (s *Server) handleReady(req *Request) Response {
 	if readyArgs.MolType != "" {
 		molType := types.MolType(readyArgs.MolType)
 		wf.MolType = &molType
+	}
+	if len(readyArgs.SourceRepos) > 0 {
+		wf.SourceRepos = readyArgs.SourceRepos
 	}
 
 	ctx, cancel := s.reqCtx(req)
