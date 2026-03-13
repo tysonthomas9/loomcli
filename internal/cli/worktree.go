@@ -612,69 +612,6 @@ func ResolveWorktreePath(name string) (string, error) {
 	return getDefaultResolver().ResolveWorktreePath(name)
 }
 
-// ResolvedTarget holds the result of workspace-aware argument resolution.
-type ResolvedTarget struct {
-	WorkDir   string // directory where Claude should run
-	AgentName string // agent name for locks and prompts
-}
-
-// ResolveAgentTarget resolves a CLI argument (workspace name, repo name, or
-// worktree name) into the working directory and agent name. In workspace mode,
-// Claude always runs from the workspace root so bd commands use the shared
-// .beads/ directory.
-func ResolveAgentTarget(name string) (ResolvedTarget, error) {
-	resolver, _ := NewResolver()
-	if resolver.Mode() == ModeWorkspace {
-		// Absolute paths are used as-is even in workspace mode
-		if name != "" && filepath.IsAbs(name) {
-			if _, err := os.Stat(name); err != nil {
-				return ResolvedTarget{}, fmt.Errorf("path does not exist: %s", name)
-			}
-			return ResolvedTarget{
-				WorkDir:   name,
-				AgentName: filepath.Base(name),
-			}, nil
-		}
-		// Try workspace name first
-		if wsPath, ok := resolver.ResolveWorkspaceByName(name); ok {
-			return ResolvedTarget{
-				WorkDir:   wsPath,
-				AgentName: name,
-			}, nil
-		}
-		// Validate repo name exists (but still use workspace root for Claude)
-		if name != "" {
-			if _, err := resolver.ResolveWorktreePath(name); err != nil {
-				return ResolvedTarget{}, fmt.Errorf("'%s' is not a workspace or repo name: %w", name, err)
-			}
-		}
-		// In workspace mode, always use workspace root for Claude
-		wsConfig, ok := resolver.config.Workspaces[resolver.workspace]
-		if !ok || wsConfig.Path == "" {
-			return ResolvedTarget{}, fmt.Errorf("workspace %q has no path configured", resolver.workspace)
-		}
-		return ResolvedTarget{
-			WorkDir:   wsConfig.Path,
-			AgentName: resolver.WorkspaceName(),
-		}, nil
-	}
-
-	// Legacy mode - unchanged behavior
-	worktreePath, err := ResolveWorktreePath(name)
-	if err != nil {
-		return ResolvedTarget{}, err
-	}
-	return ResolvedTarget{
-		WorkDir:   worktreePath,
-		AgentName: GetWorktreeName(worktreePath),
-	}, nil
-}
-
-// GetWorktreeName extracts the worktree name from a path
-func GetWorktreeName(path string) string {
-	return filepath.Base(path)
-}
-
 // DiscoverWorktrees finds all worktrees in the worktrees directory
 func DiscoverWorktrees() ([]WorktreeInfo, error) {
 	return getDefaultResolver().DiscoverWorktrees()

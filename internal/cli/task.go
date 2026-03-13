@@ -69,7 +69,7 @@ func runTask(cmd *cobra.Command, args []string) {
 		argName = args[0]
 	}
 
-	target, err := ResolveAgentTarget(argName)
+	target, err := ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

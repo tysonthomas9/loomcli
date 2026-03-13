@@ -571,7 +571,7 @@ func TestResolveAgentTarget_WorkspaceMode_AbsolutePath(t *testing.T) {
 	absTarget := filepath.Join(tmpDir, "custom-target")
 	os.MkdirAll(absTarget, 0755)
 
-	target, err := ResolveAgentTarget(absTarget)
+	target, err := ResolveAgentTarget(absTarget, "")
 	if err != nil {
 		t.Fatalf("ResolveAgentTarget: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestResolveAgentTarget_WorkspaceMode_AbsolutePathNotExist(t *testing.T) {
 	defaultResolver = nil
 	defer func() { defaultResolver = old }()
 
-	_, err := ResolveAgentTarget("/nonexistent/absolute/path")
+	_, err := ResolveAgentTarget("/nonexistent/absolute/path", "")
 	if err == nil {
 		t.Fatal("expected error for nonexistent absolute path")
 	}
@@ -628,7 +628,7 @@ func TestResolveAgentTarget_WorkspaceMode_NoWorkspacePath(t *testing.T) {
 	defaultResolver = nil
 	defer func() { defaultResolver = old }()
 
-	_, err := ResolveAgentTarget("")
+	_, err := ResolveAgentTarget("", "")
 	if err == nil {
 		t.Fatal("expected error when workspace has no path")
 	}

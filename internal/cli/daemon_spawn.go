@@ -61,6 +61,11 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", resolveDaemonPath(d.projectDir, d.config.Daemon.EventsDir)),
 	)
 
+	// Propagate repo context for subprocess diagnostics and prompts
+	if ap.entry.Repo != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_REPO=%s", ap.entry.Repo))
+	}
+
 	// Propagate role constraints as env vars for the subprocess
 	if len(ap.roleConfig.AllowedTools) > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ALLOWED_TOOLS=%s", strings.Join(ap.roleConfig.AllowedTools, ",")))

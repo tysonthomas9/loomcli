@@ -112,21 +112,10 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 	}
 
 	for i, entry := range config.Agents {
-		// Resolve worktree path
-		target, err := ResolveAgentTarget(entry.Worktree)
+		// Resolve worktree path (handles per-repo routing when entry.Repo is set)
+		target, err := ResolveAgentTarget(entry.Worktree, entry.Repo)
 		if err != nil {
 			return nil, fmt.Errorf("agent[%d] worktree %q: %w", i, entry.Worktree, err)
-		}
-
-		worktreePath := target.WorkDir
-
-		// If agent declares repo affinity, resolve repo path for working directory
-		if entry.Repo != "" {
-			repoPath, err := resolveRepoPath(entry.Repo)
-			if err != nil {
-				return nil, fmt.Errorf("agent[%d] repo %q: %w", i, entry.Repo, err)
-			}
-			worktreePath = repoPath
 		}
 
 		// Resolve role config
@@ -138,7 +127,7 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 		ap := &AgentProcess{
 			entry:        entry,
 			roleConfig:   roleConfig,
-			worktreePath: worktreePath,
+			worktreePath: target.WorkDir,
 		}
 		d.agents = append(d.agents, ap)
 	}
