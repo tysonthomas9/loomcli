@@ -66,6 +66,7 @@ type MonitorData struct {
 	ReviewTasks        []TaskInfo          // top 5 need review tasks
 	InProgressTasks    []TaskInfo          // all in_progress tasks
 	BacklogTasks       []TaskInfo          // backlog tasks (top 20)
+	ClosedTasks        []TaskInfo          // closed tasks (top 50)
 	AgentTasks         map[string]TaskInfo // agent name -> current task (from assignee)
 	TaskConflicts      map[string][]string // TaskID -> agent names (if multiple agents claim same task)
 	SyncStatus         SyncInfo
@@ -114,6 +115,7 @@ type TaskSummary struct {
 	InProgress       int `json:"in_progress"`
 	NeedReview       int `json:"need_review"`
 	Backlog          int `json:"backlog"`
+	Epics            int `json:"epics"` // Open epics (tracked separately)
 }
 
 // WorktreeSyncDetail holds per-worktree sync detail (commits ahead or behind).
@@ -305,7 +307,7 @@ func collectMonitorData(readyLimit int, branch string) *MonitorData {
 	}()
 
 	// Collect tasks (internally parallel) to get agent-task mapping
-	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.AgentTasks = collectTaskStatus(readyLimit)
+	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.ClosedTasks, data.AgentTasks = collectTaskStatus(readyLimit)
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
@@ -325,6 +327,18 @@ func collectMonitorData(readyLimit int, branch string) *MonitorData {
 	// Combine sync bd result with agent data for git push/pull counts
 	data.SyncStatus = completeSyncStatus(syncBdInfo, data.Agents)
 	data.Stats = stats
+
+	// Compute Remaining as the sum of work queue categories so it always tallies.
+	// bd stats computes Remaining by subtraction which can disagree with the
+	// work queue counts due to issues falling between bd ready / bd blocked.
+	data.Stats.Remaining = data.Tasks.NeedsPlanning + data.Tasks.ReadyToImplement +
+		data.Tasks.NeedReview + data.Tasks.InProgress + data.Tasks.Backlog
+	data.Stats.Total = data.Stats.Remaining + data.Stats.Closed
+	if data.Stats.Total > 0 {
+		data.Stats.Completion = float64(data.Stats.Closed) / float64(data.Stats.Total) * 100
+	} else {
+		data.Stats.Completion = 0
+	}
 
 	return data
 }
@@ -566,23 +580,24 @@ func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string)
 	return ahead, behind
 }
 
-func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
+func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
 	var summary TaskSummary
 	var needsPlanningTasks []TaskInfo
 	var readyToImplementTasks []TaskInfo
 	var reviewTasks []TaskInfo
 	var inProgressTasks []TaskInfo
 	var backlogTasks []TaskInfo
+	var closedTasks []TaskInfo
 	agentTasks := make(map[string]TaskInfo)
 
-	// Run all 4 bd commands in parallel
+	// Run all 5 bd commands in parallel
 	var (
-		readyOutput, inProgressOutput, needReviewOutput, backlogOutput string
-		readyErr, inProgressErr, needReviewErr, backlogErr             error
-		wg                                                             sync.WaitGroup
+		readyOutput, inProgressOutput, needReviewOutput, backlogOutput, closedOutput string
+		readyErr, inProgressErr, needReviewErr, backlogErr, closedErr                error
+		wg                                                                           sync.WaitGroup
 	)
 
-	wg.Add(4)
+	wg.Add(5)
 
 	go func() {
 		defer wg.Done()
@@ -604,6 +619,11 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		backlogOutput, backlogErr = runBdCommand("blocked", "--json")
 	}()
 
+	go func() {
+		defer wg.Done()
+		closedOutput, closedErr = runBdCommand("list", "--status=closed", "--json", "--limit", "50")
+	}()
+
 	wg.Wait()
 
 	// Build unclosed issue ID set from existing responses for accurate blocker filtering.
@@ -623,9 +643,12 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 					continue
 				}
 				if IsEpic(issue) {
+					summary.Epics++
 					continue
 				}
 				if HasUnclosedBlockers(issue.Dependencies, unclosedIDs) {
+					// Count these in backlog — they have open deps
+					summary.Backlog++
 					continue
 				}
 
@@ -704,7 +727,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	if backlogErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(backlogOutput), &issues) == nil {
-			summary.Backlog = len(issues)
+			summary.Backlog += len(issues)
 			// Store up to 20 backlog tasks for display
 			for i, issue := range issues {
 				if i >= 20 {
@@ -720,7 +743,25 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 		}
 	}
 
-	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, agentTasks
+	// Process closed tasks (top 50)
+	if closedErr == nil {
+		var issues []BdIssue
+		if json.Unmarshal([]byte(closedOutput), &issues) == nil {
+			for i, issue := range issues {
+				if i >= 50 {
+					break
+				}
+				closedTasks = append(closedTasks, TaskInfo{
+					ID:       issue.ID,
+					Title:    issue.Title,
+					Priority: issue.Priority,
+					Status:   issue.Status,
+				})
+			}
+		}
+	}
+
+	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks
 }
 
 // collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).
@@ -780,16 +821,17 @@ func collectStatistics() MonitorStats {
 				stats.Completion = float64(stats.Closed) / float64(stats.Total) * 100
 			}
 
-			// Remaining = total - closed - tombstone
-			stats.Remaining = stats.Total - stats.Closed - bdStats.Summary.TombstoneIssues
+			// Remaining = total - closed
+			// Note: bd stats total_issues already excludes tombstones
+			stats.Remaining = stats.Total - stats.Closed
 			if stats.Remaining < 0 {
 				stats.Remaining = 0
 			}
 
-			// Review = total - open - inProgress - closed - blocked - deferred - tombstone - pinned
+			// Review = total - open - inProgress - closed - blocked - deferred - pinned
+			// Note: bd stats total_issues already excludes tombstones
 			stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
-				stats.Blocked - bdStats.Summary.DeferredIssues -
-				bdStats.Summary.TombstoneIssues - bdStats.Summary.PinnedIssues
+				stats.Blocked - bdStats.Summary.DeferredIssues - bdStats.Summary.PinnedIssues
 			if stats.Review < 0 {
 				stats.Review = 0
 			}
@@ -881,3 +923,4 @@ func runBdCommand(args ...string) (string, error) {
 	}
 	return result.Stdout, nil
 }
+
