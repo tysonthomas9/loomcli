@@ -102,6 +102,41 @@ const TOP_ITEMS: NavItem[] = [
       </svg>
     ),
   },
+  {
+    id: "terminal",
+    label: "Terminal",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect
+          x="2"
+          y="3"
+          width="20"
+          height="18"
+          rx="2"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <polyline
+          points="6 9 10 12 6 15"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <line
+          x1="12"
+          y1="15"
+          x2="18"
+          y2="15"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
 ];
 
 const BOTTOM_ITEMS: NavItem[] = [

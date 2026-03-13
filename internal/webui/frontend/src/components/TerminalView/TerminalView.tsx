@@ -28,7 +28,13 @@ interface TabState {
   connectionState: ConnectionState;
 }
 
-export function TerminalView(): JSX.Element {
+interface TerminalViewProps {
+  isActive?: boolean;
+}
+
+export function TerminalView({
+  isActive = true,
+}: TerminalViewProps): JSX.Element {
   const { sessions, isLoading } = useTerminalSessions();
 
   const [tabs, setTabs] = useState<TabState[]>([]);
@@ -59,8 +65,9 @@ export function TerminalView(): JSX.Element {
     }
   }, [sessions, isLoading]);
 
-  // Cmd+F / Ctrl+F intercept
+  // Cmd+F / Ctrl+F intercept (only when view is active)
   useEffect(() => {
+    if (!isActive) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "f") {
         e.preventDefault();
@@ -74,7 +81,7 @@ export function TerminalView(): JSX.Element {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [isSearchOpen, activeTabId, isSessionPromptOpen]);
+  }, [isActive, isSearchOpen, activeTabId, isSessionPromptOpen]);
 
   // Re-run search on tab switch while search is open
   useEffect(() => {
