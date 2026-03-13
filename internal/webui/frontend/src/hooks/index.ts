@@ -146,3 +146,9 @@ export type {
   UseGitActionsReturn,
   GitActionState,
 } from "./useGitActions";
+
+export { useFileTree } from "./useFileTree";
+export type { UseFileTreeReturn } from "./useFileTree";
+
+export { useFileContent } from "./useFileContent";
+export type { UseFileContentReturn } from "./useFileContent";
