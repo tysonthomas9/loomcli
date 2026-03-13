@@ -9,9 +9,10 @@ import {
   getStatusLabel,
 } from "@/components/AgentCard";
 import { BlockedBadge } from "@/components/BlockedBadge";
+import { TypeIcon } from "@/components/TypeIcon";
 import { useAgentContext } from "@/hooks";
 import type { BlockerRef, Issue } from "@/types";
-import { parseLoomStatus } from "@/types";
+import { isKnownIssueType, parseLoomStatus } from "@/types";
 import { formatIssueId } from "@/utils/formatIssueId";
 import { getOpenStatus, getReviewType } from "@/utils/issueCategory";
 import type { OpenStatus, ReviewType } from "@/utils/issueCategory";
@@ -142,6 +143,13 @@ export function IssueCard({
     >
       <header className={styles.header}>
         <span className={styles.id}>{displayId}</span>
+        {issue.issue_type && isKnownIssueType(issue.issue_type) && (
+          <TypeIcon
+            type={issue.issue_type}
+            size={14}
+            className={styles.typeIcon ?? ""}
+          />
+        )}
         {reviewType && (
           <span
             className={`${styles.reviewTypeBadge} ${REVIEW_BADGE_CONFIG[reviewType].className}`}
