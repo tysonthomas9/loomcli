@@ -254,3 +254,30 @@ func TestRepoConfigDefaults(t *testing.T) {
 		t.Errorf("Remote = %q, want empty (omitempty)", repo.Remote)
 	}
 }
+
+func TestRepoConfig_ResolveAbsPath_Relative(t *testing.T) {
+	rc := RepoConfig{Path: "repos/myrepo"}
+	got := rc.ResolveAbsPath("/workspace")
+	want := "/workspace/repos/myrepo"
+	if got != want {
+		t.Errorf("ResolveAbsPath(%q) = %q, want %q", "/workspace", got, want)
+	}
+}
+
+func TestRepoConfig_ResolveAbsPath_Absolute(t *testing.T) {
+	rc := RepoConfig{Path: "/abs/myrepo"}
+	got := rc.ResolveAbsPath("/workspace")
+	want := "/abs/myrepo"
+	if got != want {
+		t.Errorf("ResolveAbsPath(%q) = %q, want %q", "/workspace", got, want)
+	}
+}
+
+func TestRepoConfig_ResolveAbsPath_EmptyWorkspace(t *testing.T) {
+	rc := RepoConfig{Path: "repos/myrepo"}
+	got := rc.ResolveAbsPath("")
+	want := filepath.Join("", "repos/myrepo")
+	if got != want {
+		t.Errorf("ResolveAbsPath(%q) = %q, want %q", "", got, want)
+	}
+}

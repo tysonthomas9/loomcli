@@ -31,6 +31,16 @@ type RepoConfig struct {
 	Remote        string `yaml:"remote,omitempty" json:"remote,omitempty"`                 // Git remote name (defaults to "origin")
 }
 
+// ResolveAbsPath returns the absolute path for this repo.
+// If repo.Path is already absolute, returns it as-is.
+// Otherwise, joins it with workspacePath.
+func (rc RepoConfig) ResolveAbsPath(workspacePath string) string {
+	if filepath.IsAbs(rc.Path) {
+		return rc.Path
+	}
+	return filepath.Join(workspacePath, rc.Path)
+}
+
 // ValidateRemoteName checks if a remote name is safe for use in git commands.
 // Empty is allowed (resolveRemote defaults it to "origin").
 func ValidateRemoteName(name string) error {

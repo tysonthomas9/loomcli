@@ -1117,3 +1117,183 @@ agents:
 		t.Errorf("Agent PathPatterns = %v, want nil", pf.Agents[0].PathPatterns)
 	}
 }
+
+func TestAgentEntry_RepoField_YAMLRoundtrip(t *testing.T) {
+	original := AgentEntry{
+		Worktree: "falcon",
+		Role:     "plan",
+		Repo:     "myrepo",
+		Auto:     true,
+		Backend:  "anthropic",
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Verify the YAML contains "repo: myrepo"
+	if !strings.Contains(string(data), "repo: myrepo") {
+		t.Errorf("marshaled YAML does not contain 'repo: myrepo': %s", string(data))
+	}
+
+	var decoded AgentEntry
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded.Worktree != original.Worktree {
+		t.Errorf("Worktree = %q, want %q", decoded.Worktree, original.Worktree)
+	}
+	if decoded.Role != original.Role {
+		t.Errorf("Role = %q, want %q", decoded.Role, original.Role)
+	}
+	if decoded.Repo != original.Repo {
+		t.Errorf("Repo = %q, want %q", decoded.Repo, original.Repo)
+	}
+	if decoded.Auto != original.Auto {
+		t.Errorf("Auto = %v, want %v", decoded.Auto, original.Auto)
+	}
+	if decoded.Backend != original.Backend {
+		t.Errorf("Backend = %q, want %q", decoded.Backend, original.Backend)
+	}
+}
+
+func TestAgentEntry_RepoField_OmittedWhenEmpty(t *testing.T) {
+	original := AgentEntry{
+		Worktree: "nova",
+		Role:     "task",
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Repo field should be omitted when empty (omitempty)
+	if strings.Contains(string(data), "repo:") {
+		t.Errorf("marshaled YAML contains 'repo:' but should be omitted: %s", string(data))
+	}
+
+	var decoded AgentEntry
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.Repo != "" {
+		t.Errorf("Repo = %q, want empty", decoded.Repo)
+	}
+}
+
+func TestLoadProjectFile_WithRepoField(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `agents:
+  - worktree: falcon
+    role: plan
+    repo: myrepo
+    auto: true
+  - worktree: nova
+    role: task
+`
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	pf, err := LoadProjectFile(dir)
+	if err != nil {
+		t.Fatalf("LoadProjectFile() error = %v", err)
+	}
+	if pf == nil {
+		t.Fatal("LoadProjectFile() returned nil")
+	}
+	if len(pf.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(pf.Agents))
+	}
+	if pf.Agents[0].Repo != "myrepo" {
+		t.Errorf("agents[0].Repo = %q, want %q", pf.Agents[0].Repo, "myrepo")
+	}
+	if pf.Agents[1].Repo != "" {
+		t.Errorf("agents[1].Repo = %q, want empty", pf.Agents[1].Repo)
+	}
+}
+
+// writeWorkspaceConfig writes a config.yaml with a workspace containing repos into configDir.
+func writeWorkspaceConfig(t *testing.T, configDir string, repos []RepoConfig) {
+	t.Helper()
+	reposYAML := ""
+	for _, r := range repos {
+		reposYAML += "      - name: " + r.Name + "\n"
+		reposYAML += "        path: " + r.Path + "\n"
+	}
+	cfgYAML := "version: 2\nworkspaces:\n  ws:\n    path: /tmp/ws\n    repos:\n" + reposYAML
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(cfgYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateAgentRepos_UnknownRepo(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	writeWorkspaceConfig(t, configDir, []RepoConfig{
+		{Name: "backend", Path: "/tmp/ws/backend"},
+		{Name: "frontend", Path: "/tmp/ws/frontend"},
+	})
+
+	agents := []AgentEntry{
+		{Worktree: "falcon", Role: "plan", Repo: "nonexistent"},
+	}
+	err := validateAgentRepos(agents)
+	if err == nil {
+		t.Fatal("validateAgentRepos() error = nil, want error for unknown repo")
+	}
+	if !strings.Contains(err.Error(), "not found in workspace") {
+		t.Errorf("error = %q, want contains 'not found in workspace'", err.Error())
+	}
+}
+
+func TestValidateAgentRepos_ValidRepo(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	writeWorkspaceConfig(t, configDir, []RepoConfig{
+		{Name: "backend", Path: "/tmp/ws/backend"},
+		{Name: "frontend", Path: "/tmp/ws/frontend"},
+	})
+
+	agents := []AgentEntry{
+		{Worktree: "falcon", Role: "plan", Repo: "backend"},
+	}
+	err := validateAgentRepos(agents)
+	if err != nil {
+		t.Errorf("validateAgentRepos() error = %v, want nil", err)
+	}
+}
+
+func TestValidateAgentRepos_NoWorkspace(t *testing.T) {
+	// No config file → no workspace → should warn but not error
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	agents := []AgentEntry{
+		{Worktree: "falcon", Role: "plan", Repo: "somerepo"},
+	}
+	err := validateAgentRepos(agents)
+	if err != nil {
+		t.Errorf("validateAgentRepos() error = %v, want nil (no workspace configured)", err)
+	}
+}
+
+func TestValidateAgentRepos_NoRepoField(t *testing.T) {
+	// Agents with no Repo field set — should return nil regardless of workspace config
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	writeWorkspaceConfig(t, configDir, []RepoConfig{
+		{Name: "backend", Path: "/tmp/ws/backend"},
+	})
+
+	agents := []AgentEntry{
+		{Worktree: "falcon", Role: "plan"},
+		{Worktree: "nova", Role: "task"},
+	}
+	err := validateAgentRepos(agents)
+	if err != nil {
+		t.Errorf("validateAgentRepos() error = %v, want nil (no repo field set)", err)
+	}
+}

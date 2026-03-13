@@ -69,6 +69,7 @@ type RoleConfig struct {
 type AgentEntry struct {
 	Worktree         string   `yaml:"worktree"`
 	Role             string   `yaml:"role"`
+	Repo             string   `yaml:"repo,omitempty"`
 	Auto             bool     `yaml:"auto,omitempty"`
 	Backend          string   `yaml:"backend,omitempty"`
 	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
@@ -197,6 +198,11 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		return nil, err
 	}
 
+	// Validate repo references against workspace config
+	if err := validateAgentRepos(dc.Agents); err != nil {
+		return nil, err
+	}
+
 	// Run comprehensive validation
 	if vr := ValidateProjectConfig(dc, projectDir); vr.HasErrors() {
 		return nil, fmt.Errorf("%s", vr.FormatIssues())
@@ -227,6 +233,79 @@ func validateAgents(agents []AgentEntry, maxAgents *int) error {
 		return fmt.Errorf("too many agents configured: %d exceeds max_agents limit of %d", len(agents), *maxAgents)
 	}
 	return nil
+}
+
+// validateAgentRepos checks that agent Repo fields reference valid repos in the workspace config.
+// In workspace mode, unknown repo names are hard errors. Outside workspace mode, Repo fields
+// trigger a warning but are not blocking.
+func validateAgentRepos(agents []AgentEntry) error {
+	// Check if any agent uses Repo
+	hasRepo := false
+	for _, a := range agents {
+		if a.Repo != "" {
+			hasRepo = true
+			break
+		}
+	}
+	if !hasRepo {
+		return nil
+	}
+
+	ws, err := ResolveActiveWorkspace()
+	if err != nil {
+		return fmt.Errorf("validating agent repos: %w", err)
+	}
+
+	if ws == nil {
+		// Not in workspace mode — warn but don't fail
+		fmt.Fprintf(os.Stderr, "Warning: agent(s) declare repo but no workspace is configured; repo field will be ignored\n")
+		return nil
+	}
+
+	// Build set of valid repo names
+	repoNames := make(map[string]bool, len(ws.Repos))
+	for _, r := range ws.Repos {
+		repoNames[r.Name] = true
+	}
+
+	for i, a := range agents {
+		if a.Repo == "" {
+			continue
+		}
+		if !repoNames[a.Repo] {
+			available := make([]string, 0, len(ws.Repos))
+			for _, r := range ws.Repos {
+				available = append(available, r.Name)
+			}
+			return fmt.Errorf("agent[%d]: repo %q not found in workspace; available repos: %v", i, a.Repo, available)
+		}
+	}
+	return nil
+}
+
+// resolveRepoPath looks up a repo by name in the active workspace config and returns
+// its absolute path. Returns an error if the repo is not found or the path doesn't exist.
+func resolveRepoPath(repoName string) (string, error) {
+	ws, err := ResolveActiveWorkspace()
+	if err != nil {
+		return "", fmt.Errorf("resolving workspace: %w", err)
+	}
+	if ws == nil {
+		return "", fmt.Errorf("no active workspace configured")
+	}
+
+	for _, repo := range ws.Repos {
+		if repo.Name == repoName {
+			absPath := repo.ResolveAbsPath(ws.Path)
+			if info, err := os.Stat(absPath); err != nil {
+				return "", fmt.Errorf("repo path %q does not exist: %w", absPath, err)
+			} else if !info.IsDir() {
+				return "", fmt.Errorf("repo path %q is not a directory", absPath)
+			}
+			return absPath, nil
+		}
+	}
+	return "", fmt.Errorf("repo %q not found in workspace", repoName)
 }
 
 // overlayDaemonSettings applies explicitly-set values from src onto dst.

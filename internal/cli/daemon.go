@@ -43,6 +43,7 @@ type AgentProcess struct {
 type SupervisedAgentStatus struct {
 	Worktree       string
 	Role           string
+	Repo           string
 	WorktreePath   string
 	PID            int
 	RestartCount   int
@@ -117,6 +118,17 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 			return nil, fmt.Errorf("agent[%d] worktree %q: %w", i, entry.Worktree, err)
 		}
 
+		worktreePath := target.WorkDir
+
+		// If agent declares repo affinity, resolve repo path for working directory
+		if entry.Repo != "" {
+			repoPath, err := resolveRepoPath(entry.Repo)
+			if err != nil {
+				return nil, fmt.Errorf("agent[%d] repo %q: %w", i, entry.Repo, err)
+			}
+			worktreePath = repoPath
+		}
+
 		// Resolve role config
 		roleConfig, err := d.resolveRoleConfig(entry.Role, i)
 		if err != nil {
@@ -126,7 +138,7 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 		ap := &AgentProcess{
 			entry:        entry,
 			roleConfig:   roleConfig,
-			worktreePath: target.WorkDir,
+			worktreePath: worktreePath,
 		}
 		d.agents = append(d.agents, ap)
 	}
@@ -373,6 +385,7 @@ func (d *Daemon) Agents() []SupervisedAgentStatus {
 		result[i] = SupervisedAgentStatus{
 			Worktree:       ap.entry.Worktree,
 			Role:           ap.entry.Role,
+			Repo:           ap.entry.Repo,
 			WorktreePath:   ap.worktreePath,
 			PID:            ap.pid,
 			RestartCount:   ap.restartCount,

@@ -21,6 +21,7 @@ import (
 type DaemonAgentStatus struct {
 	Worktree       string    `json:"worktree"`
 	Role           string    `json:"role"`
+	Repo           string    `json:"repo,omitempty"`
 	PID            int       `json:"pid"`
 	Status         string    `json:"status"` // "running", "starting", "stopped", "failed"
 	TaskID         string    `json:"task_id,omitempty"`
@@ -479,6 +480,7 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 		state.Agents[i] = DaemonAgentStatus{
 			Worktree:       ap.Worktree,
 			Role:           ap.Role,
+			Repo:           ap.Repo,
 			PID:            ap.PID,
 			Status:         computeAgentStatus(ap, maxRetries),
 			EpicID:         ap.AssignedEpicID,
