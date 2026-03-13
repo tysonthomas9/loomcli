@@ -13,8 +13,14 @@ import (
 // Rejects names starting with '-' or containing '..'.
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
 
-// resolveAgent validates the agent name from the path and resolves it via GitOps.
-func resolveAgent(w http.ResponseWriter, r *http.Request, ops GitOps) (*AgentWorktree, bool) {
+// AgentResolver is satisfied by any interface that can resolve agent worktrees.
+// Both GitOps and FileOps implement this, allowing resolveAgent to be shared.
+type AgentResolver interface {
+	ResolveAgentWorktree(name string) (*AgentWorktree, error)
+}
+
+// resolveAgent validates the agent name from the path and resolves it via the given resolver.
+func resolveAgent(w http.ResponseWriter, r *http.Request, ops AgentResolver) (*AgentWorktree, bool) {
 	agentName := r.PathValue("name")
 	if agentName == "" {
 		respondError(w, http.StatusBadRequest, "missing agent name")

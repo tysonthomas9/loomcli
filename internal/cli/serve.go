@@ -253,6 +253,7 @@ func runServe(cmd *cobra.Command, args []string) {
 			log.Printf("WebUI API authentication is disabled (enable with --auth)")
 		}
 		go func() {
+			gitOps := NewGitOps()
 			cfg := webui.ServerConfig{
 				Port:           serveWebUIPort,
 				BindAddress:    serveBindAddr,
@@ -268,7 +269,8 @@ func runServe(cmd *cobra.Command, args []string) {
 				HSTSEnabled:    serveHSTS,
 				DevMode:        serveDev,
 				DevFrontendDir: serveDevFrontDir,
-				GitOps:         NewGitOps(),
+				GitOps:         gitOps,
+				FileOps:        gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true
