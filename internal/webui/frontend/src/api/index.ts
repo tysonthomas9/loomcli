@@ -72,7 +72,7 @@ export {
 
 // Diff API functions (agent worktree diffs)
 export { fetchDiffCommits, fetchDiffFiles, fetchDiffFile } from "./diff";
-export type { DiffCommit, DiffFile, DiffFileContent } from "./diff";
+export type { DiffCommit, DiffFile, DiffFilePatch } from "./diff";
 
 // Git API functions
 export {

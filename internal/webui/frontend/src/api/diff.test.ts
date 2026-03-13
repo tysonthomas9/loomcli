@@ -26,7 +26,7 @@ describe("diff API", () => {
           short_hash: "abc123d",
           subject: "Fix bug",
           author: "Test User",
-          author_email: "test@example.com",
+          email: "test@example.com",
           date: "2026-03-10T12:00:00Z",
         },
       ];
@@ -94,12 +94,14 @@ describe("diff API", () => {
   describe("fetchDiffFiles", () => {
     it("returns files array on success", async () => {
       const files = [
-        { path: "main.go", status: "M" as const },
-        { path: "new.go", status: "A" as const },
+        { path: "main.go", status: "M" as const, additions: 5, deletions: 2 },
+        { path: "new.go", status: "A" as const, additions: 30, deletions: 0 },
         {
           path: "renamed.go",
           status: "R" as const,
           old_path: "old_name.go",
+          additions: 0,
+          deletions: 0,
         },
       ];
       mockGet.mockResolvedValue({
@@ -107,11 +109,24 @@ describe("diff API", () => {
         data: { files },
       });
 
-      const result = await fetchDiffFiles("ember", "abc123", "def456");
+      const result = await fetchDiffFiles("ember", "def456", "abc123");
 
       expect(result).toEqual(files);
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/files?from=abc123&to=def456",
+        "/api/agents/ember/diff/files?to=def456&from=abc123",
+      );
+    });
+
+    it("omits from param for root commit", async () => {
+      mockGet.mockResolvedValue({
+        success: true,
+        data: { files: [] },
+      });
+
+      await fetchDiffFiles("ember", "def456");
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/agents/ember/diff/files?to=def456",
       );
     });
 
@@ -121,10 +136,10 @@ describe("diff API", () => {
         data: { files: [] },
       });
 
-      await fetchDiffFiles("agent/special", "abc", "def");
+      await fetchDiffFiles("agent/special", "def", "abc");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/agent%2Fspecial/diff/files?from=abc&to=def",
+        "/api/agents/agent%2Fspecial/diff/files?to=def&from=abc",
       );
     });
 
@@ -134,10 +149,10 @@ describe("diff API", () => {
         data: { files: [] },
       });
 
-      await fetchDiffFiles("ember", "ref/with spaces", "other&ref");
+      await fetchDiffFiles("ember", "other&ref", "ref/with spaces");
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/files?from=ref%2Fwith%20spaces&to=other%26ref",
+        "/api/agents/ember/diff/files?to=other%26ref&from=ref%2Fwith%20spaces",
       );
     });
 
@@ -147,35 +162,55 @@ describe("diff API", () => {
         error: "invalid commit range",
       });
 
-      await expect(fetchDiffFiles("ember", "bad", "range")).rejects.toThrow(
+      await expect(fetchDiffFiles("ember", "range", "bad")).rejects.toThrow(
         ApiError,
       );
     });
   });
 
   describe("fetchDiffFile", () => {
-    it("returns file content on success", async () => {
-      const content = {
-        old_content: "old code",
-        new_content: "new code",
+    it("returns diff patch on success", async () => {
+      const patch = {
+        patch: "--- a/main.go\n+++ b/main.go\n@@ -1,3 +1,5 @@\n+new line",
         is_binary: false,
-        too_large: false,
+        is_too_large: false,
+        additions: 3,
+        deletions: 1,
       };
       mockGet.mockResolvedValue({
         success: true,
-        data: content,
+        data: patch,
       });
 
       const result = await fetchDiffFile(
         "ember",
         "main.go",
-        "abc123",
         "def456",
+        "abc123",
       );
 
-      expect(result).toEqual(content);
+      expect(result).toEqual(patch);
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/file?path=main.go&from=abc123&to=def456",
+        "/api/agents/ember/diff/file?path=main.go&to=def456&from=abc123",
+      );
+    });
+
+    it("omits from param for root commit", async () => {
+      mockGet.mockResolvedValue({
+        success: true,
+        data: {
+          patch: "+new file content",
+          is_binary: false,
+          is_too_large: false,
+          additions: 1,
+          deletions: 0,
+        },
+      });
+
+      await fetchDiffFile("ember", "main.go", "def456");
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/agents/ember/diff/file?path=main.go&to=def456",
       );
     });
 
@@ -183,22 +218,23 @@ describe("diff API", () => {
       mockGet.mockResolvedValue({
         success: true,
         data: {
-          old_content: "",
-          new_content: "",
+          patch: "",
           is_binary: false,
-          too_large: false,
+          is_too_large: false,
+          additions: 0,
+          deletions: 0,
         },
       });
 
       await fetchDiffFile(
         "ember",
         "src/path with spaces/file.go",
-        "abc&123",
         "def=456",
+        "abc&123",
       );
 
       expect(mockGet).toHaveBeenCalledWith(
-        "/api/agents/ember/diff/file?path=src%2Fpath%20with%20spaces%2Ffile.go&from=abc%26123&to=def%3D456",
+        "/api/agents/ember/diff/file?path=src%2Fpath%20with%20spaces%2Ffile.go&to=def%3D456&from=abc%26123",
       );
     });
 
@@ -206,34 +242,35 @@ describe("diff API", () => {
       mockGet.mockResolvedValue({
         success: true,
         data: {
-          old_content: "",
-          new_content: "",
+          patch: "",
           is_binary: true,
-          too_large: false,
+          is_too_large: false,
+          additions: 0,
+          deletions: 0,
         },
       });
 
-      const result = await fetchDiffFile("ember", "image.png", "abc", "def");
+      const result = await fetchDiffFile("ember", "image.png", "def", "abc");
 
       expect(result.is_binary).toBe(true);
-      expect(result.old_content).toBe("");
-      expect(result.new_content).toBe("");
+      expect(result.patch).toBe("");
     });
 
-    it("returns too_large flag correctly", async () => {
+    it("returns is_too_large flag correctly", async () => {
       mockGet.mockResolvedValue({
         success: true,
         data: {
-          old_content: "",
-          new_content: "",
+          patch: "",
           is_binary: false,
-          too_large: true,
+          is_too_large: true,
+          additions: 0,
+          deletions: 0,
         },
       });
 
-      const result = await fetchDiffFile("ember", "huge.sql", "abc", "def");
+      const result = await fetchDiffFile("ember", "huge.sql", "def", "abc");
 
-      expect(result.too_large).toBe(true);
+      expect(result.is_too_large).toBe(true);
     });
 
     it("throws on API failure", async () => {
@@ -243,10 +280,10 @@ describe("diff API", () => {
       });
 
       await expect(
-        fetchDiffFile("ember", "missing.go", "abc", "def"),
+        fetchDiffFile("ember", "missing.go", "def", "abc"),
       ).rejects.toThrow(ApiError);
       await expect(
-        fetchDiffFile("ember", "missing.go", "abc", "def"),
+        fetchDiffFile("ember", "missing.go", "def", "abc"),
       ).rejects.toThrow("file not found");
     });
   });

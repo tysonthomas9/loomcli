@@ -12,7 +12,7 @@ export interface DiffCommit {
   short_hash: string;
   subject: string;
   author: string;
-  author_email: string;
+  email: string;
   date: string; // ISO 8601 string from backend
 }
 
@@ -20,13 +20,16 @@ export interface DiffFile {
   path: string;
   status: "M" | "A" | "D" | "R";
   old_path?: string; // present for renames
+  additions: number;
+  deletions: number;
 }
 
-export interface DiffFileContent {
-  old_content: string;
-  new_content: string;
+export interface DiffFilePatch {
+  patch: string;
   is_binary: boolean;
-  too_large: boolean;
+  is_too_large: boolean;
+  additions: number;
+  deletions: number;
 }
 
 // ============= Response Types =============
@@ -72,29 +75,35 @@ export async function fetchDiffCommits(
 
 /**
  * Fetch changed files between two commits.
- * GET /api/agents/{name}/diff/files?from=X&to=Y
+ * GET /api/agents/{name}/diff/files?to=Y or ?from=X&to=Y
  */
 export async function fetchDiffFiles(
   agentName: string,
-  from: string,
   to: string,
+  from?: string,
 ): Promise<DiffFile[]> {
-  const url = `/api/agents/${encodeURIComponent(agentName)}/diff/files?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  let url = `/api/agents/${encodeURIComponent(agentName)}/diff/files?to=${encodeURIComponent(to)}`;
+  if (from !== undefined) {
+    url += `&from=${encodeURIComponent(from)}`;
+  }
   const response = await get<ApiResult<{ files: DiffFile[] }>>(url);
   return unwrap(response).files;
 }
 
 /**
- * Fetch diff content for a single file between two commits.
- * GET /api/agents/{name}/diff/file?path=X&from=Y&to=Z
+ * Fetch unified diff patch for a single file between two commits.
+ * GET /api/agents/{name}/diff/file?path=X&to=Z or ?path=X&from=Y&to=Z
  */
 export async function fetchDiffFile(
   agentName: string,
   path: string,
-  from: string,
   to: string,
-): Promise<DiffFileContent> {
-  const url = `/api/agents/${encodeURIComponent(agentName)}/diff/file?path=${encodeURIComponent(path)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-  const response = await get<ApiResult<DiffFileContent>>(url);
+  from?: string,
+): Promise<DiffFilePatch> {
+  let url = `/api/agents/${encodeURIComponent(agentName)}/diff/file?path=${encodeURIComponent(path)}&to=${encodeURIComponent(to)}`;
+  if (from !== undefined) {
+    url += `&from=${encodeURIComponent(from)}`;
+  }
+  const response = await get<ApiResult<DiffFilePatch>>(url);
   return unwrap(response);
 }
