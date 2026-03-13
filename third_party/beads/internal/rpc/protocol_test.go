@@ -170,3 +170,101 @@ func TestUpdateArgsWithNilValues(t *testing.T) {
 		t.Errorf("Expected status to be nil, got %v", *decodedArgs.Status)
 	}
 }
+
+func TestCreateArgsSourceRepoSerialization(t *testing.T) {
+	args := CreateArgs{
+		Title:      "Test Issue",
+		IssueType:  "task",
+		Priority:   2,
+		SourceRepo: "github.com/org/repo",
+	}
+
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("Failed to marshal CreateArgs: %v", err)
+	}
+
+	var decoded CreateArgs
+	if err := json.Unmarshal(argsJSON, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal CreateArgs: %v", err)
+	}
+
+	if decoded.SourceRepo != "github.com/org/repo" {
+		t.Errorf("Expected SourceRepo 'github.com/org/repo', got %q", decoded.SourceRepo)
+	}
+	if decoded.Title != "Test Issue" {
+		t.Errorf("Expected Title 'Test Issue', got %q", decoded.Title)
+	}
+}
+
+func TestCreateArgsSourceRepoOmittedWhenEmpty(t *testing.T) {
+	args := CreateArgs{
+		Title:     "Test Issue",
+		IssueType: "task",
+		Priority:  2,
+	}
+
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("Failed to marshal CreateArgs: %v", err)
+	}
+
+	// source_repo should be omitted from JSON when empty
+	var raw map[string]interface{}
+	if err := json.Unmarshal(argsJSON, &raw); err != nil {
+		t.Fatalf("Failed to unmarshal to map: %v", err)
+	}
+	if _, exists := raw["source_repo"]; exists {
+		t.Errorf("Expected source_repo to be omitted from JSON when empty")
+	}
+}
+
+func TestMutationEventSourceRepoSerialization(t *testing.T) {
+	event := MutationEvent{
+		Type:       MutationCreate,
+		IssueID:    "bd-42",
+		Title:      "Test Issue",
+		SourceRepo: "github.com/org/repo",
+	}
+
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal MutationEvent: %v", err)
+	}
+
+	var decoded MutationEvent
+	if err := json.Unmarshal(eventJSON, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal MutationEvent: %v", err)
+	}
+
+	if decoded.SourceRepo != "github.com/org/repo" {
+		t.Errorf("Expected SourceRepo 'github.com/org/repo', got %q", decoded.SourceRepo)
+	}
+	if decoded.Type != MutationCreate {
+		t.Errorf("Expected Type %q, got %q", MutationCreate, decoded.Type)
+	}
+	if decoded.IssueID != "bd-42" {
+		t.Errorf("Expected IssueID 'bd-42', got %q", decoded.IssueID)
+	}
+}
+
+func TestMutationEventSourceRepoOmittedWhenEmpty(t *testing.T) {
+	event := MutationEvent{
+		Type:    MutationCreate,
+		IssueID: "bd-42",
+		Title:   "Test Issue",
+	}
+
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("Failed to marshal MutationEvent: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(eventJSON, &raw); err != nil {
+		t.Fatalf("Failed to unmarshal to map: %v", err)
+	}
+	if _, exists := raw["source_repo"]; exists {
+		t.Errorf("Expected source_repo to be omitted from JSON when empty")
+	}
+}

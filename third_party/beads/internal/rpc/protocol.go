@@ -116,6 +116,8 @@ type CreateArgs struct {
 	// Time-based scheduling fields (GH#820)
 	DueAt      string `json:"due_at,omitempty"`      // Relative or ISO format due date
 	DeferUntil string `json:"defer_until,omitempty"` // Relative or ISO format defer date
+	// Multi-repo fields
+	SourceRepo string `json:"source_repo,omitempty"` // Source repository for multi-repo workspaces
 }
 
 // UpdateArgs represents arguments for the update operation

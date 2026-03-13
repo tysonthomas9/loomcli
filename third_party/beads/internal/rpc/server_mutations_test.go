@@ -1834,3 +1834,158 @@ func TestGetGitUserEmail_EmptyEnvFallsThrough(t *testing.T) {
 	email := getGitUserEmail("")
 	_ = email
 }
+
+// TestHandleCreate_SetsSourceRepo verifies that SourceRepo from CreateArgs is stored on the issue.
+func TestHandleCreate_SetsSourceRepo(t *testing.T) {
+	store := memory.New("/tmp/test.jsonl")
+	server := NewServer("/tmp/test.sock", store, "/tmp", "/tmp/test.db")
+
+	createArgs := CreateArgs{
+		Title:      "Issue with source repo",
+		IssueType:  "task",
+		Priority:   2,
+		SourceRepo: "github.com/org/myrepo",
+	}
+	createJSON, _ := json.Marshal(createArgs)
+	createReq := &Request{
+		Operation: OpCreate,
+		Args:      createJSON,
+		Actor:     "test-actor",
+	}
+
+	resp := server.handleCreate(createReq)
+	if !resp.Success {
+		t.Fatalf("create failed: %s", resp.Error)
+	}
+
+	// Extract the issue ID from the response to look up in storage
+	var respData struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(resp.Data, &respData); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// Verify SourceRepo was persisted to storage
+	storedIssue, err := store.GetIssue(context.Background(), respData.ID)
+	if err != nil {
+		t.Fatalf("failed to get issue from storage: %v", err)
+	}
+	if storedIssue.SourceRepo != "github.com/org/myrepo" {
+		t.Errorf("expected SourceRepo 'github.com/org/myrepo' in storage, got %q", storedIssue.SourceRepo)
+	}
+}
+
+// TestHandleCreate_DiscoveredFromOverridesSourceRepo verifies that a discovered-from
+// dependency's source_repo overrides the explicit SourceRepo from CreateArgs.
+func TestHandleCreate_DiscoveredFromOverridesSourceRepo(t *testing.T) {
+	store := memory.New("/tmp/test.jsonl")
+	server := NewServer("/tmp/test.sock", store, "/tmp", "/tmp/test.db")
+
+	// Create a parent issue with a specific source_repo
+	parentArgs := CreateArgs{
+		Title:      "Parent issue",
+		IssueType:  "task",
+		Priority:   2,
+		SourceRepo: "github.com/org/parent-repo",
+	}
+	parentJSON, _ := json.Marshal(parentArgs)
+	parentReq := &Request{
+		Operation: OpCreate,
+		Args:      parentJSON,
+		Actor:     "test-actor",
+	}
+	parentResp := server.handleCreate(parentReq)
+	if !parentResp.Success {
+		t.Fatalf("parent create failed: %s", parentResp.Error)
+	}
+
+	var parentRespData struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(parentResp.Data, &parentRespData); err != nil {
+		t.Fatalf("failed to parse parent response: %v", err)
+	}
+
+	// Create a child issue with a different explicit source_repo AND a discovered-from dep
+	childArgs := CreateArgs{
+		Title:        "Child issue",
+		IssueType:    "task",
+		Priority:     2,
+		SourceRepo:   "github.com/org/explicit-repo",
+		Dependencies: []string{"discovered-from:" + parentRespData.ID},
+	}
+	childJSON, _ := json.Marshal(childArgs)
+	childReq := &Request{
+		Operation: OpCreate,
+		Args:      childJSON,
+		Actor:     "test-actor",
+	}
+	childResp := server.handleCreate(childReq)
+	if !childResp.Success {
+		t.Fatalf("child create failed: %s", childResp.Error)
+	}
+
+	var childRespData struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(childResp.Data, &childRespData); err != nil {
+		t.Fatalf("failed to parse child response: %v", err)
+	}
+
+	// discovered-from parent's source_repo should override the explicit value
+	storedChild, err := store.GetIssue(context.Background(), childRespData.ID)
+	if err != nil {
+		t.Fatalf("failed to get child issue from storage: %v", err)
+	}
+	if storedChild.SourceRepo != "github.com/org/parent-repo" {
+		t.Errorf("expected SourceRepo 'github.com/org/parent-repo' (inherited from parent), got %q", storedChild.SourceRepo)
+	}
+}
+
+// TestMutationEvent_CreateIncludesSourceRepo verifies that mutation events emitted
+// during issue creation include the SourceRepo field.
+func TestMutationEvent_CreateIncludesSourceRepo(t *testing.T) {
+	store := memory.New("/tmp/test.jsonl")
+	server := NewServer("/tmp/test.sock", store, "/tmp", "/tmp/test.db")
+
+	createArgs := CreateArgs{
+		Title:      "Issue for mutation test",
+		IssueType:  "task",
+		Priority:   2,
+		SourceRepo: "github.com/org/mutation-repo",
+	}
+	createJSON, _ := json.Marshal(createArgs)
+	createReq := &Request{
+		Operation: OpCreate,
+		Args:      createJSON,
+		Actor:     "test-actor",
+	}
+
+	resp := server.handleCreate(createReq)
+	if !resp.Success {
+		t.Fatalf("create failed: %s", resp.Error)
+	}
+
+	mutations := server.GetRecentMutations(0)
+	if len(mutations) == 0 {
+		t.Fatal("expected at least 1 mutation event after create")
+	}
+
+	// Find the create mutation
+	var createMutation *MutationEvent
+	for i, m := range mutations {
+		if m.Type == MutationCreate {
+			createMutation = &mutations[i]
+			break
+		}
+	}
+
+	if createMutation == nil {
+		t.Fatal("no create mutation found in recent mutations")
+	}
+
+	if createMutation.SourceRepo != "github.com/org/mutation-repo" {
+		t.Errorf("expected SourceRepo 'github.com/org/mutation-repo' in mutation event, got %q", createMutation.SourceRepo)
+	}
+}

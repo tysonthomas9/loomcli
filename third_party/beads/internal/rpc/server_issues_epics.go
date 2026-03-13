@@ -348,8 +348,13 @@ func (s *Server) handleCreate(req *Request) Response {
 		DeferUntil: deferUntil,
 	}
 
+	// Set source_repo from CreateArgs if provided
+	if createArgs.SourceRepo != "" {
+		issue.SourceRepo = createArgs.SourceRepo
+	}
+
 	// Check if any dependencies are discovered-from type
-	// If so, inherit source_repo from the parent issue
+	// If so, inherit source_repo from the parent issue (overrides explicit value)
 	var discoveredFromParentID string
 	for _, depSpec := range createArgs.Dependencies {
 		depSpec = strings.TrimSpace(depSpec)
@@ -377,7 +382,7 @@ func (s *Server) handleCreate(req *Request) Response {
 	// If we found a discovered-from dependency, inherit source_repo from parent
 	if discoveredFromParentID != "" {
 		parentIssue, err := store.GetIssue(ctx, discoveredFromParentID)
-		if err == nil && parentIssue.SourceRepo != "" {
+		if err == nil && parentIssue != nil && parentIssue.SourceRepo != "" {
 			issue.SourceRepo = parentIssue.SourceRepo
 		}
 		// If error getting parent or parent has no source_repo, continue with default
@@ -540,7 +545,13 @@ func (s *Server) handleCreate(req *Request) Response {
 	}
 
 	// Emit mutation event for event-driven daemon
-	s.emitMutation(MutationCreate, issue.ID, issue.Title, issue.Assignee)
+	s.emitRichMutation(MutationEvent{
+		Type:       MutationCreate,
+		IssueID:    issue.ID,
+		Title:      issue.Title,
+		Assignee:   issue.Assignee,
+		SourceRepo: issue.SourceRepo,
+	})
 
 	data, _ := json.Marshal(issue)
 	return Response{
@@ -796,21 +807,23 @@ func (s *Server) handleUpdate(req *Request) Response {
 		// Check if this was a status change - emit rich MutationStatus event
 		if updateArgs.Status != nil && *updateArgs.Status != string(issue.Status) {
 			s.emitRichMutation(MutationEvent{
-				Type:      MutationStatus,
-				IssueID:   updateArgs.ID,
-				Title:     updatedIssue.Title,
-				Assignee:  updatedIssue.Assignee,
-				Actor:     actor,
-				OldStatus: string(issue.Status),
-				NewStatus: *updateArgs.Status,
+				Type:       MutationStatus,
+				IssueID:    updateArgs.ID,
+				Title:      updatedIssue.Title,
+				Assignee:   updatedIssue.Assignee,
+				Actor:      actor,
+				OldStatus:  string(issue.Status),
+				NewStatus:  *updateArgs.Status,
+				SourceRepo: updatedIssue.SourceRepo,
 			})
 		} else {
 			s.emitRichMutation(MutationEvent{
-				Type:     MutationUpdate,
-				IssueID:  updateArgs.ID,
-				Title:    updatedIssue.Title,
-				Assignee: updatedIssue.Assignee,
-				Actor:    actor,
+				Type:       MutationUpdate,
+				IssueID:    updateArgs.ID,
+				Title:      updatedIssue.Title,
+				Assignee:   updatedIssue.Assignee,
+				Actor:      actor,
+				SourceRepo: updatedIssue.SourceRepo,
 			})
 		}
 	}
@@ -889,12 +902,13 @@ func (s *Server) handleClose(req *Request) Response {
 
 	// Emit rich status change event for event-driven daemon
 	s.emitRichMutation(MutationEvent{
-		Type:      MutationStatus,
-		IssueID:   closeArgs.ID,
-		Title:     issue.Title,
-		Assignee:  issue.Assignee,
-		OldStatus: oldStatus,
-		NewStatus: "closed",
+		Type:       MutationStatus,
+		IssueID:    closeArgs.ID,
+		Title:      issue.Title,
+		Assignee:   issue.Assignee,
+		OldStatus:  oldStatus,
+		NewStatus:  "closed",
+		SourceRepo: issue.SourceRepo,
 	})
 
 	closedIssue, _ := store.GetIssue(ctx, closeArgs.ID)
