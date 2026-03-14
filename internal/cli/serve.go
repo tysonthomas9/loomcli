@@ -271,6 +271,22 @@ func runServe(cmd *cobra.Command, args []string) {
 				DevFrontendDir: serveDevFrontDir,
 				GitOps:         gitOps,
 				FileOps:        gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
+				WorkspaceConfigFn: func() ([]webui.WorkspaceRepo, error) {
+					cfg, err := LoadConfig()
+					if err != nil {
+						return nil, err
+					}
+					if cfg == nil || len(cfg.Workspaces) == 0 {
+						return nil, nil
+					}
+					var repos []webui.WorkspaceRepo
+					for _, ws := range cfg.Workspaces {
+						for _, r := range ws.Repos {
+							repos = append(repos, webui.WorkspaceRepo{Name: r.Name, Path: r.Path})
+						}
+					}
+					return repos, nil
+				},
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true
