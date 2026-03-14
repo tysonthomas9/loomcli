@@ -38,6 +38,7 @@ export * from "./OpenInEditor";
 export * from "./ViewSwitcher";
 export * from "./SwimLane";
 export * from "./SwimLaneBoard";
+export * from "./BackendSelectorDropdown";
 export * from "./AgentCard";
 export * from "./AgentDetailPanel";
 export * from "./AgentsSidebar";
