@@ -50,7 +50,7 @@ import {
   useToast,
   useRecentAssignees,
   useSelection,
-  useAgents,
+  useAgentContext,
   useTheme,
 } from "@/hooks";
 import type { Issue, Status } from "@/types";
@@ -228,8 +228,8 @@ function App() {
     clearIssue,
   } = useIssueDetail();
 
-  // Agent data (shared between AgentsSidebar, MonitorDashboard, and AgentDetailPanel)
-  const { agents, agentTasks } = useAgents({ pollInterval: 5000 });
+  // Agent data (shared via AgentProvider — single polling loop)
+  const { agents, agentTasks } = useAgentContext();
 
   // Agent detail panel state
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);

@@ -111,6 +111,12 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
+	if data == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
+		return
+	}
 	writeJSON(w, StatusResponse{
 		Workspace:      getWorkspaceInfo(),
 		Agents:         data.Agents,
@@ -125,6 +131,12 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 
 func handleAgents(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
+	if data == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
+		return
+	}
 	wsInfo := getWorkspaceInfo()
 
 	response := AgentsResponse{
@@ -143,6 +155,12 @@ func handleAgents(w http.ResponseWriter, r *http.Request) {
 
 func handleTasks(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
+	if data == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
+		return
+	}
 	writeJSON(w, TasksResponse{
 		Summary:          data.Tasks,
 		NeedsPlanning:    data.NeedsPlanningTasks,
@@ -157,6 +175,12 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 
 func handleStats(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
+	if data == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
+		return
+	}
 	writeJSON(w, StatsResponse{
 		Stats:     data.Stats,
 		Timestamp: data.Timestamp,
@@ -165,6 +189,12 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 
 func handleSync(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
+	if data == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
+		return
+	}
 	writeJSON(w, SyncResponse{
 		Sync:      data.SyncStatus,
 		Timestamp: data.Timestamp,

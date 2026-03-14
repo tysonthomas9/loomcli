@@ -64,6 +64,10 @@ func handleGitPush(ops GitOps) http.HandlerFunc {
 		if target == "" {
 			target = wt.DefaultBranch
 		}
+		if !validGitRef.MatchString(target) || strings.Contains(target, "..") {
+			respondError(w, http.StatusBadRequest, "invalid target branch name")
+			return
+		}
 
 		result, err := ops.Push(wt.Path, wt.Branch, target, wt.Remote)
 		if err != nil {
@@ -179,6 +183,10 @@ func handleGitPull(ops GitOps) http.HandlerFunc {
 		if source == "" {
 			source = wt.DefaultBranch
 		}
+		if !validGitRef.MatchString(source) || strings.Contains(source, "..") {
+			respondError(w, http.StatusBadRequest, "invalid source branch name")
+			return
+		}
 
 		currentBranch, err := ops.GetCurrentBranch(wt.Path)
 		if err != nil {
@@ -284,6 +292,10 @@ func handleGitPR(ops GitOps) http.HandlerFunc {
 		if target == "" {
 			target = wt.DefaultBranch
 		}
+		if !validGitRef.MatchString(target) || strings.Contains(target, "..") {
+			respondError(w, http.StatusBadRequest, "invalid target branch name")
+			return
+		}
 
 		result, err := ops.CreatePR(wt.Path, wt.Branch, target, wt.Remote)
 		if err != nil {
@@ -336,6 +348,10 @@ func handleGitReset(ops GitOps) http.HandlerFunc {
 		target := req.Branch
 		if target == "" {
 			target = wt.DefaultBranch
+		}
+		if !validGitRef.MatchString(target) || strings.Contains(target, "..") {
+			respondError(w, http.StatusBadRequest, "invalid branch name")
+			return
 		}
 
 		result, err := ops.Reset(wt.Path, wt.Name, target, req.Force)
