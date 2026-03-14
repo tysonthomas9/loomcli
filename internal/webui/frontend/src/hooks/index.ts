@@ -140,7 +140,10 @@ export type {
 export { useWorkspace } from "./useWorkspace";
 export type { UseWorkspaceOptions, UseWorkspaceReturn } from "./useWorkspace";
 
-export { WorkspaceProvider, useWorkspaceContext } from "./useWorkspaceContext";
+export {
+  WorkspaceProvider,
+  useWorkspaceContext,
+} from "./useWorkspaceContext";
 export type {
   WorkspaceContextValue,
   WorkspaceProviderProps,

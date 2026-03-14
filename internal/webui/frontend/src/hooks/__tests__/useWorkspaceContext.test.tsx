@@ -7,9 +7,9 @@
  * Follows useAgentContext test pattern: mock underlying hook, test provider and helpers.
  */
 
-import { renderHook } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 
@@ -351,6 +351,753 @@ describe("useWorkspaceContext", () => {
       });
 
       expect(result.current.getAgentByName("nova")).toBeUndefined();
+    });
+  });
+
+  describe("activeWorkspaceName", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("is set to workspace.name on load", () => {
+      setupMockWorkspace({
+        workspace: {
+          name: "my-workspace",
+          path: "/home/user/workspace",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [],
+        },
+      });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.activeWorkspaceName).toBe("my-workspace");
+    });
+
+    it("is null when workspace is null", () => {
+      setupMockWorkspace({ workspace: null });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.activeWorkspaceName).toBeNull();
+    });
+  });
+
+  describe("setActiveWorkspace", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("updates activeWorkspaceName", () => {
+      setupMockWorkspace();
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.setActiveWorkspace("new-workspace");
+      });
+
+      expect(result.current.activeWorkspaceName).toBe("new-workspace");
+    });
+
+    it("persists to localStorage", () => {
+      setupMockWorkspace();
+      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.setActiveWorkspace("persisted-workspace");
+      });
+
+      expect(setItemSpy).toHaveBeenCalledWith(
+        "loom-active-workspace",
+        "persisted-workspace",
+      );
+
+      setItemSpy.mockRestore();
+    });
+  });
+
+  describe("selectRepos", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("updates activeRepos to only the named repos", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+        createMockRepo({ name: "backend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.selectRepos(["api", "backend"]);
+      });
+
+      expect(result.current.activeRepos).toHaveLength(2);
+      expect(result.current.activeRepos.map((r) => r.name)).toEqual([
+        "api",
+        "backend",
+      ]);
+    });
+
+    it("updates selectedRepoNames set", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.selectRepos(["frontend"]);
+      });
+
+      expect(result.current.selectedRepoNames.has("frontend")).toBe(true);
+      expect(result.current.selectedRepoNames.has("api")).toBe(false);
+    });
+
+    it("persists selection to localStorage", () => {
+      const repos = [createMockRepo({ name: "api" })];
+      setupMockWorkspace({ repos });
+      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.selectRepos(["api"]);
+      });
+
+      expect(setItemSpy).toHaveBeenCalledWith(
+        "loom-selected-repos",
+        JSON.stringify(["api"]),
+      );
+
+      setItemSpy.mockRestore();
+    });
+  });
+
+  describe("selectAll", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("clears selection and returns all repos", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+        createMockRepo({ name: "backend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      // First select a subset
+      act(() => {
+        result.current.selectRepos(["api"]);
+      });
+      expect(result.current.activeRepos).toHaveLength(1);
+
+      // Then select all
+      act(() => {
+        result.current.selectAll();
+      });
+
+      expect(result.current.activeRepos).toHaveLength(3);
+      expect(result.current.selectedRepoNames.size).toBe(0);
+      expect(result.current.isAllSelected).toBe(true);
+    });
+
+    it("persists empty selection to localStorage", () => {
+      setupMockWorkspace();
+      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.selectAll();
+      });
+
+      expect(setItemSpy).toHaveBeenCalledWith(
+        "loom-selected-repos",
+        JSON.stringify([]),
+      );
+
+      setItemSpy.mockRestore();
+    });
+  });
+
+  describe("toggleRepo", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("adds a repo to selection", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.toggleRepo("api");
+      });
+
+      expect(result.current.selectedRepoNames.has("api")).toBe(true);
+    });
+
+    it("removes a repo from selection", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      // Add then remove
+      act(() => {
+        result.current.toggleRepo("api");
+      });
+      expect(result.current.selectedRepoNames.has("api")).toBe(true);
+
+      act(() => {
+        result.current.toggleRepo("api");
+      });
+      expect(result.current.selectedRepoNames.has("api")).toBe(false);
+    });
+
+    it("persists toggled selection to localStorage", () => {
+      const repos = [createMockRepo({ name: "api" })];
+      setupMockWorkspace({ repos });
+      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.toggleRepo("api");
+      });
+
+      expect(setItemSpy).toHaveBeenCalledWith(
+        "loom-selected-repos",
+        JSON.stringify(["api"]),
+      );
+
+      setItemSpy.mockRestore();
+    });
+  });
+
+  describe("sourceReposFilter", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("returns undefined when all repos selected", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.sourceReposFilter).toBeUndefined();
+    });
+
+    it("returns repo names when subset selected", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+        createMockRepo({ name: "backend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.selectRepos(["api", "backend"]);
+      });
+
+      expect(result.current.sourceReposFilter).toEqual(["api", "backend"]);
+    });
+
+    it("returns undefined after selectAll", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.selectRepos(["api"]);
+      });
+      expect(result.current.sourceReposFilter).toEqual(["api"]);
+
+      act(() => {
+        result.current.selectAll();
+      });
+      expect(result.current.sourceReposFilter).toBeUndefined();
+    });
+  });
+
+  describe("isMultiRepo", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    it("is false when 0 repos", () => {
+      setupMockWorkspace({ repos: [] });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.isMultiRepo).toBe(false);
+    });
+
+    it("is false when 1 repo", () => {
+      setupMockWorkspace({ repos: [createMockRepo({ name: "api" })] });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.isMultiRepo).toBe(false);
+    });
+
+    it("is true when 2+ repos", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.isMultiRepo).toBe(true);
+    });
+
+    it("is true when 3 repos", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+        createMockRepo({ name: "backend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.isMultiRepo).toBe(true);
+    });
+  });
+
+  describe("localStorage persistence", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("workspace name survives unmount/remount", () => {
+      setupMockWorkspace({
+        workspace: {
+          name: "persistent-ws",
+          path: "/home/user/workspace",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [],
+        },
+      });
+
+      // First render sets localStorage
+      const { unmount } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+      unmount();
+
+      // Second render reads from localStorage
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.activeWorkspaceName).toBe("persistent-ws");
+    });
+
+    it("repo selection survives unmount/remount", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+        createMockRepo({ name: "backend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      // First render: select repos
+      const { result: result1, unmount } = renderHook(
+        () => useWorkspaceContext(),
+        { wrapper },
+      );
+
+      act(() => {
+        result1.current.selectRepos(["api", "backend"]);
+      });
+      unmount();
+
+      // Second render: selection should persist
+      const { result: result2 } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result2.current.selectedRepoNames.has("api")).toBe(true);
+      expect(result2.current.selectedRepoNames.has("backend")).toBe(true);
+      expect(result2.current.selectedRepoNames.has("frontend")).toBe(false);
+      expect(result2.current.activeRepos).toHaveLength(2);
+    });
+  });
+
+  describe("stale localStorage cleanup", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("discards stored repo names not in workspace", () => {
+      // Pre-populate localStorage with stale + valid repos
+      localStorage.setItem(
+        "loom-selected-repos",
+        JSON.stringify(["api", "removed-repo"]),
+      );
+
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      // "removed-repo" should be discarded, "api" should remain
+      expect(result.current.selectedRepoNames.has("api")).toBe(true);
+      expect(result.current.selectedRepoNames.has("removed-repo")).toBe(false);
+      expect(result.current.activeRepos).toHaveLength(1);
+      expect(result.current.activeRepos[0].name).toBe("api");
+    });
+
+    it("falls back to all repos when all stored repos are stale", () => {
+      // Pre-populate localStorage with only stale repos
+      localStorage.setItem(
+        "loom-selected-repos",
+        JSON.stringify(["removed-1", "removed-2"]),
+      );
+
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      // All stale entries removed, should fall back to "all"
+      expect(result.current.selectedRepoNames.size).toBe(0);
+      expect(result.current.isAllSelected).toBe(true);
+      expect(result.current.activeRepos).toHaveLength(2);
+    });
+  });
+
+  describe("localStorage failure", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    it("gracefully falls back to defaults when getItem throws", () => {
+      const getItemSpy = vi
+        .spyOn(Storage.prototype, "getItem")
+        .mockImplementation(() => {
+          throw new Error("localStorage disabled");
+        });
+
+      // Use null workspace so the useEffect doesn't override the initial null
+      setupMockWorkspace({ workspace: null });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      // Should not throw and should have defaults (localStorage read failed gracefully)
+      expect(result.current.activeWorkspaceName).toBeNull();
+      expect(result.current.selectedRepoNames.size).toBe(0);
+      expect(result.current.isAllSelected).toBe(true);
+
+      getItemSpy.mockRestore();
+    });
+
+    it("gracefully handles setItem failure", () => {
+      const setItemSpy = vi
+        .spyOn(Storage.prototype, "setItem")
+        .mockImplementation(() => {
+          throw new Error("quota exceeded");
+        });
+
+      setupMockWorkspace();
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      // Should not throw when persisting
+      expect(() => {
+        act(() => {
+          result.current.setActiveWorkspace("new-ws");
+        });
+      }).not.toThrow();
+
+      expect(() => {
+        act(() => {
+          result.current.selectRepos(["api"]);
+        });
+      }).not.toThrow();
+
+      expect(() => {
+        act(() => {
+          result.current.toggleRepo("api");
+        });
+      }).not.toThrow();
+
+      expect(() => {
+        act(() => {
+          result.current.selectAll();
+        });
+      }).not.toThrow();
+
+      setItemSpy.mockRestore();
+    });
+  });
+
+  describe("NO_WORKSPACE_CONTEXT defaults for new fields", () => {
+    it("returns safe defaults for selection fields outside provider", () => {
+      const { result } = renderHook(() => useWorkspaceContext());
+
+      expect(result.current.activeWorkspaceName).toBeNull();
+      expect(result.current.selectedRepoNames).toBeInstanceOf(Set);
+      expect(result.current.selectedRepoNames.size).toBe(0);
+      expect(result.current.activeRepos).toEqual([]);
+      expect(result.current.activeRepoNames).toEqual([]);
+      expect(result.current.isAllSelected).toBe(true);
+      expect(result.current.sourceReposFilter).toBeUndefined();
+      expect(result.current.isMultiRepo).toBe(false);
+    });
+
+    it("selection actions are no-ops outside provider", () => {
+      const { result } = renderHook(() => useWorkspaceContext());
+
+      expect(() => result.current.setActiveWorkspace("ws")).not.toThrow();
+      expect(() => result.current.selectRepos(["api"])).not.toThrow();
+      expect(() => result.current.selectAll()).not.toThrow();
+      expect(() => result.current.toggleRepo("api")).not.toThrow();
+    });
+  });
+
+  describe("isAllSelected", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("is true when selectedRepoNames is empty (no filter)", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.isAllSelected).toBe(true);
+    });
+
+    it("is false when repos are selected", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.selectRepos(["api"]);
+      });
+
+      expect(result.current.isAllSelected).toBe(false);
+    });
+
+    it("becomes true again after selectAll", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.selectRepos(["api"]);
+      });
+      expect(result.current.isAllSelected).toBe(false);
+
+      act(() => {
+        result.current.selectAll();
+      });
+      expect(result.current.isAllSelected).toBe(true);
+    });
+  });
+
+  describe("activeRepoNames", () => {
+    function wrapper({ children }: { children: ReactNode }) {
+      return <WorkspaceProvider>{children}</WorkspaceProvider>;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("returns all repo names when no filter applied", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+        createMockRepo({ name: "backend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.activeRepoNames).toEqual([
+        "api",
+        "frontend",
+        "backend",
+      ]);
+    });
+
+    it("returns only selected repo names when filter applied", () => {
+      const repos = [
+        createMockRepo({ name: "api" }),
+        createMockRepo({ name: "frontend" }),
+        createMockRepo({ name: "backend" }),
+      ];
+      setupMockWorkspace({ repos });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      act(() => {
+        result.current.selectRepos(["frontend", "backend"]);
+      });
+
+      expect(result.current.activeRepoNames).toEqual([
+        "frontend",
+        "backend",
+      ]);
+    });
+
+    it("returns empty array when no repos exist", () => {
+      setupMockWorkspace({ repos: [] });
+
+      const { result } = renderHook(() => useWorkspaceContext(), {
+        wrapper,
+      });
+
+      expect(result.current.activeRepoNames).toEqual([]);
     });
   });
 });
