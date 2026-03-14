@@ -7,12 +7,13 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 
+import { useBackendConfig } from "@/hooks/useBackendConfig";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 import { useTerminalSessions } from "@/hooks/useTerminalSessions";
 
+import { BackendPickerPrompt } from "./BackendPickerPrompt";
 import { NotesBar } from "./NotesBar";
 import { SearchBar } from "./SearchBar";
-import { SessionNamePrompt } from "./SessionNamePrompt";
 import type {
   ConnectionState,
   TerminalInstanceHandle,
@@ -22,6 +23,24 @@ import { TerminalTabBar } from "./TerminalTabBar";
 import styles from "./TerminalView.module.css";
 
 const MAX_TABS = 8;
+
+/**
+ * Generate an auto-incremented tab name for a given backend.
+ * Returns `lead-{backend}-{n}` where n is max existing number + 1.
+ */
+function generateTabName(backend: string, existingTabs: TabState[]): string {
+  const prefix = `lead-${backend}-`;
+  let max = 0;
+  for (const tab of existingTabs) {
+    if (tab.sessionName.startsWith(prefix)) {
+      const num = parseInt(tab.sessionName.slice(prefix.length), 10);
+      if (!isNaN(num) && num > max) {
+        max = num;
+      }
+    }
+  }
+  return `${prefix}${max + 1}`;
+}
 
 interface TabState {
   id: string;
@@ -43,6 +62,7 @@ export function TerminalView({
     updateNotes,
     isLoading: metaLoading,
   } = useTerminalMetadata();
+  const { config, isLoading: configLoading } = useBackendConfig();
 
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -147,11 +167,11 @@ export function TerminalView({
     setIsSessionPromptOpen(true);
   }, [tabs.length]);
 
-  const handleSessionNameConfirm = useCallback((name: string) => {
-    setIsSessionPromptOpen(false);
-    setTabs((prev) => {
-      if (prev.some((t) => t.sessionName === name)) return prev;
-      return [
+  const handleBackendSelect = useCallback(
+    (backend: string) => {
+      setIsSessionPromptOpen(false);
+      const name = generateTabName(backend, tabs);
+      setTabs((prev) => [
         ...prev,
         {
           id: name,
@@ -159,10 +179,11 @@ export function TerminalView({
           sessionName: name,
           connectionState: "disconnected" as const,
         },
-      ];
-    });
-    setActiveTabId(name);
-  }, []);
+      ]);
+      setActiveTabId(name);
+    },
+    [tabs],
+  );
 
   const handleSessionPromptCancel = useCallback(() => {
     setIsSessionPromptOpen(false);
@@ -274,10 +295,11 @@ export function TerminalView({
           )}
         </>
       )}
-      <SessionNamePrompt
+      <BackendPickerPrompt
         isOpen={isSessionPromptOpen}
-        existingNames={tabs.map((t) => t.sessionName)}
-        onConfirm={handleSessionNameConfirm}
+        availableBackends={config?.available ?? []}
+        isLoading={configLoading}
+        onSelect={handleBackendSelect}
         onCancel={handleSessionPromptCancel}
       />
     </div>

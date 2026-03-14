@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import { TerminalView } from "../TerminalView";
+import { BackendPickerPrompt } from "../BackendPickerPrompt";
 import { SessionNamePrompt } from "../SessionNamePrompt";
 
 // ── Mock shared state ────────────────────────────────────────────────────────
@@ -55,6 +56,24 @@ const mockMetadataHook = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useTerminalMetadata", () => ({
   useTerminalMetadata: () => mockMetadataHook,
+}));
+
+const mockBackendConfigHook = vi.hoisted(() => ({
+  config: {
+    backend: "claude",
+    source: "default",
+    available: ["claude", "codex", "opencode"],
+    agents: [],
+  },
+  isLoading: false,
+  error: null as string | null,
+  isSaving: false,
+  updateBackend: vi.fn(),
+  refetch: vi.fn(),
+}));
+
+vi.mock("@/hooks/useBackendConfig", () => ({
+  useBackendConfig: () => mockBackendConfigHook,
 }));
 
 // ── Mock sibling components ──────────────────────────────────────────────────
@@ -131,6 +150,26 @@ vi.mock("../TerminalView.module.css", () => ({
     searchOverlay: "searchOverlay",
     searchInput: "searchInput",
     searchButton: "searchButton",
+  },
+}));
+
+vi.mock("../BackendPickerPrompt.module.css", () => ({
+  default: {
+    overlay: "overlay",
+    open: "open",
+    modal: "modal",
+    header: "header",
+    title: "title",
+    subtitle: "subtitle",
+    content: "content",
+    selectGroup: "selectGroup",
+    label: "label",
+    select: "select",
+    loadingText: "loadingText",
+    emptyText: "emptyText",
+    footer: "footer",
+    buttonPrimary: "buttonPrimary",
+    buttonSecondary: "buttonSecondary",
   },
 }));
 
@@ -217,11 +256,11 @@ describe("TerminalView", () => {
   // ── New tab prompt ─────────────────────────────────────────────────────────
 
   describe("new tab prompt", () => {
-    it("clicking + opens SessionNamePrompt modal", () => {
+    it("clicking + opens BackendPickerPrompt modal", () => {
       setHook(DEFAULT_SESSIONS, false);
       render(<TerminalView />);
 
-      const overlay = screen.getByTestId("session-name-prompt-overlay");
+      const overlay = screen.getByTestId("backend-picker-prompt-overlay");
       expect(overlay).toHaveAttribute("aria-hidden", "true");
 
       fireEvent.click(screen.getByTestId("new-tab-button"));
@@ -238,25 +277,25 @@ describe("TerminalView", () => {
       setHook(eightSessions, false);
       render(<TerminalView />);
 
-      const overlay = screen.getByTestId("session-name-prompt-overlay");
+      const overlay = screen.getByTestId("backend-picker-prompt-overlay");
       fireEvent.click(screen.getByTestId("new-tab-button"));
 
       expect(overlay).toHaveAttribute("aria-hidden", "true");
     });
 
-    it("confirming with a valid name creates a new tab", async () => {
+    it("selecting a backend creates a new tab with auto-generated name", async () => {
       setHook(DEFAULT_SESSIONS, false);
       render(<TerminalView />);
 
       fireEvent.click(screen.getByTestId("new-tab-button"));
 
-      const input = screen.getByTestId("session-name-input");
-      fireEvent.change(input, { target: { value: "new-session" } });
-      fireEvent.submit(input.closest("form")!);
+      const select = screen.getByTestId("backend-picker-select");
+      fireEvent.change(select, { target: { value: "claude" } });
+      fireEvent.submit(select.closest("form")!);
 
       await waitFor(() => {
         expect(
-          screen.getByTestId("terminal-instance-new-session"),
+          screen.getByTestId("terminal-instance-lead-claude-1"),
         ).toBeInTheDocument();
       });
     });
@@ -267,13 +306,13 @@ describe("TerminalView", () => {
 
       fireEvent.click(screen.getByTestId("new-tab-button"));
 
-      const input = screen.getByTestId("session-name-input");
-      fireEvent.change(input, { target: { value: "new-session" } });
-      fireEvent.submit(input.closest("form")!);
+      const select = screen.getByTestId("backend-picker-select");
+      fireEvent.change(select, { target: { value: "claude" } });
+      fireEvent.submit(select.closest("form")!);
 
       await waitFor(() => {
         expect(screen.getByTestId("active-tab-id").textContent).toBe(
-          "new-session",
+          "lead-claude-1",
         );
       });
     });
@@ -283,15 +322,98 @@ describe("TerminalView", () => {
       render(<TerminalView />);
 
       fireEvent.click(screen.getByTestId("new-tab-button"));
-      fireEvent.click(screen.getByTestId("session-name-cancel-button"));
+      fireEvent.click(screen.getByTestId("backend-picker-cancel-button"));
 
       expect(
-        screen.queryByTestId("terminal-instance-new-session"),
+        screen.queryByTestId("terminal-instance-lead-claude-1"),
       ).not.toBeInTheDocument();
-      expect(screen.getByTestId("session-name-prompt-overlay")).toHaveAttribute(
-        "aria-hidden",
-        "true",
+      expect(
+        screen.getByTestId("backend-picker-prompt-overlay"),
+      ).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("creating two tabs with same backend produces sequential names", async () => {
+      setHook(DEFAULT_SESSIONS, false);
+      render(<TerminalView />);
+
+      // Create first claude tab
+      fireEvent.click(screen.getByTestId("new-tab-button"));
+      const select = screen.getByTestId("backend-picker-select");
+      fireEvent.change(select, { target: { value: "claude" } });
+      fireEvent.submit(select.closest("form")!);
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("terminal-instance-lead-claude-1"),
+        ).toBeInTheDocument();
+      });
+
+      // Create second claude tab
+      fireEvent.click(screen.getByTestId("new-tab-button"));
+      const select2 = screen.getByTestId("backend-picker-select");
+      fireEvent.change(select2, { target: { value: "claude" } });
+      fireEvent.submit(select2.closest("form")!);
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("terminal-instance-lead-claude-2"),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("creating tabs with different backends produces independent counters", async () => {
+      setHook(DEFAULT_SESSIONS, false);
+      render(<TerminalView />);
+
+      // Create claude tab
+      fireEvent.click(screen.getByTestId("new-tab-button"));
+      fireEvent.change(screen.getByTestId("backend-picker-select"), {
+        target: { value: "claude" },
+      });
+      fireEvent.submit(
+        screen.getByTestId("backend-picker-select").closest("form")!,
       );
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("terminal-instance-lead-claude-1"),
+        ).toBeInTheDocument();
+      });
+
+      // Create codex tab
+      fireEvent.click(screen.getByTestId("new-tab-button"));
+      fireEvent.change(screen.getByTestId("backend-picker-select"), {
+        target: { value: "codex" },
+      });
+      fireEvent.submit(
+        screen.getByTestId("backend-picker-select").closest("form")!,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("terminal-instance-lead-codex-1"),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("when backends are loading, Create button is disabled", () => {
+      mockBackendConfigHook.isLoading = true;
+      mockBackendConfigHook.config = null;
+      setHook(DEFAULT_SESSIONS, false);
+      render(<TerminalView />);
+
+      fireEvent.click(screen.getByTestId("new-tab-button"));
+
+      expect(screen.getByTestId("backend-picker-create-button")).toBeDisabled();
+
+      // Restore
+      mockBackendConfigHook.isLoading = false;
+      mockBackendConfigHook.config = {
+        backend: "claude",
+        source: "default",
+        available: ["claude", "codex", "opencode"],
+        agents: [],
+      };
     });
   });
 
@@ -573,5 +695,183 @@ describe("SessionNamePrompt", () => {
     // Valid
     fireEvent.change(input, { target: { value: "valid-name" } });
     expect(submitBtn).not.toBeDisabled();
+  });
+});
+
+// ── Tests: BackendPickerPrompt ───────────────────────────────────────────────
+
+describe("BackendPickerPrompt", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders dropdown with all available backends", () => {
+    render(
+      <BackendPickerPrompt
+        isOpen={true}
+        availableBackends={["claude", "codex", "opencode"]}
+        isLoading={false}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const select = screen.getByTestId("backend-picker-select");
+    const options = select.querySelectorAll("option");
+
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveTextContent("claude");
+    expect(options[1]).toHaveTextContent("codex");
+    expect(options[2]).toHaveTextContent("opencode");
+  });
+
+  it("calls onSelect with correct backend when Create is clicked", async () => {
+    const onSelect = vi.fn();
+    render(
+      <BackendPickerPrompt
+        isOpen={true}
+        availableBackends={["claude", "codex", "opencode"]}
+        isLoading={false}
+        onSelect={onSelect}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    const select = screen.getByTestId("backend-picker-select");
+    fireEvent.change(select, { target: { value: "codex" } });
+    fireEvent.click(screen.getByTestId("backend-picker-create-button"));
+
+    expect(onSelect).toHaveBeenCalledWith("codex");
+  });
+
+  it("calls onCancel when Cancel is clicked", () => {
+    const onCancel = vi.fn();
+    render(
+      <BackendPickerPrompt
+        isOpen={true}
+        availableBackends={["claude", "codex"]}
+        isLoading={false}
+        onSelect={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("backend-picker-cancel-button"));
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onCancel when Escape is pressed", () => {
+    const onCancel = vi.fn();
+    render(
+      <BackendPickerPrompt
+        isOpen={true}
+        availableBackends={["claude", "codex"]}
+        isLoading={false}
+        onSelect={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows loading state when isLoading=true", () => {
+    render(
+      <BackendPickerPrompt
+        isOpen={true}
+        availableBackends={[]}
+        isLoading={true}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("backend-picker-loading")).toBeInTheDocument();
+    expect(screen.getByTestId("backend-picker-loading")).toHaveTextContent(
+      "Loading backends...",
+    );
+    expect(
+      screen.queryByTestId("backend-picker-select"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows empty message when no backends available", () => {
+    render(
+      <BackendPickerPrompt
+        isOpen={true}
+        availableBackends={[]}
+        isLoading={false}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("backend-picker-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("backend-picker-empty")).toHaveTextContent(
+      "No backends available",
+    );
+    expect(
+      screen.queryByTestId("backend-picker-select"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Create button is disabled when loading", () => {
+    render(
+      <BackendPickerPrompt
+        isOpen={true}
+        availableBackends={[]}
+        isLoading={true}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("backend-picker-create-button")).toBeDisabled();
+  });
+
+  it("Create button is disabled when no backends available", () => {
+    render(
+      <BackendPickerPrompt
+        isOpen={true}
+        availableBackends={[]}
+        isLoading={false}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("backend-picker-create-button")).toBeDisabled();
+  });
+
+  it("dropdown defaults to first available backend", async () => {
+    render(
+      <BackendPickerPrompt
+        isOpen={true}
+        availableBackends={["codex", "claude", "opencode"]}
+        isLoading={false}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    const select = screen.getByTestId(
+      "backend-picker-select",
+    ) as HTMLSelectElement;
+    expect(select.value).toBe("codex");
   });
 });
