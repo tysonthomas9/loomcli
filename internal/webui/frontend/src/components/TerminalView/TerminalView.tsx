@@ -147,21 +147,22 @@ export function TerminalView({
     setIsSessionPromptOpen(true);
   }, [tabs.length]);
 
-  const handleSessionNameConfirm = useCallback(
-    (name: string) => {
-      setIsSessionPromptOpen(false);
-      if (tabs.some((t) => t.sessionName === name)) return;
-      const newTab: TabState = {
-        id: name,
-        label: name,
-        sessionName: name,
-        connectionState: "disconnected",
-      };
-      setTabs((prev) => [...prev, newTab]);
-      setActiveTabId(name);
-    },
-    [tabs],
-  );
+  const handleSessionNameConfirm = useCallback((name: string) => {
+    setIsSessionPromptOpen(false);
+    setTabs((prev) => {
+      if (prev.some((t) => t.sessionName === name)) return prev;
+      return [
+        ...prev,
+        {
+          id: name,
+          label: name,
+          sessionName: name,
+          connectionState: "disconnected" as const,
+        },
+      ];
+    });
+    setActiveTabId(name);
+  }, []);
 
   const handleSessionPromptCancel = useCallback(() => {
     setIsSessionPromptOpen(false);

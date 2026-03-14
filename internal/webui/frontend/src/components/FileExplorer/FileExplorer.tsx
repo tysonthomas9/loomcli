@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { useAgents } from "@/hooks";
+import { useAgentContext } from "@/hooks";
 import { useFileTree } from "@/hooks/useFileTree";
 import { useFileContent } from "@/hooks/useFileContent";
 import { FileTree } from "./FileTree";
@@ -7,7 +7,7 @@ import { FileViewer } from "./FileViewer";
 import styles from "./FileExplorer.module.css";
 
 export function FileExplorer() {
-  const { agents } = useAgents({ pollInterval: 5000 });
+  const { agents } = useAgentContext();
   const [selectedAgent, setSelectedAgent] = useState<string>("");
 
   // Auto-select first agent when agents load

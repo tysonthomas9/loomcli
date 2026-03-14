@@ -772,9 +772,9 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed: 7,
 			wantTotal:  10,
 			wantCompl:  70.0,
-			// Remaining = 10 - 7 - 0 (tombstone) = 3
+			// Remaining = 10 - 7 = 3 (total_issues already excludes tombstones)
 			wantRemaining: 3,
-			// Review = 10 - 3 - 0 - 7 - 0 - 0 - 0 - 0 = 0
+			// Review = 10 - 3 - 0 - 7 - 0 - 0 - 0 = 0
 			wantReview:     0,
 			wantInProgress: 0,
 			wantBlocked:    0,
@@ -822,7 +822,7 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed: 5,
 			wantTotal:  5,
 			wantCompl:  100.0,
-			// Remaining = 5 - 5 - 0 = 0
+			// Remaining = 5 - 5 = 0
 			wantRemaining:  0,
 			wantInProgress: 0,
 			wantReview:     0,
@@ -836,11 +836,11 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed: 5,
 			wantTotal:  20,
 			wantCompl:  25.0,
-			// Remaining = 20 - 5 - 0 (tombstone) = 15
+			// Remaining = 20 - 5 = 15 (total_issues already excludes tombstones)
 			wantRemaining:  15,
 			wantInProgress: 2,
 			wantBlocked:    1,
-			// Review = 20 - 10 - 2 - 5 - 1 - 0 - 0 - 0 = 2
+			// Review = 20 - 10 - 2 - 5 - 1 - 0 - 0 = 2
 			wantReview: 2,
 		},
 		{
@@ -852,7 +852,7 @@ func TestCollectStatistics(t *testing.T) {
 			wantClosed: 3,
 			wantTotal:  10,
 			wantCompl:  30.0,
-			// Remaining = 10 - 3 - 0 = 7
+			// Remaining = 10 - 3 = 7
 			wantRemaining:  7,
 			wantInProgress: 3,
 			wantBlocked:    2,
@@ -860,34 +860,36 @@ func TestCollectStatistics(t *testing.T) {
 		},
 		{
 			name: "negative remaining clamped to zero",
-			// total=5, open=0, closed=6, tombstone=1 (closed+tombstone > total)
-			// Remaining = 5 - 6 - 1 = -2 -> clamped to 0
+			// total=5, open=0, closed=6 (closed > total, edge case)
+			// Remaining = 5 - 6 = -1 -> clamped to 0
+			// Note: total_issues already excludes tombstones, so tombstone_issues is not subtracted
 			bdOutput:   `{"summary":{"total_issues":5,"open_issues":0,"in_progress_issues":0,"closed_issues":6,"blocked_issues":0,"deferred_issues":0,"tombstone_issues":1,"pinned_issues":0}}`,
 			wantOpen:   0,
 			wantClosed: 6,
 			wantTotal:  5,
 			wantCompl:  120.0, // 6/5 * 100
-			// Remaining = 5 - 6 - 1 = -2 -> clamped to 0
+			// Remaining = 5 - 6 = -1 -> clamped to 0
 			wantRemaining:  0,
 			wantInProgress: 0,
 			wantBlocked:    0,
-			// Review = 5 - 0 - 0 - 6 - 0 - 0 - 1 - 0 = -2 -> clamped to 0
+			// Review = 5 - 0 - 0 - 6 - 0 - 0 - 0 = -1 -> clamped to 0
 			wantReview: 0,
 		},
 		{
 			name: "review computed with deferred and pinned",
 			// total=30, open=10, in_progress=3, closed=8, blocked=2, deferred=2, tombstone=1, pinned=1
-			// Review = 30 - 10 - 3 - 8 - 2 - 2 - 1 - 1 = 3
+			// Note: total_issues already excludes tombstones, so tombstone_issues is not subtracted
+			// Review = 30 - 10 - 3 - 8 - 2 - 2 - 1 = 4
 			bdOutput:   `{"summary":{"total_issues":30,"open_issues":10,"in_progress_issues":3,"closed_issues":8,"blocked_issues":2,"deferred_issues":2,"tombstone_issues":1,"pinned_issues":1}}`,
 			wantOpen:   10,
 			wantClosed: 8,
 			wantTotal:  30,
 			wantCompl:  float64(8) / float64(30) * 100,
-			// Remaining = 30 - 8 - 1 = 21
-			wantRemaining:  21,
+			// Remaining = 30 - 8 = 22
+			wantRemaining:  22,
 			wantInProgress: 3,
 			wantBlocked:    2,
-			wantReview:     3,
+			wantReview:     4,
 		},
 	}
 
@@ -1028,6 +1030,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		inProgressOutput        string
 		needReviewOutput        string
 		blockedOutput           string
+		closedOutput            string
 		wantNeedsPlanning       int
 		wantReadyToImplement    int
 		wantInProgress          int
@@ -1038,6 +1041,7 @@ func TestCollectTaskStatus(t *testing.T) {
 		wantReviewTasksLen      int
 		wantInProgressTasksLen  int
 		wantBacklogTasksLen     int
+		wantClosedTasksLen      int
 		wantAgentTasksLen       int
 	}{
 		{
@@ -1169,6 +1173,18 @@ func TestCollectTaskStatus(t *testing.T) {
 			wantReadyToImplementLen: 5, // But only 5 stored
 		},
 		{
+			name:             "closed tasks are collected",
+			readyOutput:      "[]",
+			inProgressOutput: "[]",
+			needReviewOutput: "[]",
+			blockedOutput:    "[]",
+			closedOutput: mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Done task", Status: "closed", Priority: 2},
+				{ID: "T-2", Title: "Also done", Status: "closed", Priority: 3},
+			}),
+			wantClosedTasksLen: 2,
+		},
+		{
 			name:                 "JSON parsing error handled gracefully",
 			readyOutput:          "not valid json",
 			inProgressOutput:     "also invalid",
@@ -1209,13 +1225,19 @@ func TestCollectTaskStatus(t *testing.T) {
 				if len(args) > 1 && args[0] == "list" && args[1] == "--status=review" {
 					return CommandResult{Stdout: tt.needReviewOutput}
 				}
+				if len(args) > 1 && args[0] == "list" && args[1] == "--status=closed" {
+					if tt.closedOutput != "" {
+						return CommandResult{Stdout: tt.closedOutput}
+					}
+					return CommandResult{Stdout: "[]"}
+				}
 				if len(args) > 0 && args[0] == "blocked" {
 					return CommandResult{Stdout: tt.blockedOutput}
 				}
 				return CommandResult{}
 			}
 
-			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, _, agentTasks := collectTaskStatus(100)
+			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks := collectTaskStatus(100)
 
 			if summary.NeedsPlanning != tt.wantNeedsPlanning {
 				t.Errorf("NeedsPlanning = %d, want %d", summary.NeedsPlanning, tt.wantNeedsPlanning)
@@ -1246,6 +1268,9 @@ func TestCollectTaskStatus(t *testing.T) {
 			}
 			if len(backlogTasks) != tt.wantBacklogTasksLen {
 				t.Errorf("backlogTasks len = %d, want %d", len(backlogTasks), tt.wantBacklogTasksLen)
+			}
+			if len(closedTasks) != tt.wantClosedTasksLen {
+				t.Errorf("closedTasks len = %d, want %d", len(closedTasks), tt.wantClosedTasksLen)
 			}
 			if len(agentTasks) != tt.wantAgentTasksLen {
 				t.Errorf("agentTasks len = %d, want %d", len(agentTasks), tt.wantAgentTasksLen)
@@ -1619,8 +1644,14 @@ func TestCollectMonitorData(t *testing.T) {
 	if data.Tasks.ReadyToImplement != 1 {
 		t.Errorf("expected ReadyToImplement=1, got %d", data.Tasks.ReadyToImplement)
 	}
-	if data.Stats.Total != 10 {
-		t.Errorf("expected Stats.Total=10, got %d", data.Stats.Total)
+	// Total = work queue Remaining + Closed (excludes epics)
+	// Work queue: Plan(1) + Impl(1) + Review(0) + Active(0) + Backlog(0) = 2
+	// Closed from bd stats: 7 → Total = 9
+	if data.Stats.Total != 9 {
+		t.Errorf("expected Stats.Total=9, got %d", data.Stats.Total)
+	}
+	if data.Stats.Remaining != 2 {
+		t.Errorf("expected Stats.Remaining=2, got %d", data.Stats.Remaining)
 	}
 	if data.SyncStatus.DBSynced != true {
 		t.Error("expected DBSynced=true")
@@ -1697,8 +1728,10 @@ func TestCollectMonitorDataExported(t *testing.T) {
 	if data.Timestamp.IsZero() {
 		t.Error("Timestamp should be set")
 	}
-	if data.Stats.Total != 5 {
-		t.Errorf("expected Stats.Total=5, got %d", data.Stats.Total)
+	// Total = work queue Remaining + Closed
+	// Work queue: all empty = 0. Closed from bd stats: 3 → Total = 3
+	if data.Stats.Total != 3 {
+		t.Errorf("expected Stats.Total=3, got %d", data.Stats.Total)
 	}
 }
 
@@ -1747,6 +1780,304 @@ func TestCollectAgentStatusOnlyExported(t *testing.T) {
 	}
 	if agents[0].Status != "ready" {
 		t.Errorf("expected status 'ready', got %q", agents[0].Status)
+	}
+}
+
+// TestBacklogAccumulatesReadyWithBlockersAndBlocked verifies that summary.Backlog
+// includes both ready issues with unclosed blockers AND bd-blocked issues (the += fix).
+func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
+
+	wtDir := filepath.Join(tmpDir, "worktrees", "agent1")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	// T-BLOCKER is unclosed (in ready output), so T-BLOCKED-READY has an unclosed blocker.
+	// T-BD-BLOCKED comes from bd blocked output.
+	// Both should count toward Backlog, giving Backlog=2.
+	readyIssues := []BdIssue{
+		{ID: "T-BLOCKER", Title: "Open blocker", Status: "open", Design: "plan"},
+		{ID: "T-BLOCKED-READY", Title: "Blocked in ready", Status: "open", Design: "plan",
+			Dependencies: []Dependency{{IssueID: "T-BLOCKED-READY", DependsOnID: "T-BLOCKER", Type: "blocks"}}},
+		{ID: "T-NORMAL", Title: "Normal task", Status: "open", Design: "plan"},
+	}
+	blockedIssues := []BdIssue{
+		{ID: "T-BD-BLOCKED", Title: "Blocked by bd", Status: "open"},
+	}
+
+	readyJSON, _ := json.Marshal(readyIssues)
+	blockedJSON, _ := json.Marshal(blockedIssues)
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		if name == "git" && len(args) > 0 && args[0] == "branch" {
+			return CommandResult{Stdout: "agent1"}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "status" {
+			return CommandResult{Stdout: ""}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
+			return CommandResult{Stdout: "0\t0"}
+		}
+		if name == "bd" {
+			if len(args) > 0 && args[0] == "ready" {
+				return CommandResult{Stdout: string(readyJSON)}
+			}
+			if len(args) > 0 && args[0] == "stats" {
+				return CommandResult{Stdout: `{"summary":{"total_issues":20,"open_issues":10,"closed_issues":5}}`}
+			}
+			if len(args) > 0 && args[0] == "sync" {
+				return CommandResult{Stdout: "synced"}
+			}
+			if len(args) > 0 && args[0] == "blocked" {
+				return CommandResult{Stdout: string(blockedJSON)}
+			}
+			if len(args) > 1 && args[0] == "list" {
+				return CommandResult{Stdout: "[]"}
+			}
+		}
+		return CommandResult{}
+	}
+
+	data := collectMonitorData(100, "")
+
+	// T-BLOCKED-READY routed to backlog (1) + T-BD-BLOCKED from bd blocked (1) = 2
+	if data.Tasks.Backlog != 2 {
+		t.Errorf("expected Backlog=2 (1 ready-with-blockers + 1 bd-blocked), got %d", data.Tasks.Backlog)
+	}
+	// T-BLOCKER is unblocked ready-to-implement, T-NORMAL is unblocked ready-to-implement
+	if data.Tasks.ReadyToImplement != 2 {
+		t.Errorf("expected ReadyToImplement=2, got %d", data.Tasks.ReadyToImplement)
+	}
+	// Remaining = sum of work queue: Plan(0) + Impl(2) + Review(0) + Active(0) + Backlog(2) = 4
+	if data.Stats.Remaining != 4 {
+		t.Errorf("expected Remaining=4, got %d", data.Stats.Remaining)
+	}
+	// Total = Remaining(4) + Closed(5) = 9
+	if data.Stats.Total != 9 {
+		t.Errorf("expected Total=9, got %d", data.Stats.Total)
+	}
+}
+
+// TestEpicsExcludedFromWorkQueueAndStats verifies that epic issues from bd ready
+// are counted separately and excluded from both work queue categories and Remaining/Total.
+func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
+
+	wtDir := filepath.Join(tmpDir, "worktrees", "agent1")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	readyIssues := []BdIssue{
+		{ID: "T-1", Title: "Normal task", Status: "open", Design: "plan"},
+		{ID: "T-EPIC", Title: "Epic task", Status: "open", IssueType: "epic"},
+		{ID: "T-2", Title: "Needs planning", Status: "open", Design: ""},
+	}
+
+	readyJSON, _ := json.Marshal(readyIssues)
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		if name == "git" && len(args) > 0 && args[0] == "branch" {
+			return CommandResult{Stdout: "agent1"}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "status" {
+			return CommandResult{Stdout: ""}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
+			return CommandResult{Stdout: "0\t0"}
+		}
+		if name == "bd" {
+			if len(args) > 0 && args[0] == "ready" {
+				return CommandResult{Stdout: string(readyJSON)}
+			}
+			if len(args) > 0 && args[0] == "stats" {
+				return CommandResult{Stdout: `{"summary":{"total_issues":10,"open_issues":5,"closed_issues":3}}`}
+			}
+			if len(args) > 0 && args[0] == "sync" {
+				return CommandResult{Stdout: "synced"}
+			}
+			if len(args) > 0 && args[0] == "blocked" {
+				return CommandResult{Stdout: "[]"}
+			}
+			if len(args) > 1 && args[0] == "list" {
+				return CommandResult{Stdout: "[]"}
+			}
+		}
+		return CommandResult{}
+	}
+
+	data := collectMonitorData(100, "")
+
+	// Epic should be tracked separately, not in work queue
+	if data.Tasks.Epics != 1 {
+		t.Errorf("expected Epics=1, got %d", data.Tasks.Epics)
+	}
+	// Only non-epic tasks in work queue: T-1 (ReadyToImplement), T-2 (NeedsPlanning)
+	if data.Tasks.ReadyToImplement != 1 {
+		t.Errorf("expected ReadyToImplement=1, got %d", data.Tasks.ReadyToImplement)
+	}
+	if data.Tasks.NeedsPlanning != 1 {
+		t.Errorf("expected NeedsPlanning=1, got %d", data.Tasks.NeedsPlanning)
+	}
+	// Remaining = Plan(1) + Impl(1) + Review(0) + Active(0) + Backlog(0) = 2
+	// Epic is NOT included
+	if data.Stats.Remaining != 2 {
+		t.Errorf("expected Remaining=2 (epics excluded), got %d", data.Stats.Remaining)
+	}
+	// Total = Remaining(2) + Closed(3) = 5 (NOT 10 from bd stats)
+	if data.Stats.Total != 5 {
+		t.Errorf("expected Total=5 (work-queue-derived), got %d", data.Stats.Total)
+	}
+}
+
+// TestRemainingDerivedFromWorkQueue verifies that Remaining = sum of all
+// work queue categories (NeedsPlanning + ReadyToImplement + NeedReview +
+// InProgress + Backlog), not the bd stats subtraction.
+func TestRemainingDerivedFromWorkQueue(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetBeadsDirCache()
+
+	wtDir := filepath.Join(tmpDir, "worktrees", "agent1")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	readyIssues := []BdIssue{
+		{ID: "T-1", Title: "Plan me", Status: "open", Design: ""},
+		{ID: "T-2", Title: "Implement me", Status: "open", Design: "plan"},
+	}
+	inProgressIssues := []BdIssue{
+		{ID: "T-3", Title: "Active work", Status: "in_progress", Assignee: "agent1"},
+	}
+	reviewIssues := []BdIssue{
+		{ID: "T-4", Title: "Review me", Status: "review"},
+		{ID: "T-5", Title: "Review me too", Status: "review"},
+	}
+	blockedIssues := []BdIssue{
+		{ID: "T-6", Title: "Blocked task", Status: "open"},
+	}
+
+	readyJSON, _ := json.Marshal(readyIssues)
+	inProgressJSON, _ := json.Marshal(inProgressIssues)
+	reviewJSON, _ := json.Marshal(reviewIssues)
+	blockedJSON, _ := json.Marshal(blockedIssues)
+
+	execCommand = func(dir, name string, args ...string) CommandResult {
+		if name == "git" && len(args) > 0 && args[0] == "branch" {
+			return CommandResult{Stdout: "agent1"}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "status" {
+			return CommandResult{Stdout: ""}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
+			return CommandResult{Stdout: "0\t0"}
+		}
+		if name == "bd" {
+			if len(args) > 0 && args[0] == "ready" {
+				return CommandResult{Stdout: string(readyJSON)}
+			}
+			if len(args) > 0 && args[0] == "stats" {
+				// bd stats says 50 total, 40 closed — but Remaining should come from work queue, not subtraction
+				return CommandResult{Stdout: `{"summary":{"total_issues":50,"open_issues":8,"closed_issues":40}}`}
+			}
+			if len(args) > 0 && args[0] == "sync" {
+				return CommandResult{Stdout: "synced"}
+			}
+			if len(args) > 0 && args[0] == "blocked" {
+				return CommandResult{Stdout: string(blockedJSON)}
+			}
+			if len(args) > 1 && args[0] == "list" {
+				// Match the specific status queries
+				for _, arg := range args {
+					if arg == "--status=in_progress" {
+						return CommandResult{Stdout: string(inProgressJSON)}
+					}
+					if arg == "--status=review" {
+						return CommandResult{Stdout: string(reviewJSON)}
+					}
+					if arg == "--status=closed" {
+						return CommandResult{Stdout: "[]"}
+					}
+				}
+				return CommandResult{Stdout: "[]"}
+			}
+		}
+		return CommandResult{}
+	}
+
+	data := collectMonitorData(100, "")
+
+	// Verify each work queue category
+	if data.Tasks.NeedsPlanning != 1 {
+		t.Errorf("NeedsPlanning = %d, want 1", data.Tasks.NeedsPlanning)
+	}
+	if data.Tasks.ReadyToImplement != 1 {
+		t.Errorf("ReadyToImplement = %d, want 1", data.Tasks.ReadyToImplement)
+	}
+	if data.Tasks.InProgress != 1 {
+		t.Errorf("InProgress = %d, want 1", data.Tasks.InProgress)
+	}
+	if data.Tasks.NeedReview != 2 {
+		t.Errorf("NeedReview = %d, want 2", data.Tasks.NeedReview)
+	}
+	if data.Tasks.Backlog != 1 {
+		t.Errorf("Backlog = %d, want 1", data.Tasks.Backlog)
+	}
+
+	// Remaining = 1 + 1 + 1 + 2 + 1 = 6 (NOT 50 - 40 = 10 from bd stats)
+	if data.Stats.Remaining != 6 {
+		t.Errorf("Remaining = %d, want 6 (work-queue-derived, not bd stats subtraction)", data.Stats.Remaining)
+	}
+	// Total = 6 + 40 = 46 (NOT 50 from bd stats)
+	if data.Stats.Total != 46 {
+		t.Errorf("Total = %d, want 46", data.Stats.Total)
+	}
+	// Completion = 40/46 * 100
+	wantCompl := float64(40) / float64(46) * 100
+	if data.Stats.Completion != wantCompl {
+		t.Errorf("Completion = %.1f, want %.1f", data.Stats.Completion, wantCompl)
 	}
 }
 

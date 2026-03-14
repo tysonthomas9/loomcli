@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -129,7 +130,7 @@ func TestGetRecentMutations_CircularBuffer(t *testing.T) {
 
 	// Emit more than maxMutationBuffer (100) mutations
 	for i := 0; i < 150; i++ {
-		server.emitMutation(MutationCreate, "bd-"+string(rune(i)), "", "")
+		server.emitMutation(MutationCreate, fmt.Sprintf("bd-%d", i), "", "")
 		time.Sleep(time.Millisecond) // Ensure different timestamps
 	}
 
@@ -141,7 +142,7 @@ func TestGetRecentMutations_CircularBuffer(t *testing.T) {
 
 	// First mutation should be from iteration 50 (150-100)
 	firstID := mutations[0].IssueID
-	expectedFirstID := "bd-" + string(rune(50))
+	expectedFirstID := fmt.Sprintf("bd-%d", 50)
 	if firstID != expectedFirstID {
 		t.Errorf("expected first mutation to be %s (after circular buffer wraparound), got %s", expectedFirstID, firstID)
 	}

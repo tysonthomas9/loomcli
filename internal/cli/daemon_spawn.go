@@ -108,7 +108,6 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 	cmd := d.buildCommand(ap)
 
 	ap.mu.Lock()
-	defer ap.mu.Unlock()
 
 	// Set up log files if log directory is configured
 	if d.config.Daemon.LogDir != "" {
@@ -136,6 +135,11 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 
 	// Start the subprocess
 	if err := cmd.Start(); err != nil {
+		if ap.logFile != nil {
+			_ = ap.logFile.Close()
+			ap.logFile = nil
+		}
+		ap.mu.Unlock()
 		return fmt.Errorf("failed to start subprocess: %w", err)
 	}
 
@@ -143,10 +147,17 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 	ap.pid = cmd.Process.Pid
 	ap.lastStart = time.Now()
 
-	log.Printf("[daemon] Agent %s: spawned subprocess PID %d", ap.entry.Worktree, ap.pid)
+	// Snapshot fields before releasing lock for event emission
+	pid := ap.pid
+	worktree := ap.entry.Worktree
+	role := ap.entry.Role
+	epicID := ap.assignedEpicID
+	ap.mu.Unlock()
 
-	// Emit agent_started event (best-effort)
-	if evt, err := events.NewEvent(events.AgentStarted, ap.entry.Worktree, ap.entry.Role, ap.assignedEpicID, events.AgentStartedData{PID: ap.pid}); err == nil {
+	log.Printf("[daemon] Agent %s: spawned subprocess PID %d", worktree, pid)
+
+	// Emit agent_started event outside the lock (best-effort, matching waitForAgent pattern)
+	if evt, err := events.NewEvent(events.AgentStarted, worktree, role, epicID, events.AgentStartedData{PID: pid}); err == nil {
 		d.emitEvent(evt)
 	}
 

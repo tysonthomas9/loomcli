@@ -41,11 +41,14 @@ func (d *Daemon) shouldRestart(ap *AgentProcess) bool {
 	ap.mu.Lock()
 	defer ap.mu.Unlock()
 
-	// Successful run (exit 0, ran for >1 minute) resets all counters
-	if ap.lastExitCode == 0 && time.Since(ap.lastStart) > time.Minute {
+	// Clean success (exit 0, no error): always restart, reset counters.
+	// Long runs (>1 minute) also reset primary backend.
+	if ap.lastExitCode == 0 && ap.lastError == nil {
 		ap.restartCount = 0
 		ap.rateRetryCount = 0
-		ap.currentBackendIdx = 0 // reset to primary backend
+		if time.Since(ap.lastStart) > time.Minute {
+			ap.currentBackendIdx = 0 // reset to primary backend
+		}
 		return true
 	}
 

@@ -7,6 +7,8 @@
 import type { ReactNode } from "react";
 import { useState, useCallback, useEffect } from "react";
 
+import { ApiError } from "@/api/client";
+import { gitPushAll } from "@/api/git";
 import { useAgentContext } from "@/hooks";
 import type { LoomTaskInfo, WorktreeSyncDetail } from "@/types";
 
@@ -138,22 +140,16 @@ export function AgentsSidebar({
     setIsPushing(true);
     setPushError(null);
     try {
-      const resp = await fetch("/api/git/push-all", { method: "POST" });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => null);
-        setPushError(data?.error || `Push failed (${resp.status})`);
-        return;
-      }
-      const data = await resp.json();
+      const data = await gitPushAll();
       if (data.failed > 0) {
         const failedNames = data.results
-          .filter((r: { success: boolean }) => !r.success)
-          .map((r: { name: string }) => r.name)
+          .filter((r) => !r.success)
+          .map((r) => r.name)
           .join(", ");
         setPushError(`Failed: ${failedNames}`);
       }
-    } catch {
-      setPushError("Network error");
+    } catch (err) {
+      setPushError(err instanceof ApiError ? err.statusText : "Network error");
     } finally {
       setIsPushing(false);
     }

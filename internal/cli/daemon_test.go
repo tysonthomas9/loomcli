@@ -489,7 +489,7 @@ func TestShouldRestart(t *testing.T) {
 		}
 	})
 
-	t.Run("successful short run does not reset counter", func(t *testing.T) {
+	t.Run("successful short run resets counter", func(t *testing.T) {
 		config := makeDaemonConfig(
 			[]AgentEntry{{Worktree: "test", Role: "plan"}},
 			nil,
@@ -501,15 +501,16 @@ func TestShouldRestart(t *testing.T) {
 			restartCount: 1,
 			lastExitCode: 0,                                 // successful exit
 			lastStart:    time.Now().Add(-30 * time.Second), // ran for <1 minute
+			lastError:    nil,                               // clean success
 		}
 
 		result := daemon.shouldRestart(ap)
 		if !result {
 			t.Error("shouldRestart() = false, want true")
 		}
-		// Counter should be incremented since run was short
-		if ap.restartCount != 2 {
-			t.Errorf("restartCount = %d, want 2 (should be incremented)", ap.restartCount)
+		// Counter should be reset — clean success always resets regardless of runtime
+		if ap.restartCount != 0 {
+			t.Errorf("restartCount = %d, want 0 (should be reset)", ap.restartCount)
 		}
 	})
 

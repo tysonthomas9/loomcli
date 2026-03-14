@@ -16,7 +16,7 @@ import { FileViewer } from "../FileViewer";
 // ---- Mocks ----
 
 vi.mock("@/hooks", () => ({
-  useAgents: vi.fn(),
+  useAgentContext: vi.fn(),
 }));
 
 vi.mock("@/hooks/useFileTree", () => ({
@@ -41,11 +41,11 @@ vi.mock("@/components/CodeMirrorEditor", () => ({
   ),
 }));
 
-import { useAgents } from "@/hooks";
+import { useAgentContext } from "@/hooks";
 import { useFileTree } from "@/hooks/useFileTree";
 import { useFileContent } from "@/hooks/useFileContent";
 
-const mockUseAgents = vi.mocked(useAgents);
+const mockUseAgents = vi.mocked(useAgentContext);
 const mockUseFileTree = vi.mocked(useFileTree);
 const mockUseFileContent = vi.mocked(useFileContent);
 
@@ -106,7 +106,7 @@ describe("FileExplorer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAgents.mockReturnValue(
-      defaultAgentsReturn() as ReturnType<typeof useAgents>,
+      defaultAgentsReturn() as ReturnType<typeof useAgentContext>,
     );
     mockUseFileTree.mockReturnValue(defaultFileTreeReturn());
     mockUseFileContent.mockReturnValue(defaultFileContentReturn());
