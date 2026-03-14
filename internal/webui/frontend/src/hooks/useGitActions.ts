@@ -3,7 +3,7 @@
  * with loading state management and toast feedback.
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 import { ApiError } from "@/api/client";
 import {
@@ -70,10 +70,13 @@ export function useGitActions({
   const onStatusChangeRef = useRef(onStatusChange);
   onStatusChangeRef.current = onStatusChange;
 
-  // Track mounted state
-  // Note: This ref is set to false on cleanup, but since we use it in callbacks
-  // we set it back to true on each render (React guarantees cleanup runs before re-render).
-  // For simplicity, we just rely on the ref and accept minor edge cases.
+  // Track mounted state for safe async cleanup
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const [pushState, setPushState] = useState<GitActionState>(INITIAL_STATE);
   const [pullState, setPullState] = useState<GitActionState>(INITIAL_STATE);

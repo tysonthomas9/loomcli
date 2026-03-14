@@ -58,7 +58,7 @@ export interface TerminalInstanceHandle {
 async function fetchTerminalToken(sessionName: string): Promise<string | null> {
   try {
     const resp = await get<{ token: string }>(
-      `/api/terminal/token?session=${sessionName}`, // allow-url
+      `/api/terminal/token?session=${encodeURIComponent(sessionName)}`, // allow-url
     );
     return resp.token;
   } catch {
@@ -71,7 +71,7 @@ async function fetchTerminalToken(sessionName: string): Promise<string | null> {
  */
 function buildWsUrl(sessionName: string, token: string | null): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${sessionName}`; // allow-url
+  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
   if (token) {
     url += `&token=${encodeURIComponent(token)}`;
   }

@@ -126,6 +126,10 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 
 	// Start the subprocess
 	if err := cmd.Start(); err != nil {
+		if ap.logFile != nil {
+			_ = ap.logFile.Close()
+			ap.logFile = nil
+		}
 		return fmt.Errorf("failed to start subprocess: %w", err)
 	}
 
