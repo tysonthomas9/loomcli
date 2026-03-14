@@ -49,6 +49,7 @@ type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
 let workspaceCache: WorkspaceData | null = null;
 let fetchPromise: Promise<WorkspaceData> | null = null;
+let cacheGeneration = 0; // incremented on refresh to discard stale in-flight responses
 
 // ============= Helpers =============
 
@@ -72,14 +73,21 @@ export async function fetchWorkspace(): Promise<WorkspaceData> {
   if (fetchPromise !== null) {
     return fetchPromise;
   }
+  const gen = cacheGeneration;
   fetchPromise = get<ApiResult<WorkspaceData>>("/api/workspace").then(
     (response) => {
+      // Discard stale response if a refresh happened while we were in-flight
+      if (gen !== cacheGeneration) {
+        return fetchWorkspace();
+      }
       workspaceCache = unwrap(response);
       fetchPromise = null;
       return workspaceCache;
     },
     (err) => {
-      fetchPromise = null;
+      if (gen === cacheGeneration) {
+        fetchPromise = null;
+      }
       throw err;
     },
   );
@@ -90,8 +98,9 @@ export async function fetchWorkspace(): Promise<WorkspaceData> {
  * Invalidate the cache and re-fetch workspace data from the backend.
  */
 export async function refreshWorkspace(): Promise<WorkspaceData> {
+  cacheGeneration++; // Invalidate any in-flight fetch from prior generation
   workspaceCache = null;
-  fetchPromise = null; // Reset to ensure fresh fetch, not stale in-flight data
+  fetchPromise = null;
   return fetchWorkspace();
 }
 

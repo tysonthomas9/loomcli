@@ -304,6 +304,7 @@ export function BackendSelectorDropdown({
                   </span>
                   {!backend.available && (
                     <button
+                      type="button"
                       className={styles.configureLink}
                       onClick={(e) => {
                         e.stopPropagation();

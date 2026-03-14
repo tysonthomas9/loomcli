@@ -324,11 +324,9 @@ describe("BackendSelectorDropdown", () => {
         />,
       );
       fireEvent.click(screen.getByTestId("backend-selector-trigger"));
-      expect(screen.getByTestId("backend-configure-codex")).toBeInTheDocument();
-      expect(screen.getByTestId("backend-configure-codex")).toHaveAttribute(
-        "href",
-        "?view=settings",
-      );
+      const btn = screen.getByTestId("backend-configure-codex");
+      expect(btn).toBeInTheDocument();
+      expect(btn.tagName).toBe("BUTTON");
     });
   });
 

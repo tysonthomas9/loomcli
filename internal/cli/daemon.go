@@ -245,8 +245,11 @@ func (d *Daemon) Start() error {
 	// cross-checkout conflicts from prior daemon runs.
 	d.resetWorktreeBranches()
 
-	// Compute initial config hash for reconciler no-op detection
+	// Compute initial config hash for reconciler no-op detection.
+	// Take reconcileMu to stay consistent with reloadAndReconcile's write pattern.
+	d.reconcileMu.Lock()
 	d.configHash = computeConfigHash(d.config)
+	d.reconcileMu.Unlock()
 
 	// Start healthChecker goroutine
 	d.wg.Add(1)
