@@ -104,6 +104,9 @@ type Daemon struct {
 	concurrency  *ConcurrencyTracker // enforces per-role concurrency limits
 	eventBus     events.Emitter      // event emission for observability (nil-safe via NopBus default)
 	repos        []RepoConfig        // workspace repos for resolveAgentRepos; nil outside workspace mode
+
+	configHash  string     // SHA-256 hash of current running config for no-op detection
+	reconcileMu sync.Mutex // serializes reloadAndReconcile calls
 }
 
 // emitEvent is a convenience helper that emits an event via the daemon's event bus.
@@ -218,11 +221,21 @@ func (d *Daemon) Start() error {
 	// cross-checkout conflicts from prior daemon runs.
 	d.resetWorktreeBranches()
 
+	// Compute initial config hash for reconciler no-op detection
+	d.configHash = computeConfigHash(d.config)
+
 	// Start healthChecker goroutine
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
 		d.healthChecker()
+	}()
+
+	// Start configReconciler goroutine
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.configReconciler()
 	}()
 
 	// Initialize stop/done channels and start superviseAgent goroutine for each agent
