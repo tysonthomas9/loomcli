@@ -278,6 +278,7 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 	// Array parameters
 	args.Labels = parseArrayParam(q, "labels")
 	args.LabelsAny = parseArrayParam(q, "labels_any")
+	args.SourceRepos = parseArrayParam(q, "source_repos")
 
 	return args, nil
 }

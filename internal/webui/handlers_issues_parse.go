@@ -26,6 +26,7 @@ func parseListParams(r *http.Request) (*rpc.ListArgs, error) {
 
 	// Labels (comma-separated)
 	args.Labels = parseArrayParam(q, "labels")
+	args.SourceRepos = parseArrayParam(q, "source_repos")
 
 	// Limit (capped at MaxListLimit to prevent DoS, silently ignore invalid)
 	limitPtr, _ := parseIntParam(q, "limit")

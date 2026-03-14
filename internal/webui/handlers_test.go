@@ -5020,61 +5020,86 @@ func TestParseGraphParams(t *testing.T) {
 		url               string
 		wantStatus        string
 		wantIncludeClosed bool
+		wantSourceRepos   []string
 	}{
 		{
 			name:              "default values",
 			url:               "/api/issues/graph",
 			wantStatus:        "all",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "status=open",
 			url:               "/api/issues/graph?status=open",
 			wantStatus:        "open",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "status=closed",
 			url:               "/api/issues/graph?status=closed",
 			wantStatus:        "closed",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "status=all",
 			url:               "/api/issues/graph?status=all",
 			wantStatus:        "all",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "include_closed=false",
 			url:               "/api/issues/graph?include_closed=false",
 			wantStatus:        "all",
 			wantIncludeClosed: false,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "include_closed=true",
 			url:               "/api/issues/graph?include_closed=true",
 			wantStatus:        "all",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "combined status and include_closed",
 			url:               "/api/issues/graph?status=open&include_closed=false",
 			wantStatus:        "open",
 			wantIncludeClosed: false,
+			wantSourceRepos:   nil,
+		},
+		{
+			name:              "source_repos single",
+			url:               "/api/issues/graph?source_repos=repo1",
+			wantStatus:        "all",
+			wantIncludeClosed: true,
+			wantSourceRepos:   []string{"repo1"},
+		},
+		{
+			name:              "source_repos multiple",
+			url:               "/api/issues/graph?source_repos=repo1,repo2",
+			wantStatus:        "all",
+			wantIncludeClosed: true,
+			wantSourceRepos:   []string{"repo1", "repo2"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
-			status, includeClosed := parseGraphParams(req)
+			status, includeClosed, sourceRepos := parseGraphParams(req)
 
 			if status != tt.wantStatus {
 				t.Errorf("status = %q, want %q", status, tt.wantStatus)
 			}
 			if includeClosed != tt.wantIncludeClosed {
 				t.Errorf("includeClosed = %v, want %v", includeClosed, tt.wantIncludeClosed)
+			}
+			if !slices.Equal(sourceRepos, tt.wantSourceRepos) {
+				t.Errorf("sourceRepos = %v, want %v", sourceRepos, tt.wantSourceRepos)
 			}
 		})
 	}
@@ -9213,5 +9238,107 @@ func TestHandleListIssues_KanbanModeRepo(t *testing.T) {
 	// issue-2 should not have repo
 	if kanbanItems[1].Repo != nil {
 		t.Errorf("expected issue-2 repo to be nil, got %v", kanbanItems[1].Repo)
+	}
+}
+
+func TestParseListParams_SourceRepos(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantVal []string
+	}{
+		{
+			name:    "no source_repos returns nil",
+			url:     "/api/issues",
+			wantVal: nil,
+		},
+		{
+			name:    "single source repo",
+			url:     "/api/issues?source_repos=repo1",
+			wantVal: []string{"repo1"},
+		},
+		{
+			name:    "multiple source repos comma-separated",
+			url:     "/api/issues?source_repos=repo1,repo2,repo3",
+			wantVal: []string{"repo1", "repo2", "repo3"},
+		},
+		{
+			name:    "empty source_repos value returns nil",
+			url:     "/api/issues?source_repos=",
+			wantVal: nil,
+		},
+		{
+			name:    "source_repos combined with other params",
+			url:     "/api/issues?status=open&source_repos=repo1,repo2&priority=1",
+			wantVal: []string{"repo1", "repo2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.url, nil)
+			args, err := parseListParams(req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if !slices.Equal(args.SourceRepos, tt.wantVal) {
+				t.Errorf("SourceRepos = %v, want %v", args.SourceRepos, tt.wantVal)
+			}
+		})
+	}
+}
+
+func TestParseReadyParams_SourceRepos(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   string
+		wantVal []string
+	}{
+		{
+			name:    "no source_repos returns nil",
+			query:   "",
+			wantVal: nil,
+		},
+		{
+			name:    "single source repo",
+			query:   "source_repos=repo1",
+			wantVal: []string{"repo1"},
+		},
+		{
+			name:    "multiple source repos comma-separated",
+			query:   "source_repos=repo1,repo2,repo3",
+			wantVal: []string{"repo1", "repo2", "repo3"},
+		},
+		{
+			name:    "empty source_repos value returns nil",
+			query:   "source_repos=",
+			wantVal: nil,
+		},
+		{
+			name:    "source_repos combined with other params",
+			query:   "assignee=tyson&source_repos=repo1,repo2&limit=10",
+			wantVal: []string{"repo1", "repo2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url := "/api/ready"
+			if tt.query != "" {
+				url += "?" + tt.query
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+
+			args, err := parseReadyParams(req)
+			if err != nil {
+				t.Errorf("parseReadyParams() unexpected error: %v", err)
+				return
+			}
+
+			if !slices.Equal(args.SourceRepos, tt.wantVal) {
+				t.Errorf("SourceRepos = %v, want %v", args.SourceRepos, tt.wantVal)
+			}
+		})
 	}
 }

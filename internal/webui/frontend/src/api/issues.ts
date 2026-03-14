@@ -196,6 +196,8 @@ export interface GraphFilter {
   status?: "all" | "open" | "closed";
   /** Include closed issues when status is 'all' (default: true) */
   includeClosed?: boolean;
+  /** Filter by source repositories */
+  source_repos?: string[];
 }
 
 /**
@@ -240,6 +242,9 @@ export async function fetchGraphIssues(
   }
   if (options?.includeClosed !== undefined) {
     params.include_closed = options.includeClosed;
+  }
+  if (options?.source_repos?.length) {
+    params.source_repos = options.source_repos;
   }
   const query = buildQueryString(params);
   const response = await get<GraphApiResponse>(`/api/issues/graph${query}`);

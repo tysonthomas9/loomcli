@@ -264,6 +264,9 @@ type ListArgs struct {
 
 	// Staleness control (bd-dpkdm)
 	AllowStale bool `json:"allow_stale,omitempty"` // Skip staleness check, return potentially stale data
+
+	// Multi-repo filtering
+	SourceRepos []string `json:"source_repos,omitempty"` // Filter by source repository
 }
 
 // CountArgs represents arguments for the count operation
@@ -302,6 +305,9 @@ type CountArgs struct {
 
 	// Grouping option (only one can be specified)
 	GroupBy string `json:"group_by,omitempty"` // "status", "priority", "type", "assignee", "label"
+
+	// Multi-repo filtering
+	SourceRepos []string `json:"source_repos,omitempty"` // Filter by source repository
 }
 
 // ShowArgs represents arguments for the show operation
@@ -327,6 +333,7 @@ type ReadyArgs struct {
 	ParentID        string   `json:"parent_id,omitempty"`        // Filter to descendants of this bead/epic
 	MolType         string   `json:"mol_type,omitempty"`         // Filter by molecule type: swarm, patrol, or work
 	IncludeDeferred bool     `json:"include_deferred,omitempty"` // Include issues with future defer_until (GH#820)
+	SourceRepos     []string `json:"source_repos,omitempty"`     // Filter by source repository
 }
 
 // BlockedArgs represents arguments for the blocked operation
@@ -675,6 +682,7 @@ type GetParentIDsResponse struct {
 type GetGraphDataArgs struct {
 	Status        string   `json:"status,omitempty"`         // "open", "closed", or "all" (default: "all")
 	ExcludeStatus []string `json:"exclude_status,omitempty"` // Statuses to exclude
+	SourceRepos   []string `json:"source_repos,omitempty"`   // Filter by source repository
 }
 
 // GraphIssueSummary is a slim issue representation for graph visualization.
