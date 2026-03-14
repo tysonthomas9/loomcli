@@ -29,6 +29,7 @@ import {
   FilterBar,
   SearchInput,
   IssueDetailPanel,
+  IssueDetailView,
   AgentDetailPanel,
   AgentsSidebar,
   WorkspaceTree,
@@ -39,6 +40,7 @@ import {
   ThemeToggle,
 } from "@/components";
 import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { ViewMode } from "@/components/ViewSwitcher";
 import {
   useIssues,
   useViewState,
@@ -236,6 +238,9 @@ function App() {
     clearIssue,
   } = useIssueDetail();
 
+  // Previous view state for issue-detail back navigation
+  const [previousView, setPreviousView] = useState<ViewMode>("kanban");
+
   // Agent data (shared via AgentProvider — single polling loop)
   const { agents, agentTasks } = useAgentContext();
 
@@ -338,17 +343,13 @@ function App() {
   // Handle issue click from SwimLaneBoard/IssueTable
   const handleIssueClick = useCallback(
     (issue: Issue) => {
-      // If clicking the same issue that's already selected, just ensure panel is open
-      if (issue.id === selectedIssueId && isPanelOpen) {
+      // If already viewing this issue in detail view, no-op
+      if (issue.id === selectedIssueId && activeView === "issue-detail") {
         return;
       }
 
-      // Cancel any pending issue panel timeout (prevents wiping the new selection)
-      clearTimeoutRef(issuePanelTimeoutRef);
-
-      // Close agent panel if open (only one panel at a time)
+      // Close agent panel if open
       if (isAgentPanelOpen) {
-        // Cancel pending agent panel timeout before starting new one
         clearTimeoutRef(agentPanelTimeoutRef);
         setIsAgentPanelOpen(false);
         agentPanelTimeoutRef.current = setTimeout(() => {
@@ -357,15 +358,24 @@ function App() {
         }, 300);
       }
 
+      // Ensure issue panel overlay is closed
+      setIsPanelOpen(false);
+
+      // Store current view as previous (but not if already in issue-detail)
+      if (activeView !== "issue-detail") {
+        setPreviousView(activeView);
+      }
+
       setSelectedIssueId(issue.id);
-      setIsPanelOpen(true);
       fetchIssue(issue.id);
+      setActiveView("issue-detail");
     },
     [
       selectedIssueId,
-      isPanelOpen,
+      activeView,
       isAgentPanelOpen,
       fetchIssue,
+      setActiveView,
       clearTimeoutRef,
     ],
   );
@@ -381,6 +391,13 @@ function App() {
       setSelectedIssueId(null);
     }, 300); // Match CSS transition duration
   }, [clearIssue]);
+
+  // Handle back from issue detail view
+  const handleBackFromDetail = useCallback(() => {
+    setActiveView(previousView);
+    clearIssue();
+    setSelectedIssueId(null);
+  }, [previousView, clearIssue, setActiveView]);
 
   // Handle approve button click on review cards
   const handleApprove = useCallback(
@@ -484,25 +501,28 @@ function App() {
     setActiveView("terminal");
   }, [setActiveView]);
 
-  // Handle task click from agent panel (opens IssueDetailPanel for that task)
+  // Handle task click from agent panel (navigates to issue-detail view)
   const handleAgentTaskClick = useCallback(
     (taskId: string) => {
-      // Cancel any pending issue panel timeout to prevent it from wiping the new selection
+      // Cancel any pending timeouts
       clearTimeoutRef(issuePanelTimeoutRef);
-      // Cancel any pending agent panel timeout before the transition
       clearTimeoutRef(agentPanelTimeoutRef);
-      // Close agent panel first
+      // Close agent panel
       setIsAgentPanelOpen(false);
-      agentPanelTimeoutRef.current = setTimeout(() => {
-        if (!mountedRef.current) return;
-        setSelectedAgentName(null);
-        // Open issue panel for the task
-        setSelectedIssueId(taskId);
-        setIsPanelOpen(true);
-        fetchIssue(taskId);
-      }, 300);
+      setSelectedAgentName(null);
+      // Ensure issue panel overlay is closed
+      setIsPanelOpen(false);
+
+      // Store current view as previous (but not if already in issue-detail)
+      if (activeView !== "issue-detail") {
+        setPreviousView(activeView);
+      }
+
+      setSelectedIssueId(taskId);
+      fetchIssue(taskId);
+      setActiveView("issue-detail");
     },
-    [fetchIssue, clearTimeoutRef],
+    [activeView, fetchIssue, setActiveView, clearTimeoutRef],
   );
 
   const headerNavigation = (
@@ -700,6 +720,17 @@ function App() {
         <Suspense fallback={<LoadingSkeleton.Column />}>
           <FileExplorer />
         </Suspense>
+      )}
+      {activeView === "issue-detail" && (
+        <IssueDetailView
+          issue={issueDetails}
+          isLoading={isLoadingDetails}
+          error={detailError}
+          previousView={previousView}
+          onBack={handleBackFromDetail}
+          onApprove={handleApprove}
+          onReject={handleReject}
+        />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <IssueDetailPanel

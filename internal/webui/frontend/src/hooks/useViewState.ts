@@ -20,12 +20,18 @@ const VALID_VIEWS: ViewMode[] = [
   "workspace",
   "settings",
   "files",
+  "issue-detail",
 ];
 
 /**
  * URL parameter name for view.
  */
 const VIEW_PARAM = "view";
+
+/**
+ * URL parameter name for issue ID (used with issue-detail view).
+ */
+const ISSUE_PARAM = "issue";
 
 /**
  * Options for useViewState hook.
@@ -38,7 +44,12 @@ export interface UseViewStateOptions {
 /**
  * Return type for useViewState hook.
  */
-export type UseViewStateReturn = [ViewMode, (view: ViewMode) => void];
+export type UseViewStateReturn = [ViewMode, (view: ViewMode) => void] & {
+  /** Set view to issue-detail with an issue ID in a single URL update */
+  setDetailView: (issueId: string) => void;
+  /** The issue ID from the URL (when in issue-detail view) */
+  urlIssueId: string | null;
+};
 
 /**
  * Check if running in browser environment.
@@ -77,8 +88,9 @@ function parseViewFromUrl(): ViewMode {
  * Update URL with view mode without triggering navigation.
  * Uses replaceState to avoid polluting browser history.
  * Removes the view param from URL when it matches DEFAULT_VIEW for cleaner URLs.
+ * When view is 'issue-detail', also sets/clears the 'issue' param.
  */
-function updateViewUrl(view: ViewMode): void {
+function updateViewUrl(view: ViewMode, issueId?: string | null): void {
   if (!isBrowser()) return;
 
   const params = new URLSearchParams(window.location.search);
@@ -90,12 +102,28 @@ function updateViewUrl(view: ViewMode): void {
     params.set(VIEW_PARAM, view);
   }
 
+  // Manage issue param: set when in issue-detail view, clear otherwise
+  if (view === "issue-detail" && issueId) {
+    params.set(ISSUE_PARAM, issueId);
+  } else {
+    params.delete(ISSUE_PARAM);
+  }
+
   const queryString = params.toString();
   const newUrl = queryString
     ? `${window.location.pathname}?${queryString}`
     : window.location.pathname;
 
   window.history.replaceState(null, "", newUrl);
+}
+
+/**
+ * Parse issue ID from URL search parameters.
+ */
+function parseIssueFromUrl(): string | null {
+  if (!isBrowser()) return null;
+  const params = new URLSearchParams(window.location.search);
+  return params.get(ISSUE_PARAM);
 }
 
 /**
@@ -128,12 +156,20 @@ export function useViewState(
     return DEFAULT_VIEW;
   });
 
+  // Track issue ID for issue-detail view URL sync
+  const [issueId, setIssueId] = useState<string | null>(() => {
+    if (syncUrl) {
+      return parseIssueFromUrl();
+    }
+    return null;
+  });
+
   // Sync URL when state changes
   useEffect(() => {
     if (syncUrl && isBrowser()) {
-      updateViewUrl(view);
+      updateViewUrl(view, issueId);
     }
-  }, [view, syncUrl]);
+  }, [view, issueId, syncUrl]);
 
   // Handle browser back/forward navigation
   useEffect(() => {
@@ -141,18 +177,31 @@ export function useViewState(
 
     const handlePopState = () => {
       setViewState(parseViewFromUrl());
+      setIssueId(parseIssueFromUrl());
     };
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [syncUrl]);
 
-  // Memoized setter
+  // Memoized setter - clears issueId when switching away from issue-detail
   const setView = useCallback((newView: ViewMode) => {
     setViewState(newView);
+    if (newView !== "issue-detail") {
+      setIssueId(null);
+    }
   }, []);
 
-  return [view, setView];
+  // Set view to issue-detail with an issue ID in one update
+  const setDetailView = useCallback((newIssueId: string) => {
+    setViewState("issue-detail");
+    setIssueId(newIssueId);
+  }, []);
+
+  const result = [view, setView] as UseViewStateReturn;
+  result.setDetailView = setDetailView;
+  result.urlIssueId = issueId;
+  return result;
 }
 
 // Export helpers for testing

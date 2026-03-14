@@ -8,6 +8,7 @@ export * from "./EmptyColumn";
 export * from "./IssueCard";
 export * from "./DraggableIssueCard";
 export * from "./IssueDetailPanel";
+export * from "./IssueDetailView";
 export * from "./LoadingSkeleton";
 export * from "./table";
 export * from "./StatusColumn";

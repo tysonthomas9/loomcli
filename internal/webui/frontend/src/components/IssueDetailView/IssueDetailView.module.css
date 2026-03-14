@@ -1,0 +1,344 @@
+/**
+ * IssueDetailView component styles.
+ * Full-area view replacing the main content area when viewing issue details.
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-panel-bg);
+}
+
+/* ============= Header Bar ============= */
+
+.headerBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+  flex-shrink: 0;
+}
+
+.backButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.backButton:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.backButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.backButtonIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.backButtonText {
+  white-space: nowrap;
+}
+
+@media (width <= 520px) {
+  .backButtonText {
+    display: none;
+  }
+}
+
+.issueIdBadge {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  padding: 4px 8px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  text-transform: capitalize;
+}
+
+.statusBadge[data-status="open"] {
+  background: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+}
+
+.statusBadge[data-status="in_progress"] {
+  background: var(
+    --color-primary-bg,
+    color-mix(in srgb, var(--color-primary) 15%, transparent)
+  );
+  color: var(--color-primary);
+}
+
+.statusBadge[data-status="review"] {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.statusBadge[data-status="blocked"] {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.statusBadge[data-status="closed"] {
+  background: color-mix(in srgb, var(--color-success) 15%, transparent);
+  color: var(--color-success);
+}
+
+.headerTitle {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ============= Content Area ============= */
+
+.contentArea {
+  flex: 1;
+  overflow: hidden auto;
+  padding: 24px 32px;
+}
+
+@media (width <= 520px) {
+  .contentArea {
+    padding: 16px;
+  }
+}
+
+/* ============= Metadata Bar ============= */
+
+.metadataBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.metadataItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+}
+
+.metadataItem svg {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+}
+
+/* ============= Section Styles ============= */
+
+.section {
+  margin-bottom: 28px;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.sectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.description {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* ============= Review Action Bar ============= */
+
+.reviewActionBar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.reviewApproveButton,
+.reviewRejectButton {
+  padding: 8px 16px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.reviewApproveButton {
+  color: white;
+  background-color: var(--color-success);
+}
+
+.reviewApproveButton:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-success) 85%, black);
+}
+
+.reviewApproveButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.reviewRejectButton {
+  color: white;
+  background-color: var(--color-danger);
+}
+
+.reviewRejectButton:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-danger) 85%, black);
+}
+
+/* ============= Labels ============= */
+
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.label {
+  padding: 2px 8px;
+  background-color: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+  font-size: var(--font-xs);
+  border-radius: var(--radius-full);
+}
+
+/* ============= Dependencies ============= */
+
+.dependencyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dependencyItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 14px;
+}
+
+.dependencyItem:last-child {
+  border-bottom: none;
+}
+
+.dependencyId {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.dependencyTitle {
+  flex: 1;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dependencyType {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.dependencyClosed .dependencyTitle {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+/* ============= Loading State ============= */
+
+.loadingContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--color-text-secondary);
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ============= Error State ============= */
+
+.errorContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 24px;
+  text-align: center;
+}
+
+.errorMessage {
+  color: var(--color-danger);
+  margin-bottom: 16px;
+  font-size: 14px;
+}
