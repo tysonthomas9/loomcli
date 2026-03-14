@@ -146,7 +146,9 @@ func runTask(cmd *cobra.Command, args []string) {
 	}
 
 	// SINGLE TASK MODE - check if there are tasks available for implementation
-	available, err := checkTaskAvailability(routerCheck, func() (bool, error) { return HasAvailableImplementationTasks(taskParentID) })
+	available, err := checkTaskAvailability(routerCheck, func() (bool, error) {
+		return HasAvailableImplementationTasks(taskParentID, os.Getenv("LOOM_AGENT_REPO"))
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
 		os.Exit(1)

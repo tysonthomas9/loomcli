@@ -149,7 +149,7 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := HasAvailablePlanningTasks("")
+			got, err := HasAvailablePlanningTasks("", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("HasAvailablePlanningTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -265,7 +265,7 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := HasAvailableImplementationTasks("")
+			got, err := HasAvailableImplementationTasks("", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("HasAvailableImplementationTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2434,7 +2434,7 @@ func TestHasAnyAvailableTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := HasAnyAvailableTasks("")
+			got, err := HasAnyAvailableTasks("", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("HasAnyAvailableTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2816,7 +2816,7 @@ func TestGetAvailablePlanningTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := GetAvailablePlanningTasks("")
+			got, err := GetAvailablePlanningTasks("", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAvailablePlanningTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2947,7 +2947,7 @@ func TestGetAvailableImplementationTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := GetAvailableImplementationTasks("")
+			got, err := GetAvailableImplementationTasks("", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAvailableImplementationTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -3079,7 +3079,7 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
 			}
 
-			got, err := GetAnyAvailableTasks("")
+			got, err := GetAnyAvailableTasks("", "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAnyAvailableTasks() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -3119,7 +3119,7 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// HasAvailablePlanningTasks should return true (T-1 has no design)
-	hasPlan, err := HasAvailablePlanningTasks("")
+	hasPlan, err := HasAvailablePlanningTasks("", "")
 	if err != nil {
 		t.Fatalf("HasAvailablePlanningTasks() error = %v", err)
 	}
@@ -3128,7 +3128,7 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// HasAvailableImplementationTasks should return true (T-2 has design)
-	hasImpl, err := HasAvailableImplementationTasks("")
+	hasImpl, err := HasAvailableImplementationTasks("", "")
 	if err != nil {
 		t.Fatalf("HasAvailableImplementationTasks() error = %v", err)
 	}
@@ -3137,7 +3137,7 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// HasAnyAvailableTasks should return true (both T-1 and T-2 are open)
-	hasAny, err := HasAnyAvailableTasks("")
+	hasAny, err := HasAnyAvailableTasks("", "")
 	if err != nil {
 		t.Fatalf("HasAnyAvailableTasks() error = %v", err)
 	}
@@ -3146,17 +3146,17 @@ func TestHasAvailableDelegatesToGet(t *testing.T) {
 	}
 
 	// Verify Get* returns correct counts
-	planTasks, _ := GetAvailablePlanningTasks("")
+	planTasks, _ := GetAvailablePlanningTasks("", "")
 	if len(planTasks) != 1 || planTasks[0].ID != "T-1" {
 		t.Errorf("GetAvailablePlanningTasks() = %v, want [T-1]", planTasks)
 	}
 
-	implTasks, _ := GetAvailableImplementationTasks("")
+	implTasks, _ := GetAvailableImplementationTasks("", "")
 	if len(implTasks) != 1 || implTasks[0].ID != "T-2" {
 		t.Errorf("GetAvailableImplementationTasks() = %v, want [T-2]", implTasks)
 	}
 
-	anyTasks, _ := GetAnyAvailableTasks("")
+	anyTasks, _ := GetAnyAvailableTasks("", "")
 	if len(anyTasks) != 2 {
 		t.Errorf("GetAnyAvailableTasks() returned %d tasks, want 2", len(anyTasks))
 	}
@@ -3618,7 +3618,7 @@ func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
 				}
 			}
 
-			_, err := GetAvailablePlanningTasks(tt.parentID)
+			_, err := GetAvailablePlanningTasks(tt.parentID, "")
 			if err != nil {
 				t.Fatalf("GetAvailablePlanningTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
@@ -3681,7 +3681,7 @@ func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
 				}
 			}
 
-			_, err := GetAvailableImplementationTasks(tt.parentID)
+			_, err := GetAvailableImplementationTasks(tt.parentID, "")
 			if err != nil {
 				t.Fatalf("GetAvailableImplementationTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
@@ -3744,7 +3744,7 @@ func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
 				}
 			}
 
-			_, err := GetAnyAvailableTasks(tt.parentID)
+			_, err := GetAnyAvailableTasks(tt.parentID, "")
 			if err != nil {
 				t.Fatalf("GetAnyAvailableTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
@@ -3806,7 +3806,7 @@ func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
 				}
 			}
 
-			got, err := HasAvailablePlanningTasks(tt.parentID)
+			got, err := HasAvailablePlanningTasks(tt.parentID, "")
 			if err != nil {
 				t.Fatalf("HasAvailablePlanningTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
@@ -3872,7 +3872,7 @@ func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
 				}
 			}
 
-			got, err := HasAvailableImplementationTasks(tt.parentID)
+			got, err := HasAvailableImplementationTasks(tt.parentID, "")
 			if err != nil {
 				t.Fatalf("HasAvailableImplementationTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
@@ -3938,7 +3938,7 @@ func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
 				}
 			}
 
-			got, err := HasAnyAvailableTasks(tt.parentID)
+			got, err := HasAnyAvailableTasks(tt.parentID, "")
 			if err != nil {
 				t.Fatalf("HasAnyAvailableTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
@@ -4048,7 +4048,7 @@ func TestFetchReadyIssues_InvalidJSON(t *testing.T) {
 		return CommandResult{Stdout: "not valid json"}
 	}
 
-	_, err := fetchReadyIssues("")
+	_, err := fetchReadyIssues("", "")
 	if err == nil {
 		t.Fatal("fetchReadyIssues() expected error for invalid JSON, got nil")
 	}
@@ -4065,7 +4065,7 @@ func TestFetchReadyIssues_EmptyArray(t *testing.T) {
 		return CommandResult{Stdout: "[]"}
 	}
 
-	issues, err := fetchReadyIssues("")
+	issues, err := fetchReadyIssues("", "")
 	if err != nil {
 		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
 	}
@@ -4088,7 +4088,7 @@ func TestFetchReadyIssues_ValidIssues(t *testing.T) {
 		}
 	}
 
-	issues, err := fetchReadyIssues("")
+	issues, err := fetchReadyIssues("", "")
 	if err != nil {
 		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
 	}
@@ -4108,7 +4108,7 @@ func TestFetchReadyIssues_CommandError(t *testing.T) {
 		return CommandResult{Err: fmt.Errorf("command failed")}
 	}
 
-	_, err := fetchReadyIssues("")
+	_, err := fetchReadyIssues("", "")
 	if err == nil {
 		t.Fatal("fetchReadyIssues() expected error for command failure, got nil")
 	}
@@ -4127,7 +4127,7 @@ func TestFetchReadyIssues_WithParentID(t *testing.T) {
 		return CommandResult{Stdout: "[]"}
 	}
 
-	_, err := fetchReadyIssues("epic-123")
+	_, err := fetchReadyIssues("epic-123", "")
 	if err != nil {
 		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
 	}
@@ -4141,6 +4141,73 @@ func TestFetchReadyIssues_WithParentID(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("fetchReadyIssues() did not pass --parent epic-123, args: %v", capturedArgs)
+	}
+}
+
+// ============================================================================
+// fetchReadyIssues - Repo Label Filtering Tests
+// ============================================================================
+
+func TestFetchReadyIssues_WithRepoLabel(t *testing.T) {
+	orig := defaultDeps
+	t.Cleanup(func() { defaultDeps = orig })
+
+	mock := &MockBDRunner{
+		Result: CommandResult{Stdout: "[]"},
+	}
+	defaultDeps = &Deps{BD: mock}
+
+	_, err := fetchReadyIssues("", "frontend")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 BD call, got %d", len(mock.Calls))
+	}
+	args := mock.Calls[0].Args
+	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--label", "repo:frontend"}) {
+		t.Errorf("BD args = %v, want [ready --json --limit 100 --label repo:frontend]", args)
+	}
+}
+
+func TestFetchReadyIssues_WithoutRepoLabel(t *testing.T) {
+	orig := defaultDeps
+	t.Cleanup(func() { defaultDeps = orig })
+
+	mock := &MockBDRunner{
+		Result: CommandResult{Stdout: "[]"},
+	}
+	defaultDeps = &Deps{BD: mock}
+
+	_, err := fetchReadyIssues("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	args := mock.Calls[0].Args
+	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100"}) {
+		t.Errorf("BD args = %v (should not have --label)", args)
+	}
+}
+
+func TestFetchReadyIssues_WithParentAndRepoLabel(t *testing.T) {
+	orig := defaultDeps
+	t.Cleanup(func() { defaultDeps = orig })
+
+	mock := &MockBDRunner{
+		Result: CommandResult{Stdout: "[]"},
+	}
+	defaultDeps = &Deps{BD: mock}
+
+	_, err := fetchReadyIssues("E-1", "backend")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 BD call, got %d", len(mock.Calls))
+	}
+	args := mock.Calls[0].Args
+	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--parent", "E-1", "--label", "repo:backend"}) {
+		t.Errorf("BD args = %v, want [ready --json --limit 100 --parent E-1 --label repo:backend]", args)
 	}
 }
 

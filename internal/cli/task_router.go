@@ -218,6 +218,9 @@ func AgentEntryFromEnv() AgentEntry {
 	if v := os.Getenv("LOOM_ROLE"); v != "" {
 		ae.Role = v
 	}
+	if v := os.Getenv("LOOM_AGENT_REPO"); v != "" {
+		ae.Repo = v
+	}
 	return ae
 }
 

@@ -323,7 +323,7 @@ func TestFetchReadyIssues_UsesBDRunner(t *testing.T) {
 	}
 	defaultDeps = &Deps{BD: mock}
 
-	got, err := fetchReadyIssues("epic-1")
+	got, err := fetchReadyIssues("epic-1", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestFetchReadyIssues_NoParent(t *testing.T) {
 	}
 	defaultDeps = &Deps{BD: mock}
 
-	_, err := fetchReadyIssues("")
+	_, err := fetchReadyIssues("", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

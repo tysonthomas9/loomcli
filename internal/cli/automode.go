@@ -105,9 +105,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	if opts.CustomTaskCheck != nil {
 		hasAvailableTasks = opts.CustomTaskCheck
 	} else if opts.AgentType == "plan" {
-		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID) }
+		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID, os.Getenv("LOOM_AGENT_REPO")) }
 	} else {
-		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
+		hasAvailableTasks = func() (bool, error) {
+			return HasAvailableImplementationTasks(opts.ParentID, os.Getenv("LOOM_AGENT_REPO"))
+		}
 	}
 
 	// Prompt gen: custom overrides default

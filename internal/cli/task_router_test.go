@@ -712,6 +712,7 @@ func TestAgentEntryFromEnv_Empty(t *testing.T) {
 	t.Setenv("LOOM_AGENT_PATH_PATTERNS", "")
 	t.Setenv("BD_ACTOR", "")
 	t.Setenv("LOOM_ROLE", "")
+	t.Setenv("LOOM_AGENT_REPO", "")
 
 	ae := AgentEntryFromEnv()
 
@@ -723,5 +724,40 @@ func TestAgentEntryFromEnv_Empty(t *testing.T) {
 	}
 	if ae.Role != "" {
 		t.Errorf("Role = %q, want empty", ae.Role)
+	}
+}
+
+func TestAgentEntryFromEnv_WithLOOM_AGENT_REPO(t *testing.T) {
+	t.Setenv("LOOM_AGENT_PATH_PATTERNS", "")
+	t.Setenv("BD_ACTOR", "")
+	t.Setenv("LOOM_ROLE", "")
+	t.Setenv("LOOM_AGENT_REPO", "myrepo")
+
+	ae := AgentEntryFromEnv()
+
+	if ae.Repo != "myrepo" {
+		t.Errorf("Repo = %q, want %q", ae.Repo, "myrepo")
+	}
+}
+
+// TestBuildRouterTaskCheck_RepoOnlyConstraint verifies non-nil returned when only Repo is set.
+func TestBuildRouterTaskCheck_RepoOnlyConstraint(t *testing.T) {
+	rc := RoleConfig{Description: "frontend repo agent"}
+	ae := AgentEntry{Worktree: "falcon", Role: "task", Repo: "frontend"}
+
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check == nil {
+		t.Error("BuildRouterTaskCheck() should return non-nil when AgentEntry.Repo is set")
+	}
+}
+
+// TestBuildRouterTaskCheck_NoConstraints verifies nil returned for empty RoleConfig and empty AgentEntry.
+func TestBuildRouterTaskCheck_NoConstraints(t *testing.T) {
+	rc := RoleConfig{}
+	ae := AgentEntry{}
+
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check != nil {
+		t.Error("BuildRouterTaskCheck() should return nil for completely empty RoleConfig and AgentEntry")
 	}
 }

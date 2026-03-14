@@ -146,7 +146,7 @@ func runPlan(cmd *cobra.Command, args []string) {
 	}
 
 	// SINGLE TASK MODE - check if there are tasks available for planning
-	available, err := checkTaskAvailability(routerCheck, func() (bool, error) { return HasAvailablePlanningTasks(planParentID) })
+	available, err := checkTaskAvailability(routerCheck, func() (bool, error) { return HasAvailablePlanningTasks(planParentID, os.Getenv("LOOM_AGENT_REPO")) })
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error checking tasks: %v\n", err)
 		os.Exit(1)
