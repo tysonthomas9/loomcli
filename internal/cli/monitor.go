@@ -450,12 +450,14 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 	var agents []AgentStatus
 	taskIDToAgents := make(map[string][]string) // Track which agents claim which tasks
 
-	// Compute default branch once per tick using already-discovered worktrees
-	defaultBranch := GetDefaultBranchForWorktrees(worktrees)
+	// Compute global default branch for legacy mode display.
+	// Per-worktree branch is resolved in the loop for workspace mode.
+	globalDefaultBranch := GetDefaultBranchForWorktrees(worktrees)
 
-	// Get GitHub remote URL once (all worktrees share the same remote)
+	// Get GitHub remote URL once (all worktrees share the same remote in legacy mode).
+	// In workspace mode, per-worktree URL is resolved in the loop instead.
 	githubURL := ""
-	if len(worktrees) > 0 {
+	if len(worktrees) > 0 && worktrees[0].Repo == nil {
 		githubURL = getGitHubRemoteURL(worktrees[0].Path)
 	}
 
@@ -527,12 +529,22 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			}
 		}
 
+		// Use per-worktree default branch in workspace mode
+		wtDefaultBranch := globalDefaultBranch
+		if wt.Repo != nil {
+			wtDefaultBranch = DefaultBranchForWorktree(wt)
+		}
+
 		// Check ahead/behind integration branch
-		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, defaultBranch, branch)
+		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, wtDefaultBranch, branch)
 
 		// Populate commit details when ahead > 0
 		if agent.Ahead > 0 {
-			agent.Commits = getWorktreeCommitDetails(wt.Path, defaultBranch, 10, githubURL, branch)
+			wtGithubURL := githubURL
+			if wt.Repo != nil {
+				wtGithubURL = getGitHubRemoteURL(wt.Path)
+			}
+			agent.Commits = getWorktreeCommitDetails(wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
 		}
 
 		// Populate file changes (returns nil for clean trees)
