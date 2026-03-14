@@ -59,6 +59,9 @@ func fetchReadyIssues(parentID string, repoLabel string) ([]BdIssue, error) {
 	if repoLabel != "" {
 		args = append(args, "--label", "repo:"+repoLabel)
 	}
+	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
+		args = append(args, "--source-repos="+sourceRepos)
+	}
 	result := defaultDeps.BD.Run(GetBeadsDir(), args...)
 	if result.Err != nil {
 		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)

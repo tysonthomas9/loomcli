@@ -4211,6 +4211,73 @@ func TestFetchReadyIssues_WithParentAndRepoLabel(t *testing.T) {
 	}
 }
 
+// fetchReadyIssues - Source Repos Filtering Tests
+// ============================================================================
+
+func TestFetchReadyIssues_WithSourceRepos(t *testing.T) {
+	orig := defaultDeps
+	t.Cleanup(func() { defaultDeps = orig })
+
+	mock := &MockBDRunner{
+		Result: CommandResult{Stdout: "[]"},
+	}
+	defaultDeps = &Deps{BD: mock}
+	t.Setenv("LOOM_SOURCE_REPOS", "repo-a,repo-b")
+
+	_, err := fetchReadyIssues("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 BD call, got %d", len(mock.Calls))
+	}
+	args := mock.Calls[0].Args
+	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--source-repos=repo-a,repo-b"}) {
+		t.Errorf("BD args = %v, want [ready --json --limit 100 --source-repos=repo-a,repo-b]", args)
+	}
+}
+
+func TestFetchReadyIssues_WithSourceReposAndParent(t *testing.T) {
+	orig := defaultDeps
+	t.Cleanup(func() { defaultDeps = orig })
+
+	mock := &MockBDRunner{
+		Result: CommandResult{Stdout: "[]"},
+	}
+	defaultDeps = &Deps{BD: mock}
+	t.Setenv("LOOM_SOURCE_REPOS", "repo-a")
+
+	_, err := fetchReadyIssues("epic-123", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	args := mock.Calls[0].Args
+	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--parent", "epic-123", "--source-repos=repo-a"}) {
+		t.Errorf("BD args = %v, want [ready --json --limit 100 --parent epic-123 --source-repos=repo-a]", args)
+	}
+}
+
+func TestFetchReadyIssues_WithoutSourceRepos(t *testing.T) {
+	orig := defaultDeps
+	t.Cleanup(func() { defaultDeps = orig })
+
+	mock := &MockBDRunner{
+		Result: CommandResult{Stdout: "[]"},
+	}
+	defaultDeps = &Deps{BD: mock}
+	// Explicitly unset LOOM_SOURCE_REPOS
+	t.Setenv("LOOM_SOURCE_REPOS", "")
+
+	_, err := fetchReadyIssues("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	args := mock.Calls[0].Args
+	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100"}) {
+		t.Errorf("BD args = %v (should not have --source-repos)", args)
+	}
+}
+
 // ============================================================================
 // RunAutoModeLoop - ConsecutiveNoProgress Tests
 // ============================================================================
