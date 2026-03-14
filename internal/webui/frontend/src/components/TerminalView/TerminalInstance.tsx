@@ -402,6 +402,7 @@ export const TerminalInstance = forwardRef<
 
       setConnectionState("disconnected");
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontSize/fontFamily handled by separate sync effect
   }, [sessionName]);
 
   // Re-fit when tab becomes active (xterm can't measure when hidden)
