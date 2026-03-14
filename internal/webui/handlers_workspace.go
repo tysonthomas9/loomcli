@@ -44,9 +44,10 @@ func handleWorkspace(configFn func() (*WorkspaceData, error)) http.HandlerFunc {
 // emptyWorkspaceData returns a WorkspaceData with all slices initialized to empty (not nil).
 func emptyWorkspaceData() *WorkspaceData {
 	return &WorkspaceData{
-		Repos:  []WorkspaceRepo{},
-		Groups: []string{},
-		Agents: []WorkspaceAgentInfo{},
+		Repos:      []WorkspaceRepo{},
+		Groups:     []string{},
+		Agents:     []WorkspaceAgentInfo{},
+		Workspaces: []WorkspaceSummary{},
 	}
 }
 
@@ -60,6 +61,9 @@ func normalizeWorkspaceData(data *WorkspaceData) {
 	}
 	if data.Agents == nil {
 		data.Agents = []WorkspaceAgentInfo{}
+	}
+	if data.Workspaces == nil {
+		data.Workspaces = []WorkspaceSummary{}
 	}
 	for i := range data.Repos {
 		if data.Repos[i].Groups == nil {

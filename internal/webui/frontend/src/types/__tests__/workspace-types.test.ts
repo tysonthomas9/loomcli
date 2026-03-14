@@ -11,6 +11,7 @@ import type {
   WorkspaceData,
   RepoInfo,
   WorkspaceAgentInfo,
+  WorkspaceSummary,
 } from "../index";
 
 describe("LoomAgentStatus cross_repo field", () => {
@@ -54,18 +55,20 @@ describe("LoomAgentStatus cross_repo field", () => {
 });
 
 describe("RepoInfo type", () => {
-  it("has required fields: name, path, default_branch, remote", () => {
+  it("has required fields: name, path, default_branch, remote, groups", () => {
     const repo: RepoInfo = {
       name: "api",
       path: "/home/user/workspace/api",
       default_branch: "main",
       remote: "origin",
+      groups: [],
     };
 
     expect(repo.name).toBe("api");
     expect(repo.path).toBe("/home/user/workspace/api");
     expect(repo.default_branch).toBe("main");
     expect(repo.remote).toBe("origin");
+    expect(repo.groups).toEqual([]);
   });
 
   it("supports optional source_repo_id field", () => {
@@ -74,6 +77,7 @@ describe("RepoInfo type", () => {
       path: "/home/user/workspace/api",
       default_branch: "main",
       remote: "origin",
+      groups: [],
       source_repo_id: "repo-abc-123",
     };
 
@@ -86,12 +90,13 @@ describe("RepoInfo type", () => {
       path: "/home/user/workspace/api",
       default_branch: "main",
       remote: "origin",
+      groups: [],
     };
 
     expect(repo.source_repo_id).toBeUndefined();
   });
 
-  it("supports optional groups field as string array", () => {
+  it("supports groups field as string array", () => {
     const repo: RepoInfo = {
       name: "api",
       path: "/home/user/workspace/api",
@@ -102,17 +107,6 @@ describe("RepoInfo type", () => {
 
     expect(repo.groups).toEqual(["backend", "core"]);
     expect(repo.groups).toHaveLength(2);
-  });
-
-  it("groups defaults to undefined when not set", () => {
-    const repo: RepoInfo = {
-      name: "api",
-      path: "/home/user/workspace/api",
-      default_branch: "main",
-      remote: "origin",
-    };
-
-    expect(repo.groups).toBeUndefined();
   });
 
   it("groups can be an empty array", () => {
@@ -168,8 +162,35 @@ describe("WorkspaceAgentInfo type", () => {
   });
 });
 
+describe("WorkspaceSummary type", () => {
+  it("has all required fields", () => {
+    const summary: WorkspaceSummary = {
+      name: "my-workspace",
+      path: "/home/user/workspace",
+      active: true,
+      repo_count: 3,
+    };
+
+    expect(summary.name).toBe("my-workspace");
+    expect(summary.path).toBe("/home/user/workspace");
+    expect(summary.active).toBe(true);
+    expect(summary.repo_count).toBe(3);
+  });
+
+  it("supports inactive workspace", () => {
+    const summary: WorkspaceSummary = {
+      name: "other-workspace",
+      path: "/home/user/other",
+      active: false,
+      repo_count: 1,
+    };
+
+    expect(summary.active).toBe(false);
+  });
+});
+
 describe("WorkspaceData type", () => {
-  it("has required fields: name, path, repos", () => {
+  it("has required fields: name, path, repos, groups, agents, workspaces", () => {
     const workspace: WorkspaceData = {
       name: "my-workspace",
       path: "/home/user/workspace",
@@ -179,41 +200,41 @@ describe("WorkspaceData type", () => {
           path: "/home/user/workspace/api",
           default_branch: "main",
           remote: "origin",
+          groups: [],
         },
       ],
+      groups: [],
+      agents: [],
+      workspaces: [],
     };
 
     expect(workspace.name).toBe("my-workspace");
     expect(workspace.path).toBe("/home/user/workspace");
     expect(workspace.repos).toHaveLength(1);
+    expect(workspace.groups).toEqual([]);
+    expect(workspace.agents).toEqual([]);
+    expect(workspace.workspaces).toEqual([]);
   });
 
-  it("supports optional groups field", () => {
+  it("supports groups field", () => {
     const workspace: WorkspaceData = {
       name: "my-workspace",
       path: "/home/user/workspace",
       repos: [],
       groups: ["backend", "frontend", "infra"],
+      agents: [],
+      workspaces: [],
     };
 
     expect(workspace.groups).toEqual(["backend", "frontend", "infra"]);
   });
 
-  it("groups defaults to undefined when not set", () => {
+  it("supports agents field", () => {
     const workspace: WorkspaceData = {
       name: "my-workspace",
       path: "/home/user/workspace",
       repos: [],
-    };
-
-    expect(workspace.groups).toBeUndefined();
-  });
-
-  it("supports optional agents field", () => {
-    const workspace: WorkspaceData = {
-      name: "my-workspace",
-      path: "/home/user/workspace",
-      repos: [],
+      groups: [],
       agents: [
         {
           name: "nova",
@@ -228,24 +249,33 @@ describe("WorkspaceData type", () => {
           cross_repo: true,
         },
       ],
+      workspaces: [],
     };
 
     expect(workspace.agents).toHaveLength(2);
-    expect(workspace.agents![0].name).toBe("nova");
-    expect(workspace.agents![1].cross_repo).toBe(true);
+    expect(workspace.agents[0].name).toBe("nova");
+    expect(workspace.agents[1].cross_repo).toBe(true);
   });
 
-  it("agents defaults to undefined when not set", () => {
+  it("supports workspaces field with summaries", () => {
     const workspace: WorkspaceData = {
       name: "my-workspace",
       path: "/home/user/workspace",
       repos: [],
+      groups: [],
+      agents: [],
+      workspaces: [
+        { name: "my-workspace", path: "/home/user/workspace", active: true, repo_count: 2 },
+        { name: "other", path: "/home/user/other", active: false, repo_count: 1 },
+      ],
     };
 
-    expect(workspace.agents).toBeUndefined();
+    expect(workspace.workspaces).toHaveLength(2);
+    expect(workspace.workspaces[0].active).toBe(true);
+    expect(workspace.workspaces[1].active).toBe(false);
   });
 
-  it("supports full workspace with repos, groups, and agents", () => {
+  it("supports full workspace with repos, groups, agents, and workspaces", () => {
     const workspace: WorkspaceData = {
       name: "multi-repo-workspace",
       path: "/home/user/workspace",
@@ -276,11 +306,15 @@ describe("WorkspaceData type", () => {
           cross_repo: false,
         },
       ],
+      workspaces: [
+        { name: "multi-repo-workspace", path: "/home/user/workspace", active: true, repo_count: 2 },
+      ],
     };
 
     expect(workspace.repos).toHaveLength(2);
     expect(workspace.groups).toHaveLength(2);
     expect(workspace.agents).toHaveLength(1);
+    expect(workspace.workspaces).toHaveLength(1);
     expect(workspace.repos[0].source_repo_id).toBe("repo-1");
     expect(workspace.repos[0].groups).toEqual(["backend"]);
   });

@@ -62,11 +62,20 @@ type ServerConfig struct {
 
 // WorkspaceData represents the full workspace topology returned by the API.
 type WorkspaceData struct {
-	Name   string               `json:"name"`
-	Path   string               `json:"path"`
-	Repos  []WorkspaceRepo      `json:"repos"`
-	Groups []string             `json:"groups"`
-	Agents []WorkspaceAgentInfo `json:"agents"`
+	Name       string               `json:"name"`
+	Path       string               `json:"path"`
+	Repos      []WorkspaceRepo      `json:"repos"`
+	Groups     []string             `json:"groups"`
+	Agents     []WorkspaceAgentInfo `json:"agents"`
+	Workspaces []WorkspaceSummary   `json:"workspaces"`
+}
+
+// WorkspaceSummary provides a lightweight summary of a configured workspace.
+type WorkspaceSummary struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Active    bool   `json:"active"`
+	RepoCount int    `json:"repo_count"`
 }
 
 // WorkspaceRepo represents a repository within a workspace.

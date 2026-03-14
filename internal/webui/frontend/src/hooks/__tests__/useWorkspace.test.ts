@@ -65,6 +65,9 @@ function createMockWorkspace(
         cross_repo: true,
       },
     ],
+    workspaces: [
+      { name: "test-workspace", path: "/home/user/workspace", active: true, repo_count: 2 },
+    ],
     ...overrides,
   };
 }

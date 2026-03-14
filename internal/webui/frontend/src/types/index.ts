@@ -223,6 +223,7 @@ export type {
   WorkspaceData,
   RepoInfo,
   WorkspaceAgentInfo,
+  WorkspaceSummary,
 } from "../api/workspace";
 
 // Graph types (React Flow)

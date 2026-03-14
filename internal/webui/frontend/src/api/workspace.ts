@@ -13,7 +13,7 @@ export interface RepoInfo {
   default_branch: string;
   remote: string;
   source_repo_id?: string;
-  groups?: string[];
+  groups: string[];
 }
 
 export interface WorkspaceAgentInfo {
@@ -23,12 +23,20 @@ export interface WorkspaceAgentInfo {
   cross_repo: boolean;
 }
 
+export interface WorkspaceSummary {
+  name: string;
+  path: string;
+  active: boolean;
+  repo_count: number;
+}
+
 export interface WorkspaceData {
   name: string;
   path: string;
   repos: RepoInfo[];
-  groups?: string[];
-  agents?: WorkspaceAgentInfo[];
+  groups: string[];
+  agents: WorkspaceAgentInfo[];
+  workspaces: WorkspaceSummary[];
 }
 
 // ============= Response Types =============

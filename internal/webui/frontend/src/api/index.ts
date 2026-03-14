@@ -69,7 +69,7 @@ export {
   refreshWorkspace,
   getCachedWorkspace,
 } from "./workspace";
-export type { WorkspaceData, RepoInfo, WorkspaceAgentInfo } from "./workspace";
+export type { WorkspaceData, RepoInfo, WorkspaceAgentInfo, WorkspaceSummary } from "./workspace";
 
 // Editor API functions
 export {

@@ -34,6 +34,7 @@ function setupMockWorkspace(overrides?: Partial<UseWorkspaceReturn>): void {
       repos: [],
       groups: [],
       agents: [],
+      workspaces: [],
     },
     repos: [],
     groups: [],
@@ -55,6 +56,7 @@ function createMockRepo(overrides?: Partial<RepoInfo>): RepoInfo {
     path: "/home/user/workspace/api",
     default_branch: "main",
     remote: "origin",
+    groups: [],
     ...overrides,
   };
 }

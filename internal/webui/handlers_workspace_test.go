@@ -38,7 +38,7 @@ func TestHandleWorkspace_NilConfigFn(t *testing.T) {
 		t.Fatalf("expected empty agents, got %d", len(resp.Data.Agents))
 	}
 	// Verify JSON has [] not null for arrays
-	assertJSONArraysNotNull(t, resp, "repos", "groups", "agents")
+	assertJSONArraysNotNull(t, resp, "repos", "groups", "agents", "workspaces")
 }
 
 func TestHandleWorkspace_EmptyRepos(t *testing.T) {
@@ -167,7 +167,7 @@ func TestHandleWorkspace_NilRepos(t *testing.T) {
 		t.Fatalf("expected empty repos, got %d", len(resp.Data.Repos))
 	}
 	// Verify all nil slices are normalized
-	assertJSONArraysNotNull(t, resp, "repos", "groups", "agents")
+	assertJSONArraysNotNull(t, resp, "repos", "groups", "agents", "workspaces")
 }
 
 func TestHandleWorkspace_FullResponse(t *testing.T) {
@@ -197,6 +197,10 @@ func TestHandleWorkspace_FullResponse(t *testing.T) {
 			Agents: []WorkspaceAgentInfo{
 				{Name: "agent-1", Repos: []string{"api"}, RepoGroups: []string{"backend"}, CrossRepo: false},
 				{Name: "agent-2", Repos: []string{"web"}, RepoGroups: []string{"frontend"}, CrossRepo: true},
+			},
+			Workspaces: []WorkspaceSummary{
+				{Name: "myworkspace", Path: "/workspaces/myworkspace", Active: true, RepoCount: 2},
+				{Name: "other", Path: "/workspaces/other", Active: false, RepoCount: 1},
 			},
 		}, nil
 	})
@@ -241,6 +245,23 @@ func TestHandleWorkspace_FullResponse(t *testing.T) {
 	}
 	if !resp.Data.Agents[1].CrossRepo {
 		t.Error("expected agent-2 cross_repo=true")
+	}
+
+	// Verify workspaces
+	if len(resp.Data.Workspaces) != 2 {
+		t.Fatalf("expected 2 workspaces, got %d", len(resp.Data.Workspaces))
+	}
+	if resp.Data.Workspaces[0].Name != "myworkspace" {
+		t.Errorf("expected workspace name myworkspace, got %s", resp.Data.Workspaces[0].Name)
+	}
+	if !resp.Data.Workspaces[0].Active {
+		t.Error("expected myworkspace active=true")
+	}
+	if resp.Data.Workspaces[0].RepoCount != 2 {
+		t.Errorf("expected repo_count 2, got %d", resp.Data.Workspaces[0].RepoCount)
+	}
+	if resp.Data.Workspaces[1].Active {
+		t.Error("expected other workspace active=false")
 	}
 }
 
@@ -296,6 +317,85 @@ func TestHandleWorkspace_NilSlicesAsEmptyArrays(t *testing.T) {
 	}
 	if string(agents[0]["repo_groups"]) == "null" {
 		t.Error("expected agents[0].repo_groups to be [] not null")
+	}
+}
+
+func TestHandleWorkspace_WorkspacesSummary(t *testing.T) {
+	handler := handleWorkspace(func() (*WorkspaceData, error) {
+		return &WorkspaceData{
+			Name: "active-ws",
+			Path: "/workspaces/active",
+			Repos: []WorkspaceRepo{
+				{Name: "api", Path: "/code/api", DefaultBranch: "main", Remote: "origin"},
+			},
+			Workspaces: []WorkspaceSummary{
+				{Name: "active-ws", Path: "/workspaces/active", Active: true, RepoCount: 1},
+				{Name: "staging", Path: "/workspaces/staging", Active: false, RepoCount: 3},
+				{Name: "testing", Path: "/workspaces/testing", Active: false, RepoCount: 2},
+			},
+		}, nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/workspace", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp workspaceResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if !resp.Success {
+		t.Fatal("expected success=true")
+	}
+	if len(resp.Data.Workspaces) != 3 {
+		t.Fatalf("expected 3 workspaces, got %d", len(resp.Data.Workspaces))
+	}
+
+	// Verify only one workspace is active
+	activeCount := 0
+	for _, ws := range resp.Data.Workspaces {
+		if ws.Active {
+			activeCount++
+			if ws.Name != "active-ws" {
+				t.Errorf("expected active workspace to be active-ws, got %s", ws.Name)
+			}
+		}
+	}
+	if activeCount != 1 {
+		t.Errorf("expected exactly 1 active workspace, got %d", activeCount)
+	}
+}
+
+func TestHandleWorkspace_SingleWorkspace(t *testing.T) {
+	handler := handleWorkspace(func() (*WorkspaceData, error) {
+		return &WorkspaceData{
+			Name: "only-ws",
+			Path: "/workspaces/only",
+			Workspaces: []WorkspaceSummary{
+				{Name: "only-ws", Path: "/workspaces/only", Active: true, RepoCount: 0},
+			},
+		}, nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/workspace", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp workspaceResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(resp.Data.Workspaces) != 1 {
+		t.Fatalf("expected 1 workspace, got %d", len(resp.Data.Workspaces))
+	}
+	if !resp.Data.Workspaces[0].Active {
+		t.Error("expected single workspace to be active")
 	}
 }
 

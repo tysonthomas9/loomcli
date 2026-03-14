@@ -76,11 +76,26 @@ func buildWorkspaceInfo() (*webui.WorkspaceData, error) {
 		}
 	}
 
+	// Build lightweight summaries for all configured workspaces
+	summaries := make([]webui.WorkspaceSummary, 0, len(cfg.Workspaces))
+	for name, w := range cfg.Workspaces {
+		summaries = append(summaries, webui.WorkspaceSummary{
+			Name:      name,
+			Path:      w.Path,
+			Active:    name == wsName,
+			RepoCount: len(w.Repos),
+		})
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].Name < summaries[j].Name
+	})
+
 	return &webui.WorkspaceData{
-		Name:   wsName,
-		Path:   ws.Path,
-		Repos:  repos,
-		Groups: groups,
-		Agents: agents,
+		Name:       wsName,
+		Path:       ws.Path,
+		Repos:      repos,
+		Groups:     groups,
+		Agents:     agents,
+		Workspaces: summaries,
 	}, nil
 }
