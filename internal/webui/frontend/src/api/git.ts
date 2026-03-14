@@ -147,6 +147,15 @@ export async function gitReset(
   );
 }
 
+/** POST /api/git/push-all — push all worktrees */
+export interface GitPushAllResult {
+  failed: number;
+  results: { name: string; success: boolean }[];
+}
+export async function gitPushAll(): Promise<GitPushAllResult> {
+  return post<GitPushAllResult>("/api/git/push-all", {}); // allow-url
+}
+
 /** PATCH /api/agents/{name}/git/target */
 export async function gitUpdateTarget(
   agentName: string,

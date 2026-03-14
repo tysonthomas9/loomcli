@@ -7,7 +7,8 @@
 import type { ReactNode } from "react";
 import { useState, useCallback, useEffect } from "react";
 
-import { post, ApiError } from "@/api/client";
+import { ApiError } from "@/api/client";
+import { gitPushAll } from "@/api/git";
 import { useAgentContext } from "@/hooks";
 import type { LoomTaskInfo, WorktreeSyncDetail } from "@/types";
 
@@ -139,10 +140,7 @@ export function AgentsSidebar({
     setIsPushing(true);
     setPushError(null);
     try {
-      const data = await post<{
-        failed: number;
-        results: { name: string; success: boolean }[];
-      }>("/api/git/push-all", {});
+      const data = await gitPushAll();
       if (data.failed > 0) {
         const failedNames = data.results
           .filter((r) => !r.success)
