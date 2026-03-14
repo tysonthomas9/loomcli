@@ -106,6 +106,10 @@ export interface LoomAgentStatus {
   commits?: LoomCommitDetail[];
   /** Uncommitted file changes */
   changes?: LoomFileChange[];
+  /** Worktree filesystem path */
+  worktree_path?: string;
+  /** Workspace path (alias) */
+  path?: string;
 }
 
 /**
