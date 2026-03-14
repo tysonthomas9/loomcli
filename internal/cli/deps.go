@@ -39,12 +39,13 @@ type FileSystem interface {
 // Deps is the central dependency-injection container for CLI commands.
 // It holds all external dependencies so they can be swapped for testing.
 type Deps struct {
-	Git    GitRunner
-	Exec   ExecRunner
-	FS     FileSystem
-	Logger *slog.Logger
-	Clock  func() time.Time
-	BD     BDRunner
+	Git     GitRunner
+	Exec    ExecRunner
+	FS      FileSystem
+	Logger  *slog.Logger
+	Clock   func() time.Time
+	BD      BDRunner
+	Tracker IssueTracker // issue tracker backend (nil until wired by task .2)
 }
 
 // --- default implementations ---
