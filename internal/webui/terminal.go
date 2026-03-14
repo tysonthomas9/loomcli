@@ -354,6 +354,35 @@ func (m *TerminalManager) FindLatestAgentSession(agentName string) (string, bool
 	return bestName, true, nil
 }
 
+// Spawn creates a tmux session without attaching a PTY connection.
+// It is idempotent: if the session already exists, it returns (false, nil).
+// The returned bool indicates whether a new session was created.
+func (m *TerminalManager) Spawn(name, command string, cols, rows uint16) (bool, error) {
+	if !validSessionName.MatchString(name) {
+		return false, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
+	}
+	if cols == 0 {
+		cols = m.defaultCols
+	}
+	if rows == 0 {
+		rows = m.defaultRows
+	}
+
+	internalName := m.tmuxName(name)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.tmuxHasSession(internalName) {
+		return false, nil
+	}
+
+	if err := m.tmuxNewSession(internalName, command, cols, rows); err != nil {
+		return false, fmt.Errorf("tmux new-session: %w", err)
+	}
+	return true, nil
+}
+
 // Resize changes the PTY and tmux window dimensions for a connection.
 func (m *TerminalManager) Resize(connID string, cols, rows uint16) error {
 	m.mu.RLock()
