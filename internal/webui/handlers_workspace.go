@@ -3,28 +3,42 @@ package webui
 import "net/http"
 
 type workspaceResponse struct {
-	Repos []WorkspaceRepo `json:"repos"`
+	Success bool           `json:"success"`
+	Data    *WorkspaceData `json:"data,omitempty"`
+	Error   string         `json:"error,omitempty"`
 }
 
 // handleWorkspace returns workspace topology (repos with names and paths).
-// If configFn is nil, returns an empty repos array (single-repo mode).
-func handleWorkspace(configFn func() ([]WorkspaceRepo, error)) http.HandlerFunc {
+// If configFn is nil, returns an empty workspace (single-repo mode).
+func handleWorkspace(configFn func() (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if configFn == nil {
-			respondJSON(w, http.StatusOK, workspaceResponse{Repos: []WorkspaceRepo{}})
+			respondJSON(w, http.StatusOK, workspaceResponse{
+				Success: true,
+				Data:    &WorkspaceData{Repos: []WorkspaceRepo{}},
+			})
 			return
 		}
 
-		repos, err := configFn()
+		data, err := configFn()
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "failed to load workspace config")
+			respondJSON(w, http.StatusInternalServerError, workspaceResponse{
+				Success: false,
+				Error:   "failed to load workspace config",
+			})
 			return
 		}
 
-		if repos == nil {
-			repos = []WorkspaceRepo{}
+		if data == nil {
+			data = &WorkspaceData{}
+		}
+		if data.Repos == nil {
+			data.Repos = []WorkspaceRepo{}
 		}
 
-		respondJSON(w, http.StatusOK, workspaceResponse{Repos: repos})
+		respondJSON(w, http.StatusOK, workspaceResponse{
+			Success: true,
+			Data:    data,
+		})
 	}
 }

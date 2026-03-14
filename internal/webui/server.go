@@ -47,23 +47,32 @@ type ServerConfig struct {
 	MaxTerminalSessions int  // Maximum concurrent terminal connections (0 = default 20)
 	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
 	FleetRedis          *fleet.RedisConfig
-	FleetJWTKey         []byte                          // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
-	FleetAPIKey         string                          // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	APIKey              string                          `json:"-"` // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
-	AuthEnabled         bool                            // Whether API authentication is enabled (default: true)
-	HSTSEnabled         bool                            // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
-	LoomServerURL       string                          // Default target URL for the loom API proxy (set by 'loom serve')
-	DevMode             bool                            // Serve frontend from disk instead of embedded FS
-	DevFrontendDir      string                          // Directory to serve in dev mode (default: internal/webui/frontend/dist)
-	GitOps              GitOps                          // Git operations interface (optional; nil disables git endpoints)
-	FileOps             FileOps                         // File operations interface (optional; nil disables file endpoints)
-	WorkspaceConfigFn   func() ([]WorkspaceRepo, error) // Workspace topology supplier; nil = single-repo mode
+	FleetJWTKey         []byte                         // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey         string                         // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
+	APIKey              string                         `json:"-"` // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
+	AuthEnabled         bool                           // Whether API authentication is enabled (default: true)
+	HSTSEnabled         bool                           // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	LoomServerURL       string                         // Default target URL for the loom API proxy (set by 'loom serve')
+	DevMode             bool                           // Serve frontend from disk instead of embedded FS
+	DevFrontendDir      string                         // Directory to serve in dev mode (default: internal/webui/frontend/dist)
+	GitOps              GitOps                         // Git operations interface (optional; nil disables git endpoints)
+	FileOps             FileOps                        // File operations interface (optional; nil disables file endpoints)
+	WorkspaceConfigFn   func() (*WorkspaceData, error) // Workspace topology supplier; nil = single-repo mode
+}
+
+// WorkspaceData represents the full workspace topology returned by the API.
+type WorkspaceData struct {
+	Name  string          `json:"name"`
+	Path  string          `json:"path"`
+	Repos []WorkspaceRepo `json:"repos"`
 }
 
 // WorkspaceRepo represents a repository within a workspace.
 type WorkspaceRepo struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	DefaultBranch string `json:"default_branch"`
+	Remote        string `json:"remote"`
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.

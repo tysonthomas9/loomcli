@@ -63,6 +63,14 @@ export { fetchUsage } from "./usage";
 // Observability API functions (loom server)
 export { fetchObservabilityMetrics } from "./observability";
 
+// Workspace API functions
+export {
+  fetchWorkspace,
+  refreshWorkspace,
+  getCachedWorkspace,
+} from "./workspace";
+export type { WorkspaceData, RepoInfo } from "./workspace";
+
 // Editor API functions
 export {
   fetchEditors,

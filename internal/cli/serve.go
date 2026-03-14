@@ -271,7 +271,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				DevFrontendDir: serveDevFrontDir,
 				GitOps:         gitOps,
 				FileOps:        gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
-				WorkspaceConfigFn: func() ([]webui.WorkspaceRepo, error) {
+				WorkspaceConfigFn: func() (*webui.WorkspaceData, error) {
 					cfg, err := LoadConfig()
 					if err != nil {
 						return nil, err
@@ -279,13 +279,39 @@ func runServe(cmd *cobra.Command, args []string) {
 					if cfg == nil || len(cfg.Workspaces) == 0 {
 						return nil, nil
 					}
-					var repos []webui.WorkspaceRepo
-					for _, ws := range cfg.Workspaces {
-						for _, r := range ws.Repos {
-							repos = append(repos, webui.WorkspaceRepo{Name: r.Name, Path: r.Path})
+					// Find the active workspace (use default or first available)
+					wsName := cfg.DefaultWorkspace
+					ws, ok := cfg.Workspaces[wsName]
+					if !ok {
+						// Fall back to first workspace
+						for name, w := range cfg.Workspaces {
+							wsName = name
+							ws = w
+							break
 						}
 					}
-					return repos, nil
+					repos := make([]webui.WorkspaceRepo, 0, len(ws.Repos))
+					for _, r := range ws.Repos {
+						db := r.DefaultBranch
+						if db == "" {
+							db = "main"
+						}
+						remote := r.Remote
+						if remote == "" {
+							remote = "origin"
+						}
+						repos = append(repos, webui.WorkspaceRepo{
+							Name:          r.Name,
+							Path:          r.Path,
+							DefaultBranch: db,
+							Remote:        remote,
+						})
+					}
+					return &webui.WorkspaceData{
+						Name:  wsName,
+						Path:  ws.Path,
+						Repos: repos,
+					}, nil
 				},
 			}
 			if serveCorsOrigin != "" {
