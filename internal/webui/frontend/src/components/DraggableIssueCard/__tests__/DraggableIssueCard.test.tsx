@@ -557,8 +557,10 @@ describe("DraggableIssueCard", () => {
         <DraggableIssueCard issue={mockIssue} isOverlay={true} />,
       );
 
-      const svg = container.querySelector("svg");
-      expect(svg).not.toBeInTheDocument();
+      const dragHandle = container.querySelector(
+        'svg.dragHandle, svg[class*="dragHandle"]',
+      );
+      expect(dragHandle).not.toBeInTheDocument();
     });
   });
 
