@@ -20,6 +20,7 @@ type ReadyIssueWithParent struct {
 	*types.Issue
 	Parent      *string `json:"parent,omitempty"`       // Parent issue ID (null for root-level issues)
 	ParentTitle *string `json:"parent_title,omitempty"` // Parent issue title for display
+	Repo        *string `json:"repo,omitempty"`         // Repository that owns this issue
 }
 
 // ReadyResponse wraps the ready issues data for JSON response.
@@ -117,6 +118,9 @@ func buildReadyResponse(client readyClient, issues []*types.Issue) []*ReadyIssue
 		if parentInfo, ok := parentResp.Parents[issue.ID]; ok {
 			iwp.Parent = &parentInfo.ParentID
 			iwp.ParentTitle = &parentInfo.ParentTitle
+		}
+		if issue.SourceRepo != "" {
+			iwp.Repo = &issue.SourceRepo
 		}
 		result[i] = iwp
 	}

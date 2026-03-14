@@ -102,6 +102,8 @@ export interface LoomAgentStatus {
   behind: number;
   /** Role from daemon config (e.g., "plan", "task") */
   role?: string;
+  /** Repository this agent is assigned to (multi-repo workspaces) */
+  repo?: string;
   /** Recent commits ahead of integration branch */
   commits?: LoomCommitDetail[];
   /** Uncommitted file changes */

@@ -22,6 +22,7 @@ type IssueWithParent struct {
 	*types.IssueWithCounts
 	Parent      *string `json:"parent,omitempty"`       // Parent issue ID (null for root-level issues)
 	ParentTitle *string `json:"parent_title,omitempty"` // Parent issue title for display
+	Repo        *string `json:"repo,omitempty"`         // Repository that owns this issue
 }
 
 // KanbanIssue extends IssueWithParent with blocked dependency info.
@@ -34,6 +35,7 @@ type KanbanIssue struct {
 	BlockedByCount   int                `json:"blocked_by_count"`
 	BlockedBy        []string           `json:"blocked_by,omitempty"`
 	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`
+	Repo             *string            `json:"repo,omitempty"`
 }
 
 // IssuesResponse represents the response structure for the issues endpoint.
@@ -358,6 +360,9 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 					ki.Parent = &parentInfo.ParentID
 					ki.ParentTitle = &parentInfo.ParentTitle
 				}
+				if iwc.Issue.SourceRepo != "" {
+					ki.Repo = &iwc.Issue.SourceRepo
+				}
 				// Client-side blocker check is authoritative (considers only closed
 				// blockers as resolved). Falls back to daemon data on error.
 				if unclosedIDs != nil {
@@ -399,6 +404,9 @@ func handleListIssues(pool daemon.Pool) http.HandlerFunc {
 			if parentInfo, ok := parentResp.Parents[iwc.Issue.ID]; ok {
 				iwp.Parent = &parentInfo.ParentID
 				iwp.ParentTitle = &parentInfo.ParentTitle
+			}
+			if iwc.Issue.SourceRepo != "" {
+				iwp.Repo = &iwc.Issue.SourceRepo
 			}
 			issuesWithParent[i] = iwp
 		}

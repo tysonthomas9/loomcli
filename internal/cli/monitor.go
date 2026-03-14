@@ -94,6 +94,7 @@ type AgentStatus struct {
 	Ahead         int            `json:"ahead"`                    // commits ahead of integration branch
 	Behind        int            `json:"behind"`                   // commits behind integration branch
 	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
+	Repo          string         `json:"repo,omitempty"`           // repository this agent is assigned to (multi-repo)
 	Workspace     string         `json:"workspace"`                // workspace name (empty in legacy mode)
 	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
 	Commits       []CommitDetail `json:"commits,omitempty"`        // recent commits ahead of integration branch
@@ -195,18 +196,18 @@ type DaemonAgentStateEntry struct {
 	Worktree string `json:"worktree"`
 	Status   string `json:"status"`
 	Role     string `json:"role"`
+	Repo     string `json:"repo,omitempty"`
 }
 
 // DaemonAgentInfo carries daemon supervision metadata for a worktree.
 type DaemonAgentInfo struct {
 	Managed bool
 	Role    string
+	Repo    string
 }
 
-// loadDaemonManagedAgents reads the daemon state file and returns metadata
-// for worktrees under daemon supervision, including their role.
-// Returns nil if the file doesn't exist, can't be parsed, or daemon isn't running.
-// The stateFilePath should be resolved via ResolveDaemonStatePath().
+// loadDaemonManagedAgents reads the daemon state file and returns metadata for
+// worktrees under daemon supervision. Returns nil if unavailable or daemon died.
 func loadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 	data, err := os.ReadFile(stateFilePath)
 	if err != nil {
@@ -229,6 +230,7 @@ func loadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 			result[agent.Worktree] = DaemonAgentInfo{
 				Managed: true,
 				Role:    agent.Role,
+				Repo:    agent.Repo,
 			}
 		}
 	}
@@ -451,12 +453,8 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 	var agents []AgentStatus
 	taskIDToAgents := make(map[string][]string) // Track which agents claim which tasks
 
-	// Compute global default branch for legacy mode display.
-	// Per-worktree branch is resolved in the loop for workspace mode.
+	// Global defaults for legacy mode; per-worktree values resolved in loop for workspace mode.
 	globalDefaultBranch := GetDefaultBranchForWorktrees(worktrees)
-
-	// Get GitHub remote URL once (all worktrees share the same remote in legacy mode).
-	// In workspace mode, per-worktree URL is resolved in the loop instead.
 	githubURL := ""
 	if len(worktrees) > 0 && worktrees[0].Repo == nil {
 		githubURL = getGitHubRemoteURL(worktrees[0].Path)
@@ -469,6 +467,7 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			Branch:        wt.Branch,
 			Workspace:     wt.Workspace,
 			Role:          daemonInfo.Role,
+			Repo:          daemonInfo.Repo,
 			DaemonManaged: daemonInfo.Managed,
 		}
 
