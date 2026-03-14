@@ -49,3 +49,4 @@ export * from "./TalkToLeadButton";
 export * from "./TerminalPanel";
 export * from "./ThemeToggle";
 export * from "./TerminalView";
+export * from "./WorkspaceTree";

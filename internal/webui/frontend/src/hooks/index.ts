@@ -128,6 +128,9 @@ export type {
   UseObservabilityMetricsResult,
 } from "./useObservabilityMetrics";
 
+export { useWorkspaceRepos } from "./useWorkspaceRepos";
+export type { UseWorkspaceReposReturn } from "./useWorkspaceRepos";
+
 export { useTheme } from "./useTheme";
 export type { Theme, UseThemeReturn } from "./useTheme";
 

@@ -31,6 +31,7 @@ import {
   IssueDetailPanel,
   AgentDetailPanel,
   AgentsSidebar,
+  WorkspaceTree,
   AssigneePrompt,
   BulkActionToolbar,
   TalkToLeadButton,
@@ -473,6 +474,11 @@ function App() {
     }, 300);
   }, []);
 
+  // Handle repo click from WorkspaceTree (no-op for now)
+  const handleRepoClick = useCallback((_repoName: string) => {
+    // Future: select repo, show repo detail
+  }, []);
+
   // Handle Talk to Lead button click
   const handleTalkToLeadClick = useCallback(() => {
     setActiveView("terminal");
@@ -550,11 +556,15 @@ function App() {
         actions={headerActions}
         navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
         sidebar={
-          <AgentsSidebar
-            onAgentClick={handleAgentClick}
-            defaultCollapsed={false}
-            collapsible={false}
-          />
+          activeView === "workspace" ? (
+            <WorkspaceTree onRepoClick={handleRepoClick} />
+          ) : (
+            <AgentsSidebar
+              onAgentClick={handleAgentClick}
+              defaultCollapsed={false}
+              collapsible={false}
+            />
+          )
         }
       >
         <div
@@ -578,11 +588,15 @@ function App() {
         actions={headerActions}
         navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
         sidebar={
-          <AgentsSidebar
-            onAgentClick={handleAgentClick}
-            defaultCollapsed={false}
-            collapsible={false}
-          />
+          activeView === "workspace" ? (
+            <WorkspaceTree onRepoClick={handleRepoClick} />
+          ) : (
+            <AgentsSidebar
+              onAgentClick={handleAgentClick}
+              defaultCollapsed={false}
+              collapsible={false}
+            />
+          )
         }
       >
         <ErrorDisplay
