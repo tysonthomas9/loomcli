@@ -61,6 +61,21 @@ vi.mock("@/hooks", () => ({
   useAgentContext: () => ({ ...defaultMockContext, ...mockContextOverride }),
 }));
 
+const mockGitPushAll = vi.fn();
+vi.mock("@/api/git", () => ({
+  gitPushAll: (...args: unknown[]) => mockGitPushAll(...args),
+}));
+
+vi.mock("@/api/client", () => ({
+  ApiError: class ApiError extends Error {
+    statusText: string;
+    constructor(status: number, statusText: string) {
+      super(statusText);
+      this.statusText = statusText;
+    }
+  },
+}));
+
 describe("AgentsSidebar", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -223,22 +238,20 @@ describe("AgentsSidebar", () => {
         },
       };
 
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-        new Response(JSON.stringify({ results: [], pushed: 1, failed: 0 }), {
-          status: 200,
-        }),
-      );
+      mockGitPushAll.mockResolvedValueOnce({
+        results: [],
+        pushed: 1,
+        failed: 0,
+      });
 
       render(<AgentsSidebar />);
 
       const pushButton = screen.getByRole("button", { name: /push all/i });
       fireEvent.click(pushButton);
 
-      expect(fetchSpy).toHaveBeenCalledWith("/api/git/push-all", {
-        method: "POST",
-      });
+      expect(mockGitPushAll).toHaveBeenCalled();
 
-      fetchSpy.mockRestore();
+      mockGitPushAll.mockReset();
     });
   });
 
