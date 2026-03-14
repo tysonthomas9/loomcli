@@ -13,13 +13,15 @@ func (d *Daemon) getEffectiveBackend(ap *AgentProcess) string {
 	idx := ap.currentBackendIdx
 	ap.mu.Unlock()
 
+	cfg := d.configSnapshot()
+
 	if idx == 0 {
 		b := ap.entry.Backend
 		if b == "" {
 			b = ap.roleConfig.Backend
 		}
-		if b == "" && d.config != nil {
-			b = d.config.Backend
+		if b == "" && cfg != nil {
+			b = cfg.Backend
 		}
 		return b
 	}
@@ -31,8 +33,8 @@ func (d *Daemon) getEffectiveBackend(ap *AgentProcess) string {
 
 	// Beyond fallback list — return primary (caller should have prevented this)
 	b := ap.entry.Backend
-	if b == "" && d.config != nil {
-		b = d.config.Backend
+	if b == "" && cfg != nil {
+		b = cfg.Backend
 	}
 	return b
 }

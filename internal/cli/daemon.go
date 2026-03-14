@@ -105,8 +105,31 @@ type Daemon struct {
 	eventBus     events.Emitter      // event emission for observability (nil-safe via NopBus default)
 	repos        []RepoConfig        // workspace repos for resolveAgentRepos; nil outside workspace mode
 
-	configHash  string     // SHA-256 hash of current running config for no-op detection
-	reconcileMu sync.Mutex // serializes reloadAndReconcile calls
+	configHash  string       // SHA-256 hash of current running config for no-op detection
+	reconcileMu sync.RWMutex // serializes config writes; readers hold RLock when accessing d.config
+}
+
+// configSnapshot returns a snapshot of the current config pointer under RLock.
+// Safe for concurrent use with reloadAndReconcile which swaps d.config under Lock.
+func (d *Daemon) configSnapshot() *DaemonConfig {
+	d.reconcileMu.RLock()
+	cfg := d.config
+	d.reconcileMu.RUnlock()
+	return cfg
+}
+
+// findRepoConfig looks up a RepoConfig by name in d.repos.
+// Returns nil if repoName is empty or not found (non-workspace mode).
+func (d *Daemon) findRepoConfig(repoName string) *RepoConfig {
+	if repoName == "" {
+		return nil
+	}
+	for i := range d.repos {
+		if d.repos[i].Name == repoName {
+			return &d.repos[i]
+		}
+	}
+	return nil
 }
 
 // emitEvent is a convenience helper that emits an event via the daemon's event bus.
@@ -171,6 +194,7 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 			entry:        entry,
 			roleConfig:   roleConfig,
 			worktreePath: target.WorkDir,
+			repoConfig:   d.findRepoConfig(entry.Repo),
 		}
 		d.agents = append(d.agents, ap)
 	}

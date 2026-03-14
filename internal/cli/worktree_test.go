@@ -396,9 +396,9 @@ func TestValidateWorktreeName(t *testing.T) {
 		{"my-agent", false},
 		{"agent_1", false},
 		{"sub/dir", false},
-		{".", false},
 
 		// Invalid names (path traversal)
+		{".", true},
 		{"..", true},
 		{"../secret", true},
 		{"../../etc", true},

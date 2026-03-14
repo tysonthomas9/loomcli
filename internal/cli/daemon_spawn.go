@@ -15,6 +15,8 @@ import (
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
+	cfg := d.configSnapshot() // snapshot config for consistent reads
+
 	ap.mu.Lock()
 	epicID := ap.assignedEpicID // snapshot before getEffectiveBackend (also acquires ap.mu)
 	ap.mu.Unlock()
@@ -58,7 +60,7 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 	cmd.Env = append(FilteredEnv(),
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
-		fmt.Sprintf("LOOM_EVENTS_DIR=%s", resolveDaemonPath(d.projectDir, d.config.Daemon.EventsDir)),
+		fmt.Sprintf("LOOM_EVENTS_DIR=%s", resolveDaemonPath(d.projectDir, cfg.Daemon.EventsDir)),
 	)
 
 	// Propagate repo context for subprocess diagnostics and prompts
@@ -110,8 +112,9 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 	ap.mu.Lock()
 
 	// Set up log files if log directory is configured
-	if d.config.Daemon.LogDir != "" {
-		logDir := d.config.Daemon.LogDir
+	cfg := d.configSnapshot()
+	if cfg.Daemon.LogDir != "" {
+		logDir := cfg.Daemon.LogDir
 		if !filepath.IsAbs(logDir) {
 			logDir = filepath.Join(d.projectDir, logDir)
 		}

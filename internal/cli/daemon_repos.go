@@ -24,9 +24,21 @@ func resolveAgentRepos(agent AgentEntry, repos []RepoConfig) []string {
 		}
 	}
 
-	// Explicit repos first.
+	// Build name→SourceRepoID lookup for explicit repo resolution.
+	nameToID := make(map[string]string, len(repos))
+	for _, rc := range repos {
+		if rc.SourceRepoID != "" {
+			nameToID[rc.Name] = rc.SourceRepoID
+		}
+	}
+
+	// Explicit repos first — resolve name to SourceRepoID when available.
 	for _, r := range agent.Repos {
-		add(r)
+		if id, ok := nameToID[r]; ok {
+			add(id)
+		} else {
+			add(r) // fallback: use as-is (may already be a SourceRepoID)
+		}
 	}
 
 	// Expand repo groups.

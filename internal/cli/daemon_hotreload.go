@@ -82,11 +82,13 @@ func (d *Daemon) addAgent(entry AgentEntry) error {
 		entry:        entry,
 		roleConfig:   roleConfig,
 		worktreePath: target.WorkDir,
+		repoConfig:   d.findRepoConfig(entry.Repo),
 		stopCh:       make(chan struct{}),
 		done:         make(chan struct{}),
 	}
 
-	// Check for duplicate and add atomically under a single write lock
+	// Check for duplicate, add to slice, and increment WaitGroup atomically
+	// under a single write lock to prevent a race between wg.Add(1) and Stop()'s wg.Wait().
 	d.agentsMu.Lock()
 	for _, existing := range d.agents {
 		if existing.entry.Worktree == entry.Worktree {
@@ -95,10 +97,8 @@ func (d *Daemon) addAgent(entry AgentEntry) error {
 		}
 	}
 	d.agents = append(d.agents, ap)
-	d.agentsMu.Unlock()
-
-	// Start the superviseAgent goroutine
 	d.wg.Add(1)
+	d.agentsMu.Unlock()
 	go func() {
 		defer d.wg.Done()
 		defer close(ap.done)

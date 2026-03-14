@@ -263,7 +263,6 @@ export function BackendSelectorDropdown({
               setSearchQuery(e.target.value);
               setFocusedIndex(-1);
             }}
-            onKeyDown={handleKeyDown}
             placeholder="Search backends..."
             data-testid="backend-selector-search"
           />
@@ -304,14 +303,17 @@ export function BackendSelectorDropdown({
                     <span className={styles.provider}>{backend.provider}</span>
                   </span>
                   {!backend.available && (
-                    <a
+                    <button
                       className={styles.configureLink}
-                      href="?view=settings"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.history.replaceState({}, "", "?view=settings");
+                        window.dispatchEvent(new PopStateEvent("popstate"));
+                      }}
                       data-testid={`backend-configure-${backend.name}`}
                     >
                       Configure in Settings
-                    </a>
+                    </button>
                   )}
                   {backend.name === optimisticBackend && backend.available && (
                     <span className={styles.checkmark} aria-hidden="true">

@@ -138,72 +138,83 @@ func (d *Daemon) computeBackoff(ap *AgentProcess) time.Duration {
 }
 
 // Helper functions to safely access RestartPolicy fields with defaults.
+// All use configSnapshot() to avoid data races with hot-reload.
 func (d *Daemon) getMaxRetries() int {
-	if d.config.Daemon.RestartPolicy.MaxRetries != nil {
-		return *d.config.Daemon.RestartPolicy.MaxRetries
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.MaxRetries != nil {
+		return *cfg.Daemon.RestartPolicy.MaxRetries
 	}
 	return 3 // default
 }
 
 func (d *Daemon) getBackoffInitial() int {
-	if d.config.Daemon.RestartPolicy.BackoffInitial != nil {
-		return *d.config.Daemon.RestartPolicy.BackoffInitial
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.BackoffInitial != nil {
+		return *cfg.Daemon.RestartPolicy.BackoffInitial
 	}
 	return 2 // default seconds
 }
 
 func (d *Daemon) getBackoffMax() int {
-	if d.config.Daemon.RestartPolicy.BackoffMax != nil {
-		return *d.config.Daemon.RestartPolicy.BackoffMax
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.BackoffMax != nil {
+		return *cfg.Daemon.RestartPolicy.BackoffMax
 	}
 	return 300 // default seconds
 }
 
 func (d *Daemon) getOutputTimeout() int {
-	if d.config.Daemon.RestartPolicy.OutputTimeout != nil {
-		return *d.config.Daemon.RestartPolicy.OutputTimeout
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.OutputTimeout != nil {
+		return *cfg.Daemon.RestartPolicy.OutputTimeout
 	}
 	return 900 // default: 15 minutes
 }
 
 func (d *Daemon) getRateLimitBackoff() int {
-	if d.config.Daemon.RestartPolicy.RateLimitBackoff != nil {
-		return *d.config.Daemon.RestartPolicy.RateLimitBackoff
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.RateLimitBackoff != nil {
+		return *cfg.Daemon.RestartPolicy.RateLimitBackoff
 	}
 	return 30 // default seconds
 }
 
 func (d *Daemon) getRateLimitMaxWait() int {
-	if d.config.Daemon.RestartPolicy.RateLimitMaxWait != nil {
-		return *d.config.Daemon.RestartPolicy.RateLimitMaxWait
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.RateLimitMaxWait != nil {
+		return *cfg.Daemon.RestartPolicy.RateLimitMaxWait
 	}
 	return 300 // default seconds
 }
 
 func (d *Daemon) getRateLimitNoCount() bool {
-	if d.config.Daemon.RestartPolicy.RateLimitNoCount != nil {
-		return *d.config.Daemon.RestartPolicy.RateLimitNoCount
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.RateLimitNoCount != nil {
+		return *cfg.Daemon.RestartPolicy.RateLimitNoCount
 	}
 	return true // default: rate-limit retries don't count toward max_retries
 }
 
 func (d *Daemon) getTimeoutBackoff() int {
-	if d.config.Daemon.RestartPolicy.TimeoutBackoff != nil {
-		return *d.config.Daemon.RestartPolicy.TimeoutBackoff
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.TimeoutBackoff != nil {
+		return *cfg.Daemon.RestartPolicy.TimeoutBackoff
 	}
 	return 5 // default seconds
 }
 
 func (d *Daemon) getNoWorkBackoff() int {
-	if d.config.Daemon.RestartPolicy.NoWorkBackoff != nil {
-		return *d.config.Daemon.RestartPolicy.NoWorkBackoff
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.NoWorkBackoff != nil {
+		return *cfg.Daemon.RestartPolicy.NoWorkBackoff
 	}
 	return 30 // default seconds
 }
 
 func (d *Daemon) getIdlePollInterval() int {
-	if d.config.Daemon.RestartPolicy.IdlePollInterval != nil {
-		return *d.config.Daemon.RestartPolicy.IdlePollInterval
+	cfg := d.configSnapshot()
+	if cfg.Daemon.RestartPolicy.IdlePollInterval != nil {
+		return *cfg.Daemon.RestartPolicy.IdlePollInterval
 	}
 	return 30 // default seconds
 }

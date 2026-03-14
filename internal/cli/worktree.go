@@ -248,7 +248,7 @@ func (r *Resolver) resolveWorkspacePath(name string) (string, error) {
 // traversal sequences. Returns an error if the name is unsafe.
 func validateWorktreeName(name string) error {
 	cleaned := filepath.Clean(name)
-	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("invalid worktree name %q: path traversal not allowed", name)
 	}
 	return nil

@@ -2054,8 +2054,8 @@ func TestBuildCommand_SourceReposInjected(t *testing.T) {
 		}
 	}
 
-	if v, ok := envMap["LOOM_SOURCE_REPOS"]; !ok || v != "backend" {
-		t.Errorf("LOOM_SOURCE_REPOS = %q, want %q", v, "backend")
+	if v, ok := envMap["LOOM_SOURCE_REPOS"]; !ok || v != "src-backend" {
+		t.Errorf("LOOM_SOURCE_REPOS = %q, want %q", v, "src-backend")
 	}
 }
 

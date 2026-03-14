@@ -82,7 +82,7 @@ type AgentEntry struct {
 	Backend          string   `yaml:"backend,omitempty"`
 	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
 	PathPatterns     []string `yaml:"path_patterns,omitempty"`
-	SourceRepos      []string `yaml:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
+	SourceRepos      []string `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
 	Repos            []string `yaml:"repos,omitempty"`
 	RepoGroups       []string `yaml:"repo_groups,omitempty"`
 	CrossRepo        bool     `yaml:"cross_repo,omitempty"`

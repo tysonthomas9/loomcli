@@ -9,17 +9,18 @@ import (
 // resolveRoleConfig looks up a role by name, supporting both built-in and custom roles.
 // For built-in roles, merges any user-defined config (skills, path_patterns, etc.) on top of defaults.
 func (d *Daemon) resolveRoleConfig(roleName string, agentIndex int) (RoleConfig, error) {
+	cfg := d.configSnapshot()
 	if builtInRoles[roleName] {
 		rc := RoleConfig{Description: fmt.Sprintf("Built-in %s agent", roleName)}
 		// Merge user-defined config for built-in roles
-		if userRC, ok := d.config.ResolveRole(roleName); ok {
+		if userRC, ok := cfg.ResolveRole(roleName); ok {
 			rc = mergeRoleConfig(rc, userRC)
 		}
 		return rc, nil
 	}
 
 	// Look up custom role in config
-	rc, ok := d.config.ResolveRole(roleName)
+	rc, ok := cfg.ResolveRole(roleName)
 	if !ok {
 		return RoleConfig{}, fmt.Errorf("agent[%d]: role %q not found (not a built-in role and not defined in config.Roles)", agentIndex, roleName)
 	}

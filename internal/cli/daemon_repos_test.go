@@ -93,6 +93,23 @@ func TestResolveAgentRepos(t *testing.T) {
 			},
 			want: []string(nil),
 		},
+		{
+			name:  "explicit repo name resolved to SourceRepoID",
+			agent: AgentEntry{Repos: []string{"my-app"}},
+			repos: []RepoConfig{
+				{Name: "my-app", SourceRepoID: "org/my-app", Groups: []string{"frontend"}},
+			},
+			want: []string{"org/my-app"},
+		},
+		{
+			name:  "explicit repo name with different SourceRepoID deduped with group",
+			agent: AgentEntry{Repos: []string{"api-server"}, RepoGroups: []string{"backend"}},
+			repos: []RepoConfig{
+				{Name: "api-server", SourceRepoID: "core/api", Groups: []string{"backend"}},
+				{Name: "worker", SourceRepoID: "core/worker", Groups: []string{"backend"}},
+			},
+			want: []string{"core/api", "core/worker"},
+		},
 	}
 
 	for _, tt := range tests {

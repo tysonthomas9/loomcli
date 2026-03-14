@@ -91,7 +91,7 @@ export async function fetchWorkspace(): Promise<WorkspaceData> {
  */
 export async function refreshWorkspace(): Promise<WorkspaceData> {
   workspaceCache = null;
-  // Do not reset fetchPromise — deduplication still applies for concurrent callers.
+  fetchPromise = null; // Reset to ensure fresh fetch, not stale in-flight data
   return fetchWorkspace();
 }
 

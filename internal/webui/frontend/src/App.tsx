@@ -617,11 +617,15 @@ function App() {
       actions={headerActions}
       navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
       sidebar={
-        <AgentsSidebar
-          onAgentClick={handleAgentClick}
-          defaultCollapsed={false}
-          collapsible={false}
-        />
+        activeView === "workspace" ? (
+          <WorkspaceTree onRepoClick={handleRepoClick} />
+        ) : (
+          <AgentsSidebar
+            onAgentClick={handleAgentClick}
+            defaultCollapsed={false}
+            collapsible={false}
+          />
+        )
       }
     >
       {activeView === "kanban" && (
