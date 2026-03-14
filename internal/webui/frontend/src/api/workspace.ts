@@ -12,12 +12,23 @@ export interface RepoInfo {
   path: string;
   default_branch: string;
   remote: string;
+  source_repo_id?: string;
+  groups?: string[];
+}
+
+export interface WorkspaceAgentInfo {
+  name: string;
+  repos: string[];
+  repo_groups: string[];
+  cross_repo: boolean;
 }
 
 export interface WorkspaceData {
   name: string;
   path: string;
   repos: RepoInfo[];
+  groups?: string[];
+  agents?: WorkspaceAgentInfo[];
 }
 
 // ============= Response Types =============
@@ -80,7 +91,7 @@ export async function fetchWorkspace(): Promise<WorkspaceData> {
  */
 export async function refreshWorkspace(): Promise<WorkspaceData> {
   workspaceCache = null;
-  fetchPromise = null;
+  // Do not reset fetchPromise — deduplication still applies for concurrent callers.
   return fetchWorkspace();
 }
 

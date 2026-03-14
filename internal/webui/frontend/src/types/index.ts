@@ -218,6 +218,13 @@ export type {
 // Editor types
 export type { EditorInfo } from "./editor";
 
+// Workspace types
+export type {
+  WorkspaceData,
+  RepoInfo,
+  WorkspaceAgentInfo,
+} from "../api/workspace";
+
 // Graph types (React Flow)
 export type {
   IssueNodeData,

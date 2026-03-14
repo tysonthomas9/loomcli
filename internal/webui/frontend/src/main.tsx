@@ -5,7 +5,7 @@ import "@/styles/index.css";
 import { initAuth, getAuthState } from "@/api";
 import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { ToastProvider, AgentProvider } from "@/hooks";
+import { ToastProvider, AgentProvider, WorkspaceProvider } from "@/hooks";
 import {
   IssueDetailPanelFixture,
   ErrorTriggerFixture,
@@ -59,7 +59,9 @@ initAuth()
       <StrictMode>
         <ErrorBoundary>
           <ToastProvider>
-            <AgentProvider>{getComponent()}</AgentProvider>
+            <WorkspaceProvider>
+              <AgentProvider>{getComponent()}</AgentProvider>
+            </WorkspaceProvider>
           </ToastProvider>
         </ErrorBoundary>
       </StrictMode>,

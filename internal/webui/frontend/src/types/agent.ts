@@ -104,6 +104,8 @@ export interface LoomAgentStatus {
   role?: string;
   /** Repository this agent is assigned to (multi-repo workspaces) */
   repo?: string;
+  /** Whether agent works across multiple repos */
+  cross_repo?: boolean;
   /** Recent commits ahead of integration branch */
   commits?: LoomCommitDetail[];
   /** Uncommitted file changes */

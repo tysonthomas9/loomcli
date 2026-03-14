@@ -131,6 +131,21 @@ export type {
 export { useWorkspaceRepos } from "./useWorkspaceRepos";
 export type { UseWorkspaceReposReturn } from "./useWorkspaceRepos";
 
+export { useRepoFilter, parseReposFromUrl } from "./useRepoFilter";
+export type {
+  UseRepoFilterOptions,
+  UseRepoFilterReturn,
+} from "./useRepoFilter";
+
+export { useWorkspace } from "./useWorkspace";
+export type { UseWorkspaceOptions, UseWorkspaceReturn } from "./useWorkspace";
+
+export { WorkspaceProvider, useWorkspaceContext } from "./useWorkspaceContext";
+export type {
+  WorkspaceContextValue,
+  WorkspaceProviderProps,
+} from "./useWorkspaceContext";
+
 export { useTheme } from "./useTheme";
 export type { Theme, UseThemeReturn } from "./useTheme";
 
