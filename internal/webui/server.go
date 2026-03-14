@@ -58,6 +58,7 @@ type ServerConfig struct {
 	GitOps              GitOps                         // Git operations interface (optional; nil disables git endpoints)
 	FileOps             FileOps                        // File operations interface (optional; nil disables file endpoints)
 	WorkspaceConfigFn   func() (*WorkspaceData, error) // Workspace topology supplier; nil = single-repo mode
+	BackendListFn       func() ([]BackendInfo, error)  // Backend registry supplier; nil = fallback to validBackends
 }
 
 // WorkspaceData represents the full workspace topology returned by the API.
@@ -388,7 +389,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, config.WorkspaceConfigFn)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, config.WorkspaceConfigFn, config.BackendListFn)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.
