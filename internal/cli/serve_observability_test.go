@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +30,16 @@ func writeTestEvent(t *testing.T, dir string, e events.Event) {
 	_, _ = f.Write(append(data, '\n'))
 }
 
+// newTestMetricsCache creates a cachedValue for observability metrics tests.
+func newTestMetricsCache(dir string) *cachedValue[*events.MetricsSnapshot] {
+	return newCachedValue[*events.MetricsSnapshot](30*time.Second, func() *events.MetricsSnapshot {
+		store := events.NewMetricsStore(nil, events.DefaultRetention)
+		_ = replayAllEvents(store, dir)
+		snap := store.Snapshot()
+		return &snap
+	})
+}
+
 func TestHandleObservabilityMetrics_Success(t *testing.T) {
 	dir := t.TempDir()
 
@@ -44,7 +55,7 @@ func TestHandleObservabilityMetrics_Success(t *testing.T) {
 	e.Timestamp = now.Add(-30 * time.Minute)
 	writeTestEvent(t, dir, e)
 
-	handler := handleObservabilityMetrics(dir)
+	handler := handleObservabilityMetrics(dir, newTestMetricsCache(dir))
 	req := httptest.NewRequest("GET", "/api/observability/metrics", nil)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
@@ -73,7 +84,7 @@ func TestHandleObservabilityMetrics_Success(t *testing.T) {
 
 func TestHandleObservabilityMetrics_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	handler := handleObservabilityMetrics(dir)
+	handler := handleObservabilityMetrics(dir, newTestMetricsCache(dir))
 	req := httptest.NewRequest("GET", "/api/observability/metrics", nil)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
@@ -95,7 +106,7 @@ func TestHandleObservabilityMetrics_EmptyDir(t *testing.T) {
 }
 
 func TestHandleObservabilityMetrics_NotConfigured(t *testing.T) {
-	handler := handleObservabilityMetrics("")
+	handler := handleObservabilityMetrics("", newTestMetricsCache(""))
 	req := httptest.NewRequest("GET", "/api/observability/metrics", nil)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
@@ -388,6 +399,120 @@ func TestReadEventsFromJSONL_EmptyDir(t *testing.T) {
 	}
 	if len(evts) != 0 {
 		t.Errorf("expected empty slice, got %d", len(evts))
+	}
+}
+
+func TestHandleObservabilityMetrics_CacheCoalescing(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a test event so metrics have something to report
+	now := time.Now()
+	e, _ := events.NewEvent(events.TaskCompleted, "agent1", "coder", "", events.TaskCompletedData{
+		TaskID:   "task-1",
+		Duration: events.Duration{Duration: 2 * time.Minute},
+	})
+	e.Timestamp = now.Add(-10 * time.Minute)
+	writeTestEvent(t, dir, e)
+
+	// Track how many times the collection function is called
+	var callCount int64
+	cache := newCachedValue[*events.MetricsSnapshot](5*time.Second, func() *events.MetricsSnapshot {
+		atomic.AddInt64(&callCount, 1)
+		store := events.NewMetricsStore(nil, events.DefaultRetention)
+		_ = replayAllEvents(store, dir)
+		snap := store.Snapshot()
+		return &snap
+	})
+
+	handler := handleObservabilityMetrics(dir, cache)
+
+	// First request: triggers collection
+	req1 := httptest.NewRequest("GET", "/api/observability/metrics", nil)
+	rec1 := httptest.NewRecorder()
+	handler(rec1, req1)
+
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("request 1: expected 200, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	// Second request within TTL: should use cached value
+	req2 := httptest.NewRequest("GET", "/api/observability/metrics", nil)
+	rec2 := httptest.NewRecorder()
+	handler(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("request 2: expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	// Verify only one collection happened
+	count := atomic.LoadInt64(&callCount)
+	if count != 1 {
+		t.Errorf("expected 1 collection call, got %d", count)
+	}
+
+	// Verify both responses return the same data
+	var resp1, resp2 ObservabilityMetricsResponse
+	if err := json.Unmarshal(rec1.Body.Bytes(), &resp1); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
+		t.Fatal(err)
+	}
+	if resp1.Data.TasksCompleted24h != resp2.Data.TasksCompleted24h {
+		t.Errorf("cached response mismatch: %d vs %d",
+			resp1.Data.TasksCompleted24h, resp2.Data.TasksCompleted24h)
+	}
+}
+
+func TestHandleObservabilityMetrics_CacheExpiry(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a test event
+	now := time.Now()
+	e, _ := events.NewEvent(events.TaskCompleted, "agent1", "coder", "", events.TaskCompletedData{
+		TaskID:   "task-1",
+		Duration: events.Duration{Duration: 1 * time.Minute},
+	})
+	e.Timestamp = now.Add(-5 * time.Minute)
+	writeTestEvent(t, dir, e)
+
+	// Use a very short TTL so it expires quickly
+	var callCount int64
+	cache := newCachedValue[*events.MetricsSnapshot](10*time.Millisecond, func() *events.MetricsSnapshot {
+		atomic.AddInt64(&callCount, 1)
+		store := events.NewMetricsStore(nil, events.DefaultRetention)
+		_ = replayAllEvents(store, dir)
+		snap := store.Snapshot()
+		return &snap
+	})
+
+	handler := handleObservabilityMetrics(dir, cache)
+
+	// First request: triggers collection
+	req1 := httptest.NewRequest("GET", "/api/observability/metrics", nil)
+	rec1 := httptest.NewRecorder()
+	handler(rec1, req1)
+
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("request 1: expected 200, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	// Wait for the cache TTL to expire
+	time.Sleep(50 * time.Millisecond)
+
+	// Second request after TTL: should trigger a new collection
+	req2 := httptest.NewRequest("GET", "/api/observability/metrics", nil)
+	rec2 := httptest.NewRecorder()
+	handler(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("request 2: expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	// Verify two collections happened
+	count := atomic.LoadInt64(&callCount)
+	if count != 2 {
+		t.Errorf("expected 2 collection calls after TTL expiry, got %d", count)
 	}
 }
 

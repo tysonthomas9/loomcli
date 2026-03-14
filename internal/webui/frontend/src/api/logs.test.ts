@@ -8,12 +8,16 @@ import {
   getAgentTerminalWsUrl,
   getAgentLogArchive,
 } from "./logs";
-import { getAuthToken, get } from "./client";
+import { ApiError, getAuthToken, get } from "./client";
 
-vi.mock("./client", () => ({
-  getAuthToken: vi.fn(),
-  get: vi.fn(),
-}));
+vi.mock("./client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./client")>();
+  return {
+    ...actual,
+    getAuthToken: vi.fn(),
+    get: vi.fn(),
+  };
+});
 
 const mockGetAuthToken = getAuthToken as ReturnType<typeof vi.fn>;
 const mockGet = get as ReturnType<typeof vi.fn>;
@@ -194,6 +198,22 @@ describe("logs API", () => {
         startLine: 1,
       });
       expect(mockGet).toHaveBeenCalledWith("/api/agents/ember/logs?lines=100");
+    });
+
+    it("returns empty results on 404 (no logs available)", async () => {
+      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
+
+      const archive = await getAgentLogArchive("idle-agent", 100);
+
+      expect(archive).toEqual({ lines: [], lineCount: 0, startLine: 1 });
+    });
+
+    it("throws on non-404 errors", async () => {
+      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+
+      await expect(getAgentLogArchive("ember", 100)).rejects.toThrow(
+        "API Error: 500",
+      );
     });
 
     it("normalizes null archive payload fields", async () => {

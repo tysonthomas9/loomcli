@@ -489,7 +489,7 @@ func TestShouldRestart(t *testing.T) {
 		}
 	})
 
-	t.Run("successful short run does not reset counter", func(t *testing.T) {
+	t.Run("successful short run resets counter", func(t *testing.T) {
 		config := makeDaemonConfig(
 			[]AgentEntry{{Worktree: "test", Role: "plan"}},
 			nil,
@@ -501,15 +501,16 @@ func TestShouldRestart(t *testing.T) {
 			restartCount: 1,
 			lastExitCode: 0,                                 // successful exit
 			lastStart:    time.Now().Add(-30 * time.Second), // ran for <1 minute
+			lastError:    nil,                               // clean success
 		}
 
 		result := daemon.shouldRestart(ap)
 		if !result {
 			t.Error("shouldRestart() = false, want true")
 		}
-		// Counter should be incremented since run was short
-		if ap.restartCount != 2 {
-			t.Errorf("restartCount = %d, want 2 (should be incremented)", ap.restartCount)
+		// Counter should be reset — clean success always resets regardless of runtime
+		if ap.restartCount != 0 {
+			t.Errorf("restartCount = %d, want 0 (should be reset)", ap.restartCount)
 		}
 	})
 
@@ -1926,6 +1927,101 @@ func TestBuildCommand_ToolConstraintEnvVars(t *testing.T) {
 			t.Error("LOOM_READ_ONLY not found")
 		}
 	})
+}
+
+// TestBuildCommand_RoutingEnvVars verifies LOOM_ROLE_SKILLS, LOOM_ROLE_PATH_PATTERNS,
+// LOOM_ROLE_MAX_PRIORITY, LOOM_ROLE_TASK_FILTER, and LOOM_ROLE are set in cmd.Env.
+func TestBuildCommand_RoutingEnvVars(t *testing.T) {
+	tmpDir := t.TempDir()
+	maxP := 2
+
+	d := &Daemon{
+		config:     &DaemonConfig{Daemon: DaemonSettings{}},
+		projectDir: tmpDir,
+	}
+	ap := &AgentProcess{
+		entry: AgentEntry{Worktree: "falcon", Role: "plan", PathPatterns: []string{"cmd/**"}},
+		roleConfig: RoleConfig{
+			Description:  "Built-in plan agent",
+			Skills:       []string{"go", "daemon"},
+			PathPatterns: []string{"internal/**"},
+			MaxPriority:  &maxP,
+			TaskFilter:   "needs_plan",
+		},
+		worktreePath: tmpDir,
+	}
+
+	cmd := d.buildCommand(ap)
+	envMap := make(map[string]string)
+	for _, env := range cmd.Env {
+		if idx := strings.IndexByte(env, '='); idx >= 0 {
+			envMap[env[:idx]] = env[idx+1:]
+		}
+	}
+
+	if v, ok := envMap["LOOM_ROLE_SKILLS"]; !ok || v != "go,daemon" {
+		t.Errorf("LOOM_ROLE_SKILLS = %q, want %q", v, "go,daemon")
+	}
+	if v, ok := envMap["LOOM_ROLE_PATH_PATTERNS"]; !ok || v != "internal/**" {
+		t.Errorf("LOOM_ROLE_PATH_PATTERNS = %q, want %q", v, "internal/**")
+	}
+	if v, ok := envMap["LOOM_ROLE_MAX_PRIORITY"]; !ok || v != "2" {
+		t.Errorf("LOOM_ROLE_MAX_PRIORITY = %q, want %q", v, "2")
+	}
+	if v, ok := envMap["LOOM_ROLE_TASK_FILTER"]; !ok || v != "needs_plan" {
+		t.Errorf("LOOM_ROLE_TASK_FILTER = %q, want %q", v, "needs_plan")
+	}
+	if v, ok := envMap["LOOM_ROLE"]; !ok || v != "plan" {
+		t.Errorf("LOOM_ROLE = %q, want %q", v, "plan")
+	}
+	if v, ok := envMap["LOOM_AGENT_PATH_PATTERNS"]; !ok || v != "cmd/**" {
+		t.Errorf("LOOM_AGENT_PATH_PATTERNS = %q, want %q", v, "cmd/**")
+	}
+}
+
+// TestBuildCommand_NoRoutingEnvVars verifies no routing env vars are set when
+// role has no routing config (backward compatibility).
+func TestBuildCommand_NoRoutingEnvVars(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := &Daemon{
+		config:     &DaemonConfig{Daemon: DaemonSettings{}},
+		projectDir: tmpDir,
+	}
+	ap := &AgentProcess{
+		entry:        AgentEntry{Worktree: "falcon", Role: "plan"},
+		roleConfig:   RoleConfig{Description: "Built-in plan agent"}, // no routing config
+		worktreePath: tmpDir,
+	}
+
+	cmd := d.buildCommand(ap)
+	for _, env := range cmd.Env {
+		if strings.HasPrefix(env, "LOOM_ROLE_SKILLS=") {
+			t.Error("LOOM_ROLE_SKILLS should not be set when Skills is empty")
+		}
+		if strings.HasPrefix(env, "LOOM_ROLE_PATH_PATTERNS=") {
+			t.Error("LOOM_ROLE_PATH_PATTERNS should not be set when PathPatterns is empty")
+		}
+		if strings.HasPrefix(env, "LOOM_ROLE_MAX_PRIORITY=") {
+			t.Error("LOOM_ROLE_MAX_PRIORITY should not be set when MaxPriority is nil")
+		}
+		if strings.HasPrefix(env, "LOOM_ROLE_TASK_FILTER=") {
+			t.Error("LOOM_ROLE_TASK_FILTER should not be set when TaskFilter is empty")
+		}
+		if strings.HasPrefix(env, "LOOM_AGENT_PATH_PATTERNS=") {
+			t.Error("LOOM_AGENT_PATH_PATTERNS should not be set when AgentEntry has no PathPatterns")
+		}
+	}
+	// LOOM_ROLE should always be set
+	foundRole := false
+	for _, env := range cmd.Env {
+		if strings.HasPrefix(env, "LOOM_ROLE=") {
+			foundRole = true
+		}
+	}
+	if !foundRole {
+		t.Error("LOOM_ROLE should always be set")
+	}
 }
 
 // TestBuildCommand_NoConstraints_BackwardCompat verifies no constraint env vars

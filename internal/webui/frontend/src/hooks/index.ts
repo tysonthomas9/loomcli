@@ -127,3 +127,38 @@ export type {
   UseObservabilityMetricsOptions,
   UseObservabilityMetricsResult,
 } from "./useObservabilityMetrics";
+
+export { useTheme } from "./useTheme";
+export type { Theme, UseThemeReturn } from "./useTheme";
+
+export { useEditors } from "./useEditors";
+export type { UseEditorsResult } from "./useEditors";
+
+export { useTerminalSessions } from "./useTerminalSessions";
+export type { UseTerminalSessionsReturn } from "./useTerminalSessions";
+
+export { useGitStatus } from "./useGitStatus";
+export type { UseGitStatusOptions, UseGitStatusReturn } from "./useGitStatus";
+
+export { useGitActions } from "./useGitActions";
+export type {
+  UseGitActionsOptions,
+  UseGitActionsReturn,
+  GitActionState,
+} from "./useGitActions";
+
+export { useFileTree } from "./useFileTree";
+export type { UseFileTreeReturn } from "./useFileTree";
+
+export { useFileContent } from "./useFileContent";
+export type { UseFileContentReturn } from "./useFileContent";
+
+export {
+  useTerminalFont,
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_FONT_SIZE,
+  FONT_FAMILY_OPTIONS,
+  FONT_SIZE_OPTIONS,
+  CUSTOM_FONT_SENTINEL,
+} from "./useTerminalFont";
+export type { UseTerminalFontReturn } from "./useTerminalFont";

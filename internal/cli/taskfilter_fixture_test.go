@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestTaskfilterParity_JSONFixtureCases(t *testing.T) {
-	data, err := os.ReadFile("../webui/frontend/testdata/blocker_parity_cases.json")
+func TestPlanStatusParity_JSONFixtureCases(t *testing.T) {
+	data, err := os.ReadFile("../webui/frontend/testdata/plan_status_parity_cases.json")
 	if err != nil {
 		t.Fatalf("failed to read parity fixture: %v", err)
 	}
@@ -18,9 +18,10 @@ func TestTaskfilterParity_JSONFixtureCases(t *testing.T) {
 			Labels []string `json:"labels"`
 		} `json:"issue"`
 		Expected struct {
-			GoNeedsPlan        bool   `json:"go_needs_plan"`
-			GoReadyToImplement bool   `json:"go_ready_to_implement"`
-			TsOpenStatus       string `json:"ts_open_status"`
+			HasNeedsRevision bool   `json:"has_needs_revision"`
+			NeedsPlan        bool   `json:"needs_plan"`
+			ReadyToImplement bool   `json:"ready_to_implement"`
+			TsOpenStatus     string `json:"ts_open_status"`
 		} `json:"expected"`
 	}
 	if err := json.Unmarshal(data, &cases); err != nil {
@@ -29,11 +30,14 @@ func TestTaskfilterParity_JSONFixtureCases(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.ID, func(t *testing.T) {
 			issue := BdIssue{Design: c.Issue.Design, Labels: c.Issue.Labels}
-			if got := NeedsPlan(issue); got != c.Expected.GoNeedsPlan {
-				t.Errorf("NeedsPlan()=%v, want %v", got, c.Expected.GoNeedsPlan)
+			if got := HasNeedsRevision(issue); got != c.Expected.HasNeedsRevision {
+				t.Errorf("HasNeedsRevision()=%v, want %v", got, c.Expected.HasNeedsRevision)
 			}
-			if got := ReadyToImplement(issue); got != c.Expected.GoReadyToImplement {
-				t.Errorf("ReadyToImplement()=%v, want %v", got, c.Expected.GoReadyToImplement)
+			if got := NeedsPlan(issue); got != c.Expected.NeedsPlan {
+				t.Errorf("NeedsPlan()=%v, want %v", got, c.Expected.NeedsPlan)
+			}
+			if got := ReadyToImplement(issue); got != c.Expected.ReadyToImplement {
+				t.Errorf("ReadyToImplement()=%v, want %v", got, c.Expected.ReadyToImplement)
 			}
 		})
 	}

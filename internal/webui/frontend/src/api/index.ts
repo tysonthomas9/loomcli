@@ -2,6 +2,7 @@ export {
   ApiError,
   get,
   post,
+  put,
   patch,
   del,
   initAuth,
@@ -62,6 +63,39 @@ export { fetchUsage } from "./usage";
 // Observability API functions (loom server)
 export { fetchObservabilityMetrics } from "./observability";
 
+// Editor API functions
+export {
+  fetchEditors,
+  refreshEditors,
+  getCachedEditors,
+  openInEditor,
+} from "./editors";
+
+// Diff API functions (agent worktree diffs)
+export { fetchDiffCommits, fetchDiffFiles, fetchDiffFile } from "./diff";
+export type { DiffCommit, DiffFile, DiffFilePatch } from "./diff";
+
+// Git API functions
+export {
+  fetchGitStatus,
+  gitPush,
+  gitPull,
+  gitSync,
+  gitCreatePR,
+  gitReset,
+  gitUpdateTarget,
+} from "./git";
+export type {
+  GitStatus,
+  GitPushResult,
+  GitPullResult,
+  GitSyncResult,
+  GitPRResult,
+  GitResetResult,
+  GitResetLockedResponse,
+  GitTargetResult,
+} from "./git";
+
 // Log streaming API functions
 export {
   getTaskLogPhases,
@@ -71,3 +105,15 @@ export {
   getAgentTerminalWsUrl,
   getAgentLogArchive,
 } from "./logs";
+
+// Terminal API functions
+export {
+  listTerminalSessions,
+  fetchTerminalToken,
+  buildTerminalWsUrl,
+} from "./terminal";
+export type { TerminalSessionInfo } from "./terminal";
+
+// File API functions (agent worktree file operations)
+export { listWorktreeDir, readWorktreeFile, writeWorktreeFile } from "./files";
+export type { FileEntry, DirListData, FileReadData } from "./files";

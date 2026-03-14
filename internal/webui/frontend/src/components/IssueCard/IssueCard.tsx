@@ -9,9 +9,10 @@ import {
   getStatusLabel,
 } from "@/components/AgentCard";
 import { BlockedBadge } from "@/components/BlockedBadge";
+import { TypeIcon } from "@/components/TypeIcon";
 import { useAgentContext } from "@/hooks";
 import type { BlockerRef, Issue } from "@/types";
-import { parseLoomStatus } from "@/types";
+import { isKnownIssueType, parseLoomStatus } from "@/types";
 import { formatIssueId } from "@/utils/formatIssueId";
 import { getOpenStatus, getReviewType } from "@/utils/issueCategory";
 import type { OpenStatus, ReviewType } from "@/utils/issueCategory";
@@ -101,8 +102,10 @@ export function IssueCard({
   const reviewType = getReviewType(issue);
   const openStatus = columnId === "ready" ? getOpenStatus(issue) : null;
 
-  // Compute agent row data for in_progress cards with an assignee
-  const showAgentRow = columnId === "in_progress" && !!issue.assignee;
+  // Compute agent row data for in_progress and review cards with an assignee
+  const showAgentRow =
+    (columnId === "in_progress" || columnId === "review") && !!issue.assignee;
+  const isReviewColumn = columnId === "review";
   const assignedAgent = issue.assignee
     ? getAgentByName(issue.assignee)
     : undefined;
@@ -142,6 +145,13 @@ export function IssueCard({
     >
       <header className={styles.header}>
         <span className={styles.id}>{displayId}</span>
+        {issue.issue_type && isKnownIssueType(issue.issue_type) && (
+          <TypeIcon
+            type={issue.issue_type}
+            size={14}
+            className={styles.typeIcon ?? ""}
+          />
+        )}
         {reviewType && (
           <span
             className={`${styles.reviewTypeBadge} ${REVIEW_BADGE_CONFIG[reviewType].className}`}
@@ -202,17 +212,21 @@ export function IssueCard({
       {showAgentRow && issue.assignee && (
         <AgentRow
           agentName={issue.assignee}
-          status={agentParsedStatus}
+          status={isReviewColumn ? null : agentParsedStatus}
           avatarColor={getAvatarColor(issue.assignee.replace(/^\[H\]\s*/, ""))}
           dotColor={
-            agentParsedStatus
-              ? getStatusDotColor(agentParsedStatus.type)
-              : undefined
+            isReviewColumn
+              ? undefined
+              : agentParsedStatus
+                ? getStatusDotColor(agentParsedStatus.type)
+                : undefined
           }
           activity={
-            agentParsedStatus && assignedAgent
-              ? getStatusLabel(agentParsedStatus)
-              : undefined
+            isReviewColumn
+              ? "Submitted for review"
+              : agentParsedStatus && assignedAgent
+                ? getStatusLabel(agentParsedStatus)
+                : undefined
           }
         />
       )}

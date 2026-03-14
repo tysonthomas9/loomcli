@@ -16,7 +16,9 @@ export type ViewMode =
   | "graph"
   | "monitor"
   | "observability"
-  | "settings";
+  | "terminal"
+  | "settings"
+  | "files";
 
 /**
  * Default view when none is specified.

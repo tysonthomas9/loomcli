@@ -585,3 +585,69 @@ func TestSSELive_ClientDisconnect(t *testing.T) {
 		t.Errorf("expected 0 clients after disconnect, got %d", hub.ClientCount())
 	}
 }
+
+// TestSSELive_RetryFieldInStream verifies that the `retry: 5000` field appears
+// in the raw SSE stream for a fresh (non-reconnecting) connection. The
+// readEvent helper skips retry: lines, so this test reads raw bytes instead.
+func TestSSELive_RetryFieldInStream(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+
+	server := newLiveSSEServer(t, hub, nil)
+
+	// Open a raw HTTP connection instead of using connectSSE, so we can
+	// read the raw stream without the readEvent helper filtering retry:.
+	resp, err := http.Get(server.URL + "/api/events") //nolint:gosec // G107 — test hits local httptest server
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+
+	// Read lines until we see both "retry:" and "event: connected", or timeout.
+	type result struct {
+		retryLine   string
+		retryFound  bool
+		connectedAt int // line index where "event: connected" appeared
+		retryAt     int // line index where "retry:" appeared
+	}
+
+	resCh := make(chan result, 1)
+	go func() {
+		var res result
+		lineIdx := 0
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "retry:") {
+				res.retryLine = line
+				res.retryAt = lineIdx
+				res.retryFound = true
+			}
+			if line == "event: connected" {
+				res.connectedAt = lineIdx
+				// We have both pieces of info we need
+				resCh <- res
+				return
+			}
+			lineIdx++
+		}
+		// Stream ended before we found both
+		resCh <- res
+	}()
+
+	select {
+	case res := <-resCh:
+		expectedRetry := fmt.Sprintf("retry: %d", sseRetryMs)
+		if res.retryLine != expectedRetry {
+			t.Errorf("expected %q in raw stream, got %q", expectedRetry, res.retryLine)
+		}
+		if res.retryFound && res.retryAt >= res.connectedAt {
+			t.Errorf("expected retry: (line %d) to appear before event: connected (line %d)",
+				res.retryAt, res.connectedAt)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for retry field and connected event in raw stream")
+	}
+}

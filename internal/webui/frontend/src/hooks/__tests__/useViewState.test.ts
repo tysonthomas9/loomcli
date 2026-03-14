@@ -114,6 +114,14 @@ describe("useViewState", () => {
       expect(view).toBe("settings");
     });
 
+    it("parses files view from URL", () => {
+      mockWindowLocation("?view=files");
+      const { result } = renderHook(() => useViewState());
+
+      const [view] = result.current;
+      expect(view).toBe("files");
+    });
+
     it('defaults to kanban for invalid view (?view=invalid returns "kanban")', () => {
       mockWindowLocation("?view=invalid");
       const { result } = renderHook(() => useViewState());
@@ -425,6 +433,12 @@ describe("parseViewFromUrl", () => {
     expect(result).toBe("settings");
   });
 
+  it("parses files view", () => {
+    mockWindowLocation("?view=files");
+    const result = parseViewFromUrl();
+    expect(result).toBe("files");
+  });
+
   it("returns DEFAULT_VIEW for invalid view", () => {
     mockWindowLocation("?view=invalid");
     const result = parseViewFromUrl();
@@ -469,6 +483,10 @@ describe("isValidViewMode", () => {
 
   it("returns true for settings", () => {
     expect(isValidViewMode("settings")).toBe(true);
+  });
+
+  it("returns true for files", () => {
+    expect(isValidViewMode("files")).toBe(true);
   });
 
   it("returns false for invalid string", () => {

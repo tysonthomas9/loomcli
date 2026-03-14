@@ -1,0 +1,102 @@
+/**
+ * TerminalView container styles.
+ * Layout for tabbed terminal view with search overlay and full-height mode.
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+  background: #1e1e1e;
+  overflow: hidden;
+}
+
+.fullHeight {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+}
+
+.terminalsContainer {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.terminalPane {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
+}
+
+/* SearchBar overlay - VS Code style top-right */
+.searchOverlay {
+  position: absolute;
+  top: 0;
+  right: 20px;
+  z-index: var(--z-dropdown);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: #252526;
+  border: 1px solid #3c3c3c;
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.searchInput {
+  padding: 4px 8px;
+  font-size: var(--font-sm);
+  background: #3c3c3c;
+  border: 1px solid #5a5a5a;
+  border-radius: var(--radius-sm);
+  color: #cccccc;
+  outline: none;
+  min-width: 180px;
+}
+
+.searchInput::placeholder {
+  color: #808080;
+}
+
+.searchInput:focus {
+  border-color: var(--color-primary);
+}
+
+.searchButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #cccccc;
+  cursor: pointer;
+  font-size: 10px;
+  transition: background-color var(--transition-fast);
+}
+
+.searchButton:hover {
+  background: #3c3c3c;
+}
+
+.searchButton:focus-visible {
+  outline: 1px solid var(--color-primary);
+}

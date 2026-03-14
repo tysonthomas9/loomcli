@@ -4,7 +4,7 @@ import "testing"
 
 // TestBuildRouterTaskCheck_NilWhenNoConstraints verifies nil returned for unconstrained roles.
 func TestBuildRouterTaskCheck_NilWhenNoConstraints(t *testing.T) {
-	rc := RoleConfig{Description: "basic"} // no Skills, PathPatterns, or MaxPriority
+	rc := RoleConfig{Description: "basic"} // no Skills or MaxPriority
 	ae := AgentEntry{Worktree: "falcon", Role: "task"}
 
 	check := BuildRouterTaskCheck(rc, ae, "")
@@ -27,20 +27,6 @@ func TestBuildRouterTaskCheck_NonNilWithSkills(t *testing.T) {
 	}
 }
 
-// TestBuildRouterTaskCheck_NonNilWithPathPatterns verifies non-nil returned when role has path patterns.
-func TestBuildRouterTaskCheck_NonNilWithPathPatterns(t *testing.T) {
-	rc := RoleConfig{
-		Description:  "frontend specialist",
-		PathPatterns: []string{"src/components/**"},
-	}
-	ae := AgentEntry{Worktree: "falcon", Role: "task"}
-
-	check := BuildRouterTaskCheck(rc, ae, "")
-	if check == nil {
-		t.Error("BuildRouterTaskCheck() should return non-nil for role with path patterns")
-	}
-}
-
 // TestBuildRouterTaskCheck_NonNilWithMaxPriority verifies non-nil returned when role has max priority.
 func TestBuildRouterTaskCheck_NonNilWithMaxPriority(t *testing.T) {
 	maxP := 2
@@ -56,18 +42,24 @@ func TestBuildRouterTaskCheck_NonNilWithMaxPriority(t *testing.T) {
 	}
 }
 
-// TestBuildRouterTaskCheck_AgentOverridesPathPatterns verifies agent-level path patterns
-// override role-level ones when determining if router is needed.
-func TestBuildRouterTaskCheck_AgentOverridesPathPatterns(t *testing.T) {
-	rc := RoleConfig{Description: "no constraints"} // no PathPatterns
-	ae := AgentEntry{
-		Worktree:     "falcon",
-		Role:         "task",
-		PathPatterns: []string{"internal/**"},
+// TestBuildRouterTaskCheck_NilWithOnlyPathPatterns verifies PathPatterns alone does NOT activate the router.
+func TestBuildRouterTaskCheck_NilWithOnlyPathPatterns(t *testing.T) {
+	// RoleConfig-level PathPatterns
+	rc := RoleConfig{
+		Description:  "frontend specialist",
+		PathPatterns: []string{"src/components/**"},
+	}
+	ae := AgentEntry{Worktree: "falcon", Role: "task"}
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check != nil {
+		t.Error("BuildRouterTaskCheck() should return nil when only RoleConfig.PathPatterns is set (not a routing constraint)")
 	}
 
-	check := BuildRouterTaskCheck(rc, ae, "")
-	if check == nil {
-		t.Error("BuildRouterTaskCheck() should return non-nil when agent has path patterns")
+	// AgentEntry-level PathPatterns
+	rc2 := RoleConfig{Description: "frontend specialist"}
+	ae2 := AgentEntry{Worktree: "falcon", Role: "task", PathPatterns: []string{"internal/**"}}
+	check2 := BuildRouterTaskCheck(rc2, ae2, "")
+	if check2 != nil {
+		t.Error("BuildRouterTaskCheck() should return nil when only AgentEntry.PathPatterns is set (not a routing constraint)")
 	}
 }

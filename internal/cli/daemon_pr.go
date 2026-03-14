@@ -153,7 +153,7 @@ func createEpicPR(dir, epicID, branch string, info *epicPRInfo) (string, error) 
 	body := buildPRBody(info)
 
 	result := execCommand(dir, "gh", "pr", "create",
-		"--base", "main",
+		"--base", GetDefaultBranch(),
 		"--head", branch,
 		"--title", title,
 		"--body", body,

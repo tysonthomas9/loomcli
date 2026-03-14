@@ -53,7 +53,8 @@ func (s *SQLiteStorage) GetReadyWork(ctx context.Context, filter types.WorkFilte
 		if !filter.IncludeMolSteps {
 			patterns := s.getExcludeIDPatterns(ctx)
 			for _, pattern := range patterns {
-				whereClauses = append(whereClauses, "i.id NOT LIKE '%"+pattern+"%'")
+				whereClauses = append(whereClauses, "i.id NOT LIKE ?")
+				args = append(args, "%"+pattern+"%")
 			}
 		}
 	}

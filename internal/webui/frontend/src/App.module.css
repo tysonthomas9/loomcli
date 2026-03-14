@@ -27,8 +27,7 @@
 .headerActions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 22px;
+  gap: var(--space-1);
 }
 
 .searchWrapper {
@@ -45,8 +44,9 @@
 .kanbanShell {
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto; /* Size to content instead of filling space */
-  overflow: visible; /* Let parent handle scrolling */
+  flex: 1 1 0; /* Fill available space to constrain column height */
+  min-height: 0; /* Allow flex item to shrink below content height */
+  overflow: hidden; /* Columns handle their own scrolling */
 }
 
 @media (width <= 1024px) {

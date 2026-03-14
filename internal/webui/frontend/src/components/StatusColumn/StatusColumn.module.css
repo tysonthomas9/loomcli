@@ -4,13 +4,15 @@
  */
 
 .statusColumn {
+  --column-bg: #e8e5dc;
   display: flex;
   flex-direction: column;
   min-width: 220px;
+  min-height: 0; /* Allow flex item to shrink below content height */
   flex: 1 0 220px; /* Allow columns to grow and fill space equally */
-  background-color: #e8e5dc;
+  background-color: var(--column-bg);
   border-radius: 0;
-  overflow: visible; /* Allow content to be visible */
+  overflow: hidden; /* Column handles its own scrolling via .content */
   border-right: 1px solid var(--color-border);
 }
 
@@ -115,7 +117,8 @@
 }
 
 .content {
-  flex: 0 1 auto; /* Size to content, allow shrinking if needed */
+  flex: 1 1 0; /* Fill remaining column height */
+  min-height: 0; /* Allow flex item to shrink below content height */
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
@@ -125,12 +128,31 @@
     background-color 0.15s ease,
     border-color 0.15s ease;
   border: 1px solid transparent;
-  overflow-y: visible; /* Show all cards without scrolling */
+  overflow-y: auto; /* Scroll when cards overflow column height */
   /* Smooth momentum scrolling on iOS */
   -webkit-overflow-scrolling: touch;
   /* Firefox scrollbar styling */
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
+  /* Scroll shadow indicators using background-attachment: local trick */
+  background:
+    /* Shadow cover at top (moves with content, hides top shadow when at top) */
+    linear-gradient(var(--column-bg) 30%, transparent) center top,
+    /* Shadow cover at bottom (moves with content, hides bottom shadow when at bottom) */
+    linear-gradient(transparent, var(--column-bg) 70%) center bottom,
+    /* Top shadow (fixed, visible when scrolled down) */
+    radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.15), transparent)
+      center top,
+    /* Bottom shadow (fixed, visible when more content below) */
+    radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.15), transparent)
+      center bottom;
+  background-repeat: no-repeat;
+  background-size:
+    100% 40px,
+    100% 40px,
+    100% 12px,
+    100% 12px;
+  background-attachment: local, local, scroll, scroll;
 }
 
 /* Webkit scrollbar styling (Chrome, Safari, Edge) */
@@ -175,7 +197,22 @@
 
 /* Drop target visual feedback when dragging over */
 .contentDropOver {
-  background-color: var(--accent-bg);
+  background:
+    linear-gradient(var(--column-bg) 30%, transparent) center top,
+    linear-gradient(transparent, var(--column-bg) 70%) center bottom,
+    radial-gradient(farthest-side at 50% 0, rgba(0, 0, 0, 0.15), transparent)
+      center top,
+    radial-gradient(farthest-side at 50% 100%, rgba(0, 0, 0, 0.15), transparent)
+      center bottom,
+    var(--accent-bg);
+  background-repeat: no-repeat;
+  background-size:
+    100% 40px,
+    100% 40px,
+    100% 12px,
+    100% 12px,
+    100% 100%;
+  background-attachment: local, local, scroll, scroll, local;
   border-color: var(--color-border);
 }
 
@@ -184,7 +221,8 @@
  * ================================= */
 
 .statusColumn[data-column-type="backlog"] {
-  background-color: #e3e0d6;
+  --column-bg: #e3e0d6;
+  background-color: var(--column-bg);
 }
 
 .statusColumn[data-column-type="backlog"] .header {

@@ -40,6 +40,10 @@ func mockMonitorData() *MonitorData {
 			{ID: "bd-123", Title: "Current task", Priority: 1, Status: "in_progress"},
 		},
 		BacklogTasks: []TaskInfo{},
+		ClosedTasks: []TaskInfo{
+			{ID: "bd-010", Title: "Completed task", Priority: 2, Status: "closed"},
+			{ID: "bd-011", Title: "Another done task", Priority: 3, Status: "closed"},
+		},
 		AgentTasks: map[string]TaskInfo{
 			"nova": {ID: "bd-123", Title: "Current task", Priority: 1, Status: "in_progress"},
 		},
@@ -358,6 +362,7 @@ func TestHandleTasks(t *testing.T) {
 		wantNeedsReviewLen    int
 		wantInProgressLen     int
 		wantBacklogLen        int
+		wantClosedLen         int
 		wantSummaryNeedsPlan  int
 		wantSummaryReadyImpl  int
 		wantSummaryInProgress int
@@ -372,6 +377,7 @@ func TestHandleTasks(t *testing.T) {
 			wantNeedsReviewLen:    1,
 			wantInProgressLen:     1,
 			wantBacklogLen:        0,
+			wantClosedLen:         2,
 			wantSummaryNeedsPlan:  3,
 			wantSummaryReadyImpl:  5,
 			wantSummaryInProgress: 2,
@@ -388,12 +394,14 @@ func TestHandleTasks(t *testing.T) {
 				ReviewTasks:        []TaskInfo{},
 				InProgressTasks:    []TaskInfo{},
 				BacklogTasks:       []TaskInfo{},
+				ClosedTasks:        []TaskInfo{},
 			},
 			wantNeedsPlanningLen:  0,
 			wantReadyToImplLen:    0,
 			wantNeedsReviewLen:    0,
 			wantInProgressLen:     0,
 			wantBacklogLen:        0,
+			wantClosedLen:         0,
 			wantSummaryNeedsPlan:  0,
 			wantSummaryReadyImpl:  0,
 			wantSummaryInProgress: 0,
@@ -434,6 +442,9 @@ func TestHandleTasks(t *testing.T) {
 				}
 				if len(resp.Backlog) != tt.wantBacklogLen {
 					t.Errorf("Backlog len = %d, want %d", len(resp.Backlog), tt.wantBacklogLen)
+				}
+				if len(resp.Closed) != tt.wantClosedLen {
+					t.Errorf("Closed len = %d, want %d", len(resp.Closed), tt.wantClosedLen)
 				}
 
 				// Check summary counts

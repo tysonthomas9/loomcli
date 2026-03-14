@@ -122,6 +122,9 @@ func TestConfigInit(t *testing.T) {
 	if len(ws.Repos) != 0 {
 		t.Errorf("len(repos) = %d, want 0", len(ws.Repos))
 	}
+	if cfg.Version != CurrentConfigVersion {
+		t.Errorf("Version = %d, want %d", cfg.Version, CurrentConfigVersion)
+	}
 }
 
 func TestConfigInitDefaultWorkspaceName(t *testing.T) {

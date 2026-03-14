@@ -48,16 +48,6 @@ func originHosts(origins []string) []string {
 	return hosts
 }
 
-// handleTerminalWS returns a WebSocket handler for terminal relay.
-// It upgrades HTTP connections to WebSocket, bridges them to tmux sessions
-// via the TerminalManager, and handles bidirectional binary data relay
-// plus an in-band resize protocol. The manager's current default command
-// is used for new terminal sessions.
-//
-// allowedOrigins is a list of full origin URLs (e.g. "http://localhost:3000")
-// whose host portions are used as OriginPatterns for the WebSocket upgrade.
-// When nil or empty, only same-origin and non-browser (no Origin header)
-// connections are accepted.
 // handleTerminalToken returns a handler that generates a one-time terminal auth token
 // for the given session. The caller must already be authenticated via the API key
 // middleware.
@@ -161,6 +151,16 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 	}
 }
 
+// handleTerminalWS returns a WebSocket handler for terminal relay.
+// It upgrades HTTP connections to WebSocket, bridges them to tmux sessions
+// via the TerminalManager, and handles bidirectional binary data relay
+// plus an in-band resize protocol. The manager's current default command
+// is used for new terminal sessions.
+//
+// allowedOrigins is a list of full origin URLs (e.g. "http://localhost:3000")
+// whose host portions are used as OriginPatterns for the WebSocket upgrade.
+// When nil or empty, only same-origin and non-browser (no Origin header)
+// connections are accepted.
 func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string) http.HandlerFunc {
 	// Compute origin host patterns once at construction time.
 	patterns := originHosts(allowedOrigins)

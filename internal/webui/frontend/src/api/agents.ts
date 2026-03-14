@@ -144,5 +144,6 @@ export async function fetchTasks(): Promise<LoomTaskLists> {
     needsReview: data.needs_review ?? [],
     inProgress: data.in_progress ?? [],
     backlog: data.backlog ?? [],
+    done: data.closed ?? [],
   };
 }

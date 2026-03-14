@@ -5,23 +5,23 @@ import (
 	"time"
 )
 
-// cachedCollector wraps a monitor data collection function with TTL caching
-// and request coalescing (singleflight). When multiple HTTP handlers call
-// get() concurrently, only one collection runs — the rest wait and share
+// cachedValue wraps a collection function with TTL caching and request
+// coalescing (singleflight). When multiple HTTP handlers call get()
+// concurrently, only one collection runs — the rest wait and share
 // the same result.
-type cachedCollector struct {
+type cachedValue[T any] struct {
 	ttl       time.Duration
-	collectFn func() *MonitorData
+	collectFn func() T
 
 	mu       sync.Mutex
-	cached   *MonitorData
+	cached   T
 	cachedAt time.Time
 	inflight bool
 	waitCh   chan struct{} // closed when inflight collection finishes
 }
 
-func newCachedCollector(ttl time.Duration, fn func() *MonitorData) *cachedCollector {
-	return &cachedCollector{
+func newCachedValue[T any](ttl time.Duration, fn func() T) *cachedValue[T] {
+	return &cachedValue[T]{
 		ttl:       ttl,
 		collectFn: fn,
 	}
@@ -29,11 +29,11 @@ func newCachedCollector(ttl time.Duration, fn func() *MonitorData) *cachedCollec
 
 // get returns cached data if fresh, otherwise triggers a single collection
 // that all concurrent callers share.
-func (c *cachedCollector) get() *MonitorData {
+func (c *cachedValue[T]) get() T {
 	c.mu.Lock()
 
 	// Fast path: cache is fresh
-	if c.cached != nil && time.Since(c.cachedAt) < c.ttl {
+	if !c.cachedAt.IsZero() && time.Since(c.cachedAt) < c.ttl {
 		data := c.cached
 		c.mu.Unlock()
 		return data
@@ -52,8 +52,17 @@ func (c *cachedCollector) get() *MonitorData {
 
 	// We are the collector
 	c.inflight = true
-	c.waitCh = make(chan struct{})
+	ch := make(chan struct{})
+	c.waitCh = ch
 	c.mu.Unlock()
+
+	// Ensure waiters are always unblocked, even if collectFn panics.
+	defer func() {
+		c.mu.Lock()
+		c.inflight = false
+		close(ch)
+		c.mu.Unlock()
+	}()
 
 	// Perform collection outside the lock
 	data := c.collectFn()
@@ -61,8 +70,6 @@ func (c *cachedCollector) get() *MonitorData {
 	c.mu.Lock()
 	c.cached = data
 	c.cachedAt = time.Now()
-	c.inflight = false
-	close(c.waitCh) // wake all waiters
 	c.mu.Unlock()
 
 	return data

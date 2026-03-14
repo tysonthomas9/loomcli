@@ -71,6 +71,13 @@
   white-space: nowrap;
 }
 
+.typeIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
 .priorityBadge {
   flex-shrink: 0;
   padding: 2px 6px;

@@ -395,6 +395,12 @@ func GitCheckoutNewFromRef(dir, branch, startPoint string) error {
 	return RunGitCommandWithOutput(dir, "checkout", "-b", branch, startPoint)
 }
 
+// GitMergeAbort aborts an in-progress merge, restoring the pre-merge state.
+func GitMergeAbort(dir string) error {
+	_, err := RunGitCommand(dir, "merge", "--abort")
+	return err
+}
+
 // HasUnmergedFiles checks if there are unmerged files in the working tree
 func HasUnmergedFiles(dir string) (bool, error) {
 	files, err := GetConflictedFiles(dir)

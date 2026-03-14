@@ -100,16 +100,24 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	// Choose the appropriate task checker based on agent type
 	var hasAvailableTasks func() (bool, error)
 	var generatePrompt func(string, *WorkspaceConfig) string
-	if opts.CustomPromptGen != nil && opts.CustomTaskCheck != nil {
+
+	// Task check: custom overrides default
+	if opts.CustomTaskCheck != nil {
 		hasAvailableTasks = opts.CustomTaskCheck
-		generatePrompt = opts.CustomPromptGen
 	} else if opts.AgentType == "plan" {
 		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID) }
+	} else {
+		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
+	}
+
+	// Prompt gen: custom overrides default
+	if opts.CustomPromptGen != nil {
+		generatePrompt = opts.CustomPromptGen
+	} else if opts.AgentType == "plan" {
 		generatePrompt = func(name string, ws *WorkspaceConfig) string {
 			return GeneratePlanningPrompt(name, ws, opts.ParentID)
 		}
 	} else {
-		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
 		generatePrompt = func(name string, ws *WorkspaceConfig) string {
 			return GenerateTaskPrompt(name, ws, opts.ParentID, GetBackendName())
 		}
@@ -218,13 +226,10 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		// Set up usage collector before invocation
 		backendName := GetBackendName()
 		collector := usage.NewCollector(backendName, opts.AgentName)
-		activeUsageCollector = collector
 		startedAt := time.Now()
 
-		err = InvokeAgentNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown)
+		err = InvokeAgentNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown, collector)
 
-		// Clear collector and record usage
-		activeUsageCollector = nil
 		endedAt := time.Now()
 		recordSessionUsage(usageStore, collector, opts.WorktreePath, opts.ParentID, startedAt, endedAt, err)
 

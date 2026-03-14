@@ -98,12 +98,12 @@ linters:
           - gosec
         text: "G302"
       # G304: File inclusion via variable - these are intentional file operations
-      - path: 'internal/(cli/(automode|automode_tmux|lock|agent_cmd|config|daemon|daemon_cmd|daemon_config|daemon_supervisor|monitor|workspace_cmd)|rpc/auth|webui/(auth|handlers_config|log_open_unix|log_streamer))\.go'
+      - path: 'internal/(cli/(automode|automode_tmux|lock|agent_cmd|config|daemon|daemon_cmd|daemon_config|daemon_spawn|daemon_supervisor|monitor|workspace_cmd)|rpc/auth|webui/(auth|handlers_config|log_open_unix|log_streamer))\.go'
         linters:
           - gosec
         text: "G304"
       # G204: Subprocess launches are intentional for tmux, claude, bd, loom commands
-      - path: 'internal/(cli/(automode|automode_tmux|recover|daemon|daemon_supervisor)|kv/reconcile|webui/terminal)\.go'
+      - path: 'internal/(cli/(automode|automode_tmux|recover|daemon|daemon_spawn|daemon_supervisor)|kv/reconcile|webui/terminal)\.go'
         linters:
           - gosec
         text: "G204"
@@ -112,7 +112,7 @@ linters:
           - gosec
         text: "G306"
       # G204: Subprocess launches for AI agent backends and daemon
-      - path: 'internal/cli/(backend_claude|backend_codex|backend_opencode|backend_external|daemon|daemon_supervisor)\.go'
+      - path: 'internal/cli/(backend_claude|backend_codex|backend_opencode|backend_external|daemon|daemon_spawn|daemon_supervisor)\.go'
         linters:
           - gosec
         text: "G204"
@@ -127,7 +127,7 @@ linters:
       - path: "internal/webui/handlers_issues\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/handlers_deps\\.go"
-        linters: [funlen, cyclop, gocognit]
+        linters: [funlen, gocognit]
       - path: "internal/webui/handlers_health\\.go"
         linters: [funlen, cyclop, gocognit]
       # types.go — tracked by loomcli-6yk.6
@@ -301,7 +301,7 @@ linters:
           - errcheck
         text: 'Encode|Fprintf'
       # errcheck: Prometheus metric writes where errors are non-actionable
-      - path: 'internal/cli/serve\.go'
+      - path: 'internal/cli/serve(_metrics)?\.go'
         linters:
           - errcheck
         text: 'Fprintf'

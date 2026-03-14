@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 const (
@@ -46,14 +47,16 @@ type ServerConfig struct {
 	MaxTerminalSessions int  // Maximum concurrent terminal connections (0 = default 20)
 	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
 	FleetRedis          *fleet.RedisConfig
-	FleetJWTKey         []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
-	FleetAPIKey         string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	APIKey              string `json:"-"` // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
-	AuthEnabled         bool   // Whether API authentication is enabled (default: true)
-	HSTSEnabled         bool   // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
-	LoomServerURL       string // Default target URL for the loom API proxy (set by 'loom serve')
-	DevMode             bool   // Serve frontend from disk instead of embedded FS
-	DevFrontendDir      string // Directory to serve in dev mode (default: internal/webui/frontend/dist)
+	FleetJWTKey         []byte  // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey         string  // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
+	APIKey              string  `json:"-"` // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
+	AuthEnabled         bool    // Whether API authentication is enabled (default: true)
+	HSTSEnabled         bool    // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	LoomServerURL       string  // Default target URL for the loom API proxy (set by 'loom serve')
+	DevMode             bool    // Serve frontend from disk instead of embedded FS
+	DevFrontendDir      string  // Directory to serve in dev mode (default: internal/webui/frontend/dist)
+	GitOps              GitOps  // Git operations interface (optional; nil disables git endpoints)
+	FileOps             FileOps // File operations interface (optional; nil disables file endpoints)
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.
@@ -311,6 +314,15 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Fleet registration endpoint will return 503 until a fleet API key is configured")
 	}
 
+	// Initialize tab metadata store for terminal tab persistence
+	var tabMetaStore *tabmeta.Store
+	if config.FleetRedis != nil {
+		tmClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
+		tabMetaStore = tabmeta.NewStore(tmClient, nil)
+		defer func() { _ = tabMetaStore.Close() }()
+		log.Printf("Tab metadata store initialized (Redis: %s)", config.FleetRedis.Address)
+	}
+
 	// Load or generate API key for authentication
 	var apiKey string
 	if config.AuthEnabled {
@@ -339,7 +351,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.

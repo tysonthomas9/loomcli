@@ -76,7 +76,7 @@ func TestCodexInvokeNonInteractive_MockInvoker(t *testing.T) {
 	var gotWorkDir, gotPrompt, gotAgentName string
 	var gotShutdown <-chan struct{}
 	orig := codexNonInteractiveInvoker
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		gotWorkDir = workDir
 		gotPrompt = prompt
 		gotAgentName = agentName
@@ -87,7 +87,7 @@ func TestCodexInvokeNonInteractive_MockInvoker(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	b := &CodexBackend{}
-	err := b.InvokeNonInteractive("/work", "task prompt", "agent2", shutdown)
+	err := b.InvokeNonInteractive("/work", "task prompt", "agent2", shutdown, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,13 +108,13 @@ func TestCodexInvokeNonInteractive_MockInvoker(t *testing.T) {
 func TestCodexInvokeNonInteractive_MockInvokerError(t *testing.T) {
 	expectedErr := errors.New("codex non-interactive failed")
 	orig := codexNonInteractiveInvoker
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		return expectedErr
 	}
 	t.Cleanup(func() { codexNonInteractiveInvoker = orig })
 
 	b := &CodexBackend{}
-	err := b.InvokeNonInteractive("/work", "prompt", "", make(chan struct{}))
+	err := b.InvokeNonInteractive("/work", "prompt", "", make(chan struct{}), nil)
 	if err != expectedErr {
 		t.Errorf("expected error %v, got %v", expectedErr, err)
 	}
@@ -207,7 +207,7 @@ func TestCodexBackendInvokeNonInteractive(t *testing.T) {
 	var called bool
 	var gotShutdown <-chan struct{}
 	orig := codexNonInteractiveInvoker
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		called = true
 		gotShutdown = shutdown
 		return nil
@@ -216,7 +216,7 @@ func TestCodexBackendInvokeNonInteractive(t *testing.T) {
 
 	shutdown := make(chan struct{})
 	b := &CodexBackend{}
-	err := b.InvokeNonInteractive("/work", "task", "agent2", shutdown)
+	err := b.InvokeNonInteractive("/work", "task", "agent2", shutdown, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestCodexBackend_DispatchViaNonInteractive(t *testing.T) {
 
 	var gotWorkDir, gotPrompt, gotAgentName string
 	var gotShutdown <-chan struct{}
-	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+	codexNonInteractiveInvoker = func(workDir, prompt, agentName string, shutdown <-chan struct{}, _ *usage.Collector) error {
 		gotWorkDir = workDir
 		gotPrompt = prompt
 		gotAgentName = agentName
@@ -251,7 +251,7 @@ func TestCodexBackend_DispatchViaNonInteractive(t *testing.T) {
 	}
 
 	shutdown := make(chan struct{})
-	err := InvokeAgentNonInteractive("/dispatch/test", "codex dispatch prompt", "dispatch-agent", shutdown)
+	err := InvokeAgentNonInteractive("/dispatch/test", "codex dispatch prompt", "dispatch-agent", shutdown, nil)
 	if err != nil {
 		t.Fatalf("InvokeAgentNonInteractive() unexpected error: %v", err)
 	}

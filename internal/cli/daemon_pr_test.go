@@ -290,13 +290,47 @@ func TestCreateEpicPR_Success(t *testing.T) {
 	}
 	args := calls[0].Args
 	if !containsSubstring(args, "--base") || !containsSubstring(args, "main") {
-		t.Error("should pass --base main")
+		t.Error("should pass --base main (default)")
 	}
 	if !containsSubstring(args, "--head") || !containsSubstring(args, "epic/loomcli-mzr") {
 		t.Error("should pass --head epic/loomcli-mzr")
 	}
 	if !containsSubstring(args, "--title") {
 		t.Error("should pass --title")
+	}
+}
+
+func TestCreateEpicPR_CustomDefaultBranch(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "develop")
+
+	info := &epicPRInfo{
+		Title: "My Epic",
+		ID:    "loomcli-mzr",
+		Children: []epicChild{
+			{ID: "task-1", Title: "First Task", Status: "open"},
+		},
+	}
+
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "gh", Stdout: "https://github.com/org/repo/pull/100\n"},
+	})
+	cmdMock.Install()
+
+	url, err := createEpicPR("/repo", "loomcli-mzr", "epic/loomcli-mzr", info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != "https://github.com/org/repo/pull/100" {
+		t.Errorf("url = %q, want PR URL", url)
+	}
+
+	calls := cmdMock.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	args := calls[0].Args
+	if !containsSubstring(args, "--base") || !containsSubstring(args, "develop") {
+		t.Errorf("should pass --base develop when LOOM_DEFAULT_BRANCH=develop, got args: %v", args)
 	}
 }
 

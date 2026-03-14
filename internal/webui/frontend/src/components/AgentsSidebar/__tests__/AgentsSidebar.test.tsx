@@ -7,7 +7,7 @@
  * Focuses on the viewSwitcher slot behavior and sync status rendering.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import "@testing-library/jest-dom";
@@ -29,6 +29,7 @@ const defaultMockContext = {
     needsReview: [],
     inProgress: [],
     backlog: [],
+    done: [],
   },
   agentTasks: {},
   sync: {
@@ -58,6 +59,21 @@ let mockContextOverride: Partial<typeof defaultMockContext> = {};
 // Mock the hooks to prevent API calls in tests
 vi.mock("@/hooks", () => ({
   useAgentContext: () => ({ ...defaultMockContext, ...mockContextOverride }),
+}));
+
+const mockGitPushAll = vi.fn();
+vi.mock("@/api/git", () => ({
+  gitPushAll: (...args: unknown[]) => mockGitPushAll(...args),
+}));
+
+vi.mock("@/api/client", () => ({
+  ApiError: class ApiError extends Error {
+    statusText: string;
+    constructor(status: number, statusText: string) {
+      super(statusText);
+      this.statusText = statusText;
+    }
+  },
 }));
 
 describe("AgentsSidebar", () => {
@@ -137,8 +153,8 @@ describe("AgentsSidebar", () => {
     });
   });
 
-  describe("sync status rendering", () => {
-    it('renders "unpushed" text when git_needs_push > 0', () => {
+  describe("sync banner in Work Queue", () => {
+    it('renders "need push" banner when git_needs_push > 0', () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
@@ -150,43 +166,43 @@ describe("AgentsSidebar", () => {
 
       render(<AgentsSidebar />);
 
-      expect(screen.getByText(/2 unpushed/)).toBeInTheDocument();
-      expect(screen.queryByText(/need push/)).not.toBeInTheDocument();
+      expect(screen.getByText(/2 need push/)).toBeInTheDocument();
+      expect(screen.queryByText(/unpushed/)).not.toBeInTheDocument();
     });
 
-    it('renders "unpulled" text when git_needs_pull > 0', () => {
+    it("does not render banner when git_needs_push is 0", () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
           db_last_sync: "",
           git_needs_push: 0,
-          git_needs_pull: 3,
+          git_needs_pull: 0,
         },
       };
 
       render(<AgentsSidebar />);
 
-      expect(screen.getByText(/3 unpulled/)).toBeInTheDocument();
-      expect(screen.queryByText(/need pull/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/need push/)).not.toBeInTheDocument();
     });
 
-    it('renders both "unpushed" and "unpulled" when both counts > 0', () => {
+    it('"Push All" button is present in banner', () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
           db_last_sync: "",
-          git_needs_push: 1,
-          git_needs_pull: 2,
+          git_needs_push: 3,
+          git_needs_pull: 0,
         },
       };
 
       render(<AgentsSidebar />);
 
-      expect(screen.getByText(/1 unpushed/)).toBeInTheDocument();
-      expect(screen.getByText(/2 unpulled/)).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /push all/i }),
+      ).toBeInTheDocument();
     });
 
-    it("shows tooltip with worktree names for push details", () => {
+    it("shows tooltip with worktree details on banner text", () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
@@ -202,7 +218,7 @@ describe("AgentsSidebar", () => {
 
       render(<AgentsSidebar />);
 
-      const pushElement = screen.getByText(/2 unpushed/);
+      const pushElement = screen.getByText(/2 need push/);
       expect(pushElement).toHaveAttribute("title");
       const title = pushElement.getAttribute("title")!;
       expect(title).toContain("nova");
@@ -210,6 +226,65 @@ describe("AgentsSidebar", () => {
       expect(title).toContain("falcon");
       expect(title).toContain("1 commit");
       expect(title).toContain("ahead");
+    });
+
+    it("push button calls POST /api/git/push-all on click", async () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 1,
+          git_needs_pull: 0,
+        },
+      };
+
+      mockGitPushAll.mockResolvedValueOnce({
+        results: [],
+        pushed: 1,
+        failed: 0,
+      });
+
+      render(<AgentsSidebar />);
+
+      const pushButton = screen.getByRole("button", { name: /push all/i });
+      fireEvent.click(pushButton);
+
+      expect(mockGitPushAll).toHaveBeenCalled();
+
+      mockGitPushAll.mockReset();
+    });
+  });
+
+  describe("footer sync status", () => {
+    it("footer does not show push count", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 5,
+          git_needs_pull: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      // "unpushed" should not appear anywhere (removed from footer)
+      expect(screen.queryByText(/unpushed/)).not.toBeInTheDocument();
+    });
+
+    it('renders "unpulled" text in footer when git_needs_pull > 0', () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 0,
+          git_needs_pull: 3,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      expect(screen.getByText(/3 unpulled/)).toBeInTheDocument();
     });
 
     it("shows tooltip with worktree names for pull details", () => {
@@ -233,7 +308,7 @@ describe("AgentsSidebar", () => {
       expect(title).toContain("behind");
     });
 
-    it("does not render sync warnings when counts are zero", () => {
+    it("does not render sync warnings when all counts are zero", () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
@@ -245,28 +320,84 @@ describe("AgentsSidebar", () => {
 
       render(<AgentsSidebar />);
 
-      expect(screen.queryByText(/unpushed/)).not.toBeInTheDocument();
       expect(screen.queryByText(/unpulled/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/need push/)).not.toBeInTheDocument();
     });
+  });
 
-    it("pluralizes commit correctly in tooltip for count=1", () => {
+  describe("work queue backlog button", () => {
+    it("renders the Backlog button with needs_planning count when expanded", () => {
       mockContextOverride = {
-        sync: {
-          db_synced: true,
-          db_last_sync: "",
-          git_needs_push: 1,
-          git_needs_pull: 0,
-          git_push_details: [{ name: "cobalt", count: 1 }],
+        tasks: {
+          needs_planning: 3,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          backlog: 0,
         },
       };
 
       render(<AgentsSidebar />);
 
-      const pushElement = screen.getByText(/1 unpushed/);
-      const title = pushElement.getAttribute("title")!;
-      // Should say "1 commit ahead" (singular), not "1 commits ahead"
-      expect(title).toContain("1 commit ahead");
-      expect(title).not.toContain("1 commits");
+      const backlogButton = screen.getByRole("button", { name: /backlog/i });
+      expect(backlogButton).toBeInTheDocument();
+      expect(screen.getByText("3")).toBeInTheDocument();
+    });
+
+    it("is disabled when needs_planning is 0", () => {
+      // defaultMockContext already has needs_planning: 0
+      render(<AgentsSidebar />);
+
+      const backlogButton = screen.getByRole("button", { name: /backlog/i });
+      expect(backlogButton).toBeDisabled();
+    });
+
+    it("is enabled and clickable when needs_planning > 0", () => {
+      mockContextOverride = {
+        tasks: {
+          needs_planning: 5,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          backlog: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const backlogButton = screen.getByRole("button", { name: /backlog/i });
+      expect(backlogButton).not.toBeDisabled();
+
+      // Clicking should not throw
+      fireEvent.click(backlogButton);
+    });
+
+    it("sets data-highlight attribute correctly based on count", () => {
+      // When needs_planning is 0, data-highlight should be "false"
+      render(<AgentsSidebar />);
+
+      const backlogButton = screen.getByRole("button", { name: /backlog/i });
+      const zeroCount = within(backlogButton).getByText("0");
+      expect(zeroCount).toHaveAttribute("data-highlight", "false");
+    });
+
+    it("sets data-highlight to true when needs_planning > 0", () => {
+      mockContextOverride = {
+        tasks: {
+          needs_planning: 2,
+          ready_to_implement: 0,
+          in_progress: 0,
+          need_review: 0,
+          backlog: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const countSpan = screen.getByText("2", {
+        selector: 'button span[data-highlight="true"]',
+      });
+      expect(countSpan).toHaveAttribute("data-highlight", "true");
     });
   });
 });

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // mockBackend implements Backend for testing.
@@ -25,6 +27,7 @@ type mockCall struct {
 type mockNonInteractiveCall struct {
 	workDir, prompt, agentName string
 	shutdown                   <-chan struct{}
+	collector                  *usage.Collector
 }
 
 func (m *mockBackend) Name() string { return m.name }
@@ -34,8 +37,8 @@ func (m *mockBackend) InvokeInteractive(workDir, prompt, agentName string) error
 	return m.interactiveErr
 }
 
-func (m *mockBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
-	m.nonInteractiveCalls = append(m.nonInteractiveCalls, mockNonInteractiveCall{workDir, prompt, agentName, shutdown})
+func (m *mockBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	m.nonInteractiveCalls = append(m.nonInteractiveCalls, mockNonInteractiveCall{workDir, prompt, agentName, shutdown, collector})
 	return m.nonInteractiveErr
 }
 
@@ -213,7 +216,7 @@ func TestInvokeAgentNonInteractiveDispatches(t *testing.T) {
 	RegisterBackend(m)
 
 	shutdown := make(chan struct{})
-	err := InvokeAgentNonInteractive("/work", "task", "agent2", shutdown)
+	err := InvokeAgentNonInteractive("/work", "task", "agent2", shutdown, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -232,7 +235,7 @@ func TestInvokeAgentNonInteractiveReturnsError(t *testing.T) {
 	m := &mockBackend{name: "claude", nonInteractiveErr: fmt.Errorf("non-interactive failed")}
 	RegisterBackend(m)
 
-	err := InvokeAgentNonInteractive("/work", "task", "", nil)
+	err := InvokeAgentNonInteractive("/work", "task", "", nil, nil)
 	if err == nil || err.Error() != "non-interactive failed" {
 		t.Fatalf("expected 'non-interactive failed', got %v", err)
 	}
@@ -241,7 +244,7 @@ func TestInvokeAgentNonInteractiveReturnsError(t *testing.T) {
 func TestInvokeAgentNonInteractiveUnregistered(t *testing.T) {
 	resetBackendState(t)
 
-	err := InvokeAgentNonInteractive("/work", "task", "", nil)
+	err := InvokeAgentNonInteractive("/work", "task", "", nil, nil)
 	if err == nil {
 		t.Fatal("expected error for unregistered backend")
 	}

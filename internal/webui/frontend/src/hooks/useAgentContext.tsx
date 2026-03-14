@@ -68,6 +68,7 @@ const NO_AGENT_CONTEXT: AgentContextValue = {
     needsReview: [],
     inProgress: [],
     backlog: [],
+    done: [],
   },
   agentTasks: {},
   sync: {

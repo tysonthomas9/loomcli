@@ -983,4 +983,40 @@ describe("IssueCard", () => {
       expect(onClick).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("TypeIcon integration", () => {
+    it('renders TypeIcon with data-type="bug" for issue_type="bug"', () => {
+      const issue = createTestIssue({ issue_type: "bug" });
+      const { container } = render(<IssueCard issue={issue} />);
+
+      const icon = container.querySelector("svg[data-type]");
+      expect(icon).toBeInTheDocument();
+      expect(icon).toHaveAttribute("data-type", "bug");
+    });
+
+    it('renders TypeIcon with data-type="feature" for issue_type="feature"', () => {
+      const issue = createTestIssue({ issue_type: "feature" });
+      const { container } = render(<IssueCard issue={issue} />);
+
+      const icon = container.querySelector("svg[data-type]");
+      expect(icon).toBeInTheDocument();
+      expect(icon).toHaveAttribute("data-type", "feature");
+    });
+
+    it("renders no TypeIcon when issue_type is undefined", () => {
+      const issue = createTestIssue();
+      const { container } = render(<IssueCard issue={issue} />);
+
+      const icon = container.querySelector("svg[data-type]");
+      expect(icon).not.toBeInTheDocument();
+    });
+
+    it("renders no TypeIcon for unknown issue_type", () => {
+      const issue = createTestIssue({ issue_type: "custom" });
+      const { container } = render(<IssueCard issue={issue} />);
+
+      const icon = container.querySelector("svg[data-type]");
+      expect(icon).not.toBeInTheDocument();
+    });
+  });
 });

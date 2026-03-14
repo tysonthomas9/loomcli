@@ -2,7 +2,7 @@
  * API functions for log streaming endpoints.
  */
 
-import { get, getAuthToken } from "./client";
+import { ApiError, get, getAuthToken } from "./client";
 
 /**
  * Response from GET /api/tasks/{id}/logs
@@ -171,7 +171,15 @@ export async function getAgentLogArchive(
   if (beforeLine !== undefined) {
     url += `&before_line=${beforeLine}`;
   }
-  const response = await get<AgentLogContentResponse>(url);
+  let response: AgentLogContentResponse;
+  try {
+    response = await get<AgentLogContentResponse>(url);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return { lines: [], lineCount: 0, startLine: 1 };
+    }
+    throw err;
+  }
   if (!response.success || !response.data) {
     throw new Error(response.error || "Failed to fetch agent log archive");
   }

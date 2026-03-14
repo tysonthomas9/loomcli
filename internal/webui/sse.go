@@ -19,6 +19,8 @@ const (
 	sseRetryMs = 5000
 	// sseHeartbeatInterval is how often heartbeat comments are sent to keep connections alive.
 	sseHeartbeatInterval = 30 * time.Second
+	// sseClientSendBuf is the per-client channel buffer size for outbound mutation events.
+	sseClientSendBuf = 64
 )
 
 // sseEventIDCounter provides monotonically increasing event IDs across all SSE connections.
@@ -289,7 +291,7 @@ func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEv
 		// Create client
 		client := &SSEClient{
 			id:        clientID,
-			send:      make(chan *MutationPayload, 64),
+			send:      make(chan *MutationPayload, sseClientSendBuf),
 			done:      make(chan struct{}),
 			lastSince: lastSince,
 		}

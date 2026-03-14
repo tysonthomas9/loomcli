@@ -2,6 +2,8 @@
  * IssueDetailPanel barrel export.
  */
 
+export { AssigneeDropdown } from "./AssigneeDropdown";
+export type { AssigneeDropdownProps } from "./AssigneeDropdown";
 export { IssueDetailPanel } from "./IssueDetailPanel";
 export type { IssueDetailPanelProps } from "./IssueDetailPanel";
 export { IssueHeader } from "./IssueHeader";

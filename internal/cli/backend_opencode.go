@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sync/atomic"
 	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -22,15 +21,15 @@ func (o *OpenCodeBackend) InvokeInteractive(workDir, prompt, agentName string) e
 	return openCodeInvoker(workDir, prompt, agentName)
 }
 
-func (o *OpenCodeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
-	return openCodeNonInteractiveInvoker(workDir, prompt, agentName, shutdown)
+func (o *OpenCodeBackend) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return openCodeNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
 }
 
 // openCodeInvoker is the function used to invoke OpenCode interactively (mockable for tests)
 var openCodeInvoker = defaultOpenCodeInvoker
 
 // openCodeNonInteractiveInvoker is the function used for non-interactive OpenCode invocation (mockable for tests)
-var openCodeNonInteractiveInvoker = defaultOpenCodeNonInteractiveInvoker
+var openCodeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultOpenCodeNonInteractiveInvoker
 
 // buildOpenCodeInteractiveCmd constructs the exec.Cmd for interactive OpenCode invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
@@ -57,7 +56,7 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 	return cmd.Run()
 }
 
-func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}) error {
+func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	cmd := exec.Command("opencode", "run", "--format", "json")
 	cmd.Dir = workDir
 	env := append(FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
@@ -87,6 +86,8 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	}
 	cmd.Stderr = os.Stderr
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
 	fmt.Println("")
 
@@ -96,17 +97,12 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	}
 
 	// Monitor for shutdown signal
-	var exited atomic.Bool
-	done := make(chan struct{})
+	guard := newProcessGuard(cmd.Process)
 	go func() {
 		select {
 		case <-shutdown:
-			// Only signal if process hasn't exited yet to avoid
-			// sending SIGTERM to a reused PID.
-			if !exited.Load() {
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-			}
-		case <-done:
+			guard.Signal(syscall.SIGTERM)
+		case <-guard.Done():
 		}
 	}()
 
@@ -117,14 +113,13 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 	for scanner.Scan() {
 		line := scanner.Text()
 		fmt.Println(line)
-		if activeUsageCollector != nil {
-			collectOpenCodeStreamUsage(line, activeUsageCollector)
+		if collector != nil {
+			collectOpenCodeStreamUsage(line, collector)
 		}
 	}
 
 	runErr := cmd.Wait()
-	exited.Store(true) // Mark exited before closing done channel
-	close(done)        // Signal goroutine to exit
+	guard.WaitAndMark()
 	r.Close()
 	return runErr
 }

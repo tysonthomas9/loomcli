@@ -284,7 +284,7 @@ func TestExternalBackend_InvokeNonInteractive(t *testing.T) {
 
 	eb := &ExternalBackend{name: "test", binPath: binPath}
 	shutdown := make(chan struct{})
-	err := eb.InvokeNonInteractive(dir, "test prompt", "agent2", shutdown)
+	err := eb.InvokeNonInteractive(dir, "test prompt", "agent2", shutdown, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

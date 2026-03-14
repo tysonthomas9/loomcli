@@ -5,12 +5,14 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // setupRoutes configures all HTTP routes for the server.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string) {
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store) { //nolint:funlen // route registration function
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -88,6 +90,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 
 	// Terminal token and WebSocket endpoints for authenticated terminal relay
 	if termManager != nil {
+		mux.HandleFunc("GET /api/terminal/sessions", handleListTerminalSessions(termManager))
 		if termAuth != nil {
 			mux.HandleFunc("GET /api/terminal/token", handleTerminalToken(termAuth))
 			mux.HandleFunc("GET /api/agents/{name}/terminal/token", handleGetAgentTerminalToken(termAuth))
@@ -96,7 +99,37 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("GET /api/agents/{name}/terminal/ws", handleAgentTerminalWS(termManager, termAuth, allowedOrigins))
 		mux.HandleFunc("GET /api/agents/{name}/terminal/info", handleGetAgentTerminalInfo(termManager))
 		mux.HandleFunc("POST /api/terminal/restart", handleTerminalRestart(termManager, pool, termAuth))
+
+		// Terminal tab metadata endpoints (Redis-backed persistence)
+		mux.HandleFunc("GET /api/terminal/tabs", handleListTerminalTabs(tabMetaStore, termManager))
+		mux.HandleFunc("GET /api/terminal/tabs/{session}", handleGetTerminalTab(tabMetaStore))
+		mux.HandleFunc("PATCH /api/terminal/tabs/{session}", handlePatchTerminalTab(tabMetaStore, hub))
+		mux.HandleFunc("DELETE /api/terminal/tabs/{session}", handleDeleteTerminalTab(tabMetaStore, hub))
 	}
+
+	// Git operation endpoints for worktrees
+	if gitOps != nil {
+		mux.HandleFunc("POST /api/git/push-all", handleGitPushAll(gitOps))
+		mux.HandleFunc("POST /api/agents/{name}/git/push", handleGitPush(gitOps))
+		mux.HandleFunc("POST /api/agents/{name}/git/pull", handleGitPull(gitOps))
+		mux.HandleFunc("POST /api/agents/{name}/git/sync", handleGitSync(gitOps))
+		mux.HandleFunc("POST /api/agents/{name}/git/pr", handleGitPR(gitOps))
+		mux.HandleFunc("POST /api/agents/{name}/git/reset", handleGitReset(gitOps))
+		mux.HandleFunc("GET /api/agents/{name}/git/status", handleGitStatus(gitOps))
+		mux.HandleFunc("PATCH /api/agents/{name}/git/target", handleGitTargetUpdate(gitOps))
+	}
+
+	// File operation endpoints for worktrees
+	if fileOps != nil {
+		mux.HandleFunc("GET /api/agents/{name}/files/tree", handleFileTree(fileOps))
+		mux.HandleFunc("GET /api/agents/{name}/files", handleFileRead(fileOps))
+		mux.HandleFunc("PUT /api/agents/{name}/files", handleFileWrite(fileOps))
+	}
+
+	// Editor endpoints for external editor detection and launch
+	editorCache := newDefaultEditorCache()
+	mux.HandleFunc("GET /api/editors", handleListEditors(editorCache))
+	mux.HandleFunc("POST /api/editors/open", handleOpenEditor(editorCache, editor.LaunchEditor))
 
 	// Log streaming endpoints
 	mux.HandleFunc("GET /api/agents/{name}/logs", handleGetAgentLog())

@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,6 +114,52 @@ func resolveWorkspaceName(path string) string {
 	return ""
 }
 
+// acquireLockRetry handles the retry loop when the initial O_EXCL lock creation
+// fails because a lock file already exists. It re-evaluates the lock on each
+// attempt to handle TOCTOU races (e.g., another process removing a stale lock
+// and creating a new one between our check and create).
+func acquireLockRetry(worktreePath, lockPath string) (*os.File, error) {
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			n, _ := rand.Int(rand.Reader, big.NewInt(40))
+			time.Sleep(time.Duration(10+n.Int64()) * time.Millisecond)
+		}
+
+		existingInfo, running, checkErr := CheckLock(worktreePath)
+		if checkErr != nil {
+			return nil, fmt.Errorf("failed to check existing lock: %w", checkErr)
+		}
+
+		if existingInfo == nil {
+			file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+			if err == nil {
+				return file, nil
+			}
+			if !os.IsExist(err) {
+				return nil, fmt.Errorf("failed to create lock file: %w", err)
+			}
+			continue
+		}
+
+		if running {
+			duration := time.Since(existingInfo.StartedAt).Round(time.Second)
+			return nil, fmt.Errorf("agent already running: %s (PID %d, started %s ago)",
+				existingInfo.Command, existingInfo.PID, duration)
+		}
+
+		os.Remove(lockPath)
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err == nil {
+			return file, nil
+		}
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("failed to create lock file: %w", err)
+		}
+	}
+	return nil, fmt.Errorf("failed to acquire lock after %d attempts (concurrent lock contention)", maxRetries)
+}
+
 // AcquireLock attempts to acquire an agent lock for the worktree
 // Returns an error if an agent is already running
 // Uses atomic file creation (O_EXCL) to prevent race conditions
@@ -119,7 +167,6 @@ func AcquireLock(worktreePath, command, agentName string) error {
 	lockDir := ResolveLockDir(worktreePath)
 	lockPath := filepath.Join(lockDir, LockFileName)
 
-	// Prepare lock info
 	info := LockInfo{
 		PID:       os.Getpid(),
 		Command:   command,
@@ -133,34 +180,20 @@ func AcquireLock(worktreePath, command, agentName string) error {
 		return fmt.Errorf("failed to marshal lock info: %w", err)
 	}
 
-	// Atomic lock creation - O_EXCL fails if file exists
 	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		if os.IsExist(err) {
-			// Lock file exists - check if it's stale (process dead)
-			if existingInfo, running, checkErr := CheckLock(worktreePath); checkErr == nil {
-				if running {
-					duration := time.Since(existingInfo.StartedAt).Round(time.Second)
-					return fmt.Errorf("agent already running: %s (PID %d, started %s ago)",
-						existingInfo.Command, existingInfo.PID, duration)
-				}
-				// Stale lock - remove and retry once
-				os.Remove(lockPath)
-				file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-				if err != nil {
-					return fmt.Errorf("failed to acquire lock after removing stale lock: %w", err)
-				}
-			} else {
-				return fmt.Errorf("failed to check existing lock: %w", checkErr)
-			}
-		} else {
+		if !os.IsExist(err) {
 			return fmt.Errorf("failed to create lock file: %w", err)
+		}
+		file, err = acquireLockRetry(worktreePath, lockPath)
+		if err != nil {
+			return err
 		}
 	}
 	defer file.Close()
 
 	if _, err := file.Write(data); err != nil {
-		os.Remove(lockPath) // Clean up on write failure
+		os.Remove(lockPath)
 		return fmt.Errorf("failed to write lock info: %w", err)
 	}
 

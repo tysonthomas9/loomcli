@@ -36,7 +36,7 @@ type promptTemplateData struct {
 // renderPrompt loads a template by name, checks for per-project override,
 // and renders it with the given data.
 func renderPrompt(name string, data promptTemplateData) string {
-	tmplContent, err := loadTemplate(name)
+	tmplContent, isOverride, err := loadTemplate(name)
 	if err != nil {
 		panic(fmt.Sprintf("prompt: failed to load template %q: %v", name, err))
 	}
@@ -48,7 +48,19 @@ func renderPrompt(name string, data promptTemplateData) string {
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		panic(fmt.Sprintf("prompt: failed to execute template %q: %v", name, err))
+		if !isOverride {
+			panic(fmt.Sprintf("prompt: failed to execute template %q: %v", name, err))
+		}
+		log.Printf("warning: override template %q execution failed: %v; falling back to embedded default", name, err)
+		embContent, embErr := promptFS.ReadFile("prompts/" + name + ".md")
+		if embErr != nil {
+			panic(fmt.Sprintf("prompt: embedded fallback template %q not found: %v", name, embErr))
+		}
+		embTmpl := template.Must(template.New(name).Parse(string(embContent)))
+		buf.Reset()
+		if execErr := embTmpl.Execute(&buf, data); execErr != nil {
+			panic(fmt.Sprintf("prompt: embedded template %q execute failed (bug): %v", name, execErr))
+		}
 	}
 
 	return buf.String()
@@ -59,27 +71,28 @@ func renderPrompt(name string, data promptTemplateData) string {
 var promptOverrideDir string
 
 // loadTemplate checks for a per-project override at ./loom-prompts/<name>.md,
-// then falls back to the embedded default.
-func loadTemplate(name string) (string, error) {
+// then falls back to the embedded default. The isOverride return indicates
+// whether the returned content came from a user override file.
+func loadTemplate(name string) (content string, isOverride bool, err error) {
 	base := promptOverrideDir
 	if base == "" {
 		base = "."
 	}
 	overridePath := filepath.Join(base, "loom-prompts", name+".md")
-	if content, err := os.ReadFile(overridePath); err == nil { //nolint:gosec // G304: intentional per-project override loading
+	if data, readErr := os.ReadFile(overridePath); readErr == nil { //nolint:gosec // G304: intentional per-project override loading
 		// Validate the override parses as a template
-		if _, parseErr := template.New(name).Parse(string(content)); parseErr != nil {
+		if _, parseErr := template.New(name).Parse(string(data)); parseErr != nil {
 			log.Printf("warning: invalid template override %s: %v, using embedded default", overridePath, parseErr)
 		} else {
-			return string(content), nil
+			return string(data), true, nil
 		}
 	}
 
-	content, err := promptFS.ReadFile("prompts/" + name + ".md")
+	data, err := promptFS.ReadFile("prompts/" + name + ".md")
 	if err != nil {
-		return "", fmt.Errorf("embedded template %q not found: %w", name, err)
+		return "", false, fmt.Errorf("embedded template %q not found: %w", name, err)
 	}
-	return string(content), nil
+	return string(data), false, nil
 }
 
 // buildWorkspaceContextBlock generates the workspace context section for prompts.

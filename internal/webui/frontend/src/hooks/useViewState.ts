@@ -16,7 +16,9 @@ const VALID_VIEWS: ViewMode[] = [
   "graph",
   "monitor",
   "observability",
+  "terminal",
   "settings",
+  "files",
 ];
 
 /**

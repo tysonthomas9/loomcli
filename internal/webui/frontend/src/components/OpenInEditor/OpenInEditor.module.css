@@ -1,0 +1,130 @@
+/**
+ * OpenInEditor dropdown styles.
+ * Custom dropdown for selecting an editor to open a file/workspace.
+ */
+
+.openInEditor {
+  position: relative;
+  display: inline-block;
+}
+
+/* Trigger button */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: var(--font-xs);
+  font-weight: 500;
+  background-color: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: var(--color-border);
+  background-color: var(--color-bg-secondary);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Launching state */
+.trigger[data-launching="true"] {
+  opacity: 0.7;
+  pointer-events: none;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Error state */
+.trigger[data-error="true"] {
+  color: var(--color-danger);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.triggerText {
+  white-space: nowrap;
+}
+
+.chevron {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-left: 2px;
+  transition: transform var(--transition-fast);
+}
+
+.chevron[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+/* Dropdown menu */
+.menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--z-dropdown, 100);
+  min-width: 180px;
+  margin-top: var(--space-1, 4px);
+  padding: var(--space-1, 4px);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+/* Menu options */
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast);
+}
+
+.option:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.option[data-focused="true"] {
+  background-color: var(--color-bg-secondary);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.editorName {
+  flex: 1;
+}
+
+/* Empty state */
+.emptyOption {
+  padding: 8px 10px;
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
+  font-style: italic;
+}

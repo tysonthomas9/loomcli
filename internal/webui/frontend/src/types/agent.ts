@@ -106,6 +106,10 @@ export interface LoomAgentStatus {
   commits?: LoomCommitDetail[];
   /** Uncommitted file changes */
   changes?: LoomFileChange[];
+  /** Worktree filesystem path */
+  worktree_path?: string;
+  /** Workspace path (alias) */
+  path?: string;
 }
 
 /**
@@ -224,6 +228,7 @@ export interface LoomTasksResponse {
   needs_review: LoomTaskInfo[] | null;
   in_progress: LoomTaskInfo[] | null;
   backlog: LoomTaskInfo[] | null;
+  closed: LoomTaskInfo[] | null;
   timestamp: string;
 }
 
@@ -236,6 +241,7 @@ export interface LoomTaskLists {
   needsReview: LoomTaskInfo[];
   inProgress: LoomTaskInfo[];
   backlog: LoomTaskInfo[];
+  done: LoomTaskInfo[];
 }
 
 /**

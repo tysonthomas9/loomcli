@@ -329,3 +329,147 @@ func TestConcurrentHandleEvent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestAgentStarted_EndsExistingSpan(t *testing.T) {
+	exp, spanExp, _ := newTestExporter(t)
+	defer exp.Stop(context.Background())
+
+	// Send two AgentStarted events for the same agent without AgentStopped in between.
+	exp.HandleEvent(makeEvent(events.AgentStarted, "agent1", "task", "", events.AgentStartedData{PID: 100}))
+	exp.HandleEvent(makeEvent(events.AgentStarted, "agent1", "task", "", events.AgentStartedData{PID: 200}))
+
+	// The first span should have been ended with status "superseded".
+	spans := spanExp.GetSpans()
+	var supersededCount int
+	for _, s := range spans {
+		if s.Name == "loom.agent.lifecycle" && s.Status.Code == codes.Error && s.Status.Description == "superseded" {
+			supersededCount++
+		}
+	}
+	if supersededCount != 1 {
+		t.Errorf("expected 1 superseded agent span, got %d", supersededCount)
+	}
+
+	// Only one active agent span should remain in the map.
+	exp.mu.Lock()
+	agentSpans := len(exp.activeAgentSpans)
+	exp.mu.Unlock()
+	if agentSpans != 1 {
+		t.Errorf("activeAgentSpans = %d, want 1", agentSpans)
+	}
+}
+
+func TestTaskClaimed_EndsExistingSpan(t *testing.T) {
+	exp, spanExp, _ := newTestExporter(t)
+	defer exp.Stop(context.Background())
+
+	// Send two TaskClaimed events for the same agent without TaskCompleted in between.
+	exp.HandleEvent(makeEvent(events.TaskClaimed, "agent1", "task", "epic-1", events.TaskClaimedData{TaskID: "t1", Title: "First task"}))
+	exp.HandleEvent(makeEvent(events.TaskClaimed, "agent1", "task", "epic-1", events.TaskClaimedData{TaskID: "t2", Title: "Second task"}))
+
+	// The first task span should have been ended with status "superseded".
+	spans := spanExp.GetSpans()
+	var supersededCount int
+	for _, s := range spans {
+		if s.Name == "loom.task" && s.Status.Code == codes.Error && s.Status.Description == "superseded" {
+			supersededCount++
+		}
+	}
+	if supersededCount != 1 {
+		t.Errorf("expected 1 superseded task span, got %d", supersededCount)
+	}
+
+	// Only one active task span should remain in the map.
+	exp.mu.Lock()
+	taskSpans := len(exp.activeTaskSpans)
+	exp.mu.Unlock()
+	if taskSpans != 1 {
+		t.Errorf("activeTaskSpans = %d, want 1", taskSpans)
+	}
+}
+
+func TestAgentRestarted_EndsTaskSpan(t *testing.T) {
+	exp, spanExp, _ := newTestExporter(t)
+	defer exp.Stop(context.Background())
+
+	// Claim a task, then restart the agent.
+	exp.HandleEvent(makeEvent(events.TaskClaimed, "agent1", "task", "epic-1", events.TaskClaimedData{TaskID: "t1", Title: "Some task"}))
+	exp.HandleEvent(makeEvent(events.AgentRestarted, "agent1", "task", "", events.AgentRestartedData{PID: 300, RestartCount: 1}))
+
+	// The task span should have been ended with error status "agent_restarted".
+	spans := spanExp.GetSpans()
+	var found bool
+	for _, s := range spans {
+		if s.Name == "loom.task" && s.Status.Code == codes.Error && s.Status.Description == "agent_restarted" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected loom.task span with error status 'agent_restarted'")
+	}
+
+	// activeTaskSpans should be empty for that agent.
+	exp.mu.Lock()
+	taskSpans := len(exp.activeTaskSpans)
+	exp.mu.Unlock()
+	if taskSpans != 0 {
+		t.Errorf("activeTaskSpans = %d, want 0", taskSpans)
+	}
+}
+
+func TestFullRestartCycle_NoLeaks(t *testing.T) {
+	exp, spanExp, _ := newTestExporter(t)
+
+	// Simulate a full restart cycle:
+	// AgentStarted -> TaskClaimed -> AgentRestarted -> AgentStarted -> TaskClaimed -> TaskCompleted -> AgentStopped
+	exp.HandleEvent(makeEvent(events.AgentStarted, "agent1", "task", "", events.AgentStartedData{PID: 100}))
+	exp.HandleEvent(makeEvent(events.TaskClaimed, "agent1", "task", "epic-1", events.TaskClaimedData{TaskID: "t1", Title: "First task"}))
+	exp.HandleEvent(makeEvent(events.AgentRestarted, "agent1", "task", "", events.AgentRestartedData{PID: 200, RestartCount: 1}))
+	exp.HandleEvent(makeEvent(events.AgentStarted, "agent1", "task", "", events.AgentStartedData{PID: 200}))
+	exp.HandleEvent(makeEvent(events.TaskClaimed, "agent1", "task", "epic-1", events.TaskClaimedData{TaskID: "t2", Title: "Second task"}))
+	exp.HandleEvent(makeEvent(events.TaskCompleted, "agent1", "task", "epic-1", events.TaskCompletedData{TaskID: "t2", Duration: events.Duration{Duration: 2 * time.Second}}))
+	exp.HandleEvent(makeEvent(events.AgentStopped, "agent1", "task", "", events.AgentStoppedData{PID: 200, ExitCode: 0}))
+
+	// Check spans before Stop (which shuts down the tracer provider and may reset the exporter).
+	spans := spanExp.GetSpans()
+
+	// We expect 4 ended spans:
+	// 1. loom.agent.lifecycle (first, superseded by second AgentStarted)
+	// 2. loom.task (first task, ended by AgentRestarted with "agent_restarted")
+	// 3. loom.agent.lifecycle (second, ended by AgentStopped)
+	// 4. loom.task (second task, ended by TaskCompleted)
+	var agentLifecycleCount, taskCount int
+	for _, s := range spans {
+		switch s.Name {
+		case "loom.agent.lifecycle":
+			agentLifecycleCount++
+		case "loom.task":
+			taskCount++
+		}
+	}
+	if agentLifecycleCount != 2 {
+		t.Errorf("expected 2 loom.agent.lifecycle spans, got %d", agentLifecycleCount)
+	}
+	if taskCount != 2 {
+		t.Errorf("expected 2 loom.task spans, got %d", taskCount)
+	}
+
+	// Verify both maps are empty after the full cycle (before Stop).
+	exp.mu.Lock()
+	agentSpans := len(exp.activeAgentSpans)
+	taskSpans := len(exp.activeTaskSpans)
+	exp.mu.Unlock()
+
+	if agentSpans != 0 {
+		t.Errorf("after full cycle: activeAgentSpans = %d, want 0", agentSpans)
+	}
+	if taskSpans != 0 {
+		t.Errorf("after full cycle: activeTaskSpans = %d, want 0", taskSpans)
+	}
+
+	// Clean up.
+	if err := exp.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+}

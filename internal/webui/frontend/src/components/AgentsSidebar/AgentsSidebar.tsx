@@ -7,6 +7,8 @@
 import type { ReactNode } from "react";
 import { useState, useCallback, useEffect } from "react";
 
+import { ApiError } from "@/api/client";
+import { gitPushAll } from "@/api/git";
 import { useAgentContext } from "@/hooks";
 import type { LoomTaskInfo, WorktreeSyncDetail } from "@/types";
 
@@ -82,6 +84,10 @@ export function AgentsSidebar({
     null,
   );
 
+  // Push All state
+  const [isPushing, setIsPushing] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+
   const {
     agents,
     tasks,
@@ -130,6 +136,25 @@ export function AgentsSidebar({
     setSelectedCategory(null);
   }, []);
 
+  const handlePushAll = useCallback(async () => {
+    setIsPushing(true);
+    setPushError(null);
+    try {
+      const data = await gitPushAll();
+      if (data.failed > 0) {
+        const failedNames = data.results
+          .filter((r) => !r.success)
+          .map((r) => r.name)
+          .join(", ");
+        setPushError(`Failed: ${failedNames}`);
+      }
+    } catch (err) {
+      setPushError(err instanceof ApiError ? err.statusText : "Network error");
+    } finally {
+      setIsPushing(false);
+    }
+  }, []);
+
   // Get tasks and title for the selected category
   const getDrawerData = useCallback((): {
     title: string;
@@ -147,7 +172,7 @@ export function AgentsSidebar({
       case "blocked":
         return { title: "Blocked", tasks: taskLists.backlog };
       case "done":
-        return { title: "Done", tasks: [] };
+        return { title: "Done", tasks: taskLists.done };
       default:
         return { title: "", tasks: [] };
     }
@@ -170,9 +195,8 @@ export function AgentsSidebar({
     (a) => a.status.startsWith("working:") || a.status.startsWith("planning:"),
   ).length;
 
-  // Check if there are sync warnings
-  const hasSyncWarning =
-    sync.git_needs_push > 0 || sync.git_needs_pull > 0 || !sync.db_synced;
+  // Check if there are sync warnings for the footer (push count moved to banner)
+  const hasSyncWarning = sync.git_needs_pull > 0 || !sync.db_synced;
 
   return (
     <aside className={rootClassName} data-collapsed={isCollapsed}>
@@ -253,7 +277,47 @@ export function AgentsSidebar({
               </div>
               {isWorkQueueExpanded && (
                 <div className={styles.workQueueContent}>
+                  {sync.git_needs_push > 0 && (
+                    <>
+                      <div className={styles.syncBanner}>
+                        <span
+                          className={styles.syncBannerText}
+                          title={buildSyncTooltip(
+                            sync.git_push_details,
+                            "ahead",
+                          )}
+                        >
+                          {sync.git_needs_push} need push
+                        </span>
+                        <button
+                          type="button"
+                          className={styles.pushButton}
+                          onClick={handlePushAll}
+                          disabled={isPushing}
+                        >
+                          {isPushing ? "Pushing..." : "Push All"}
+                        </button>
+                      </div>
+                      {pushError && (
+                        <div className={styles.pushError}>{pushError}</div>
+                      )}
+                    </>
+                  )}
                   <div className={styles.queueGrid}>
+                    <button
+                      type="button"
+                      className={styles.queueItem}
+                      onClick={() => handleCategoryClick("plan")}
+                      disabled={tasks.needs_planning === 0}
+                    >
+                      <span className={styles.queueLabel}>Backlog</span>
+                      <span
+                        className={styles.queueCount}
+                        data-highlight={tasks.needs_planning > 0}
+                      >
+                        {tasks.needs_planning}
+                      </span>
+                    </button>
                     <button
                       type="button"
                       className={styles.queueItem}
@@ -281,14 +345,14 @@ export function AgentsSidebar({
                       type="button"
                       className={styles.queueItem}
                       onClick={() => handleCategoryClick("inProgress")}
-                      disabled={(tasks.in_progress ?? 0) === 0}
+                      disabled={tasks.in_progress === 0}
                     >
                       <span className={styles.queueLabel}>In Progress</span>
                       <span
                         className={styles.queueCount}
-                        data-highlight={(tasks.in_progress ?? 0) > 0}
+                        data-highlight={tasks.in_progress > 0}
                       >
-                        {tasks.in_progress ?? 0}
+                        {tasks.in_progress}
                       </span>
                     </button>
                     <button
@@ -308,8 +372,8 @@ export function AgentsSidebar({
                     <button
                       type="button"
                       className={styles.queueItem}
-                      disabled
-                      aria-label="Done count"
+                      onClick={() => handleCategoryClick("done")}
+                      disabled={stats.closed === 0}
                     >
                       <span className={styles.queueLabel}>Done</span>
                       <span className={styles.queueCount}>{stats.closed}</span>
@@ -343,20 +407,9 @@ export function AgentsSidebar({
               </div>
             )}
 
-            {/* Sync status row */}
+            {/* Sync status row (push count moved to Work Queue banner) */}
             {isConnected && hasSyncWarning && (
               <div className={styles.syncStatus}>
-                {sync.git_needs_push > 0 && (
-                  <span
-                    className={styles.syncWarning}
-                    title={buildSyncTooltip(sync.git_push_details, "ahead")}
-                  >
-                    {sync.git_needs_push} unpushed
-                  </span>
-                )}
-                {sync.git_needs_push > 0 && sync.git_needs_pull > 0 && (
-                  <span className={styles.syncSeparator}>·</span>
-                )}
                 {sync.git_needs_pull > 0 && (
                   <span
                     className={styles.syncWarning}
@@ -365,10 +418,9 @@ export function AgentsSidebar({
                     {sync.git_needs_pull} unpulled
                   </span>
                 )}
-                {(sync.git_needs_push > 0 || sync.git_needs_pull > 0) &&
-                  !sync.db_synced && (
-                    <span className={styles.syncSeparator}>·</span>
-                  )}
+                {sync.git_needs_pull > 0 && !sync.db_synced && (
+                  <span className={styles.syncSeparator}>·</span>
+                )}
                 {!sync.db_synced && (
                   <span className={styles.syncWarning}>DB not synced</span>
                 )}

@@ -177,7 +177,7 @@ func TestHasUnclosedBlockers(t *testing.T) {
 		{"empty deps", []Dependency{}, nil, false},
 		{"only parent-child deps", []Dependency{
 			{Type: "parent-child", DependsOnID: "B-1"},
-		}, map[string]bool{"B-1": true}, false},
+		}, map[string]bool{"B-1": true}, true},
 		{"blocks dep with unclosed blocker", []Dependency{
 			{Type: "blocks", DependsOnID: "B-1"},
 		}, map[string]bool{"B-1": true}, true},
@@ -191,9 +191,18 @@ func TestHasUnclosedBlockers(t *testing.T) {
 			{Type: "parent-child", DependsOnID: "B-1"},
 			{Type: "blocks", DependsOnID: "B-2"},
 		}, map[string]bool{"B-2": true}, true},
-		{"mixed deps resolved blocker", []Dependency{
+		{"blocks dep resolved but parent-child still open", []Dependency{
 			{Type: "parent-child", DependsOnID: "B-1"},
 			{Type: "blocks", DependsOnID: "B-2"},
+		}, map[string]bool{"B-1": true}, true},
+		{"conditional-blocks dep unclosed", []Dependency{
+			{Type: "conditional-blocks", DependsOnID: "B-1"},
+		}, map[string]bool{"B-1": true}, true},
+		{"waits-for dep unclosed", []Dependency{
+			{Type: "waits-for", DependsOnID: "B-1"},
+		}, map[string]bool{"B-1": true}, true},
+		{"related dep unclosed (non-blocking)", []Dependency{
+			{Type: "related", DependsOnID: "B-1"},
 		}, map[string]bool{"B-1": true}, false},
 	}
 	for _, tt := range tests {
@@ -202,6 +211,24 @@ func TestHasUnclosedBlockers(t *testing.T) {
 				t.Errorf("HasUnclosedBlockers() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAffectsReadyWork(t *testing.T) {
+	blocking := []string{"blocks", "parent-child", "conditional-blocks", "waits-for"}
+	for _, typ := range blocking {
+		if !affectsReadyWork(typ) {
+			t.Errorf("affectsReadyWork(%q) = false, want true", typ)
+		}
+	}
+	nonBlocking := []string{"related", "discovered-from", "replies-to",
+		"relates-to", "duplicates", "supersedes", "authored-by",
+		"assigned-to", "approved-by", "attests", "tracks", "until",
+		"caused-by", "validates", "delegated-from", ""}
+	for _, typ := range nonBlocking {
+		if affectsReadyWork(typ) {
+			t.Errorf("affectsReadyWork(%q) = true, want false", typ)
+		}
 	}
 }
 

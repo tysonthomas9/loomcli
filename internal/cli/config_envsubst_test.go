@@ -84,6 +84,39 @@ func TestExpandEnvVars_ErrorMessageWithUnset(t *testing.T) {
 	}
 }
 
+func TestExpandEnvVars_EmptySetPlain(t *testing.T) {
+	t.Setenv("TEST_EMPTY_PLAIN", "")
+	got, err := ExpandEnvVars("${TEST_EMPTY_PLAIN}")
+	if err != nil {
+		t.Fatalf("unexpected error for empty-but-set variable: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty string", got)
+	}
+}
+
+func TestExpandEnvVars_EmptySetDefault(t *testing.T) {
+	t.Setenv("TEST_EMPTY_DEF", "")
+	got, err := ExpandEnvVars("${TEST_EMPTY_DEF:-fallback}")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "fallback" {
+		t.Errorf("got %q, want %q", got, "fallback")
+	}
+}
+
+func TestExpandEnvVars_EmptySetError(t *testing.T) {
+	t.Setenv("TEST_EMPTY_ERR", "")
+	_, err := ExpandEnvVars("${TEST_EMPTY_ERR:?must be set}")
+	if err == nil {
+		t.Fatal("expected error for empty-but-set variable with :?")
+	}
+	if !strings.Contains(err.Error(), "must be set") {
+		t.Errorf("error should contain custom message: %v", err)
+	}
+}
+
 func TestExpandEnvVars_MultipleExpansions(t *testing.T) {
 	t.Setenv("TEST_A", "foo")
 	t.Setenv("TEST_B", "bar")

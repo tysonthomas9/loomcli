@@ -105,6 +105,29 @@
   border-radius: var(--radius-full);
 }
 
+/* Text input (custom font) */
+.input {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family-base);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-width: 280px;
+  margin-top: var(--space-2);
+  transition: border-color var(--transition-fast);
+}
+
+.input:hover {
+  border-color: var(--color-border-hover);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 /* Save button */
 .saveButton {
   padding: var(--space-2) var(--space-4);

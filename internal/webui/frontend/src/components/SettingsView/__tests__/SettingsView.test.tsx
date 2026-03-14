@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { UseBackendConfigReturn } from "@/hooks/useBackendConfig";
+import type { UseTerminalFontReturn } from "@/hooks/useTerminalFont";
 import type { BackendConfigData } from "@/api/config";
 
 import { SettingsView } from "../SettingsView";
@@ -22,6 +23,14 @@ import { SettingsView } from "../SettingsView";
 vi.mock("@/hooks/useBackendConfig", () => ({
   useBackendConfig: vi.fn(),
 }));
+
+vi.mock("@/hooks/useTerminalFont", async () => {
+  const actual = await vi.importActual("@/hooks/useTerminalFont");
+  return {
+    ...actual,
+    useTerminalFont: vi.fn(),
+  };
+});
 
 vi.mock("@/hooks/useToast", () => ({
   useToast: vi.fn(() => ({
@@ -33,9 +42,11 @@ vi.mock("@/hooks/useToast", () => ({
 }));
 
 import { useBackendConfig } from "@/hooks/useBackendConfig";
+import { useTerminalFont } from "@/hooks/useTerminalFont";
 import { useToast } from "@/hooks/useToast";
 
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
+const mockUseTerminalFont = vi.mocked(useTerminalFont);
 const mockUseToast = vi.mocked(useToast);
 
 /**
@@ -73,6 +84,21 @@ function createMockHookReturn(
 describe("SettingsView", () => {
   const mockShowToast = vi.fn();
 
+  const mockSetFontFamily = vi.fn();
+  const mockSetFontSize = vi.fn();
+
+  function createMockFontReturn(
+    overrides?: Partial<UseTerminalFontReturn>,
+  ): UseTerminalFontReturn {
+    return {
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontSize: 14,
+      setFontFamily: mockSetFontFamily,
+      setFontSize: mockSetFontSize,
+      ...overrides,
+    };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseToast.mockReturnValue({
@@ -81,6 +107,7 @@ describe("SettingsView", () => {
       dismissToast: vi.fn(),
       dismissAll: vi.fn(),
     });
+    mockUseTerminalFont.mockReturnValue(createMockFontReturn());
   });
 
   describe("loading state", () => {
@@ -320,6 +347,110 @@ describe("SettingsView", () => {
       expect(
         screen.getByText("No per-agent overrides configured."),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("terminal font panel", () => {
+    it("renders the Terminal Font panel", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("terminal-font-panel")).toBeInTheDocument();
+      expect(screen.getByText("Terminal Font")).toBeInTheDocument();
+    });
+
+    it("renders font family select with current preset value", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseTerminalFont.mockReturnValue(
+        createMockFontReturn({ fontFamily: "Menlo, monospace" }),
+      );
+
+      render(<SettingsView />);
+
+      const select = screen.getByTestId(
+        "font-family-select",
+      ) as HTMLSelectElement;
+      expect(select.value).toBe("Menlo, monospace");
+    });
+
+    it("renders font size select with current value", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseTerminalFont.mockReturnValue(
+        createMockFontReturn({ fontSize: 18 }),
+      );
+
+      render(<SettingsView />);
+
+      const select = screen.getByTestId(
+        "font-size-select",
+      ) as HTMLSelectElement;
+      expect(select.value).toBe("18");
+    });
+
+    it("calls setFontFamily when font family select changes", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      const select = screen.getByTestId("font-family-select");
+      fireEvent.change(select, { target: { value: "Monaco, monospace" } });
+
+      expect(mockSetFontFamily).toHaveBeenCalledWith("Monaco, monospace");
+    });
+
+    it("calls setFontSize when font size select changes", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      const select = screen.getByTestId("font-size-select");
+      fireEvent.change(select, { target: { value: "20" } });
+
+      expect(mockSetFontSize).toHaveBeenCalledWith(20);
+    });
+
+    it("shows custom input when Custom is selected", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      // A non-preset font shows the custom input
+      mockUseTerminalFont.mockReturnValue(
+        createMockFontReturn({ fontFamily: "MyCustomFont, serif" }),
+      );
+
+      render(<SettingsView />);
+
+      expect(
+        screen.getByTestId("font-family-custom-input"),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show custom input for preset fonts", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseTerminalFont.mockReturnValue(
+        createMockFontReturn({ fontFamily: "Menlo, monospace" }),
+      );
+
+      render(<SettingsView />);
+
+      expect(
+        screen.queryByTestId("font-family-custom-input"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("typing in custom input calls setFontFamily", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseTerminalFont.mockReturnValue(
+        createMockFontReturn({ fontFamily: "MyFont" }),
+      );
+
+      render(<SettingsView />);
+
+      const input = screen.getByTestId(
+        "font-family-custom-input",
+      ) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "AnotherFont, monospace" } });
+
+      expect(mockSetFontFamily).toHaveBeenCalledWith("AnotherFont, monospace");
     });
   });
 
