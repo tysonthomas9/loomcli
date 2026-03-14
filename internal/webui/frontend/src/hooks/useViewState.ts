@@ -17,6 +17,7 @@ const VALID_VIEWS: ViewMode[] = [
   "monitor",
   "observability",
   "terminal",
+  "workspace",
   "settings",
   "files",
 ];

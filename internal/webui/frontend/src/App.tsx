@@ -90,6 +90,13 @@ const TerminalView = lazy(() =>
   })),
 );
 
+// Lazy load WorkspaceView (multi-repo workspace)
+const WorkspaceView = lazy(() =>
+  import("@/components/WorkspaceView").then((m) => ({
+    default: m.WorkspaceView,
+  })),
+);
+
 // Lazy load FileExplorer (CodeMirror 6 ~100KB)
 const FileExplorer = lazy(() =>
   import("@/components/FileExplorer").then((m) => ({
@@ -664,6 +671,11 @@ function App() {
       {activeView === "settings" && (
         <Suspense fallback={<LoadingSkeleton.Column />}>
           <SettingsView />
+        </Suspense>
+      )}
+      {activeView === "workspace" && (
+        <Suspense fallback={<LoadingSkeleton.Column />}>
+          <WorkspaceView />
         </Suspense>
       )}
       {activeView === "files" && (

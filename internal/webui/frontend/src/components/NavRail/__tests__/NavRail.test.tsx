@@ -50,11 +50,17 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Terminal")).toBeInTheDocument();
     });
 
-    it("renders exactly six navigation buttons", () => {
+    it("renders a Workspace button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Workspace")).toBeInTheDocument();
+    });
+
+    it("renders exactly seven navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(6);
+      expect(buttons).toHaveLength(7);
     });
 
     it("renders a Files button", () => {
@@ -72,6 +78,9 @@ describe("NavRail", () => {
       expect(screen.getByRole("tooltip", { name: "List" })).toBeInTheDocument();
       expect(
         screen.getByRole("tooltip", { name: "Observability" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("tooltip", { name: "Workspace" }),
       ).toBeInTheDocument();
       expect(
         screen.getByRole("tooltip", { name: "Files" }),
