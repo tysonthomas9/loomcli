@@ -239,6 +239,43 @@
   flex: 1;
 }
 
+/* ============= Two-Column Layout ============= */
+
+.detailColumns {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.detailColumnLeft {
+  min-width: 0;
+}
+
+.detailColumnRight {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+.detailColumnFull {
+  grid-column: 1 / -1;
+}
+
+@media (width <= 768px) {
+  .detailColumns {
+    grid-template-columns: 1fr;
+  }
+
+  .detailColumnRight {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
 /* Status Row - kept for backward compatibility, may be removed */
 .statusRow {
   display: flex;
@@ -249,16 +286,28 @@
 
 /* ============= Tab Bar ============= */
 
+.tabBarWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+}
+
 .tabBar {
   display: flex;
   gap: 24px;
   padding: 0 calc(var(--panel-padding-md) + 4px);
-  border-bottom: 1px solid var(--color-border-light);
   background: var(--color-panel-bg);
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
 }
 
 .tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 14px 0 12px;
   background: none;
   border: none;
@@ -273,8 +322,106 @@
     border-color var(--transition-fast);
 }
 
+.tabLabel {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabCloseButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  opacity: 0.6;
+  color: inherit;
+  border-radius: 2px;
+  transition: opacity var(--transition-fast);
+}
+
+.tabCloseButton:hover {
+  opacity: 1;
+  background: var(--color-bg-hover);
+}
+
+.tabCloseButton svg {
+  width: 12px;
+  height: 12px;
+}
+
 .tab:hover {
   color: var(--color-text);
+}
+
+/* ============= Add Tab Dropdown ============= */
+
+.addTabContainer {
+  position: relative;
+  margin-right: var(--panel-padding-md);
+}
+
+.addTabButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.addTabButton:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.addTabButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+.addTabDropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--z-dropdown, 100);
+  min-width: 120px;
+  margin-top: 4px;
+  padding: 4px 0;
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--panel-shadow-strong);
+}
+
+.addTabOption {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.addTabOption:hover {
+  background: var(--color-bg-hover);
 }
 
 .tab:focus-visible {

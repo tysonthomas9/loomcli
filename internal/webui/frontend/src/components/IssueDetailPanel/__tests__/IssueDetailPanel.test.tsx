@@ -430,7 +430,7 @@ describe("IssueDetailPanel", () => {
   });
 
   describe("CollapsibleSection", () => {
-    it("renders design section expanded by default for short content", () => {
+    it("renders design section always visible (not collapsible)", () => {
       const mockIssue = createTestIssueDetails({
         design: "Short design text",
       });
@@ -438,46 +438,14 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
       const designSection = screen.getByTestId("design-section");
-      const button = within(designSection).getByRole("button");
-      expect(button).toHaveAttribute("aria-expanded", "true");
+      expect(designSection).toBeInTheDocument();
+      // Design is no longer in a CollapsibleSection — no toggle button
+      expect(
+        within(designSection).queryByRole("button"),
+      ).not.toBeInTheDocument();
     });
 
-    it("renders design section collapsed by default for long content", () => {
-      const longDesign = "A".repeat(250); // More than 200 chars
-      const mockIssue = createTestIssueDetails({
-        design: longDesign,
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      const designSection = screen.getByTestId("design-section");
-      const button = within(designSection).getByRole("button");
-      expect(button).toHaveAttribute("aria-expanded", "false");
-    });
-
-    it("toggles expanded state when section header is clicked", () => {
-      const mockIssue = createTestIssueDetails({
-        design: "Some design content",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      const designSection = screen.getByTestId("design-section");
-      const button = within(designSection).getByRole("button");
-
-      // Initially expanded
-      expect(button).toHaveAttribute("aria-expanded", "true");
-
-      // Click to collapse
-      fireEvent.click(button);
-      expect(button).toHaveAttribute("aria-expanded", "false");
-
-      // Click to expand again
-      fireEvent.click(button);
-      expect(button).toHaveAttribute("aria-expanded", "true");
-    });
-
-    it("shows collapsible section title", () => {
+    it("renders design in right column with heading", () => {
       const mockIssue = createTestIssueDetails({
         design: "Design content",
       });
@@ -486,28 +454,6 @@ describe("IssueDetailPanel", () => {
       );
       const designSection = screen.getByTestId("design-section");
       expect(within(designSection).getByText("Design")).toBeInTheDocument();
-    });
-
-    it("hides content when collapsed", () => {
-      const mockIssue = createTestIssueDetails({
-        design: "Visible design content",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      const designSection = screen.getByTestId("design-section");
-      const button = within(designSection).getByRole("button");
-
-      // Content visible when expanded
-      expect(screen.getByText("Visible design content")).toBeInTheDocument();
-
-      // Collapse the section
-      fireEvent.click(button);
-
-      // Content should be hidden
-      expect(
-        screen.queryByText("Visible design content"),
-      ).not.toBeInTheDocument();
     });
 
     it("renders notes section when notes provided", () => {
@@ -963,26 +909,24 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
     });
 
-    it("shows Logs tab when issue has an assignee", () => {
+    it("shows + button when issue has an assignee", () => {
       const mockIssue = createTestIssueDetails({
         assignee: "agent-1",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
+      expect(screen.getByTestId("add-tab-button")).toBeInTheDocument();
     });
 
-    it("does not show Logs tab when issue has no assignee", () => {
+    it("does not show + button when issue has no assignee", () => {
       const mockIssue = createTestIssueDetails({
         assignee: undefined,
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      expect(
-        screen.queryByRole("tab", { name: "Logs" }),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("add-tab-button")).not.toBeInTheDocument();
     });
 
     it("defaults to Details tab and shows detail content", () => {
@@ -1000,7 +944,7 @@ describe("IssueDetailPanel", () => {
       expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument();
     });
 
-    it("shows LogViewer on Logs tab", () => {
+    it("adds Logs tab via + dropdown and shows LogViewer", () => {
       const mockIssue = createTestIssueDetails({
         assignee: "agent-1",
       });
@@ -1008,11 +952,33 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
 
-      fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+      // Click + button to open dropdown
+      fireEvent.click(screen.getByTestId("add-tab-button"));
+      expect(screen.getByTestId("add-tab-dropdown")).toBeInTheDocument();
+
+      // Click Logs option
+      fireEvent.click(screen.getByTestId("add-tab-logs"));
+      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
       expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
     });
 
-    it("switches back from Logs to Details tab correctly", () => {
+    it("hides + button when Logs tab is already open", () => {
+      const mockIssue = createTestIssueDetails({
+        assignee: "agent-1",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // Add Logs tab
+      fireEvent.click(screen.getByTestId("add-tab-button"));
+      fireEvent.click(screen.getByTestId("add-tab-logs"));
+
+      // + button should be hidden (no remaining options)
+      expect(screen.queryByTestId("add-tab-button")).not.toBeInTheDocument();
+    });
+
+    it("closes Logs tab and switches back to Details", () => {
       const mockIssue = createTestIssueDetails({
         assignee: "agent-1",
         design: "# My Design",
@@ -1021,17 +987,22 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
 
-      // Switch to Logs tab
-      fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+      // Add Logs tab via dropdown
+      fireEvent.click(screen.getByTestId("add-tab-button"));
+      fireEvent.click(screen.getByTestId("add-tab-logs"));
       expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
 
-      // Switch back to Details tab
-      fireEvent.click(screen.getByRole("tab", { name: "Details" }));
+      // Close the Logs tab
+      fireEvent.click(screen.getByTestId("close-tab-logs"));
       expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument();
       expect(screen.getByTestId("design-section")).toBeInTheDocument();
+
+      // Details tab should be active
+      const detailsTab = screen.getByRole("tab", { name: "Details" });
+      expect(detailsTab).toHaveAttribute("aria-selected", "true");
     });
 
-    it("shows Logs tab for all issue types with an assignee", () => {
+    it("shows + button for all issue types with an assignee", () => {
       const issueTypes = ["bug", "feature", "task", "epic"] as const;
       for (const type of issueTypes) {
         const mockIssue = createTestIssueDetails({
@@ -1045,7 +1016,7 @@ describe("IssueDetailPanel", () => {
             onClose={() => {}}
           />,
         );
-        expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
+        expect(screen.getByTestId("add-tab-button")).toBeInTheDocument();
         unmount();
       }
     });
@@ -1058,8 +1029,9 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
 
-      // Switch to Logs tab to enable the hook
-      fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+      // Add Logs tab via dropdown to enable the hook
+      fireEvent.click(screen.getByTestId("add-tab-button"));
+      fireEvent.click(screen.getByTestId("add-tab-logs"));
 
       expect(mockUseAgentTerminalLogs).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1067,6 +1039,16 @@ describe("IssueDetailPanel", () => {
           enabled: true,
         }),
       );
+    });
+
+    it("Details tab close button is not shown", () => {
+      const mockIssue = createTestIssueDetails({
+        description: "Test description",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.queryByTestId("close-tab-details")).not.toBeInTheDocument();
     });
   });
 });

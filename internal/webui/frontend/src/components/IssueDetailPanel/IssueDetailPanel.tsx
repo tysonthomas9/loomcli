@@ -234,6 +234,23 @@ interface DefaultContentProps {
 }
 
 /**
+ * Tab model for dynamic tab management.
+ */
+interface DetailTab {
+  id: string;
+  type: "details" | "logs";
+  label: string;
+  closable: boolean;
+}
+
+const DETAILS_TAB: DetailTab = {
+  id: "details",
+  type: "details",
+  label: "Details",
+  closable: false,
+};
+
+/**
  * Default content renderer for issue details.
  */
 function DefaultContent({
@@ -258,9 +275,38 @@ function DefaultContent({
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
 
-  // Tab state
-  type TabType = "details" | "logs";
-  const [activeTab, setActiveTab] = useState<TabType>("details");
+  // Tab state - managed tab array with dynamic add/remove
+  const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB]);
+  const [activeTabId, setActiveTabId] = useState("details");
+  const [showAddTabDropdown, setShowAddTabDropdown] = useState(false);
+  const addTabRef = useRef<HTMLDivElement>(null);
+
+  const addTab = useCallback((type: "logs") => {
+    setTabs((prev) => {
+      const existing = prev.find((t) => t.type === type);
+      if (existing) {
+        setActiveTabId(existing.id);
+        return prev;
+      }
+      const newTab: DetailTab = {
+        id: type,
+        type,
+        label: type === "logs" ? "Logs" : type,
+        closable: true,
+      };
+      setActiveTabId(newTab.id);
+      return [...prev, newTab];
+    });
+    setShowAddTabDropdown(false);
+  }, []);
+
+  const removeTab = useCallback((id: string) => {
+    setTabs((prev) => {
+      const filtered = prev.filter((t) => t.id !== id);
+      return filtered;
+    });
+    setActiveTabId((prev) => (prev === id ? "details" : prev));
+  }, []);
 
   // Agent-based log connection
   const agentName = issue?.assignee || null;
@@ -280,20 +326,46 @@ function DefaultContent({
     isLoadingMore,
   } = useAgentTerminalLogs({
     agentName,
-    enabled: isOpen && activeTab === "logs" && hasAgent,
+    enabled: isOpen && activeTabId === "logs" && hasAgent,
   });
 
-  // Reset tab when issue changes
+  // Reset tabs when issue changes
   useEffect(() => {
-    setActiveTab("details");
+    setTabs([DETAILS_TAB]);
+    setActiveTabId("details");
   }, [issue?.id]);
 
-  // Reset tab when agent removed while on logs tab
+  // Reset to details when agent removed while on logs tab
   useEffect(() => {
-    if (activeTab === "logs" && !hasAgent) {
-      setActiveTab("details");
+    if (activeTabId === "logs" && !hasAgent) {
+      setTabs([DETAILS_TAB]);
+      setActiveTabId("details");
     }
-  }, [activeTab, hasAgent]);
+  }, [activeTabId, hasAgent]);
+
+  // Close add-tab dropdown on outside click
+  useEffect(() => {
+    if (!showAddTabDropdown) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (addTabRef.current && !addTabRef.current.contains(e.target as Node)) {
+        setShowAddTabDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [showAddTabDropdown]);
+
+  // Close add-tab dropdown on Escape
+  useEffect(() => {
+    if (!showAddTabDropdown) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowAddTabDropdown(false);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [showAddTabDropdown]);
 
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);
@@ -518,11 +590,7 @@ function DefaultContent({
   const openBlockerCount =
     dependencies?.filter((d) => d.status !== "closed").length ?? 0;
 
-  // Auto-collapse logic for Design/Notes (collapse if long, but keep expanded for review items)
-  const shouldCollapseDesign =
-    !isReviewItem &&
-    issue.design &&
-    (issue.design.length > 200 || issue.design.split("\n").length > 5);
+  // Auto-collapse logic for Notes (collapse if long, but keep expanded for review items)
   const shouldCollapseNotes =
     issue.notes &&
     (issue.notes.length > 200 || issue.notes.split("\n").length > 5);
@@ -653,38 +721,93 @@ function DefaultContent({
       />
 
       {/* Tab Bar */}
-      <div
-        className={styles.tabBar}
-        role="tablist"
-        aria-label="Issue detail tabs"
-      >
-        <button
-          type="button"
-          role="tab"
-          className={`${styles.tab} ${activeTab === "details" ? styles.activeTab : ""}`}
-          aria-selected={activeTab === "details"}
-          aria-controls="issue-panel-tabpanel-details"
-          id="issue-panel-tab-details"
-          onClick={() => setActiveTab("details")}
+      <div className={styles.tabBarWrapper}>
+        <div
+          className={styles.tabBar}
+          role="tablist"
+          aria-label="Issue detail tabs"
         >
-          Details
-        </button>
-        {hasAgent && (
-          <button
-            type="button"
-            role="tab"
-            className={`${styles.tab} ${activeTab === "logs" ? styles.activeTab : ""}`}
-            aria-selected={activeTab === "logs"}
-            aria-controls="issue-panel-tabpanel-logs"
-            id="issue-panel-tab-logs"
-            onClick={() => setActiveTab("logs")}
-          >
-            Logs
-          </button>
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              role="tab"
+              className={`${styles.tab} ${activeTabId === tab.id ? styles.activeTab : ""}`}
+              aria-selected={activeTabId === tab.id}
+              aria-controls={`issue-panel-tabpanel-${tab.id}`}
+              id={`issue-panel-tab-${tab.id}`}
+              onClick={() => setActiveTabId(tab.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveTabId(tab.id);
+                }
+              }}
+              tabIndex={activeTabId === tab.id ? 0 : -1}
+            >
+              <span className={styles.tabLabel}>{tab.label}</span>
+              {tab.closable && (
+                <button
+                  type="button"
+                  className={styles.tabCloseButton}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeTab(tab.id);
+                  }}
+                  aria-label={`Close ${tab.label} tab`}
+                  data-testid={`close-tab-${tab.id}`}
+                >
+                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M4 4l8 8M12 4l-8 8"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        {/* "+" dropdown for adding tabs */}
+        {hasAgent && !tabs.some((t) => t.type === "logs") && (
+          <div className={styles.addTabContainer} ref={addTabRef}>
+            <button
+              type="button"
+              className={styles.addTabButton}
+              onClick={() => setShowAddTabDropdown((prev) => !prev)}
+              aria-label="Add tab"
+              data-testid="add-tab-button"
+            >
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M8 3v10M3 8h10"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+            {showAddTabDropdown && (
+              <div
+                className={styles.addTabDropdown}
+                data-testid="add-tab-dropdown"
+              >
+                <button
+                  type="button"
+                  className={styles.addTabOption}
+                  onClick={() => addTab("logs")}
+                  data-testid="add-tab-logs"
+                >
+                  Logs
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      {activeTab === "logs" && hasAgent ? (
+      {activeTabId === "logs" ? (
         <div
           className={styles.logsContainer}
           role="tabpanel"
@@ -734,50 +857,63 @@ function DefaultContent({
           aria-labelledby="issue-panel-tab-details"
         >
           <div className={styles.detailContent}>
-            {/* Priority/Type dropdowns for editing */}
-            <div className={styles.statusRow}>
-              <PriorityDropdown
-                priority={issue.priority as Priority}
-                onSave={handlePrioritySave}
-                isSaving={isSavingPriority}
-              />
-              <TypeDropdown
-                type={issue.issue_type}
-                onSave={handleTypeSave}
-                isSaving={isSavingType}
-              />
-              <AssigneeDropdown
-                assignee={issue.assignee}
-                onSave={handleAssigneeSave}
-                isSaving={isSavingAssignee}
-              />
+            {/* Two-column layout: left=metadata+description, right=design */}
+            <div className={issue.design ? styles.detailColumns : undefined}>
+              <div
+                className={
+                  issue.design
+                    ? styles.detailColumnLeft
+                    : styles.detailColumnFull
+                }
+              >
+                {/* Priority/Type dropdowns for editing */}
+                <div className={styles.statusRow}>
+                  <PriorityDropdown
+                    priority={issue.priority as Priority}
+                    onSave={handlePrioritySave}
+                    isSaving={isSavingPriority}
+                  />
+                  <TypeDropdown
+                    type={issue.issue_type}
+                    onSave={handleTypeSave}
+                    isSaving={isSavingType}
+                  />
+                  <AssigneeDropdown
+                    assignee={issue.assignee}
+                    onSave={handleAssigneeSave}
+                    isSaving={isSavingAssignee}
+                  />
+                </div>
+
+                {/* Description */}
+                <section className={styles.section}>
+                  <h3 className={styles.sectionTitle}>Description</h3>
+                  <EditableDescription
+                    description={issue.description}
+                    isEditable={true}
+                    onSave={async (newDescription) => {
+                      const updatedIssue = await updateIssue(issue.id, {
+                        description: newDescription,
+                      });
+                      onIssueUpdate?.(updatedIssue);
+                    }}
+                  />
+                </section>
+              </div>
+
+              {/* Design in right column (always visible, no CollapsibleSection) */}
+              {issue.design && (
+                <div
+                  className={styles.detailColumnRight}
+                  data-testid="design-section"
+                >
+                  <h3 className={styles.sectionTitle}>Design</h3>
+                  <MarkdownRenderer content={issue.design} />
+                </div>
+              )}
             </div>
 
-            {/* Description */}
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>Description</h3>
-              <EditableDescription
-                description={issue.description}
-                isEditable={true}
-                onSave={async (newDescription) => {
-                  const updatedIssue = await updateIssue(issue.id, {
-                    description: newDescription,
-                  });
-                  onIssueUpdate?.(updatedIssue);
-                }}
-              />
-            </section>
-
-            {/* Design (collapsible, markdown rendered) */}
-            {issue.design && (
-              <CollapsibleSection
-                title="Design"
-                defaultExpanded={!shouldCollapseDesign}
-                testId="design-section"
-              >
-                <MarkdownRenderer content={issue.design} />
-              </CollapsibleSection>
-            )}
+            {/* Full-width sections below the columns */}
 
             {/* Notes (collapsible) */}
             {issue.notes && (
