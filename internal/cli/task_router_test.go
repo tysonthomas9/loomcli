@@ -761,3 +761,126 @@ func TestBuildRouterTaskCheck_NoConstraints(t *testing.T) {
 		t.Error("BuildRouterTaskCheck() should return nil for completely empty RoleConfig and AgentEntry")
 	}
 }
+
+// --- Repo affinity tests ---
+
+func TestMatchTask_RepoAffinityMatch(t *testing.T) {
+	issue := BdIssue{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		SourceRepo: "repo-a",
+	}
+	c := RoleConstraints{
+		TaskFilter:  "has_design",
+		SourceRepos: []string{"repo-a"},
+	}
+
+	got := MatchTask(issue, c, nil)
+
+	// base(100) + repo(30) + priority(12) = 142
+	if got.Score != 142 {
+		t.Errorf("Score = %d, want 142", got.Score)
+	}
+}
+
+func TestMatchTask_RepoAffinityMismatch(t *testing.T) {
+	issue := BdIssue{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		SourceRepo: "repo-b",
+	}
+	c := RoleConstraints{
+		TaskFilter:  "has_design",
+		SourceRepos: []string{"repo-a"},
+	}
+
+	got := MatchTask(issue, c, nil)
+
+	if got.Score != 5 {
+		t.Errorf("Score = %d, want 5 (repo mismatch)", got.Score)
+	}
+	if got.Reason != "repo mismatch" {
+		t.Errorf("Reason = %q, want %q", got.Reason, "repo mismatch")
+	}
+}
+
+func TestMatchTask_RepoAffinityNoConstraint(t *testing.T) {
+	issue := BdIssue{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		SourceRepo: "repo-a",
+	}
+	c := RoleConstraints{TaskFilter: "has_design"}
+
+	got := MatchTask(issue, c, nil)
+
+	// base(100) + priority(12) = 112 — no repo penalty when agent has no SourceRepos
+	if got.Score != 112 {
+		t.Errorf("Score = %d, want 112 (no repo constraint, normal scoring)", got.Score)
+	}
+}
+
+func TestMatchTask_RepoAffinityEmptyIssueRepo(t *testing.T) {
+	issue := BdIssue{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		SourceRepo: "",
+	}
+	c := RoleConstraints{
+		TaskFilter:  "has_design",
+		SourceRepos: []string{"repo-a"},
+	}
+
+	got := MatchTask(issue, c, nil)
+
+	// base(100) + priority(12) = 112 — repo-neutral issue, no penalty
+	if got.Score != 112 {
+		t.Errorf("Score = %d, want 112 (repo-neutral issue, no penalty)", got.Score)
+	}
+}
+
+func TestMergeRoleConstraints_SourceReposPropagated(t *testing.T) {
+	rc := RoleConfig{
+		TaskFilter: "has_design",
+		Backend:    "claude",
+	}
+	ae := AgentEntry{
+		SourceRepos: []string{"backend", "frontend"},
+	}
+
+	got := MergeRoleConstraints(rc, ae)
+
+	if len(got.SourceRepos) != 2 {
+		t.Fatalf("SourceRepos len = %d, want 2", len(got.SourceRepos))
+	}
+	if got.SourceRepos[0] != "backend" || got.SourceRepos[1] != "frontend" {
+		t.Errorf("SourceRepos = %v, want [backend frontend]", got.SourceRepos)
+	}
+}
+
+func TestAgentEntryFromEnv_SourceRepos(t *testing.T) {
+	t.Setenv("LOOM_SOURCE_REPOS", "repo-a,repo-b")
+	t.Setenv("LOOM_AGENT_PATH_PATTERNS", "")
+	t.Setenv("BD_ACTOR", "")
+	t.Setenv("LOOM_ROLE", "")
+	t.Setenv("LOOM_AGENT_REPO", "")
+
+	ae := AgentEntryFromEnv()
+
+	if len(ae.SourceRepos) != 2 {
+		t.Fatalf("SourceRepos len = %d, want 2", len(ae.SourceRepos))
+	}
+	if ae.SourceRepos[0] != "repo-a" || ae.SourceRepos[1] != "repo-b" {
+		t.Errorf("SourceRepos = %v, want [repo-a repo-b]", ae.SourceRepos)
+	}
+}
+
+func TestBuildRouterTaskCheck_SourceReposOnlyConstraint(t *testing.T) {
+	rc := RoleConfig{}
+	ae := AgentEntry{SourceRepos: []string{"repo-a"}}
+
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check == nil {
+		t.Error("BuildRouterTaskCheck() should return non-nil when AgentEntry.SourceRepos is set")
+	}
+}

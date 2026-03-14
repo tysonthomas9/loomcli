@@ -95,6 +95,11 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_PATH_PATTERNS=%s", strings.Join(ap.entry.PathPatterns, ",")))
 	}
 
+	// Propagate resolved source repos for repo affinity scoring
+	if sourceRepos := resolveAgentRepos(ap.entry, d.repos); len(sourceRepos) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
+	}
+
 	return cmd
 }
 

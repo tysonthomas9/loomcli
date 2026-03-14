@@ -97,6 +97,7 @@ type Daemon struct {
 	epicAssigner *EpicAssigner       // manages epic-to-worktree assignments
 	concurrency  *ConcurrencyTracker // enforces per-role concurrency limits
 	eventBus     events.Emitter      // event emission for observability (nil-safe via NopBus default)
+	repos        []RepoConfig        // workspace repos for resolveAgentRepos; nil outside workspace mode
 }
 
 // emitEvent is a convenience helper that emits an event via the daemon's event bus.
@@ -137,6 +138,11 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 		epicAssigner: NewEpicAssigner(),
 		concurrency:  NewConcurrencyTracker(config.Roles),
 		eventBus:     eventBus,
+	}
+
+	// Load workspace repos for source repo resolution (best-effort)
+	if ws, err := ResolveActiveWorkspace(); err == nil && ws != nil {
+		d.repos = ws.Repos
 	}
 
 	for i, entry := range config.Agents {

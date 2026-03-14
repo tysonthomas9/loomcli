@@ -205,7 +205,7 @@ func BuildRouterTaskCheck(rc RoleConfig, ae AgentEntry, parentID string) func() 
 	constraints := MergeRoleConstraints(rc, ae)
 	repoLabel := ae.Repo
 	// If no routing fields are set, return nil to use defaults
-	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" {
+	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
 		return nil
 	}
 	return func() (bool, error) {

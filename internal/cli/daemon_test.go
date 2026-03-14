@@ -2010,6 +2010,9 @@ func TestBuildCommand_NoRoutingEnvVars(t *testing.T) {
 		if strings.HasPrefix(env, "LOOM_AGENT_PATH_PATTERNS=") {
 			t.Error("LOOM_AGENT_PATH_PATTERNS should not be set when AgentEntry has no PathPatterns")
 		}
+		if strings.HasPrefix(env, "LOOM_SOURCE_REPOS=") {
+			t.Error("LOOM_SOURCE_REPOS should not be set when agent has no repo affinity")
+		}
 	}
 	// LOOM_ROLE should always be set
 	foundRole := false
@@ -2020,6 +2023,64 @@ func TestBuildCommand_NoRoutingEnvVars(t *testing.T) {
 	}
 	if !foundRole {
 		t.Error("LOOM_ROLE should always be set")
+	}
+}
+
+// TestBuildCommand_SourceReposInjected verifies LOOM_SOURCE_REPOS is set when
+// the agent has Repos declared and d.repos provides the RepoConfig mapping.
+func TestBuildCommand_SourceReposInjected(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := &Daemon{
+		config:     &DaemonConfig{Daemon: DaemonSettings{}},
+		projectDir: tmpDir,
+		repos: []RepoConfig{
+			{Name: "backend", SourceRepoID: "src-backend", Groups: []string{"infra"}},
+			{Name: "frontend", SourceRepoID: "src-frontend"},
+		},
+	}
+	ap := &AgentProcess{
+		entry:        AgentEntry{Worktree: "falcon", Role: "task", Repos: []string{"backend"}},
+		roleConfig:   RoleConfig{Description: "Backend agent"},
+		worktreePath: tmpDir,
+	}
+
+	cmd := d.buildCommand(ap)
+	envMap := make(map[string]string)
+	for _, env := range cmd.Env {
+		if idx := strings.IndexByte(env, '='); idx >= 0 {
+			envMap[env[:idx]] = env[idx+1:]
+		}
+	}
+
+	if v, ok := envMap["LOOM_SOURCE_REPOS"]; !ok || v != "backend" {
+		t.Errorf("LOOM_SOURCE_REPOS = %q, want %q", v, "backend")
+	}
+}
+
+// TestBuildCommand_SourceReposAbsentWhenEmpty verifies LOOM_SOURCE_REPOS is not
+// set when the agent has no repo affinity.
+func TestBuildCommand_SourceReposAbsentWhenEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	d := &Daemon{
+		config:     &DaemonConfig{Daemon: DaemonSettings{}},
+		projectDir: tmpDir,
+		repos: []RepoConfig{
+			{Name: "backend", SourceRepoID: "src-backend"},
+		},
+	}
+	ap := &AgentProcess{
+		entry:        AgentEntry{Worktree: "falcon", Role: "task"},
+		roleConfig:   RoleConfig{Description: "Generic agent"},
+		worktreePath: tmpDir,
+	}
+
+	cmd := d.buildCommand(ap)
+	for _, env := range cmd.Env {
+		if strings.HasPrefix(env, "LOOM_SOURCE_REPOS=") {
+			t.Error("LOOM_SOURCE_REPOS should not be set when agent has no repo affinity")
+		}
 	}
 }
 

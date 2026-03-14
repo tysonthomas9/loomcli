@@ -17,6 +17,7 @@ type RoleConstraints struct {
 	PathPatterns []string // not used in routing decisions; carried through for subprocess env var propagation
 	Skills       []string // skill labels this role handles
 	MaxPriority  *int     // reject tasks with priority > this value (nil = no cap)
+	SourceRepos  []string // resolved source repo IDs for affinity scoring
 	ReadOnly     bool     // informational, carried through for downstream use
 	AllowedTools []string // informational, carried through for downstream use
 	DeniedTools  []string // informational, carried through for downstream use
@@ -52,6 +53,8 @@ func MergeRoleConstraints(rc RoleConfig, ae AgentEntry) RoleConstraints {
 	if ae.Backend != "" {
 		c.Backend = ae.Backend
 	}
+	// SourceRepos is always agent-specific (resolved by daemon), never role-level
+	c.SourceRepos = ae.SourceRepos
 
 	return c
 }
@@ -76,26 +79,8 @@ func MatchTask(issue BdIssue, constraints RoleConstraints, unclosedIDs map[strin
 	}
 
 	// Apply TaskFilter
-	filter := constraints.TaskFilter
-	if filter == "" {
-		filter = "has_design"
-	}
-	switch filter {
-	case "needs_plan":
-		if !NeedsPlan(issue) {
-			return TaskMatch{Issue: issue, Score: 0, Reason: "filter: has design (needs_plan filter)"}
-		}
-	case "has_design":
-		if !ReadyToImplement(issue) {
-			return TaskMatch{Issue: issue, Score: 0, Reason: "filter: not ready to implement"}
-		}
-	case "any":
-		// No additional filter — already passed workable + blocker checks
-	default:
-		// Unknown filter value — treat as "has_design"
-		if !ReadyToImplement(issue) {
-			return TaskMatch{Issue: issue, Score: 0, Reason: "filter: not ready to implement"}
-		}
+	if reason := applyTaskFilter(issue, constraints.TaskFilter); reason != "" {
+		return TaskMatch{Issue: issue, Score: 0, Reason: reason}
 	}
 
 	// Reject if priority exceeds MaxPriority
@@ -117,6 +102,16 @@ func MatchTask(issue BdIssue, constraints RoleConstraints, unclosedIDs map[strin
 		bonus := skillMatches * 50
 		score += bonus
 		parts = append(parts, fmt.Sprintf("skills:+%d(%d match)", bonus, skillMatches))
+	}
+
+	// Repo affinity scoring
+	if len(constraints.SourceRepos) > 0 && issue.SourceRepo != "" {
+		if matchesRepo(constraints.SourceRepos, issue.SourceRepo) {
+			score += 30
+			parts = append(parts, "repo:+30")
+		} else {
+			return TaskMatch{Issue: issue, Score: 5, Reason: "repo mismatch"}
+		}
 	}
 
 	// Priority bonus: 20 - (priority * 4), clamped to [0, 20]
@@ -221,7 +216,45 @@ func AgentEntryFromEnv() AgentEntry {
 	if v := os.Getenv("LOOM_AGENT_REPO"); v != "" {
 		ae.Repo = v
 	}
+	if v := os.Getenv("LOOM_SOURCE_REPOS"); v != "" {
+		ae.SourceRepos = strings.Split(v, ",")
+	}
 	return ae
+}
+
+// applyTaskFilter checks if the issue passes the given task filter.
+// Returns an empty string if the issue passes, or a rejection reason.
+func applyTaskFilter(issue BdIssue, filter string) string {
+	if filter == "" {
+		filter = "has_design"
+	}
+	switch filter {
+	case "needs_plan":
+		if !NeedsPlan(issue) {
+			return "filter: has design (needs_plan filter)"
+		}
+	case "has_design":
+		if !ReadyToImplement(issue) {
+			return "filter: not ready to implement"
+		}
+	case "any":
+		// No additional filter
+	default:
+		if !ReadyToImplement(issue) {
+			return "filter: not ready to implement"
+		}
+	}
+	return ""
+}
+
+// matchesRepo returns true if repo appears in the repos list.
+func matchesRepo(repos []string, repo string) bool {
+	for _, r := range repos {
+		if r == repo {
+			return true
+		}
+	}
+	return false
 }
 
 // countSkillMatches returns the number of role skills that appear in the issue's labels.
