@@ -754,6 +754,7 @@ func TestSuperviseAgent_ShutdownBeforeSpawn(t *testing.T) {
 	ap := &AgentProcess{
 		entry:        AgentEntry{Worktree: "test", Role: "plan"},
 		worktreePath: t.TempDir(),
+		stopCh:       make(chan struct{}),
 	}
 
 	// Close shutdown before starting superviseAgent
@@ -1423,6 +1424,7 @@ func TestSuperviseAgent_AcquiresAndReleasesOnShutdown(t *testing.T) {
 	ap := &AgentProcess{
 		entry:        AgentEntry{Worktree: "test-conc", Role: "plan"},
 		worktreePath: t.TempDir(),
+		stopCh:       make(chan struct{}),
 	}
 
 	done := make(chan struct{})
@@ -1473,6 +1475,7 @@ func TestSuperviseAgent_ReleasesOnBranchSetupFailure(t *testing.T) {
 	ap := &AgentProcess{
 		entry:        AgentEntry{Worktree: "test-branch-fail", Role: "plan"},
 		worktreePath: "/nonexistent/path/that/will/fail", // branch setup will fail
+		stopCh:       make(chan struct{}),
 	}
 
 	done := make(chan struct{})
@@ -1534,5 +1537,210 @@ func TestBuildCommand_BuiltInRoleWithBackendAndEpic(t *testing.T) {
 		case "agent", "--prompt":
 			t.Errorf("unexpected arg %q in built-in role command", arg)
 		}
+	}
+}
+
+// TestDrainAgent_NotFound verifies that drainAgent returns an error when the
+// requested agent name does not exist in the agents slice.
+func TestDrainAgent_NotFound(t *testing.T) {
+	d := &Daemon{
+		config: &DaemonConfig{},
+		agents: []*AgentProcess{
+			{entry: AgentEntry{Worktree: "alpha"}},
+			{entry: AgentEntry{Worktree: "beta"}},
+		},
+	}
+
+	err := d.drainAgent("nonexistent")
+	if err == nil {
+		t.Fatal("drainAgent() returned nil error, want error for non-existent agent")
+	}
+	if got := err.Error(); got != `agent "nonexistent" not found` {
+		t.Errorf("drainAgent() error = %q, want %q", got, `agent "nonexistent" not found`)
+	}
+}
+
+// TestDrainAgent_RemovesFromSlice verifies that drainAgent stops the agent,
+// waits for its done channel, and removes it from the agents slice.
+func TestDrainAgent_RemovesFromSlice(t *testing.T) {
+	d := &Daemon{
+		config: &DaemonConfig{},
+		agents: make([]*AgentProcess, 0, 3),
+	}
+
+	// Create three agents with pre-closed done channels (simulates goroutine already exited)
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		ap := &AgentProcess{
+			entry:  AgentEntry{Worktree: name},
+			stopCh: make(chan struct{}),
+			done:   make(chan struct{}),
+		}
+		// Pre-close done so drainAgent's <-ap.done returns immediately
+		close(ap.done)
+		d.agents = append(d.agents, ap)
+	}
+
+	if d.AgentCount() != 3 {
+		t.Fatalf("AgentCount() = %d, want 3", d.AgentCount())
+	}
+
+	// Drain the middle agent
+	err := d.drainAgent("beta")
+	if err != nil {
+		t.Fatalf("drainAgent(beta) error = %v", err)
+	}
+
+	if d.AgentCount() != 2 {
+		t.Fatalf("AgentCount() = %d after drain, want 2", d.AgentCount())
+	}
+
+	// Verify beta is gone and order is preserved
+	statuses := d.Agents()
+	if len(statuses) != 2 {
+		t.Fatalf("Agents() returned %d entries, want 2", len(statuses))
+	}
+	if statuses[0].Worktree != "alpha" {
+		t.Errorf("Agents()[0].Worktree = %q, want %q", statuses[0].Worktree, "alpha")
+	}
+	if statuses[1].Worktree != "gamma" {
+		t.Errorf("Agents()[1].Worktree = %q, want %q", statuses[1].Worktree, "gamma")
+	}
+
+	// Drain the first agent
+	err = d.drainAgent("alpha")
+	if err != nil {
+		t.Fatalf("drainAgent(alpha) error = %v", err)
+	}
+	if d.AgentCount() != 1 {
+		t.Fatalf("AgentCount() = %d after second drain, want 1", d.AgentCount())
+	}
+
+	// Drain the last agent
+	err = d.drainAgent("gamma")
+	if err != nil {
+		t.Fatalf("drainAgent(gamma) error = %v", err)
+	}
+	if d.AgentCount() != 0 {
+		t.Fatalf("AgentCount() = %d after draining all, want 0", d.AgentCount())
+	}
+
+	// Draining from empty slice should return error
+	err = d.drainAgent("gamma")
+	if err == nil {
+		t.Error("drainAgent() on empty slice returned nil error, want error")
+	}
+}
+
+// TestDrainAgent_WaitsForDone verifies that drainAgent blocks until the done
+// channel is closed, simulating a superviseAgent goroutine that takes time to exit.
+func TestDrainAgent_WaitsForDone(t *testing.T) {
+	d := &Daemon{
+		config: &DaemonConfig{},
+	}
+
+	ap := &AgentProcess{
+		entry:  AgentEntry{Worktree: "slow-agent"},
+		stopCh: make(chan struct{}),
+		done:   make(chan struct{}),
+	}
+	d.agents = []*AgentProcess{ap}
+
+	// Launch a goroutine that closes done after observing stopCh
+	go func() {
+		<-ap.stopCh
+		// Simulate some cleanup time
+		time.Sleep(50 * time.Millisecond)
+		close(ap.done)
+	}()
+
+	drainDone := make(chan error, 1)
+	go func() {
+		drainDone <- d.drainAgent("slow-agent")
+	}()
+
+	select {
+	case err := <-drainDone:
+		if err != nil {
+			t.Fatalf("drainAgent() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("drainAgent() did not complete within 5 seconds")
+	}
+
+	if d.AgentCount() != 0 {
+		t.Errorf("AgentCount() = %d after drain, want 0", d.AgentCount())
+	}
+}
+
+// TestAddAgent_DuplicateName verifies that addAgent returns an error when
+// an agent with the same worktree name already exists.
+func TestAddAgent_DuplicateName(t *testing.T) {
+	d := &Daemon{
+		config: &DaemonConfig{},
+		agents: []*AgentProcess{
+			{
+				entry:  AgentEntry{Worktree: "existing-agent", Role: "plan"},
+				stopCh: make(chan struct{}),
+				done:   make(chan struct{}),
+			},
+		},
+	}
+
+	err := d.addAgent(AgentEntry{Worktree: "existing-agent", Role: "task"})
+	if err == nil {
+		t.Fatal("addAgent() returned nil error, want error for duplicate name")
+	}
+	if got := err.Error(); got != `agent "existing-agent" already exists` {
+		t.Errorf("addAgent() error = %q, want %q", got, `agent "existing-agent" already exists`)
+	}
+
+	// Verify original agent is unchanged
+	if d.AgentCount() != 1 {
+		t.Errorf("AgentCount() = %d, want 1 (unchanged)", d.AgentCount())
+	}
+}
+
+// TestAgentsMu_ConcurrentAccess verifies that Agents() and AgentCount() can be
+// called concurrently without data races. Run with `go test -race` to detect races.
+func TestAgentsMu_ConcurrentAccess(t *testing.T) {
+	d := &Daemon{
+		config: &DaemonConfig{},
+		agents: []*AgentProcess{
+			{entry: AgentEntry{Worktree: "a", Role: "plan"}},
+			{entry: AgentEntry{Worktree: "b", Role: "task"}},
+			{entry: AgentEntry{Worktree: "c", Role: "plan"}},
+		},
+	}
+
+	const goroutines = 20
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				if id%2 == 0 {
+					statuses := d.Agents()
+					_ = len(statuses)
+				} else {
+					count := d.AgentCount()
+					_ = count
+				}
+			}
+		}(i)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// No races detected (race detector would fail the test)
+	case <-time.After(10 * time.Second):
+		t.Fatal("concurrent access test timed out")
 	}
 }

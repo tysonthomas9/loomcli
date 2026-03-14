@@ -36,6 +36,10 @@ type AgentProcess struct {
 
 	currentBackendIdx int // 0=primary, 1+=fallback index into entry.FallbackBackends
 
+	stopCh   chan struct{} // closed to signal this specific agent to stop (created in Start/addAgent)
+	done     chan struct{} // closed when superviseAgent goroutine exits
+	stopOnce sync.Once     // prevents double-close of stopCh
+
 	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx
 }
 
@@ -87,9 +91,11 @@ type Daemon struct {
 	config     *DaemonConfig
 	projectDir string // directory containing loom.yaml
 
-	// agents is populated during NewDaemon and is immutable afterward.
-	// Safe to read without holding mu after Start() is called.
-	agents       []*AgentProcess
+	// agents is the list of supervised agents. Protected by agentsMu for
+	// concurrent access — readers acquire RLock, writers (addAgent/drainAgent) acquire Lock.
+	agents   []*AgentProcess
+	agentsMu sync.RWMutex // protects the agents slice for concurrent read/write access
+
 	shutdown     chan struct{}  // closed to signal shutdown
 	shutdownOnce sync.Once      // protects shutdown channel from double-close
 	wg           sync.WaitGroup // tracks superviseAgent goroutines
@@ -174,7 +180,12 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 // when epic assignments differ from a prior daemon run — git refuses
 // to checkout a branch that is already checked out in another worktree.
 func (d *Daemon) resetWorktreeBranches() {
-	for _, ap := range d.agents {
+	d.agentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(d.agents))
+	copy(snapshot, d.agents)
+	d.agentsMu.RUnlock()
+
+	for _, ap := range snapshot {
 		current, err := GetCurrentBranch(ap.worktreePath)
 		if err != nil {
 			log.Printf("[daemon] Warning: failed to get branch for %s: %v", ap.entry.Worktree, err)
@@ -214,11 +225,19 @@ func (d *Daemon) Start() error {
 		d.healthChecker()
 	}()
 
-	// Start superviseAgent goroutine for each agent
-	for _, ap := range d.agents {
+	// Initialize stop/done channels and start superviseAgent goroutine for each agent
+	d.agentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(d.agents))
+	copy(snapshot, d.agents)
+	d.agentsMu.RUnlock()
+
+	for _, ap := range snapshot {
+		ap.stopCh = make(chan struct{})
+		ap.done = make(chan struct{})
 		d.wg.Add(1)
 		go func(agent *AgentProcess) {
 			defer d.wg.Done()
+			defer close(agent.done)
 			d.superviseAgent(agent)
 		}(ap)
 	}
@@ -237,7 +256,12 @@ func (d *Daemon) Stop() {
 	d.concurrency.Close()
 
 	// Stop all agent processes
-	for _, ap := range d.agents {
+	d.agentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(d.agents))
+	copy(snapshot, d.agents)
+	d.agentsMu.RUnlock()
+
+	for _, ap := range snapshot {
 		d.stopAgent(ap)
 	}
 
@@ -251,10 +275,13 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 	log.Printf("[daemon] Starting supervisor for agent %s (role: %s)", ap.entry.Worktree, ap.entry.Role)
 
 	for {
-		// Check shutdown before each cycle
+		// Check shutdown or per-agent stop before each cycle
 		select {
 		case <-d.shutdown:
 			log.Printf("[daemon] Agent %s: shutdown signal received", ap.entry.Worktree)
+			return
+		case <-ap.stopCh:
+			log.Printf("[daemon] Agent %s: stop signal received", ap.entry.Worktree)
 			return
 		default:
 		}
@@ -351,10 +378,13 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			// Non-fatal: agent will respawn in current mode
 		}
 
-		// 7. Check shutdown after subprocess exit
+		// 7. Check shutdown or per-agent stop after subprocess exit
 		select {
 		case <-d.shutdown:
 			log.Printf("[daemon] Agent %s: shutdown signal received after exit", ap.entry.Worktree)
+			return
+		case <-ap.stopCh:
+			log.Printf("[daemon] Agent %s: stop signal received after exit", ap.entry.Worktree)
 			return
 		default:
 		}
@@ -390,20 +420,31 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		case <-d.shutdown:
 			log.Printf("[daemon] Agent %s: shutdown during backoff", ap.entry.Worktree)
 			return
+		case <-ap.stopCh:
+			log.Printf("[daemon] Agent %s: stop signal during backoff", ap.entry.Worktree)
+			return
 		}
 	}
 }
 
 // AgentCount returns the number of configured agents.
 func (d *Daemon) AgentCount() int {
-	return len(d.agents)
+	d.agentsMu.RLock()
+	n := len(d.agents)
+	d.agentsMu.RUnlock()
+	return n
 }
 
 // Agents returns a snapshot of all agent statuses for inspection.
 // The returned SupervisedAgentStatus structs are safe to use without synchronization.
 func (d *Daemon) Agents() []SupervisedAgentStatus {
-	result := make([]SupervisedAgentStatus, len(d.agents))
-	for i, ap := range d.agents {
+	d.agentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(d.agents))
+	copy(snapshot, d.agents)
+	d.agentsMu.RUnlock()
+
+	result := make([]SupervisedAgentStatus, len(snapshot))
+	for i, ap := range snapshot {
 		ap.mu.Lock()
 		result[i] = SupervisedAgentStatus{
 			Worktree:       ap.entry.Worktree,

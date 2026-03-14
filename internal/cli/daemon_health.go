@@ -90,7 +90,12 @@ func (d *Daemon) checkAgentHealth() {
 	outputTimeout := d.getOutputTimeout()
 	var totalAgents, healthyAgents int
 
-	for _, ap := range d.agents {
+	d.agentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(d.agents))
+	copy(snapshot, d.agents)
+	d.agentsMu.RUnlock()
+
+	for _, ap := range snapshot {
 		ap.mu.Lock()
 		pid := ap.pid
 		worktreePath := ap.worktreePath
