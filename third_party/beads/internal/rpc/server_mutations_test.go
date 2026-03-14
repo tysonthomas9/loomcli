@@ -1876,9 +1876,9 @@ func TestHandleCreate_SetsSourceRepo(t *testing.T) {
 	}
 }
 
-// TestHandleCreate_DiscoveredFromOverridesSourceRepo verifies that a discovered-from
-// dependency's source_repo overrides the explicit SourceRepo from CreateArgs.
-func TestHandleCreate_DiscoveredFromOverridesSourceRepo(t *testing.T) {
+// TestHandleCreate_ExplicitSourceRepoOverridesDiscoveredFrom verifies that an explicit
+// SourceRepo in CreateArgs takes precedence over discovered-from inheritance.
+func TestHandleCreate_ExplicitSourceRepoOverridesDiscoveredFrom(t *testing.T) {
 	store := memory.New("/tmp/test.jsonl")
 	server := NewServer("/tmp/test.sock", store, "/tmp", "/tmp/test.db")
 
@@ -1933,7 +1933,73 @@ func TestHandleCreate_DiscoveredFromOverridesSourceRepo(t *testing.T) {
 		t.Fatalf("failed to parse child response: %v", err)
 	}
 
-	// discovered-from parent's source_repo should override the explicit value
+	// Explicit source_repo should take precedence over discovered-from inheritance
+	storedChild, err := store.GetIssue(context.Background(), childRespData.ID)
+	if err != nil {
+		t.Fatalf("failed to get child issue from storage: %v", err)
+	}
+	if storedChild.SourceRepo != "github.com/org/explicit-repo" {
+		t.Errorf("expected SourceRepo 'github.com/org/explicit-repo' (explicit flag), got %q", storedChild.SourceRepo)
+	}
+}
+
+// TestHandleCreate_DiscoveredFromInheritsSourceRepo verifies that discovered-from
+// inheritance works when no explicit SourceRepo is provided.
+func TestHandleCreate_DiscoveredFromInheritsSourceRepo(t *testing.T) {
+	store := memory.New("/tmp/test.jsonl")
+	server := NewServer("/tmp/test.sock", store, "/tmp", "/tmp/test.db")
+
+	// Create a parent issue with a specific source_repo
+	parentArgs := CreateArgs{
+		Title:      "Parent issue",
+		IssueType:  "task",
+		Priority:   2,
+		SourceRepo: "github.com/org/parent-repo",
+	}
+	parentJSON, _ := json.Marshal(parentArgs)
+	parentReq := &Request{
+		Operation: OpCreate,
+		Args:      parentJSON,
+		Actor:     "test-actor",
+	}
+	parentResp := server.handleCreate(parentReq)
+	if !parentResp.Success {
+		t.Fatalf("parent create failed: %s", parentResp.Error)
+	}
+
+	var parentRespData struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(parentResp.Data, &parentRespData); err != nil {
+		t.Fatalf("failed to parse parent response: %v", err)
+	}
+
+	// Create a child issue WITHOUT explicit source_repo but WITH discovered-from dep
+	childArgs := CreateArgs{
+		Title:        "Child issue",
+		IssueType:    "task",
+		Priority:     2,
+		Dependencies: []string{"discovered-from:" + parentRespData.ID},
+	}
+	childJSON, _ := json.Marshal(childArgs)
+	childReq := &Request{
+		Operation: OpCreate,
+		Args:      childJSON,
+		Actor:     "test-actor",
+	}
+	childResp := server.handleCreate(childReq)
+	if !childResp.Success {
+		t.Fatalf("child create failed: %s", childResp.Error)
+	}
+
+	var childRespData struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(childResp.Data, &childRespData); err != nil {
+		t.Fatalf("failed to parse child response: %v", err)
+	}
+
+	// Without explicit source_repo, should inherit from parent
 	storedChild, err := store.GetIssue(context.Background(), childRespData.ID)
 	if err != nil {
 		t.Fatalf("failed to get child issue from storage: %v", err)

@@ -348,13 +348,8 @@ func (s *Server) handleCreate(req *Request) Response {
 		DeferUntil: deferUntil,
 	}
 
-	// Set source_repo from CreateArgs if provided
-	if createArgs.SourceRepo != "" {
-		issue.SourceRepo = createArgs.SourceRepo
-	}
-
 	// Check if any dependencies are discovered-from type
-	// If so, inherit source_repo from the parent issue (overrides explicit value)
+	// If so, inherit source_repo from the parent issue
 	var discoveredFromParentID string
 	for _, depSpec := range createArgs.Dependencies {
 		depSpec = strings.TrimSpace(depSpec)
@@ -386,6 +381,13 @@ func (s *Server) handleCreate(req *Request) Response {
 			issue.SourceRepo = parentIssue.SourceRepo
 		}
 		// If error getting parent or parent has no source_repo, continue with default
+	}
+
+	// Explicit --source-repo flag takes precedence over discovered-from inheritance.
+	// Note: the RPC protocol uses empty string for "not provided", so clearing
+	// source_repo via --source-repo="" is only supported in direct (non-daemon) mode.
+	if createArgs.SourceRepo != "" {
+		issue.SourceRepo = createArgs.SourceRepo
 	}
 
 	if err := store.CreateIssue(ctx, issue, s.reqActor(req)); err != nil {

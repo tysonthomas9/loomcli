@@ -55,6 +55,8 @@ This is useful for agents executing molecules to see which steps can run next.`,
 		molTypeStr, _ := cmd.Flags().GetString("mol-type")
 		prettyFormat, _ := cmd.Flags().GetBool("pretty")
 		includeDeferred, _ := cmd.Flags().GetBool("include-deferred")
+		sourceRepos, _ := cmd.Flags().GetStringSlice("source-repos")
+		sourceRepos = util.NormalizeLabels(sourceRepos)
 		var molType *types.MolType
 		if molTypeStr != "" {
 			mt := types.MolType(molTypeStr)
@@ -86,6 +88,7 @@ This is useful for agents executing molecules to see which steps can run next.`,
 			Labels:          labels,
 			LabelsAny:       labelsAny,
 			IncludeDeferred: includeDeferred, // GH#820: respect --include-deferred flag
+			SourceRepos:     sourceRepos,
 		}
 		// Use Changed() to properly handle P0 (priority=0)
 		if cmd.Flags().Changed("priority") {
@@ -119,6 +122,7 @@ This is useful for agents executing molecules to see which steps can run next.`,
 				ParentID:        parentID,
 				MolType:         molTypeStr,
 				IncludeDeferred: includeDeferred, // GH#820
+				SourceRepos:     sourceRepos,
 			}
 			if cmd.Flags().Changed("priority") {
 				priority, _ := cmd.Flags().GetInt("priority")
@@ -463,6 +467,7 @@ func init() {
 	readyCmd.Flags().Bool("pretty", false, "Display issues in a tree format with status/priority symbols")
 	readyCmd.Flags().Bool("include-deferred", false, "Include issues with future defer_until timestamps")
 	readyCmd.Flags().Bool("gated", false, "Find molecules ready for gate-resume dispatch")
+	readyCmd.Flags().StringSlice("source-repos", []string{}, "Filter by source repositories (comma-separated)")
 	rootCmd.AddCommand(readyCmd)
 	blockedCmd.Flags().String("parent", "", "Filter to descendants of this bead/epic")
 	rootCmd.AddCommand(blockedCmd)

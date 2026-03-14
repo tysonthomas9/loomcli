@@ -12,7 +12,7 @@ func resolveAgentRepos(agent AgentEntry, repos []RepoConfig) []string {
 	}
 
 	seen := make(map[string]bool)
-	var result []string
+	result := make([]string, 0)
 
 	add := func(id string) {
 		if id == "" {

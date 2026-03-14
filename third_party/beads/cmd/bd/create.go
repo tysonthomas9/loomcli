@@ -618,7 +618,8 @@ var createCmd = &cobra.Command{
 		}
 
 		// If we found a discovered-from dependency, inherit source_repo from parent
-		if discoveredFromParentID != "" {
+		// Only inherit if --source-repo was not explicitly provided
+		if discoveredFromParentID != "" && !cmd.Flags().Changed("source-repo") {
 			parentIssue, err := store.GetIssue(ctx, discoveredFromParentID)
 			if err == nil && parentIssue != nil && parentIssue.SourceRepo != "" {
 				issue.SourceRepo = parentIssue.SourceRepo
