@@ -62,17 +62,29 @@ type ServerConfig struct {
 
 // WorkspaceData represents the full workspace topology returned by the API.
 type WorkspaceData struct {
-	Name  string          `json:"name"`
-	Path  string          `json:"path"`
-	Repos []WorkspaceRepo `json:"repos"`
+	Name   string               `json:"name"`
+	Path   string               `json:"path"`
+	Repos  []WorkspaceRepo      `json:"repos"`
+	Groups []string             `json:"groups"`
+	Agents []WorkspaceAgentInfo `json:"agents"`
 }
 
 // WorkspaceRepo represents a repository within a workspace.
 type WorkspaceRepo struct {
-	Name          string `json:"name"`
-	Path          string `json:"path"`
-	DefaultBranch string `json:"default_branch"`
-	Remote        string `json:"remote"`
+	Name          string   `json:"name"`
+	Path          string   `json:"path"`
+	DefaultBranch string   `json:"default_branch"`
+	Remote        string   `json:"remote"`
+	SourceRepoID  string   `json:"source_repo_id,omitempty"`
+	Groups        []string `json:"groups"`
+}
+
+// WorkspaceAgentInfo represents an agent's repo/group assignments.
+type WorkspaceAgentInfo struct {
+	Name       string   `json:"name"`
+	Repos      []string `json:"repos"`
+	RepoGroups []string `json:"repo_groups"`
+	CrossRepo  bool     `json:"cross_repo"`
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.

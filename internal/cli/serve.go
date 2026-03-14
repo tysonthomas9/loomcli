@@ -255,64 +255,23 @@ func runServe(cmd *cobra.Command, args []string) {
 		go func() {
 			gitOps := NewGitOps()
 			cfg := webui.ServerConfig{
-				Port:           serveWebUIPort,
-				BindAddress:    serveBindAddr,
-				SocketPath:     serveWebUISocket,
-				LoomServerURL:  fmt.Sprintf("http://localhost:%d", servePort),
-				TerminalCmd:    terminalCmd,
-				FleetEnabled:   serveRedisAddr != "",
-				FleetRedis:     fleetRedisConfig,
-				FleetJWTKey:    fleetJWTKey,
-				FleetAPIKey:    serveFleetAPIKey,
-				APIKey:         serveAPIKey,
-				AuthEnabled:    serveAuth,
-				HSTSEnabled:    serveHSTS,
-				DevMode:        serveDev,
-				DevFrontendDir: serveDevFrontDir,
-				GitOps:         gitOps,
-				FileOps:        gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
-				WorkspaceConfigFn: func() (*webui.WorkspaceData, error) {
-					cfg, err := LoadConfig()
-					if err != nil {
-						return nil, err
-					}
-					if cfg == nil || len(cfg.Workspaces) == 0 {
-						return nil, nil
-					}
-					// Find the active workspace (use default or first available)
-					wsName := cfg.DefaultWorkspace
-					ws, ok := cfg.Workspaces[wsName]
-					if !ok {
-						// Fall back to first workspace
-						for name, w := range cfg.Workspaces {
-							wsName = name
-							ws = w
-							break
-						}
-					}
-					repos := make([]webui.WorkspaceRepo, 0, len(ws.Repos))
-					for _, r := range ws.Repos {
-						db := r.DefaultBranch
-						if db == "" {
-							db = "main"
-						}
-						remote := r.Remote
-						if remote == "" {
-							remote = "origin"
-						}
-						repos = append(repos, webui.WorkspaceRepo{
-							Name:          r.Name,
-							Path:          r.Path,
-							DefaultBranch: db,
-							Remote:        remote,
-						})
-					}
-					return &webui.WorkspaceData{
-						Name:  wsName,
-						Path:  ws.Path,
-						Repos: repos,
-					}, nil
-				},
+				Port:              serveWebUIPort,
+				BindAddress:       serveBindAddr,
+				SocketPath:        serveWebUISocket,
+				LoomServerURL:     fmt.Sprintf("http://localhost:%d", servePort),
+				TerminalCmd:       terminalCmd,
+				FleetEnabled:      serveRedisAddr != "",
+				FleetRedis:        fleetRedisConfig,
+				FleetJWTKey:       fleetJWTKey,
+				FleetAPIKey:       serveFleetAPIKey,
+				APIKey:            serveAPIKey,
+				AuthEnabled:       serveAuth,
+				HSTSEnabled:       serveHSTS,
+				DevMode:           serveDev,
+				DevFrontendDir:    serveDevFrontDir,
+				GitOps:            gitOps,
+				FileOps:           gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
+				WorkspaceConfigFn: buildWorkspaceInfo,
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true
