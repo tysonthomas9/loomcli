@@ -56,152 +56,6 @@ func init() {
 	rootCmd.AddCommand(monitorCmd)
 }
 
-// MonitorData holds all dashboard information
-type MonitorData struct {
-	Timestamp          time.Time
-	Agents             []AgentStatus
-	Tasks              TaskSummary
-	NeedsPlanningTasks []TaskInfo          // Ready tasks without design (top 5)
-	ReadyToImplement   []TaskInfo          // Ready tasks with design (top 5)
-	ReviewTasks        []TaskInfo          // top 5 need review tasks
-	InProgressTasks    []TaskInfo          // all in_progress tasks
-	BacklogTasks       []TaskInfo          // backlog tasks (top 20)
-	ClosedTasks        []TaskInfo          // closed tasks (top 50)
-	AgentTasks         map[string]TaskInfo // agent name -> current task (from assignee)
-	TaskConflicts      map[string][]string // TaskID -> agent names (if multiple agents claim same task)
-	SyncStatus         SyncInfo
-	Stats              MonitorStats
-}
-
-// CommitDetail represents a single commit with hash, message, and optional GitHub URL.
-type CommitDetail struct {
-	Hash    string `json:"hash"`
-	Message string `json:"message"`
-	URL     string `json:"url,omitempty"` // GitHub commit URL if remote available
-}
-
-// FileChange represents a single file change from git status.
-type FileChange struct {
-	Status string `json:"status"` // "M", "A", "D", "??", "R"
-	Path   string `json:"path"`
-}
-
-// AgentStatus represents a single agent/worktree status
-type AgentStatus struct {
-	Name          string         `json:"name"`
-	Branch        string         `json:"branch"`
-	Status        string         `json:"status"`                   // "ready", "3 changes", "running (plan, 5m ago)"
-	Ahead         int            `json:"ahead"`                    // commits ahead of integration branch
-	Behind        int            `json:"behind"`                   // commits behind integration branch
-	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
-	Workspace     string         `json:"workspace"`                // workspace name (empty in legacy mode)
-	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
-	Commits       []CommitDetail `json:"commits,omitempty"`        // recent commits ahead of integration branch
-	Changes       []FileChange   `json:"changes,omitempty"`        // uncommitted file changes
-}
-
-// TaskInfo represents a task with basic info
-type TaskInfo struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Priority int    `json:"priority"`
-	Status   string `json:"status"` // "in_progress", "closed", "open"
-}
-
-// TaskSummary holds task counts by category
-type TaskSummary struct {
-	NeedsPlanning    int `json:"needs_planning"`     // Ready tasks without design
-	ReadyToImplement int `json:"ready_to_implement"` // Ready tasks with approved design
-	InProgress       int `json:"in_progress"`
-	NeedReview       int `json:"need_review"`
-	Backlog          int `json:"backlog"`
-}
-
-// WorktreeSyncDetail holds per-worktree sync detail (commits ahead or behind).
-type WorktreeSyncDetail struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
-}
-
-// SyncInfo holds sync status information
-type SyncInfo struct {
-	DBSynced       bool                 `json:"db_synced"`
-	DBLastSync     string               `json:"db_last_sync"`
-	DBError        string               `json:"db_error,omitempty"`
-	GitNeedsPush   int                  `json:"git_needs_push"`
-	GitNeedsPull   int                  `json:"git_needs_pull"`
-	GitPushDetails []WorktreeSyncDetail `json:"git_push_details,omitempty"`
-	GitPullDetails []WorktreeSyncDetail `json:"git_pull_details,omitempty"`
-}
-
-// MonitorStats holds overall statistics
-type MonitorStats struct {
-	Open       int     `json:"open"`
-	Closed     int     `json:"closed"`
-	Total      int     `json:"total"`
-	Completion float64 `json:"completion"`
-	Remaining  int     `json:"remaining"`
-	InProgress int     `json:"in_progress"`
-	Review     int     `json:"review"`
-	Blocked    int     `json:"blocked"`
-}
-
-// Dependency represents a dependency relationship from bd ready --json
-type Dependency struct {
-	IssueID     string `json:"issue_id"`
-	DependsOnID string `json:"depends_on_id"`
-	Type        string `json:"type"` // "parent-child" or "blocks"
-	CreatedAt   string `json:"created_at"`
-	CreatedBy   string `json:"created_by"`
-}
-
-// BdIssue represents an issue from bd list --json
-type BdIssue struct {
-	ID           string       `json:"id"`
-	Title        string       `json:"title"`
-	Status       string       `json:"status"`
-	Priority     int          `json:"priority"`
-	IssueType    string       `json:"issue_type"`
-	Design       string       `json:"design"`
-	Assignee     string       `json:"assignee"`
-	Labels       []string     `json:"labels"`
-	Dependencies []Dependency `json:"dependencies"`
-}
-
-// BdStats represents output from bd stats --json
-type BdStats struct {
-	Summary struct {
-		TotalIssues      int `json:"total_issues"`
-		OpenIssues       int `json:"open_issues"`
-		ClosedIssues     int `json:"closed_issues"`
-		InProgressIssues int `json:"in_progress_issues"`
-		BlockedIssues    int `json:"blocked_issues"`
-		DeferredIssues   int `json:"deferred_issues"`
-		TombstoneIssues  int `json:"tombstone_issues"`
-		PinnedIssues     int `json:"pinned_issues"`
-	} `json:"summary"`
-}
-
-// DaemonAgentState represents the daemon-agents.json file format.
-// This matches the DaemonState written by daemon_cmd.go.
-type DaemonAgentState struct {
-	PID    int                     `json:"pid"`
-	Agents []DaemonAgentStateEntry `json:"agents"`
-}
-
-// DaemonAgentStateEntry represents a single agent in daemon-agents.json
-type DaemonAgentStateEntry struct {
-	Worktree string `json:"worktree"`
-	Status   string `json:"status"`
-	Role     string `json:"role"`
-}
-
-// DaemonAgentInfo carries daemon supervision metadata for a worktree.
-type DaemonAgentInfo struct {
-	Managed bool
-	Role    string
-}
-
 // loadDaemonManagedAgents reads the daemon state file and returns metadata
 // for worktrees under daemon supervision, including their role.
 // Returns nil if the file doesn't exist, can't be parsed, or daemon isn't running.
@@ -326,6 +180,18 @@ func collectMonitorData(readyLimit int, branch string) *MonitorData {
 	// Combine sync bd result with agent data for git push/pull counts
 	data.SyncStatus = completeSyncStatus(syncBdInfo, data.Agents)
 	data.Stats = stats
+
+	// Compute Remaining as the sum of work queue categories so it always tallies.
+	// bd stats computes Remaining by subtraction which can disagree with the
+	// work queue counts due to issues falling between bd ready / bd blocked.
+	data.Stats.Remaining = data.Tasks.NeedsPlanning + data.Tasks.ReadyToImplement +
+		data.Tasks.NeedReview + data.Tasks.InProgress + data.Tasks.Backlog
+	data.Stats.Total = data.Stats.Remaining + data.Stats.Closed
+	if data.Stats.Total > 0 {
+		data.Stats.Completion = float64(data.Stats.Closed) / float64(data.Stats.Total) * 100
+	} else {
+		data.Stats.Completion = 0
+	}
 
 	return data
 }
@@ -630,9 +496,12 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 					continue
 				}
 				if IsEpic(issue) {
+					summary.Epics++
 					continue
 				}
 				if HasUnclosedBlockers(issue.Dependencies, unclosedIDs) {
+					// Count these in backlog — they have open deps
+					summary.Backlog++
 					continue
 				}
 
@@ -711,7 +580,7 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	if backlogErr == nil {
 		var issues []BdIssue
 		if json.Unmarshal([]byte(backlogOutput), &issues) == nil {
-			summary.Backlog = len(issues)
+			summary.Backlog += len(issues)
 			// Store up to 20 backlog tasks for display
 			for i, issue := range issues {
 				if i >= 20 {
@@ -805,16 +674,17 @@ func collectStatistics() MonitorStats {
 				stats.Completion = float64(stats.Closed) / float64(stats.Total) * 100
 			}
 
-			// Remaining = total - closed - tombstone
-			stats.Remaining = stats.Total - stats.Closed - bdStats.Summary.TombstoneIssues
+			// Remaining = total - closed
+			// Note: bd stats total_issues already excludes tombstones
+			stats.Remaining = stats.Total - stats.Closed
 			if stats.Remaining < 0 {
 				stats.Remaining = 0
 			}
 
-			// Review = total - open - inProgress - closed - blocked - deferred - tombstone - pinned
+			// Review = total - open - inProgress - closed - blocked - deferred - pinned
+			// Note: bd stats total_issues already excludes tombstones
 			stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
-				stats.Blocked - bdStats.Summary.DeferredIssues -
-				bdStats.Summary.TombstoneIssues - bdStats.Summary.PinnedIssues
+				stats.Blocked - bdStats.Summary.DeferredIssues - bdStats.Summary.PinnedIssues
 			if stats.Review < 0 {
 				stats.Review = 0
 			}
