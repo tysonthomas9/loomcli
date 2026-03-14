@@ -1173,8 +1173,8 @@ func TestCollectTaskStatus(t *testing.T) {
 			wantReadyToImplementLen: 5, // But only 5 stored
 		},
 		{
-			name:        "closed tasks are collected",
-			readyOutput: "[]",
+			name:             "closed tasks are collected",
+			readyOutput:      "[]",
 			inProgressOutput: "[]",
 			needReviewOutput: "[]",
 			blockedOutput:    "[]",

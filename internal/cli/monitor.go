@@ -923,4 +923,3 @@ func runBdCommand(args ...string) (string, error) {
 	}
 	return result.Stdout, nil
 }
-
