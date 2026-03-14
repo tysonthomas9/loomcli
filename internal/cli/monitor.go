@@ -880,8 +880,7 @@ func collectReadyTasksByPriority(readyLimit int) map[int]int {
 
 // buildUnclosedIDsFromResponses builds a set of unclosed issue IDs from the
 // JSON responses already fetched by collectTaskStatus's parallel bd commands.
-// Issues from ready/in_progress/review are unclosed by definition; backlog
-// issues need a status check since bd blocked may include closed issues.
+// Issues from ready/in_progress/review are unclosed by definition; backlog issues need a status check.
 func buildUnclosedIDsFromResponses(readyJSON, inProgressJSON, reviewJSON, backlogJSON string) map[string]bool {
 	unclosed := make(map[string]bool)
 
