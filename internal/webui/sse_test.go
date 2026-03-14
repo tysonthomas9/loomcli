@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1504,5 +1505,81 @@ func TestHandleSSE_SendChannelClosed(t *testing.T) {
 		// Good — handler exited cleanly
 	case <-time.After(3 * time.Second):
 		t.Fatal("handler did not exit after hub stopped and send channel closed")
+	}
+}
+
+// TestRpcMutationToPayload_SourceRepo tests that SourceRepo is correctly mapped from rpc.MutationEvent.
+func TestRpcMutationToPayload_SourceRepo(t *testing.T) {
+	input := rpc.MutationEvent{
+		Type:       "create",
+		IssueID:    "bd-10",
+		Timestamp:  time.Date(2025, 1, 23, 12, 0, 0, 0, time.UTC),
+		SourceRepo: "payments/api",
+	}
+
+	result := rpcMutationToPayload(input)
+
+	if result.SourceRepo != "payments/api" {
+		t.Errorf("SourceRepo: got %q, want %q", result.SourceRepo, "payments/api")
+	}
+}
+
+// TestRpcMutationToPayload_EmptySourceRepo tests that an empty SourceRepo is preserved and omitted from JSON.
+func TestRpcMutationToPayload_EmptySourceRepo(t *testing.T) {
+	input := rpc.MutationEvent{
+		Type:      "create",
+		IssueID:   "bd-11",
+		Timestamp: time.Date(2025, 1, 23, 12, 0, 0, 0, time.UTC),
+	}
+
+	result := rpcMutationToPayload(input)
+
+	if result.SourceRepo != "" {
+		t.Errorf("SourceRepo: got %q, want empty string", result.SourceRepo)
+	}
+
+	// Verify JSON marshaling omits the field when empty
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	if strings.Contains(string(data), "source_repo") {
+		t.Errorf("expected source_repo to be omitted from JSON, got: %s", data)
+	}
+}
+
+// TestMutationPayload_SourceRepoInJSON tests JSON marshaling of MutationPayload with SourceRepo.
+func TestMutationPayload_SourceRepoInJSON(t *testing.T) {
+	// With SourceRepo set, the field should appear in JSON
+	payload := &MutationPayload{
+		Type:       "create",
+		IssueID:    "bd-12",
+		Timestamp:  "2025-01-23T12:00:00Z",
+		SourceRepo: "payments/api",
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	if !strings.Contains(string(data), `"source_repo":"payments/api"`) {
+		t.Errorf("expected JSON to contain source_repo field, got: %s", data)
+	}
+
+	// With empty SourceRepo, the field should be absent from JSON
+	payloadEmpty := &MutationPayload{
+		Type:      "create",
+		IssueID:   "bd-13",
+		Timestamp: "2025-01-23T12:00:00Z",
+	}
+
+	dataEmpty, err := json.Marshal(payloadEmpty)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	if strings.Contains(string(dataEmpty), "source_repo") {
+		t.Errorf("expected source_repo to be absent from JSON, got: %s", dataEmpty)
 	}
 }

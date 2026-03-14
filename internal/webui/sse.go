@@ -34,16 +34,17 @@ func init() {
 
 // MutationPayload represents mutation data sent to clients.
 type MutationPayload struct {
-	Type      string `json:"type"` // create, update, delete, comment, status, bonded, squashed, burned, refresh
-	IssueID   string `json:"issue_id"`
-	Title     string `json:"title,omitempty"`
-	Assignee  string `json:"assignee,omitempty"`
-	Actor     string `json:"actor,omitempty"`
-	Timestamp string `json:"timestamp"`
-	OldStatus string `json:"old_status,omitempty"` // For status events
-	NewStatus string `json:"new_status,omitempty"` // For status events
-	ParentID  string `json:"parent_id,omitempty"`  // For bonded events
-	StepCount int    `json:"step_count,omitempty"` // For bonded events
+	Type       string `json:"type"` // create, update, delete, comment, status, bonded, squashed, burned, refresh
+	IssueID    string `json:"issue_id"`
+	Title      string `json:"title,omitempty"`
+	Assignee   string `json:"assignee,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+	Timestamp  string `json:"timestamp"`
+	OldStatus  string `json:"old_status,omitempty"`  // For status events
+	NewStatus  string `json:"new_status,omitempty"`  // For status events
+	ParentID   string `json:"parent_id,omitempty"`   // For bonded events
+	StepCount  int    `json:"step_count,omitempty"`  // For bonded events
+	SourceRepo string `json:"source_repo,omitempty"` // Source repository for multi-repo filtering
 }
 
 // SSEHub manages connected SSE clients and broadcasts mutations to them.
@@ -384,15 +385,16 @@ func writeSSEEvent(w http.ResponseWriter, mutation *MutationPayload) {
 // rpcMutationToPayload converts an RPC mutation event to a payload.
 func rpcMutationToPayload(m rpc.MutationEvent) *MutationPayload {
 	return &MutationPayload{
-		Type:      m.Type,
-		IssueID:   m.IssueID,
-		Title:     m.Title,
-		Assignee:  m.Assignee,
-		Actor:     m.Actor,
-		Timestamp: m.Timestamp.UTC().Format(time.RFC3339),
-		OldStatus: m.OldStatus,
-		NewStatus: m.NewStatus,
-		ParentID:  m.ParentID,
-		StepCount: m.StepCount,
+		Type:       m.Type,
+		IssueID:    m.IssueID,
+		Title:      m.Title,
+		Assignee:   m.Assignee,
+		Actor:      m.Actor,
+		Timestamp:  m.Timestamp.UTC().Format(time.RFC3339),
+		OldStatus:  m.OldStatus,
+		NewStatus:  m.NewStatus,
+		ParentID:   m.ParentID,
+		StepCount:  m.StepCount,
+		SourceRepo: m.SourceRepo,
 	}
 }
