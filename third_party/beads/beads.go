@@ -11,6 +11,8 @@ import (
 	"context"
 
 	"github.com/steveyegge/beads/internal/beads"
+	beadsrpc "github.com/steveyegge/beads/internal/rpc"
+	"github.com/steveyegge/beads/internal/storage/memory"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -129,3 +131,33 @@ const (
 	EventLabelRemoved      = types.EventLabelRemoved
 	EventCompacted         = types.EventCompacted
 )
+
+// Server wraps the internal RPC server for use by external consumers.
+type Server struct {
+	impl *beadsrpc.Server
+}
+
+// NewServer creates a new RPC server listening on the given Unix socket path.
+func NewServer(socketPath string, store Storage, workspacePath string, dbPath string) *Server {
+	return &Server{impl: beadsrpc.NewServer(socketPath, store, workspacePath, dbPath)}
+}
+
+// Start starts the RPC server and blocks until stopped.
+func (s *Server) Start(ctx context.Context) error {
+	return s.impl.Start(ctx)
+}
+
+// WaitReady returns a channel that is closed when the server is ready to accept connections.
+func (s *Server) WaitReady() <-chan struct{} {
+	return s.impl.WaitReady()
+}
+
+// Stop gracefully shuts down the server.
+func (s *Server) Stop() error {
+	return s.impl.Stop()
+}
+
+// NewMemoryStorage creates an in-memory storage backend for testing and development.
+func NewMemoryStorage(jsonlPath string) Storage {
+	return memory.New(jsonlPath)
+}
