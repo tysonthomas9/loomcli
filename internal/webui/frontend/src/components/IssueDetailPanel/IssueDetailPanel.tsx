@@ -31,6 +31,7 @@ import { MarkdownRenderer } from "./MarkdownRenderer";
 import { PriorityDropdown } from "./PriorityDropdown";
 import { RejectCommentForm } from "./RejectCommentForm";
 import { TypeDropdown } from "./TypeDropdown";
+import { EmbeddedTerminal } from "../EmbeddedTerminal";
 import { ErrorToast } from "../ErrorToast";
 import { LogViewer } from "../LogViewer";
 import styles from "./IssueDetailPanel.module.css";
@@ -236,11 +237,19 @@ interface DefaultContentProps {
 /**
  * Tab model for dynamic tab management.
  */
+interface DetailTabMetadata {
+  sessionName?: string | undefined;
+  backend?: string | undefined;
+  agentName?: string | null | undefined;
+  worktreePath?: string | undefined;
+}
+
 interface DetailTab {
   id: string;
-  type: "details" | "logs";
+  type: "details" | "logs" | "terminal";
   label: string;
   closable: boolean;
+  metadata?: DetailTabMetadata | undefined;
 }
 
 const DETAILS_TAB: DetailTab = {
@@ -281,24 +290,41 @@ function DefaultContent({
   const [showAddTabDropdown, setShowAddTabDropdown] = useState(false);
   const addTabRef = useRef<HTMLDivElement>(null);
 
-  const addTab = useCallback((type: "logs") => {
-    setTabs((prev) => {
-      const existing = prev.find((t) => t.type === type);
-      if (existing) {
-        setActiveTabId(existing.id);
-        return prev;
-      }
-      const newTab: DetailTab = {
-        id: type,
-        type,
-        label: type === "logs" ? "Logs" : type,
-        closable: true,
-      };
-      setActiveTabId(newTab.id);
-      return [...prev, newTab];
-    });
-    setShowAddTabDropdown(false);
-  }, []);
+  const addTab = useCallback(
+    (type: "logs" | "terminal", metadata?: DetailTabMetadata) => {
+      setTabs((prev) => {
+        // For logs, prevent duplicates
+        if (type === "logs") {
+          const existing = prev.find((t) => t.type === type);
+          if (existing) {
+            setActiveTabId(existing.id);
+            return prev;
+          }
+        }
+        const id =
+          type === "terminal"
+            ? `terminal-${metadata?.sessionName ?? Date.now()}`
+            : type;
+        const label =
+          type === "logs"
+            ? "Logs"
+            : type === "terminal"
+              ? `Terminal (${metadata?.backend ?? "shell"})`
+              : type;
+        const newTab: DetailTab = {
+          id,
+          type,
+          label,
+          closable: true,
+          metadata,
+        };
+        setActiveTabId(newTab.id);
+        return [...prev, newTab];
+      });
+      setShowAddTabDropdown(false);
+    },
+    [],
+  );
 
   const removeTab = useCallback((id: string) => {
     setTabs((prev) => {
@@ -807,7 +833,31 @@ function DefaultContent({
         )}
       </div>
 
-      {activeTabId === "logs" ? (
+      {/* Terminal tab content */}
+      {activeTabId.startsWith("terminal-") &&
+        (() => {
+          const activeTab = tabs.find((t) => t.id === activeTabId);
+          if (!activeTab?.metadata?.sessionName || !activeTab.metadata.backend)
+            return null;
+          return (
+            <div
+              className={styles.logsContainer}
+              role="tabpanel"
+              id={`issue-panel-tabpanel-${activeTabId}`}
+              aria-labelledby={`issue-panel-tab-${activeTabId}`}
+            >
+              <EmbeddedTerminal
+                sessionName={activeTab.metadata.sessionName}
+                backend={activeTab.metadata.backend}
+                agentName={activeTab.metadata.agentName ?? null}
+                worktreePath={activeTab.metadata.worktreePath}
+                isActive={true}
+              />
+            </div>
+          );
+        })()}
+
+      {activeTabId === "logs" && (
         <div
           className={styles.logsContainer}
           role="tabpanel"
@@ -849,7 +899,9 @@ function DefaultContent({
             {...(logMode === "tmux" ? { onTerminalData: sendLogInput } : {})}
           />
         </div>
-      ) : (
+      )}
+
+      {activeTabId === "details" && (
         <div
           className={styles.scrollableContent}
           role="tabpanel"

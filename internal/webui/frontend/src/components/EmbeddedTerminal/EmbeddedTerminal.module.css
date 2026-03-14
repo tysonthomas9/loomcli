@@ -1,0 +1,107 @@
+/**
+ * EmbeddedTerminal styles.
+ * Wrapper for TerminalInstance with header bar inside detail view tabs.
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel-bg);
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.backendLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.brandDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.connectionDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.connectionDot[data-state="connected"] {
+  background-color: var(--color-status-done, #22c55e);
+}
+
+.connectionDot[data-state="connecting"] {
+  background-color: var(--color-status-working, #facc15);
+}
+
+.connectionDot[data-state="disconnected"] {
+  background-color: var(--color-status-error, #ef4444);
+}
+
+.breadcrumb {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  margin-left: auto;
+  gap: 8px;
+}
+
+.actionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.actionBtn:hover:not(:disabled) {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-dark, var(--color-border));
+}
+
+.actionBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.terminalContainer {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}

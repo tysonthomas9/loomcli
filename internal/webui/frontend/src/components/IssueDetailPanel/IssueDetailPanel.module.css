@@ -446,7 +446,8 @@
   min-width: 0;
 }
 
-.logsContainer > [data-testid="log-viewer"] {
+.logsContainer > [data-testid="log-viewer"],
+.logsContainer > [data-testid="embedded-terminal"] {
   flex: 1;
   min-height: 0;
   min-width: 0;
