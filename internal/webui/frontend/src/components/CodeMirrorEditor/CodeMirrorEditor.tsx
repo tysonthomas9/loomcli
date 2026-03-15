@@ -121,7 +121,7 @@ export function CodeMirrorEditor({
     const view = new EditorView({ state, parent: container });
     viewRef.current = view;
 
-    // ResizeObserver — debounced, matching TerminalPanel pattern
+    // ResizeObserver — debounced
     let resizeTimer: ReturnType<typeof setTimeout>;
     const observer = new ResizeObserver(() => {
       clearTimeout(resizeTimer);
