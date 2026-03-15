@@ -44,6 +44,7 @@ import type { BlockedInfo } from "@/components/KanbanBoard";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import {
   useIssues,
+  useRepoFilter,
   useViewState,
   useFilterState,
   DEFAULT_GROUP_BY,
@@ -115,6 +116,9 @@ function App() {
   // View state must be read before useIssues to determine fetch mode
   const [activeView, setActiveView] = useViewState();
 
+  // Repo filter for multi-repo workspaces
+  const [selectedRepos] = useRepoFilter();
+
   const {
     issues,
     isLoading,
@@ -131,6 +135,7 @@ function App() {
         : activeView === "kanban"
           ? "kanban"
           : "ready",
+    sourceRepos: selectedRepos.length > 0 ? selectedRepos : undefined,
   });
 
   // Filter state with URL synchronization
@@ -243,8 +248,9 @@ function App() {
   const [previousView, setPreviousView] = useState<ViewMode>("kanban");
 
   // Pending issue context for terminal seeding
-  const [pendingIssueContext, setPendingIssueContext] =
-    useState<IssueContext | undefined>(undefined);
+  const [pendingIssueContext, setPendingIssueContext] = useState<
+    IssueContext | undefined
+  >(undefined);
 
   // Agent data (shared via AgentProvider — single polling loop)
   const { agents, agentTasks } = useAgentContext();

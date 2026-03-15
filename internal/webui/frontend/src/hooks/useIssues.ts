@@ -8,7 +8,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
-import type { ConnectionState, GraphFilter } from "@/api";
+import type { ConnectionState, GraphFilter, MutationPayload } from "@/api";
 import {
   getReadyIssues,
   getKanbanIssues,
@@ -41,6 +41,8 @@ export interface UseIssuesOptions {
   autoConnect?: boolean;
   /** Subscribe to mutations on connect (default: true) */
   subscribeOnConnect?: boolean;
+  /** Source repo filter — when set, refetch uses source_repos and SSE reconnects with updated URL */
+  sourceRepos?: string[] | undefined;
 }
 
 /**
@@ -111,6 +113,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     graphFilter,
     autoFetch = true,
     autoConnect = true,
+    sourceRepos,
     // Note: subscribeOnConnect is deprecated with SSE - connection equals subscription
   } = options;
 
@@ -153,6 +156,39 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     },
   });
 
+  // Client-side mutation gate: discard SSE mutations for repos not in active filter
+  const sourceReposRef = useRef(sourceRepos);
+  useEffect(() => {
+    sourceReposRef.current = sourceRepos;
+  }, [sourceRepos]);
+
+  const gatedHandleMutation = useCallback(
+    (mutation: MutationPayload) => {
+      const activeRepos = sourceReposRef.current;
+      // If no filter is active (empty or undefined), allow all mutations
+      if (!activeRepos || activeRepos.length === 0) {
+        handleMutation(mutation);
+        return;
+      }
+      // Allow mutations without source_repo (legacy/unknown origin)
+      if (!mutation.source_repo) {
+        handleMutation(mutation);
+        return;
+      }
+      // Gate: only process mutations for selected repos
+      if (activeRepos.includes(mutation.source_repo)) {
+        handleMutation(mutation);
+      } else if (process.env.NODE_ENV === "development") {
+        console.debug(
+          "[useIssues] Gated mutation for unselected repo:",
+          mutation.source_repo,
+          mutation.issue_id,
+        );
+      }
+    },
+    [handleMutation],
+  );
+
   // SSE setup - connection equals subscription (no separate subscribe message)
   // The 'since' parameter is passed on connect for catch-up events
   const {
@@ -166,7 +202,8 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     autoConnect,
     since:
       fetchTimestampRef.current > 0 ? fetchTimestampRef.current : undefined,
-    onMutation: handleMutation,
+    onMutation: gatedHandleMutation,
+    sourceRepos,
   });
 
   // Toast for user notifications
@@ -187,13 +224,21 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     deletedDuringFetchRef.current.clear();
 
     try {
+      // Build effective filters with source_repos when active
+      const effectiveFilter: WorkFilter | undefined = sourceRepos?.length
+        ? { ...filter, source_repos: sourceRepos }
+        : filter;
+      const effectiveGraphFilter: GraphFilter | undefined = sourceRepos?.length
+        ? { ...graphFilter, source_repos: sourceRepos }
+        : graphFilter;
+
       let data: Issue[];
       if (mode === "kanban") {
-        data = await getKanbanIssues(filter);
+        data = await getKanbanIssues(effectiveFilter);
       } else if (mode === "graph") {
-        data = await fetchGraphIssues(graphFilter);
+        data = await fetchGraphIssues(effectiveGraphFilter);
       } else {
-        data = await getReadyIssues(filter);
+        data = await getReadyIssues(effectiveFilter);
       }
       if (!mountedRef.current) return;
 
@@ -261,7 +306,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       fetchingRef.current = false;
       deletedDuringFetchRef.current.clear();
     }
-  }, [filter, mode, graphFilter]);
+  }, [filter, mode, graphFilter, sourceRepos]);
 
   // Keep refetchRef in sync with the latest refetch callback
   refetchRef.current = refetch;

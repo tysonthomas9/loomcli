@@ -306,6 +306,7 @@ vi.mock("@/hooks", () => ({
     toggleTheme: vi.fn(),
     setTheme: vi.fn(),
   })),
+  useRepoFilter: vi.fn(() => [[], vi.fn()]),
 }));
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)

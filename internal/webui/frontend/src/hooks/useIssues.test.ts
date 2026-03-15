@@ -1445,4 +1445,320 @@ describe("useIssues", () => {
       expect(result.current.getIssue("issue-2")?.status).toBe("closed");
     });
   });
+
+  describe("sourceRepos filtering", () => {
+    describe("refetch with sourceRepos builds effective filters", () => {
+      it("builds WorkFilter with source_repos for ready mode", async () => {
+        vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
+        const filter = { priority: 1 };
+
+        const { result } = renderHook(() =>
+          useIssues({
+            mode: "ready",
+            filter,
+            sourceRepos: ["repo-a", "repo-b"],
+            autoFetch: false,
+          }),
+        );
+
+        await act(async () => {
+          await result.current.refetch();
+        });
+
+        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith({
+          priority: 1,
+          source_repos: ["repo-a", "repo-b"],
+        });
+      });
+
+      it("builds WorkFilter with source_repos for kanban mode", async () => {
+        vi.mocked(issuesApi.getKanbanIssues).mockResolvedValue([]);
+        const filter = { assignee: "dev@example.com" };
+
+        const { result } = renderHook(() =>
+          useIssues({
+            mode: "kanban",
+            filter,
+            sourceRepos: ["repo-c"],
+            autoFetch: false,
+          }),
+        );
+
+        await act(async () => {
+          await result.current.refetch();
+        });
+
+        expect(issuesApi.getKanbanIssues).toHaveBeenCalledWith({
+          assignee: "dev@example.com",
+          source_repos: ["repo-c"],
+        });
+      });
+
+      it("builds GraphFilter with source_repos for graph mode", async () => {
+        vi.mocked(issuesApi.fetchGraphIssues).mockResolvedValue([]);
+        const graphFilter = { status: "open" as const, includeClosed: false };
+
+        const { result } = renderHook(() =>
+          useIssues({
+            mode: "graph",
+            graphFilter,
+            sourceRepos: ["repo-d"],
+            autoFetch: false,
+          }),
+        );
+
+        await act(async () => {
+          await result.current.refetch();
+        });
+
+        expect(issuesApi.fetchGraphIssues).toHaveBeenCalledWith({
+          status: "open",
+          includeClosed: false,
+          source_repos: ["repo-d"],
+        });
+      });
+
+      it("does not add source_repos when sourceRepos is undefined", async () => {
+        vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
+        const filter = { priority: 1 };
+
+        const { result } = renderHook(() =>
+          useIssues({
+            mode: "ready",
+            filter,
+            sourceRepos: undefined,
+            autoFetch: false,
+          }),
+        );
+
+        await act(async () => {
+          await result.current.refetch();
+        });
+
+        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith({ priority: 1 });
+      });
+
+      it("does not add source_repos when sourceRepos is empty", async () => {
+        vi.mocked(issuesApi.getReadyIssues).mockResolvedValue([]);
+
+        const { result } = renderHook(() =>
+          useIssues({
+            mode: "ready",
+            sourceRepos: [],
+            autoFetch: false,
+          }),
+        );
+
+        await act(async () => {
+          await result.current.refetch();
+        });
+
+        expect(issuesApi.getReadyIssues).toHaveBeenCalledWith(undefined);
+      });
+    });
+
+    describe("gatedHandleMutation", () => {
+      it("processes mutation with matching source_repo", async () => {
+        const mockIssues = [
+          createTestIssue({
+            id: "issue-1",
+            title: "Existing",
+            updated_at: "2025-01-23T10:00:00Z",
+          }),
+        ];
+        vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
+
+        const { result } = renderHook(() =>
+          useIssues({ sourceRepos: ["repo-a", "repo-b"] }),
+        );
+
+        await waitFor(() => {
+          expect(result.current.issues).toHaveLength(1);
+        });
+
+        // Send a mutation with a matching source_repo
+        act(() => {
+          onMutationCallback?.({
+            type: "create",
+            issue_id: "new-issue",
+            title: "New from repo-a",
+            timestamp: new Date().toISOString(),
+            source_repo: "repo-a",
+          });
+        });
+
+        expect(result.current.issues).toHaveLength(2);
+        expect(result.current.getIssue("new-issue")?.title).toBe(
+          "New from repo-a",
+        );
+      });
+
+      it("discards mutation with non-matching source_repo", async () => {
+        const mockIssues = [
+          createTestIssue({
+            id: "issue-1",
+            title: "Existing",
+            updated_at: "2025-01-23T10:00:00Z",
+          }),
+        ];
+        vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
+
+        const { result } = renderHook(() =>
+          useIssues({ sourceRepos: ["repo-a"] }),
+        );
+
+        await waitFor(() => {
+          expect(result.current.issues).toHaveLength(1);
+        });
+
+        // Send a mutation with a non-matching source_repo
+        act(() => {
+          onMutationCallback?.({
+            type: "create",
+            issue_id: "foreign-issue",
+            title: "From another repo",
+            timestamp: new Date().toISOString(),
+            source_repo: "repo-z",
+          });
+        });
+
+        // Should NOT have added the issue
+        expect(result.current.issues).toHaveLength(1);
+        expect(result.current.getIssue("foreign-issue")).toBeUndefined();
+      });
+
+      it("allows mutation without source_repo through when filter is active", async () => {
+        const mockIssues = [
+          createTestIssue({
+            id: "issue-1",
+            title: "Existing",
+            updated_at: "2025-01-23T10:00:00Z",
+          }),
+        ];
+        vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
+
+        const { result } = renderHook(() =>
+          useIssues({ sourceRepos: ["repo-a"] }),
+        );
+
+        await waitFor(() => {
+          expect(result.current.issues).toHaveLength(1);
+        });
+
+        // Send a mutation without source_repo (legacy/unknown origin)
+        act(() => {
+          onMutationCallback?.({
+            type: "create",
+            issue_id: "legacy-issue",
+            title: "No repo info",
+            timestamp: new Date().toISOString(),
+          });
+        });
+
+        // Should be allowed through
+        expect(result.current.issues).toHaveLength(2);
+        expect(result.current.getIssue("legacy-issue")?.title).toBe(
+          "No repo info",
+        );
+      });
+
+      it("allows all mutations when sourceRepos is empty", async () => {
+        const mockIssues = [
+          createTestIssue({
+            id: "issue-1",
+            title: "Existing",
+            updated_at: "2025-01-23T10:00:00Z",
+          }),
+        ];
+        vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
+
+        const { result } = renderHook(() => useIssues({ sourceRepos: [] }));
+
+        await waitFor(() => {
+          expect(result.current.issues).toHaveLength(1);
+        });
+
+        // Send a mutation with any source_repo - should pass through since filter is empty
+        act(() => {
+          onMutationCallback?.({
+            type: "create",
+            issue_id: "any-repo-issue",
+            title: "From any repo",
+            timestamp: new Date().toISOString(),
+            source_repo: "repo-whatever",
+          });
+        });
+
+        expect(result.current.issues).toHaveLength(2);
+        expect(result.current.getIssue("any-repo-issue")?.title).toBe(
+          "From any repo",
+        );
+      });
+
+      it("allows all mutations when sourceRepos is undefined", async () => {
+        const mockIssues = [
+          createTestIssue({
+            id: "issue-1",
+            title: "Existing",
+            updated_at: "2025-01-23T10:00:00Z",
+          }),
+        ];
+        vi.mocked(issuesApi.getReadyIssues).mockResolvedValue(mockIssues);
+
+        const { result } = renderHook(() =>
+          useIssues({ sourceRepos: undefined }),
+        );
+
+        await waitFor(() => {
+          expect(result.current.issues).toHaveLength(1);
+        });
+
+        act(() => {
+          onMutationCallback?.({
+            type: "create",
+            issue_id: "unfiltered-issue",
+            title: "No filter active",
+            timestamp: new Date().toISOString(),
+            source_repo: "repo-anything",
+          });
+        });
+
+        expect(result.current.issues).toHaveLength(2);
+        expect(result.current.getIssue("unfiltered-issue")?.title).toBe(
+          "No filter active",
+        );
+      });
+    });
+
+    describe("sourceRepos passed to useSSE", () => {
+      it("passes sourceRepos option to useSSE", () => {
+        renderHook(() =>
+          useIssues({
+            autoFetch: false,
+            sourceRepos: ["repo-a", "repo-b"],
+          }),
+        );
+
+        expect(useSSEModule.useSSE).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sourceRepos: ["repo-a", "repo-b"],
+          }),
+        );
+      });
+
+      it("passes undefined sourceRepos to useSSE when not set", () => {
+        renderHook(() =>
+          useIssues({
+            autoFetch: false,
+          }),
+        );
+
+        expect(useSSEModule.useSSE).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sourceRepos: undefined,
+          }),
+        );
+      });
+    });
+  });
 });

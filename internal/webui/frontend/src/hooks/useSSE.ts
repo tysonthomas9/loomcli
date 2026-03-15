@@ -31,6 +31,8 @@ export interface UseSSEOptions {
   autoConnect?: boolean;
   /** Initial timestamp (ms) for catch-up events when connecting */
   since?: number | undefined;
+  /** Source repo filter for server-side SSE event filtering */
+  sourceRepos?: string[] | undefined;
 }
 
 /**
@@ -81,6 +83,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
     onMutation,
     onError,
     onStateChange,
+    sourceRepos,
   } = options;
 
   // Reactive state
@@ -115,6 +118,14 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
   useEffect(() => {
     sinceRef.current = since;
   }, [since]);
+
+  // Track sourceRepos for reconnect detection
+  const sourceReposRef = useRef(sourceRepos);
+  const prevSourceReposRef = useRef<string[] | undefined>(undefined);
+
+  useEffect(() => {
+    sourceReposRef.current = sourceRepos;
+  }, [sourceRepos]);
 
   // Create client on mount
   useEffect(() => {
@@ -158,7 +169,7 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
 
     // Auto-connect if enabled
     if (autoConnect) {
-      client.connect(sinceRef.current);
+      client.connect(sinceRef.current, sourceReposRef.current);
     }
 
     // Cleanup on unmount
@@ -169,9 +180,30 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEReturn {
     };
   }, [autoConnect]);
 
+  // Reconnect when sourceRepos changes (disconnect + reconnect with new URL)
+  useEffect(() => {
+    const prev = prevSourceReposRef.current;
+    prevSourceReposRef.current = sourceRepos;
+
+    // Skip initial mount (autoConnect handles that)
+    if (prev === undefined) return;
+
+    // Compare arrays (sorted join to ignore reordering)
+    const prevKey = (prev ?? []).slice().sort().join(",");
+    const nextKey = (sourceRepos ?? []).slice().sort().join(",");
+    if (prevKey === nextKey) return;
+
+    // Disconnect and reconnect with new source_repos
+    const client = clientRef.current;
+    if (client) {
+      client.disconnect();
+      client.connect(sinceRef.current, sourceRepos);
+    }
+  }, [sourceRepos]);
+
   // Stable method references
   const connect = useCallback(() => {
-    clientRef.current?.connect(sinceRef.current);
+    clientRef.current?.connect(sinceRef.current, sourceReposRef.current);
   }, []);
 
   const disconnect = useCallback(() => {

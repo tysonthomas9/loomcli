@@ -896,4 +896,144 @@ describe("useSSE", () => {
       }
     });
   });
+
+  describe("sourceRepos parameter", () => {
+    it("passes sourceRepos to client.connect() on auto-connect", () => {
+      renderHook(() =>
+        useSSE({
+          autoConnect: true,
+          sourceRepos: ["repo-a", "repo-b"],
+        }),
+      );
+
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "source_repos=repo-a%2Crepo-b",
+      );
+    });
+
+    it("passes sourceRepos to client on manual connect", () => {
+      const { result } = renderHook(() =>
+        useSSE({
+          autoConnect: false,
+          sourceRepos: ["repo-x"],
+        }),
+      );
+
+      act(() => {
+        result.current.connect();
+      });
+
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "source_repos=repo-x",
+      );
+    });
+
+    it("changing sourceRepos triggers disconnect + reconnect", () => {
+      const { rerender } = renderHook(
+        ({ sourceRepos }: { sourceRepos: string[] | undefined }) =>
+          useSSE({
+            autoConnect: true,
+            sourceRepos,
+          }),
+        { initialProps: { sourceRepos: ["repo-a"] as string[] | undefined } },
+      );
+
+      expect(MockEventSource.instances.length).toBe(1);
+      const firstInstance = MockEventSource.lastInstance;
+      expect(firstInstance?.url).toContain("source_repos=repo-a");
+
+      // Change sourceRepos
+      rerender({ sourceRepos: ["repo-b"] });
+
+      // Should have disconnected (closed first) and reconnected (new instance)
+      expect(firstInstance?.readyState).toBe(MockEventSource.CLOSED);
+      expect(MockEventSource.instances.length).toBe(2);
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "source_repos=repo-b",
+      );
+    });
+
+    it("identical sourceRepos (reordered) does NOT trigger reconnect", () => {
+      const { rerender } = renderHook(
+        ({ sourceRepos }: { sourceRepos: string[] | undefined }) =>
+          useSSE({
+            autoConnect: true,
+            sourceRepos,
+          }),
+        {
+          initialProps: {
+            sourceRepos: ["repo-a", "repo-b"] as string[] | undefined,
+          },
+        },
+      );
+
+      expect(MockEventSource.instances.length).toBe(1);
+
+      // Rerender with same repos in different order
+      rerender({ sourceRepos: ["repo-b", "repo-a"] });
+
+      // Should NOT have created a new connection
+      expect(MockEventSource.instances.length).toBe(1);
+    });
+
+    it("reconnect uses sinceRef.current for catch-up", () => {
+      const { rerender } = renderHook(
+        ({
+          sourceRepos,
+          since,
+        }: {
+          sourceRepos: string[] | undefined;
+          since: number | undefined;
+        }) =>
+          useSSE({
+            autoConnect: true,
+            sourceRepos,
+            since,
+          }),
+        {
+          initialProps: {
+            sourceRepos: ["repo-a"] as string[] | undefined,
+            since: 1706011200000 as number | undefined,
+          },
+        },
+      );
+
+      expect(MockEventSource.instances.length).toBe(1);
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "since=1706011200000",
+      );
+
+      // Change sourceRepos to trigger reconnect
+      rerender({ sourceRepos: ["repo-b"], since: 1706011200000 });
+
+      // New connection should use the since value for catch-up
+      expect(MockEventSource.instances.length).toBe(2);
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "since=1706011200000",
+      );
+      expect(MockEventSource.lastInstance?.url).toContain(
+        "source_repos=repo-b",
+      );
+    });
+
+    it("switching from sourceRepos to undefined triggers reconnect", () => {
+      const { rerender } = renderHook(
+        ({ sourceRepos }: { sourceRepos: string[] | undefined }) =>
+          useSSE({
+            autoConnect: true,
+            sourceRepos,
+          }),
+        { initialProps: { sourceRepos: ["repo-a"] as string[] | undefined } },
+      );
+
+      expect(MockEventSource.instances.length).toBe(1);
+      expect(MockEventSource.lastInstance?.url).toContain("source_repos");
+
+      // Change to undefined
+      rerender({ sourceRepos: undefined });
+
+      expect(MockEventSource.instances.length).toBe(2);
+      expect(MockEventSource.lastInstance?.url).not.toContain("source_repos");
+    });
+  });
 });

@@ -64,6 +64,7 @@ export class BeadsSSEClient {
   private reconnectAttempts = 0;
   private lastEventId: number | undefined;
   private manualDisconnect = false;
+  private currentSourceRepos?: string[] | undefined;
 
   private onMutation: ((mutation: MutationPayload) => void) | undefined;
   private onError: ((error: string) => void) | undefined;
@@ -81,8 +82,15 @@ export class BeadsSSEClient {
    * Connect to the SSE endpoint.
    * If auth state is 'failed', attempts token re-acquisition before connecting.
    * @param since Optional timestamp (ms) to receive events since that time
+   * @param sourceRepos Optional repo filter for server-side event filtering
    */
-  async connect(since?: number): Promise<void> {
+  async connect(since?: number, sourceRepos?: string[]): Promise<void> {
+    // Always update stored sourceRepos even if we bail early,
+    // so retryNow() uses the latest filter
+    if (sourceRepos !== undefined) {
+      this.currentSourceRepos = sourceRepos;
+    }
+
     if (this.state === "connected" || this.state === "connecting") {
       return;
     }
@@ -99,7 +107,7 @@ export class BeadsSSEClient {
 
     // Use provided since value or fall back to last received event ID
     const sinceParam = since ?? this.lastEventId;
-    const url = getSSEUrl(sinceParam);
+    const url = getSSEUrl(sinceParam, sourceRepos);
 
     try {
       this.eventSource = new EventSource(url);
@@ -176,7 +184,7 @@ export class BeadsSSEClient {
 
     this.reconnectAttempts = 0;
     this.onReconnect?.(0);
-    this.connect();
+    this.connect(undefined, this.currentSourceRepos);
   }
 
   /**
@@ -273,11 +281,14 @@ export class BeadsSSEClient {
  * Get the SSE URL for the events endpoint.
  * @param since Optional timestamp (ms) for catch-up events
  */
-export function getSSEUrl(since?: number): string {
+export function getSSEUrl(since?: number, sourceRepos?: string[]): string {
   const base = `${window.location.origin}/api/events`;
   const params = new URLSearchParams();
   if (since !== undefined) {
     params.set("since", String(since));
+  }
+  if (sourceRepos && sourceRepos.length > 0) {
+    params.set("source_repos", sourceRepos.join(","));
   }
   const token = getAuthToken();
   if (token) {
