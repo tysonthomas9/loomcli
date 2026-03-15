@@ -13,7 +13,7 @@
   min-height: 0; /* Allow flex item to shrink below content height */
   overflow-x: auto;
   overflow-y: hidden;
-  background-color: #e6e4dc;
+  background-color: var(--color-bg-secondary);
 }
 
 .board > :last-child {

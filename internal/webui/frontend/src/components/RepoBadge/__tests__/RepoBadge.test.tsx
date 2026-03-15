@@ -53,11 +53,11 @@ describe("RepoBadge", () => {
       expect(badge.style.backgroundColor).toBe(expectedColor);
     });
 
-    it("always uses dark text color (#1f2937)", () => {
+    it("uses CSS variable for text color", () => {
       render(<RepoBadge repoName="some-repo" />);
 
       const badge = screen.getByLabelText("Repository: some-repo");
-      expect(badge.style.color).toBe(hexToRgb("#1f2937"));
+      expect(badge.style.color).toBe("var(--color-text-primary)");
     });
 
     it("uses deterministic background color (same name produces same color)", () => {

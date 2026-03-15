@@ -7,8 +7,8 @@
   display: flex;
   align-items: center;
   height: 36px;
-  background-color: #252526;
-  border-bottom: 1px solid #333;
+  background-color: var(--terminal-surface);
+  border-bottom: 1px solid var(--terminal-border);
   font-family: var(--font-family-base);
 }
 
@@ -31,9 +31,9 @@
   padding: 0 12px;
   height: 100%;
   border: none;
-  border-right: 1px solid #333;
+  border-right: 1px solid var(--terminal-border);
   background: transparent;
-  color: #ccc;
+  color: var(--terminal-text);
   cursor: pointer;
   font-family: var(--font-family-base);
   font-size: var(--font-size-xs);
@@ -43,7 +43,7 @@
 }
 
 .tab:hover {
-  background-color: #2d2d2d;
+  background-color: var(--terminal-surface-hover);
 }
 
 .tab:focus {
@@ -56,8 +56,8 @@
 }
 
 .tab.active {
-  background-color: #1e1e1e;
-  color: #fff;
+  background-color: var(--terminal-tab-active);
+  color: var(--terminal-text-bright);
 }
 
 /* ============= Status Dot ============= */
@@ -80,7 +80,7 @@
 }
 
 .statusDot[data-status="disconnected"] {
-  background-color: var(--brand-color, #666);
+  background-color: var(--brand-color, var(--terminal-text-muted));
   opacity: 0.35;
 }
 
@@ -90,7 +90,7 @@
 }
 
 .statusDot[data-status="crashed"] {
-  background-color: #ef4444;
+  background-color: var(--color-danger, #ef4444);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -151,10 +151,10 @@
 /* ============= Rename Input ============= */
 
 .tabLabelInput {
-  background: #1e1e1e;
+  background: var(--terminal-bg);
   border: 1px solid var(--color-primary);
   border-radius: var(--radius-sm, 2px);
-  color: #fff;
+  color: var(--terminal-text-bright);
   font-family: var(--font-family-base);
   font-size: var(--font-size-xs);
   padding: 1px 4px;
@@ -173,7 +173,7 @@
 .closeButton {
   background: none;
   border: none;
-  color: #888;
+  color: var(--terminal-text-muted);
   font-size: 12px;
   padding: 2px 4px;
   cursor: pointer;
@@ -190,7 +190,7 @@
 
 .closeButton:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--terminal-text-bright);
 }
 
 /* ============= Action Buttons ============= */
@@ -203,15 +203,15 @@
   height: 100%;
   background: none;
   border: none;
-  border-left: 1px solid #333;
-  color: #aaa;
+  border-left: 1px solid var(--terminal-border);
+  color: var(--terminal-text-muted);
   cursor: pointer;
   font-size: 16px;
 }
 
 .actionButton:hover {
-  background-color: #2d2d2d;
-  color: #fff;
+  background-color: var(--terminal-surface-hover);
+  color: var(--terminal-text-bright);
 }
 
 .actionButton:focus {
@@ -227,8 +227,8 @@
 
 .contextMenu {
   position: fixed;
-  background-color: #2d2d2d;
-  border: 1px solid #555;
+  background-color: var(--terminal-surface-hover);
+  border: 1px solid var(--terminal-scrollbar-thumb);
   border-radius: var(--radius-sm, 4px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   z-index: 1000;
@@ -242,7 +242,7 @@
   padding: 6px 12px;
   background: none;
   border: none;
-  color: #ccc;
+  color: var(--terminal-text);
   font-family: var(--font-family-base);
   font-size: var(--font-size-xs);
   text-align: left;
@@ -251,8 +251,8 @@
 }
 
 .contextMenuItem:hover:not(:disabled) {
-  background-color: #3d3d3d;
-  color: #fff;
+  background-color: var(--terminal-surface-hover);
+  color: var(--terminal-text-bright);
 }
 
 .contextMenuItem:focus-visible {
@@ -261,13 +261,13 @@
 }
 
 .contextMenuItemDisabled {
-  color: #666;
+  color: var(--terminal-text-muted);
   cursor: default;
   pointer-events: none;
 }
 
 .contextMenuDivider {
   height: 1px;
-  background-color: #444;
+  background-color: var(--terminal-border);
   margin: 4px 0;
 }

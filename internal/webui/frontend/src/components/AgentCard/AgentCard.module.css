@@ -22,7 +22,7 @@
 }
 
 .card[role="button"]:hover {
-  background: #ece9e1;
+  background: var(--color-bg-hover);
 }
 
 .card[role="button"]:focus {

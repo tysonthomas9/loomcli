@@ -74,7 +74,7 @@
   left: 44px;
   top: 50%;
   transform: translateY(-50%);
-  background-color: #1f2937;
+  background-color: var(--color-text-primary);
   color: var(--color-text-inverse);
   padding: 4px 8px;
   border-radius: 6px;
@@ -97,7 +97,7 @@
   min-width: 16px;
   height: 16px;
   border-radius: 9999px;
-  background: #22c55e;
+  background: var(--color-success);
   color: white;
   font-size: 10px;
   font-weight: 600;

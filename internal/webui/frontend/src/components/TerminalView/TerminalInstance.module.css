@@ -12,7 +12,7 @@
 .container {
   width: 100%;
   height: 100%;
-  background: #1e1e1e;
+  background: var(--terminal-bg);
   overflow: hidden;
 }
 
@@ -22,16 +22,16 @@
 }
 
 .container :global(.xterm-viewport)::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: var(--terminal-bg);
 }
 
 .container :global(.xterm-viewport)::-webkit-scrollbar-thumb {
-  background: #555;
+  background: var(--terminal-scrollbar-thumb);
   border-radius: 4px;
 }
 
 .container :global(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
-  background: #777;
+  background: var(--terminal-scrollbar-thumb-hover);
 }
 
 /* "New output ↓" pill — shown when scrolled up and new output arrives */

@@ -30,7 +30,7 @@ export function RepoBadge({
   return (
     <span
       className={rootClassName}
-      style={{ backgroundColor: bgColor, color: "#1f2937" }}
+      style={{ backgroundColor: bgColor, color: "var(--color-text-primary)" }}
       aria-label={`Repository: ${repoName}`}
       title={repoName}
     >

@@ -25,11 +25,10 @@ import {
   startAutoReconnect,
   type ReconnectState,
 } from "@/utils/reconnectBackoff";
-
 import type { ReconnectOverlayState } from "./ReconnectingOverlay";
-
 import styles from "./TerminalInstance.module.css";
 import { connectWebSocket, encodeResize } from "./terminalConnection";
+import { getTerminalTheme } from "./terminalTheme";
 import "@xterm/xterm/css/xterm.css";
 
 const SEARCH_DECORATIONS = {
@@ -340,11 +339,7 @@ export const TerminalInstance = forwardRef<
       scrollback: 5000,
       smoothScrollDuration: 120,
       rightClickSelectsWord: true,
-      theme: {
-        background: "#1e1e1e",
-        foreground: "#d4d4d4",
-        cursor: "#d4d4d4",
-      },
+      theme: getTerminalTheme(),
     });
 
     const fitAddon = new FitAddon();
@@ -645,6 +640,20 @@ export const TerminalInstance = forwardRef<
     terminal.options.fontFamily = fontFamily;
     fitAddonRef.current?.fit();
   }, [fontSize, fontFamily]);
+
+  // Sync terminal theme when data-theme attribute changes
+  useEffect(() => {
+    const t = terminalRef.current;
+    if (!t) return;
+    const obs = new MutationObserver(() => {
+      t.options.theme = getTerminalTheme();
+    });
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => obs.disconnect();
+  }, [sessionName]);
 
   return (
     <div className={styles.wrapper}>

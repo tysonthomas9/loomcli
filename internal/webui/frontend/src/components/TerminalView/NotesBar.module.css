@@ -5,9 +5,9 @@
 
 .notesBar {
   flex-shrink: 0;
-  border-top: 1px solid #3c3c3c;
-  background: #252526;
-  color: #d4d4d4;
+  border-top: 1px solid var(--terminal-border);
+  background: var(--terminal-surface);
+  color: var(--terminal-fg);
   font-size: 12px;
 }
 
@@ -21,14 +21,14 @@
 }
 
 .collapsed:hover {
-  background: #2a2d2e;
+  background: var(--terminal-surface);
 }
 
 .noteIcon {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  color: #888;
+  color: var(--terminal-text-muted);
 }
 
 .summaryText {
@@ -39,7 +39,7 @@
 }
 
 .placeholder {
-  color: #666;
+  color: var(--terminal-text-muted);
   font-style: italic;
 }
 
@@ -49,9 +49,9 @@
 
 .textarea {
   width: 100%;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  border: 1px solid #3c3c3c;
+  background: var(--terminal-bg);
+  color: var(--terminal-fg);
+  border: 1px solid var(--terminal-border);
   border-radius: 3px;
   padding: 6px 8px;
   font-family: inherit;
@@ -71,12 +71,12 @@
 .hint {
   margin-top: 4px;
   font-size: 11px;
-  color: #666;
+  color: var(--terminal-text-muted);
 }
 
 .savingIndicator {
   font-size: 11px;
-  color: #888;
+  color: var(--terminal-text-muted);
   margin-left: auto;
   flex-shrink: 0;
 }

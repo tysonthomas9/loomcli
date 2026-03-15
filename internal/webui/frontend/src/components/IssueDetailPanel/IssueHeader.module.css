@@ -173,7 +173,7 @@
 .title {
   font-size: 24px;
   font-weight: 700;
-  color: #111827;
+  color: var(--color-text-primary);
   margin: 0;
   line-height: 1.25;
   word-break: break-word;

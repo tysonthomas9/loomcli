@@ -315,7 +315,7 @@
   margin-bottom: -1px;
   font-size: 18px;
   font-weight: 600;
-  color: #5f6b7c;
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition:
     color var(--transition-fast),
@@ -450,7 +450,7 @@
 }
 
 .tab.activeTab {
-  color: #111827;
+  color: var(--color-text-primary);
   font-weight: 700;
   border-bottom-color: #111827;
 }

@@ -20,7 +20,7 @@ export const ALLOWLIST = new Map([
   ["src/hooks/useIssues.ts", 528],
   ["src/components/IssueDetailView/IssueDetailView.tsx", 651],
   ["src/components/TerminalView/TerminalView.tsx", 710],
-  ["src/components/TerminalView/TerminalInstance.tsx", 668],
+  ["src/components/TerminalView/TerminalInstance.tsx", 678],
   ["src/components/IssueDetailPanel/AssigneeDropdown.tsx", 535],
 ]);
 
