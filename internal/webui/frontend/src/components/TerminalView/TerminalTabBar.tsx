@@ -13,6 +13,7 @@ export interface TerminalTab {
   id: string;
   label: string;
   connectionState: ConnectionState;
+  brandColor?: string;
 }
 
 export interface TerminalTabBarProps {
@@ -200,6 +201,13 @@ export function TerminalTabBar({
                 data-status={tab.connectionState}
                 data-testid={`terminal-tab-status-${tab.id}`}
                 aria-label={`Connection: ${tab.connectionState}`}
+                style={
+                  tab.brandColor
+                    ? ({
+                        "--brand-color": tab.brandColor,
+                      } as React.CSSProperties)
+                    : undefined
+                }
               />
               {editingTabId === tab.id ? (
                 <input

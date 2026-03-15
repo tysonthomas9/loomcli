@@ -544,6 +544,93 @@ describe("TerminalTabBar", () => {
     });
   });
 
+  describe("brand color status dots", () => {
+    it("status dot sets --brand-color CSS variable when brandColor is provided", () => {
+      const tabs: TerminalTab[] = [
+        {
+          id: "claude-1",
+          label: "Claude 1",
+          connectionState: "connected",
+          brandColor: "#D97706",
+        },
+      ];
+      render(
+        <TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="claude-1" />,
+      );
+
+      const dot = screen.getByTestId("terminal-tab-status-claude-1");
+      expect(dot).toHaveStyle({ "--brand-color": "#D97706" });
+    });
+
+    it("status dot does not set inline style when brandColor is undefined", () => {
+      const tabs: TerminalTab[] = [
+        { id: "plain", label: "Plain", connectionState: "connected" },
+      ];
+      render(
+        <TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="plain" />,
+      );
+
+      const dot = screen.getByTestId("terminal-tab-status-plain");
+      expect(dot.getAttribute("style")).toBeNull();
+    });
+
+    it("connected state shows brand color at full opacity (no opacity override)", () => {
+      const tabs: TerminalTab[] = [
+        {
+          id: "codex-1",
+          label: "Codex 1",
+          connectionState: "connected",
+          brandColor: "#22c55e",
+        },
+      ];
+      render(
+        <TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="codex-1" />,
+      );
+
+      const dot = screen.getByTestId("terminal-tab-status-codex-1");
+      expect(dot).toHaveStyle({ "--brand-color": "#22c55e" });
+      // CSS handles opacity via data-status; no inline opacity override
+      expect(dot.style.opacity).toBe("");
+    });
+
+    it("all status dot states still use data-status attribute", () => {
+      const tabs: TerminalTab[] = [
+        {
+          id: "a",
+          label: "A",
+          connectionState: "connected",
+          brandColor: "#D97706",
+        },
+        {
+          id: "b",
+          label: "B",
+          connectionState: "connecting",
+          brandColor: "#22c55e",
+        },
+        {
+          id: "c",
+          label: "C",
+          connectionState: "disconnected",
+          brandColor: "#3B82F6",
+        },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(screen.getByTestId("terminal-tab-status-a")).toHaveAttribute(
+        "data-status",
+        "connected",
+      );
+      expect(screen.getByTestId("terminal-tab-status-b")).toHaveAttribute(
+        "data-status",
+        "connecting",
+      );
+      expect(screen.getByTestId("terminal-tab-status-c")).toHaveAttribute(
+        "data-status",
+        "disconnected",
+      );
+    });
+  });
+
   describe("edge cases", () => {
     it("renders just the new-tab button when tabs array is empty", () => {
       render(<TerminalTabBar {...defaultProps} tabs={[]} activeTabId="" />);

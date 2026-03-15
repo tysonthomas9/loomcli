@@ -848,6 +848,74 @@ describe("TerminalView", () => {
       expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
     });
   });
+
+  // ── Brand color mapping ─────────────────────────────────────────────────
+
+  describe("brand color mapping", () => {
+    it("tabs with lead-claude-1 session get claude brand color (#D97706)", async () => {
+      setMetadata([]);
+      render(<TerminalView />);
+
+      const { TerminalTabBar } = await import("../TerminalTabBar");
+      const mockTabBar = vi.mocked(TerminalTabBar);
+      const lastCallProps =
+        mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
+      const claudeTab = lastCallProps.tabs.find(
+        (t: { id: string }) => t.id === "lead-claude-1",
+      );
+      expect(claudeTab?.brandColor).toBe("#D97706");
+    });
+
+    it("tabs with lead-codex-1 session get codex brand color (#22c55e)", async () => {
+      setMetadata([]);
+      render(<TerminalView />);
+
+      const { TerminalTabBar } = await import("../TerminalTabBar");
+      const mockTabBar = vi.mocked(TerminalTabBar);
+      const lastCallProps =
+        mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
+      const codexTab = lastCallProps.tabs.find(
+        (t: { id: string }) => t.id === "lead-codex-1",
+      );
+      expect(codexTab?.brandColor).toBe("#22c55e");
+    });
+
+    it("talk-to-lead session uses default backend's brand color (claude -> #D97706)", async () => {
+      mockBackendConfigHook.config = {
+        backend: "claude",
+        source: "default",
+        available: [],
+        agents: [],
+      };
+      setMetadata([]);
+      render(<TerminalView />);
+
+      const { TerminalTabBar } = await import("../TerminalTabBar");
+      const mockTabBar = vi.mocked(TerminalTabBar);
+      const lastCallProps =
+        mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
+      const fallbackTab = lastCallProps.tabs.find(
+        (t: { id: string }) => t.id === "talk-to-lead",
+      );
+      expect(fallbackTab?.brandColor).toBe("#D97706");
+    });
+
+    it("unknown backend names get undefined brandColor (CSS fallbacks apply)", async () => {
+      // A session matching lead-{backend}-{n} with an unrecognized backend
+      // leaves brandColor undefined so CSS semantic fallbacks take over
+      setMetadata([{ session_name: "lead-gemini-1", label: "lead-gemini-1" }]);
+      render(<TerminalView />);
+
+      const { TerminalTabBar } = await import("../TerminalTabBar");
+      const mockTabBar = vi.mocked(TerminalTabBar);
+      const lastCallProps =
+        mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
+      const geminiTab = lastCallProps.tabs.find(
+        (t: { id: string }) => t.id === "lead-gemini-1",
+      );
+      expect(geminiTab?.brandColor).toBeUndefined();
+    });
+  });
 });
 
 // ── Tests: SessionNamePrompt ─────────────────────────────────────────────────

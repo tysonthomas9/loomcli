@@ -71,16 +71,17 @@
 }
 
 .statusDot[data-status="connected"] {
-  background-color: var(--color-success, #22c55e);
+  background-color: var(--brand-color, var(--color-success, #22c55e));
 }
 
 .statusDot[data-status="connecting"] {
-  background-color: var(--color-warning, #f59e0b);
+  background-color: var(--brand-color, var(--color-warning, #f59e0b));
   animation: pulse 1.5s ease-in-out infinite;
 }
 
 .statusDot[data-status="disconnected"] {
-  background-color: var(--color-danger, #ef4444);
+  background-color: var(--brand-color, #666);
+  opacity: 0.35;
 }
 
 .statusDot[data-status="error"] {

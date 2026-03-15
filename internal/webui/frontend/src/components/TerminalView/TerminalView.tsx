@@ -26,6 +26,27 @@ import styles from "./TerminalView.module.css";
 
 const MAX_TABS = 8;
 
+/** Brand colors for each known backend. */
+const BACKEND_BRAND_COLORS: Record<string, string> = {
+  claude: "#D97706",
+  codex: "#22c55e",
+  opencode: "#3B82F6",
+};
+/** When backend is not in the map, leave brandColor undefined so CSS fallbacks apply. */
+
+/**
+ * Extract backend name from a session name.
+ * Parses `lead-{backend}-{n}` pattern; falls back to defaultBackend.
+ */
+function getBackendFromSessionName(
+  sessionName: string,
+  defaultBackend?: string,
+): string {
+  const match = sessionName.match(/^lead-(.+)-\d+$/);
+  if (match?.[1]) return match[1];
+  return defaultBackend ?? "unknown";
+}
+
 /**
  * Generate an auto-incremented tab name for a given backend.
  * Returns `lead-{backend}-{n}` where n is max existing number + 1.
@@ -49,6 +70,7 @@ interface TabState {
   label: string;
   sessionName: string;
   connectionState: ConnectionState;
+  backendName: string;
 }
 
 /**
@@ -99,12 +121,17 @@ export function TerminalView({
 
     if (tabMetadata.length > 0) {
       // Returning user: restore tabs from persisted metadata, sorted by sort_order
+      const defaultBackend = config?.backend;
       const restoredTabs: TabState[] = tabMetadata
         .map((m) => ({
           id: m.session_name,
           label: m.label,
           sessionName: m.session_name,
           connectionState: "disconnected" as ConnectionState,
+          backendName: getBackendFromSessionName(
+            m.session_name,
+            defaultBackend,
+          ),
           _sortOrder: m.sort_order,
         }))
         .sort((a, b) => (a._sortOrder ?? 999) - (b._sortOrder ?? 999))
@@ -128,6 +155,7 @@ export function TerminalView({
           label: "talk-to-lead",
           sessionName: "talk-to-lead",
           connectionState: "disconnected" as ConnectionState,
+          backendName: config?.backend ?? "unknown",
         };
         setTabs([fallbackTab]);
         setActiveTabId(fallbackTab.id);
@@ -144,6 +172,7 @@ export function TerminalView({
           label: name,
           sessionName: name,
           connectionState: "disconnected" as ConnectionState,
+          backendName: backend,
         };
       });
       setTabs(newTabs);
@@ -201,6 +230,7 @@ export function TerminalView({
       label: `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`,
       sessionName,
       connectionState: "disconnected" as ConnectionState,
+      backendName: config?.backend ?? "unknown",
     };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(sessionName);
@@ -331,6 +361,7 @@ export function TerminalView({
           label: name,
           sessionName: name,
           connectionState: "disconnected" as const,
+          backendName: backend,
         },
       ]);
       setActiveTabId(name);
@@ -394,11 +425,15 @@ export function TerminalView({
       ) : (
         <>
           <TerminalTabBar
-            tabs={tabs.map((t) => ({
-              id: t.id,
-              label: t.label,
-              connectionState: t.connectionState,
-            }))}
+            tabs={tabs.map((t) => {
+              const color = BACKEND_BRAND_COLORS[t.backendName];
+              return {
+                id: t.id,
+                label: t.label,
+                connectionState: t.connectionState,
+                ...(color != null && { brandColor: color }),
+              };
+            })}
             activeTabId={activeTabId}
             onTabChange={handleTabChange}
             onTabClose={handleTabClose}
