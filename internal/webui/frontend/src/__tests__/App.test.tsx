@@ -731,12 +731,9 @@ describe("App", () => {
 
       render(<App />);
 
-      // Should render EmptyState with no-issues variant in the main content area
-      const emptyStates = screen.getAllByTestId("empty-state");
-      const issuesEmptyState = emptyStates.find(
-        (el) => el.getAttribute("data-variant") === "no-issues",
-      );
-      expect(issuesEmptyState).toBeInTheDocument();
+      // Should render EmptyWorkspaceBoard in the main content area
+      const emptyBoard = screen.getByTestId("empty-workspace-board");
+      expect(emptyBoard).toBeInTheDocument();
       expect(
         screen.getByRole("heading", { name: "No issues yet" }),
       ).toBeInTheDocument();

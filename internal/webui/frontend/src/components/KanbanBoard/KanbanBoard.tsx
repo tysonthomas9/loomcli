@@ -22,6 +22,7 @@ import { useState, useMemo, useCallback, useRef, createRef } from "react";
 
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyColumn } from "@/components/EmptyColumn";
+import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
 import { StatusColumn, VirtualizedCardList } from "@/components/StatusColumn";
 import { formatStatusLabel } from "@/utils/statusFormat";
 import type { FilterState } from "@/hooks/useFilterState";
@@ -64,6 +65,8 @@ export interface KanbanBoardProps {
   showBlocked?: boolean;
   /** Set of issue IDs with pending optimistic updates */
   pendingIds?: Set<string>;
+  /** Whether the app is in multi-repo mode (affects empty state text) */
+  isMultiRepo?: boolean;
 }
 
 /**
@@ -98,6 +101,7 @@ export function KanbanBoard({
   blockedIssues,
   showBlocked = true,
   pendingIds,
+  isMultiRepo,
 }: KanbanBoardProps): JSX.Element {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
@@ -256,6 +260,23 @@ export function KanbanBoard({
     },
     [onDragEnd, columns, sourceColumnId],
   );
+
+  // Board-level empty state: show when all issues have been filtered out
+  if (filteredIssues.length === 0) {
+    // Determine if user-driven filters caused the empty state (not just showBlocked)
+    const hasUserFilters =
+      filters !== undefined &&
+      (filters.priority !== undefined ||
+        filters.type !== undefined ||
+        (filters.labels !== undefined && filters.labels.length > 0) ||
+        (filters.search !== undefined && filters.search !== ""));
+    return (
+      <EmptyWorkspaceBoard
+        {...(isMultiRepo !== undefined && { isMultiRepo })}
+        hasFiltersActive={hasUserFilters}
+      />
+    );
+  }
 
   const rootClassName = className
     ? `${styles.board} ${className}`

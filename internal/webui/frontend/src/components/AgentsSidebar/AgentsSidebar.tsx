@@ -1,15 +1,12 @@
 /**
  * AgentsSidebar component displays a collapsible sidebar with agent status.
- * Shows all agents from the loom server with real-time updates.
- * Includes work queue summary, project stats, and sync status.
  */
-
 import type { ReactNode } from "react";
 import { useState, useCallback, useEffect } from "react";
 
 import { ApiError } from "@/api/client";
 import { gitPushAll } from "@/api/git";
-import { EmptyState, ErrorDisplay, LoadingSkeleton } from "@/components";
+import { ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useAgentContext, useRepoFilter } from "@/hooks";
 import type {
   LoomAgentStatus,
@@ -277,7 +274,12 @@ export function AgentsSidebar({
           )}
 
           {agents.length === 0 && isConnected && !isLoading && (
-            <EmptyState variant="no-agents" />
+            <div className={styles.emptyGuide}>
+              <p className={styles.emptyHeadline}>No agents configured</p>
+              <p className={styles.emptyHint}>
+                Add agents in your loom config to start automating work
+              </p>
+            </div>
           )}
 
           {agents.length > 0 && (

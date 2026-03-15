@@ -664,11 +664,11 @@ describe("SwimLaneBoard", () => {
         />,
       );
 
-      // Should render the board container but with no lanes
-      expect(screen.getByTestId("swim-lane-board")).toBeInTheDocument();
+      // Should render the EmptyWorkspaceBoard instead of empty lanes
+      expect(screen.getByTestId("empty-workspace-board")).toBeInTheDocument();
       expect(
-        screen.queryByRole("heading", { level: 3 }),
-      ).not.toBeInTheDocument();
+        screen.getByRole("heading", { name: "No issues yet" }),
+      ).toBeInTheDocument();
     });
 
     it("handles issues appearing in multiple label lanes", () => {

@@ -24,7 +24,7 @@ import {
   SwimLaneBoard,
   IssueTable,
   LoadingSkeleton,
-  EmptyState,
+  EmptyWorkspaceBoard,
   ErrorDisplay,
   ErrorBoundary,
   ConnectionStatus,
@@ -911,7 +911,7 @@ function App() {
           }
           sidebar={sidebarContent}
         >
-          <EmptyState variant="no-issues" />
+          <EmptyWorkspaceBoard isMultiRepo={isMultiRepo} />
         </AppLayout>
         {!isDaemonAvailable && (
           <DaemonUnavailableOverlay
@@ -955,6 +955,7 @@ function App() {
                   groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
                   onDragEnd={handleDragEnd}
                   onIssueClick={handleIssueClick}
+                  isMultiRepo={isMultiRepo}
                   {...(blockedIssuesMap !== undefined && {
                     blockedIssues: blockedIssuesMap,
                   })}
