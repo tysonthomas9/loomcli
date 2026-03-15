@@ -64,6 +64,7 @@ export function TerminalView({
     updateLabel,
     updateNotes,
     deleteTab,
+    linkToIssue,
     isLoading: metaLoading,
   } = useTerminalMetadata();
   const { config, isLoading: configLoading } = useBackendConfig();
@@ -364,9 +365,11 @@ export function TerminalView({
     setActiveTabId,
     instanceRefs,
     initializedRef,
+    isActive,
     issueId,
     tabs,
     createTab,
+    linkToIssue,
     backendName: config?.backend ?? "unknown",
   });
 

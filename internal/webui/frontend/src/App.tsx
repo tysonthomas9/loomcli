@@ -977,6 +977,7 @@ function App() {
               pendingIssueContext={pendingIssueContext}
               onIssueContextConsumed={handleIssueContextConsumed}
               onActiveSessionCountChange={setActiveSessionCount}
+              {...(selectedIssueId != null && { issueId: selectedIssueId })}
             />
           </Suspense>
         </div>
@@ -995,5 +996,4 @@ function App() {
     </SearchTermProvider>
   );
 }
-
 export default App;

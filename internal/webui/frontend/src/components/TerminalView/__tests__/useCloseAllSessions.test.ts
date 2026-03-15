@@ -22,8 +22,10 @@ function createArgs(
       Map<string, unknown>
     >,
     initializedRef: { current: true } as React.MutableRefObject<boolean>,
+    isActive: true,
     tabs: [],
     createTab: vi.fn().mockResolvedValue(undefined),
+    linkToIssue: vi.fn().mockResolvedValue(undefined),
     backendName: "claude",
     ...overrides,
   };
@@ -247,6 +249,149 @@ describe("useSessionManagement", () => {
 
       // Dots should be replaced with dashes
       expect(setActiveTabId).toHaveBeenCalledWith("issue-proj-sub-123");
+    });
+
+    it("calls linkToIssue after createTab succeeds for new issue tab", async () => {
+      const createTab = vi.fn().mockResolvedValue(undefined);
+      const linkToIssue = vi.fn().mockResolvedValue(undefined);
+
+      const args = createArgs({
+        issueId: "PROJ-99",
+        tabs: [],
+        createTab,
+        linkToIssue,
+        initializedRef: { current: true } as React.MutableRefObject<boolean>,
+      });
+
+      renderHook(() => useSessionManagement(args));
+
+      // Wait for promise chain (createTab -> linkToIssue) to resolve
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(createTab).toHaveBeenCalledWith(
+        "issue-PROJ-99",
+        "issue-PROJ-99",
+        0,
+      );
+      expect(linkToIssue).toHaveBeenCalledWith("issue-PROJ-99", "PROJ-99");
+    });
+
+    it("calls linkToIssue after createTab for sanitized issue ID", async () => {
+      const createTab = vi.fn().mockResolvedValue(undefined);
+      const linkToIssue = vi.fn().mockResolvedValue(undefined);
+
+      const args = createArgs({
+        issueId: "proj.sub.42",
+        tabs: [],
+        createTab,
+        linkToIssue,
+        initializedRef: { current: true } as React.MutableRefObject<boolean>,
+      });
+
+      renderHook(() => useSessionManagement(args));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(createTab).toHaveBeenCalledWith(
+        "issue-proj-sub-42",
+        "issue-proj-sub-42",
+        0,
+      );
+      expect(linkToIssue).toHaveBeenCalledWith(
+        "issue-proj-sub-42",
+        "proj.sub.42",
+      );
+    });
+
+    it("does not call linkToIssue when switching to existing tab", async () => {
+      const linkToIssue = vi.fn().mockResolvedValue(undefined);
+      const createTab = vi.fn().mockResolvedValue(undefined);
+
+      const args = createArgs({
+        issueId: "PROJ-42",
+        tabs: [
+          {
+            id: "issue-PROJ-42",
+            label: "issue-PROJ-42",
+            sessionName: "issue-PROJ-42",
+            connectionState: "disconnected" as const,
+            backendName: "claude",
+          },
+        ],
+        createTab,
+        linkToIssue,
+        initializedRef: { current: true } as React.MutableRefObject<boolean>,
+      });
+
+      renderHook(() => useSessionManagement(args));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(createTab).not.toHaveBeenCalled();
+      expect(linkToIssue).not.toHaveBeenCalled();
+    });
+
+    it("logs error when linkToIssue fails after createTab", async () => {
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const createTab = vi.fn().mockResolvedValue(undefined);
+      const linkToIssue = vi.fn().mockRejectedValue(new Error("link failed"));
+
+      const args = createArgs({
+        issueId: "PROJ-50",
+        tabs: [],
+        createTab,
+        linkToIssue,
+        initializedRef: { current: true } as React.MutableRefObject<boolean>,
+      });
+
+      renderHook(() => useSessionManagement(args));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(createTab).toHaveBeenCalled();
+      // The .catch handler logs the error
+      expect(consoleSpy).toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+
+    it("does not call linkToIssue when createTab fails", async () => {
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const createTab = vi.fn().mockRejectedValue(new Error("create failed"));
+      const linkToIssue = vi.fn().mockResolvedValue(undefined);
+
+      const args = createArgs({
+        issueId: "PROJ-60",
+        tabs: [],
+        createTab,
+        linkToIssue,
+        initializedRef: { current: true } as React.MutableRefObject<boolean>,
+      });
+
+      renderHook(() => useSessionManagement(args));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      expect(createTab).toHaveBeenCalled();
+      // linkToIssue should NOT be called if createTab failed
+      expect(linkToIssue).not.toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
     });
   });
 });

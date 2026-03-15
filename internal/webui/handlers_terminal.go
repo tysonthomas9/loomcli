@@ -14,6 +14,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // Constants for terminal WebSocket communication.
@@ -161,7 +162,7 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 // whose host portions are used as OriginPatterns for the WebSocket upgrade.
 // When nil or empty, only same-origin and non-browser (no Origin header)
 // connections are accepted.
-func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
+func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigFn func() (*WorkspaceData, error), tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 	// Compute origin host patterns once at construction time.
 	patterns := originHosts(allowedOrigins)
 
@@ -263,6 +264,20 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		// Inject project context banner into freshly created talk-to-lead sessions.
 		if isNewSession && loomServerURL != "" {
 			injectTerminalContextBanner(termSession, loomServerURL, workspaceConfigFn)
+		}
+
+		// Broadcast SSE event if this session is linked to an issue, so indicators update on connect.
+		// Use background context since r.Context() may be invalid after WebSocket hijack.
+		if tabMetaStore != nil && hub != nil {
+			metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if meta, err := tabMetaStore.Get(metaCtx, session); err == nil && meta != nil && meta.IssueID != "" {
+				hub.Broadcast(&MutationPayload{
+					Type:      "terminal_session_change",
+					IssueID:   meta.IssueID,
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+				})
+			}
+			metaCancel()
 		}
 
 		// Create context for coordinating goroutines
