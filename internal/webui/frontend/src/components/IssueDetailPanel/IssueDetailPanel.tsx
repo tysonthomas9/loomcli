@@ -192,6 +192,8 @@ export interface IssueDetailPanelProps {
   onApprove?: (issue: Issue) => void | Promise<void>;
   /** Callback when reject is submitted with comment (only for review items) */
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
+  /** Callback when copy-link button is clicked */
+  onCopyLink?: () => void;
 }
 
 /**
@@ -240,6 +242,8 @@ interface DefaultContentProps {
   onApprove?: (issue: Issue) => void | Promise<void>;
   /** Callback when reject is submitted with comment */
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
+  /** Callback when copy-link button is clicked */
+  onCopyLink?: () => void;
 }
 
 /**
@@ -281,6 +285,7 @@ function DefaultContent({
   onIssueUpdate,
   onApprove,
   onReject,
+  onCopyLink,
 }: DefaultContentProps): JSX.Element {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
@@ -794,6 +799,7 @@ function DefaultContent({
           onStatusChange={handleStatusChange}
           isSavingStatus={isSavingStatus}
           showPriority={true}
+          {...(onCopyLink !== undefined && { onCopyLink })}
           sticky={true}
         />
 
@@ -1250,6 +1256,7 @@ export function IssueDetailPanel({
   children,
   onApprove,
   onReject,
+  onCopyLink,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
@@ -1313,6 +1320,7 @@ export function IssueDetailPanel({
       onClose={onClose}
       {...(onApprove !== undefined && { onApprove })}
       {...(onReject !== undefined && { onReject })}
+      {...(onCopyLink !== undefined && { onCopyLink })}
     />
   );
 

@@ -191,13 +191,17 @@ vi.mock("@/components/WorkspaceView", () => ({
 }));
 
 // Create hoisted mock for useViewState to allow per-test control
-const { mockUseViewState, mockSetActiveView, mockSetDetailView } = vi.hoisted(
-  () => ({
-    mockUseViewState: vi.fn(),
-    mockSetActiveView: vi.fn(),
-    mockSetDetailView: vi.fn(),
-  }),
-);
+const {
+  mockUseViewState,
+  mockSetActiveView,
+  mockSetDetailView,
+  mockCloseDetailView,
+} = vi.hoisted(() => ({
+  mockUseViewState: vi.fn(),
+  mockSetActiveView: vi.fn(),
+  mockSetDetailView: vi.fn(),
+  mockCloseDetailView: vi.fn(),
+}));
 
 /**
  * Helper to create a useViewState return value with extra properties.
@@ -205,16 +209,20 @@ const { mockUseViewState, mockSetActiveView, mockSetDetailView } = vi.hoisted(
 function createViewStateReturn(
   view: string,
   setter = mockSetActiveView,
+  issueId: string | null = null,
 ): [string, typeof mockSetActiveView] & {
   setDetailView: typeof mockSetDetailView;
+  closeDetailView: typeof mockCloseDetailView;
   urlIssueId: string | null;
 } {
   const result = [view, setter] as [string, typeof mockSetActiveView] & {
     setDetailView: typeof mockSetDetailView;
+    closeDetailView: typeof mockCloseDetailView;
     urlIssueId: string | null;
   };
   result.setDetailView = mockSetDetailView;
-  result.urlIssueId = null;
+  result.closeDetailView = mockCloseDetailView;
+  result.urlIssueId = issueId;
   return result;
 }
 
@@ -1430,7 +1438,7 @@ describe("App", () => {
       fireEvent.click(issueCard);
 
       // Should navigate to issue-detail view
-      expect(mockSetActiveView).toHaveBeenCalledWith("issue-detail");
+      expect(mockSetDetailView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
     });
 
@@ -1492,7 +1500,7 @@ describe("App", () => {
       fireEvent.click(backButton);
 
       // Should navigate back (defaults to kanban since previousView starts as kanban)
-      expect(mockSetActiveView).toHaveBeenCalledWith("kanban");
+      expect(mockCloseDetailView).toHaveBeenCalledWith("kanban");
       expect(clearIssue).toHaveBeenCalled();
     });
 
@@ -2211,7 +2219,7 @@ describe("App", () => {
       fireEvent.click(
         screen.getByRole("button", { name: /Issue: First Issue/ }),
       );
-      expect(mockSetActiveView).toHaveBeenCalledWith("issue-detail");
+      expect(mockSetDetailView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // Click second issue
@@ -2250,7 +2258,7 @@ describe("App", () => {
       fireEvent.click(screen.getByText("Issue Three"));
 
       // All navigated to issue-detail view
-      expect(mockSetActiveView).toHaveBeenCalledWith("issue-detail");
+      expect(mockSetDetailView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenLastCalledWith("issue-3");
     });
 
@@ -2384,7 +2392,7 @@ describe("App", () => {
       // Click issue - should close agent panel and navigate to detail view
       vi.advanceTimersByTime(100);
       fireEvent.click(screen.getByText("Test Issue"));
-      expect(mockSetActiveView).toHaveBeenCalledWith("issue-detail");
+      expect(mockSetDetailView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // Agent panel should be closed
@@ -2412,7 +2420,7 @@ describe("App", () => {
 
       // Click issue - should navigate to issue-detail view, not open the panel overlay
       fireEvent.click(screen.getByText("Test Issue"));
-      expect(mockSetActiveView).toHaveBeenCalledWith("issue-detail");
+      expect(mockSetDetailView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // The overlay panel should remain closed (we now use IssueDetailView instead)
@@ -2473,7 +2481,7 @@ describe("App", () => {
       });
       fireEvent.click(issueCard);
       expect(fetchIssue).toHaveBeenCalledTimes(1);
-      expect(mockSetActiveView).toHaveBeenCalledWith("issue-detail");
+      expect(mockSetDetailView).toHaveBeenCalled();
     });
 
     it("agent panel timeout is properly cancelled when clicking another agent", () => {

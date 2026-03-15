@@ -110,6 +110,39 @@
   color: var(--color-text-muted);
 }
 
+.copyLinkButton {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.copyLinkButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.copyLinkButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* When copyLinkButton is present, it takes the margin-left: auto.
+   closeButton only needs it when copyLinkButton is absent. */
+.copyLinkButton + .closeButton {
+  margin-left: 0;
+}
+
 .closeButton {
   margin-left: auto;
   width: 28px;

@@ -659,3 +659,269 @@ describe("edge cases", () => {
     expect(result.current[0]).toBe("table");
   });
 });
+
+describe("deep-link URL (setDetailView / closeDetailView)", () => {
+  let pushStateSpy: ReturnType<typeof vi.fn>;
+  let replaceStateSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockWindowLocation("");
+    pushStateSpy = vi.fn();
+    replaceStateSpy = vi.fn();
+    Object.defineProperty(window, "history", {
+      value: {
+        pushState: pushStateSpy,
+        replaceState: replaceStateSpy,
+      },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("setDetailView calls pushState (not replaceState) with correct URL params", () => {
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.setDetailView("issue-42");
+    });
+
+    // pushState should be called with issue-detail view and issue param
+    expect(pushStateSpy).toHaveBeenCalledWith(
+      null,
+      "",
+      "/app?view=issue-detail&issue=issue-42",
+    );
+
+    // The meaningful navigation action should go through pushState,
+    // not just replaceState. Verify pushState was called first (before any
+    // useEffect sync replaceState).
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("setDetailView updates view state to issue-detail", () => {
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.setDetailView("abc-123");
+    });
+
+    expect(result.current[0]).toBe("issue-detail");
+  });
+
+  it("setDetailView sets urlIssueId", () => {
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.setDetailView("abc-123");
+    });
+
+    expect(result.current.urlIssueId).toBe("abc-123");
+  });
+
+  it("closeDetailView calls pushState with correct URL (issue param removed)", () => {
+    const { result } = renderHook(() => useViewState());
+
+    // First open a detail view
+    act(() => {
+      result.current.setDetailView("issue-99");
+    });
+
+    pushStateSpy.mockClear();
+
+    // Now close it, falling back to table view
+    act(() => {
+      result.current.closeDetailView("table");
+    });
+
+    expect(pushStateSpy).toHaveBeenCalledWith(
+      null,
+      "",
+      "/app?view=table",
+    );
+
+    // The URL should not contain issue param
+    const lastPushCall = pushStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(lastPushCall).not.toContain("issue=");
+  });
+
+  it("closeDetailView returns urlIssueId as null after closing", () => {
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.setDetailView("issue-99");
+    });
+
+    expect(result.current.urlIssueId).toBe("issue-99");
+
+    act(() => {
+      result.current.closeDetailView("kanban");
+    });
+
+    expect(result.current.urlIssueId).toBeNull();
+  });
+
+  it("closeDetailView sets view to fallback view", () => {
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.setDetailView("issue-1");
+    });
+
+    act(() => {
+      result.current.closeDetailView("graph");
+    });
+
+    expect(result.current[0]).toBe("graph");
+  });
+
+  it("closeDetailView to DEFAULT_VIEW removes view param from URL", () => {
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.setDetailView("issue-1");
+    });
+
+    pushStateSpy.mockClear();
+
+    act(() => {
+      result.current.closeDetailView("kanban");
+    });
+
+    // kanban is DEFAULT_VIEW, so view param should be omitted for clean URL
+    const lastPushCall = pushStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(lastPushCall).toBe("/app");
+    expect(lastPushCall).not.toContain("view=");
+    expect(lastPushCall).not.toContain("issue=");
+  });
+
+  it("URL sync useEffect skips replaceState when URL already matches state (after pushState)", () => {
+    const { result } = renderHook(() => useViewState());
+
+    // setDetailView calls pushState, which updates the URL
+    act(() => {
+      result.current.setDetailView("issue-42");
+    });
+
+    // Simulate URL already matching after pushState
+    mockWindowLocation("?view=issue-detail&issue=issue-42");
+
+    // Clear spy counts after setDetailView
+    replaceStateSpy.mockClear();
+
+    // Force a re-render to trigger the useEffect sync
+    act(() => {
+      // Trigger re-render without changing state
+      result.current[1](result.current[0]);
+    });
+
+    // replaceState should not be called because URL already matches state
+    const replaceCallsWithIssue = replaceStateSpy.mock.calls.filter(
+      (call) =>
+        typeof call[2] === "string" && call[2].includes("issue=issue-42"),
+    );
+    expect(replaceCallsWithIssue).toHaveLength(0);
+  });
+
+  it("popstate event updates urlIssueId correctly", () => {
+    mockWindowLocation("?view=issue-detail&issue=deep-link-1");
+    const { result } = renderHook(() => useViewState());
+
+    expect(result.current[0]).toBe("issue-detail");
+    expect(result.current.urlIssueId).toBe("deep-link-1");
+
+    // Simulate browser back to a different issue
+    act(() => {
+      mockWindowLocation("?view=issue-detail&issue=deep-link-2");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    expect(result.current.urlIssueId).toBe("deep-link-2");
+
+    // Simulate browser back to a non-detail view
+    act(() => {
+      mockWindowLocation("?view=table");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    expect(result.current[0]).toBe("table");
+    expect(result.current.urlIssueId).toBeNull();
+  });
+
+  it("setDetailView preserves other URL params (priority, type, etc.)", () => {
+    mockWindowLocation("?priority=2&view=kanban&type=bug");
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.setDetailView("issue-55");
+    });
+
+    const lastPushCall = pushStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(lastPushCall).toContain("priority=2");
+    expect(lastPushCall).toContain("type=bug");
+    expect(lastPushCall).toContain("view=issue-detail");
+    expect(lastPushCall).toContain("issue=issue-55");
+  });
+
+  it("closeDetailView preserves other URL params (priority, type, etc.)", () => {
+    mockWindowLocation("?priority=3&view=issue-detail&issue=issue-55&type=feature");
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.closeDetailView("table");
+    });
+
+    const lastPushCall = pushStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(lastPushCall).toContain("priority=3");
+    expect(lastPushCall).toContain("type=feature");
+    expect(lastPushCall).toContain("view=table");
+    expect(lastPushCall).not.toContain("issue=");
+  });
+
+  it("setDetailView does not use pushState when syncUrl is false", () => {
+    const { result } = renderHook(() => useViewState({ syncUrl: false }));
+
+    act(() => {
+      result.current.setDetailView("issue-1");
+    });
+
+    expect(pushStateSpy).not.toHaveBeenCalled();
+    // But state should still be updated
+    expect(result.current[0]).toBe("issue-detail");
+    expect(result.current.urlIssueId).toBe("issue-1");
+  });
+
+  it("closeDetailView does not use pushState when syncUrl is false", () => {
+    const { result } = renderHook(() => useViewState({ syncUrl: false }));
+
+    act(() => {
+      result.current.setDetailView("issue-1");
+    });
+
+    act(() => {
+      result.current.closeDetailView("table");
+    });
+
+    expect(pushStateSpy).not.toHaveBeenCalled();
+    expect(result.current[0]).toBe("table");
+    expect(result.current.urlIssueId).toBeNull();
+  });
+
+  it("initializes urlIssueId from URL on mount", () => {
+    mockWindowLocation("?view=issue-detail&issue=from-url");
+    const { result } = renderHook(() => useViewState());
+
+    expect(result.current[0]).toBe("issue-detail");
+    expect(result.current.urlIssueId).toBe("from-url");
+  });
+
+  it("initializes urlIssueId as null when no issue param in URL", () => {
+    mockWindowLocation("?view=table");
+    const { result } = renderHook(() => useViewState());
+
+    expect(result.current.urlIssueId).toBeNull();
+  });
+});

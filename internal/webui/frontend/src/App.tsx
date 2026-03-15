@@ -120,7 +120,14 @@ function App() {
   const { workspace, isMultiRepo } = useWorkspaceContext();
 
   // View state must be read before useIssues to determine fetch mode
-  const [activeView, setActiveView] = useViewState();
+  const viewState = useViewState();
+  const activeView = viewState[0];
+  const setActiveView = viewState[1];
+  const {
+    setDetailView,
+    closeDetailView,
+    urlIssueId: selectedIssueId,
+  } = viewState;
 
   // Repo filter for multi-repo workspaces
   const [selectedRepos] = useRepoFilter();
@@ -239,9 +246,8 @@ function App() {
     deselectAll: clearSelection,
   } = useSelection({ visibleItems: filteredIssues });
 
-  // Issue detail panel state
+  // Issue detail panel state (panel overlay is unused — isPanelOpen always false)
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const {
     issueDetails,
     isLoading: isLoadingDetails,
@@ -292,6 +298,26 @@ function App() {
       setActiveView("kanban");
     }
   }, [isMultiRepo, activeView, setActiveView]);
+
+  // Deep-link: auto-fetch issue when URL contains ?issue={id}
+  // Also handles browser back/forward (popstate updates selectedIssueId via useViewState)
+  useEffect(() => {
+    if (selectedIssueId) {
+      fetchIssue(selectedIssueId);
+    } else if (activeView !== "issue-detail") {
+      clearIssue();
+    }
+  }, [selectedIssueId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Copy link handler: copies current URL to clipboard
+  const handleCopyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      showToast("Link copied to clipboard", { type: "success" });
+    } catch {
+      showToast("Failed to copy link", { type: "error" });
+    }
+  }, [showToast]);
 
   const handleDragEnd = useCallback(
     async (issueId: string, newStatus: Status, oldStatus: Status) => {
@@ -390,16 +416,16 @@ function App() {
         setPreviousView(activeView);
       }
 
-      setSelectedIssueId(issue.id);
+      // Navigate to issue-detail view with pushState (enables browser back/forward)
+      setDetailView(issue.id);
       fetchIssue(issue.id);
-      setActiveView("issue-detail");
     },
     [
       selectedIssueId,
       activeView,
       isAgentPanelOpen,
       fetchIssue,
-      setActiveView,
+      setDetailView,
       clearTimeoutRef,
     ],
   );
@@ -412,16 +438,14 @@ function App() {
     issuePanelTimeoutRef.current = setTimeout(() => {
       if (!mountedRef.current) return;
       clearIssue();
-      setSelectedIssueId(null);
     }, 300); // Match CSS transition duration
   }, [clearIssue]);
 
-  // Handle back from issue detail view
+  // Handle back from issue detail view (pushState for browser history)
   const handleBackFromDetail = useCallback(() => {
-    setActiveView(previousView);
+    closeDetailView(previousView);
     clearIssue();
-    setSelectedIssueId(null);
-  }, [previousView, clearIssue, setActiveView]);
+  }, [previousView, clearIssue, closeDetailView]);
 
   // Handle approve button click on review cards
   const handleApprove = useCallback(
@@ -495,7 +519,6 @@ function App() {
         issuePanelTimeoutRef.current = setTimeout(() => {
           if (!mountedRef.current) return;
           clearIssue();
-          setSelectedIssueId(null);
         }, 300);
       }
 
@@ -561,11 +584,11 @@ function App() {
         setPreviousView(activeView);
       }
 
-      setSelectedIssueId(taskId);
+      // Navigate to issue-detail view with pushState (enables browser back/forward)
+      setDetailView(taskId);
       fetchIssue(taskId);
-      setActiveView("issue-detail");
     },
-    [activeView, fetchIssue, setActiveView, clearTimeoutRef],
+    [activeView, fetchIssue, setDetailView, clearTimeoutRef],
   );
 
   const headerNavigation = (
@@ -783,6 +806,7 @@ function App() {
           onApprove={handleApprove}
           onReject={handleReject}
           onOpenInTerminal={handleOpenIssueInTerminal}
+          onCopyLink={handleCopyLink}
         />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
@@ -794,6 +818,7 @@ function App() {
         onClose={handlePanelClose}
         onApprove={handleApprove}
         onReject={handleReject}
+        onCopyLink={handleCopyLink}
       />
       <AgentDetailPanel
         isOpen={isAgentPanelOpen}

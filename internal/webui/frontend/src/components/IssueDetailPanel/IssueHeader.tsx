@@ -42,6 +42,8 @@ export interface IssueHeaderProps {
   showPriority?: boolean;
   /** Callback when priority badge is clicked */
   onPriorityClick?: () => void;
+  /** Callback when copy-link button is clicked */
+  onCopyLink?: () => void;
   /** Enable sticky mode styling */
   sticky?: boolean;
   /** Additional CSS class name */
@@ -75,6 +77,7 @@ export function IssueHeader({
   isSavingStatus,
   showPriority,
   onPriorityClick,
+  onCopyLink,
   sticky,
   className,
 }: IssueHeaderProps): JSX.Element {
@@ -118,6 +121,31 @@ export function IssueHeader({
             data-testid="header-priority-badge"
           >
             {priorityInfo.short}
+          </button>
+        )}
+        {onCopyLink && (
+          <button
+            type="button"
+            className={styles.copyLinkButton}
+            onClick={onCopyLink}
+            aria-label="Copy link"
+            data-testid="header-copy-link-button"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M8.5 11.5l3-3M12 8a2.75 2.75 0 0 1 0 3.89l-2 2A2.75 2.75 0 0 1 6.11 10M8 12a2.75 2.75 0 0 1 0-3.89l2-2A2.75 2.75 0 0 1 13.89 10"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
         )}
         <button

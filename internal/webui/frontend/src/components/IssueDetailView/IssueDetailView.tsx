@@ -26,6 +26,7 @@ export interface IssueDetailViewProps {
   onApprove: (issue: Issue) => Promise<void>;
   onReject: (issue: Issue, comment: string) => Promise<void>;
   onOpenInTerminal?: (issue: Issue | IssueDetails) => void;
+  onCopyLink?: () => void;
 }
 
 /**
@@ -118,6 +119,7 @@ export function IssueDetailView({
   onApprove,
   onReject,
   onOpenInTerminal,
+  onCopyLink,
 }: IssueDetailViewProps): JSX.Element {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
@@ -350,6 +352,26 @@ export function IssueDetailView({
               />
             </svg>
             Open in Terminal
+          </button>
+        )}
+        {onCopyLink && (
+          <button
+            type="button"
+            className={styles.copyLinkButton}
+            onClick={onCopyLink}
+            aria-label="Copy link"
+            data-testid="copy-link-button"
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M6.75 9.25l2.5-2.5M10 6.5a2.25 2.25 0 0 1 0 3.18l-1.75 1.75a2.25 2.25 0 0 1-3.18-3.18l.88-.88M6 9.5a2.25 2.25 0 0 1 0-3.18l1.75-1.75a2.25 2.25 0 0 1 3.18 3.18l-.88.88"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Copy Link
           </button>
         )}
       </div>

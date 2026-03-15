@@ -45,8 +45,10 @@ export interface UseViewStateOptions {
  * Return type for useViewState hook.
  */
 export type UseViewStateReturn = [ViewMode, (view: ViewMode) => void] & {
-  /** Set view to issue-detail with an issue ID in a single URL update */
+  /** Set view to issue-detail with an issue ID in a single URL update (pushState for history) */
   setDetailView: (issueId: string) => void;
+  /** Navigate away from issue-detail view (pushState for history) */
+  closeDetailView: (fallbackView: ViewMode) => void;
   /** The issue ID from the URL (when in issue-detail view) */
   urlIssueId: string | null;
 };
@@ -86,11 +88,16 @@ function parseViewFromUrl(): ViewMode {
 
 /**
  * Update URL with view mode without triggering navigation.
- * Uses replaceState to avoid polluting browser history.
+ * Uses replaceState by default to avoid polluting browser history.
+ * Uses pushState when `push` is true (for meaningful navigation actions like opening/closing issue detail).
  * Removes the view param from URL when it matches DEFAULT_VIEW for cleaner URLs.
  * When view is 'issue-detail', also sets/clears the 'issue' param.
  */
-function updateViewUrl(view: ViewMode, issueId?: string | null): void {
+function updateViewUrl(
+  view: ViewMode,
+  issueId?: string | null,
+  push?: boolean,
+): void {
   if (!isBrowser()) return;
 
   const params = new URLSearchParams(window.location.search);
@@ -114,7 +121,8 @@ function updateViewUrl(view: ViewMode, issueId?: string | null): void {
     ? `${window.location.pathname}?${queryString}`
     : window.location.pathname;
 
-  window.history.replaceState(null, "", newUrl);
+  const method = push ? "pushState" : "replaceState";
+  window.history[method](null, "", newUrl);
 }
 
 /**
@@ -164,9 +172,13 @@ export function useViewState(
     return null;
   });
 
-  // Sync URL when state changes
+  // Sync URL when state changes (replaceState only — skip if URL already matches
+  // to avoid overwriting pushState entries from setDetailView/closeDetailView)
   useEffect(() => {
     if (syncUrl && isBrowser()) {
+      const currentView = parseViewFromUrl();
+      const currentIssue = parseIssueFromUrl();
+      if (currentView === view && currentIssue === issueId) return;
       updateViewUrl(view, issueId);
     }
   }, [view, issueId, syncUrl]);
@@ -192,14 +204,33 @@ export function useViewState(
     }
   }, []);
 
-  // Set view to issue-detail with an issue ID in one update
-  const setDetailView = useCallback((newIssueId: string) => {
-    setViewState("issue-detail");
-    setIssueId(newIssueId);
-  }, []);
+  // Set view to issue-detail with an issue ID in one update (pushState for back/forward)
+  const setDetailView = useCallback(
+    (newIssueId: string) => {
+      setViewState("issue-detail");
+      setIssueId(newIssueId);
+      if (syncUrl) {
+        updateViewUrl("issue-detail", newIssueId, true);
+      }
+    },
+    [syncUrl],
+  );
+
+  // Navigate away from issue-detail view (pushState for back/forward)
+  const closeDetailView = useCallback(
+    (fallbackView: ViewMode) => {
+      setViewState(fallbackView);
+      setIssueId(null);
+      if (syncUrl) {
+        updateViewUrl(fallbackView, null, true);
+      }
+    },
+    [syncUrl],
+  );
 
   const result = [view, setView] as UseViewStateReturn;
   result.setDetailView = setDetailView;
+  result.closeDetailView = closeDetailView;
   result.urlIssueId = issueId;
   return result;
 }
