@@ -5,7 +5,7 @@
  * Designed to be rendered inside terminal-type tabs in IssueDetailPanel.
  */
 
-import { forwardRef, useState } from "react";
+import { forwardRef, useState, useCallback } from "react";
 
 import { useGitActions } from "@/hooks/useGitActions";
 import {
@@ -23,17 +23,33 @@ export interface EmbeddedTerminalProps {
   agentName: string | null;
   worktreePath?: string | undefined;
   isActive: boolean;
+  onConnectionStateChange?: ((state: ConnectionState) => void) | undefined;
 }
 
 export const EmbeddedTerminal = forwardRef<
   TerminalInstanceHandle,
   EmbeddedTerminalProps
 >(function EmbeddedTerminal(
-  { sessionName, backend, agentName, worktreePath, isActive },
+  {
+    sessionName,
+    backend,
+    agentName,
+    worktreePath,
+    isActive,
+    onConnectionStateChange: onExternalStateChange,
+  },
   ref,
 ) {
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
+
+  const handleConnectionStateChange = useCallback(
+    (state: ConnectionState) => {
+      setConnectionState(state);
+      onExternalStateChange?.(state);
+    },
+    [onExternalStateChange],
+  );
 
   const gitActions = useGitActions({ agentName });
 
@@ -51,7 +67,7 @@ export const EmbeddedTerminal = forwardRef<
           ref={ref}
           sessionName={sessionName}
           isActive={isActive}
-          onConnectionStateChange={setConnectionState}
+          onConnectionStateChange={handleConnectionStateChange}
         />
       </div>
     </div>

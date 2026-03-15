@@ -6,6 +6,9 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // terminalSessionInfo describes a terminal session visible to the frontend.
@@ -157,6 +160,38 @@ func formatSeedPrompt(req *seedRequest) string {
 	}
 
 	return b.String()
+}
+
+// sessionKillGracePeriod is the delay before a scheduled session kill executes.
+const sessionKillGracePeriod = 30 * time.Second
+
+// handleScheduleSessionKill schedules a deferred tmux session kill with a grace period.
+// POST /api/terminal/sessions/{session}/kill
+func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if manager == nil {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+				"success": false,
+				"error":   "terminal manager not initialized",
+			})
+			return
+		}
+
+		session := r.PathValue("session")
+		if err := tabmeta.ValidateSessionName(session); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		manager.ScheduleKill(session, sessionKillGracePeriod)
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+		})
+	}
 }
 
 func handleSeedTerminalSession(manager *TerminalManager) http.HandlerFunc {

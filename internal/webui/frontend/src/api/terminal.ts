@@ -168,3 +168,14 @@ export async function deleteTabMetadata(session: string): Promise<void> {
     `/api/terminal/tabs/${encodeURIComponent(session)}`,
   );
 }
+
+/**
+ * Schedule a deferred tmux session kill with grace period.
+ * POST /api/terminal/sessions/{session}/kill
+ */
+export async function scheduleSessionKill(sessionName: string): Promise<void> {
+  await post<{ success: boolean }>(
+    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/kill`,
+    {},
+  );
+}

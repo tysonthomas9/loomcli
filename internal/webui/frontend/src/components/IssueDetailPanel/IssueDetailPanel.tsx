@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
 import { updateIssue, addDependency, removeDependency } from "@/api";
+import { deleteTabMetadata, scheduleSessionKill } from "@/api/terminal";
 import { useAgentTerminalLogs } from "@/hooks";
 import type {
   Issue,
@@ -21,6 +22,8 @@ import type {
 import type { Status } from "@/types/status";
 import { getReviewType } from "@/utils/issueCategory";
 
+import type { ConnectionState } from "@/components/TerminalView";
+
 import { AssigneeDropdown } from "./AssigneeDropdown";
 import { CommentForm } from "./CommentForm";
 import { CommentsSection } from "./CommentsSection";
@@ -31,6 +34,7 @@ import { MarkdownRenderer } from "./MarkdownRenderer";
 import { PriorityDropdown } from "./PriorityDropdown";
 import { RejectCommentForm } from "./RejectCommentForm";
 import { TypeDropdown } from "./TypeDropdown";
+import { ConfirmDialog } from "../ConfirmDialog";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
 import { ErrorToast } from "../ErrorToast";
 import { LogViewer } from "../LogViewer";
@@ -250,6 +254,7 @@ interface DetailTab {
   label: string;
   closable: boolean;
   metadata?: DetailTabMetadata | undefined;
+  connectionState?: ConnectionState | undefined;
 }
 
 const DETAILS_TAB: DetailTab = {
@@ -326,13 +331,54 @@ function DefaultContent({
     [],
   );
 
-  const removeTab = useCallback((id: string) => {
-    setTabs((prev) => {
-      const filtered = prev.filter((t) => t.id !== id);
-      return filtered;
-    });
+  // Pending close confirmation state
+  const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
+    null,
+  );
+
+  // Close a tab: remove from state, clean up backend resources
+  const closeTab = useCallback((id: string) => {
+    // Find the tab before updating state to extract metadata for cleanup
+    const tab = tabs.find((t) => t.id === id);
+
+    // Fire-and-forget backend cleanup for terminal tabs
+    if (tab?.type === "terminal" && tab.metadata?.sessionName) {
+      const sessionName = tab.metadata.sessionName;
+      deleteTabMetadata(sessionName).catch(() => {});
+      scheduleSessionKill(sessionName).catch(() => {});
+    }
+
+    setTabs((prev) => prev.filter((t) => t.id !== id));
     setActiveTabId((prev) => (prev === id ? "details" : prev));
-  }, []);
+  }, [tabs]);
+
+  // Handle tab close: confirm if terminal has active connection
+  const handleTabClose = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab || !tab.closable) return;
+
+      if (tab.type === "terminal" && tab.connectionState === "connected") {
+        setPendingCloseTabId(tabId);
+        return;
+      }
+
+      closeTab(tabId);
+    },
+    [tabs, closeTab],
+  );
+
+  // Track connectionState changes from EmbeddedTerminal
+  const handleConnectionStateChange = useCallback(
+    (tabId: string, state: ConnectionState) => {
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === tabId ? { ...t, connectionState: state } : t,
+        ),
+      );
+    },
+    [],
+  );
 
   // Agent-based log connection
   const agentName = issue?.assignee || null;
@@ -777,7 +823,7 @@ function DefaultContent({
                   className={styles.tabCloseButton}
                   onClick={(e) => {
                     e.stopPropagation();
-                    removeTab(tab.id);
+                    handleTabClose(tab.id);
                   }}
                   aria-label={`Close ${tab.label} tab`}
                   data-testid={`close-tab-${tab.id}`}
@@ -852,6 +898,9 @@ function DefaultContent({
                 agentName={activeTab.metadata.agentName ?? null}
                 worktreePath={activeTab.metadata.worktreePath}
                 isActive={true}
+                onConnectionStateChange={(state) =>
+                  handleConnectionStateChange(activeTab.id, state)
+                }
               />
             </div>
           );
@@ -1033,6 +1082,20 @@ function DefaultContent({
           testId="status-error-toast"
         />
       )}
+
+      {/* Close confirmation dialog for terminal tabs with active sessions */}
+      <ConfirmDialog
+        isOpen={pendingCloseTabId !== null}
+        title="Close terminal?"
+        message="This terminal has an active session. Closing it will terminate the session after a brief grace period."
+        confirmLabel="Close"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingCloseTabId) closeTab(pendingCloseTabId);
+          setPendingCloseTabId(null);
+        }}
+        onCancel={() => setPendingCloseTabId(null)}
+      />
     </>
   );
 }

@@ -547,6 +547,81 @@ func TestFormatSeedPrompt(t *testing.T) {
 	})
 }
 
+// ── ScheduleSessionKill handler tests ──────────────────────────────────────────
+
+// TestHandleScheduleSessionKill_ValidSession verifies the handler returns 200
+// for a valid session name.
+func TestHandleScheduleSessionKill_ValidSession(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+	t.Cleanup(func() { mgr.Shutdown() })
+
+	handler := handleScheduleSessionKill(mgr)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/test-session/kill", nil)
+	req.SetPathValue("session", "test-session")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool `json:"success"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected success=true")
+	}
+}
+
+// TestHandleScheduleSessionKill_InvalidSession verifies the handler returns 400
+// for an invalid session name.
+func TestHandleScheduleSessionKill_InvalidSession(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+	t.Cleanup(func() { mgr.Shutdown() })
+
+	handler := handleScheduleSessionKill(mgr)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/invalid%20name/kill", nil)
+	req.SetPathValue("session", "invalid name")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+// TestHandleScheduleSessionKill_NilManager verifies the handler returns 503
+// when the terminal manager is nil.
+func TestHandleScheduleSessionKill_NilManager(t *testing.T) {
+	handler := handleScheduleSessionKill(nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/test-session/kill", nil)
+	req.SetPathValue("session", "test-session")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
+	}
+}
+
+// ── SeedTerminalSession handler tests ─────────────────────────────────────────
+
 // TestHandleSeedTerminalSession_MissingName tests that the seed handler returns
 // 400 when the session name path parameter is empty.
 func TestHandleSeedTerminalSession_NilManager(t *testing.T) {

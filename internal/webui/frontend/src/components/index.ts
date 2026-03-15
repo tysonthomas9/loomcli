@@ -18,6 +18,7 @@ export * from "./FilterBar";
 export * from "./KanbanBoard";
 export * from "./BulkActionToolbar";
 export * from "./ConnectionStatus";
+export * from "./ConfirmDialog";
 export * from "./EmbeddedTerminal";
 export * from "./ErrorBoundary";
 export * from "./ErrorDisplay";

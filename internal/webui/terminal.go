@@ -2,6 +2,7 @@ package webui
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -73,7 +75,8 @@ const defaultMaxTerminalSessions = 20
 // Multiple WebSocket connections can attach to the same tmux session simultaneously,
 // each tracked by a unique connection ID.
 type TerminalManager struct {
-	sessions       map[string]*TerminalSession // keyed by connection ID
+	sessions       map[string]*TerminalSession   // keyed by connection ID
+	pendingKills   map[string]context.CancelFunc // deferred session kills, guarded by mu
 	mu             sync.RWMutex
 	tmuxPath       string
 	sessionPrefix  string // prepended to tmux session names for isolation between server instances
@@ -99,6 +102,7 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 	}
 	return &TerminalManager{
 		sessions:       make(map[string]*TerminalSession),
+		pendingKills:   make(map[string]context.CancelFunc),
 		tmuxPath:       tmuxPath,
 		sessionPrefix:  sessionPrefix,
 		defaultCommand: defaultCommand,
@@ -173,6 +177,7 @@ func (m *TerminalManager) tmuxAttach(name string) (*exec.Cmd, *os.File, error) {
 // If the tmux session doesn't exist, it creates one with the given command.
 // If command is empty, uses the manager's default command.
 // Multiple connections can attach to the same tmux session simultaneously.
+// Re-attaching cancels any pending deferred kill for this session.
 func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*TerminalSession, error) {
 	if !validSessionName.MatchString(name) {
 		return nil, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
@@ -186,6 +191,9 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 	if command == "" {
 		command = m.defaultCommand
 	}
+
+	// Cancel any pending deferred kill for this session.
+	m.CancelPendingKill(name)
 
 	// Apply prefix to get the actual tmux session name.
 	internalName := m.tmuxName(name)
@@ -438,6 +446,11 @@ func (m *TerminalManager) Detach(connID string) error {
 // Shutdown kills all tmux sessions and cleans up all PTYs.
 func (m *TerminalManager) Shutdown() error {
 	m.mu.Lock()
+	// Cancel all pending deferred kills.
+	for name, cancel := range m.pendingKills {
+		cancel()
+		delete(m.pendingKills, name)
+	}
 	sessions := make(map[string]*TerminalSession, len(m.sessions))
 	for k, v := range m.sessions {
 		sessions[k] = v
@@ -543,4 +556,70 @@ func (m *TerminalManager) SessionCount() int {
 // MaxSessions returns the maximum allowed concurrent connections.
 func (m *TerminalManager) MaxSessions() int {
 	return m.maxSessions
+}
+
+// ScheduleKill schedules a deferred kill for the named session after the given delay.
+// If a pending kill already exists for this session, it is replaced.
+// The kill is cancelled if the session is re-attached before the delay expires.
+func (m *TerminalManager) ScheduleKill(name string, delay time.Duration) {
+	m.mu.Lock()
+	// Cancel any existing pending kill for this session.
+	if cancel, ok := m.pendingKills[name]; ok {
+		cancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.pendingKills[name] = cancel
+	myCancel := cancel // capture for identity check in goroutine
+	m.mu.Unlock()
+
+	go func() {
+		select {
+		case <-time.After(delay):
+			m.mu.Lock()
+			// Only delete if this goroutine's cancel is still the current one.
+			// A replacement ScheduleKill may have installed a new cancel.
+			if current, ok := m.pendingKills[name]; ok && sameFunc(current, myCancel) {
+				delete(m.pendingKills, name)
+			}
+			m.mu.Unlock()
+			// Only kill if no active connections remain.
+			if !m.HasActiveConnections(name) {
+				_ = m.KillSessionByName(name)
+			}
+		case <-ctx.Done():
+			// Cancelled — session was re-attached or server is shutting down.
+		}
+	}()
+}
+
+// sameFunc compares two function values by pointer identity.
+func sameFunc(a, b context.CancelFunc) bool {
+	return fmt.Sprintf("%p", a) == fmt.Sprintf("%p", b)
+}
+
+// CancelPendingKill cancels a pending deferred kill for the named session.
+// Returns true if a pending kill was found and cancelled.
+func (m *TerminalManager) CancelPendingKill(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cancel, ok := m.pendingKills[name]; ok {
+		cancel()
+		delete(m.pendingKills, name)
+		return true
+	}
+	return false
+}
+
+// HasActiveConnections reports whether there are any active PTY connections
+// to the named session (using the user-facing name, prefix applied internally).
+func (m *TerminalManager) HasActiveConnections(name string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	internalName := m.tmuxName(name)
+	for _, sess := range m.sessions {
+		if sess.Name == internalName {
+			return true
+		}
+	}
+	return false
 }
