@@ -93,6 +93,17 @@ describe("NavRail", () => {
       ).toBeInTheDocument();
     });
 
+    it("renders Terminal as the 3rd nav item (between List and Observability)", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      const buttons = screen.getAllByRole("button");
+      // TOP_ITEMS order: kanban(0), table(1), terminal(2), observability(3), files(4), workspace(5), settings is BOTTOM
+      expect(buttons[0]).toHaveAccessibleName("Kanban");
+      expect(buttons[1]).toHaveAccessibleName("List");
+      expect(buttons[2]).toHaveAccessibleName("Terminal");
+      expect(buttons[3]).toHaveAccessibleName("Observability");
+    });
+
     it("has navigation landmark with aria-label", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
