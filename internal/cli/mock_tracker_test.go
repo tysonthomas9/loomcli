@@ -18,6 +18,9 @@ type mockTrackerCall struct {
 // MockIssueTracker implements IssueTracker for tests. Each method has a
 // Result/Err pair for static returns and an optional Func override for
 // dynamic behavior. All calls are recorded thread-safely.
+//
+// Func overrides are called after releasing the mutex, so they may safely
+// call other mock methods without deadlocking.
 type MockIssueTracker struct {
 	mu    sync.Mutex
 	Calls []mockTrackerCall
@@ -257,7 +260,7 @@ func (m *MockIssueTracker) LastCall(method string) *mockTrackerCall {
 	defer m.mu.Unlock()
 	for i := len(m.Calls) - 1; i >= 0; i-- {
 		if m.Calls[i].Method == method {
-			c := m.Calls[i]
+			c := m.Calls[i] // copy while holding the lock
 			return &c
 		}
 	}
@@ -269,7 +272,7 @@ func (m *MockIssueTracker) LastCall(method string) *mockTrackerCall {
 func TestMockTracker_RecordsCalls(t *testing.T) {
 	m := NewMockTracker()
 	opts := ReadyOpts{Limit: 10, ParentID: "epic-1"}
-	m.Ready(context.Background(), opts)
+	_, _ = m.Ready(context.Background(), opts)
 
 	if len(m.Calls) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(m.Calls))
@@ -314,16 +317,21 @@ func TestMockTracker_DefaultReturns(t *testing.T) {
 	if name != "" {
 		t.Errorf("BackendName: got %q, want empty", name)
 	}
+
+	issue, err := m.GetIssue(context.Background(), "x")
+	if issue != nil || err != nil {
+		t.Errorf("GetIssue: got (%v, %v), want (nil, nil)", issue, err)
+	}
 }
 
 func TestMockTracker_CallCount(t *testing.T) {
 	m := NewMockTracker()
 	ctx := context.Background()
 
-	m.Ready(ctx, ReadyOpts{})
-	m.Ready(ctx, ReadyOpts{})
-	m.Ready(ctx, ReadyOpts{})
-	m.List(ctx, ListOpts{})
+	_, _ = m.Ready(ctx, ReadyOpts{})
+	_, _ = m.Ready(ctx, ReadyOpts{})
+	_, _ = m.Ready(ctx, ReadyOpts{})
+	_, _ = m.List(ctx, ListOpts{})
 
 	if got := m.CallCount("Ready"); got != 3 {
 		t.Errorf("CallCount(Ready) = %d, want 3", got)
@@ -340,8 +348,8 @@ func TestMockTracker_LastCall(t *testing.T) {
 	m := NewMockTracker()
 	ctx := context.Background()
 
-	m.GetIssue(ctx, "id-1")
-	m.GetIssue(ctx, "id-2")
+	_, _ = m.GetIssue(ctx, "id-1")
+	_, _ = m.GetIssue(ctx, "id-2")
 
 	lc := m.LastCall("GetIssue")
 	if lc == nil {
@@ -365,7 +373,7 @@ func TestMockTracker_ConcurrentSafety(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			m.Ready(ctx, ReadyOpts{})
+			_, _ = m.Ready(ctx, ReadyOpts{})
 		}()
 	}
 	wg.Wait()
