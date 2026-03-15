@@ -21,6 +21,8 @@ export interface WorkspaceContextMenuProps {
   position: { x: number; y: number };
   /** Callback when Rename is selected */
   onRename: () => void;
+  /** Callback when Remove is selected */
+  onRemove: () => void;
   /** Callback to close the menu */
   onClose: () => void;
 }
@@ -29,6 +31,7 @@ export function WorkspaceContextMenu({
   isOpen,
   position,
   onRename,
+  onRemove,
   onClose,
 }: WorkspaceContextMenuProps): JSX.Element | null {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -81,6 +84,11 @@ export function WorkspaceContextMenu({
     onClose();
   }, [onRename, onClose]);
 
+  const handleRemoveClick = useCallback(() => {
+    onRemove();
+    onClose();
+  }, [onRemove, onClose]);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLButtonElement>) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -89,6 +97,16 @@ export function WorkspaceContextMenu({
       }
     },
     [handleRenameClick],
+  );
+
+  const handleRemoveKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handleRemoveClick();
+      }
+    },
+    [handleRemoveClick],
   );
 
   if (!isOpen) return null;
@@ -125,6 +143,31 @@ export function WorkspaceContextMenu({
           />
         </svg>
         Rename
+      </button>
+      <button
+        type="button"
+        className={`${styles.menuItem} ${styles.dangerItem}`}
+        onClick={handleRemoveClick}
+        onKeyDown={handleRemoveKeyDown}
+        role="menuitem"
+        data-testid="workspace-context-menu-remove"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          className={styles.menuItemIcon}
+        >
+          <path
+            d="M2 3.5H12M5.5 6V10.5M8.5 6V10.5M3 3.5L3.5 11.5C3.5 12.05 3.95 12.5 4.5 12.5H9.5C10.05 12.5 10.5 12.05 10.5 11.5L11 3.5M5 3.5V2C5 1.45 5.45 1 6 1H8C8.55 1 9 1.45 9 2V3.5"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        Remove
       </button>
     </div>
   );

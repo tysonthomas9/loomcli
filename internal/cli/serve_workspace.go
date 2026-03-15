@@ -1,11 +1,64 @@
 package cli
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
+
+// deleteWorkspace removes a workspace from config without deleting git worktrees.
+// Returns an error if the workspace is not found or has running agents.
+func deleteWorkspace(name string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg == nil || len(cfg.Workspaces) == 0 {
+		return fmt.Errorf("workspace %q not found", name)
+	}
+
+	ws, ok := cfg.Workspaces[name]
+	if !ok {
+		return fmt.Errorf("workspace %q not found", name)
+	}
+
+	// Check for running agents (lock files)
+	for _, repo := range ws.Repos {
+		repoPath := repo.Path
+		if !filepath.IsAbs(repoPath) {
+			repoPath = filepath.Join(ws.Path, repoPath)
+		}
+		lockPath := filepath.Join(repoPath, LockFileName)
+		if _, err := os.Stat(lockPath); err == nil {
+			return fmt.Errorf("workspace %q has running agents", name)
+		}
+	}
+
+	// Remove from config
+	delete(cfg.Workspaces, name)
+
+	// Update default workspace if needed
+	if cfg.DefaultWorkspace == name {
+		cfg.DefaultWorkspace = ""
+		names := make([]string, 0, len(cfg.Workspaces))
+		for n := range cfg.Workspaces {
+			names = append(names, n)
+		}
+		if len(names) > 0 {
+			sort.Strings(names)
+			cfg.DefaultWorkspace = names[0]
+		}
+	}
+
+	if err := SaveConfig(cfg); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	return nil
+}
 
 // buildWorkspaceInfo loads workspace topology from config and daemon config.
 // Returns nil when no workspaces are configured (single-repo mode).

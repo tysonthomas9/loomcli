@@ -275,6 +275,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				GitOps:            gitOps,
 				FileOps:           gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
 				WorkspaceConfigFn: buildWorkspaceInfo,
+				WorkspaceDeleteFn: deleteWorkspace,
 				BackendOps:        backendOps,
 			}
 			if serveCorsOrigin != "" {

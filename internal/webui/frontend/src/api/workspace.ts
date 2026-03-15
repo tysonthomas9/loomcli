@@ -3,7 +3,7 @@
  * Interfaces with GET /api/workspace endpoint.
  */
 
-import { get, patch, ApiError } from "./client";
+import { get, patch, del, ApiError } from "./client";
 
 // ============= Types =============
 
@@ -133,6 +133,25 @@ export async function renameWorkspace(
   workspaceCache = data;
   fetchPromise = null;
   return data;
+}
+
+/**
+ * Delete a workspace by name. On success, invalidates the cache and returns refreshed data.
+ */
+export async function deleteWorkspace(
+  name: string,
+): Promise<WorkspaceData | null> {
+  const response = await del<ApiResult<WorkspaceData>>(
+    `/api/workspace/${encodeURIComponent(name)}`,
+  );
+  if (!response.success) {
+    throw new ApiError(0, response.error);
+  }
+  // Refresh cache with the returned data
+  cacheGeneration++;
+  workspaceCache = response.data ?? null;
+  fetchPromise = null;
+  return workspaceCache;
 }
 
 /**

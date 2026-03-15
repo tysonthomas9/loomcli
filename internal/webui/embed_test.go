@@ -318,7 +318,7 @@ func TestHandleHealth(t *testing.T) {
 
 func TestSetupRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil) // nil pool, hub, getMutationsSince, termManager for basic routing tests
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil) // nil pool, hub, getMutationsSince, termManager for basic routing tests
 
 	tests := []struct {
 		name       string
@@ -362,7 +362,7 @@ func TestSetupRoutes(t *testing.T) {
 
 func TestHealthEndpointJSON(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil) // nil pool, hub, getMutationsSince, termManager for basic health tests
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil) // nil pool, hub, getMutationsSince, termManager for basic health tests
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -597,7 +597,7 @@ func TestSetupRoutes_DevMode(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, true, dir, "", nil, nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, true, dir, "", nil, nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name             string

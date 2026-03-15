@@ -6,9 +6,10 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 
-import { renameWorkspace } from "@/api/workspace";
+import { renameWorkspace, deleteWorkspace } from "@/api/workspace";
 import type { WorkspaceSummary } from "@/api/workspace";
-import { useWorkspaceRepos, useAgentContext } from "@/hooks";
+import { useWorkspaceRepos, useAgentContext, useToast } from "@/hooks";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 import styles from "./WorkspaceTree.module.css";
 import { WorkspaceContextMenu } from "./WorkspaceContextMenu";
@@ -51,6 +52,15 @@ export function WorkspaceTree({
 
   const { workspace, repos, isLoading, error, refetch } = useWorkspaceRepos();
   const { agents } = useAgentContext();
+  const { showToast } = useToast();
+
+  // Workspace delete state
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [pendingDeleteName, setPendingDeleteName] = useState<string | null>(
+    null,
+  );
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deletionPendingRef = useRef(false);
 
   // Workspace rename state
   const [editingWorkspace, setEditingWorkspace] = useState<string | null>(null);
@@ -170,6 +180,69 @@ export function WorkspaceTree({
     },
     [handleSaveRename, handleCancelRename],
   );
+
+  // Delete handlers
+  const handleStartRemove = useCallback(() => {
+    if (!contextMenu) return;
+    setPendingDeleteName(contextMenu.workspaceName);
+    setConfirmDeleteOpen(true);
+  }, [contextMenu]);
+
+  const handleCancelDelete = useCallback(() => {
+    setConfirmDeleteOpen(false);
+    setPendingDeleteName(null);
+  }, []);
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!pendingDeleteName) return;
+    const nameToDelete = pendingDeleteName;
+    setConfirmDeleteOpen(false);
+    setPendingDeleteName(null);
+
+    // Show undo toast with 5-second duration
+    deletionPendingRef.current = false;
+
+    // Start delayed deletion
+    deleteTimerRef.current = setTimeout(async () => {
+      deletionPendingRef.current = true;
+      try {
+        await deleteWorkspace(nameToDelete);
+        refetch();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to remove workspace";
+        showToast(message, { type: "error" });
+        refetch();
+      }
+    }, 5000);
+
+    showToast(`Workspace "${nameToDelete}" removed`, {
+      type: "success",
+      duration: 5000,
+      onUndo: () => {
+        // Cancel the pending deletion
+        if (deleteTimerRef.current) {
+          clearTimeout(deleteTimerRef.current);
+          deleteTimerRef.current = null;
+        }
+        if (deletionPendingRef.current) {
+          showToast("Deletion already in progress", { type: "info" });
+          return;
+        }
+        showToast(`Workspace "${nameToDelete}" restored`, { type: "info" });
+        refetch();
+      },
+    });
+  }, [pendingDeleteName, refetch, showToast]);
+
+  // Cleanup delete timer on unmount
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) {
+        clearTimeout(deleteTimerRef.current);
+      }
+    };
+  }, []);
 
   // Workspace summaries from the data
   const workspaces: WorkspaceSummary[] = workspace?.workspaces ?? [];
@@ -482,7 +555,18 @@ export function WorkspaceTree({
         isOpen={contextMenu !== null}
         position={contextMenu ?? { x: 0, y: 0 }}
         onRename={handleStartRename}
+        onRemove={handleStartRemove}
         onClose={handleCloseContextMenu}
+      />
+
+      <ConfirmDialog
+        isOpen={confirmDeleteOpen}
+        title="Remove workspace"
+        message={`Are you sure you want to remove "${pendingDeleteName}"? Git worktrees will be kept on disk.`}
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
       />
     </aside>
   );

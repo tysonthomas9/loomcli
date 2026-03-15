@@ -44,3 +44,11 @@
   flex-shrink: 0;
   color: var(--color-text-tertiary);
 }
+
+.dangerItem {
+  color: var(--color-error, #e53935);
+}
+
+.dangerItem .menuItemIcon {
+  color: var(--color-error, #e53935);
+}
