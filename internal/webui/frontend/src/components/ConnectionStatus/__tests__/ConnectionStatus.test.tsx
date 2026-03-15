@@ -308,9 +308,7 @@ describe("ConnectionStatus", () => {
 
   describe("connectionLost prop", () => {
     it('shows "Connection lost" text when connectionLost=true', () => {
-      render(
-        <ConnectionStatus state="reconnecting" connectionLost={true} />,
-      );
+      render(<ConnectionStatus state="reconnecting" connectionLost={true} />);
       expect(screen.getByText("Connection lost")).toBeInTheDocument();
     });
 
@@ -323,9 +321,7 @@ describe("ConnectionStatus", () => {
         />,
       );
       expect(screen.getByText("Connection lost")).toBeInTheDocument();
-      expect(
-        screen.queryByText(/Reconnecting/),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
     });
 
     it('uses data-state="connection-lost" when connectionLost=true', () => {
@@ -387,16 +383,12 @@ describe("ConnectionStatus", () => {
     });
 
     it("does not show retry button when connectionLost=true but no onRetry", () => {
-      render(
-        <ConnectionStatus state="reconnecting" connectionLost={true} />,
-      );
+      render(<ConnectionStatus state="reconnecting" connectionLost={true} />);
       expect(screen.queryByRole("button")).not.toBeInTheDocument();
     });
 
     it("has correct aria-label when connectionLost=true", () => {
-      render(
-        <ConnectionStatus state="reconnecting" connectionLost={true} />,
-      );
+      render(<ConnectionStatus state="reconnecting" connectionLost={true} />);
       expect(
         screen.getByLabelText("Connection status: Connection lost"),
       ).toBeInTheDocument();

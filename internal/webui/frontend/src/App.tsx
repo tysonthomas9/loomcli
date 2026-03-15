@@ -172,6 +172,7 @@ function App() {
     showStaleBanner: sseShowStaleBanner,
     connectionLost: sseConnectionLost,
     disconnectedSince: sseDisconnectedSince,
+    pendingIds,
   } = useIssues({
     mode:
       activeView === "graph"
@@ -370,12 +371,17 @@ function App() {
   useEffect(() => {
     if (workspaceParam === null) {
       // null means "all workspaces" — only call selectAll if currently filtered
-      if (selectedRepoNames.size !== workspaceRepos.length && workspaceRepos.length > 0) {
+      if (
+        selectedRepoNames.size !== workspaceRepos.length &&
+        workspaceRepos.length > 0
+      ) {
         selectAll();
       }
       return;
     }
-    if (!(selectedRepoNames.size === 1 && selectedRepoNames.has(workspaceParam))) {
+    if (
+      !(selectedRepoNames.size === 1 && selectedRepoNames.has(workspaceParam))
+    ) {
       selectRepos([workspaceParam]);
     }
   }, [workspaceParam]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -432,16 +438,14 @@ function App() {
       }
 
       // Normal drag - update status directly
+      // Toast on error is handled by updateIssueStatus rollback
       try {
         await updateIssueStatus(issueId, newStatus);
-      } catch (err) {
-        if (!mountedRef.current) return;
-        const message =
-          err instanceof Error ? err.message : "Failed to update status";
-        showToast(message, { type: "error" });
+      } catch {
+        // Rollback + error toast handled by useOptimisticUpdate
       }
     },
-    [updateIssueStatus, showToast],
+    [updateIssueStatus],
   );
 
   // Handle assignee prompt confirmation
@@ -479,13 +483,10 @@ function App() {
     try {
       // Update status only (no assignee)
       await updateIssueStatus(issueId, newStatus);
-    } catch (err) {
-      if (!mountedRef.current) return;
-      const message =
-        err instanceof Error ? err.message : "Failed to update status";
-      showToast(message, { type: "error" });
+    } catch {
+      // Rollback + error toast handled by useOptimisticUpdate
     }
-  }, [pendingDragData, updateIssueStatus, showToast]);
+  }, [pendingDragData, updateIssueStatus]);
 
   // Handle search clear to sync both local and filter state
   const handleSearchClear = useCallback(() => {
@@ -578,10 +579,15 @@ function App() {
         // Close the detail panel and clean up after successful approve
         handlePanelClose();
       } catch (err) {
+        // updateIssueStatus errors are handled by useOptimisticUpdate rollback
+        // Only show toast for non-updateIssueStatus errors (e.g., closeIssue)
         if (!mountedRef.current) return;
-        const message =
-          err instanceof Error ? err.message : "Failed to approve";
-        showToast(message, { type: "error" });
+        const reviewType = getReviewType(issue);
+        if (reviewType === "code") {
+          const message =
+            err instanceof Error ? err.message : "Failed to approve";
+          showToast(message, { type: "error" });
+        }
       }
     },
     [updateIssueStatus, refetch, handlePanelClose, showToast],
@@ -689,7 +695,13 @@ function App() {
       // Sync workspace URL param
       setWorkspaceParam(repoName);
     },
-    [activeRepoName, switchWorkspace, selectAll, selectRepos, setWorkspaceParam],
+    [
+      activeRepoName,
+      switchWorkspace,
+      selectAll,
+      selectRepos,
+      setWorkspaceParam,
+    ],
   );
 
   // Handle Talk to Lead button click
@@ -927,6 +939,7 @@ function App() {
                 {...(filters.showBlocked !== undefined && {
                   showBlocked: filters.showBlocked,
                 })}
+                {...(pendingIds.size > 0 && { pendingIds })}
               />
             </div>
           </ErrorBoundary>

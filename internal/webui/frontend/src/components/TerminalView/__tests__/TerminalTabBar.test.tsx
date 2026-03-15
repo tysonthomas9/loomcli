@@ -879,4 +879,53 @@ describe("TerminalTabBar", () => {
       expect(screen.getByTestId("context-menu-close")).toBeInTheDocument();
     });
   });
+
+  describe("crashed status dot", () => {
+    it("renders status dot with data-status='crashed' for crashed tab", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected" },
+        { id: "b", label: "B", connectionState: "crashed" },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(screen.getByTestId("terminal-tab-status-b")).toHaveAttribute(
+        "data-status",
+        "crashed",
+      );
+    });
+
+    it("crashed tab still renders alongside other connection states", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected" },
+        { id: "b", label: "B", connectionState: "crashed" },
+        { id: "c", label: "C", connectionState: "disconnected" },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(screen.getByTestId("terminal-tab-status-a")).toHaveAttribute(
+        "data-status",
+        "connected",
+      );
+      expect(screen.getByTestId("terminal-tab-status-b")).toHaveAttribute(
+        "data-status",
+        "crashed",
+      );
+      expect(screen.getByTestId("terminal-tab-status-c")).toHaveAttribute(
+        "data-status",
+        "disconnected",
+      );
+    });
+
+    it("crashed status dot has correct aria-label", () => {
+      const tabs: TerminalTab[] = [
+        { id: "x", label: "X", connectionState: "crashed" },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="x" />);
+
+      expect(screen.getByTestId("terminal-tab-status-x")).toHaveAttribute(
+        "aria-label",
+        "Connection: crashed",
+      );
+    });
+  });
 });

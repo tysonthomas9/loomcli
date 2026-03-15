@@ -10,10 +10,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import {
-  useWorkspaceParam,
-  parseWorkspaceFromUrl,
-} from "../useWorkspaceParam";
+import { useWorkspaceParam, parseWorkspaceFromUrl } from "../useWorkspaceParam";
 
 /**
  * Mock window.location for URL sync tests.
@@ -210,8 +207,7 @@ describe("useWorkspaceParam", () => {
       // replaceState should not be called for workspace changes
       const calls = historyMock.replaceState.mock.calls;
       const workspaceCall = calls.find(
-        (call) =>
-          typeof call[2] === "string" && call[2].includes("workspace="),
+        (call) => typeof call[2] === "string" && call[2].includes("workspace="),
       );
       expect(workspaceCall).toBeUndefined();
     });

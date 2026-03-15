@@ -228,8 +228,12 @@ describe("useViewState", () => {
       // Neither replaceState nor pushState should be called for view changes
       const replaceCalls = historyMock.replaceState.mock.calls;
       const pushCalls = historyMock.pushState.mock.calls;
-      const viewReplaceCall = replaceCalls.find((call) => call[2]?.includes("view=table"));
-      const viewPushCall = pushCalls.find((call) => call[2]?.includes("view=table"));
+      const viewReplaceCall = replaceCalls.find((call) =>
+        call[2]?.includes("view=table"),
+      );
+      const viewPushCall = pushCalls.find((call) =>
+        call[2]?.includes("view=table"),
+      );
       expect(viewReplaceCall).toBeUndefined();
       expect(viewPushCall).toBeUndefined();
     });
@@ -306,9 +310,7 @@ describe("useViewState", () => {
         result.current.setView("table");
       });
 
-      const lastCall = historyMock.pushState.mock.calls.at(
-        -1,
-      )?.[2] as string;
+      const lastCall = historyMock.pushState.mock.calls.at(-1)?.[2] as string;
       expect(lastCall).toContain("priority=2");
       expect(lastCall).toContain("type=bug");
       expect(lastCall).toContain("view=table");
@@ -322,9 +324,7 @@ describe("useViewState", () => {
         result.current.setView("kanban");
       });
 
-      const lastCall = historyMock.pushState.mock.calls.at(
-        -1,
-      )?.[2] as string;
+      const lastCall = historyMock.pushState.mock.calls.at(-1)?.[2] as string;
       expect(lastCall).toContain("priority=2");
       expect(lastCall).toContain("type=bug");
       expect(lastCall).not.toContain("view=");
@@ -703,8 +703,7 @@ describe("pushState vs replaceState behavior", () => {
 
     // On initial mount, replaceState may be called to sync URL, but pushState should not
     const pushCallsWithView = historyMock.pushState.mock.calls.filter(
-      (call) =>
-        typeof call[2] === "string" && call[2].includes("view="),
+      (call) => typeof call[2] === "string" && call[2].includes("view="),
     );
     expect(pushCallsWithView).toHaveLength(0);
   });
@@ -767,8 +766,7 @@ describe("pushState vs replaceState behavior", () => {
 
     // Sync effect should be skipped, so replaceState should not be called with the view
     const replaceCallsWithTable = historyMock.replaceState.mock.calls.filter(
-      (call) =>
-        typeof call[2] === "string" && call[2].includes("view=table"),
+      (call) => typeof call[2] === "string" && call[2].includes("view=table"),
     );
     expect(replaceCallsWithTable).toHaveLength(0);
   });

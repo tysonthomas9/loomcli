@@ -350,6 +350,7 @@ vi.mock("@/hooks", () => ({
   })),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
+  useWorkspaceParam: vi.fn(() => [null, vi.fn()]),
 }));
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)
@@ -388,6 +389,7 @@ interface MockUseIssuesReturn {
   getIssue: (id: string) => Issue | undefined;
   mutationCount: number;
   retryConnection: () => void;
+  pendingIds: Set<string>;
 }
 
 function createMockUseIssuesReturn(
@@ -410,6 +412,7 @@ function createMockUseIssuesReturn(
     getIssue: (id: string) => issuesMap.get(id),
     mutationCount: 0,
     retryConnection: vi.fn(),
+    pendingIds: new Set<string>(),
     ...overrides,
   };
 }
@@ -2892,7 +2895,53 @@ describe("App", () => {
       });
     });
 
-    it("approve shows error toast on failure", async () => {
+    it("approve shows error toast on failure for code review type", async () => {
+      const mockCloseIssueFn = mockCloseIssue.mockRejectedValue(
+        new Error("Network error"),
+      );
+      const showToast = vi.fn();
+      mockUseToast.mockReturnValue({
+        toasts: [],
+        showToast,
+        dismissToast: vi.fn(),
+        dismissAll: vi.fn(),
+      });
+      const mockReturn = createMockUseIssuesReturn();
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "fail-issue",
+            title: "Fail Approve Issue",
+            priority: 2,
+            status: "review",
+            issue_type: "task",
+            external_ref: "https://github.com/org/repo/pull/1",
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+        }),
+      );
+      // Render in issue-detail view
+      vi.mocked(useViewState).mockReturnValue(
+        createViewStateReturn("issue-detail"),
+      );
+
+      render(<App />);
+
+      // Click the approve button in IssueDetailView
+      const approveButton = screen.getByTestId("detail-approve-button");
+      fireEvent.click(approveButton);
+
+      await waitFor(() => {
+        expect(showToast).toHaveBeenCalledWith("Network error", {
+          type: "error",
+        });
+      });
+      mockCloseIssueFn.mockReset();
+    });
+
+    it("approve does not show toast for plan review failures (handled by optimistic rollback)", async () => {
       const updateIssueStatus = vi
         .fn()
         .mockRejectedValue(new Error("Network error"));
@@ -2931,11 +2980,13 @@ describe("App", () => {
       const approveButton = screen.getByTestId("detail-approve-button");
       fireEvent.click(approveButton);
 
+      // Wait for the async handler to complete
       await waitFor(() => {
-        expect(showToast).toHaveBeenCalledWith("Network error", {
-          type: "error",
-        });
+        expect(updateIssueStatus).toHaveBeenCalled();
       });
+
+      // showToast should NOT be called — error is handled by useOptimisticUpdate rollback
+      expect(showToast).not.toHaveBeenCalled();
     });
   });
 

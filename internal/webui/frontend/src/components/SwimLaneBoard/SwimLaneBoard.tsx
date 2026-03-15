@@ -132,6 +132,8 @@ export interface SwimLaneBoardProps {
   defaultCollapsed?: boolean;
   /** Maximum cards to show per column in swim lanes (default: 5) */
   cardLimit?: number;
+  /** Set of issue IDs with pending optimistic updates */
+  pendingIds?: Set<string>;
 }
 
 /**
@@ -153,6 +155,7 @@ export function SwimLaneBoard({
   sortLanesBy = "title",
   defaultCollapsed = false,
   cardLimit,
+  pendingIds,
 }: SwimLaneBoardProps): JSX.Element {
   // Resolve columns: props.columns > props.statuses (legacy) > default
   // In swim lane mode (groupBy !== 'none'), include epics in columns so they appear in lanes
@@ -175,6 +178,7 @@ export function SwimLaneBoard({
       ...(onDragEnd !== undefined && { onDragEnd }),
       ...(className !== undefined && { className }),
       ...(blockedIssues !== undefined && { blockedIssues }),
+      ...(pendingIds !== undefined && { pendingIds }),
     };
     return <KanbanBoard {...kanbanProps} />;
   }
@@ -192,6 +196,7 @@ export function SwimLaneBoard({
     ...(className !== undefined && { className }),
     ...(blockedIssues !== undefined && { blockedIssues }),
     ...(cardLimit !== undefined && { cardLimit }),
+    ...(pendingIds !== undefined && { pendingIds }),
   };
 
   return <SwimLaneBoardContent {...contentProps} />;
@@ -213,6 +218,7 @@ function SwimLaneBoardContent({
   sortLanesBy,
   defaultCollapsed,
   cardLimit,
+  pendingIds,
 }: Omit<SwimLaneBoardProps, "filters" | "groupBy" | "statuses"> & {
   groupBy: Exclude<GroupByField, "none">;
   columns: KanbanColumnConfig[];
@@ -415,6 +421,7 @@ function SwimLaneBoardContent({
             ...(blockedIssues !== undefined && { blockedIssues }),
             ...(showBlocked !== undefined && { showBlocked }),
             ...(cardLimit !== undefined && { cardLimit }),
+            ...(pendingIds !== undefined && { pendingIds }),
           };
           return <SwimLane key={lane.id} {...laneProps} />;
         })}

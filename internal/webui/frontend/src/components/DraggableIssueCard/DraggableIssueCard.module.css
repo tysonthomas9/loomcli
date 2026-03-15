@@ -44,6 +44,21 @@
   cursor: grabbing;
 }
 
+/* Pending optimistic update — subtle pulsing opacity */
+.draggable[data-optimistic="pending"] {
+  animation: optimistic-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes optimistic-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .overlay {
   cursor: grabbing;
   box-shadow: var(--shadow-lg);

@@ -62,6 +62,8 @@ export interface KanbanBoardProps {
   blockedIssues?: Map<string, BlockedInfo>;
   /** Whether to show blocked issues (default: true) */
   showBlocked?: boolean;
+  /** Set of issue IDs with pending optimistic updates */
+  pendingIds?: Set<string>;
 }
 
 /**
@@ -95,6 +97,7 @@ export function KanbanBoard({
   className,
   blockedIssues,
   showBlocked = true,
+  pendingIds,
 }: KanbanBoardProps): JSX.Element {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
@@ -368,6 +371,7 @@ export function KanbanBoard({
                   }),
                 })}
                 {...(isMutedColumn && { isBacklog: true })}
+                {...(pendingIds?.has(issue.id) && { isPending: true })}
               />
             );
           };

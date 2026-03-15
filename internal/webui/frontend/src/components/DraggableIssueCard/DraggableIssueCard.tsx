@@ -45,6 +45,8 @@ export interface DraggableIssueCardProps extends IssueCardProps {
   isOverlay?: boolean;
   /** Column ID this card belongs to (for drag restrictions) */
   columnId?: string;
+  /** Whether this card has a pending optimistic update awaiting API confirmation */
+  isPending?: boolean;
 }
 
 /**
@@ -66,6 +68,7 @@ export function DraggableIssueCard({
   columnId,
   isBacklog,
   hasActiveSession,
+  isPending = false,
 }: DraggableIssueCardProps): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -111,6 +114,7 @@ export function DraggableIssueCard({
       style={style}
       className={styles.draggable}
       data-dragging={isDragging ? "true" : undefined}
+      data-optimistic={isPending ? "pending" : undefined}
       {...listeners}
       {...attributes}
     >

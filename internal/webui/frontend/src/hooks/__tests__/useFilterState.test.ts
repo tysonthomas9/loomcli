@@ -1078,9 +1078,7 @@ describe("preserving non-filter URL params", () => {
       result.current[1].setPriority(2 as Priority);
     });
 
-    const lastCall = historyMock.replaceState.mock.calls.at(
-      -1,
-    )?.[2] as string;
+    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
     expect(lastCall).toContain("view=table");
     expect(lastCall).toContain("repos=api");
     expect(lastCall).toContain("workspace=myproject");
@@ -1088,7 +1086,9 @@ describe("preserving non-filter URL params", () => {
   });
 
   it("preserves non-filter params when clearing all filters", () => {
-    mockWindowLocation("?view=table&repos=api&workspace=myproject&priority=2&type=bug");
+    mockWindowLocation(
+      "?view=table&repos=api&workspace=myproject&priority=2&type=bug",
+    );
     historyMock = mockWindowHistory();
     const { result } = renderHook(() => useFilterState());
 
@@ -1096,9 +1096,7 @@ describe("preserving non-filter URL params", () => {
       result.current[1].clearAll();
     });
 
-    const lastCall = historyMock.replaceState.mock.calls.at(
-      -1,
-    )?.[2] as string;
+    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
     expect(lastCall).toContain("view=table");
     expect(lastCall).toContain("repos=api");
     expect(lastCall).toContain("workspace=myproject");
@@ -1116,9 +1114,7 @@ describe("preserving non-filter URL params", () => {
       result.current[1].setType("bug");
     });
 
-    const lastCall = historyMock.replaceState.mock.calls.at(
-      -1,
-    )?.[2] as string;
+    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
     expect(lastCall).toContain("view=issue-detail");
     expect(lastCall).toContain("issue=abc-123");
     expect(lastCall).toContain("type=bug");
@@ -1133,9 +1129,7 @@ describe("preserving non-filter URL params", () => {
       result.current[1].setLabels(["phase-1", "frontend"]);
     });
 
-    const lastCall = historyMock.replaceState.mock.calls.at(
-      -1,
-    )?.[2] as string;
+    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
     expect(lastCall).toContain("view=kanban");
     expect(lastCall).toContain("workspace=dev");
     expect(lastCall).toContain("labels=");
@@ -1150,9 +1144,7 @@ describe("preserving non-filter URL params", () => {
       result.current[1].clearFilter("priority");
     });
 
-    const lastCall = historyMock.replaceState.mock.calls.at(
-      -1,
-    )?.[2] as string;
+    const lastCall = historyMock.replaceState.mock.calls.at(-1)?.[2] as string;
     expect(lastCall).toContain("view=table");
     expect(lastCall).toContain("workspace=prod");
     expect(lastCall).toContain("type=bug");

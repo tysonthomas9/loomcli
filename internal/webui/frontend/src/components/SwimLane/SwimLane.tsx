@@ -47,6 +47,8 @@ export interface SwimLaneProps {
   className?: string;
   /** Maximum cards to show per column (default: 5) */
   cardLimit?: number;
+  /** Set of issue IDs with pending optimistic updates */
+  pendingIds?: Set<string>;
 }
 
 /**
@@ -66,6 +68,7 @@ export function SwimLane({
   showBlocked = true,
   className,
   cardLimit = DEFAULT_CARD_LIMIT,
+  pendingIds,
 }: SwimLaneProps): JSX.Element {
   // Track which columns are expanded to show all cards
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(
@@ -230,6 +233,7 @@ export function SwimLane({
                       }),
                     }),
                     ...(isMutedColumn && { isBacklog: true }),
+                    ...(pendingIds?.has(issue.id) && { isPending: true }),
                   };
                   return <DraggableIssueCard key={issue.id} {...cardProps} />;
                 })

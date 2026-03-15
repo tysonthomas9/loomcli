@@ -18,6 +18,7 @@ import {
 import type { Issue, WorkFilter, Status } from "@/types";
 
 import { useMutationHandler } from "./useMutationHandler";
+import { useOptimisticUpdate } from "./useOptimisticUpdate";
 import { useSSE } from "./useSSE";
 import { useToast } from "./useToast";
 
@@ -87,6 +88,8 @@ export interface UseIssuesReturn {
   connectionLost: boolean;
   /** Timestamp (ms) when disconnection started, null if connected */
   disconnectedSince: number | null;
+  /** Set of issue IDs currently in optimistic state (pending API confirmation) */
+  pendingIds: Set<string>;
 }
 
 /**
@@ -179,7 +182,19 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
   );
   const mutationCountAtDisconnectRef = useRef<number>(0);
 
+  // Toast for user notifications
+  const { showToast } = useToast();
+
+  // Optimistic update lifecycle management
+  const { startOptimistic, pendingIds, filterMutation } = useOptimisticUpdate({
+    setIssuesMap,
+    handleMutation,
+    showToast,
+    mountedRef,
+  });
+
   // Client-side mutation gate: discard SSE mutations for repos not in active filter
+  // Also gates mutations for issues in optimistic state (buffers them for later replay)
   const sourceReposRef = useRef(sourceRepos);
   useEffect(() => {
     sourceReposRef.current = sourceRepos;
@@ -187,6 +202,11 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
 
   const gatedHandleMutation = useCallback(
     (mutation: MutationPayload) => {
+      // Gate: buffer mutations for issues in optimistic state
+      if (!filterMutation(mutation)) {
+        return;
+      }
+
       const activeRepos = sourceReposRef.current;
       // If no filter is active (empty or undefined), allow all mutations
       if (!activeRepos || activeRepos.length === 0) {
@@ -209,7 +229,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
         );
       }
     },
-    [handleMutation],
+    [handleMutation, filterMutation],
   );
 
   // SSE setup - connection equals subscription (no separate subscribe message)
@@ -228,9 +248,6 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     onMutation: gatedHandleMutation,
     sourceRepos,
   });
-
-  // Toast for user notifications
-  const { showToast } = useToast();
 
   // Track previous state for detecting reconnection
   const prevStateRef = useRef<ConnectionState>("disconnected");
@@ -358,10 +375,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     prevStateRef.current = connectionState;
 
     // Transition to reconnecting: start 5s timer for stale banner
-    if (
-      connectionState === "reconnecting" &&
-      prevState !== "reconnecting"
-    ) {
+    if (connectionState === "reconnecting" && prevState !== "reconnecting") {
       const now = Date.now();
       setDisconnectedSince(now);
       mutationCountAtDisconnectRef.current = mutationCount;
@@ -440,7 +454,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     };
   }, []);
 
-  // Optimistic status update
+  // Optimistic status update with SSE mutation buffering and rollback
   const updateIssueStatus = useCallback(
     async (issueId: string, newStatus: Status) => {
       const existingIssue = issuesMap.get(issueId);
@@ -448,7 +462,13 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
         throw new Error(`Issue ${issueId} not found`);
       }
 
-      // Optimistic update
+      // Start optimistic tracking (returns null if issue already has pending update)
+      const handle = startOptimistic(issueId, existingIssue);
+      if (!handle) {
+        throw new Error(`Issue ${issueId} already has a pending update`);
+      }
+
+      // Optimistic update — apply new status immediately
       const optimisticIssue: Issue = {
         ...existingIssue,
         status: newStatus,
@@ -460,19 +480,21 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
 
       try {
         await apiUpdateIssue(issueId, { status: newStatus });
+        // Confirm: clear optimistic state, flush buffered SSE mutations
+        handle.confirm();
       } catch (err) {
-        // Rollback on failure using functional update to only restore this single issue,
-        // preserving any SSE mutations that arrived during the API call
-        if (!mountedRef.current) return;
-        setIssuesMap((currentMap) => {
-          const newMap = new Map(currentMap);
-          newMap.set(issueId, existingIssue);
-          return newMap;
-        });
+        // Rollback: restore snapshot, flush buffered SSE mutations, show toast
+        if (!mountedRef.current) {
+          handle.rollback();
+          return;
+        }
+        const message =
+          err instanceof Error ? err.message : "Failed to update status";
+        handle.rollback(message);
         throw err;
       }
     },
-    [issuesMap],
+    [issuesMap, startOptimistic],
   );
 
   // Get single issue by ID
@@ -501,5 +523,6 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     showStaleBanner,
     connectionLost,
     disconnectedSince,
+    pendingIds,
   };
 }
