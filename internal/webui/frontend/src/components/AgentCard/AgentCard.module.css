@@ -100,6 +100,23 @@
   line-height: 1.2;
 }
 
+/* Repo info line */
+.repoLine {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.crossRepoIndicator {
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 0.7rem;
+  flex-shrink: 0;
+  user-select: none;
+}
+
 .meta {
   margin-left: auto;
   display: flex;

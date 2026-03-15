@@ -429,6 +429,55 @@ describe("AgentCard", () => {
     });
   });
 
+  describe("repo badge", () => {
+    it("renders RepoBadge when agent.repo is set", () => {
+      render(<AgentCard agent={makeAgent({ repo: "api" })} />);
+
+      expect(screen.getByLabelText("Repository: api")).toBeInTheDocument();
+      expect(screen.getByText("api")).toBeInTheDocument();
+    });
+
+    it("does not render repo line when agent.repo is undefined", () => {
+      render(<AgentCard agent={makeAgent({ repo: undefined })} />);
+
+      expect(screen.queryByLabelText(/^Repository:/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("cross_repo indicator", () => {
+    it("renders cross_repo indicator when agent.cross_repo is true", () => {
+      render(
+        <AgentCard agent={makeAgent({ repo: "api", cross_repo: true })} />,
+      );
+
+      expect(screen.getByText("↔")).toBeInTheDocument();
+    });
+
+    it("does not render cross_repo indicator when agent.cross_repo is false", () => {
+      render(
+        <AgentCard agent={makeAgent({ repo: "api", cross_repo: false })} />,
+      );
+
+      expect(screen.queryByText("↔")).not.toBeInTheDocument();
+    });
+
+    it("does not render cross_repo indicator when agent.cross_repo is undefined", () => {
+      render(<AgentCard agent={makeAgent({ repo: "api" })} />);
+
+      expect(screen.queryByText("↔")).not.toBeInTheDocument();
+    });
+
+    it("cross_repo indicator has correct aria-label", () => {
+      render(
+        <AgentCard agent={makeAgent({ repo: "api", cross_repo: true })} />,
+      );
+
+      expect(
+        screen.getByLabelText("Works across multiple repositories"),
+      ).toBeInTheDocument();
+    });
+  });
+
   describe("edge cases", () => {
     it("handles empty name gracefully", () => {
       const { container } = render(

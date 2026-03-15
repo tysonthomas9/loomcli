@@ -591,6 +591,20 @@
   line-height: 1.25;
 }
 
+/* Repo detail in info grid */
+.repoDetail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.crossRepoLabel {
+  font-size: 12px;
+  color: var(--color-text-muted, #9ca3af);
+  font-style: italic;
+}
+
 .openInSection {
   margin-top: 14px;
 }

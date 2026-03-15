@@ -12,6 +12,7 @@ import { parseLoomStatus } from "@/types";
 
 import { LogViewer } from "../LogViewer";
 import { OpenInEditor } from "../OpenInEditor";
+import { RepoBadge } from "../RepoBadge";
 import styles from "./AgentDetailPanel.module.css";
 import { GitTab } from "./GitTab";
 import { useExpandedCommits } from "./useExpandedCommits";
@@ -419,6 +420,19 @@ export function AgentDetailPanel({
                     )}
                     <dt>Branch</dt>
                     <dd>{agent.branch}</dd>
+                    {agent.repo && (
+                      <>
+                        <dt>Repos</dt>
+                        <dd className={styles.repoDetail}>
+                          <RepoBadge repoName={agent.repo} />
+                          {agent.cross_repo && (
+                            <span className={styles.crossRepoLabel}>
+                              All repos
+                            </span>
+                          )}
+                        </dd>
+                      </>
+                    )}
                     <dt>Status</dt>
                     <dd>{agent.status}</dd>
                     {parsed.taskId && (

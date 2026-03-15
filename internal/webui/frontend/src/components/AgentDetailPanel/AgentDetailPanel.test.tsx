@@ -245,6 +245,36 @@ describe("AgentDetailPanel", () => {
     });
   });
 
+  describe("repo info in Agent Info section", () => {
+    it('shows "Repos" row with RepoBadge when agent.repo is set', () => {
+      renderPanel({ repo: "api" });
+
+      expect(screen.getByText("Repos")).toBeInTheDocument();
+      expect(screen.getByLabelText("Repository: api")).toBeInTheDocument();
+      expect(screen.getByText("api")).toBeInTheDocument();
+    });
+
+    it('does not show "Repos" row when agent.repo is undefined', () => {
+      renderPanel({ repo: undefined });
+
+      expect(screen.queryByText("Repos")).not.toBeInTheDocument();
+    });
+
+    it('shows "All repos" label when agent.cross_repo is true', () => {
+      renderPanel({ repo: "api", cross_repo: true });
+
+      expect(screen.getByText("Repos")).toBeInTheDocument();
+      expect(screen.getByText("All repos")).toBeInTheDocument();
+    });
+
+    it('does not show "All repos" when agent.cross_repo is false', () => {
+      renderPanel({ repo: "api", cross_repo: false });
+
+      expect(screen.getByText("Repos")).toBeInTheDocument();
+      expect(screen.queryByText("All repos")).not.toBeInTheDocument();
+    });
+  });
+
   describe("Show all commits feature", () => {
     beforeEach(() => {
       mockFetchDiffCommits.mockReset();

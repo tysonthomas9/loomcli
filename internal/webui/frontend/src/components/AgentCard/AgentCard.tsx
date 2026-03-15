@@ -5,6 +5,7 @@
 
 import type { LoomAgentStatus, ParsedLoomStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
+import { RepoBadge } from "@/components/RepoBadge";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./AgentCard.module.css";
@@ -135,6 +136,20 @@ export function AgentCard({
       <div className={styles.info}>
         <span className={styles.name}>{agent.name}</span>
         <span className={styles.role}>{roleLabel}</span>
+        {agent.repo && (
+          <span className={styles.repoLine}>
+            <RepoBadge repoName={agent.repo} />
+            {agent.cross_repo && (
+              <span
+                className={styles.crossRepoIndicator}
+                aria-label="Works across multiple repositories"
+                title="Cross-repo"
+              >
+                ↔
+              </span>
+            )}
+          </span>
+        )}
       </div>
 
       <div className={styles.meta}>
