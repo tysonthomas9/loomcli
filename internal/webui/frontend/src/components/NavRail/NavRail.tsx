@@ -12,6 +12,7 @@ export interface NavRailProps {
   activeView: ViewMode;
   onChange: (view: ViewMode) => void;
   className?: string;
+  sessionCount?: number;
 }
 
 type NavItem = { id: ViewMode; label: string; icon: JSX.Element };
@@ -253,6 +254,7 @@ export function NavRail({
   activeView,
   onChange,
   className,
+  sessionCount,
 }: NavRailProps): JSX.Element {
   const { isMultiRepo } = useWorkspaceContext();
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
@@ -262,6 +264,8 @@ export function NavRail({
 
   const renderButton = (item: NavItem) => {
     const isActive = activeView === item.id;
+    const showBadge =
+      item.id === "terminal" && sessionCount != null && sessionCount > 0;
     return (
       <button
         key={item.id}
@@ -272,6 +276,14 @@ export function NavRail({
         aria-label={item.label}
       >
         <span className={styles.icon}>{item.icon}</span>
+        {showBadge && (
+          <span
+            className={styles.badge}
+            aria-label={`${sessionCount} active sessions`}
+          >
+            {sessionCount}
+          </span>
+        )}
         <span className={styles.tooltip} role="tooltip">
           {item.label}
         </span>

@@ -285,6 +285,9 @@ function App() {
     IssueContext | undefined
   >(undefined);
 
+  // Active terminal session count for badge display
+  const [activeSessionCount, setActiveSessionCount] = useState(0);
+
   // Agent data (shared via AgentProvider — single polling loop)
   const { agents, agentTasks } = useAgentContext();
 
@@ -704,7 +707,13 @@ function App() {
         title={headerTitle}
         navigation={headerNavigation}
         actions={headerActions}
-        navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
+        navRail={
+          <NavRail
+            activeView={activeView}
+            onChange={setActiveView}
+            sessionCount={activeSessionCount}
+          />
+        }
         sidebar={
           activeView === "workspace" && isMultiRepo ? (
             <WorkspaceTree onRepoClick={handleRepoClick} />
@@ -742,7 +751,13 @@ function App() {
         title={headerTitle}
         navigation={headerNavigation}
         actions={headerActions}
-        navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
+        navRail={
+          <NavRail
+            activeView={activeView}
+            onChange={setActiveView}
+            sessionCount={activeSessionCount}
+          />
+        }
         sidebar={
           activeView === "workspace" && isMultiRepo ? (
             <WorkspaceTree onRepoClick={handleRepoClick} />
@@ -772,7 +787,13 @@ function App() {
         title={headerTitle}
         navigation={headerNavigation}
         actions={headerActions}
-        navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
+        navRail={
+          <NavRail
+            activeView={activeView}
+            onChange={setActiveView}
+            sessionCount={activeSessionCount}
+          />
+        }
         sidebar={
           activeView === "workspace" && isMultiRepo ? (
             <WorkspaceTree onRepoClick={handleRepoClick} />
@@ -920,12 +941,14 @@ function App() {
               isActive={activeView === "terminal"}
               pendingIssueContext={pendingIssueContext}
               onIssueContextConsumed={handleIssueContextConsumed}
+              onActiveSessionCountChange={setActiveSessionCount}
             />
           </Suspense>
         </div>
         <TalkToLeadButton
           onClick={handleTalkToLeadClick}
           isActive={activeView === "terminal"}
+          sessionCount={activeSessionCount}
         />
         <AssigneePrompt
           isOpen={pendingDragData !== null}

@@ -40,12 +40,14 @@ interface TerminalViewProps {
   isActive?: boolean;
   pendingIssueContext?: IssueContext | undefined;
   onIssueContextConsumed?: (() => void) | undefined;
+  onActiveSessionCountChange?: (count: number) => void;
 }
 
 export function TerminalView({
   isActive = true,
   pendingIssueContext,
   onIssueContextConsumed,
+  onActiveSessionCountChange,
 }: TerminalViewProps): JSX.Element {
   const {
     tabs: tabMetadata,
@@ -165,6 +167,19 @@ export function TerminalView({
       sessionStorage.setItem("terminal-active-tab", activeTabId);
     }
   }, [activeTabId]);
+
+  // Report active (connected) session count to parent
+  useEffect(() => {
+    const count = tabs.filter((t) => t.connectionState === "connected").length;
+    onActiveSessionCountChange?.(count);
+  }, [tabs, onActiveSessionCountChange]);
+
+  // Reset count on unmount
+  useEffect(() => {
+    return () => {
+      onActiveSessionCountChange?.(0);
+    };
+  }, [onActiveSessionCountChange]);
 
   // Track sessions that have been seeded so we don't re-seed on reconnect
   const seededSessionsRef = useRef<Set<string>>(new Set());

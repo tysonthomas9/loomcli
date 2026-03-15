@@ -213,4 +213,47 @@ describe("NavRail", () => {
       expect(onChange).toHaveBeenCalledWith("kanban");
     });
   });
+
+  describe("session badge", () => {
+    it("does not render badge when sessionCount is undefined", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(
+        screen.queryByLabelText(/active sessions/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render badge when sessionCount is 0", () => {
+      render(
+        <NavRail activeView="kanban" onChange={() => {}} sessionCount={0} />,
+      );
+
+      expect(
+        screen.queryByLabelText(/active sessions/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders badge on terminal button when sessionCount > 0", () => {
+      render(
+        <NavRail activeView="kanban" onChange={() => {}} sessionCount={3} />,
+      );
+
+      expect(screen.getByLabelText("3 active sessions")).toBeInTheDocument();
+    });
+
+    it("badge only appears on terminal button, not other buttons", () => {
+      render(
+        <NavRail activeView="kanban" onChange={() => {}} sessionCount={2} />,
+      );
+
+      // Badge is inside the Terminal button
+      const badge = screen.getByLabelText("2 active sessions");
+      const terminalButton = screen.getByLabelText("Terminal");
+      expect(terminalButton).toContainElement(badge);
+
+      // Other buttons do not contain the badge
+      const kanbanButton = screen.getByLabelText("Kanban");
+      expect(kanbanButton).not.toContainElement(badge);
+    });
+  });
 });
