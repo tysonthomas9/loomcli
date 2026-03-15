@@ -271,3 +271,47 @@
   background-color: var(--terminal-border);
   margin: 4px 0;
 }
+
+/* ============= Responsive: Mobile (768px) ============= */
+
+@media (width <= 768px) {
+  .tabList {
+    position: relative;
+  }
+
+  .tabList::after {
+    content: "";
+    position: sticky;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    flex-shrink: 0;
+    background: linear-gradient(
+      to left,
+      var(--terminal-surface),
+      transparent
+    );
+    pointer-events: none;
+  }
+
+  .tab {
+    min-height: var(--touch-target-min);
+  }
+
+  .closeButton {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    padding: 14px;
+  }
+
+  .actionButton {
+    min-width: var(--touch-target-min);
+  }
+
+  .contextMenuItem {
+    min-height: var(--touch-target-min);
+    display: flex;
+    align-items: center;
+  }
+}

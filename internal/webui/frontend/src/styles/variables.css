@@ -224,6 +224,17 @@
   --z-overlay: 300;
   --z-modal: 400;
   --z-toast: 500;
+
+  /* ===========================
+   * Responsive Layout Tokens
+   * NOTE: Breakpoint values are reference documentation only.
+   * CSS custom properties cannot be used inside @media conditions.
+   * Use raw px values in @media rules directly.
+   * =========================== */
+  --breakpoint-tablet: 1024px;
+  --breakpoint-mobile: 768px;
+  --breakpoint-small: 520px;
+  --touch-target-min: 44px;
 }
 
 /* ===========================

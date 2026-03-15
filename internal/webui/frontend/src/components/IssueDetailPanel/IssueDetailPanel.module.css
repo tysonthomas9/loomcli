@@ -264,7 +264,7 @@
   grid-column: 1 / -1;
 }
 
-@media (width <= 768px) {
+@media (width <= 1024px) {
   .detailColumns {
     grid-template-columns: 1fr;
   }
@@ -273,6 +273,8 @@
     position: static;
     max-height: none;
     overflow-y: visible;
+    border-top: 1px solid var(--color-border-light);
+    padding-top: 24px;
   }
 }
 
@@ -762,4 +764,80 @@
   line-height: 1.6;
   margin: 0;
   white-space: pre-wrap;
+}
+
+/* ============= Responsive: Tab Bar Scroll Indicators ============= */
+
+@media (width <= 768px) {
+  .tabBarWrapper {
+    position: relative;
+  }
+
+  .tabBarWrapper::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 20px;
+    z-index: 1;
+    pointer-events: none;
+    background: linear-gradient(
+      to left,
+      var(--color-panel-bg),
+      transparent
+    );
+  }
+
+  .tabBar {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .tabBar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    min-height: var(--touch-target-min);
+  }
+
+  .tabCloseButton {
+    width: var(--touch-target-min);
+    height: var(--touch-target-min);
+    padding: 14px;
+  }
+
+  .addTabButton {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+  }
+
+  .collapsibleHeader {
+    min-height: var(--touch-target-min);
+  }
+
+  .retryButton {
+    min-height: var(--touch-target-min);
+  }
+}
+
+/* ============= Responsive: Small Screen Padding ============= */
+
+@media (width <= 520px) {
+  .detailContent {
+    padding: 12px var(--panel-padding-sm) var(--panel-padding-sm);
+  }
+
+  .metadataBar {
+    padding: 10px var(--panel-padding-sm);
+  }
+
+  .reviewActionBar {
+    padding: 12px var(--panel-padding-sm);
+  }
+
+  .statusRow {
+    flex-direction: column;
+  }
 }

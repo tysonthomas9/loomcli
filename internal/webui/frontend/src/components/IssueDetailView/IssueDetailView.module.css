@@ -456,3 +456,46 @@
   margin-bottom: 16px;
   font-size: 14px;
 }
+
+/* ============= Responsive: Tablet (1024px) ============= */
+
+@media (width <= 1024px) {
+  .metadataBar {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* ============= Responsive: Mobile (768px) ============= */
+
+@media (width <= 768px) {
+  .headerBar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+
+  .headerTitle {
+    order: 10;
+    flex-basis: 100%;
+    white-space: normal;
+  }
+
+  .openTerminalButton,
+  .copyLinkButton {
+    min-height: var(--touch-target-min);
+  }
+
+  .backButton {
+    min-height: var(--touch-target-min);
+  }
+
+  .contentArea {
+    padding: 16px;
+  }
+
+  .reviewApproveButton,
+  .reviewRejectButton {
+    min-height: var(--touch-target-min);
+  }
+}
