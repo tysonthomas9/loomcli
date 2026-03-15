@@ -23,6 +23,7 @@ import {
   SwimLaneBoard,
   IssueTable,
   LoadingSkeleton,
+  EmptyState,
   ErrorDisplay,
   ErrorBoundary,
   ConnectionStatus,
@@ -858,6 +859,44 @@ function App() {
             showDetails
             onRetry={refetch}
           />
+        </AppLayout>
+        {!isDaemonAvailable && (
+          <DaemonUnavailableOverlay
+            mode={connectionMode}
+            retryCountdown={retryCountdown}
+            lastError={lastError}
+            onRetry={daemonRetryNow}
+            onSettingsClick={() => setActiveView("settings")}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Empty state: no issues across issue-based views
+  if (
+    issues.length === 0 &&
+    (activeView === "kanban" ||
+      activeView === "table" ||
+      activeView === "graph")
+  ) {
+    return (
+      <>
+        <AppLayout
+          title={headerTitle}
+          navigation={headerNavigation}
+          actions={headerActions}
+          navRail={
+            <NavRail
+              activeView={activeView}
+              onChange={setActiveView}
+              sessionCount={activeSessionCount}
+              badges={{ terminal: hasTerminalUnread }}
+            />
+          }
+          sidebar={sidebarContent}
+        >
+          <EmptyState variant="no-issues" />
         </AppLayout>
         {!isDaemonAvailable && (
           <DaemonUnavailableOverlay

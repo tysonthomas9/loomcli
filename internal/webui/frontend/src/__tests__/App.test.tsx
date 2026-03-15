@@ -410,10 +410,16 @@ interface MockUseIssuesReturn {
   pendingIds: Set<string>;
 }
 
+const DEFAULT_MOCK_ISSUE = createMockIssue({
+  id: "default-issue",
+  title: "Default Issue",
+  status: "open",
+});
+
 function createMockUseIssuesReturn(
   overrides: Partial<MockUseIssuesReturn> = {},
 ): MockUseIssuesReturn {
-  const issues = overrides.issues ?? [];
+  const issues = overrides.issues ?? [DEFAULT_MOCK_ISSUE];
   const issuesMap =
     overrides.issuesMap ?? new Map(issues.map((issue) => [issue.id, issue]));
 
@@ -703,33 +709,21 @@ describe("App", () => {
       expect(screen.queryByTestId("loading-container")).not.toBeInTheDocument();
     });
 
-    it("renders empty KanbanBoard when issues array is empty", () => {
+    it("renders EmptyState when issues array is empty", () => {
       const mockReturn = createMockUseIssuesReturn({ issues: [] });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
-      // Use flat view (groupBy: 'none') to verify empty column rendering
-      vi.mocked(useFilterState).mockReturnValue([
-        { groupBy: "none" },
-        {
-          setPriority: vi.fn(),
-          setType: vi.fn(),
-          setLabels: vi.fn(),
-          setSearch: vi.fn(),
-          setShowBlocked: vi.fn(),
-          setGroupBy: vi.fn(),
-          clearFilter: vi.fn(),
-          clearAll: vi.fn(),
-        },
-      ]);
-
       render(<App />);
 
-      // Should render columns even with no issues
-      expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
+      // Should render EmptyState with no-issues variant in the main content area
+      const emptyStates = screen.getAllByTestId("empty-state");
+      const issuesEmptyState = emptyStates.find(
+        (el) => el.getAttribute("data-variant") === "no-issues",
+      );
+      expect(issuesEmptyState).toBeInTheDocument();
       expect(
-        screen.getByRole("heading", { name: "In Progress" }),
+        screen.getByRole("heading", { name: "No issues yet" }),
       ).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "Done" })).toBeInTheDocument();
     });
   });
 

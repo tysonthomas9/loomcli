@@ -5,6 +5,7 @@
 
 export * from "./AppLayout";
 export * from "./EmptyColumn";
+export * from "./EmptyState";
 export * from "./IssueCard";
 export * from "./DraggableIssueCard";
 export * from "./IssueDetailPanel";

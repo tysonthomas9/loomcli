@@ -9,7 +9,7 @@ import { useState, useCallback, useEffect } from "react";
 
 import { ApiError } from "@/api/client";
 import { gitPushAll } from "@/api/git";
-import { ErrorDisplay, LoadingSkeleton } from "@/components";
+import { EmptyState, ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useAgentContext, useRepoFilter } from "@/hooks";
 import type {
   LoomAgentStatus,
@@ -277,7 +277,7 @@ export function AgentsSidebar({
           )}
 
           {agents.length === 0 && isConnected && !isLoading && (
-            <div className={styles.empty}>No agents found</div>
+            <EmptyState variant="no-agents" />
           )}
 
           {agents.length > 0 && (
