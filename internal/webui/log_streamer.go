@@ -563,35 +563,33 @@ func getTaskLogDir(taskID string) (string, error) {
 
 // validatePathWithinDir checks that the resolved path stays within the allowed directory.
 // This prevents symlink attacks where a symlink could point outside the log directory.
+func pathIsWithin(child, parent string) bool {
+	return child == parent || strings.HasPrefix(child+string(filepath.Separator), parent+string(filepath.Separator))
+}
+
 func validatePathWithinDir(path, allowedDir string) error {
-	// Resolve any symlinks in the path
+	// Resolve symlinks in the allowed directory (e.g. /var → /private/var on macOS)
+	resolvedAllowed, err := filepath.EvalSymlinks(allowedDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve allowed dir: %w", err)
+	}
 	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		// If file doesn't exist yet, check the parent directory
 		if os.IsNotExist(err) {
-			parentDir := filepath.Dir(path)
-			resolvedParent, err := filepath.EvalSymlinks(parentDir)
-			if err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to resolve parent path: %w", err)
+			resolvedParent, pErr := filepath.EvalSymlinks(filepath.Dir(path))
+			if pErr != nil && !os.IsNotExist(pErr) {
+				return fmt.Errorf("failed to resolve parent path: %w", pErr)
 			}
-			if err == nil {
-				// Check parent stays within allowed dir
-				if !strings.HasPrefix(resolvedParent+string(filepath.Separator), allowedDir+string(filepath.Separator)) &&
-					resolvedParent != allowedDir {
-					return fmt.Errorf("path outside allowed directory")
-				}
+			if pErr == nil && !pathIsWithin(resolvedParent, resolvedAllowed) {
+				return fmt.Errorf("path outside allowed directory")
 			}
 			return nil
 		}
 		return fmt.Errorf("failed to resolve path: %w", err)
 	}
-
-	// Ensure resolved path is within the allowed directory
-	if !strings.HasPrefix(resolvedPath+string(filepath.Separator), allowedDir+string(filepath.Separator)) &&
-		resolvedPath != allowedDir {
+	if !pathIsWithin(resolvedPath, resolvedAllowed) {
 		return fmt.Errorf("path outside allowed directory")
 	}
-
 	return nil
 }
 
