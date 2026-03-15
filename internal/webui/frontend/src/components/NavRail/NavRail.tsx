@@ -294,9 +294,7 @@ export function NavRail({
             aria-label="has unread output"
           />
         )}
-        <span className={styles.tooltip} role="tooltip">
-          {item.label}
-        </span>
+        <span className={styles.tooltip}>{item.label}</span>
       </button>
     );
   };

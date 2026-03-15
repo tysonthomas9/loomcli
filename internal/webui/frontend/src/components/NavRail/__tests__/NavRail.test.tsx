@@ -10,6 +10,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import "@testing-library/jest-dom";
+import { expectNoA11yViolations } from "@/test-utils/a11y-helpers";
 import { NavRail } from "../NavRail";
 
 // Mock useWorkspaceContext — default to single-repo (isMultiRepo: false)
@@ -98,27 +99,21 @@ describe("NavRail", () => {
     });
 
     it("renders tooltips for each button in single-repo mode", () => {
-      render(<NavRail activeView="kanban" onChange={() => {}} />);
+      const { container } = render(
+        <NavRail activeView="kanban" onChange={() => {}} />,
+      );
 
-      expect(
-        screen.getByRole("tooltip", { name: "Kanban" }),
-      ).toBeInTheDocument();
-      expect(screen.getByRole("tooltip", { name: "List" })).toBeInTheDocument();
-      expect(
-        screen.getByRole("tooltip", { name: "Observability" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.queryByRole("tooltip", { name: "Workspace" }),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.getByRole("tooltip", { name: "Files" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("tooltip", { name: "Terminal" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("tooltip", { name: "Settings" }),
-      ).toBeInTheDocument();
+      const tooltips = container.querySelectorAll(
+        "span.tooltip, [class*='tooltip']",
+      );
+      const tooltipTexts = Array.from(tooltips).map((t) => t.textContent);
+      expect(tooltipTexts).toContain("Kanban");
+      expect(tooltipTexts).toContain("List");
+      expect(tooltipTexts).toContain("Observability");
+      expect(tooltipTexts).not.toContain("Workspace");
+      expect(tooltipTexts).toContain("Files");
+      expect(tooltipTexts).toContain("Terminal");
+      expect(tooltipTexts).toContain("Settings");
     });
 
     it("renders Terminal as the 3rd nav item (between List and Observability)", () => {
@@ -254,6 +249,45 @@ describe("NavRail", () => {
       // Other buttons do not contain the badge
       const kanbanButton = screen.getByLabelText("Kanban");
       expect(kanbanButton).not.toContainElement(badge);
+    });
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations in single-repo mode", async () => {
+      const { container } = render(
+        <NavRail activeView="kanban" onChange={() => {}} />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations in multi-repo mode", async () => {
+      mockUseWorkspaceContext.mockReturnValue({ isMultiRepo: true });
+      const { container } = render(
+        <NavRail activeView="kanban" onChange={() => {}} />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations with active session badge", async () => {
+      const { container } = render(
+        <NavRail activeView="kanban" onChange={() => {}} sessionCount={3} />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations with unread indicator", async () => {
+      const { container } = render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          badges={{ terminal: true }}
+        />,
+      );
+
+      await expectNoA11yViolations(container);
     });
   });
 

@@ -85,7 +85,8 @@
   transition: opacity var(--transition-fast);
 }
 
-.navButton:hover .tooltip {
+.navButton:hover .tooltip,
+.navButton:focus-visible .tooltip {
   opacity: 1;
 }
 

@@ -170,6 +170,24 @@ export const A11Y_ATTRIBUTES = {
   retryButton: {
     ariaLabel: "Retry connection now",
   },
+  navRail: {
+    containerRole: "navigation",
+    ariaLabel: "Primary",
+  },
+  bulkActionToolbar: {
+    role: "toolbar",
+    ariaLabelPattern: /Bulk actions for \d+ selected issue/,
+  },
+  priorityDropdown: {
+    ariaHasPopup: "listbox",
+    ariaLabelPattern: /Priority: P\d - .+/,
+  },
+  liveRegion: {
+    politeTestId: "live-region-polite",
+    assertiveTestId: "live-region-assertive",
+    politeAriaLive: "polite",
+    assertiveAriaLive: "assertive",
+  },
 } as const;
 
 /**

@@ -3,8 +3,10 @@
  * Interactive dropdown for changing issue priority (P0-P4) with colored indicators.
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useId } from "react";
 
+import { VisuallyHidden } from "@/components/VisuallyHidden/VisuallyHidden";
+import { useAnnounce } from "@/hooks/useAnnounce";
 import type { Priority } from "@/types";
 
 import styles from "./PriorityDropdown.module.css";
@@ -63,6 +65,8 @@ export function PriorityDropdown({
   disabled,
   className,
 }: PriorityDropdownProps): JSX.Element {
+  const { announce } = useAnnounce();
+  const colorDescId = useId();
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [optimisticPriority, setOptimisticPriority] =
@@ -143,6 +147,10 @@ export function PriorityDropdown({
 
       try {
         await onSave(newPriority);
+        const opt = PRIORITY_OPTIONS.find((o) => o.value === newPriority);
+        if (opt) {
+          announce(`Priority changed to ${opt.shortLabel} - ${opt.label}`);
+        }
       } catch (err) {
         // Rollback on error
         setOptimisticPriority(previousPriority);
@@ -151,7 +159,7 @@ export function PriorityDropdown({
         setError(message);
       }
     },
-    [priority, onSave],
+    [priority, onSave, announce],
   );
 
   const handleKeyDown = useCallback(
@@ -218,6 +226,12 @@ export function PriorityDropdown({
 
   return (
     <div ref={containerRef} className={rootClassName}>
+      <VisuallyHidden>
+        <span id={colorDescId}>
+          Colors indicate priority level: red is critical, orange is high,
+          yellow is medium, blue is normal, gray is backlog.
+        </span>
+      </VisuallyHidden>
       <button
         ref={triggerRef}
         type="button"
@@ -230,6 +244,7 @@ export function PriorityDropdown({
         aria-expanded={isOpen}
         aria-haspopup="listbox"
         aria-label={`Priority: ${currentOption.shortLabel} - ${currentOption.label}. Click to change.`}
+        aria-describedby={colorDescId}
         data-testid="priority-dropdown-trigger"
       >
         <span className={styles.colorDot} data-priority={optimisticPriority} />

@@ -285,7 +285,9 @@ describe("IssueCard", () => {
       const issue = createTestIssue({ priority: 0 });
       render(<IssueCard issue={issue} />);
 
-      expect(screen.getByLabelText("Priority 0")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Priority: P0 - Critical"),
+      ).toBeInTheDocument();
     });
   });
 

@@ -5,6 +5,8 @@
 
 import type { ReactNode } from "react";
 
+import { LiveRegion } from "@/components/LiveRegion/LiveRegion";
+
 import styles from "./AppLayout.module.css";
 
 /**
@@ -47,6 +49,7 @@ export function AppLayout({
 
   return (
     <div className={rootClassName}>
+      <LiveRegion />
       <a href="#main-content" className={styles.skipLink}>
         Skip to main content
       </a>

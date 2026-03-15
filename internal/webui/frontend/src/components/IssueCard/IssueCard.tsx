@@ -76,6 +76,14 @@ export interface IssueCardProps {
   hasActiveSession?: boolean;
 }
 
+const PRIORITY_LABELS: Record<number, string> = {
+  0: "Critical",
+  1: "High",
+  2: "Medium",
+  3: "Normal",
+  4: "Backlog",
+};
+
 /**
  * Get priority level, defaulting to 4 (backlog) if undefined or out of range.
  */
@@ -241,7 +249,7 @@ export function IssueCard({
         <span
           className={`${styles.priorityBadge} ${styles[`priority${priority}`]}`}
           data-priority={priority}
-          aria-label={`Priority ${priority}`}
+          aria-label={`Priority: P${priority} - ${PRIORITY_LABELS[priority] ?? "Unknown"}`}
         >
           P{priority}
         </span>
