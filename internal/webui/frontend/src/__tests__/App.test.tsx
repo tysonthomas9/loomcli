@@ -1046,9 +1046,11 @@ describe("App", () => {
 
       render(<App />);
 
-      // FilterBar should be rendered with its test id (priority/type hidden in header variant)
+      // FilterBar should be rendered with priority/type dropdowns and more-filters button
       expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
-      expect(screen.getByTestId("groupby-filter")).toBeInTheDocument();
+      expect(screen.getByTestId("priority-filter")).toBeInTheDocument();
+      expect(screen.getByTestId("type-filter")).toBeInTheDocument();
+      expect(screen.getByTestId("more-filters-trigger")).toBeInTheDocument();
     });
 
     it("renders filter navigation even in loading state", () => {
@@ -1177,7 +1179,7 @@ describe("App", () => {
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);
 
-      // Mock FilterState with no groupBy (App.tsx applies DEFAULT_GROUP_BY = 'epic')
+      // Mock FilterState with no groupBy (App.tsx applies DEFAULT_GROUP_BY = 'none')
       vi.mocked(useFilterState).mockReturnValue([
         {},
         {

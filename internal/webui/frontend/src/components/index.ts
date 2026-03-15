@@ -15,6 +15,7 @@ export * from "./StatusColumn";
 export * from "./search";
 export * from "./TypeIcon";
 export * from "./FilterBar";
+export * from "./MoreFiltersMenu";
 export * from "./KanbanBoard";
 export * from "./BulkActionToolbar";
 export * from "./ConnectionStatus";

@@ -29,6 +29,7 @@ import {
   ConnectionStatus,
   ToastContainer,
   FilterBar,
+  MoreFiltersMenu,
   SearchInput,
   IssueDetailPanel,
   IssueDetailView,
@@ -582,14 +583,16 @@ function App() {
         <FilterBar
           filters={filters}
           actions={filterActions}
-          showPriority={false}
-          showType={false}
+          showPriority={true}
+          showType={true}
           showLabels={false}
-          showGroupBy={true}
+          showGroupBy={false}
+          variant="header"
+          showClear={true}
+        />
+        <MoreFiltersMenu
           groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
           onGroupByChange={filterActions.setGroupBy}
-          variant="header"
-          showClear={false}
         />
       </div>
     </div>
