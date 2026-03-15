@@ -105,6 +105,57 @@
   overflow-y: auto;
 }
 
+/* Repo affinity group */
+.repoGroup {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.repoGroup:last-child {
+  border-bottom: none;
+}
+
+.repoGroupHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  user-select: none;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.repoGroupHeader:hover {
+  background: var(--color-bg-hover);
+}
+
+.repoGroupToggle {
+  width: 12px;
+  font-family: monospace;
+  color: var(--color-text-tertiary);
+}
+
+.repoGroupName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repoGroupCount {
+  min-width: 16px;
+  text-align: center;
+  font-size: 0.65rem;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
 .disconnected {
   display: flex;
   align-items: center;

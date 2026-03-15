@@ -9,13 +9,18 @@ import { useState, useCallback, useEffect } from "react";
 
 import { ApiError } from "@/api/client";
 import { gitPushAll } from "@/api/git";
-import { useAgentContext } from "@/hooks";
-import type { LoomTaskInfo, WorktreeSyncDetail } from "@/types";
+import { useAgentContext, useRepoFilter } from "@/hooks";
+import type {
+  LoomAgentStatus,
+  LoomTaskInfo,
+  WorktreeSyncDetail,
+} from "@/types";
 
 import { AgentCard } from "../AgentCard";
 import { TaskDrawer } from "../TaskDrawer";
 import type { TaskCategory } from "../TaskDrawer";
 import styles from "./AgentsSidebar.module.css";
+import { RepoGroupedList } from "./RepoGroupedList";
 
 function buildSyncTooltip(
   details: WorktreeSyncDetail[] | undefined,
@@ -30,19 +35,39 @@ function buildSyncTooltip(
     .join("\n");
 }
 
+export type AgentTaskMap = Record<string, LoomTaskInfo>;
+
 /**
- * Props for the AgentsSidebar component.
+ * Group agents by repo affinity when repo filters are active.
+ * Agents matching selected repos go into named groups; the rest go into "other".
  */
+export function groupAgentsByRepo(
+  agents: LoomAgentStatus[],
+  selectedRepos: string[],
+): { grouped: Map<string, LoomAgentStatus[]>; other: LoomAgentStatus[] } {
+  const grouped = new Map<string, LoomAgentStatus[]>();
+  const other: LoomAgentStatus[] = [];
+
+  for (const repo of selectedRepos) {
+    grouped.set(repo, []);
+  }
+
+  for (const agent of agents) {
+    if (agent.repo && grouped.has(agent.repo)) {
+      grouped.get(agent.repo)!.push(agent);
+    } else {
+      other.push(agent);
+    }
+  }
+
+  return { grouped, other };
+}
+
 export interface AgentsSidebarProps {
-  /** Additional CSS class name */
   className?: string;
-  /** Default collapsed state */
   defaultCollapsed?: boolean;
-  /** Allow collapsing the sidebar (default: true) */
   collapsible?: boolean;
-  /** Callback when an agent card is clicked */
   onAgentClick?: (agentName: string) => void;
-  /** Optional content to render at the top of the sidebar (e.g., ViewSwitcher) */
   viewSwitcher?: ReactNode;
 }
 
@@ -100,6 +125,9 @@ export function AgentsSidebar({
     wasEverConnected,
     lastUpdated,
   } = useAgentContext();
+
+  const [selectedRepos] = useRepoFilter();
+  const isGrouped = selectedRepos.length > 0;
 
   // Persist collapsed state
   useEffect(() => {
@@ -247,16 +275,27 @@ export function AgentsSidebar({
 
           {agents.length > 0 && (
             <div className={styles.agentList}>
-              {agents.map((agent) => (
-                <AgentCard
-                  key={agent.name}
-                  agent={agent}
-                  taskTitle={agentTasks[agent.name]?.title}
+              {isGrouped ? (
+                <RepoGroupedList
+                  agents={agents}
+                  selectedRepos={selectedRepos}
+                  agentTasks={agentTasks}
                   {...(onAgentClick !== undefined && {
-                    onClick: () => onAgentClick(agent.name),
+                    onAgentClick,
                   })}
                 />
-              ))}
+              ) : (
+                agents.map((agent) => (
+                  <AgentCard
+                    key={agent.name}
+                    agent={agent}
+                    taskTitle={agentTasks[agent.name]?.title}
+                    {...(onAgentClick !== undefined && {
+                      onClick: () => onAgentClick(agent.name),
+                    })}
+                  />
+                ))
+              )}
             </div>
           )}
 

@@ -11,7 +11,8 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import "@testing-library/jest-dom";
-import { AgentsSidebar } from "../AgentsSidebar";
+import type { LoomAgentStatus } from "@/types";
+import { AgentsSidebar, groupAgentsByRepo } from "../AgentsSidebar";
 
 // Default mock context value (used by most tests)
 const defaultMockContext = {
@@ -57,8 +58,11 @@ const defaultMockContext = {
 let mockContextOverride: Partial<typeof defaultMockContext> = {};
 
 // Mock the hooks to prevent API calls in tests
+let mockSelectedRepos: string[] = [];
+
 vi.mock("@/hooks", () => ({
   useAgentContext: () => ({ ...defaultMockContext, ...mockContextOverride }),
+  useRepoFilter: () => [mockSelectedRepos, vi.fn()],
 }));
 
 const mockGitPushAll = vi.fn();
@@ -80,6 +84,7 @@ describe("AgentsSidebar", () => {
   beforeEach(() => {
     localStorage.clear();
     mockContextOverride = {};
+    mockSelectedRepos = [];
   });
 
   describe("viewSwitcher slot", () => {
@@ -398,6 +403,312 @@ describe("AgentsSidebar", () => {
         selector: 'button span[data-highlight="true"]',
       });
       expect(countSpan).toHaveAttribute("data-highlight", "true");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // groupAgentsByRepo utility (pure function)
+  // ---------------------------------------------------------------------------
+
+  describe("groupAgentsByRepo utility", () => {
+    function makeAgent(name: string, repo?: string): LoomAgentStatus {
+      return {
+        name,
+        branch: "main",
+        status: "idle",
+        ahead: 0,
+        behind: 0,
+        ...(repo !== undefined && { repo }),
+      };
+    }
+
+    it("groups agents correctly by matching repo to selectedRepos", () => {
+      const agents = [
+        makeAgent("a1", "repo-a"),
+        makeAgent("a2", "repo-b"),
+        makeAgent("a3", "repo-a"),
+      ];
+
+      const { grouped, other } = groupAgentsByRepo(agents, [
+        "repo-a",
+        "repo-b",
+      ]);
+
+      expect(grouped.get("repo-a")).toHaveLength(2);
+      expect(grouped.get("repo-a")!.map((a) => a.name)).toEqual(["a1", "a3"]);
+      expect(grouped.get("repo-b")).toHaveLength(1);
+      expect(grouped.get("repo-b")![0]!.name).toBe("a2");
+      expect(other).toHaveLength(0);
+    });
+
+    it('puts agents without repo field into "other"', () => {
+      const agents = [
+        makeAgent("a1", "repo-a"),
+        makeAgent("a2"), // no repo
+      ];
+
+      const { grouped, other } = groupAgentsByRepo(agents, ["repo-a"]);
+
+      expect(grouped.get("repo-a")).toHaveLength(1);
+      expect(other).toHaveLength(1);
+      expect(other[0]!.name).toBe("a2");
+    });
+
+    it('puts agents with non-matching repo into "other"', () => {
+      const agents = [makeAgent("a1", "repo-x"), makeAgent("a2", "repo-a")];
+
+      const { grouped, other } = groupAgentsByRepo(agents, ["repo-a"]);
+
+      expect(grouped.get("repo-a")).toHaveLength(1);
+      expect(other).toHaveLength(1);
+      expect(other[0]!.name).toBe("a1");
+    });
+
+    it("returns empty grouped Map and all agents in other when selectedRepos is empty", () => {
+      const agents = [makeAgent("a1", "repo-a"), makeAgent("a2")];
+
+      const { grouped, other } = groupAgentsByRepo(agents, []);
+
+      expect(grouped.size).toBe(0);
+      expect(other).toHaveLength(2);
+    });
+
+    it("preserves order of selectedRepos in grouped Map keys", () => {
+      const agents = [
+        makeAgent("a1", "repo-c"),
+        makeAgent("a2", "repo-a"),
+        makeAgent("a3", "repo-b"),
+      ];
+
+      const { grouped } = groupAgentsByRepo(agents, [
+        "repo-c",
+        "repo-a",
+        "repo-b",
+      ]);
+
+      const keys = Array.from(grouped.keys());
+      expect(keys).toEqual(["repo-c", "repo-a", "repo-b"]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Grouped rendering (RepoGroupedList via AgentsSidebar)
+  // ---------------------------------------------------------------------------
+
+  describe("grouped rendering", () => {
+    function makeAgentStatus(name: string, repo?: string): LoomAgentStatus {
+      return {
+        name,
+        branch: "main",
+        status: "idle",
+        ahead: 0,
+        behind: 0,
+        ...(repo !== undefined && { repo }),
+      };
+    }
+
+    it("renders repo group headers with correct names when filter active", () => {
+      mockSelectedRepos = ["repo-a", "repo-b"];
+      mockContextOverride = {
+        agents: [
+          makeAgentStatus("alpha", "repo-a"),
+          makeAgentStatus("beta", "repo-b"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Find group header elements specifically (not the RepoBadge inside AgentCard)
+      const headers = container.querySelectorAll('[class*="repoGroupHeader"]');
+      const headerTexts = Array.from(headers).map((h) => {
+        const nameSpan = h.querySelector('[class*="repoGroupName"]');
+        return nameSpan?.textContent;
+      });
+      expect(headerTexts).toContain("repo-a");
+      expect(headerTexts).toContain("repo-b");
+    });
+
+    it("shows agent counts in group header badges", () => {
+      mockSelectedRepos = ["repo-a", "repo-b"];
+      mockContextOverride = {
+        agents: [
+          makeAgentStatus("alpha", "repo-a"),
+          makeAgentStatus("gamma", "repo-a"),
+          makeAgentStatus("beta", "repo-b"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Find the header for repo-a – its sibling count badge should show 2
+      const headers = container.querySelectorAll('[class*="repoGroupHeader"]');
+      expect(headers.length).toBeGreaterThanOrEqual(2);
+
+      // repo-a header: contains "repo-a" text and count "2"
+      const repoAHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("repo-a"),
+      )!;
+      expect(repoAHeader).toBeDefined();
+      expect(
+        within(repoAHeader as HTMLElement).getByText("2"),
+      ).toBeInTheDocument();
+
+      // repo-b header: count "1"
+      const repoBHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("repo-b"),
+      )!;
+      expect(repoBHeader).toBeDefined();
+      expect(
+        within(repoBHeader as HTMLElement).getByText("1"),
+      ).toBeInTheDocument();
+    });
+
+    it('"Other" section appears when agents have no or non-matching repo', () => {
+      mockSelectedRepos = ["repo-a"];
+      mockContextOverride = {
+        agents: [
+          makeAgentStatus("alpha", "repo-a"),
+          makeAgentStatus("beta"), // no repo
+          makeAgentStatus("gamma", "repo-x"), // non-matching
+        ],
+      };
+
+      render(<AgentsSidebar collapsible={false} />);
+
+      expect(screen.getByText("Other")).toBeInTheDocument();
+
+      // The "Other" header badge should show 2
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+      const headers = container.querySelectorAll('[class*="repoGroupHeader"]');
+      const otherHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("Other"),
+      )!;
+      expect(otherHeader).toBeDefined();
+      expect(
+        within(otherHeader as HTMLElement).getByText("2"),
+      ).toBeInTheDocument();
+    });
+
+    it('"Other" section is hidden when all agents match selected repos', () => {
+      mockSelectedRepos = ["repo-a", "repo-b"];
+      mockContextOverride = {
+        agents: [
+          makeAgentStatus("alpha", "repo-a"),
+          makeAgentStatus("beta", "repo-b"),
+        ],
+      };
+
+      render(<AgentsSidebar collapsible={false} />);
+
+      expect(screen.queryByText("Other")).not.toBeInTheDocument();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Flat list preservation (no grouping when no repos selected)
+  // ---------------------------------------------------------------------------
+
+  describe("flat list preservation", () => {
+    it("renders agents without group headers when mockSelectedRepos is empty", () => {
+      mockSelectedRepos = [];
+      mockContextOverride = {
+        agents: [
+          {
+            name: "alpha",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            repo: "repo-a",
+          },
+          {
+            name: "beta",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+          },
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Agent names should render
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+
+      // No group headers should exist
+      const groupHeaders = container.querySelectorAll(
+        '[class*="repoGroupHeader"]',
+      );
+      expect(groupHeaders).toHaveLength(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Collapsible group behavior
+  // ---------------------------------------------------------------------------
+
+  describe("collapsible group behavior", () => {
+    it("clicking a group header hides agents in that group", () => {
+      mockSelectedRepos = ["repo-a"];
+      mockContextOverride = {
+        agents: [
+          {
+            name: "alpha",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            repo: "repo-a",
+          },
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Agent should be visible initially
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+
+      // Click the repo-a group header to collapse it
+      const header = container.querySelector(
+        '[class*="repoGroupHeader"]',
+      ) as HTMLElement;
+      expect(header).toBeDefined();
+      fireEvent.click(header);
+
+      // Agent should now be hidden
+      expect(screen.queryByText("alpha")).not.toBeInTheDocument();
+    });
+
+    it("clicking a collapsed group header re-expands it", () => {
+      mockSelectedRepos = ["repo-a"];
+      mockContextOverride = {
+        agents: [
+          {
+            name: "alpha",
+            branch: "main",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            repo: "repo-a",
+          },
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const header = container.querySelector(
+        '[class*="repoGroupHeader"]',
+      ) as HTMLElement;
+
+      // Collapse
+      fireEvent.click(header);
+      expect(screen.queryByText("alpha")).not.toBeInTheDocument();
+
+      // Re-expand
+      fireEvent.click(header);
+      expect(screen.getByText("alpha")).toBeInTheDocument();
     });
   });
 });
