@@ -1,0 +1,145 @@
+name: epic-agent
+description: Plan, review, and implement a single task from an epic
+
+shared_context_file: task-details.txt
+
+eval_loop:
+  gate: verify
+  fix_steps:
+    - fix
+  max_passes: 3
+
+steps:
+  - id: select-task
+    type: shell
+    command: |
+      set -euo pipefail
+      EPIC_ID="${EPIC_ID:?EPIC_ID environment variable is required}"
+      echo "==> Selecting task from epic: $EPIC_ID"
+
+      RAW=$(bd ready --parent "$EPIC_ID" --limit 50 --json 2>/dev/null) || {
+        echo "ERROR: bd ready failed"
+        echo "EXIT_CODE=1"
+        exit 0
+      }
+
+      # Find unplanned task (no design, not needs-revision)
+      TASK_LINE=$(echo "$RAW" | jq -r '
+        .[]
+        | select(.status == "open")
+        | select((.issue_type == "epic") | not)
+        | select(.design == null or .design == "")
+        | select(((.labels // []) | index("needs-revision")) | not)
+        | "\(.priority // 4) \(.id) \(.title)"
+      ' | sort -n | head -1)
+
+      if [ -z "$TASK_LINE" ]; then
+        # Try tasks with designs (ready to implement directly)
+        TASK_LINE=$(echo "$RAW" | jq -r '
+          .[]
+          | select(.status == "open")
+          | select((.issue_type == "epic") | not)
+          | select(.design != null and .design != "")
+          | select(((.labels // []) | index("needs-revision")) | not)
+          | "\(.priority // 4) \(.id) \(.title)"
+        ' | sort -n | head -1)
+      fi
+
+      if [ -z "$TASK_LINE" ]; then
+        echo "No tasks available in epic $EPIC_ID"
+        echo "EXIT_CODE=1"
+        exit 0
+      fi
+
+      TASK_ID=$(echo "$TASK_LINE" | awk '{print $2}')
+      echo "==> Claiming task: $TASK_ID"
+      bd update "$TASK_ID" --claim || {
+        echo "Claim failed (race condition)"
+        echo "EXIT_CODE=1"
+        exit 0
+      }
+
+      echo "==> Writing task-details.txt"
+      TASK_JSON=$(bd show "$TASK_ID" --json 2>/dev/null || echo "{}")
+      TASK_TITLE=$(echo "$TASK_JSON" | jq -r '.title // "unknown"')
+      TASK_DESIGN=$(echo "$TASK_JSON" | jq -r '.design // ""')
+      TASK_NOTES=$(echo "$TASK_JSON" | jq -r '.notes // ""')
+      TASK_LABELS=$(echo "$TASK_JSON" | jq -r '(.labels // []) | join(", ")')
+      HAS_DESIGN="false"
+      [ -n "$TASK_DESIGN" ] && HAS_DESIGN="true"
+
+      cat > task-details.txt <<TASKEOF
+      # Task: $TASK_ID
+      Epic: $EPIC_ID
+      Title: $TASK_TITLE
+      Labels: $TASK_LABELS
+      Has Design: $HAS_DESIGN
+
+      ## Notes
+      $TASK_NOTES
+
+      ## Design
+      $TASK_DESIGN
+
+      ## Full JSON
+      $TASK_JSON
+      TASKEOF
+
+      echo "Task $TASK_ID claimed. Has design: $HAS_DESIGN"
+      echo "EXIT_CODE=0"
+    goal_gate: true
+
+  - id: plan
+    type: prompt
+    prompt: prompts/plan.md
+    context: compact
+    after:
+      - select-task
+    when: passed
+
+  - id: review-plan
+    type: prompt
+    prompt: prompts/review-plan.md
+    context: full
+    goal_gate: true
+    after:
+      - plan
+    when: passed
+
+  - id: revise-plan
+    type: prompt
+    prompt: prompts/revise-plan.md
+    context: full
+    after:
+      - review-plan
+    when: failed
+    retry: 2
+    retry_check: review-plan
+
+  - id: execute
+    type: prompt
+    prompt: prompts/execute.md
+    context: truncate
+    after:
+      - review-plan
+    when: passed
+
+  - id: verify
+    type: shell
+    command: |
+      echo "==> Running quality gate"
+      make gate 2>&1
+      EXIT_STATUS=$?
+      echo "EXIT_CODE=$EXIT_STATUS"
+    goal_gate: true
+    after:
+      - execute
+    when: passed
+
+  - id: fix
+    type: prompt
+    prompt: prompts/fix.md
+    context: truncate
+    after:
+      - verify
+    when: failed
