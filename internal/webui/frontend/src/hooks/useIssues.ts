@@ -25,6 +25,12 @@ import { useToast } from "./useToast";
 // If we had this many consecutive reconnect attempts, assume we may have missed events
 const TOO_FAR_BEHIND_THRESHOLD = 3;
 
+// Max reconnect attempts before showing "Connection lost" with manual retry
+const MAX_RECONNECT_ATTEMPTS = 10;
+
+// Delay before showing stale data banner (ms)
+const STALE_BANNER_DELAY_MS = 5000;
+
 /**
  * Options for the useIssues hook.
  */
@@ -75,6 +81,12 @@ export interface UseIssuesReturn {
   mutationCount: number;
   /** Immediately retry SSE connection */
   retryConnection: () => void;
+  /** True when disconnected >5s — data may be stale */
+  showStaleBanner: boolean;
+  /** True when reconnection failed after max attempts */
+  connectionLost: boolean;
+  /** Timestamp (ms) when disconnection started, null if connected */
+  disconnectedSince: number | null;
 }
 
 /**
@@ -155,6 +167,17 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       }
     },
   });
+
+  // Stale data banner state: shown when disconnected >5 seconds
+  const [showStaleBanner, setShowStaleBanner] = useState(false);
+  const [connectionLost, setConnectionLost] = useState(false);
+  const [disconnectedSince, setDisconnectedSince] = useState<number | null>(
+    null,
+  );
+  const staleBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const mutationCountAtDisconnectRef = useRef<number>(0);
 
   // Client-side mutation gate: discard SSE mutations for repos not in active filter
   const sourceReposRef = useRef(sourceRepos);
@@ -323,15 +346,46 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     if (reconnectAttempts > maxReconnectAttemptsRef.current) {
       maxReconnectAttemptsRef.current = reconnectAttempts;
     }
+    // Connection lost detection: exceeded max reconnect attempts
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      setConnectionLost(true);
+    }
   }, [reconnectAttempts]);
 
-  // Too-far-behind detection: refetch when recovering from prolonged disconnection
+  // Stale banner timer + too-far-behind detection + change count toast
   useEffect(() => {
     const prevState = prevStateRef.current;
     prevStateRef.current = connectionState;
 
-    // Detect transition from reconnecting → connected
+    // Transition to reconnecting: start 5s timer for stale banner
+    if (
+      connectionState === "reconnecting" &&
+      prevState !== "reconnecting"
+    ) {
+      const now = Date.now();
+      setDisconnectedSince(now);
+      mutationCountAtDisconnectRef.current = mutationCount;
+
+      // Clear any existing timer
+      if (staleBannerTimerRef.current) {
+        clearTimeout(staleBannerTimerRef.current);
+      }
+      staleBannerTimerRef.current = setTimeout(() => {
+        setShowStaleBanner(true);
+      }, STALE_BANNER_DELAY_MS);
+    }
+
+    // Transition to connected from reconnecting
     if (prevState === "reconnecting" && connectionState === "connected") {
+      // Clear stale banner timer and state
+      if (staleBannerTimerRef.current) {
+        clearTimeout(staleBannerTimerRef.current);
+        staleBannerTimerRef.current = null;
+      }
+      setShowStaleBanner(false);
+      setConnectionLost(false);
+      setDisconnectedSince(null);
+
       // If we had multiple reconnect attempts, assume we may have missed events
       if (maxReconnectAttemptsRef.current >= TOO_FAR_BEHIND_THRESHOLD) {
         if (process.env.NODE_ENV === "development") {
@@ -346,17 +400,43 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
           duration: 3000,
         });
         void refetch();
+      } else {
+        // Show change count toast (only when not doing a full refetch)
+        const changeCount =
+          mutationCount - mutationCountAtDisconnectRef.current;
+        if (changeCount > 0) {
+          showToast(
+            `Connection restored. ${changeCount} change${changeCount !== 1 ? "s" : ""} synced.`,
+            { type: "info", duration: 3000 },
+          );
+        } else {
+          showToast("Connection restored.", {
+            type: "info",
+            duration: 3000,
+          });
+        }
       }
       // Reset max attempts counter after successful reconnection
       maxReconnectAttemptsRef.current = 0;
     }
-  }, [connectionState, showToast, refetch]);
+
+    // Transition to disconnected: clear timer
+    if (connectionState === "disconnected" && prevState === "reconnecting") {
+      if (staleBannerTimerRef.current) {
+        clearTimeout(staleBannerTimerRef.current);
+        staleBannerTimerRef.current = null;
+      }
+    }
+  }, [connectionState, showToast, refetch, mutationCount]);
 
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (staleBannerTimerRef.current) {
+        clearTimeout(staleBannerTimerRef.current);
+      }
     };
   }, []);
 
@@ -418,5 +498,8 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     getIssue,
     mutationCount,
     retryConnection: retryNow,
+    showStaleBanner,
+    connectionLost,
+    disconnectedSince,
   };
 }

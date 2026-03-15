@@ -19,6 +19,7 @@ export * from "./MoreFiltersMenu";
 export * from "./KanbanBoard";
 export * from "./BulkActionToolbar";
 export * from "./ConnectionStatus";
+export * from "./StaleDataBanner";
 export * from "./ConfirmDialog";
 export * from "./EmbeddedTerminal";
 export * from "./ErrorBoundary";

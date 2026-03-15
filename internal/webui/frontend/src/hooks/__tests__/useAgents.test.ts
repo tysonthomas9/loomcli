@@ -151,6 +151,7 @@ describe("useAgents", () => {
 
       // Count retry-related timer calls. Use exact 5000ms match for retry timeout
       // to exclude withTimeout calls (15000ms) from the count.
+      // Note: stale banner timer also fires at 5000ms, so we expect 2 timeouts total
       const retryTimeouts = setTimeoutSpy.mock.calls.filter(
         (call) => (call[1] as number) === 5000,
       );
@@ -158,8 +159,8 @@ describe("useAgents", () => {
         (call) => (call[1] as number) === 1000,
       );
 
-      // Should have exactly one retry timeout (5s delay) and one countdown interval (1s)
-      expect(retryTimeouts.length).toBe(1);
+      // 1 retry timeout + 1 stale banner timeout = 2 total at 5000ms
+      expect(retryTimeouts.length).toBe(2);
       expect(retryIntervals.length).toBe(1);
 
       setTimeoutSpy.mockRestore();
@@ -192,6 +193,7 @@ describe("useAgents", () => {
       await flushPromises();
 
       // Use exact delay match (5000ms) to exclude withTimeout calls (15000ms)
+      // Note: stale banner timer also fires at 5000ms, so we expect +1 for the first failure
       const firstTimeoutCount = setTimeoutSpy.mock.calls.filter(
         (call) => (call[1] as number) === 5000,
       ).length;
@@ -199,7 +201,8 @@ describe("useAgents", () => {
         (call) => (call[1] as number) === 1000,
       ).length;
 
-      expect(firstTimeoutCount).toBe(1);
+      // 1 retry timeout + 1 stale banner timeout = 2
+      expect(firstTimeoutCount).toBe(2);
       expect(firstIntervalCount).toBe(1);
 
       // Second failure while retry is already scheduled - should NOT create more timers
@@ -219,8 +222,9 @@ describe("useAgents", () => {
 
       // After the second failure and refetch, the retry effect will run again.
       // The refetch clears retry timers, so the effect reschedules. That's expected.
-      // Each refetch that fails clears timers then the effect reschedules, so we get 2 total.
-      expect(secondTimeoutCount).toBe(2);
+      // Each refetch that fails clears timers then the effect reschedules, so we get +1 retry.
+      // Stale banner timer is only created once (guard: disconnectedSinceRef.current === null).
+      expect(secondTimeoutCount).toBe(3);
       expect(secondIntervalCount).toBe(2);
 
       setTimeoutSpy.mockRestore();

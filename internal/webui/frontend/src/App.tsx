@@ -26,6 +26,7 @@ import {
   ErrorDisplay,
   ErrorBoundary,
   ConnectionStatus,
+  StaleDataBanner,
   ToastContainer,
   FilterBar,
   MoreFiltersMenu,
@@ -164,6 +165,9 @@ function App() {
     refetch,
     updateIssueStatus,
     retryConnection,
+    showStaleBanner: sseShowStaleBanner,
+    connectionLost: sseConnectionLost,
+    disconnectedSince: sseDisconnectedSince,
   } = useIssues({
     mode:
       activeView === "graph"
@@ -299,7 +303,25 @@ function App() {
   const [hasTerminalUnread, setHasTerminalUnread] = useState(false);
 
   // Agent data (shared via AgentProvider — single polling loop)
-  const { agents, agentTasks } = useAgentContext();
+  const {
+    agents,
+    agentTasks,
+    showStaleBanner: agentShowStaleBanner,
+    connectionLost: agentConnectionLost,
+    disconnectedSince: agentDisconnectedSince,
+    retryNow: agentRetryNow,
+  } = useAgentContext();
+
+  // Combine SSE and agent stale data states (show banner if either is stale)
+  const showStaleBanner = sseShowStaleBanner || agentShowStaleBanner;
+  const isConnectionLost = sseConnectionLost || agentConnectionLost;
+  const staleBannerDisconnectedSince =
+    sseDisconnectedSince ?? agentDisconnectedSince;
+  const staleBannerRetry = sseConnectionLost
+    ? retryConnection
+    : agentConnectionLost
+      ? agentRetryNow
+      : retryConnection;
 
   // Agent detail panel state
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
@@ -755,6 +777,7 @@ function App() {
         reconnectAttempts={reconnectAttempts}
         showText={false}
         showRetryButton={false}
+        connectionLost={sseConnectionLost}
         compact
       />
     </div>
@@ -792,6 +815,14 @@ function App() {
         }
         sidebar={sidebarContent}
       >
+        {(showStaleBanner || isConnectionLost) &&
+          staleBannerDisconnectedSince !== null && (
+            <StaleDataBanner
+              disconnectedSince={staleBannerDisconnectedSince}
+              onRetry={staleBannerRetry}
+              connectionLost={isConnectionLost}
+            />
+          )}
         <div
           className={styles.loadingContainer}
           data-testid="loading-container"
@@ -827,6 +858,14 @@ function App() {
         }
         sidebar={sidebarContent}
       >
+        {(showStaleBanner || isConnectionLost) &&
+          staleBannerDisconnectedSince !== null && (
+            <StaleDataBanner
+              disconnectedSince={staleBannerDisconnectedSince}
+              onRetry={staleBannerRetry}
+              connectionLost={isConnectionLost}
+            />
+          )}
         <ErrorDisplay
           variant="fetch-error"
           error={new Error(error)}
@@ -961,6 +1000,14 @@ function App() {
             />
           </ErrorBoundary>
         )}
+        {(showStaleBanner || isConnectionLost) &&
+          staleBannerDisconnectedSince !== null && (
+            <StaleDataBanner
+              disconnectedSince={staleBannerDisconnectedSince}
+              onRetry={staleBannerRetry}
+              connectionLost={isConnectionLost}
+            />
+          )}
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
         <IssueDetailPanel
           isOpen={isPanelOpen}
