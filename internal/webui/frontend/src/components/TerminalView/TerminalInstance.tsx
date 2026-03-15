@@ -19,14 +19,15 @@ import {
   useCallback,
 } from "react";
 
-import { get } from "@/api/client";
+import { stripAnsi } from "@/utils/stripAnsi";
 import {
   startAutoReconnect,
   type ReconnectState,
 } from "@/utils/reconnectBackoff";
 
-import "@xterm/xterm/css/xterm.css";
 import styles from "./TerminalInstance.module.css";
+import { connectWebSocket, encodeResize } from "./terminalConnection";
+import "@xterm/xterm/css/xterm.css";
 
 export type ConnectionState =
   | "disconnected"
@@ -43,6 +44,9 @@ export interface TerminalInstanceProps {
     state: ConnectionState,
     hasConnected: boolean,
   ) => void;
+  onCopyNotify?: () => void;
+  onPasteRequest?: () => void;
+  onSearchRequest?: () => void;
 }
 
 export interface TerminalInstanceHandle {
@@ -58,129 +62,7 @@ export interface TerminalInstanceHandle {
   findPrevious: () => boolean;
   clearSearch: () => void;
   reconnect: () => void;
-}
-
-/**
- * Fetch a one-time terminal auth token from the server.
- */
-async function fetchTerminalToken(sessionName: string): Promise<string | null> {
-  try {
-    const resp = await get<{ token: string }>(
-      `/api/terminal/token?session=${encodeURIComponent(sessionName)}`, // allow-url
-    );
-    return resp.token;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Build the WebSocket URL for the terminal relay endpoint.
- */
-function buildWsUrl(sessionName: string, token: string | null): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  let url = `${proto}//${window.location.host}/api/terminal/ws?session=${encodeURIComponent(sessionName)}`; // allow-url
-  if (token) {
-    url += `&token=${encodeURIComponent(token)}`;
-  }
-  return url;
-}
-
-/**
- * Encode a resize message per the binary frame protocol.
- * Byte 0 = 0x01, then cols as uint16 BE, then rows as uint16 BE.
- */
-function encodeResize(cols: number, rows: number): ArrayBuffer {
-  const buf = new ArrayBuffer(5);
-  const view = new DataView(buf);
-  view.setUint8(0, 0x01);
-  view.setUint16(1, cols, false);
-  view.setUint16(3, rows, false);
-  return buf;
-}
-
-/**
- * Connect a Terminal instance to a WebSocket, returning a cleanup function.
- */
-function connectWebSocket(
-  sessionName: string,
-  terminal: Terminal,
-  fitAddon: FitAddon,
-  wsRef: React.MutableRefObject<WebSocket | null>,
-  setConnectionState: (s: ConnectionState) => void,
-  onConnected?: () => void,
-  onDisconnected?: () => void,
-): () => void {
-  setConnectionState("connecting");
-
-  let cancelled = false;
-
-  fetchTerminalToken(sessionName)
-    .then((token) => {
-      if (cancelled) return;
-
-      const ws = new WebSocket(buildWsUrl(sessionName, token));
-      wsRef.current = ws;
-      ws.binaryType = "arraybuffer";
-
-      ws.onopen = () => {
-        setConnectionState("connected");
-        fitAddon.fit();
-        ws.send(encodeResize(terminal.cols, terminal.rows));
-        onConnected?.();
-      };
-
-      ws.onmessage = (ev: MessageEvent) => {
-        if (typeof ev.data === "string") {
-          terminal.write(ev.data);
-        } else if (ev.data instanceof ArrayBuffer) {
-          terminal.write(new Uint8Array(ev.data));
-        }
-      };
-
-      ws.onclose = () => {
-        setConnectionState("disconnected");
-        onDisconnected?.();
-      };
-
-      ws.onerror = () => {
-        setConnectionState("disconnected");
-      };
-
-      const onDataDisposable = terminal.onData((data: string) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
-        }
-      });
-
-      wsCleanupInner = () => {
-        onDataDisposable.dispose();
-        if (
-          ws.readyState === WebSocket.OPEN ||
-          ws.readyState === WebSocket.CONNECTING
-        ) {
-          ws.close(1000);
-        }
-        wsRef.current = null;
-      };
-    })
-    .catch(() => {
-      if (!cancelled) {
-        setConnectionState("disconnected");
-        onDisconnected?.();
-      }
-    });
-
-  let wsCleanupInner: (() => void) | null = null;
-
-  return () => {
-    cancelled = true;
-    if (wsCleanupInner) {
-      wsCleanupInner();
-    } else {
-      wsRef.current = null;
-    }
-  };
+  pasteText: (text: string) => void;
 }
 
 export const TerminalInstance = forwardRef<
@@ -193,6 +75,9 @@ export const TerminalInstance = forwardRef<
     fontFamily = 'Menlo, Monaco, "Courier New", monospace',
     fontSize = 14,
     onConnectionStateChange,
+    onCopyNotify,
+    onPasteRequest,
+    onSearchRequest,
   },
   ref,
 ) {
@@ -292,9 +177,20 @@ export const TerminalInstance = forwardRef<
         wsCleanupRef.current = null;
         handleReconnect();
       },
+      pasteText(text: string) {
+        terminalRef.current?.paste(text);
+      },
     }),
     [handleReconnect],
   );
+
+  // Stable refs for callbacks used inside terminal lifecycle effect
+  const onCopyNotifyRef = useRef(onCopyNotify);
+  onCopyNotifyRef.current = onCopyNotify;
+  const onPasteRequestRef = useRef(onPasteRequest);
+  onPasteRequestRef.current = onPasteRequest;
+  const onSearchRequestRef = useRef(onSearchRequest);
+  onSearchRequestRef.current = onSearchRequest;
 
   // Terminal lifecycle: create terminal and connect WebSocket
   useEffect(() => {
@@ -344,6 +240,42 @@ export const TerminalInstance = forwardRef<
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
+
+    // Copy-on-select: strip ANSI codes and write clean text to clipboard
+    let copyDebounce: ReturnType<typeof setTimeout> | undefined;
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      const text = terminal.getSelection();
+      if (!text) return;
+      const clean = stripAnsi(text);
+      clearTimeout(copyDebounce);
+      copyDebounce = setTimeout(() => {
+        navigator.clipboard
+          .writeText(clean)
+          .then(() => onCopyNotifyRef.current?.())
+          .catch(() => {});
+      }, 100);
+    });
+
+    // Custom key handler for Ctrl+Shift+V (paste) and Ctrl+Shift+F (search)
+    terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if (e.type !== "keydown") return true;
+
+      // Ctrl+Shift+V — request paste from parent
+      if (e.ctrlKey && e.shiftKey && e.key === "V") {
+        e.preventDefault();
+        onPasteRequestRef.current?.();
+        return false;
+      }
+
+      // Ctrl+Shift+F — request search from parent
+      if (e.ctrlKey && e.shiftKey && e.key === "F") {
+        e.preventDefault();
+        onSearchRequestRef.current?.();
+        return false;
+      }
+
+      return true;
+    });
 
     terminal.open(container);
 
@@ -409,7 +341,9 @@ export const TerminalInstance = forwardRef<
       mounted = false;
 
       clearTimeout(resizeTimer);
+      clearTimeout(copyDebounce);
       observer.disconnect();
+      selectionDisposable.dispose();
 
       reconnectCancelRef.current?.();
       reconnectCancelRef.current = null;

@@ -61,6 +61,10 @@ vi.mock("@xterm/xterm", () => {
     open = vi.fn();
     dispose = vi.fn();
     onData = vi.fn(() => ({ dispose: vi.fn() }));
+    onSelectionChange = vi.fn(() => ({ dispose: vi.fn() }));
+    getSelection = vi.fn(() => "");
+    attachCustomKeyEventHandler = vi.fn();
+    paste = vi.fn();
     write = vi.fn();
     loadAddon = vi.fn();
     cols = 80;

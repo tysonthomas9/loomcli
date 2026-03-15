@@ -1,0 +1,125 @@
+/**
+ * PasteConfirmDialog styles.
+ * Dark-themed modal matching terminal aesthetic.
+ */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialog {
+  background-color: #252526;
+  border: 1px solid #3c3c3c;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  width: 100%;
+  max-width: 480px;
+  margin: 16px;
+  overflow: hidden;
+}
+
+.dialog:focus {
+  outline: none;
+}
+
+.header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-base);
+  font-weight: 600;
+  color: #d4d4d4;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  font-size: var(--font-sm);
+  color: #808080;
+}
+
+.preview {
+  padding: 12px 20px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.previewText {
+  margin: 0;
+  padding: 8px 12px;
+  font-family: Menlo, Monaco, "Courier New", monospace;
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  color: #cccccc;
+  background: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: hidden;
+}
+
+.truncated {
+  margin-top: 8px;
+  font-size: var(--font-xs);
+  color: #808080;
+  font-style: italic;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid #3c3c3c;
+}
+
+.buttonSecondary {
+  padding: 8px 14px;
+  font-size: var(--font-sm);
+  font-weight: 500;
+  background-color: transparent;
+  border: 1px solid #555555;
+  border-radius: var(--radius-sm);
+  color: #d4d4d4;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.buttonSecondary:hover {
+  background-color: #3c3c3c;
+}
+
+.buttonSecondary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.buttonPrimary {
+  padding: 8px 14px;
+  font-size: var(--font-sm);
+  font-weight: 500;
+  background-color: var(--color-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.buttonPrimary:hover {
+  background-color: var(--color-primary-hover);
+}
+
+.buttonPrimary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}

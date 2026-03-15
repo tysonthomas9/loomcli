@@ -13,7 +13,9 @@ import { useBackendConfig } from "@/hooks/useBackendConfig";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 
 import { BackendPickerPrompt } from "./BackendPickerPrompt";
+import { CopyToast } from "./CopyToast";
 import { NotesBar } from "./NotesBar";
+import { PasteConfirmDialog } from "./PasteConfirmDialog";
 import { SearchBar } from "./SearchBar";
 import { TerminalConnectionOverlay } from "./TerminalConnectionOverlay";
 import type {
@@ -22,64 +24,16 @@ import type {
 } from "./TerminalInstance";
 import { TerminalInstance } from "./TerminalInstance";
 import { TerminalTabBar } from "./TerminalTabBar";
+import {
+  MAX_TABS,
+  BACKEND_BRAND_COLORS,
+  type TabState,
+  getBackendFromSessionName,
+  generateTabName,
+  sanitizeSessionName,
+} from "./terminalTabUtils";
+import { useClipboard } from "./useClipboard";
 import styles from "./TerminalView.module.css";
-
-const MAX_TABS = 8;
-
-/** Brand colors for each known backend. */
-const BACKEND_BRAND_COLORS: Record<string, string> = {
-  claude: "#D97706",
-  codex: "#22c55e",
-  opencode: "#3B82F6",
-};
-/** When backend is not in the map, leave brandColor undefined so CSS fallbacks apply. */
-
-/**
- * Extract backend name from a session name.
- * Parses `lead-{backend}-{n}` pattern; falls back to defaultBackend.
- */
-function getBackendFromSessionName(
-  sessionName: string,
-  defaultBackend?: string,
-): string {
-  const match = sessionName.match(/^lead-(.+)-\d+$/);
-  if (match?.[1]) return match[1];
-  return defaultBackend ?? "unknown";
-}
-
-/**
- * Generate an auto-incremented tab name for a given backend.
- * Returns `lead-{backend}-{n}` where n is max existing number + 1.
- */
-function generateTabName(backend: string, existingTabs: TabState[]): string {
-  const prefix = `lead-${backend}-`;
-  let max = 0;
-  for (const tab of existingTabs) {
-    if (tab.sessionName.startsWith(prefix)) {
-      const num = parseInt(tab.sessionName.slice(prefix.length), 10);
-      if (!isNaN(num) && num > max) {
-        max = num;
-      }
-    }
-  }
-  return `${prefix}${max + 1}`;
-}
-
-interface TabState {
-  id: string;
-  label: string;
-  sessionName: string;
-  connectionState: ConnectionState;
-  backendName: string;
-}
-
-/**
- * Sanitize an issue ID into a valid session name.
- * Replaces dots with dashes, strips non-alphanumeric/hyphen/underscore chars.
- */
-function sanitizeSessionName(issueId: string): string {
-  return issueId.replace(/\./g, "-").replace(/[^a-zA-Z0-9_-]/g, "");
-}
 
 interface TerminalViewProps {
   isActive?: boolean;
@@ -113,6 +67,15 @@ export function TerminalView({
   const initializedRef = useRef(false);
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
+
+  const {
+    showCopyToast,
+    pendingPasteText,
+    handleCopyNotify,
+    handlePasteRequest,
+    handlePasteConfirm,
+    handlePasteCancel,
+  } = useClipboard(instanceRefs, activeTabIdRef);
 
   // Initialize tabs from persisted metadata or auto-create from backend config
   useEffect(() => {
@@ -290,7 +253,12 @@ export function TerminalView({
         e.preventDefault();
         setIsSearchOpen((prev) => !prev);
       }
-      if (e.key === "Escape" && isSearchOpen && !isSessionPromptOpen) {
+      if (
+        e.key === "Escape" &&
+        isSearchOpen &&
+        !isSessionPromptOpen &&
+        pendingPasteText === null
+      ) {
         setIsSearchOpen(false);
         instanceRefs.current.get(activeTabId)?.clearSearch();
         setSearchTerm("");
@@ -298,7 +266,13 @@ export function TerminalView({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [isActive, isSearchOpen, activeTabId, isSessionPromptOpen]);
+  }, [
+    isActive,
+    isSearchOpen,
+    activeTabId,
+    isSessionPromptOpen,
+    pendingPasteText,
+  ]);
 
   // Re-run search on tab switch while search is open
   useEffect(() => {
@@ -396,6 +370,11 @@ export function TerminalView({
     setSearchTerm("");
   }, [activeTabId]);
 
+  // Search request from terminal (Ctrl+Shift+F)
+  const handleSearchRequest = useCallback(() => {
+    setIsSearchOpen((prev) => !prev);
+  }, []);
+
   const handleToggleFullHeight = useCallback(() => {
     setIsFullHeight((prev) => !prev);
   }, []);
@@ -460,6 +439,9 @@ export function TerminalView({
                   onConnectionStateChange={(state, hasConnected) =>
                     handleConnectionStateChange(tab.id, state, hasConnected)
                   }
+                  onCopyNotify={handleCopyNotify}
+                  onPasteRequest={handlePasteRequest}
+                  onSearchRequest={handleSearchRequest}
                 />
                 <TerminalConnectionOverlay
                   connectionState={tab.connectionState}
@@ -495,6 +477,13 @@ export function TerminalView({
         onSelect={handleBackendSelect}
         onCancel={handleSessionPromptCancel}
       />
+      <PasteConfirmDialog
+        isOpen={pendingPasteText !== null}
+        text={pendingPasteText ?? ""}
+        onConfirm={handlePasteConfirm}
+        onCancel={handlePasteCancel}
+      />
+      <CopyToast visible={showCopyToast} />
     </div>
   );
 }
