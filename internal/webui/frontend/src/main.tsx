@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import "@/styles/index.css";
+import { migrateLocalStorage } from "@/utils/migrateLocalStorage";
 import { initAuth, getAuthState } from "@/api";
 import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -11,6 +12,10 @@ import {
   ErrorTriggerFixture,
   ToastTestFixture,
 } from "@/TestFixtures";
+
+// Run localStorage migration before anything reads storage.
+// ES imports are hoisted, so this executes after all imports but before any React rendering.
+migrateLocalStorage();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

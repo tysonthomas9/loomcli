@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { useTheme } from "../useTheme";
 
-const STORAGE_KEY = "theme-preference";
+const STORAGE_KEY = "cortex:theme";
 
 // Helper to create a mock matchMedia with controllable listeners
 function createMockMatchMedia(prefersDark: boolean) {

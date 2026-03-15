@@ -8,7 +8,7 @@ import { useState, useCallback, useEffect } from "react";
 
 export type Theme = "light" | "dark";
 
-const STORAGE_KEY = "theme-preference";
+const STORAGE_KEY = "cortex:theme";
 
 function getOSTheme(): Theme {
   if (
