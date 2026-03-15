@@ -351,6 +351,15 @@ vi.mock("@/hooks", () => ({
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
   useWorkspaceParam: vi.fn(() => [null, vi.fn()]),
+  useDaemonHealth: vi.fn(() => ({
+    isDaemonAvailable: true,
+    isChecking: false,
+    wasEverConnected: true,
+    connectionMode: "connected" as const,
+    retryCountdown: 0,
+    lastError: null,
+    retryNow: vi.fn(),
+  })),
 }));
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)

@@ -24,8 +24,15 @@ export interface SettingsViewProps {
 }
 
 export function SettingsView({ className }: SettingsViewProps): JSX.Element {
-  const { config, isLoading, error, isSaving, updateBackend, refetch } =
-    useBackendConfig();
+  const {
+    config,
+    isLoading,
+    error,
+    isSaving,
+    isCached,
+    updateBackend,
+    refetch,
+  } = useBackendConfig();
   const { showToast } = useToast();
   const [selectedBackend, setSelectedBackend] = useState<string | null>(null);
 
@@ -113,7 +120,14 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
       {/* Project Default Backend */}
       <div className={styles.panel}>
         <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>Project Default Backend</h3>
+          <h3 className={styles.panelTitle}>
+            Project Default Backend
+            {isCached && (
+              <span className={styles.cachedBadge} data-testid="cached-badge">
+                (cached)
+              </span>
+            )}
+          </h3>
         </div>
         <div className={styles.panelContent}>
           <div className={styles.formGroup}>
@@ -148,7 +162,7 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
             <button
               type="button"
               className={styles.saveButton}
-              disabled={!hasChanges || isSaving}
+              disabled={!hasChanges || isSaving || isCached}
               onClick={handleSave}
               data-testid="save-button"
             >

@@ -41,6 +41,13 @@
   margin: 0;
 }
 
+.cachedBadge {
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: var(--color-warning);
+  margin-left: 8px;
+}
+
 .panelContent {
   padding: var(--space-4);
 }

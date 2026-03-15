@@ -75,6 +75,7 @@ function createMockHookReturn(
     isLoading: false,
     error: null,
     isSaving: false,
+    isCached: false,
     updateBackend: vi.fn().mockResolvedValue(undefined),
     refetch: vi.fn(),
     ...overrides,

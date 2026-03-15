@@ -108,6 +108,12 @@ export type { UseRecentAssigneesReturn } from "./useRecentAssignees";
 export { useBackendConfig } from "./useBackendConfig";
 export type { UseBackendConfigReturn } from "./useBackendConfig";
 
+export { useDaemonHealth } from "./useDaemonHealth";
+export type {
+  DaemonConnectionMode,
+  UseDaemonHealthReturn,
+} from "./useDaemonHealth";
+
 export { useTaskLogPolling } from "./useTaskLogPolling";
 export type {
   UseTaskLogPollingOptions,

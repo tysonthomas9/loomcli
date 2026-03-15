@@ -244,13 +244,23 @@ async function fetchApi<T>(
     return (await response.json()) as T;
   } catch (error) {
     clearTimeoutCleanup();
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError) {
+      // Dispatch daemon-unavailable for 503 (Service Unavailable)
+      if (error.status === 503 && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("daemon-unavailable"));
+      }
+      throw error;
+    }
     if (error instanceof DOMException && error.name === "AbortError") {
       if (timedOut) {
         throw new ApiError(0, "Request timeout");
       }
       // User-provided signal was aborted - re-throw as-is
       throw error;
+    }
+    // Network error (status 0) — daemon likely unreachable
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("daemon-unavailable"));
     }
     throw new ApiError(0, "Network error", error);
   }

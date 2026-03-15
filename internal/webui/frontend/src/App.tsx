@@ -27,6 +27,7 @@ import {
   ErrorBoundary,
   ConnectionStatus,
   StaleDataBanner,
+  DaemonUnavailableOverlay,
   ToastContainer,
   FilterBar,
   MoreFiltersMenu,
@@ -63,6 +64,7 @@ import {
   useWorkspaceContext,
   useWorkspaceState,
   useWorkspaceParam,
+  useDaemonHealth,
 } from "@/hooks";
 import type { Issue, IssueDetails, Status } from "@/types";
 
@@ -116,6 +118,15 @@ const FileExplorer = lazy(() =>
 );
 
 function App() {
+  // Daemon health monitoring
+  const {
+    isDaemonAvailable,
+    connectionMode,
+    retryCountdown,
+    lastError,
+    retryNow: daemonRetryNow,
+  } = useDaemonHealth();
+
   // Theme state
   const { theme, toggleTheme } = useTheme();
 
@@ -833,78 +844,100 @@ function App() {
   // Loading state: show skeleton columns
   if (isLoading) {
     return (
-      <AppLayout
-        title={headerTitle}
-        navigation={headerNavigation}
-        actions={headerActions}
-        navRail={
-          <NavRail
-            activeView={activeView}
-            onChange={setActiveView}
-            sessionCount={activeSessionCount}
-            badges={{ terminal: hasTerminalUnread }}
-          />
-        }
-        sidebar={sidebarContent}
-      >
-        {(showStaleBanner || isConnectionLost) &&
-          staleBannerDisconnectedSince !== null && (
-            <StaleDataBanner
-              disconnectedSince={staleBannerDisconnectedSince}
-              onRetry={staleBannerRetry}
-              connectionLost={isConnectionLost}
+      <>
+        <AppLayout
+          title={headerTitle}
+          navigation={headerNavigation}
+          actions={headerActions}
+          navRail={
+            <NavRail
+              activeView={activeView}
+              onChange={setActiveView}
+              sessionCount={activeSessionCount}
+              badges={{ terminal: hasTerminalUnread }}
             />
-          )}
-        <div
-          className={styles.loadingContainer}
-          data-testid="loading-container"
+          }
+          sidebar={sidebarContent}
         >
-          {activeView === "table" ? (
-            <LoadingSkeleton.Table />
-          ) : (
-            <>
-              <LoadingSkeleton.Column />
-              <LoadingSkeleton.Column />
-              <LoadingSkeleton.Column />
-            </>
-          )}
-        </div>
-      </AppLayout>
+          {(showStaleBanner || isConnectionLost) &&
+            staleBannerDisconnectedSince !== null && (
+              <StaleDataBanner
+                disconnectedSince={staleBannerDisconnectedSince}
+                onRetry={staleBannerRetry}
+                connectionLost={isConnectionLost}
+              />
+            )}
+          <div
+            className={styles.loadingContainer}
+            data-testid="loading-container"
+          >
+            {activeView === "table" ? (
+              <LoadingSkeleton.Table />
+            ) : (
+              <>
+                <LoadingSkeleton.Column />
+                <LoadingSkeleton.Column />
+                <LoadingSkeleton.Column />
+              </>
+            )}
+          </div>
+        </AppLayout>
+        {!isDaemonAvailable && (
+          <DaemonUnavailableOverlay
+            mode={connectionMode}
+            retryCountdown={retryCountdown}
+            lastError={lastError}
+            onRetry={daemonRetryNow}
+            onSettingsClick={() => setActiveView("settings")}
+          />
+        )}
+      </>
     );
   }
 
   // Error state: show error display with retry
   if (error && !isLoading) {
     return (
-      <AppLayout
-        title={headerTitle}
-        navigation={headerNavigation}
-        actions={headerActions}
-        navRail={
-          <NavRail
-            activeView={activeView}
-            onChange={setActiveView}
-            sessionCount={activeSessionCount}
-            badges={{ terminal: hasTerminalUnread }}
-          />
-        }
-        sidebar={sidebarContent}
-      >
-        {(showStaleBanner || isConnectionLost) &&
-          staleBannerDisconnectedSince !== null && (
-            <StaleDataBanner
-              disconnectedSince={staleBannerDisconnectedSince}
-              onRetry={staleBannerRetry}
-              connectionLost={isConnectionLost}
+      <>
+        <AppLayout
+          title={headerTitle}
+          navigation={headerNavigation}
+          actions={headerActions}
+          navRail={
+            <NavRail
+              activeView={activeView}
+              onChange={setActiveView}
+              sessionCount={activeSessionCount}
+              badges={{ terminal: hasTerminalUnread }}
             />
-          )}
-        <ErrorDisplay
-          variant="fetch-error"
-          error={new Error(error)}
-          showDetails
-          onRetry={refetch}
-        />
-      </AppLayout>
+          }
+          sidebar={sidebarContent}
+        >
+          {(showStaleBanner || isConnectionLost) &&
+            staleBannerDisconnectedSince !== null && (
+              <StaleDataBanner
+                disconnectedSince={staleBannerDisconnectedSince}
+                onRetry={staleBannerRetry}
+                connectionLost={isConnectionLost}
+              />
+            )}
+          <ErrorDisplay
+            variant="fetch-error"
+            error={new Error(error)}
+            showDetails
+            onRetry={refetch}
+          />
+        </AppLayout>
+        {!isDaemonAvailable && (
+          <DaemonUnavailableOverlay
+            mode={connectionMode}
+            retryCountdown={retryCountdown}
+            lastError={lastError}
+            onRetry={daemonRetryNow}
+            onSettingsClick={() => setActiveView("settings")}
+          />
+        )}
+      </>
     );
   }
 
@@ -1087,6 +1120,15 @@ function App() {
           recentNames={recentAssignees}
         />
       </AppLayout>
+      {!isDaemonAvailable && (
+        <DaemonUnavailableOverlay
+          mode={connectionMode}
+          retryCountdown={retryCountdown}
+          lastError={lastError}
+          onRetry={daemonRetryNow}
+          onSettingsClick={() => setActiveView("settings")}
+        />
+      )}
     </SearchTermProvider>
   );
 }
