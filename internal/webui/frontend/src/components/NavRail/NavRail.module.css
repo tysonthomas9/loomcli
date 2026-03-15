@@ -108,6 +108,19 @@
   animation: badgePop 0.15s ease-out;
 }
 
+.unreadIndicator {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-info, #3b82f6);
+  border: 2px solid var(--color-bg-card);
+  z-index: 2;
+  pointer-events: none;
+}
+
 @keyframes badgePop {
   from {
     transform: scale(0);

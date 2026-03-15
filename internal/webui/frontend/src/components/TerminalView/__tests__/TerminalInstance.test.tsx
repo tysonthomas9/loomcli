@@ -61,15 +61,18 @@ vi.mock("@xterm/xterm", () => {
     open = vi.fn();
     dispose = vi.fn();
     onData = vi.fn(() => ({ dispose: vi.fn() }));
+    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
     onSelectionChange = vi.fn(() => ({ dispose: vi.fn() }));
     getSelection = vi.fn(() => "");
     attachCustomKeyEventHandler = vi.fn();
     paste = vi.fn();
     write = vi.fn();
     loadAddon = vi.fn();
+    scrollToBottom = vi.fn();
     cols = 80;
     rows = 24;
     options: Record<string, unknown> = {};
+    buffer = { active: { viewportY: 0, baseY: 0 } };
     constructor(opts?: Record<string, unknown>) {
       if (opts) {
         this.options = { ...opts };

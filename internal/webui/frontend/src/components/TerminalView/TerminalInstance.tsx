@@ -51,6 +51,7 @@ export interface TerminalInstanceProps {
   onPasteRequest?: () => void;
   onSearchRequest?: () => void;
   onReconnectStateChange?: (state: ReconnectOverlayState) => void;
+  onOutput?: () => void;
 }
 
 export interface TerminalInstanceHandle {
@@ -83,6 +84,7 @@ export const TerminalInstance = forwardRef<
     onPasteRequest,
     onSearchRequest,
     onReconnectStateChange,
+    onOutput,
   },
   ref,
 ) {
@@ -97,6 +99,24 @@ export const TerminalInstance = forwardRef<
     null,
   );
   const reconnectAttemptRef = useRef(0);
+
+  // Scroll-tracking and new output pill
+  const isAtBottomRef = useRef(true);
+  const [showNewOutputPill, setShowNewOutputPill] = useState(false);
+  const onOutputRef = useRef(onOutput);
+  onOutputRef.current = onOutput;
+
+  const handleWsOutput = useCallback(() => {
+    onOutputRef.current?.();
+    if (!isAtBottomRef.current) {
+      setShowNewOutputPill(true);
+    }
+  }, []);
+
+  const handleScrollToBottom = useCallback(() => {
+    terminalRef.current?.scrollToBottom();
+    setShowNewOutputPill(false);
+  }, []);
 
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
@@ -159,6 +179,7 @@ export const TerminalInstance = forwardRef<
           );
           reconnectCancelRef.current = cancel;
         },
+        handleWsOutput,
       );
       wsCleanupRef.current = cleanupWs;
     };
@@ -176,7 +197,7 @@ export const TerminalInstance = forwardRef<
     } else {
       doWsConnect();
     }
-  }, [sessionName, clearReconnectState]);
+  }, [sessionName, clearReconnectState, handleWsOutput]);
 
   // Expose search methods and reconnect via imperative handle
   useImperativeHandle(
@@ -315,6 +336,16 @@ export const TerminalInstance = forwardRef<
 
     terminal.open(container);
 
+    // Track scroll position to show "New output" pill when scrolled up
+    const scrollDisposable = terminal.onScroll(() => {
+      const buffer = terminal.buffer.active;
+      const atBottom = buffer.viewportY >= buffer.baseY - 1;
+      isAtBottomRef.current = atBottom;
+      if (atBottom) {
+        setShowNewOutputPill(false);
+      }
+    });
+
     // Initial fit
     fitAddon.fit();
 
@@ -363,6 +394,7 @@ export const TerminalInstance = forwardRef<
             );
             reconnectCancelRef.current = cancel;
           },
+          handleWsOutput,
         );
         wsCleanupRef.current = cleanup;
       };
@@ -410,6 +442,7 @@ export const TerminalInstance = forwardRef<
       clearTimeout(copyDebounce);
       observer.disconnect();
       selectionDisposable.dispose();
+      scrollDisposable.dispose();
 
       reconnectCancelRef.current?.();
       reconnectCancelRef.current = null;
@@ -464,10 +497,22 @@ export const TerminalInstance = forwardRef<
   }, [fontSize, fontFamily]);
 
   return (
-    <div
-      className={styles.container}
-      ref={termRef}
-      data-testid="terminal-instance"
-    />
+    <div className={styles.wrapper}>
+      <div
+        className={styles.container}
+        ref={termRef}
+        data-testid="terminal-instance"
+      />
+      {showNewOutputPill && (
+        <button
+          className={styles.newOutputPill}
+          onClick={handleScrollToBottom}
+          type="button"
+          aria-label="Scroll to new output"
+        >
+          New output ↓
+        </button>
+      )}
+    </div>
   );
 });

@@ -60,6 +60,7 @@ export function connectWebSocket(
   setConnectionState: (s: ConnectionState) => void,
   onConnected?: () => void,
   onDisconnected?: () => void,
+  onOutput?: () => void,
 ): () => void {
   setConnectionState("connecting");
 
@@ -86,6 +87,7 @@ export function connectWebSocket(
         } else if (ev.data instanceof ArrayBuffer) {
           terminal.write(new Uint8Array(ev.data));
         }
+        onOutput?.();
       };
 
       ws.onclose = () => {

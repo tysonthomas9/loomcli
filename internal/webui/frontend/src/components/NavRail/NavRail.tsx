@@ -13,6 +13,7 @@ export interface NavRailProps {
   onChange: (view: ViewMode) => void;
   className?: string;
   sessionCount?: number;
+  badges?: Partial<Record<ViewMode, boolean>>;
 }
 
 type NavItem = { id: ViewMode; label: string; icon: JSX.Element };
@@ -255,6 +256,7 @@ export function NavRail({
   onChange,
   className,
   sessionCount,
+  badges,
 }: NavRailProps): JSX.Element {
   const { isMultiRepo } = useWorkspaceContext();
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
@@ -266,6 +268,7 @@ export function NavRail({
     const isActive = activeView === item.id;
     const showBadge =
       item.id === "terminal" && sessionCount != null && sessionCount > 0;
+    const showUnread = !isActive && badges?.[item.id] === true;
     return (
       <button
         key={item.id}
@@ -283,6 +286,13 @@ export function NavRail({
           >
             {sessionCount}
           </span>
+        )}
+        {showUnread && (
+          <span
+            role="img"
+            className={styles.unreadIndicator}
+            aria-label="has unread output"
+          />
         )}
         <span className={styles.tooltip} role="tooltip">
           {item.label}

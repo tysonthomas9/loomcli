@@ -14,6 +14,7 @@ export interface TerminalTab {
   label: string;
   connectionState: ConnectionState;
   brandColor?: string;
+  hasUnread?: boolean;
 }
 
 export interface TerminalTabBarProps {
@@ -318,6 +319,14 @@ export function TerminalTabBar({
                 >
                   {tab.label}
                 </span>
+              )}
+              {tab.hasUnread && !isActive && (
+                <span
+                  role="img"
+                  className={styles.unreadDot}
+                  aria-label="has new output"
+                  data-testid={`terminal-tab-unread-${tab.id}`}
+                />
               )}
               {tabs.length > 1 && (
                 <button

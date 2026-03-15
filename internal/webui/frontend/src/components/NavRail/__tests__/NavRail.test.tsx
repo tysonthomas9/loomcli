@@ -256,4 +256,74 @@ describe("NavRail", () => {
       expect(kanbanButton).not.toContainElement(badge);
     });
   });
+
+  describe("unread indicator", () => {
+    it("renders unread indicator when badges={{ terminal: true }} and terminal is not active", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          badges={{ terminal: true }}
+        />,
+      );
+
+      const indicator = screen.getByLabelText("has unread output");
+      expect(indicator).toBeInTheDocument();
+
+      // Indicator should be inside the Terminal button
+      const terminalButton = screen.getByLabelText("Terminal");
+      expect(terminalButton).toContainElement(indicator);
+    });
+
+    it("does NOT render unread indicator when terminal IS the active view", () => {
+      render(
+        <NavRail
+          activeView="terminal"
+          onChange={() => {}}
+          badges={{ terminal: true }}
+        />,
+      );
+
+      expect(
+        screen.queryByLabelText("has unread output"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render unread indicator without badges prop", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(
+        screen.queryByLabelText("has unread output"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render unread indicator when badges={{ terminal: false }}", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          badges={{ terminal: false }}
+        />,
+      );
+
+      expect(
+        screen.queryByLabelText("has unread output"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render unread indicator for non-terminal badges on their active view", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          badges={{ kanban: true }}
+        />,
+      );
+
+      // kanban is active, so its badge should not render
+      expect(
+        screen.queryByLabelText("has unread output"),
+      ).not.toBeInTheDocument();
+    });
+  });
 });

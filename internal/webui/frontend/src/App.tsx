@@ -295,6 +295,9 @@ function App() {
   // Active terminal session count for badge display
   const [activeSessionCount, setActiveSessionCount] = useState(0);
 
+  // Terminal unread output indicator
+  const [hasTerminalUnread, setHasTerminalUnread] = useState(false);
+
   // Agent data (shared via AgentProvider — single polling loop)
   const { agents, agentTasks } = useAgentContext();
 
@@ -322,6 +325,13 @@ function App() {
       clearTimeoutRef(agentPanelTimeoutRef);
     };
   }, [clearTimeoutRef]);
+
+  // Clear terminal unread when switching to terminal view
+  useEffect(() => {
+    if (activeView === "terminal") {
+      setHasTerminalUnread(false);
+    }
+  }, [activeView]);
 
   // Redirect away from workspace view in single-repo mode (e.g. stale URL bookmark)
   useEffect(() => {
@@ -777,6 +787,7 @@ function App() {
             activeView={activeView}
             onChange={setActiveView}
             sessionCount={activeSessionCount}
+            badges={{ terminal: hasTerminalUnread }}
           />
         }
         sidebar={sidebarContent}
@@ -811,6 +822,7 @@ function App() {
             activeView={activeView}
             onChange={setActiveView}
             sessionCount={activeSessionCount}
+            badges={{ terminal: hasTerminalUnread }}
           />
         }
         sidebar={sidebarContent}
@@ -837,6 +849,7 @@ function App() {
             activeView={activeView}
             onChange={setActiveView}
             sessionCount={activeSessionCount}
+            badges={{ terminal: hasTerminalUnread }}
           />
         }
         sidebar={sidebarContent}
@@ -977,6 +990,7 @@ function App() {
               pendingIssueContext={pendingIssueContext}
               onIssueContextConsumed={handleIssueContextConsumed}
               onActiveSessionCountChange={setActiveSessionCount}
+              onUnreadChange={setHasTerminalUnread}
               {...(selectedIssueId != null && { issueId: selectedIssueId })}
             />
           </Suspense>

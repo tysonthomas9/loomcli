@@ -5,7 +5,7 @@
  * is visible, preserving xterm buffers and WebSocket connections.
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
 import type { IssueContext } from "@/api/terminal";
 import { seedTerminalSession, patchTerminalState } from "@/api/terminal";
@@ -48,6 +48,7 @@ interface TerminalViewProps {
   pendingIssueContext?: IssueContext | undefined;
   onIssueContextConsumed?: (() => void) | undefined;
   onActiveSessionCountChange?: (count: number) => void;
+  onUnreadChange?: (hasAnyUnread: boolean) => void;
   issueId?: string;
 }
 
@@ -56,6 +57,7 @@ export function TerminalView({
   pendingIssueContext,
   onIssueContextConsumed,
   onActiveSessionCountChange,
+  onUnreadChange,
   issueId,
 }: TerminalViewProps): JSX.Element {
   const {
@@ -82,6 +84,9 @@ export function TerminalView({
   const [tabReconnectState, setTabReconnectState] = useState<
     Map<string, ReconnectOverlayState>
   >(() => new Map());
+  const [tabUnread, setTabUnread] = useState<Map<string, boolean>>(
+    () => new Map(),
+  );
   const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map());
   const initializedRef = useRef(false);
   const activeTabIdRef = useRef(activeTabId);
@@ -95,6 +100,45 @@ export function TerminalView({
     handlePasteConfirm,
     handlePasteCancel,
   } = useClipboard(instanceRefs, activeTabIdRef);
+
+  // Track output on non-active tabs as unread
+  const handleOutput = useCallback((tabId: string) => {
+    if (tabId !== activeTabIdRef.current) {
+      setTabUnread((prev) => {
+        if (prev.get(tabId)) return prev;
+        const next = new Map(prev);
+        next.set(tabId, true);
+        return next;
+      });
+    }
+  }, []);
+
+  // Compute aggregate unread and notify parent
+  const hasAnyUnread = useMemo(() => {
+    for (const val of tabUnread.values()) {
+      if (val) return true;
+    }
+    return false;
+  }, [tabUnread]);
+
+  useEffect(() => {
+    onUnreadChange?.(hasAnyUnread);
+  }, [hasAnyUnread, onUnreadChange]);
+
+  // When view becomes active, clear unread on the currently active tab
+  const prevIsActiveRef = useRef(isActive);
+  useEffect(() => {
+    if (isActive && !prevIsActiveRef.current) {
+      setTabUnread((prev) => {
+        const currentTab = activeTabIdRef.current;
+        if (!prev.get(currentTab)) return prev;
+        const next = new Map(prev);
+        next.delete(currentTab);
+        return next;
+      });
+    }
+    prevIsActiveRef.current = isActive;
+  }, [isActive]);
 
   useTabInit({
     tabMetadata,
@@ -289,6 +333,12 @@ export function TerminalView({
 
   const handleTabChange = useCallback((tabId: string) => {
     setActiveTabId(tabId);
+    setTabUnread((prev) => {
+      if (!prev.get(tabId)) return prev;
+      const next = new Map(prev);
+      next.delete(tabId);
+      return next;
+    });
   }, []);
 
   const { handleTabClose, handleDuplicateTab, handleTabRename } = useTabActions(
@@ -409,6 +459,7 @@ export function TerminalView({
                 label: t.label,
                 connectionState: t.connectionState,
                 ...(color != null && { brandColor: color }),
+                ...(tabUnread.get(t.id) && { hasUnread: true }),
               };
             })}
             activeTabId={activeTabId}
@@ -447,6 +498,7 @@ export function TerminalView({
                   onReconnectStateChange={(state) =>
                     handleReconnectStateChange(tab.id, state)
                   }
+                  onOutput={() => handleOutput(tab.id)}
                 />
                 <TerminalConnectionOverlay
                   connectionState={tab.connectionState}

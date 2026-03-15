@@ -631,6 +631,81 @@ describe("TerminalTabBar", () => {
     });
   });
 
+  describe("unread indicator", () => {
+    it("renders unread dot on inactive tab with hasUnread: true", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected", hasUnread: false },
+        { id: "b", label: "B", connectionState: "connected", hasUnread: true },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(screen.getByTestId("terminal-tab-unread-b")).toBeInTheDocument();
+      expect(screen.getByTestId("terminal-tab-unread-b")).toHaveAttribute(
+        "aria-label",
+        "has new output",
+      );
+    });
+
+    it("does NOT render unread dot on active tab even with hasUnread: true", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected", hasUnread: true },
+        { id: "b", label: "B", connectionState: "connected", hasUnread: false },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(
+        screen.queryByTestId("terminal-tab-unread-a"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render unread dot when hasUnread is false", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected", hasUnread: false },
+        { id: "b", label: "B", connectionState: "connected", hasUnread: false },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(
+        screen.queryByTestId("terminal-tab-unread-a"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("terminal-tab-unread-b"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render unread dot when hasUnread is undefined", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected" },
+        { id: "b", label: "B", connectionState: "connected" },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      expect(
+        screen.queryByTestId("terminal-tab-unread-a"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("terminal-tab-unread-b"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders unread dot on multiple inactive tabs simultaneously", () => {
+      const tabs: TerminalTab[] = [
+        { id: "a", label: "A", connectionState: "connected", hasUnread: true },
+        { id: "b", label: "B", connectionState: "connected", hasUnread: true },
+        { id: "c", label: "C", connectionState: "connected", hasUnread: true },
+      ];
+      render(<TerminalTabBar {...defaultProps} tabs={tabs} activeTabId="a" />);
+
+      // Active tab should NOT show unread
+      expect(
+        screen.queryByTestId("terminal-tab-unread-a"),
+      ).not.toBeInTheDocument();
+      // Inactive tabs should show unread
+      expect(screen.getByTestId("terminal-tab-unread-b")).toBeInTheDocument();
+      expect(screen.getByTestId("terminal-tab-unread-c")).toBeInTheDocument();
+    });
+  });
+
   describe("edge cases", () => {
     it("renders just the new-tab button when tabs array is empty", () => {
       render(<TerminalTabBar {...defaultProps} tabs={[]} activeTabId="" />);

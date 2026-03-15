@@ -109,6 +109,33 @@
   }
 }
 
+/* ============= Unread Dot ============= */
+
+.unreadDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-info, #3b82f6);
+  flex-shrink: 0;
+  animation: unreadPulse 2s ease-in-out infinite;
+}
+
+@keyframes unreadPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unreadDot {
+    animation: none;
+  }
+}
+
 /* ============= Tab Label ============= */
 
 .tabLabel {
