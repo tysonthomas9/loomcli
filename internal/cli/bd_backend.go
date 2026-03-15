@@ -150,9 +150,6 @@ func (b *bdBackend) BackendName() string {
 
 // queryIssues runs a bd command that returns a JSON array of BdIssue.
 func (b *bdBackend) queryIssues(args ...string) ([]BdIssue, error) {
-	if len(args) == 0 {
-		return nil, fmt.Errorf("queryIssues: no arguments")
-	}
 	out, err := b.RunCommand(b.dir, args...)
 	if err != nil {
 		return nil, fmt.Errorf("bd %s: %w", args[0], err)
