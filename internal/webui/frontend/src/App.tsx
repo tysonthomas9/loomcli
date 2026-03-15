@@ -21,6 +21,7 @@ import type { IssueContext } from "@/api/terminal";
 import { getReviewType } from "@/utils/issueCategory";
 import {
   AppLayout,
+  WorkspaceBreadcrumb,
   SwimLaneBoard,
   IssueTable,
   LoadingSkeleton,
@@ -57,6 +58,7 @@ import {
   useSelection,
   useAgentContext,
   useTheme,
+  useWorkspaceContext,
 } from "@/hooks";
 import type { Issue, IssueDetails, Status } from "@/types";
 
@@ -112,6 +114,9 @@ const FileExplorer = lazy(() =>
 function App() {
   // Theme state
   const { theme, toggleTheme } = useTheme();
+
+  // Workspace context for breadcrumb
+  const { workspace } = useWorkspaceContext();
 
   // View state must be read before useIssues to determine fetch mode
   const [activeView, setActiveView] = useViewState();
@@ -583,6 +588,13 @@ function App() {
     </div>
   );
 
+  const headerTitle = (
+    <WorkspaceBreadcrumb
+      workspaceName={workspace?.name ?? null}
+      activeView={activeView}
+    />
+  );
+
   const headerActions = (
     <div className={styles.headerActions}>
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
@@ -601,7 +613,7 @@ function App() {
   if (isLoading) {
     return (
       <AppLayout
-        title="Cortex"
+        title={headerTitle}
         navigation={headerNavigation}
         actions={headerActions}
         navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
@@ -633,7 +645,7 @@ function App() {
   if (error && !isLoading) {
     return (
       <AppLayout
-        title="Cortex"
+        title={headerTitle}
         navigation={headerNavigation}
         actions={headerActions}
         navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
@@ -662,7 +674,7 @@ function App() {
   // Success state: show view based on activeView with filtered issues
   return (
     <AppLayout
-      title="Cortex"
+      title={headerTitle}
       navigation={headerNavigation}
       actions={headerActions}
       navRail={<NavRail activeView={activeView} onChange={setActiveView} />}

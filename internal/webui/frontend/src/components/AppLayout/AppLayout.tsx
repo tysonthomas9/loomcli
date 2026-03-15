@@ -22,7 +22,7 @@ export interface AppLayoutProps {
   /** Optional element to render in the left sidebar */
   sidebar?: ReactNode;
   /** Application title displayed in header (defaults to "Beads") */
-  title?: string;
+  title?: ReactNode;
   /** Additional CSS class name */
   className?: string;
 }

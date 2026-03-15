@@ -53,4 +53,5 @@ export * from "./TerminalPanel";
 export * from "./ThemeToggle";
 export * from "./TerminalView";
 export * from "./RepoBadge";
+export * from "./WorkspaceBreadcrumb";
 export * from "./WorkspaceTree";
