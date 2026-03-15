@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -361,6 +362,15 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Tab metadata store initialized (Redis: %s)", config.FleetRedis.Address)
 	}
 
+	// Initialize issue tab state store for tab persistence across navigation
+	var issueTabStore *issuetabs.Store
+	if config.FleetRedis != nil {
+		itClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
+		issueTabStore = issuetabs.NewStore(itClient, nil)
+		defer func() { _ = issueTabStore.Close() }()
+		log.Printf("Issue tab store initialized (Redis: %s)", config.FleetRedis.Address)
+	}
+
 	// Load or generate API key for authentication
 	var apiKey string
 	if config.AuthEnabled {
@@ -389,7 +399,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, config.WorkspaceConfigFn, config.BackendListFn)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.BackendListFn)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.

@@ -7,12 +7,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/editor"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // setupRoutes configures all HTTP routes for the server.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, workspaceConfigFn func() (*WorkspaceData, error), backendListFn func() ([]BackendInfo, error)) { //nolint:funlen // route registration function
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), backendListFn func() ([]BackendInfo, error)) { //nolint:funlen // route registration function
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -116,6 +117,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("PATCH /api/terminal/tabs/{session}", handlePatchTerminalTab(tabMetaStore, hub))
 		mux.HandleFunc("DELETE /api/terminal/tabs/{session}", handleDeleteTerminalTab(tabMetaStore, hub))
 	}
+
+	// Issue tab persistence endpoints (Redis-backed)
+	mux.HandleFunc("GET /api/issues/{issueId}/tabs", handleGetIssueTabs(issueTabStore, termManager))
+	mux.HandleFunc("PUT /api/issues/{issueId}/tabs", handleSaveIssueTabs(issueTabStore, hub))
+	mux.HandleFunc("DELETE /api/issues/{issueId}/tabs", handleDeleteIssueTabs(issueTabStore))
 
 	// Git operation endpoints for worktrees
 	if gitOps != nil {

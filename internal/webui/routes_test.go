@@ -616,7 +616,7 @@ func TestHandleAPIHealth_NilPool(t *testing.T) {
 // the terminal WebSocket endpoint is NOT registered when termManager is nil.
 func TestSetupRoutes_TerminalEndpointNotRegisteredWithNilManager(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil) // nil termManager
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil) // nil termManager
 
 	// Request to terminal endpoint should fall through to frontend handler
 	// (the SPA catch-all) since the route is not registered
@@ -652,7 +652,7 @@ func TestSetupRoutes_TerminalEndpointRegisteredWithManager(t *testing.T) {
 	defer termMgr.Shutdown()
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, termMgr, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil) // non-nil termManager
+	setupRoutes(mux, nil, nil, nil, termMgr, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil) // non-nil termManager
 
 	// Request to terminal endpoint should be handled by the terminal handler,
 	// not fall through to frontend. Without WebSocket upgrade headers,
@@ -714,7 +714,7 @@ func TestSetupRoutes_TerminalEndpointNilManagerReturns503(t *testing.T) {
 // TestSetupRoutes_StatsEndpoint tests that stats endpoint is registered.
 func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	// Test that stats endpoint is registered
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
@@ -743,7 +743,7 @@ func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 // catch-all frontend handler "/" which returns index.html (200 OK).
 func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	// POST to GET-only endpoint falls through to frontend handler
 	req := httptest.NewRequest(http.MethodPost, "/api/stats", nil)
@@ -958,7 +958,7 @@ func TestHandleStats_DaemonError(t *testing.T) {
 // fleet endpoints are NOT registered when fleetEnabled is false.
 func TestSetupRoutes_FleetEndpointsNotRegisteredWhenDisabled(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil) // fleetEnabled=false
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil) // fleetEnabled=false
 
 	// Request to fleet endpoint should fall through to frontend handler
 	// (the SPA catch-all) since the route is not registered
@@ -984,7 +984,7 @@ func TestSetupRoutes_FleetEndpointsNotRegisteredWhenDisabled(t *testing.T) {
 // fleet endpoints ARE registered when fleetEnabled is true.
 func TestSetupRoutes_FleetEndpointsRegisteredWhenEnabled(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, true, false, "", "", nil, nil, nil, nil, nil) // fleetEnabled=true
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, true, false, "", "", nil, nil, nil, nil, nil, nil) // fleetEnabled=true
 
 	// Request to fleet endpoint should be handled by the fleet handler,
 	// not fall through to frontend. With nil pool, the handler should
@@ -1417,7 +1417,7 @@ func TestHandleAPIHealth_SuccessWithMockServer(t *testing.T) {
 // falls through to the frontend handler when hub is nil.
 func TestSetupRoutes_SSEEndpointNotRegisteredWhenHubNil(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
 	rr := httptest.NewRecorder()
@@ -1443,7 +1443,7 @@ func TestSetupRoutes_SSEEndpointRegisteredWhenHubNonNil(t *testing.T) {
 	defer hub.Stop()
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, hub, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, hub, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	// Use a context with short timeout because the SSE handler streams forever
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -1467,7 +1467,7 @@ func TestSetupRoutes_SSEEndpointRegisteredWhenHubNonNil(t *testing.T) {
 // is handled when authEnabled=true.
 func TestSetupRoutes_AuthTokenRegisteredWhenEnabled(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "test-api-key", true, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "test-api-key", true, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/token", nil)
 	rr := httptest.NewRecorder()
@@ -1488,7 +1488,7 @@ func TestSetupRoutes_AuthTokenRegisteredWhenEnabled(t *testing.T) {
 // falls through to the frontend when authEnabled=false.
 func TestSetupRoutes_AuthTokenNotRegisteredWhenDisabled(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/token", nil)
 	rr := httptest.NewRecorder()
@@ -1527,7 +1527,7 @@ func TestSetupRoutes_TerminalTokenRegisteredWithAuth(t *testing.T) {
 	t.Cleanup(func() { termAuth.Stop() })
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, termMgr, termAuth, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, termMgr, termAuth, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=test", nil)
 	rr := httptest.NewRecorder()
@@ -1554,7 +1554,7 @@ func TestSetupRoutes_TerminalTokenNotRegisteredWithoutAuth(t *testing.T) {
 
 	mux := http.NewServeMux()
 	// termAuth is nil
-	setupRoutes(mux, nil, nil, nil, termMgr, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, termMgr, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=test", nil)
 	rr := httptest.NewRecorder()
@@ -1578,7 +1578,7 @@ func TestSetupRoutes_TerminalTokenNotRegisteredWithoutAuth(t *testing.T) {
 // and POST /health falls through to the frontend.
 func TestSetupRoutes_HealthEndpoint_GETOnly(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	// GET should return JSON health response
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -1624,7 +1624,7 @@ func TestSetupRoutes_IssueEndpoints_MethodRestrictions(t *testing.T) {
 	pool := newRoutesMockPool(t, socketPath)
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, pool, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, pool, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name        string
@@ -1681,7 +1681,7 @@ func TestSetupRoutes_DependencyEndpoints_MethodRestrictions(t *testing.T) {
 	pool := newRoutesMockPool(t, socketPath)
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, pool, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, pool, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name        string
@@ -1721,7 +1721,7 @@ func TestSetupRoutes_DependencyEndpoints_MethodRestrictions(t *testing.T) {
 // registered when fleetEnabled=true and that GET on POST-only routes falls through.
 func TestSetupRoutes_FleetEndpoints_AllRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, true, false, "", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, true, false, "", "", nil, nil, nil, nil, nil, nil)
 
 	// POST routes should be handled (not fall through to frontend)
 	postRoutes := []string{
@@ -1766,7 +1766,7 @@ func TestSetupRoutes_FleetEndpoints_AllRoutes(t *testing.T) {
 func TestSetupRoutes_DevMode_FrontendHandler(t *testing.T) {
 	mux := http.NewServeMux()
 	// Pass devMode=true with a non-existent dir; the handler should not panic
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, true, "/nonexistent/dev/dir", "", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, true, "/nonexistent/dev/dir", "", nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -1790,7 +1790,7 @@ func TestSetupRoutes_LoomProxy_RegisteredWhenURLSet(t *testing.T) {
 	t.Setenv("LOOM_SERVER_URL", "")
 
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "http://localhost:9999", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "http://localhost:9999", nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/loom/status", nil)
 	rr := httptest.NewRecorder()
@@ -1814,7 +1814,7 @@ func TestSetupRoutes_LoomProxy_NotRegisteredWhenURLInvalid(t *testing.T) {
 
 	mux := http.NewServeMux()
 	// Use a URL with a non-localhost host and no allowed hosts → proxy returns nil
-	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "http://external-host.example.com:9999", nil, nil, nil, nil, nil)
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "http://external-host.example.com:9999", nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/loom/status", nil)
 	rr := httptest.NewRecorder()

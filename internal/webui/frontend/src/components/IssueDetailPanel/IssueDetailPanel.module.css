@@ -329,6 +329,26 @@
   white-space: nowrap;
 }
 
+.tabConnectionDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tabConnectionDot[data-state="connected"] {
+  background-color: var(--color-success, #22c55e);
+}
+
+.tabConnectionDot[data-state="connecting"],
+.tabConnectionDot[data-state="reconnecting"] {
+  background-color: var(--color-warning, #eab308);
+}
+
+.tabConnectionDot[data-state="disconnected"] {
+  background-color: var(--color-muted, #6b7280);
+}
+
 .tabCloseButton {
   display: flex;
   align-items: center;

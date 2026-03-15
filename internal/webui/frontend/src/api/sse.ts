@@ -23,7 +23,8 @@ export type MutationType =
   | "squashed"
   | "burned"
   | "refresh"
-  | "terminal_metadata";
+  | "terminal_metadata"
+  | "issue_tabs";
 
 // Server → Client: Mutation payload
 export interface MutationPayload {

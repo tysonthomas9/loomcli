@@ -9,7 +9,9 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 import { updateIssue, addDependency, removeDependency } from "@/api";
 import { deleteTabMetadata, scheduleSessionKill } from "@/api/terminal";
+import type { IssueTab } from "@/api/issueTabs";
 import { useAgentTerminalLogs } from "@/hooks";
+import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
   Issue,
   IssueDetails,
@@ -289,11 +291,21 @@ function DefaultContent({
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
 
+  // Tab persistence hook - loads/saves tab state to Redis
+  const issueId = issue?.id ?? "";
+  const {
+    savedState: persistedTabState,
+    isLoading: isLoadingPersistedTabs,
+    saveTabs: persistTabs,
+  } = useIssueTabPersistence(issueId);
+
   // Tab state - managed tab array with dynamic add/remove
   const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB]);
   const [activeTabId, setActiveTabId] = useState("details");
   const [showAddTabDropdown, setShowAddTabDropdown] = useState(false);
   const addTabRef = useRef<HTMLDivElement>(null);
+  // Track whether we've already restored tabs from persistence for this issue
+  const restoredIssueIdRef = useRef<string | null>(null);
 
   const addTab = useCallback(
     (type: "logs" | "terminal", metadata?: DetailTabMetadata) => {
@@ -403,9 +415,78 @@ function DefaultContent({
 
   // Reset tabs when issue changes
   useEffect(() => {
+    restoredIssueIdRef.current = null;
     setTabs([DETAILS_TAB]);
     setActiveTabId("details");
   }, [issue?.id]);
+
+  // Restore tabs from persisted state once loaded
+  useEffect(() => {
+    if (
+      !persistedTabState ||
+      isLoadingPersistedTabs ||
+      !issue?.id ||
+      restoredIssueIdRef.current === issue.id
+    ) {
+      return;
+    }
+    restoredIssueIdRef.current = issue.id;
+
+    const validTypes = new Set(["details", "logs", "terminal"]);
+    const restoredTabs: DetailTab[] = persistedTabState.tabs
+      .filter((t) => validTypes.has(t.type))
+      .map((t) => ({
+        id: t.id,
+        type: t.type as DetailTab["type"],
+        label: t.label,
+        closable: t.type !== "details",
+        metadata:
+          t.type === "terminal" && t.session_name
+            ? { sessionName: t.session_name }
+            : undefined,
+        connectionState:
+          t.type === "terminal" ? ("disconnected" as ConnectionState) : undefined,
+      }));
+
+    // Ensure details tab is always present
+    if (!restoredTabs.some((t) => t.id === "details")) {
+      restoredTabs.unshift(DETAILS_TAB);
+    }
+
+    if (restoredTabs.length > 0) {
+      setTabs(restoredTabs);
+      const activeId = persistedTabState.active_tab_id;
+      if (restoredTabs.some((t) => t.id === activeId)) {
+        setActiveTabId(activeId);
+      }
+    }
+  }, [persistedTabState, isLoadingPersistedTabs, issue?.id]);
+
+  // Persist tab state on changes (debounced via hook)
+  useEffect(() => {
+    // Don't persist while still loading persisted state or before restoration
+    if (isLoadingPersistedTabs || !issue?.id || restoredIssueIdRef.current !== issue.id) {
+      return;
+    }
+    // Only persist if there's something beyond the default single details tab
+    const isDefault =
+      tabs.length === 1 && tabs[0]?.id === "details" && activeTabId === "details";
+    if (isDefault) return;
+
+    const tabsToSave: IssueTab[] = tabs.map((t, i) => {
+      const tab: IssueTab = {
+        id: t.id,
+        type: t.type,
+        label: t.label,
+        sort_order: i,
+      };
+      if (t.metadata?.sessionName) {
+        tab.session_name = t.metadata.sessionName;
+      }
+      return tab;
+    });
+    persistTabs(tabsToSave, activeTabId);
+  }, [tabs, activeTabId, issue?.id, isLoadingPersistedTabs, persistTabs]);
 
   // Reset to details when agent removed while on logs tab
   useEffect(() => {
@@ -816,6 +897,13 @@ function DefaultContent({
               }}
               tabIndex={activeTabId === tab.id ? 0 : -1}
             >
+              {tab.type === "terminal" && tab.connectionState && (
+                <span
+                  className={styles.tabConnectionDot}
+                  data-state={tab.connectionState}
+                  data-testid={`tab-connection-dot-${tab.id}`}
+                />
+              )}
               <span className={styles.tabLabel}>{tab.label}</span>
               {tab.closable && (
                 <button
