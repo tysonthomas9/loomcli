@@ -27,6 +27,7 @@ import { getReviewType } from "@/utils/issueCategory";
 
 import type { ConnectionState } from "@/components/TerminalView";
 
+import { AgentStatusBadge } from "./AgentStatusBadge";
 import { AssigneeDropdown } from "./AssigneeDropdown";
 import { StartWorkButton } from "./StartWorkButton";
 import { CommentForm } from "./CommentForm";
@@ -1134,6 +1135,12 @@ function DefaultContent({
                     onSave={handleAssigneeSave}
                     isSaving={isSavingAssignee}
                   />
+                  {issue.assignee && !issue.assignee.startsWith("[H]") && (
+                    <AgentStatusBadge
+                      agentName={issue.assignee}
+                      onOpenTerminal={() => setActiveTabId("logs")}
+                    />
+                  )}
                   <StartWorkButton
                     issueId={issue.id}
                     issueStatus={issue.status}
