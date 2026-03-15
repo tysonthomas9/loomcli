@@ -32,11 +32,25 @@ import styles from "./TerminalInstance.module.css";
 import { connectWebSocket, encodeResize } from "./terminalConnection";
 import "@xterm/xterm/css/xterm.css";
 
+const SEARCH_DECORATIONS = {
+  matchBackground: "#515C6A",
+  matchBorder: "#515C6A",
+  matchOverviewRuler: "#d186167e",
+  activeMatchBackground: "#EE8B17",
+  activeMatchBorder: "#EE8B17",
+  activeMatchColorOverviewRuler: "#ee8b17ff",
+};
+
 export type ConnectionState =
   | "disconnected"
   | "connecting"
   | "connected"
   | "error";
+
+export interface SearchResultInfo {
+  resultIndex: number;
+  resultCount: number;
+}
 
 export interface TerminalInstanceProps {
   sessionName: string;
@@ -52,6 +66,7 @@ export interface TerminalInstanceProps {
   onSearchRequest?: () => void;
   onReconnectStateChange?: (state: ReconnectOverlayState) => void;
   onOutput?: () => void;
+  onSearchResultChange?: (result: SearchResultInfo | null) => void;
 }
 
 export interface TerminalInstanceHandle {
@@ -85,6 +100,7 @@ export const TerminalInstance = forwardRef<
     onSearchRequest,
     onReconnectStateChange,
     onOutput,
+    onSearchResultChange,
   },
   ref,
 ) {
@@ -105,6 +121,12 @@ export const TerminalInstance = forwardRef<
   const [showNewOutputPill, setShowNewOutputPill] = useState(false);
   const onOutputRef = useRef(onOutput);
   onOutputRef.current = onOutput;
+  const onSearchResultChangeRef = useRef(onSearchResultChange);
+  onSearchResultChangeRef.current = onSearchResultChange;
+
+  // Track current search term and options so findNext/findPrevious can reuse them
+  const lastSearchTermRef = useRef("");
+  const lastSearchOptsRef = useRef<Record<string, unknown>>({});
 
   const handleWsOutput = useCallback(() => {
     onOutputRef.current?.();
@@ -206,26 +228,48 @@ export const TerminalInstance = forwardRef<
       search(term, options) {
         const addon = searchAddonRef.current;
         if (!addon) return false;
-        const searchOpts: Record<string, boolean> = {};
-        if (options?.caseSensitive !== undefined)
-          searchOpts.caseSensitive = options.caseSensitive;
-        if (options?.wholeWord !== undefined)
-          searchOpts.wholeWord = options.wholeWord;
-        if (options?.regex !== undefined) searchOpts.regex = options.regex;
-        return addon.findNext(term, searchOpts);
+        lastSearchTermRef.current = term;
+        const opts: Record<string, unknown> = {};
+        if (options?.caseSensitive != null)
+          opts.caseSensitive = options.caseSensitive;
+        if (options?.wholeWord != null) opts.wholeWord = options.wholeWord;
+        if (options?.regex != null) opts.regex = options.regex;
+        lastSearchOptsRef.current = opts;
+        if (!term) {
+          addon.clearDecorations();
+          onSearchResultChangeRef.current?.(null);
+          return false;
+        }
+        return addon.findNext(term, {
+          ...opts,
+          decorations: SEARCH_DECORATIONS,
+        });
       },
       findNext() {
         const addon = searchAddonRef.current;
         if (!addon) return false;
-        return addon.findNext("");
+        const term = lastSearchTermRef.current;
+        if (!term) return false;
+        return addon.findNext(term, {
+          ...lastSearchOptsRef.current,
+          decorations: SEARCH_DECORATIONS,
+        });
       },
       findPrevious() {
         const addon = searchAddonRef.current;
         if (!addon) return false;
-        return addon.findPrevious("");
+        const term = lastSearchTermRef.current;
+        if (!term) return false;
+        return addon.findPrevious(term, {
+          ...lastSearchOptsRef.current,
+          decorations: SEARCH_DECORATIONS,
+        });
       },
       clearSearch() {
         searchAddonRef.current?.clearDecorations();
+        lastSearchTermRef.current = "";
+        lastSearchOptsRef.current = {};
+        onSearchResultChangeRef.current?.(null);
       },
       reconnect() {
         reconnectCancelRef.current?.();
@@ -297,6 +341,13 @@ export const TerminalInstance = forwardRef<
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
+
+    // Forward search result changes (N of M counter)
+    const searchResultDisposable = searchAddon.onDidChangeResults(
+      (e: { resultIndex: number; resultCount: number }) => {
+        onSearchResultChangeRef.current?.(e);
+      },
+    );
 
     // Copy-on-select: strip ANSI codes and write clean text to clipboard
     let copyDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -443,6 +494,7 @@ export const TerminalInstance = forwardRef<
       observer.disconnect();
       selectionDisposable.dispose();
       scrollDisposable.dispose();
+      searchResultDisposable.dispose();
 
       reconnectCancelRef.current?.();
       reconnectCancelRef.current = null;

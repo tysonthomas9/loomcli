@@ -26,6 +26,7 @@ import { SearchBar } from "./SearchBar";
 import { TerminalConnectionOverlay } from "./TerminalConnectionOverlay";
 import type {
   ConnectionState,
+  SearchResultInfo,
   TerminalInstanceHandle,
 } from "./TerminalInstance";
 import { TerminalInstance } from "./TerminalInstance";
@@ -77,6 +78,11 @@ export function TerminalView({
   const [isFullHeight, setIsFullHeight] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [useRegex, setUseRegex] = useState(false);
+  const [searchResult, setSearchResult] = useState<SearchResultInfo | null>(
+    null,
+  );
   const [isSessionPromptOpen, setIsSessionPromptOpen] = useState(false);
   const [tabHasConnected, setTabHasConnected] = useState<Map<string, boolean>>(
     () => new Map(),
@@ -285,6 +291,7 @@ export function TerminalView({
         setIsSearchOpen(false);
         instanceRefs.current.get(activeTabId)?.clearSearch();
         setSearchTerm("");
+        setSearchResult(null);
       }
     };
     document.addEventListener("keydown", handler);
@@ -300,9 +307,11 @@ export function TerminalView({
   // Re-run search on tab switch while search is open
   useEffect(() => {
     if (isSearchOpen && searchTerm) {
-      instanceRefs.current.get(activeTabId)?.search(searchTerm);
+      instanceRefs.current
+        .get(activeTabId)
+        ?.search(searchTerm, { caseSensitive, regex: useRegex });
     }
-  }, [activeTabId, isSearchOpen, searchTerm]);
+  }, [activeTabId, isSearchOpen, searchTerm, caseSensitive, useRegex]);
 
   // Body scroll lock for full-height mode
   useEffect(() => {
@@ -386,9 +395,11 @@ export function TerminalView({
   const handleSearch = useCallback(
     (term: string) => {
       setSearchTerm(term);
-      instanceRefs.current.get(activeTabId)?.search(term);
+      instanceRefs.current
+        .get(activeTabId)
+        ?.search(term, { caseSensitive, regex: useRegex });
     },
-    [activeTabId],
+    [activeTabId, caseSensitive, useRegex],
   );
 
   const handleFindNext = useCallback(() => {
@@ -403,7 +414,38 @@ export function TerminalView({
     setIsSearchOpen(false);
     instanceRefs.current.get(activeTabId)?.clearSearch();
     setSearchTerm("");
+    setSearchResult(null);
   }, [activeTabId]);
+
+  const handleToggleCaseSensitive = useCallback(() => {
+    const next = !caseSensitive;
+    setCaseSensitive(next);
+    if (searchTerm) {
+      instanceRefs.current
+        .get(activeTabId)
+        ?.search(searchTerm, { caseSensitive: next, regex: useRegex });
+    }
+  }, [activeTabId, searchTerm, caseSensitive, useRegex]);
+
+  const handleToggleRegex = useCallback(() => {
+    const next = !useRegex;
+    setUseRegex(next);
+    if (searchTerm) {
+      instanceRefs.current
+        .get(activeTabId)
+        ?.search(searchTerm, { caseSensitive, regex: next });
+    }
+  }, [activeTabId, searchTerm, caseSensitive, useRegex]);
+
+  // Only process search result changes from the active tab
+  const handleSearchResultChange = useCallback(
+    (tabId: string, result: SearchResultInfo | null) => {
+      if (tabId === activeTabIdRef.current) {
+        setSearchResult(result);
+      }
+    },
+    [],
+  );
 
   // Search request from terminal (Ctrl+Shift+F)
   const handleSearchRequest = useCallback(() => {
@@ -499,6 +541,9 @@ export function TerminalView({
                     handleReconnectStateChange(tab.id, state)
                   }
                   onOutput={() => handleOutput(tab.id)}
+                  onSearchResultChange={(result) =>
+                    handleSearchResultChange(tab.id, result)
+                  }
                 />
                 <TerminalConnectionOverlay
                   connectionState={tab.connectionState}
@@ -527,6 +572,12 @@ export function TerminalView({
               onFindNext={handleFindNext}
               onFindPrevious={handleFindPrevious}
               onClose={handleSearchClose}
+              matchIndex={searchResult?.resultIndex ?? null}
+              matchCount={searchResult?.resultCount ?? null}
+              caseSensitive={caseSensitive}
+              regex={useRegex}
+              onToggleCaseSensitive={handleToggleCaseSensitive}
+              onToggleRegex={handleToggleRegex}
             />
           )}
         </>

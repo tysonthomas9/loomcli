@@ -138,6 +138,10 @@ vi.mock("../TerminalView.module.css", () => ({
     searchOverlay: "searchOverlay",
     searchInput: "searchInput",
     searchButton: "searchButton",
+    searchToggle: "searchToggle",
+    searchToggleActive: "searchToggleActive",
+    searchCounter: "searchCounter",
+    noResults: "noResults",
   },
 }));
 
@@ -661,6 +665,64 @@ describe("TerminalView", () => {
 
       const input = screen.getByTestId("terminal-search-input");
       expect(input).toHaveFocus();
+    });
+
+    it("search bar shows case-sensitive toggle button", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      fireEvent.keyDown(document, { key: "f", metaKey: true });
+
+      const toggle = screen.getByTestId("search-toggle-case");
+      expect(toggle).toBeInTheDocument();
+      expect(toggle).toHaveTextContent("Aa");
+      expect(toggle).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("search bar shows regex toggle button", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      fireEvent.keyDown(document, { key: "f", metaKey: true });
+
+      const toggle = screen.getByTestId("search-toggle-regex");
+      expect(toggle).toBeInTheDocument();
+      expect(toggle).toHaveTextContent(".*");
+      expect(toggle).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("toggling case-sensitive updates aria-pressed", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      fireEvent.keyDown(document, { key: "f", metaKey: true });
+
+      const toggle = screen.getByTestId("search-toggle-case");
+      fireEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("toggling regex updates aria-pressed", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      fireEvent.keyDown(document, { key: "f", metaKey: true });
+
+      const toggle = screen.getByTestId("search-toggle-regex");
+      fireEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("no match counter when search input is empty", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      fireEvent.keyDown(document, { key: "f", metaKey: true });
+
+      expect(screen.queryByText(/of/)).not.toBeInTheDocument();
+      expect(screen.queryByText("No results")).not.toBeInTheDocument();
     });
   });
 
