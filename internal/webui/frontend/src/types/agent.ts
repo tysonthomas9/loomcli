@@ -102,6 +102,8 @@ export interface LoomAgentStatus {
   behind: number;
   /** Role from daemon config (e.g., "plan", "task") */
   role?: string;
+  /** Workspace name from daemon config (empty string in legacy/single-repo mode) */
+  workspace?: string;
   /** Repository this agent is assigned to (multi-repo workspaces) */
   repo?: string;
   /** Whether agent works across multiple repos */

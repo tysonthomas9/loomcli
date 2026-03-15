@@ -713,4 +713,269 @@ describe("AgentsSidebar", () => {
       expect(screen.getByText("alpha")).toBeInTheDocument();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Workspace grouping
+  // ---------------------------------------------------------------------------
+
+  describe("workspace grouping", () => {
+    function makeWsAgent(name: string, workspace?: string): LoomAgentStatus {
+      return {
+        name,
+        branch: "main",
+        status: "idle",
+        ahead: 0,
+        behind: 0,
+        ...(workspace !== undefined && { workspace }),
+      };
+    }
+
+    it("groups agents correctly by workspace field", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta", "backend"),
+          makeWsAgent("gamma", "frontend"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Should render workspace headers (use button selector to avoid matching child spans)
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      expect(headers.length).toBe(2);
+
+      // All agents should be rendered
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+      expect(screen.getByText("gamma")).toBeInTheDocument();
+    });
+
+    it('agents with no workspace appear in "(default)" group', () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta"), // no workspace
+          makeWsAgent("gamma", ""), // empty workspace
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Should have workspace headers for "frontend" and "(default)"
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      expect(headers.length).toBe(2);
+
+      // "(default)" group should exist
+      const headerTexts = Array.from(headers).map((h) => {
+        const textSpan = h.querySelector('[class*="workspaceHeaderText"]');
+        return textSpan?.textContent;
+      });
+      expect(headerTexts).toContain("(default)");
+      expect(headerTexts).toContain("frontend");
+    });
+
+    it('groups sorted alphabetically with "(default)" last', () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "zebra"),
+          makeWsAgent("beta"), // (default)
+          makeWsAgent("gamma", "alpha-ws"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const headerTexts = Array.from(headers).map((h) => {
+        const textSpan = h.querySelector('[class*="workspaceHeaderText"]');
+        return textSpan?.textContent;
+      });
+
+      // alpha-ws < zebra < (default)
+      expect(headerTexts).toEqual(["alpha-ws", "zebra", "(default)"]);
+    });
+
+    it("clicking workspace header toggles collapse", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta", "backend"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Both agents visible initially
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+
+      // Click the first workspace header (frontend comes before backend alphabetically: "backend" < "frontend")
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const backendHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("backend"),
+      ) as HTMLElement;
+      fireEvent.click(backendHeader);
+
+      // beta should be hidden, alpha still visible
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.queryByText("beta")).not.toBeInTheDocument();
+    });
+
+    it("collapsed group hides its agent cards", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "ws-a"),
+          makeWsAgent("beta", "ws-a"),
+          makeWsAgent("gamma", "ws-b"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Click ws-a header
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const wsAHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("ws-a"),
+      ) as HTMLElement;
+      fireEvent.click(wsAHeader);
+
+      // alpha and beta hidden, gamma still visible
+      expect(screen.queryByText("alpha")).not.toBeInTheDocument();
+      expect(screen.queryByText("beta")).not.toBeInTheDocument();
+      expect(screen.getByText("gamma")).toBeInTheDocument();
+    });
+
+    it("single workspace renders flat without group header", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "only-ws"),
+          makeWsAgent("beta", "only-ws"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // No workspace headers should be rendered
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      expect(headers).toHaveLength(0);
+
+      // Agents should still be visible
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+    });
+
+    it("single workspace with all agents in (default) renders flat", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha"), // no workspace -> (default)
+          makeWsAgent("beta", ""), // empty workspace -> (default)
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      expect(headers).toHaveLength(0);
+
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
+    });
+
+    it("workspace header shows agent count badge", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "ws-a"),
+          makeWsAgent("beta", "ws-a"),
+          makeWsAgent("gamma", "ws-b"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const wsAHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("ws-a"),
+      ) as HTMLElement;
+
+      // ws-a has 2 agents
+      expect(within(wsAHeader).getByText("2")).toBeInTheDocument();
+
+      const wsBHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("ws-b"),
+      ) as HTMLElement;
+
+      // ws-b has 1 agent
+      expect(within(wsBHeader).getByText("1")).toBeInTheDocument();
+    });
+
+    it("persists collapsed state to localStorage", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta", "backend"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      // Click a workspace header to collapse it
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const backendHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("backend"),
+      ) as HTMLElement;
+      fireEvent.click(backendHeader);
+
+      // localStorage should have the collapsed state
+      const stored = localStorage.getItem("agents-sidebar-ws-collapsed");
+      expect(stored).toBeTruthy();
+      const parsed = JSON.parse(stored!);
+      expect(parsed["backend"]).toBe(true);
+    });
+
+    it("re-expanding clears collapsed state in localStorage", () => {
+      mockContextOverride = {
+        agents: [
+          makeWsAgent("alpha", "frontend"),
+          makeWsAgent("beta", "backend"),
+        ],
+      };
+
+      const { container } = render(<AgentsSidebar collapsible={false} />);
+
+      const headers = container.querySelectorAll(
+        'button[class*="workspaceHeader"]',
+      );
+      const backendHeader = Array.from(headers).find((h) =>
+        h.textContent?.includes("backend"),
+      ) as HTMLElement;
+
+      // Collapse then re-expand
+      fireEvent.click(backendHeader);
+      fireEvent.click(backendHeader);
+
+      const stored = localStorage.getItem("agents-sidebar-ws-collapsed");
+      expect(stored).toBeTruthy();
+      const parsed = JSON.parse(stored!);
+      expect(parsed["backend"]).toBe(false);
+    });
+  });
 });

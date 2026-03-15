@@ -240,9 +240,13 @@ describe("AgentCard", () => {
 
   describe("commit count", () => {
     it("shows +N when agent.ahead > 0", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 3 })} />);
+      const { container } = render(
+        <AgentCard agent={makeAgent({ ahead: 3 })} />,
+      );
 
-      expect(screen.getByText("+3")).toBeInTheDocument();
+      const commitCount = container.querySelector('[class*="commitCount"]');
+      expect(commitCount).toBeInTheDocument();
+      expect(commitCount).toHaveTextContent("+3");
     });
 
     it("shows correct title tooltip for commit count when only ahead", () => {
@@ -258,9 +262,13 @@ describe("AgentCard", () => {
     });
 
     it("shows +1 for single commit ahead", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 1 })} />);
+      const { container } = render(
+        <AgentCard agent={makeAgent({ ahead: 1 })} />,
+      );
 
-      expect(screen.getByText("+1")).toBeInTheDocument();
+      const commitCount = container.querySelector('[class*="commitCount"]');
+      expect(commitCount).toBeInTheDocument();
+      expect(commitCount).toHaveTextContent("+1");
       expect(screen.getByTitle("1 commits ahead")).toBeInTheDocument();
     });
   });
@@ -292,9 +300,13 @@ describe("AgentCard", () => {
     });
 
     it("shows both ahead and behind counts side by side when both > 0", () => {
-      render(<AgentCard agent={makeAgent({ ahead: 3, behind: 2 })} />);
+      const { container } = render(
+        <AgentCard agent={makeAgent({ ahead: 3, behind: 2 })} />,
+      );
 
-      expect(screen.getByText("+3")).toBeInTheDocument();
+      const commitCount = container.querySelector('[class*="commitCount"]');
+      expect(commitCount).toBeInTheDocument();
+      expect(commitCount).toHaveTextContent("+3");
       expect(screen.getByText("-2")).toBeInTheDocument();
     });
 
@@ -478,6 +490,101 @@ describe("AgentCard", () => {
     });
   });
 
+  describe("change badge", () => {
+    it("shows correct sum of ahead + changes.length", () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            ahead: 3,
+            changes: [
+              { status: "M", path: "file1.ts" },
+              { status: "A", path: "file2.ts" },
+            ],
+          })}
+        />,
+      );
+
+      // changeCount = 3 + 2 = 5, badge shows "+5"
+      const badge = screen.getByTitle("5 total pending changes");
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent("+5");
+    });
+
+    it("badge hidden when total is 0", () => {
+      render(<AgentCard agent={makeAgent({ ahead: 0, changes: [] })} />);
+
+      expect(
+        screen.queryByTitle(/total pending changes/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("badge hidden when ahead is 0 and changes is undefined", () => {
+      render(<AgentCard agent={makeAgent({ ahead: 0 })} />);
+
+      expect(
+        screen.queryByTitle(/total pending changes/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows only ahead count when no changes array", () => {
+      render(<AgentCard agent={makeAgent({ ahead: 4 })} />);
+
+      // changeCount = 4 + 0 = 4
+      const badge = screen.getByTitle("4 total pending changes");
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent("+4");
+    });
+
+    it("shows only changes.length when ahead is 0", () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            ahead: 0,
+            changes: [
+              { status: "M", path: "a.ts" },
+              { status: "D", path: "b.ts" },
+              { status: "??", path: "c.ts" },
+            ],
+          })}
+        />,
+      );
+
+      // changeCount = 0 + 3 = 3
+      const badge = screen.getByTitle("3 total pending changes");
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent("+3");
+    });
+
+    it("badge renders with changeBadge CSS class", () => {
+      const { container } = render(
+        <AgentCard
+          agent={makeAgent({
+            ahead: 2,
+            changes: [{ status: "M", path: "x.ts" }],
+          })}
+        />,
+      );
+
+      const badge = container.querySelector('[class*="changeBadge"]');
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent("+3");
+    });
+
+    it("badge shows +1 for single pending change", () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            ahead: 1,
+            changes: [],
+          })}
+        />,
+      );
+
+      const badge = screen.getByTitle("1 total pending changes");
+      expect(badge).toHaveTextContent("+1");
+    });
+  });
+
   describe("edge cases", () => {
     it("handles empty name gracefully", () => {
       const { container } = render(
@@ -503,7 +610,9 @@ describe("AgentCard", () => {
     it("handles large ahead count", () => {
       render(<AgentCard agent={makeAgent({ ahead: 999 })} />);
 
-      expect(screen.getByText("+999")).toBeInTheDocument();
+      // Both the commit count (+999) and change badge (+999) render
+      const allPlusTexts = screen.getAllByText("+999");
+      expect(allPlusTexts.length).toBeGreaterThanOrEqual(1);
     });
   });
 });

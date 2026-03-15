@@ -96,6 +96,7 @@ export function AgentCard({
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
     : "Agent";
+  const changeCount = agent.ahead + (agent.changes?.length ?? 0);
 
   const rootClassName = [styles.card, className].filter(Boolean).join(" ");
 
@@ -171,6 +172,14 @@ export function AgentCard({
               <span className={styles.behindCount}>-{agent.behind}</span>
             )}
           </div>
+        )}
+        {changeCount > 0 && (
+          <span
+            className={styles.changeBadge}
+            title={`${changeCount} total pending changes`}
+          >
+            +{changeCount}
+          </span>
         )}
         <span
           className={styles.statusLine}

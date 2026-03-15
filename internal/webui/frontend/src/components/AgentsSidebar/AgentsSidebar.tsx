@@ -17,11 +17,11 @@ import type {
   WorktreeSyncDetail,
 } from "@/types";
 
-import { AgentCard } from "../AgentCard";
 import { TaskDrawer } from "../TaskDrawer";
 import type { TaskCategory } from "../TaskDrawer";
 import styles from "./AgentsSidebar.module.css";
 import { RepoGroupedList } from "./RepoGroupedList";
+import { WorkspaceGroupedList } from "./WorkspaceGroupedList";
 
 function buildSyncTooltip(
   details: WorktreeSyncDetail[] | undefined,
@@ -292,16 +292,13 @@ export function AgentsSidebar({
                   })}
                 />
               ) : (
-                agents.map((agent) => (
-                  <AgentCard
-                    key={agent.name}
-                    agent={agent}
-                    taskTitle={agentTasks[agent.name]?.title}
-                    {...(onAgentClick !== undefined && {
-                      onClick: () => onAgentClick(agent.name),
-                    })}
-                  />
-                ))
+                <WorkspaceGroupedList
+                  agents={agents}
+                  agentTasks={agentTasks}
+                  {...(onAgentClick !== undefined && {
+                    onAgentClick,
+                  })}
+                />
               )}
             </div>
           )}
