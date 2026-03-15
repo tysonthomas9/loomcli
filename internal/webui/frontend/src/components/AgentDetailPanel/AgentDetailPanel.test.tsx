@@ -69,6 +69,23 @@ vi.mock("./GitTab", () => ({
   ),
 }));
 
+// Mock FileEditorPanel to avoid pulling in CodeMirror and editor stack
+vi.mock("@/components/FileEditorPanel", () => ({
+  FileEditorPanel: ({
+    agentName,
+    isActive,
+  }: {
+    agentName: string;
+    isActive: boolean;
+  }) => (
+    <div
+      data-testid="file-editor-panel-mock"
+      data-agent={agentName}
+      data-active={String(isActive)}
+    />
+  ),
+}));
+
 // Mock fetchDiffCommits from @/api for "Show all commits" tests
 const mockFetchDiffCommits = vi.fn();
 vi.mock("@/api", async (importOriginal) => {
@@ -183,12 +200,13 @@ describe("AgentDetailPanel", () => {
       expect(gitTab).toBeInTheDocument();
     });
 
-    it("renders all three tabs: Info, Logs, Git", () => {
+    it("renders all four tabs: Info, Logs, Git, Files", () => {
       renderPanel();
 
       expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
     });
 
     it("Info tab is selected by default", () => {
@@ -259,6 +277,87 @@ describe("AgentDetailPanel", () => {
       expect(gitTab).toHaveAttribute(
         "aria-controls",
         "agent-panel-tabpanel-git",
+      );
+    });
+  });
+
+  describe("Files tab in tab bar", () => {
+    it("renders Files tab button in the tab bar", () => {
+      renderPanel();
+
+      const filesTab = screen.getByRole("tab", { name: "Files" });
+      expect(filesTab).toBeInTheDocument();
+    });
+
+    it("renders all four tabs: Info, Logs, Git, Files", () => {
+      renderPanel();
+
+      expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
+    });
+
+    it("Files tab activates on click", () => {
+      renderPanel();
+
+      // Files tab should not be selected initially
+      expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+
+      // Click Files tab
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+      // Files tab should be selected
+      expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+
+      // The tabpanel should render
+      const tabPanel = document.getElementById("agent-panel-tabpanel-files");
+      expect(tabPanel).toBeInTheDocument();
+    });
+
+    it("passes correct props to FileEditorPanel", async () => {
+      renderPanel({ name: "nova" });
+
+      // Click Files tab to render FileEditorPanel
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+      // FileEditorPanel is lazy-loaded, wait for it to resolve
+      const fileEditorMock = await screen.findByTestId(
+        "file-editor-panel-mock",
+      );
+      expect(fileEditorMock).toHaveAttribute("data-agent", "nova");
+      expect(fileEditorMock).toHaveAttribute("data-active", "true");
+    });
+
+    it("Files tab panel has correct ARIA attributes", () => {
+      renderPanel();
+
+      // Click Files tab
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+      const tabPanel = document.getElementById("agent-panel-tabpanel-files");
+      expect(tabPanel).toBeInTheDocument();
+      expect(tabPanel).toHaveAttribute("role", "tabpanel");
+      expect(tabPanel).toHaveAttribute(
+        "aria-labelledby",
+        "agent-panel-tab-files",
+      );
+    });
+
+    it("Files tab button has correct ARIA attributes", () => {
+      renderPanel();
+
+      const filesTab = screen.getByRole("tab", { name: "Files" });
+      expect(filesTab).toHaveAttribute("id", "agent-panel-tab-files");
+      expect(filesTab).toHaveAttribute(
+        "aria-controls",
+        "agent-panel-tabpanel-files",
       );
     });
   });

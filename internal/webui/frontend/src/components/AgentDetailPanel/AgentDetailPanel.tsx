@@ -4,7 +4,14 @@
  * Follows the same slide-out pattern as IssueDetailPanel.
  */
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useCallback,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
 
 import { ErrorDisplay } from "@/components";
 import {
@@ -16,6 +23,12 @@ import {
 } from "@/hooks";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
+
+const FileEditorPanel = lazy(() =>
+  import("@/components/FileEditorPanel").then((m) => ({
+    default: m.FileEditorPanel,
+  })),
+);
 
 import { LogViewer } from "../LogViewer";
 import { OpenInEditor } from "../OpenInEditor";
@@ -52,7 +65,7 @@ export interface AgentDetailPanelProps {
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = "info" | "logs" | "git";
+type TabType = "info" | "logs" | "git" | "files";
 
 export function AgentDetailPanel({
   isOpen,
@@ -247,6 +260,17 @@ export function AgentDetailPanel({
                   aria-controls="agent-panel-tabpanel-git"
                 >
                   Git
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.tab} ${activeTab === "files" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("files")}
+                  aria-selected={activeTab === "files"}
+                  role="tab"
+                  id="agent-panel-tab-files"
+                  aria-controls="agent-panel-tabpanel-files"
+                >
+                  Files
                 </button>
               </div>
             </div>
@@ -485,7 +509,7 @@ export function AgentDetailPanel({
                     : {})}
                 />
               </div>
-            ) : (
+            ) : activeTab === "git" ? (
               /* Git Tab */
               <div
                 className={styles.scrollableContent}
@@ -494,6 +518,27 @@ export function AgentDetailPanel({
                 aria-labelledby="agent-panel-tab-git"
               >
                 <GitTab agent={agent} isActive={activeTab === "git"} />
+              </div>
+            ) : (
+              /* Files Tab */
+              <div
+                className={styles.filesContainer}
+                id="agent-panel-tabpanel-files"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-files"
+              >
+                <Suspense
+                  fallback={
+                    <div className={styles.loadingFallback}>
+                      Loading editor...
+                    </div>
+                  }
+                >
+                  <FileEditorPanel
+                    agentName={agent.name}
+                    isActive={activeTab === "files"}
+                  />
+                </Suspense>
               </div>
             )}
           </>

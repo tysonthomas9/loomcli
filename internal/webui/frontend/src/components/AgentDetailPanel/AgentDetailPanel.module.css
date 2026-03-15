@@ -300,6 +300,26 @@
   background: var(--color-bg-hover);
 }
 
+/* ============= Files Container ============= */
+
+.filesContainer {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.loadingFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
+}
+
 /* ============= Content Sections ============= */
 
 .section {
