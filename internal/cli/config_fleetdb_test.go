@@ -67,6 +67,19 @@ func TestOverlayFleetDBSettings(t *testing.T) {
 	})
 }
 
+func TestResolveFleetDBConfig_NilDaemon(t *testing.T) {
+	cfg := resolveFleetDBConfig(nil)
+	if cfg.RedisURL != "" {
+		t.Errorf("expected empty RedisURL, got %s", cfg.RedisURL)
+	}
+	if cfg.Workspace != "default" {
+		t.Errorf("expected Workspace 'default', got %s", cfg.Workspace)
+	}
+	if cfg.AutoStart {
+		t.Error("expected AutoStart false")
+	}
+}
+
 func TestResolveFleetDBConfig_Defaults(t *testing.T) {
 	daemon := &DaemonSettings{}
 	cfg := resolveFleetDBConfig(daemon)
@@ -117,6 +130,41 @@ func TestResolveFleetDBConfig_EnvOverride(t *testing.T) {
 	if cfg.Workspace != "env-ws" {
 		t.Errorf("expected env Workspace override, got %s", cfg.Workspace)
 	}
+}
+
+func TestResolveFleetDBConfig_AutoStartEnvOverride(t *testing.T) {
+	t.Run("env true overrides settings false", func(t *testing.T) {
+		daemon := &DaemonSettings{
+			FleetDB: &FleetDBSettings{AutoStart: false},
+		}
+		t.Setenv("LOOM_FLEETDB_AUTO_START", "true")
+		cfg := resolveFleetDBConfig(daemon)
+		if !cfg.AutoStart {
+			t.Error("expected AutoStart true from env override")
+		}
+	})
+
+	t.Run("env false overrides settings true", func(t *testing.T) {
+		daemon := &DaemonSettings{
+			FleetDB: &FleetDBSettings{AutoStart: true},
+		}
+		t.Setenv("LOOM_FLEETDB_AUTO_START", "false")
+		cfg := resolveFleetDBConfig(daemon)
+		if cfg.AutoStart {
+			t.Error("expected AutoStart false from env override")
+		}
+	})
+
+	t.Run("invalid env preserves settings", func(t *testing.T) {
+		daemon := &DaemonSettings{
+			FleetDB: &FleetDBSettings{AutoStart: true},
+		}
+		t.Setenv("LOOM_FLEETDB_AUTO_START", "notabool")
+		cfg := resolveFleetDBConfig(daemon)
+		if !cfg.AutoStart {
+			t.Error("expected AutoStart true preserved on invalid env")
+		}
+	})
 }
 
 func TestResolveFleetDBConfig_EnvPrecedence(t *testing.T) {
