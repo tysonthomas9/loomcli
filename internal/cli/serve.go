@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -49,6 +50,9 @@ var (
 
 	// usageStoreInstance holds the usage store for the /api/usage endpoint.
 	usageStoreInstance *usage.Store
+
+	// fleetDBServerInstance holds the running FleetDBServer for the serve command.
+	fleetDBServerInstance *FleetDBServer
 )
 
 var serveCmd = &cobra.Command{
@@ -190,13 +194,51 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 
 	// Fall back to daemon config for Redis/API key when CLI flags/env vars are not set
+	var daemonCfg *DaemonConfig
 	if dc, dcErr := LoadDaemonConfig("."); dcErr == nil {
+		daemonCfg = dc
 		if serveRedisAddr == "" && dc.Daemon.RedisURL != "" {
 			serveRedisAddr = dc.Daemon.RedisURL
 		}
 		if serveAPIKey == "" && dc.Daemon.APIKey != "" {
 			serveAPIKey = dc.Daemon.APIKey
 		}
+	}
+
+	// Initialize fleet-db backend if enabled
+	fleetSettings := &FleetDBSettings{}
+	if daemonCfg != nil && daemonCfg.Daemon.FleetDB != nil {
+		fleetSettings = daemonCfg.Daemon.FleetDB
+	}
+	if resolveFleetDBEnabled(fleetSettings) {
+		fleetCfg := FleetDBServerConfig{Workspace: "default"}
+		if daemonCfg != nil {
+			fleetCfg = resolveFleetDBConfig(&daemonCfg.Daemon)
+		}
+		// Fall back to serve's --redis-addr if fleet-db config has no Redis URL
+		if fleetCfg.RedisURL == "" && serveRedisAddr != "" {
+			fleetCfg.RedisURL = serveRedisAddr
+		}
+		// Auto-start miniredis if no Redis URL available
+		if fleetCfg.RedisURL == "" {
+			fleetCfg.AutoStart = true
+		}
+		fleetCfg.Actor = "loom"
+
+		fleetServer, err := NewFleetDBServer(fleetCfg, slog.Default())
+		if err != nil {
+			log.Fatalf("Failed to start fleet-db backend: %v", err)
+		}
+		fleetDBServerInstance = fleetServer
+		setDefaultTracker(fleetServer.Backend())
+		log.Printf("Fleet-db backend enabled (workspace=%s, port=%d)", fleetCfg.Workspace, fleetServer.httpPort)
+
+		defer func() {
+			log.Printf("Stopping fleet-db server...")
+			if stopErr := fleetServer.Stop(); stopErr != nil {
+				log.Printf("Warning: fleet-db shutdown error: %v", stopErr)
+			}
+		}()
 	}
 
 	// Provision shared JWT signing key from Redis (if configured) or environment
@@ -385,6 +427,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	case err := <-apiErr:
 		if err != nil {
 			cmd.PrintErrf("API server error: %v\n", err)
+			stopFleetDBServer()
 			cancel()
 			os.Exit(1)
 		}
@@ -399,6 +442,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		case err := <-apiErr:
 			if err != nil {
 				cmd.PrintErrf("API server error: %v\n", err)
+				stopFleetDBServer()
 				cancel()
 				os.Exit(1)
 			}
@@ -421,6 +465,17 @@ func runServe(cmd *cobra.Command, args []string) {
 		case <-webuiErr:
 		case <-time.After(10 * time.Second):
 			log.Printf("Warning: webui server did not shut down within timeout")
+		}
+	}
+}
+
+// stopFleetDBServer stops the fleet-db server if running. Called before os.Exit
+// which would bypass deferred cleanup.
+func stopFleetDBServer() {
+	if fleetDBServerInstance != nil {
+		log.Printf("Stopping fleet-db server...")
+		if err := fleetDBServerInstance.Stop(); err != nil {
+			log.Printf("Warning: fleet-db shutdown error: %v", err)
 		}
 	}
 }
