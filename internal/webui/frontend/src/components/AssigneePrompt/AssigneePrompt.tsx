@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
+import { useFocusReturn, useFocusTrap } from "@/hooks";
 import styles from "./AssigneePrompt.module.css";
 
 /**
@@ -43,15 +44,17 @@ export function AssigneePrompt({
   const inputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
-  // Reset input and focus when opening
+  // Focus management
+  useFocusReturn(isOpen);
+  useFocusTrap(modalRef, isOpen, {
+    initialFocus: inputRef,
+    activationDelay: 100,
+  });
+
+  // Reset input when opening
   useEffect(() => {
     if (isOpen) {
       setInputValue("");
-      // Focus input after modal transition
-      const timer = setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
-      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 

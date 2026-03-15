@@ -63,6 +63,8 @@ let mockSelectedRepos: string[] = [];
 vi.mock("@/hooks", () => ({
   useAgentContext: () => ({ ...defaultMockContext, ...mockContextOverride }),
   useRepoFilter: () => [mockSelectedRepos, vi.fn()],
+  useFocusReturn: vi.fn(),
+  useFocusTrap: vi.fn(),
 }));
 
 const mockGitPushAll = vi.fn();

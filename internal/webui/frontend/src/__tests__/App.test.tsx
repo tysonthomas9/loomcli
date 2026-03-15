@@ -348,6 +348,8 @@ vi.mock("@/hooks", () => ({
     currentWorkspaceId: null,
     switchWorkspace: vi.fn(),
   })),
+  useFocusReturn: vi.fn(),
+  useFocusTrap: vi.fn(),
 }));
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)

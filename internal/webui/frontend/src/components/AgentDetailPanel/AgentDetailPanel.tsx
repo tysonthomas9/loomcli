@@ -7,7 +7,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 
 import { ErrorDisplay } from "@/components";
-import { useAgentTerminalLogs } from "@/hooks";
+import { useAgentTerminalLogs, useFocusReturn, useFocusTrap } from "@/hooks";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
 
@@ -107,21 +107,8 @@ export function AgentDetailPanel({
   }, [isOpen]);
 
   // Focus management
-  useEffect(() => {
-    if (isOpen && panelRef.current) {
-      const previouslyFocused = document.activeElement as HTMLElement | null;
-      panelRef.current.focus();
-      return () => {
-        if (
-          previouslyFocused &&
-          document.contains(previouslyFocused) &&
-          previouslyFocused.focus
-        ) {
-          previouslyFocused.focus();
-        }
-      };
-    }
-  }, [isOpen]);
+  useFocusReturn(isOpen, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen);
 
   const handleTaskClick = useCallback(
     (taskId: string) => {

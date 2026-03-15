@@ -30,6 +30,8 @@ vi.mock("@/hooks", () => ({
     hasMoreLines: false,
     isLoadingMore: false,
   }),
+  useFocusReturn: vi.fn(),
+  useFocusTrap: vi.fn(),
 }));
 
 // Mock LogViewer to avoid terminal rendering complexity

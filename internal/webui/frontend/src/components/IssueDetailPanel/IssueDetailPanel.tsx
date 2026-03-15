@@ -15,7 +15,7 @@ import {
 } from "@/api";
 import { deleteTabMetadata, scheduleSessionKill } from "@/api/terminal";
 import type { IssueTab } from "@/api/issueTabs";
-import { useAgentTerminalLogs } from "@/hooks";
+import { useAgentTerminalLogs, useFocusReturn, useFocusTrap } from "@/hooks";
 import { useAgentContext } from "@/hooks/useAgentContext";
 import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
@@ -1395,22 +1395,8 @@ export function IssueDetailPanel({
   }, [isOpen]);
 
   // Focus management: focus the panel when opened, restore focus on close
-  useEffect(() => {
-    if (isOpen && panelRef.current) {
-      const previouslyFocused = document.activeElement as HTMLElement | null;
-      panelRef.current.focus();
-      return () => {
-        // Check element is still in DOM before restoring focus (could be unmounted)
-        if (
-          previouslyFocused &&
-          document.contains(previouslyFocused) &&
-          previouslyFocused.focus
-        ) {
-          previouslyFocused.focus();
-        }
-      };
-    }
-  }, [isOpen]);
+  useFocusReturn(isOpen, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen);
 
   // Build root class name
   const rootClassName = [styles.overlay, isOpen && styles.open, className]

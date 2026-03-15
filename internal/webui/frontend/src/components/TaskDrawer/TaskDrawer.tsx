@@ -3,8 +3,9 @@
  * Opens from the right side, covering 50% of the screen.
  */
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 
+import { useFocusReturn, useFocusTrap } from "@/hooks";
 import type { LoomTaskInfo } from "@/types";
 
 import styles from "./TaskDrawer.module.css";
@@ -66,6 +67,12 @@ export function TaskDrawer({
   tasks,
   onClose,
 }: TaskDrawerProps): JSX.Element | null {
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // Focus management
+  useFocusReturn(isOpen);
+  useFocusTrap(drawerRef, isOpen);
+
   // Handle escape key to close drawer
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -104,10 +111,12 @@ export function TaskDrawer({
 
       {/* Drawer */}
       <div
+        ref={drawerRef}
         className={styles.drawer}
         role="dialog"
         aria-modal="true"
         aria-labelledby="drawer-title"
+        tabIndex={-1}
       >
         {/* Header */}
         <div className={styles.header}>

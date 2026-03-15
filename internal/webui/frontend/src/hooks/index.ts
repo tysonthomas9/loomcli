@@ -208,3 +208,9 @@ export {
   CUSTOM_FONT_SENTINEL,
 } from "./useTerminalFont";
 export type { UseTerminalFontReturn } from "./useTerminalFont";
+
+export { useFocusReturn } from "./useFocusReturn";
+export type { UseFocusReturnOptions } from "./useFocusReturn";
+
+export { useFocusTrap } from "./useFocusTrap";
+export type { UseFocusTrapOptions } from "./useFocusTrap";
