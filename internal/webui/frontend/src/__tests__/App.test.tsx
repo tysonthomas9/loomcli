@@ -3193,4 +3193,122 @@ describe("App", () => {
       expect(screen.getByText("my-workspace")).toBeInTheDocument();
     });
   });
+
+  describe("workspace-driven repo filtering", () => {
+    it("passes sourceReposFilter from workspace context to useIssues", () => {
+      const sourceReposFilter = ["repo-alpha", "repo-beta"];
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "filtered-workspace" },
+        repos: [
+          { name: "repo-alpha" },
+          { name: "repo-beta" },
+          { name: "repo-gamma" },
+        ],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "filtered-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set(["repo-alpha", "repo-beta"]),
+        activeRepos: [{ name: "repo-alpha" }, { name: "repo-beta" }],
+        activeRepoNames: ["repo-alpha", "repo-beta"],
+        isAllSelected: false,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter,
+        isMultiRepo: true,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // useIssues should have been called with sourceRepos from workspace context
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceRepos: sourceReposFilter,
+        }),
+      );
+    });
+
+    it("passes undefined sourceRepos when all repos selected", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [{ name: "repo-a" }, { name: "repo-b" }],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set(["repo-a", "repo-b"]),
+        activeRepos: [{ name: "repo-a" }, { name: "repo-b" }],
+        activeRepoNames: ["repo-a", "repo-b"],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // useIssues should have been called with sourceRepos: undefined (no filtering)
+      expect(useIssues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceRepos: undefined,
+        }),
+      );
+    });
+
+    it("renders FilterBar with selectedRepos from workspace context", () => {
+      const mockSelectRepos = vi.fn();
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "ws" },
+        repos: [{ name: "repo-a" }, { name: "repo-b" }, { name: "repo-c" }],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "ws",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set(["repo-a", "repo-c"]),
+        activeRepos: [{ name: "repo-a" }, { name: "repo-c" }],
+        activeRepoNames: ["repo-a", "repo-c"],
+        isAllSelected: false,
+        selectRepos: mockSelectRepos,
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: ["repo-a", "repo-c"],
+        isMultiRepo: true,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // FilterBar should be present — repo filter dropdown renders when availableRepos > 1
+      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+    });
+  });
 });

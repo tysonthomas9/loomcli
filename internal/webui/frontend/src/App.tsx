@@ -49,7 +49,6 @@ import type { BlockedInfo } from "@/components/KanbanBoard";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import {
   useIssues,
-  useRepoFilter,
   useViewState,
   useFilterState,
   DEFAULT_GROUP_BY,
@@ -140,6 +139,7 @@ function App() {
     selectedRepoNames,
     selectAll,
     selectRepos,
+    sourceReposFilter,
   } = useWorkspaceContext();
 
   // Workspace URL param sync (deep linking for workspace selection)
@@ -149,6 +149,12 @@ function App() {
   const availableRepoNames = useMemo(
     () => workspaceRepos.map((r) => r.name),
     [workspaceRepos],
+  );
+
+  // Convert Set<string> to string[] for components that expect arrays
+  const selectedRepoNamesArray = useMemo(
+    () => [...selectedRepoNames],
+    [selectedRepoNames],
   );
 
   // Scroll position cache for restoring scroll on back navigation
@@ -170,9 +176,6 @@ function App() {
     }, []),
   });
 
-  // Repo filter for multi-repo workspaces
-  const [selectedRepos, setSelectedRepos] = useRepoFilter();
-
   const {
     issues,
     isLoading,
@@ -193,7 +196,7 @@ function App() {
         : activeView === "kanban"
           ? "kanban"
           : "ready",
-    sourceRepos: selectedRepos.length > 0 ? selectedRepos : undefined,
+    sourceRepos: sourceReposFilter,
   });
 
   // Filter state with URL synchronization
@@ -723,8 +726,8 @@ function App() {
           showGroupBy={false}
           showRepos={availableRepoNames.length > 1}
           availableRepos={availableRepoNames}
-          selectedRepos={selectedRepos}
-          onRepoChange={setSelectedRepos}
+          selectedRepos={selectedRepoNamesArray}
+          onRepoChange={selectRepos}
           variant="header"
           showClear={true}
         />

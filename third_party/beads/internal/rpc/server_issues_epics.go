@@ -2203,6 +2203,10 @@ func (s *Server) handleGetGraphData(req *Request) Response {
 	for _, s := range args.ExcludeStatus {
 		filter.ExcludeStatus = append(filter.ExcludeStatus, types.Status(s))
 	}
+	// Source repo filtering
+	if len(args.SourceRepos) > 0 {
+		filter.SourceRepos = args.SourceRepos
+	}
 	// Exclude templates by default
 	isTemplate := false
 	filter.IsTemplate = &isTemplate

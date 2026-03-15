@@ -689,6 +689,7 @@ type GetParentIDsResponse struct {
 type GetGraphDataArgs struct {
 	Status        string   `json:"status,omitempty"`         // "open", "closed", or "all" (default: "all")
 	ExcludeStatus []string `json:"exclude_status,omitempty"` // Statuses to exclude
+	SourceRepos   []string `json:"source_repos,omitempty"`   // Filter by source repository
 }
 
 // GraphIssueSummary is a slim issue representation for graph visualization.

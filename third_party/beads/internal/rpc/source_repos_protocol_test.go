@@ -65,6 +65,27 @@ func TestCountArgs_SourceRepos_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestGetGraphDataArgs_SourceRepos_RoundTrip(t *testing.T) {
+	args := GetGraphDataArgs{
+		Status:      "open",
+		SourceRepos: []string{"repo-a", "repo-b"},
+	}
+	data, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got GetGraphDataArgs
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got.SourceRepos) != 2 || got.SourceRepos[0] != "repo-a" || got.SourceRepos[1] != "repo-b" {
+		t.Errorf("SourceRepos mismatch: got %v", got.SourceRepos)
+	}
+	if got.Status != "open" {
+		t.Errorf("Status mismatch: got %s", got.Status)
+	}
+}
+
 func TestSourceRepos_Omitempty(t *testing.T) {
 	args := ReadyArgs{Assignee: "bob"}
 	data, err := json.Marshal(args)
@@ -89,6 +110,7 @@ func TestSourceRepos_BackwardCompat(t *testing.T) {
 		{"ReadyArgs", `{"assignee":"alice","limit":10}`},
 		{"ListArgs", `{"status":"open","limit":5}`},
 		{"CountArgs", `{"status":"closed","group_by":"status"}`},
+		{"GetGraphDataArgs", `{"status":"open","exclude_status":["done"]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -111,6 +133,14 @@ func TestSourceRepos_BackwardCompat(t *testing.T) {
 				}
 			case "CountArgs":
 				var args CountArgs
+				if err := json.Unmarshal([]byte(tt.json), &args); err != nil {
+					t.Fatalf("unmarshal: %v", err)
+				}
+				if args.SourceRepos != nil {
+					t.Errorf("expected nil SourceRepos, got %v", args.SourceRepos)
+				}
+			case "GetGraphDataArgs":
+				var args GetGraphDataArgs
 				if err := json.Unmarshal([]byte(tt.json), &args); err != nil {
 					t.Fatalf("unmarshal: %v", err)
 				}

@@ -215,6 +215,81 @@ func TestSourceReposFilter_Count(t *testing.T) {
 	}
 }
 
+// TestSourceReposFilter_GetGraphData verifies that handleGetGraphData filters by SourceRepos correctly.
+func TestSourceReposFilter_GetGraphData(t *testing.T) {
+	_, client, store, cleanup := setupTestServerWithStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create issues with different source_repo values
+	repos := []struct {
+		title      string
+		sourceRepo string
+	}{
+		{"Graph issue from repo-a", "repo-a"},
+		{"Graph issue from repo-b", "repo-b"},
+		{"Graph issue from repo-a again", "repo-a"},
+		{"Graph issue from repo-c", "repo-c"},
+		{"Graph issue with no repo", ""},
+	}
+
+	for _, r := range repos {
+		issue := &types.Issue{
+			Title:      r.title,
+			IssueType:  "task",
+			Status:     types.StatusOpen,
+			Priority:   2,
+			SourceRepo: r.sourceRepo,
+		}
+		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("Failed to create issue: %v", err)
+		}
+	}
+
+	// Test 1: Filter to repo-a only
+	resp, err := client.GetGraphData(&GetGraphDataArgs{
+		SourceRepos: []string{"repo-a"},
+	})
+	if err != nil {
+		t.Fatalf("GetGraphData failed: %v", err)
+	}
+	if len(resp.Issues) != 2 {
+		t.Errorf("Expected 2 issues for repo-a, got %d", len(resp.Issues))
+	}
+
+	// Test 2: Filter to multiple repos
+	resp, err = client.GetGraphData(&GetGraphDataArgs{
+		SourceRepos: []string{"repo-b", "repo-c"},
+	})
+	if err != nil {
+		t.Fatalf("GetGraphData failed: %v", err)
+	}
+	if len(resp.Issues) != 2 {
+		t.Errorf("Expected 2 issues for repo-b+repo-c, got %d", len(resp.Issues))
+	}
+
+	// Test 3: No SourceRepos filter returns all issues
+	resp, err = client.GetGraphData(&GetGraphDataArgs{})
+	if err != nil {
+		t.Fatalf("GetGraphData failed: %v", err)
+	}
+	if len(resp.Issues) != 5 {
+		t.Errorf("Expected 5 issues with no filter, got %d", len(resp.Issues))
+	}
+
+	// Test 4: Filter with nonexistent repo returns no issues
+	resp, err = client.GetGraphData(&GetGraphDataArgs{
+		SourceRepos: []string{"nonexistent-repo"},
+	})
+	if err != nil {
+		t.Fatalf("GetGraphData failed: %v", err)
+	}
+	if len(resp.Issues) != 0 {
+		t.Errorf("Expected 0 issues for nonexistent repo, got %d", len(resp.Issues))
+	}
+}
+
 // TestSourceReposFilter_SQLInjection verifies parameterized queries prevent SQL injection.
 func TestSourceReposFilter_SQLInjection(t *testing.T) {
 	_, client, store, cleanup := setupTestServerWithStore(t)
