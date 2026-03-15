@@ -1,9 +1,6 @@
 /**
- * Main App component.
- * Wires useIssues hook to KanbanBoard with loading states, error handling,
- * and optimistic drag-drop updates. Manages view switching between Kanban,
- * Table, and Graph views with URL synchronization. Supports filtering and
- * search across all views.
+ * Main App component. Wires data hooks to views with filtering, URL sync,
+ * and optimistic updates. Manages view switching, deep-linking, and panels.
  */
 
 import {
@@ -18,6 +15,7 @@ import {
 
 import { updateIssue, addComment, closeIssue } from "@/api";
 import type { IssueContext } from "@/api/terminal";
+import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issueCategory";
 import {
   AppLayout,
@@ -326,15 +324,19 @@ function App() {
     }
   }, [isMultiRepo, activeView, setActiveView]);
 
-  // Deep-link: auto-fetch issue when URL contains ?issue={id}
-  // Also handles browser back/forward (popstate updates selectedIssueId via useViewState)
+  // Deep-link: auto-fetch issue from URL; handle back/forward via popstate → useViewState
   useEffect(() => {
-    if (selectedIssueId) {
-      fetchIssue(selectedIssueId);
-    } else if (activeView !== "issue-detail") {
-      clearIssue();
-    }
+    if (selectedIssueId) fetchIssue(selectedIssueId);
+    else if (activeView !== "issue-detail") clearIssue();
   }, [selectedIssueId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Deep-link error: toast + navigate away when a deep-linked issue fails to load
+  useEffect(() => {
+    if (!detailError || activeView !== "issue-detail" || !selectedIssueId)
+      return;
+    showToast("Issue not found", { type: "error" });
+    setActiveView("kanban");
+  }, [detailError, activeView, selectedIssueId, showToast, setActiveView]);
 
   // Restore scroll position when returning from issue-detail view
   useEffect(() => {
@@ -352,15 +354,17 @@ function App() {
     }
   }, [activeView]);
 
-  // Copy link handler: copies current URL to clipboard
+  // Copy link handler: copies a clean shareable URL to clipboard
   const handleCopyLink = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      await navigator.clipboard.writeText(
+        buildShareUrl({ view: activeView, issue: selectedIssueId }),
+      );
       showToast("Link copied to clipboard", { type: "success" });
     } catch {
       showToast("Failed to copy link", { type: "error" });
     }
-  }, [showToast]);
+  }, [activeView, selectedIssueId, showToast]);
 
   const handleDragEnd = useCallback(
     async (issueId: string, newStatus: Status, oldStatus: Status) => {

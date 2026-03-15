@@ -249,6 +249,40 @@ describe("useViewState", () => {
       });
       expect(result.current.view).toBe("kanban");
     });
+
+    it("clears urlIssueId when setView switches away from issue-detail", () => {
+      const { result } = renderHook(() => useViewState({ syncUrl: false }));
+
+      // First navigate to issue-detail with an issue
+      act(() => {
+        result.current.navigateToView("issue-detail", { issueId: "issue-42" });
+      });
+      expect(result.current.urlIssueId).toBe("issue-42");
+
+      // setView to kanban should clear urlIssueId
+      act(() => {
+        result.current.setView("kanban");
+      });
+      expect(result.current.view).toBe("kanban");
+      expect(result.current.urlIssueId).toBeNull();
+    });
+
+    it("preserves urlIssueId when setView sets issue-detail", () => {
+      const { result } = renderHook(() => useViewState({ syncUrl: false }));
+
+      // Navigate to issue-detail with an issue
+      act(() => {
+        result.current.navigateToView("issue-detail", { issueId: "issue-42" });
+      });
+      expect(result.current.urlIssueId).toBe("issue-42");
+
+      // setView to issue-detail should not clear urlIssueId
+      act(() => {
+        result.current.setView("issue-detail");
+      });
+      expect(result.current.view).toBe("issue-detail");
+      expect(result.current.urlIssueId).toBe("issue-42");
+    });
   });
 
   describe("preserving other URL params", () => {
