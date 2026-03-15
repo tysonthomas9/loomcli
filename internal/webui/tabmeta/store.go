@@ -53,6 +53,11 @@ func (s *Store) Close() error {
 	return s.client.Close()
 }
 
+// RedisClient returns the underlying Redis client for direct operations.
+func (s *Store) RedisClient() *redis.Client {
+	return s.client
+}
+
 func metaKey(session string) string {
 	return keyPrefix + session
 }

@@ -8,15 +8,20 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
 import type { IssueContext } from "@/api/terminal";
-import { seedTerminalSession } from "@/api/terminal";
+import { seedTerminalSession, patchTerminalState } from "@/api/terminal";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
+import { useSessionRestore } from "@/hooks/useSessionRestore";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 
 import { BackendPickerPrompt } from "./BackendPickerPrompt";
 import { CopyToast } from "./CopyToast";
 import { NotesBar } from "./NotesBar";
 import { PasteConfirmDialog } from "./PasteConfirmDialog";
+import {
+  ReconnectingOverlay,
+  type ReconnectOverlayState,
+} from "./ReconnectingOverlay";
 import { SearchBar } from "./SearchBar";
 import { TerminalConnectionOverlay } from "./TerminalConnectionOverlay";
 import type {
@@ -59,6 +64,7 @@ export function TerminalView({
     isLoading: metaLoading,
   } = useTerminalMetadata();
   const { config, isLoading: configLoading } = useBackendConfig();
+  const { activeTabId: restoredTabId, isRestoring } = useSessionRestore();
 
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -69,6 +75,9 @@ export function TerminalView({
   const [tabHasConnected, setTabHasConnected] = useState<Map<string, boolean>>(
     () => new Map(),
   );
+  const [tabReconnectState, setTabReconnectState] = useState<
+    Map<string, ReconnectOverlayState>
+  >(() => new Map());
   const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map());
   const initializedRef = useRef(false);
   const activeTabIdRef = useRef(activeTabId);
@@ -94,11 +103,28 @@ export function TerminalView({
     initializedRef,
   });
 
-  // Persist active tab to sessionStorage so it survives page refreshes
+  // Apply server-restored active tab after initialization (only if restore completed before user interaction)
+  const appliedRestoreRef = useRef(false);
   useEffect(() => {
-    if (activeTabId) {
-      sessionStorage.setItem("terminal-active-tab", activeTabId);
-    }
+    if (appliedRestoreRef.current || isRestoring || !restoredTabId) return;
+    if (!initializedRef.current || tabs.length === 0) return;
+    appliedRestoreRef.current = true;
+    const match = tabs.find((t) => t.id === restoredTabId);
+    if (match) setActiveTabId(restoredTabId);
+  }, [restoredTabId, isRestoring, tabs]);
+
+  // Persist active tab to sessionStorage and server (debounced)
+  const patchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!activeTabId) return;
+    sessionStorage.setItem("terminal-active-tab", activeTabId);
+    if (patchDebounceRef.current) clearTimeout(patchDebounceRef.current);
+    patchDebounceRef.current = setTimeout(() => {
+      patchTerminalState({ active_tab: activeTabId }).catch(() => {});
+    }, 300);
+    return () => {
+      if (patchDebounceRef.current) clearTimeout(patchDebounceRef.current);
+    };
   }, [activeTabId]);
 
   // Report active (connected) session count to parent
@@ -239,6 +265,19 @@ export function TerminalView({
       document.body.style.overflow = "";
     };
   }, [isFullHeight]);
+
+  const handleReconnectStateChange = useCallback(
+    (tabId: string, state: ReconnectOverlayState) => {
+      setTabReconnectState((prev) => {
+        if (prev.get(tabId) === state) return prev;
+        const next = new Map(prev);
+        if (state === null) next.delete(tabId);
+        else next.set(tabId, state);
+        return next;
+      });
+    },
+    [],
+  );
 
   const handleReconnect = useCallback((tabId: string) => {
     instanceRefs.current.get(tabId)?.reconnect();
@@ -403,10 +442,17 @@ export function TerminalView({
                   onCopyNotify={handleCopyNotify}
                   onPasteRequest={handlePasteRequest}
                   onSearchRequest={handleSearchRequest}
+                  onReconnectStateChange={(state) =>
+                    handleReconnectStateChange(tab.id, state)
+                  }
                 />
                 <TerminalConnectionOverlay
                   connectionState={tab.connectionState}
                   hasConnected={tabHasConnected.get(tab.id) ?? false}
+                  onReconnect={() => handleReconnect(tab.id)}
+                />
+                <ReconnectingOverlay
+                  state={tabReconnectState.get(tab.id) ?? null}
                   onReconnect={() => handleReconnect(tab.id)}
                 />
                 <NotesBar

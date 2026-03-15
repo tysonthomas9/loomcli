@@ -19,11 +19,14 @@ import {
   useCallback,
 } from "react";
 
+import { fetchScrollback } from "@/api/terminal";
 import { stripAnsi } from "@/utils/stripAnsi";
 import {
   startAutoReconnect,
   type ReconnectState,
 } from "@/utils/reconnectBackoff";
+
+import type { ReconnectOverlayState } from "./ReconnectingOverlay";
 
 import styles from "./TerminalInstance.module.css";
 import { connectWebSocket, encodeResize } from "./terminalConnection";
@@ -47,6 +50,7 @@ export interface TerminalInstanceProps {
   onCopyNotify?: () => void;
   onPasteRequest?: () => void;
   onSearchRequest?: () => void;
+  onReconnectStateChange?: (state: ReconnectOverlayState) => void;
 }
 
 export interface TerminalInstanceHandle {
@@ -78,6 +82,7 @@ export const TerminalInstance = forwardRef<
     onCopyNotify,
     onPasteRequest,
     onSearchRequest,
+    onReconnectStateChange,
   },
   ref,
 ) {
@@ -88,6 +93,10 @@ export const TerminalInstance = forwardRef<
   const wsRef = useRef<WebSocket | null>(null);
   const wsCleanupRef = useRef<(() => void) | null>(null);
   const reconnectCancelRef = useRef<(() => void) | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const reconnectAttemptRef = useRef(0);
 
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
@@ -103,44 +112,71 @@ export const TerminalInstance = forwardRef<
     onConnectionStateChange?.(connectionState, hasConnectedRef.current);
   }, [connectionState, onConnectionStateChange]);
 
-  // Reconnect handler
+  const onReconnectStateChangeRef = useRef(onReconnectStateChange);
+  onReconnectStateChangeRef.current = onReconnectStateChange;
+
+  const clearReconnectState = useCallback(() => {
+    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+    reconnectTimeoutRef.current = null;
+    reconnectAttemptRef.current = 0;
+    onReconnectStateChangeRef.current?.(null);
+  }, []);
+
+  // Reconnect handler — fetches scrollback before re-establishing WebSocket
   const handleReconnect = useCallback(() => {
     const terminal = terminalRef.current;
     const fitAddon = fitAddonRef.current;
     if (!terminal || !fitAddon) return;
 
+    clearReconnectState();
     reconnectCancelRef.current?.();
     reconnectCancelRef.current = null;
-
     wsCleanupRef.current?.();
-    const cleanupWs = connectWebSocket(
-      sessionName,
-      terminal,
-      fitAddon,
-      wsRef,
-      setConnectionState,
-      () => {
-        reconnectCancelRef.current?.();
-        reconnectCancelRef.current = null;
-      },
-      () => {
-        if (reconnectCancelRef.current) return;
-        const cancel = startAutoReconnect(
-          () => {
-            handleReconnect();
-            return false;
-          },
-          (state: ReconnectState) => {
-            if (state.gaveUp) {
-              setConnectionState("error");
-            }
-          },
-        );
-        reconnectCancelRef.current = cancel;
-      },
-    );
-    wsCleanupRef.current = cleanupWs;
-  }, [sessionName]);
+
+    const doWsConnect = () => {
+      const cleanupWs = connectWebSocket(
+        sessionName,
+        terminal,
+        fitAddon,
+        wsRef,
+        setConnectionState,
+        () => {
+          reconnectCancelRef.current?.();
+          reconnectCancelRef.current = null;
+          clearReconnectState();
+        },
+        () => {
+          if (reconnectCancelRef.current) return;
+          const cancel = startAutoReconnect(
+            () => {
+              handleReconnect();
+              return false;
+            },
+            (state: ReconnectState) => {
+              reconnectAttemptRef.current = state.attempt;
+              if (state.gaveUp) setConnectionState("error");
+            },
+          );
+          reconnectCancelRef.current = cancel;
+        },
+      );
+      wsCleanupRef.current = cleanupWs;
+    };
+
+    if (hasConnectedRef.current) {
+      fetchScrollback(sessionName)
+        .then(({ content }) => {
+          if (content) {
+            terminal.clear();
+            terminal.write(content);
+          }
+        })
+        .catch(() => {})
+        .finally(() => doWsConnect());
+    } else {
+      doWsConnect();
+    }
+  }, [sessionName, clearReconnectState]);
 
   // Expose search methods and reconnect via imperative handle
   useImperativeHandle(
@@ -282,39 +318,69 @@ export const TerminalInstance = forwardRef<
     // Initial fit
     fitAddon.fit();
 
-    // Connect WebSocket
-    function doConnect(): void {
+    const RECONNECT_TIMEOUT = 30_000;
+
+    function doConnect(withScrollback = false): void {
       wsCleanupRef.current?.();
-      const cleanup = connectWebSocket(
-        sessionName,
-        terminal,
-        fitAddon,
-        wsRef,
-        setConnectionState,
-        () => {
-          // onConnected: cancel auto-reconnect
-          reconnectCancelRef.current?.();
-          reconnectCancelRef.current = null;
-        },
-        () => {
-          // onDisconnected: start auto-reconnect
-          if (!mounted || reconnectCancelRef.current) return;
-          const cancel = startAutoReconnect(
-            () => {
-              if (!mounted) return true;
-              doConnect();
-              return false;
-            },
-            (state: ReconnectState) => {
-              if (state.gaveUp) {
+      const startWs = () => {
+        const cleanup = connectWebSocket(
+          sessionName,
+          terminal,
+          fitAddon,
+          wsRef,
+          setConnectionState,
+          () => {
+            reconnectCancelRef.current?.();
+            reconnectCancelRef.current = null;
+            clearReconnectState();
+          },
+          () => {
+            if (!mounted || reconnectCancelRef.current) return;
+            onReconnectStateChangeRef.current?.("reconnecting");
+            if (!reconnectTimeoutRef.current) {
+              reconnectTimeoutRef.current = setTimeout(() => {
+                reconnectTimeoutRef.current = null;
+                reconnectCancelRef.current?.();
+                reconnectCancelRef.current = null;
+                onReconnectStateChangeRef.current?.("expired");
                 setConnectionState("error");
-              }
-            },
-          );
-          reconnectCancelRef.current = cancel;
-        },
-      );
-      wsCleanupRef.current = cleanup;
+              }, RECONNECT_TIMEOUT);
+            }
+            const cancel = startAutoReconnect(
+              () => {
+                if (!mounted) return true;
+                doConnect(true);
+                return false;
+              },
+              (state: ReconnectState) => {
+                reconnectAttemptRef.current = state.attempt;
+                if (state.gaveUp) {
+                  clearReconnectState();
+                  onReconnectStateChangeRef.current?.("expired");
+                  setConnectionState("error");
+                }
+              },
+            );
+            reconnectCancelRef.current = cancel;
+          },
+        );
+        wsCleanupRef.current = cleanup;
+      };
+      if (withScrollback && hasConnectedRef.current) {
+        fetchScrollback(sessionName)
+          .then(({ content }) => {
+            if (mounted && content) {
+              terminal.clear();
+              terminal.write(content);
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (mounted) startWs();
+          });
+      } else {
+        startWs();
+      }
     }
 
     doConnect();
@@ -347,6 +413,11 @@ export const TerminalInstance = forwardRef<
 
       reconnectCancelRef.current?.();
       reconnectCancelRef.current = null;
+
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
 
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;

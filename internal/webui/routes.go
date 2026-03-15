@@ -111,6 +111,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("POST /api/terminal/restart", handleTerminalRestart(termManager, pool, termAuth))
 		mux.HandleFunc("POST /api/terminal/spawn", handleTerminalSpawn(termManager))
 		mux.HandleFunc("POST /api/terminal/sessions/{name}/seed", handleSeedTerminalSession(termManager))
+		mux.HandleFunc("GET /api/terminal/sessions/{session}/scrollback", handleGetScrollback(termManager))
 		mux.HandleFunc("POST /api/terminal/sessions/{session}/kill", handleScheduleSessionKill(termManager))
 		mux.HandleFunc("GET /api/terminal/sessions/by-issue", handleListSessionsByIssue(tabMetaStore))
 		mux.HandleFunc("POST /api/terminal/sessions/close-all", handleCloseAllSessions(termManager, tabMetaStore, hub))
@@ -121,6 +122,13 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("PUT /api/terminal/tabs/{session}", handlePutTerminalTab(tabMetaStore, hub))
 		mux.HandleFunc("PATCH /api/terminal/tabs/{session}", handlePatchTerminalTab(tabMetaStore, hub))
 		mux.HandleFunc("DELETE /api/terminal/tabs/{session}", handleDeleteTerminalTab(tabMetaStore, hub))
+
+		// Terminal UI state endpoints (Redis-backed active tab persistence)
+		if tabMetaStore != nil {
+			rc := tabMetaStore.RedisClient()
+			mux.HandleFunc("GET /api/terminal/state", handleGetTerminalState(rc))
+			mux.HandleFunc("PATCH /api/terminal/state", handlePatchTerminalState(rc))
+		}
 	}
 
 	// Issue tab persistence endpoints (Redis-backed)

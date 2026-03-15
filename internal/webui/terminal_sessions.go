@@ -1,8 +1,10 @@
 package webui
 
 import (
+	"fmt"
 	"log"
 	"os/exec"
+	"strings"
 )
 
 // KillAllSessions closes all PTY connections and kills all prefixed tmux sessions.
@@ -43,6 +45,32 @@ func (m *TerminalManager) KillAllSessions() error {
 	}
 
 	return nil
+}
+
+// CaptureScrollback captures the scrollback buffer of a tmux session using `tmux capture-pane`.
+// Returns up to 5000 lines of scrollback text. Returns error if the session doesn't exist.
+// The session name should be the user-facing name (prefix is applied internally).
+func (m *TerminalManager) CaptureScrollback(name string) (string, error) {
+	if !validSessionName.MatchString(name) {
+		return "", fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
+	}
+
+	internalName := m.tmuxName(name)
+
+	if !m.tmuxHasSession(internalName) {
+		return "", fmt.Errorf("tmux session %q not found", name)
+	}
+
+	cmd := exec.Command(m.tmuxPath, "capture-pane", "-p", "-t", internalName, "-S", "-5000") //nolint:gosec // tmuxPath from LookPath, name validated
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("tmux capture-pane: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+
+	// Trim trailing empty lines
+	text := strings.TrimRight(string(out), "\n")
+
+	return text, nil
 }
 
 // HasActiveConnections reports whether there are any active PTY connections

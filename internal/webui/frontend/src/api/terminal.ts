@@ -206,3 +206,38 @@ export async function listSessionsByIssue(): Promise<Record<string, string[]>> {
 export async function closeAllSessions(): Promise<void> {
   await post<{ success: boolean }>("/api/terminal/sessions/close-all", {});
 }
+
+// ============= Scrollback API =============
+
+/**
+ * Fetch scrollback content for a terminal session.
+ * GET /api/terminal/sessions/{session}/scrollback
+ */
+export async function fetchScrollback(
+  sessionName: string,
+): Promise<{ content: string; lines: number }> {
+  const response = await get<ApiResult<{ content: string; lines: number }>>(
+    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/scrollback`,
+  );
+  return unwrap(response);
+}
+
+// ============= Terminal UI State =============
+
+/**
+ * Get persisted terminal UI state (active tab).
+ * GET /api/terminal/state
+ */
+export async function getTerminalState(): Promise<{ active_tab: string }> {
+  return get<{ active_tab: string }>("/api/terminal/state");
+}
+
+/**
+ * Persist terminal UI state (active tab).
+ * PATCH /api/terminal/state
+ */
+export async function patchTerminalState(state: {
+  active_tab: string;
+}): Promise<void> {
+  await patch<{ active_tab: string }>("/api/terminal/state", state);
+}
