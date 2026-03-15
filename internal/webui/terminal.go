@@ -506,6 +506,27 @@ func (m *TerminalManager) KillSessionByName(name string) error {
 	return nil
 }
 
+// SendKeys sends text to a tmux session via `tmux send-keys`.
+// The session name should be the user-facing name (prefix is applied internally).
+// The text is sent as literal keys without a trailing Enter.
+func (m *TerminalManager) SendKeys(sessionName string, text string) error {
+	if !validSessionName.MatchString(sessionName) {
+		return fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", sessionName)
+	}
+
+	internalName := m.tmuxName(sessionName)
+
+	if !m.tmuxHasSession(internalName) {
+		return fmt.Errorf("tmux session %q not found", sessionName)
+	}
+
+	cmd := exec.Command(m.tmuxPath, "send-keys", "-t", internalName, "-l", text)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux send-keys failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // SessionCount returns the number of active terminal connections.
 func (m *TerminalManager) SessionCount() int {
 	m.mu.RLock()

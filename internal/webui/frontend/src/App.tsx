@@ -17,6 +17,7 @@ import {
 } from "react";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
+import type { IssueContext } from "@/api/terminal";
 import { getReviewType } from "@/utils/issueCategory";
 import {
   AppLayout,
@@ -56,7 +57,7 @@ import {
   useAgentContext,
   useTheme,
 } from "@/hooks";
-import type { Issue, Status } from "@/types";
+import type { Issue, IssueDetails, Status } from "@/types";
 
 import styles from "./App.module.css";
 
@@ -240,6 +241,10 @@ function App() {
 
   // Previous view state for issue-detail back navigation
   const [previousView, setPreviousView] = useState<ViewMode>("kanban");
+
+  // Pending issue context for terminal seeding
+  const [pendingIssueContext, setPendingIssueContext] =
+    useState<IssueContext | undefined>(undefined);
 
   // Agent data (shared via AgentProvider — single polling loop)
   const { agents, agentTasks } = useAgentContext();
@@ -501,6 +506,25 @@ function App() {
     setActiveView("terminal");
   }, [setActiveView]);
 
+  // Handle "Open in Terminal" from issue detail view
+  const handleOpenIssueInTerminal = useCallback(
+    (issue: Issue | IssueDetails) => {
+      const context: IssueContext = {
+        issue_id: issue.id,
+        title: issue.title,
+      };
+      if (issue.description) context.description = issue.description;
+      if (issue.design) context.design = issue.design;
+      setPendingIssueContext(context);
+      setActiveView("terminal");
+    },
+    [setActiveView],
+  );
+
+  const handleIssueContextConsumed = useCallback(() => {
+    setPendingIssueContext(undefined);
+  }, []);
+
   // Handle task click from agent panel (navigates to issue-detail view)
   const handleAgentTaskClick = useCallback(
     (taskId: string) => {
@@ -730,6 +754,7 @@ function App() {
           onBack={handleBackFromDetail}
           onApprove={handleApprove}
           onReject={handleReject}
+          onOpenInTerminal={handleOpenIssueInTerminal}
         />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
@@ -752,7 +777,11 @@ function App() {
       />
       <div style={{ display: activeView === "terminal" ? "contents" : "none" }}>
         <Suspense fallback={null}>
-          <TerminalView isActive={activeView === "terminal"} />
+          <TerminalView
+            isActive={activeView === "terminal"}
+            pendingIssueContext={pendingIssueContext}
+            onIssueContextConsumed={handleIssueContextConsumed}
+          />
         </Suspense>
       </div>
       <TalkToLeadButton

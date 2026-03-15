@@ -25,6 +25,7 @@ export interface IssueDetailViewProps {
   onBack: () => void;
   onApprove: (issue: Issue) => Promise<void>;
   onReject: (issue: Issue, comment: string) => Promise<void>;
+  onOpenInTerminal?: (issue: Issue | IssueDetails) => void;
 }
 
 /**
@@ -116,6 +117,7 @@ export function IssueDetailView({
   onBack,
   onApprove,
   onReject,
+  onOpenInTerminal,
 }: IssueDetailViewProps): JSX.Element {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
@@ -322,6 +324,34 @@ export function IssueDetailView({
         <h1 className={styles.headerTitle} data-testid="detail-title">
           {issue.title}
         </h1>
+        {onOpenInTerminal && (
+          <button
+            type="button"
+            className={styles.openTerminalButton}
+            onClick={() => onOpenInTerminal(issue)}
+            data-testid="open-in-terminal-button"
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect
+                x="1"
+                y="2"
+                width="14"
+                height="12"
+                rx="2"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <path
+                d="M4 7l2.5 2L4 11M9 11h3"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Open in Terminal
+          </button>
+        )}
       </div>
 
       {/* Scrollable Content Area */}

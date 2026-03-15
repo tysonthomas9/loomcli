@@ -125,6 +125,41 @@
   min-width: 0;
 }
 
+/* ============= Open in Terminal Button ============= */
+
+.openTerminalButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.openTerminalButton:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.openTerminalButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.openTerminalButton svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* ============= Content Area ============= */
 
 .contentArea {

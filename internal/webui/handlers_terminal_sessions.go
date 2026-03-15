@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -96,6 +98,124 @@ func handleListTerminalSessions(manager *TerminalManager) http.HandlerFunc {
 			Data: &terminalSessionsData{
 				Sessions: sessions,
 			},
+		})
+	}
+}
+
+// seedRequest is the JSON body for POST /api/terminal/sessions/{name}/seed.
+type seedRequest struct {
+	IssueID     string        `json:"issue_id"`
+	Title       string        `json:"title"`
+	Description string        `json:"description,omitempty"`
+	Design      string        `json:"design,omitempty"`
+	Blockers    []seedBlocker `json:"blockers,omitempty"`
+}
+
+type seedBlocker struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+const (
+	maxDescriptionLen = 800
+	maxDesignLen      = 500
+	maxBlockers       = 5
+)
+
+// truncate returns s truncated to maxLen runes with "..." suffix if needed.
+func truncate(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
+}
+
+// formatSeedPrompt builds the context prompt string from a seed request.
+func formatSeedPrompt(req *seedRequest) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "I need help with issue %s: %s", req.IssueID, req.Title)
+
+	if req.Description != "" {
+		fmt.Fprintf(&b, "\n\nDescription: %s", truncate(req.Description, maxDescriptionLen))
+	}
+
+	if req.Design != "" {
+		fmt.Fprintf(&b, "\n\nDesign: %s", truncate(req.Design, maxDesignLen))
+	}
+
+	if len(req.Blockers) > 0 {
+		b.WriteString("\n\nBlockers:")
+		limit := len(req.Blockers)
+		if limit > maxBlockers {
+			limit = maxBlockers
+		}
+		for _, blocker := range req.Blockers[:limit] {
+			fmt.Fprintf(&b, "\n- %s: %s", blocker.ID, blocker.Title)
+		}
+	}
+
+	return b.String()
+}
+
+func handleSeedTerminalSession(manager *TerminalManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if manager == nil {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+				"success": false,
+				"error":   "terminal manager not initialized",
+			})
+			return
+		}
+
+		sessionName := r.PathValue("name")
+		if sessionName == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"success": false,
+				"error":   "missing session name",
+			})
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		var req seedRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"success": false,
+				"error":   "invalid JSON body: " + err.Error(),
+			})
+			return
+		}
+
+		if req.IssueID == "" || req.Title == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"success": false,
+				"error":   "issue_id and title are required",
+			})
+			return
+		}
+
+		prompt := formatSeedPrompt(&req)
+
+		if err := manager.SendKeys(sessionName, prompt); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				respondJSON(w, http.StatusNotFound, map[string]interface{}{
+					"success": false,
+					"error":   "session not found: " + sessionName,
+				})
+				return
+			}
+			log.Printf("Failed to seed terminal session %q: %v", sessionName, err)
+			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "failed to seed terminal session",
+			})
+			return
+		}
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
 		})
 	}
 }

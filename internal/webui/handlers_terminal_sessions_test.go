@@ -3,9 +3,11 @@ package webui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -326,5 +328,341 @@ func TestNewTerminalManager_NoTmux_Sessions(t *testing.T) {
 	_, err := NewTerminalManager("bash", "test", 0)
 	if !errors.Is(err, ErrTmuxNotFound) {
 		t.Errorf("expected ErrTmuxNotFound, got: %v", err)
+	}
+}
+
+// TestTruncate tests the truncate helper function.
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		maxLen int
+		want   string
+	}{
+		{
+			name:   "short string unchanged",
+			input:  "hello",
+			maxLen: 10,
+			want:   "hello",
+		},
+		{
+			name:   "exact length unchanged",
+			input:  "hello",
+			maxLen: 5,
+			want:   "hello",
+		},
+		{
+			name:   "over length truncated with ellipsis",
+			input:  "hello world",
+			maxLen: 5,
+			want:   "hello...",
+		},
+		{
+			name:   "empty string unchanged",
+			input:  "",
+			maxLen: 10,
+			want:   "",
+		},
+		{
+			name:   "maxLen zero truncates everything",
+			input:  "hello",
+			maxLen: 0,
+			want:   "...",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncate(tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFormatSeedPrompt tests the formatSeedPrompt function with various inputs.
+func TestFormatSeedPrompt(t *testing.T) {
+	t.Run("all fields present", func(t *testing.T) {
+		req := &seedRequest{
+			IssueID:     "PROJ-123",
+			Title:       "Fix login bug",
+			Description: "Users cannot log in when using SSO.",
+			Design:      "Use OAuth2 flow instead.",
+			Blockers: []seedBlocker{
+				{ID: "PROJ-100", Title: "Auth service down"},
+				{ID: "PROJ-101", Title: "Token refresh broken"},
+			},
+		}
+
+		got := formatSeedPrompt(req)
+
+		if !strings.Contains(got, "I need help with issue PROJ-123: Fix login bug") {
+			t.Errorf("expected header line, got: %s", got)
+		}
+		if !strings.Contains(got, "Description: Users cannot log in when using SSO.") {
+			t.Errorf("expected description, got: %s", got)
+		}
+		if !strings.Contains(got, "Design: Use OAuth2 flow instead.") {
+			t.Errorf("expected design, got: %s", got)
+		}
+		if !strings.Contains(got, "Blockers:") {
+			t.Errorf("expected blockers header, got: %s", got)
+		}
+		if !strings.Contains(got, "- PROJ-100: Auth service down") {
+			t.Errorf("expected first blocker, got: %s", got)
+		}
+		if !strings.Contains(got, "- PROJ-101: Token refresh broken") {
+			t.Errorf("expected second blocker, got: %s", got)
+		}
+	})
+
+	t.Run("missing optional fields", func(t *testing.T) {
+		req := &seedRequest{
+			IssueID: "PROJ-456",
+			Title:   "Add feature X",
+		}
+
+		got := formatSeedPrompt(req)
+
+		if got != "I need help with issue PROJ-456: Add feature X" {
+			t.Errorf("expected only header line, got: %q", got)
+		}
+		if strings.Contains(got, "Description:") {
+			t.Error("should not contain Description when empty")
+		}
+		if strings.Contains(got, "Design:") {
+			t.Error("should not contain Design when empty")
+		}
+		if strings.Contains(got, "Blockers:") {
+			t.Error("should not contain Blockers when empty")
+		}
+	})
+
+	t.Run("long description truncated at 800 chars", func(t *testing.T) {
+		longDesc := strings.Repeat("a", 900)
+		req := &seedRequest{
+			IssueID:     "PROJ-789",
+			Title:       "Test",
+			Description: longDesc,
+		}
+
+		got := formatSeedPrompt(req)
+
+		// The truncated description should be 800 chars + "..."
+		expectedTruncated := strings.Repeat("a", 800) + "..."
+		if !strings.Contains(got, "Description: "+expectedTruncated) {
+			t.Errorf("expected description truncated to 800 chars with ellipsis")
+		}
+	})
+
+	t.Run("long design truncated at 500 chars", func(t *testing.T) {
+		longDesign := strings.Repeat("b", 600)
+		req := &seedRequest{
+			IssueID: "PROJ-101",
+			Title:   "Test",
+			Design:  longDesign,
+		}
+
+		got := formatSeedPrompt(req)
+
+		expectedTruncated := strings.Repeat("b", 500) + "..."
+		if !strings.Contains(got, "Design: "+expectedTruncated) {
+			t.Errorf("expected design truncated to 500 chars with ellipsis")
+		}
+	})
+
+	t.Run("max 5 blockers", func(t *testing.T) {
+		blockers := make([]seedBlocker, 7)
+		for i := range blockers {
+			blockers[i] = seedBlocker{
+				ID:    fmt.Sprintf("B-%d", i+1),
+				Title: fmt.Sprintf("Blocker %d", i+1),
+			}
+		}
+		req := &seedRequest{
+			IssueID:  "PROJ-999",
+			Title:    "Test",
+			Blockers: blockers,
+		}
+
+		got := formatSeedPrompt(req)
+
+		// Should include blockers 1-5
+		for i := 1; i <= 5; i++ {
+			expected := fmt.Sprintf("- B-%d: Blocker %d", i, i)
+			if !strings.Contains(got, expected) {
+				t.Errorf("expected blocker %d (%q) in output", i, expected)
+			}
+		}
+		// Should NOT include blockers 6-7
+		for i := 6; i <= 7; i++ {
+			excluded := fmt.Sprintf("- B-%d: Blocker %d", i, i)
+			if strings.Contains(got, excluded) {
+				t.Errorf("blocker %d should be excluded (max 5), got: %s", i, got)
+			}
+		}
+	})
+
+	t.Run("description at exact limit not truncated", func(t *testing.T) {
+		exactDesc := strings.Repeat("c", 800)
+		req := &seedRequest{
+			IssueID:     "PROJ-800",
+			Title:       "Test",
+			Description: exactDesc,
+		}
+
+		got := formatSeedPrompt(req)
+
+		if strings.Contains(got, "...") {
+			t.Error("description at exact limit should not be truncated")
+		}
+		if !strings.Contains(got, "Description: "+exactDesc) {
+			t.Error("expected full description at exact limit")
+		}
+	})
+
+	t.Run("exactly 5 blockers all included", func(t *testing.T) {
+		blockers := make([]seedBlocker, 5)
+		for i := range blockers {
+			blockers[i] = seedBlocker{
+				ID:    fmt.Sprintf("X-%d", i+1),
+				Title: fmt.Sprintf("Issue %d", i+1),
+			}
+		}
+		req := &seedRequest{
+			IssueID:  "PROJ-555",
+			Title:    "Test",
+			Blockers: blockers,
+		}
+
+		got := formatSeedPrompt(req)
+
+		for i := 1; i <= 5; i++ {
+			expected := fmt.Sprintf("- X-%d: Issue %d", i, i)
+			if !strings.Contains(got, expected) {
+				t.Errorf("expected blocker %d in output", i)
+			}
+		}
+	})
+}
+
+// TestHandleSeedTerminalSession_MissingName tests that the seed handler returns
+// 400 when the session name path parameter is empty.
+func TestHandleSeedTerminalSession_NilManager(t *testing.T) {
+	handler := handleSeedTerminalSession(nil)
+
+	body := strings.NewReader(`{"issue_id":"X-1","title":"Test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
+	req.SetPathValue("name", "test-session")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "terminal manager not initialized" {
+		t.Errorf("expected 'terminal manager not initialized' error, got %q", resp["error"])
+	}
+}
+
+func TestHandleSeedTerminalSession_MissingName(t *testing.T) {
+	// Use a non-nil manager so the nil guard doesn't trip
+	mgr := &TerminalManager{}
+	handler := handleSeedTerminalSession(mgr)
+
+	body := strings.NewReader(`{"issue_id":"X-1","title":"Test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions//seed", body)
+	// PathValue("name") returns "" when name is not set in the route pattern.
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "missing session name" {
+		t.Errorf("expected 'missing session name' error, got %q", resp["error"])
+	}
+}
+
+// TestHandleSeedTerminalSession_InvalidJSON tests that the seed handler returns
+// 400 for malformed JSON.
+func TestHandleSeedTerminalSession_InvalidJSON(t *testing.T) {
+	mgr := &TerminalManager{}
+	handler := handleSeedTerminalSession(mgr)
+
+	body := strings.NewReader(`{invalid json}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
+	req.SetPathValue("name", "test-session")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	errMsg, _ := resp["error"].(string)
+	if !strings.HasPrefix(errMsg, "invalid JSON body:") {
+		t.Errorf("expected 'invalid JSON body:' prefix, got %q", errMsg)
+	}
+}
+
+// TestHandleSeedTerminalSession_MissingRequiredFields tests that the seed handler
+// returns 400 when issue_id or title are missing.
+func TestHandleSeedTerminalSession_MissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"missing issue_id", `{"title":"Test"}`},
+		{"missing title", `{"issue_id":"X-1"}`},
+		{"both missing", `{}`},
+	}
+
+	mgr := &TerminalManager{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := handleSeedTerminalSession(mgr)
+
+			body := strings.NewReader(tt.body)
+			req := httptest.NewRequest(http.MethodPost, "/api/terminal/sessions/{name}/seed", body)
+			req.SetPathValue("name", "test-session")
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+			}
+
+			var resp map[string]interface{}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to parse response: %v", err)
+			}
+
+			if resp["error"] != "issue_id and title are required" {
+				t.Errorf("expected 'issue_id and title are required', got %q", resp["error"])
+			}
+		})
 	}
 }

@@ -7,6 +7,8 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 
+import type { IssueContext } from "@/api/terminal";
+import { seedTerminalSession } from "@/api/terminal";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 
@@ -48,12 +50,24 @@ interface TabState {
   connectionState: ConnectionState;
 }
 
+/**
+ * Sanitize an issue ID into a valid session name.
+ * Replaces dots with dashes, strips non-alphanumeric/hyphen/underscore chars.
+ */
+function sanitizeSessionName(issueId: string): string {
+  return issueId.replace(/\./g, "-").replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
 interface TerminalViewProps {
   isActive?: boolean;
+  pendingIssueContext?: IssueContext | undefined;
+  onIssueContextConsumed?: (() => void) | undefined;
 }
 
 export function TerminalView({
   isActive = true,
+  pendingIssueContext,
+  onIssueContextConsumed,
 }: TerminalViewProps): JSX.Element {
   const {
     tabs: tabMetadata,
@@ -137,6 +151,76 @@ export function TerminalView({
     }
   }, [tabMetadata, metaLoading, config, configLoading, createTab]);
 
+  // Track sessions that have been seeded so we don't re-seed on reconnect
+  const seededSessionsRef = useRef<Set<string>>(new Set());
+  // Store pending seed context by session name (survives across renders)
+  const pendingSeedRef = useRef<Map<string, IssueContext>>(new Map());
+
+  // Handle pending issue context: create or switch to issue tab, then seed
+  useEffect(() => {
+    if (!pendingIssueContext || !initializedRef.current) return;
+
+    const sessionName = `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`;
+
+    // Check if tab already exists — switch to it without re-seeding
+    const existingTab = tabs.find((t) => t.sessionName === sessionName);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      onIssueContextConsumed?.();
+      return;
+    }
+
+    // Store seed context in ref before consuming the prop
+    pendingSeedRef.current.set(sessionName, pendingIssueContext);
+
+    // Create new tab
+    const newTab: TabState = {
+      id: sessionName,
+      label: `issue-${sanitizeSessionName(pendingIssueContext.issue_id)}`,
+      sessionName,
+      connectionState: "disconnected" as ConnectionState,
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(sessionName);
+
+    // Persist tab metadata (fire-and-forget)
+    createTab(sessionName, newTab.label, tabs.length).catch((err) =>
+      console.error(`Failed to persist issue tab ${sessionName}:`, err),
+    );
+
+    onIssueContextConsumed?.();
+  }, [pendingIssueContext, tabs, createTab, onIssueContextConsumed]);
+
+  // Seed the session when it connects for the first time
+  const handleConnectionStateChange = useCallback(
+    (tabId: string, state: ConnectionState) => {
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === tabId ? { ...t, connectionState: state } : t,
+        ),
+      );
+
+      // If this tab just connected and has pending seed data, seed it
+      if (state === "connected") {
+        const tab = tabs.find((t) => t.id === tabId);
+        if (tab && !seededSessionsRef.current.has(tab.sessionName)) {
+          const seedCtx = pendingSeedRef.current.get(tab.sessionName);
+          if (seedCtx) {
+            seededSessionsRef.current.add(tab.sessionName);
+            pendingSeedRef.current.delete(tab.sessionName);
+            seedTerminalSession(tab.sessionName, seedCtx).catch((err) =>
+              console.error(
+                `Failed to seed terminal session ${tab.sessionName}:`,
+                err,
+              ),
+            );
+          }
+        }
+      }
+    },
+    [tabs],
+  );
+
   // Cmd+F / Ctrl+F intercept (only when view is active)
   useEffect(() => {
     if (!isActive) return;
@@ -195,17 +279,6 @@ export function TerminalView({
     });
     instanceRefs.current.delete(tabId);
   }, []);
-
-  const handleConnectionStateChange = useCallback(
-    (tabId: string, state: ConnectionState) => {
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === tabId ? { ...t, connectionState: state } : t,
-        ),
-      );
-    },
-    [],
-  );
 
   const handleNewTabClick = useCallback(() => {
     if (tabs.length >= MAX_TABS) return;

@@ -592,6 +592,140 @@ describe("TerminalView", () => {
     });
   });
 
+  // ── Issue context (sanitizeSessionName + pendingIssueContext) ─────────────
+
+  describe("issue context and sanitizeSessionName", () => {
+    it("creates tab with dots replaced by dashes in issue ID", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView
+          pendingIssueContext={{
+            issue_id: "proj.sub.123",
+            title: "Test issue",
+          }}
+          onIssueContextConsumed={vi.fn()}
+        />,
+      );
+
+      // sanitizeSessionName("proj.sub.123") => "proj-sub-123"
+      // tab sessionName => "issue-proj-sub-123"
+      expect(
+        screen.getByTestId("terminal-instance-issue-proj-sub-123"),
+      ).toBeInTheDocument();
+    });
+
+    it("creates tab with special chars stripped from issue ID", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView
+          pendingIssueContext={{
+            issue_id: "proj@123!",
+            title: "Test issue",
+          }}
+          onIssueContextConsumed={vi.fn()}
+        />,
+      );
+
+      // sanitizeSessionName("proj@123!") => "proj123"
+      // tab sessionName => "issue-proj123"
+      expect(
+        screen.getByTestId("terminal-instance-issue-proj123"),
+      ).toBeInTheDocument();
+    });
+
+    it("creates tab preserving hyphens and underscores in issue ID", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView
+          pendingIssueContext={{
+            issue_id: "proj-sub_123",
+            title: "Test issue",
+          }}
+          onIssueContextConsumed={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByTestId("terminal-instance-issue-proj-sub_123"),
+      ).toBeInTheDocument();
+    });
+
+    it("new issue tab becomes active", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView
+          pendingIssueContext={{
+            issue_id: "PROJ-42",
+            title: "New feature",
+          }}
+          onIssueContextConsumed={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "issue-PROJ-42",
+      );
+    });
+
+    it("calls onIssueContextConsumed after creating tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      render(
+        <TerminalView
+          pendingIssueContext={{
+            issue_id: "PROJ-42",
+            title: "New feature",
+          }}
+          onIssueContextConsumed={onConsumed}
+        />,
+      );
+
+      expect(onConsumed).toHaveBeenCalled();
+    });
+
+    it("switches to existing tab if issue tab already exists", () => {
+      setMetadata([
+        ...DEFAULT_METADATA,
+        { session_name: "issue-PROJ-42", label: "issue-PROJ-42" },
+      ]);
+      const onConsumed = vi.fn();
+      render(
+        <TerminalView
+          pendingIssueContext={{
+            issue_id: "PROJ-42",
+            title: "Existing issue",
+          }}
+          onIssueContextConsumed={onConsumed}
+        />,
+      );
+
+      // Should switch to existing tab, not create a new one
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "issue-PROJ-42",
+      );
+      expect(onConsumed).toHaveBeenCalled();
+    });
+
+    it("persists tab metadata for new issue tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(
+        <TerminalView
+          pendingIssueContext={{
+            issue_id: "PROJ-99",
+            title: "Persist test",
+          }}
+          onIssueContextConsumed={vi.fn()}
+        />,
+      );
+
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+        "issue-PROJ-99",
+        "issue-PROJ-99",
+        expect.any(Number),
+      );
+    });
+  });
+
   // ── Render tests ───────────────────────────────────────────────────────────
 
   describe("render tests", () => {

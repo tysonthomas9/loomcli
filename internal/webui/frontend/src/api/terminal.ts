@@ -1,4 +1,4 @@
-import { get, put, patch, del, ApiError } from "./client";
+import { get, post, put, patch, del, ApiError } from "./client";
 
 // ============= Types =============
 
@@ -76,6 +76,29 @@ export function buildTerminalWsUrl(
     url += `&token=${encodeURIComponent(token)}`;
   }
   return url;
+}
+
+// ============= Issue Context Seeding =============
+
+export interface IssueContext {
+  issue_id: string;
+  title: string;
+  description?: string;
+  design?: string;
+  blockers?: Array<{ id: string; title: string }>;
+}
+
+/**
+ * Seed a terminal session with issue context via POST /api/terminal/sessions/{name}/seed.
+ */
+export async function seedTerminalSession(
+  sessionName: string,
+  context: IssueContext,
+): Promise<void> {
+  await post<{ success: boolean }>(
+    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/seed`,
+    context,
+  );
 }
 
 // ============= Tab Metadata Types =============

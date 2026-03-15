@@ -106,6 +106,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("GET /api/agents/{name}/terminal/info", handleGetAgentTerminalInfo(termManager))
 		mux.HandleFunc("POST /api/terminal/restart", handleTerminalRestart(termManager, pool, termAuth))
 		mux.HandleFunc("POST /api/terminal/spawn", handleTerminalSpawn(termManager))
+		mux.HandleFunc("POST /api/terminal/sessions/{name}/seed", handleSeedTerminalSession(termManager))
 
 		// Terminal tab metadata endpoints (Redis-backed persistence)
 		mux.HandleFunc("GET /api/terminal/tabs", handleListTerminalTabs(tabMetaStore, termManager))

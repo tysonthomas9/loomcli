@@ -3,21 +3,23 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { ApiError, get, patch, del } from "./client";
+import { ApiError, get, post, patch, del } from "./client";
 import {
   listTerminalSessions,
   fetchTerminalToken,
   buildTerminalWsUrl,
+  seedTerminalSession,
   listTabMetadata,
   getTabMetadata,
   patchTabMetadata,
   deleteTabMetadata,
 } from "./terminal";
-import type { TerminalSessionInfo, TabMetadata } from "./terminal";
+import type { TerminalSessionInfo, TabMetadata, IssueContext } from "./terminal";
 
 // Mock the client module
 vi.mock("./client", () => ({
   get: vi.fn(),
+  post: vi.fn(),
   patch: vi.fn(),
   del: vi.fn(),
   ApiError: class ApiError extends Error {
@@ -33,6 +35,7 @@ vi.mock("./client", () => ({
 }));
 
 const mockGet = get as ReturnType<typeof vi.fn>;
+const mockPost = post as ReturnType<typeof vi.fn>;
 const mockPatch = patch as ReturnType<typeof vi.fn>;
 const mockDel = del as ReturnType<typeof vi.fn>;
 
@@ -239,6 +242,67 @@ describe("terminal API", () => {
 
       await deleteTabMetadata("test");
       expect(mockDel).toHaveBeenCalledWith("/api/terminal/tabs/test");
+    });
+  });
+
+  // ============= seedTerminalSession =============
+
+  describe("seedTerminalSession", () => {
+    it("sends POST to correct URL with context body", async () => {
+      mockPost.mockResolvedValue({ success: true });
+
+      const context: IssueContext = {
+        issue_id: "PROJ-123",
+        title: "Fix login bug",
+        description: "Users cannot log in",
+        design: "Use OAuth2",
+        blockers: [{ id: "PROJ-100", title: "Auth service down" }],
+      };
+
+      await seedTerminalSession("my-session", context);
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/terminal/sessions/my-session/seed",
+        context,
+      );
+    });
+
+    it("URL-encodes the session name", async () => {
+      mockPost.mockResolvedValue({ success: true });
+
+      await seedTerminalSession("session with spaces", {
+        issue_id: "X-1",
+        title: "Test",
+      });
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/terminal/sessions/session%20with%20spaces/seed",
+        { issue_id: "X-1", title: "Test" },
+      );
+    });
+
+    it("sends minimal context without optional fields", async () => {
+      mockPost.mockResolvedValue({ success: true });
+
+      const context: IssueContext = {
+        issue_id: "X-1",
+        title: "Simple issue",
+      };
+
+      await seedTerminalSession("test-session", context);
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/terminal/sessions/test-session/seed",
+        context,
+      );
+    });
+
+    it("propagates errors from client", async () => {
+      mockPost.mockRejectedValue(new ApiError(404, "Not Found"));
+
+      await expect(
+        seedTerminalSession("missing", { issue_id: "X-1", title: "Test" }),
+      ).rejects.toThrow("API Error: 404 Not Found");
     });
   });
 
