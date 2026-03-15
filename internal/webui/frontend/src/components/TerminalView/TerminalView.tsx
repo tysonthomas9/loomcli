@@ -16,6 +16,10 @@ import {
 } from "@/api/terminal";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
+import {
+  useRegisterEscapeLayer,
+  LAYER_TERMINAL_SEARCH,
+} from "@/hooks/useKeyboardShortcuts";
 import { useSessionRestore } from "@/hooks/useSessionRestore";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 
@@ -291,27 +295,23 @@ export function TerminalView({
         e.preventDefault();
         setIsSearchOpen((prev) => !prev);
       }
-      if (
-        e.key === "Escape" &&
-        isSearchOpen &&
-        !isSessionPromptOpen &&
-        pendingPasteText === null
-      ) {
-        setIsSearchOpen(false);
-        instanceRefs.current.get(activeTabId)?.clearSearch();
-        setSearchTerm("");
-        setSearchResult(null);
-      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [
-    isActive,
-    isSearchOpen,
-    activeTabId,
-    isSessionPromptOpen,
-    pendingPasteText,
-  ]);
+  }, [isActive]);
+
+  const closeTerminalSearch = useCallback(() => {
+    setIsSearchOpen(false);
+    instanceRefs.current.get(activeTabId)?.clearSearch();
+    setSearchTerm("");
+    setSearchResult(null);
+  }, [activeTabId]);
+
+  useRegisterEscapeLayer(
+    LAYER_TERMINAL_SEARCH,
+    closeTerminalSearch,
+    isActive && isSearchOpen,
+  );
 
   // Re-run search on tab switch while search is open
   useEffect(() => {

@@ -167,7 +167,8 @@ describe("StartWorkButton", () => {
       fireEvent.click(screen.getByTestId("start-work-button"));
       expect(screen.getByTestId("start-work-popover")).toBeInTheDocument();
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const popover = screen.getByTestId("start-work-popover");
+      fireEvent.keyDown(popover, { key: "Escape" });
       expect(
         screen.queryByTestId("start-work-popover"),
       ).not.toBeInTheDocument();
@@ -178,7 +179,8 @@ describe("StartWorkButton", () => {
       const button = screen.getByTestId("start-work-button");
       fireEvent.click(button);
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const popover = screen.getByTestId("start-work-popover");
+      fireEvent.keyDown(popover, { key: "Escape" });
       expect(document.activeElement).toBe(button);
     });
 

@@ -104,21 +104,15 @@ export function TypeDropdown({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
-  // Handle escape key to close
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-        setFocusedIndex(-1);
-        triggerRef.current?.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
+  // Handle escape key to close (local handler with stopPropagation)
+  const handleDropdownKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setIsOpen(false);
+      setFocusedIndex(-1);
+      triggerRef.current?.focus();
+    }
+  }, []);
 
   const handleTriggerClick = useCallback(() => {
     if (disabled || isSaving) return;
@@ -251,6 +245,7 @@ export function TypeDropdown({
           role="listbox"
           aria-label="Select type"
           data-testid="type-dropdown-menu"
+          onKeyDown={handleDropdownKeyDown}
         >
           {TYPE_OPTIONS.map((option, index) => (
             <div

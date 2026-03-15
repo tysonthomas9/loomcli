@@ -115,7 +115,8 @@ describe("TypeDropdown", () => {
       fireEvent.click(trigger);
       expect(screen.getByTestId("type-dropdown-menu")).toBeInTheDocument();
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("type-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(
         screen.queryByTestId("type-dropdown-menu"),
       ).not.toBeInTheDocument();
@@ -206,7 +207,8 @@ describe("TypeDropdown", () => {
       const trigger = screen.getByTestId("type-dropdown-trigger");
       fireEvent.click(trigger);
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("type-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(document.activeElement).toBe(trigger);
     });
 
@@ -731,7 +733,8 @@ describe("TypeDropdown", () => {
       fireEvent.click(trigger);
       expect(screen.getByTestId("type-dropdown-menu")).toBeInTheDocument();
 
-      fireEvent.keyDown(trigger, { key: "Escape" });
+      const menu = screen.getByTestId("type-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(
         screen.queryByTestId("type-dropdown-menu"),
       ).not.toBeInTheDocument();
@@ -794,7 +797,8 @@ describe("TypeDropdown", () => {
       );
 
       // Close and reopen
-      fireEvent.keyDown(trigger, { key: "Escape" });
+      const menu = screen.getByTestId("type-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       fireEvent.click(trigger);
 
       // Should be back to current type
@@ -832,7 +836,8 @@ describe("TypeDropdown", () => {
       );
 
       // Close and update type
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("type-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       rerender(<TypeDropdown {...defaultProps} type="bug" />);
 
       fireEvent.click(screen.getByTestId("type-dropdown-trigger"));

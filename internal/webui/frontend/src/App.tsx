@@ -11,6 +11,7 @@ import {
   useMemo,
   lazy,
   Suspense,
+  type RefObject,
 } from "react";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
@@ -43,6 +44,7 @@ import {
   TalkToLeadButton,
   NavRail,
   ThemeToggle,
+  KeyboardCheatsheet,
 } from "@/components";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import type { BlockedInfo } from "@/components/KanbanBoard";
@@ -66,6 +68,7 @@ import {
   useWorkspaceParam,
   useDaemonHealth,
   usePanelManager,
+  KeyboardShortcutProvider,
 } from "@/hooks";
 import type { Issue, IssueDetails, Status } from "@/types";
 
@@ -159,6 +162,9 @@ function App() {
 
   // Scroll position cache for restoring scroll on back navigation
   const scrollPositionCache = useRef<Map<string, number>>(new Map());
+
+  // Search input ref for Cmd/Ctrl+K shortcut
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // View state must be read before useIssues to determine fetch mode
   const {
@@ -695,6 +701,11 @@ function App() {
     setPendingIssueContext(undefined);
   }, []);
 
+  // Focus search input (for Cmd/Ctrl+K shortcut)
+  const handleSearchFocus = useCallback(() => {
+    searchInputRef.current?.focus();
+  }, []);
+
   // Handle task click from agent panel (opens issue panel overlay)
   const handleAgentTaskClick = useCallback(
     (taskId: string) => {
@@ -709,6 +720,7 @@ function App() {
     <div className={styles.headerControls}>
       <div className={styles.searchWrapper}>
         <SearchInput
+          ref={searchInputRef as RefObject<HTMLInputElement>}
           value={searchValue}
           onChange={setSearchValue}
           onClear={handleSearchClear}
@@ -916,193 +928,201 @@ function App() {
 
   // Success state: show view based on activeView with filtered issues
   return (
-    <SearchTermProvider value={debouncedSearch}>
-      <AppLayout
-        title={headerTitle}
-        navigation={headerNavigation}
-        actions={headerActions}
-        navRail={
-          <NavRail
-            activeView={activeView}
-            onChange={setActiveView}
-            sessionCount={activeSessionCount}
-            badges={{ terminal: hasTerminalUnread }}
-          />
-        }
-        sidebar={sidebarContent}
-      >
-        {activeView === "kanban" && (
-          <ErrorBoundary resetOnChange={[activeView]}>
-            <div className={styles.kanbanShell}>
-              <SwimLaneBoard
+    <KeyboardShortcutProvider
+      onViewChange={setActiveView}
+      onSearchFocus={handleSearchFocus}
+    >
+      <SearchTermProvider value={debouncedSearch}>
+        <AppLayout
+          title={headerTitle}
+          navigation={headerNavigation}
+          actions={headerActions}
+          navRail={
+            <NavRail
+              activeView={activeView}
+              onChange={setActiveView}
+              sessionCount={activeSessionCount}
+              badges={{ terminal: hasTerminalUnread }}
+            />
+          }
+          sidebar={sidebarContent}
+        >
+          {activeView === "kanban" && (
+            <ErrorBoundary resetOnChange={[activeView]}>
+              <div className={styles.kanbanShell}>
+                <SwimLaneBoard
+                  issues={filteredIssues}
+                  groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
+                  onDragEnd={handleDragEnd}
+                  onIssueClick={handleIssueClick}
+                  {...(blockedIssuesMap !== undefined && {
+                    blockedIssues: blockedIssuesMap,
+                  })}
+                  {...(filters.showBlocked !== undefined && {
+                    showBlocked: filters.showBlocked,
+                  })}
+                  {...(pendingIds.size > 0 && { pendingIds })}
+                />
+              </div>
+            </ErrorBoundary>
+          )}
+          {activeView === "table" && (
+            <ErrorBoundary resetOnChange={[activeView]}>
+              <IssueTable
                 issues={filteredIssues}
-                groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-                onDragEnd={handleDragEnd}
-                onIssueClick={handleIssueClick}
+                sortable
+                showCheckbox
+                selectedIds={selectedIds}
+                onSelectionChange={toggleSelection}
+                onRowClick={handleIssueClick}
+                searchTerm={debouncedSearch}
+                {...(selectedIssueId !== null && {
+                  selectedId: selectedIssueId,
+                })}
                 {...(blockedIssuesMap !== undefined && {
                   blockedIssues: blockedIssuesMap,
                 })}
                 {...(filters.showBlocked !== undefined && {
                   showBlocked: filters.showBlocked,
                 })}
-                {...(pendingIds.size > 0 && { pendingIds })}
               />
-            </div>
-          </ErrorBoundary>
-        )}
-        {activeView === "table" && (
-          <ErrorBoundary resetOnChange={[activeView]}>
-            <IssueTable
-              issues={filteredIssues}
-              sortable
-              showCheckbox
-              selectedIds={selectedIds}
-              onSelectionChange={toggleSelection}
-              onRowClick={handleIssueClick}
-              searchTerm={debouncedSearch}
-              {...(selectedIssueId !== null && { selectedId: selectedIssueId })}
-              {...(blockedIssuesMap !== undefined && {
-                blockedIssues: blockedIssuesMap,
-              })}
-              {...(filters.showBlocked !== undefined && {
-                showBlocked: filters.showBlocked,
-              })}
-            />
-            <BulkActionToolbar
-              selectedIds={selectedIds}
-              onClearSelection={clearSelection}
-            />
-          </ErrorBoundary>
-        )}
-        {activeView === "graph" && (
-          <ErrorBoundary resetOnChange={[activeView]}>
-            <Suspense fallback={<LoadingSkeleton.Graph />}>
-              <GraphView
-                issues={filteredIssues}
-                onNodeClick={handleIssueClick}
+              <BulkActionToolbar
+                selectedIds={selectedIds}
+                onClearSelection={clearSelection}
               />
-            </Suspense>
-          </ErrorBoundary>
-        )}
-        {activeView === "monitor" && (
-          <ErrorBoundary resetOnChange={[activeView]}>
-            <Suspense fallback={<LoadingSkeleton.Monitor />}>
-              <MonitorDashboard
-                onViewChange={setActiveView}
-                onIssueClick={handleIssueClick}
-                onAgentClick={handleAgentClick}
-              />
-            </Suspense>
-          </ErrorBoundary>
-        )}
-        {activeView === "observability" && (
-          <ErrorBoundary resetOnChange={[activeView]}>
-            <Suspense fallback={<LoadingSkeleton.Observability />}>
-              <ObservabilityDashboard />
-            </Suspense>
-          </ErrorBoundary>
-        )}
-        {activeView === "settings" && (
-          <ErrorBoundary resetOnChange={[activeView]}>
-            <Suspense fallback={<LoadingSkeleton.Column />}>
-              <SettingsView onNavigate={setActiveView} />
-            </Suspense>
-          </ErrorBoundary>
-        )}
-        {activeView === "workspace" && isMultiRepo && (
-          <ErrorBoundary resetOnChange={[activeView]}>
-            <Suspense fallback={<LoadingSkeleton.Column />}>
-              <WorkspaceView />
-            </Suspense>
-          </ErrorBoundary>
-        )}
-        {activeView === "files" && (
-          <ErrorBoundary resetOnChange={[activeView]}>
-            <Suspense fallback={<LoadingSkeleton.FileExplorer />}>
-              <FileExplorer />
-            </Suspense>
-          </ErrorBoundary>
-        )}
-        {activeView === "issue-detail" && (
-          <ErrorBoundary resetOnChange={[selectedIssueId]}>
-            <IssueDetailView
-              issue={issueDetails}
-              isLoading={isLoadingDetails}
-              error={detailError}
-              previousView={previousView}
-              onBack={handleBackFromDetail}
-              onApprove={handleApprove}
-              onReject={handleReject}
-              onOpenInTerminal={handleOpenIssueInTerminal}
-              onCopyLink={handleCopyLink}
-              onNavigateToIssue={handleIssueClick}
-            />
-          </ErrorBoundary>
-        )}
-        {(showStaleBanner || isConnectionLost) &&
-          staleBannerDisconnectedSince !== null && (
-            <StaleDataBanner
-              disconnectedSince={staleBannerDisconnectedSince}
-              onRetry={staleBannerRetry}
-              connectionLost={isConnectionLost}
-            />
+            </ErrorBoundary>
           )}
-        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-        <IssueDetailPanel
-          isOpen={isPanelOpen}
-          issue={issueDetails}
-          isLoading={isLoadingDetails}
-          error={detailError}
-          onClose={handlePanelClose}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          onCopyLink={handleCopyLink}
-          onNavigateToIssue={handleIssueClick}
-        />
-        <AgentDetailPanel
-          isOpen={isAgentPanelOpen}
-          agentName={selectedAgentName}
-          agents={agents}
-          agentTasks={agentTasks}
-          onClose={handleAgentPanelClose}
-          onTaskClick={handleAgentTaskClick}
-        />
-        <div
-          style={{ display: activeView === "terminal" ? "contents" : "none" }}
-        >
-          <Suspense fallback={<LoadingSkeleton.Terminal />}>
-            <TerminalView
-              isActive={activeView === "terminal"}
-              pendingIssueContext={pendingIssueContext}
-              onIssueContextConsumed={handleIssueContextConsumed}
-              onActiveSessionCountChange={setActiveSessionCount}
-              onUnreadChange={setHasTerminalUnread}
-              {...(selectedIssueId != null && { issueId: selectedIssueId })}
-            />
-          </Suspense>
-        </div>
-        <TalkToLeadButton
-          onClick={handleTalkToLeadClick}
-          isActive={activeView === "terminal"}
-          sessionCount={activeSessionCount}
-        />
-        <AssigneePrompt
-          isOpen={pendingDragData !== null}
-          onConfirm={handleAssigneeConfirm}
-          onSkip={handleAssigneeSkip}
-          recentNames={recentAssignees}
-        />
-      </AppLayout>
-      {!isDaemonAvailable && (
-        <DaemonUnavailableOverlay
-          mode={connectionMode}
-          retryCountdown={retryCountdown}
-          lastError={lastError}
-          onRetry={daemonRetryNow}
-          onSettingsClick={() => setActiveView("settings")}
-        />
-      )}
-    </SearchTermProvider>
+          {activeView === "graph" && (
+            <ErrorBoundary resetOnChange={[activeView]}>
+              <Suspense fallback={<LoadingSkeleton.Graph />}>
+                <GraphView
+                  issues={filteredIssues}
+                  onNodeClick={handleIssueClick}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {activeView === "monitor" && (
+            <ErrorBoundary resetOnChange={[activeView]}>
+              <Suspense fallback={<LoadingSkeleton.Monitor />}>
+                <MonitorDashboard
+                  onViewChange={setActiveView}
+                  onIssueClick={handleIssueClick}
+                  onAgentClick={handleAgentClick}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {activeView === "observability" && (
+            <ErrorBoundary resetOnChange={[activeView]}>
+              <Suspense fallback={<LoadingSkeleton.Observability />}>
+                <ObservabilityDashboard />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {activeView === "settings" && (
+            <ErrorBoundary resetOnChange={[activeView]}>
+              <Suspense fallback={<LoadingSkeleton.Column />}>
+                <SettingsView onNavigate={setActiveView} />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {activeView === "workspace" && isMultiRepo && (
+            <ErrorBoundary resetOnChange={[activeView]}>
+              <Suspense fallback={<LoadingSkeleton.Column />}>
+                <WorkspaceView />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {activeView === "files" && (
+            <ErrorBoundary resetOnChange={[activeView]}>
+              <Suspense fallback={<LoadingSkeleton.FileExplorer />}>
+                <FileExplorer />
+              </Suspense>
+            </ErrorBoundary>
+          )}
+          {activeView === "issue-detail" && (
+            <ErrorBoundary resetOnChange={[selectedIssueId]}>
+              <IssueDetailView
+                issue={issueDetails}
+                isLoading={isLoadingDetails}
+                error={detailError}
+                previousView={previousView}
+                onBack={handleBackFromDetail}
+                onApprove={handleApprove}
+                onReject={handleReject}
+                onOpenInTerminal={handleOpenIssueInTerminal}
+                onCopyLink={handleCopyLink}
+                onNavigateToIssue={handleIssueClick}
+              />
+            </ErrorBoundary>
+          )}
+          {(showStaleBanner || isConnectionLost) &&
+            staleBannerDisconnectedSince !== null && (
+              <StaleDataBanner
+                disconnectedSince={staleBannerDisconnectedSince}
+                onRetry={staleBannerRetry}
+                connectionLost={isConnectionLost}
+              />
+            )}
+          <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+          <IssueDetailPanel
+            isOpen={isPanelOpen}
+            issue={issueDetails}
+            isLoading={isLoadingDetails}
+            error={detailError}
+            onClose={handlePanelClose}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onCopyLink={handleCopyLink}
+            onNavigateToIssue={handleIssueClick}
+          />
+          <AgentDetailPanel
+            isOpen={isAgentPanelOpen}
+            agentName={selectedAgentName}
+            agents={agents}
+            agentTasks={agentTasks}
+            onClose={handleAgentPanelClose}
+            onTaskClick={handleAgentTaskClick}
+          />
+          <div
+            style={{ display: activeView === "terminal" ? "contents" : "none" }}
+          >
+            <Suspense fallback={<LoadingSkeleton.Terminal />}>
+              <TerminalView
+                isActive={activeView === "terminal"}
+                pendingIssueContext={pendingIssueContext}
+                onIssueContextConsumed={handleIssueContextConsumed}
+                onActiveSessionCountChange={setActiveSessionCount}
+                onUnreadChange={setHasTerminalUnread}
+                {...(selectedIssueId != null && { issueId: selectedIssueId })}
+              />
+            </Suspense>
+          </div>
+          <TalkToLeadButton
+            onClick={handleTalkToLeadClick}
+            isActive={activeView === "terminal"}
+            sessionCount={activeSessionCount}
+          />
+          <AssigneePrompt
+            isOpen={pendingDragData !== null}
+            onConfirm={handleAssigneeConfirm}
+            onSkip={handleAssigneeSkip}
+            recentNames={recentAssignees}
+          />
+        </AppLayout>
+        {!isDaemonAvailable && (
+          <DaemonUnavailableOverlay
+            mode={connectionMode}
+            retryCountdown={retryCountdown}
+            lastError={lastError}
+            onRetry={daemonRetryNow}
+            onSettingsClick={() => setActiveView("settings")}
+          />
+        )}
+      </SearchTermProvider>
+      <KeyboardCheatsheet />
+    </KeyboardShortcutProvider>
   );
 }
 export default App;

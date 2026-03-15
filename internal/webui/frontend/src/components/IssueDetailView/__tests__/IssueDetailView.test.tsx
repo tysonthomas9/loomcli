@@ -7,14 +7,27 @@
  * Focuses on Escape key handling and back button behavior.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, fireEvent, act } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Issue } from "@/types";
 
 import { IssueDetailView } from "../IssueDetailView";
 import type { IssueDetailViewProps } from "../IssueDetailView";
+
+// Hoist mock for useRegisterEscapeLayer so we can inspect and invoke the handler
+const { mockUseRegisterEscapeLayer } = vi.hoisted(() => ({
+  mockUseRegisterEscapeLayer: vi.fn(),
+}));
+
+vi.mock("@/hooks", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@/hooks")>();
+  return {
+    ...orig,
+    useRegisterEscapeLayer: mockUseRegisterEscapeLayer,
+  };
+});
 
 /**
  * Create a minimal test issue with required fields.
@@ -48,7 +61,26 @@ function createDefaultProps(
   };
 }
 
+/**
+ * Helper: get the most recent escape layer handler registered via the mock.
+ * The component calls useRegisterEscapeLayer(priority, handler, active).
+ */
+function getEscapeHandler(): (() => void) | null {
+  const calls = mockUseRegisterEscapeLayer.mock.calls;
+  // Find the last call where active=true
+  for (let i = calls.length - 1; i >= 0; i--) {
+    if (calls[i][2] === true) {
+      return calls[i][1] as () => void;
+    }
+  }
+  return null;
+}
+
 describe("IssueDetailView", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -65,109 +97,18 @@ describe("IssueDetailView", () => {
   });
 
   describe("Escape key handling", () => {
-    it("calls onBack when Escape is pressed", () => {
+    it("registers escape layer and handler calls onBack", () => {
       const onBack = vi.fn();
       render(<IssueDetailView {...createDefaultProps({ onBack })} />);
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      // Verify useRegisterEscapeLayer was called with active=true
+      const handler = getEscapeHandler();
+      expect(handler).not.toBeNull();
+
+      // Invoke the handler to simulate Escape key via the layer system
+      handler!();
 
       expect(onBack).toHaveBeenCalledTimes(1);
-    });
-
-    it("does NOT call onBack when input is focused", () => {
-      const onBack = vi.fn();
-      const { container } = render(
-        <IssueDetailView {...createDefaultProps({ onBack })} />,
-      );
-
-      // Add an input element to the rendered container to simulate an inner input
-      const input = document.createElement("input");
-      container.appendChild(input);
-      input.focus();
-
-      fireEvent.keyDown(input, { key: "Escape" });
-
-      expect(onBack).not.toHaveBeenCalled();
-    });
-
-    it("does NOT call onBack when textarea is focused", () => {
-      const onBack = vi.fn();
-      const { container } = render(
-        <IssueDetailView {...createDefaultProps({ onBack })} />,
-      );
-
-      // Add a textarea element to simulate an inner textarea
-      const textarea = document.createElement("textarea");
-      container.appendChild(textarea);
-      textarea.focus();
-
-      fireEvent.keyDown(textarea, { key: "Escape" });
-
-      expect(onBack).not.toHaveBeenCalled();
-    });
-
-    it("does NOT call onBack when contentEditable element is focused", () => {
-      const onBack = vi.fn();
-      const { container } = render(
-        <IssueDetailView {...createDefaultProps({ onBack })} />,
-      );
-
-      // Add a contentEditable div to simulate an inline editor
-      const editable = document.createElement("div");
-      editable.contentEditable = "true";
-      container.appendChild(editable);
-      editable.focus();
-
-      // Dispatch a native KeyboardEvent with target set to the contentEditable element
-      const event = new KeyboardEvent("keydown", {
-        key: "Escape",
-        bubbles: true,
-      });
-      // jsdom may not set isContentEditable from contentEditable attribute,
-      // so ensure it's defined on the element
-      Object.defineProperty(editable, "isContentEditable", {
-        value: true,
-        configurable: true,
-      });
-      editable.dispatchEvent(event);
-
-      expect(onBack).not.toHaveBeenCalled();
-    });
-
-    it('does NOT call onBack when a [role="dialog"] is in the DOM', () => {
-      const onBack = vi.fn();
-      render(<IssueDetailView {...createDefaultProps({ onBack })} />);
-
-      // Add a dialog overlay to the document body
-      const dialog = document.createElement("div");
-      dialog.setAttribute("role", "dialog");
-      document.body.appendChild(dialog);
-
-      try {
-        fireEvent.keyDown(document, { key: "Escape" });
-
-        expect(onBack).not.toHaveBeenCalled();
-      } finally {
-        document.body.removeChild(dialog);
-      }
-    });
-
-    it('does NOT call onBack when a [role="listbox"] is in the DOM', () => {
-      const onBack = vi.fn();
-      render(<IssueDetailView {...createDefaultProps({ onBack })} />);
-
-      // Add a listbox overlay to the document body (e.g., a dropdown)
-      const listbox = document.createElement("div");
-      listbox.setAttribute("role", "listbox");
-      document.body.appendChild(listbox);
-
-      try {
-        fireEvent.keyDown(document, { key: "Escape" });
-
-        expect(onBack).not.toHaveBeenCalled();
-      } finally {
-        document.body.removeChild(listbox);
-      }
     });
 
     it("closes reject form instead of calling onBack when reject form is open", () => {
@@ -182,8 +123,12 @@ describe("IssueDetailView", () => {
       // Verify reject form is visible
       expect(screen.getByTestId("detail-reject-comment")).toBeInTheDocument();
 
-      // Press Escape — should close the form, not call onBack
-      fireEvent.keyDown(document, { key: "Escape" });
+      // Get the latest handler (re-rendered with showRejectForm=true)
+      const handler = getEscapeHandler();
+      expect(handler).not.toBeNull();
+      act(() => {
+        handler!();
+      });
 
       expect(onBack).not.toHaveBeenCalled();
       // Reject form should be closed now
@@ -202,42 +147,35 @@ describe("IssueDetailView", () => {
       expect(screen.getByTestId("detail-reject-comment")).toBeInTheDocument();
 
       // First Escape closes the form
-      fireEvent.keyDown(document, { key: "Escape" });
+      let handler = getEscapeHandler();
+      expect(handler).not.toBeNull();
+      act(() => {
+        handler!();
+      });
       expect(onBack).not.toHaveBeenCalled();
       expect(
         screen.queryByTestId("detail-reject-comment"),
       ).not.toBeInTheDocument();
 
       // Second Escape navigates back
-      fireEvent.keyDown(document, { key: "Escape" });
+      handler = getEscapeHandler();
+      expect(handler).not.toBeNull();
+      act(() => {
+        handler!();
+      });
       expect(onBack).toHaveBeenCalledTimes(1);
     });
 
-    it("does not call onBack for non-Escape keys", () => {
-      const onBack = vi.fn();
-      render(<IssueDetailView {...createDefaultProps({ onBack })} />);
+    it("registers escape layer with LAYER_ISSUE_PANEL priority", () => {
+      render(<IssueDetailView {...createDefaultProps()} />);
 
-      fireEvent.keyDown(document, { key: "Enter" });
-      fireEvent.keyDown(document, { key: "a" });
-      fireEvent.keyDown(document, { key: "Tab" });
-
-      expect(onBack).not.toHaveBeenCalled();
-    });
-
-    it("cleans up keydown listener on unmount", () => {
-      const removeEventListenerSpy = vi.spyOn(document, "removeEventListener");
-      const onBack = vi.fn();
-
-      const { unmount } = render(
-        <IssueDetailView {...createDefaultProps({ onBack })} />,
+      // The component calls useRegisterEscapeLayer(LAYER_ISSUE_PANEL, handler, true)
+      // LAYER_ISSUE_PANEL = 10
+      const call = mockUseRegisterEscapeLayer.mock.calls.find(
+        (c: unknown[]) => c[2] === true,
       );
-
-      unmount();
-
-      expect(removeEventListenerSpy).toHaveBeenCalledWith(
-        "keydown",
-        expect.any(Function),
-      );
+      expect(call).toBeDefined();
+      expect(call![0]).toBe(10); // LAYER_ISSUE_PANEL
     });
   });
 });

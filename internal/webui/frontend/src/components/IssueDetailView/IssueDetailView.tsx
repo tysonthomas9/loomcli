@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback } from "react";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { ViewMode } from "@/components/ViewSwitcher";
+import { useRegisterEscapeLayer, LAYER_ISSUE_PANEL } from "@/hooks";
 import { getReviewType } from "@/utils/issueCategory";
 import { formatStatusLabel } from "@/utils/statusFormat";
 
@@ -176,42 +177,17 @@ export function IssueDetailView({
     setIsRejecting(false);
   }, [issue?.id]);
 
-  // Escape key handler — layered to avoid conflicts with inner components
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-
-      // Don't navigate back if focused on an input, textarea, or contentEditable
-      const target = event.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
-        return;
-      }
-
-      // Don't navigate back if a dialog or listbox overlay is open
-      // (dropdowns like PriorityDropdown, TypeDropdown handle their own Escape)
-      if (
-        document.querySelector('[role="dialog"]') ||
-        document.querySelector('[role="listbox"]')
-      ) {
-        return;
-      }
-
-      // Don't navigate back if reject form is open — close the form instead
-      if (showRejectForm) {
-        setShowRejectForm(false);
-        return;
-      }
-
-      onBack();
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+  // Escape key handler via global shortcut layer system.
+  // Dropdowns/dialogs have higher priority layers so they close first.
+  const handleEscapeBack = useCallback(() => {
+    if (showRejectForm) {
+      setShowRejectForm(false);
+      return;
+    }
+    onBack();
   }, [onBack, showRejectForm]);
+
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, handleEscapeBack, true);
 
   const handleApprove = useCallback(async () => {
     if (!issue || isApproving) return;

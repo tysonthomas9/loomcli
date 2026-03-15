@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
+import { useRegisterEscapeLayer, LAYER_MODAL } from "@/hooks";
 import styles from "./BackendPickerPrompt.module.css";
 
 export interface BackendPickerPromptProps {
@@ -38,19 +39,8 @@ export function BackendPickerPrompt({
     }
   }, [isOpen, availableBackends]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onCancel]);
+  // Escape key via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_MODAL, onCancel, isOpen);
 
   const handleSubmit = useCallback(
     (event: React.FormEvent) => {

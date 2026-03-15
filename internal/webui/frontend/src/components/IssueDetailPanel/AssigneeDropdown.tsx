@@ -196,12 +196,10 @@ export function AssigneeDropdown({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
-  // Handle escape key to close
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+  const handleDropdownKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
         if (confirmAgent) {
           setConfirmAgent(null);
         } else {
@@ -210,11 +208,9 @@ export function AssigneeDropdown({
           triggerRef.current?.focus();
         }
       }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, confirmAgent]);
+    },
+    [confirmAgent],
+  );
 
   const handleTriggerClick = useCallback(() => {
     if (disabled || isSaving) return;
@@ -344,7 +340,11 @@ export function AssigneeDropdown({
       </button>
 
       {isOpen && (
-        <div className={styles.menu} data-testid="assignee-dropdown-menu">
+        <div
+          className={styles.menu}
+          data-testid="assignee-dropdown-menu"
+          onKeyDown={handleDropdownKeyDown}
+        >
           {/* Confirmation dialog for agent reassignment */}
           {confirmAgent && (
             <div

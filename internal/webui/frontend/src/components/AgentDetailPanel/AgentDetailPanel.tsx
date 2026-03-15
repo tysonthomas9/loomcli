@@ -7,7 +7,13 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 
 import { ErrorDisplay } from "@/components";
-import { useAgentTerminalLogs, useFocusReturn, useFocusTrap } from "@/hooks";
+import {
+  useAgentTerminalLogs,
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  LAYER_AGENT_PANEL,
+} from "@/hooks";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
 
@@ -81,19 +87,8 @@ export function AgentDetailPanel({
     setActiveTab("info");
   }, [agentName]);
 
-  // Handle Escape key
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  // Handle Escape key via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_AGENT_PANEL, onClose, isOpen);
 
   // Lock body scroll when open
   useEffect(() => {

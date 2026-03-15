@@ -28,21 +28,24 @@ import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import { IssueDetailPanel } from "../IssueDetailPanel";
 
 // Create hoisted mocks
-const { mockUseAgentTerminalLogs } = vi.hoisted(() => ({
-  mockUseAgentTerminalLogs: vi.fn(() => ({
-    mode: "idle" as const,
-    chunks: [],
-    state: "disconnected" as const,
-    error: null,
-    resetVersion: 0,
-    refresh: vi.fn(),
-    resize: vi.fn(),
-    sendInput: vi.fn(),
-    loadOlderLogs: vi.fn(),
-    hasMoreLines: false,
-    isLoadingMore: false,
-  })),
-}));
+const { mockUseAgentTerminalLogs, mockUseRegisterEscapeLayer } = vi.hoisted(
+  () => ({
+    mockUseAgentTerminalLogs: vi.fn(() => ({
+      mode: "idle" as const,
+      chunks: [],
+      state: "disconnected" as const,
+      error: null,
+      resetVersion: 0,
+      refresh: vi.fn(),
+      resize: vi.fn(),
+      sendInput: vi.fn(),
+      loadOlderLogs: vi.fn(),
+      hasMoreLines: false,
+      isLoadingMore: false,
+    })),
+    mockUseRegisterEscapeLayer: vi.fn(),
+  }),
+);
 
 // Mock the API module
 vi.mock("@/api", () => ({
@@ -58,6 +61,22 @@ vi.mock("@/hooks", async (importOriginal) => {
   return {
     ...orig,
     useAgentTerminalLogs: mockUseAgentTerminalLogs,
+    useRegisterEscapeLayer: mockUseRegisterEscapeLayer,
+    useKeyboardShortcuts: vi.fn(() => ({
+      isCheatsheetOpen: false,
+      toggleCheatsheet: vi.fn(),
+      closeCheatsheet: vi.fn(),
+    })),
+    KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+      children,
+    LAYER_CONFIRM_DIALOG: 60,
+    LAYER_TOAST: 50,
+    LAYER_CHEATSHEET: 45,
+    LAYER_MODAL: 40,
+    LAYER_TERMINAL_PANEL: 30,
+    LAYER_AGENT_PANEL: 20,
+    LAYER_ISSUE_PANEL: 10,
+    LAYER_TERMINAL_SEARCH: 5,
   };
 });
 
@@ -222,12 +241,20 @@ describe("IssueDetailPanel", () => {
     });
 
     it("calls onClose when pressing Escape", () => {
+      mockUseRegisterEscapeLayer.mockClear();
       const mockIssue = createTestIssue();
       const onClose = vi.fn();
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={onClose} />,
       );
-      fireEvent.keyDown(document, { key: "Escape" });
+      // useRegisterEscapeLayer is mocked; verify it was called with the right args
+      // and manually invoke the registered handler to simulate Escape
+      const call = mockUseRegisterEscapeLayer.mock.calls.find(
+        (c: unknown[]) => c[2] === true, // active=true
+      );
+      expect(call).toBeDefined();
+      const handler = call![1] as () => void;
+      handler();
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 

@@ -3,9 +3,14 @@
  * Opens from the right side, covering 50% of the screen.
  */
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useRef } from "react";
 
-import { useFocusReturn, useFocusTrap } from "@/hooks";
+import {
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  LAYER_TERMINAL_PANEL,
+} from "@/hooks";
 import type { LoomTaskInfo } from "@/types";
 
 import styles from "./TaskDrawer.module.css";
@@ -73,20 +78,8 @@ export function TaskDrawer({
   useFocusReturn(isOpen);
   useFocusTrap(drawerRef, isOpen);
 
-  // Handle escape key to close drawer
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
-      }
-    },
-    [isOpen, onClose],
-  );
-
-  useEffect(() => {
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+  // Handle escape key to close drawer via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_TERMINAL_PANEL, onClose, isOpen);
 
   // Prevent body scroll when drawer is open
   useEffect(() => {

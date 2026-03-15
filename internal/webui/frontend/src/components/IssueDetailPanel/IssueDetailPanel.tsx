@@ -15,7 +15,13 @@ import {
 } from "@/api";
 import { deleteTabMetadata, scheduleSessionKill } from "@/api/terminal";
 import type { IssueTab } from "@/api/issueTabs";
-import { useAgentTerminalLogs, useFocusReturn, useFocusTrap } from "@/hooks";
+import {
+  useAgentTerminalLogs,
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  LAYER_ISSUE_PANEL,
+} from "@/hooks";
 import { useAgentContext } from "@/hooks/useAgentContext";
 import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
@@ -589,17 +595,14 @@ function DefaultContent({
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, [showAddTabDropdown]);
 
-  // Close add-tab dropdown on Escape
-  useEffect(() => {
-    if (!showAddTabDropdown) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setShowAddTabDropdown(false);
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [showAddTabDropdown]);
+  // Close add-tab dropdown on Escape — handled via onKeyDown on the dropdown
+  // element with stopPropagation to prevent the global handler from also firing.
+  const handleAddTabKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setShowAddTabDropdown(false);
+    }
+  }, []);
 
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);
@@ -1079,6 +1082,7 @@ function DefaultContent({
               <div
                 className={styles.addTabDropdown}
                 data-testid="add-tab-dropdown"
+                onKeyDown={handleAddTabKeyDown}
               >
                 <button
                   type="button"
@@ -1357,19 +1361,8 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Handle Escape key to close panel
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  // Handle Escape key to close panel via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen);
 
   // Lock body scroll when open, restoring previous value on close.
   // Note: Only ONE panel should be open at a time. Multiple concurrent panels

@@ -134,7 +134,8 @@ describe("BackendSelectorDropdown", () => {
       );
       fireEvent.click(screen.getByTestId("backend-selector-trigger"));
       expect(screen.getByTestId("backend-selector-menu")).toBeInTheDocument();
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("backend-selector-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(
         screen.queryByTestId("backend-selector-menu"),
       ).not.toBeInTheDocument();

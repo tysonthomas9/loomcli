@@ -79,23 +79,6 @@ export function BackendSelectorDropdown({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
-  // Handle escape key to close
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-        setSearchQuery("");
-        setFocusedIndex(-1);
-        triggerRef.current?.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
-
   // Filter backends by search query
   const filteredBackends = useMemo(() => {
     if (!searchQuery) return backends;
@@ -204,6 +187,14 @@ export function BackendSelectorDropdown({
           if (enabledIndices.length > 0) {
             setFocusedIndex(enabledIndices[enabledIndices.length - 1] ?? -1);
           }
+          break;
+        }
+        case "Escape": {
+          event.stopPropagation();
+          setIsOpen(false);
+          setSearchQuery("");
+          setFocusedIndex(-1);
+          triggerRef.current?.focus();
           break;
         }
       }

@@ -7,6 +7,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 
+import { useRegisterEscapeLayer, LAYER_CONFIRM_DIALOG } from "@/hooks";
 import styles from "./ConfirmDialog.module.css";
 
 export interface ConfirmDialogProps {
@@ -40,20 +41,8 @@ export function ConfirmDialog({
     }
   }, [isOpen]);
 
-  // Escape key to cancel
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        // stopImmediatePropagation prevents other handlers (e.g., panel close)
-        // from also firing on the same Escape press.
-        e.stopImmediatePropagation();
-        onCancel();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown, true);
-    return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [isOpen, onCancel]);
+  // Escape key to cancel via global shortcut layer system (highest priority)
+  useRegisterEscapeLayer(LAYER_CONFIRM_DIALOG, onCancel, isOpen);
 
   // Focus trap: keep Tab cycling between the two buttons
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {

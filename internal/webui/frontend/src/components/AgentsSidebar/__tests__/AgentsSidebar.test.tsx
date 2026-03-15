@@ -65,6 +65,22 @@ vi.mock("@/hooks", () => ({
   useRepoFilter: () => [mockSelectedRepos, vi.fn()],
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
+  useRegisterEscapeLayer: vi.fn(),
+  useKeyboardShortcuts: vi.fn(() => ({
+    isCheatsheetOpen: false,
+    toggleCheatsheet: vi.fn(),
+    closeCheatsheet: vi.fn(),
+  })),
+  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  LAYER_CONFIRM_DIALOG: 60,
+  LAYER_TOAST: 50,
+  LAYER_CHEATSHEET: 45,
+  LAYER_MODAL: 40,
+  LAYER_TERMINAL_PANEL: 30,
+  LAYER_AGENT_PANEL: 20,
+  LAYER_ISSUE_PANEL: 10,
+  LAYER_TERMINAL_SEARCH: 5,
 }));
 
 const mockGitPushAll = vi.fn();

@@ -80,20 +80,14 @@ export function StartWorkButton({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
-  // Handle Escape key
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-        triggerRef.current?.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
+  // Handle Escape key (local handler with stopPropagation)
+  const handlePopoverKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    }
+  }, []);
 
   const handleTriggerClick = useCallback(() => {
     if (disabled || isAssigning) return;
@@ -172,7 +166,11 @@ export function StartWorkButton({
       </button>
 
       {isOpen && (
-        <div className={styles.popover} data-testid="start-work-popover">
+        <div
+          className={styles.popover}
+          data-testid="start-work-popover"
+          onKeyDown={handlePopoverKeyDown}
+        >
           {!isConnected && (
             <div
               className={styles.connectionWarning}

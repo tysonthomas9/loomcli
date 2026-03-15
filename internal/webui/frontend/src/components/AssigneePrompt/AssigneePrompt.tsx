@@ -6,7 +6,12 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-import { useFocusReturn, useFocusTrap } from "@/hooks";
+import {
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  LAYER_MODAL,
+} from "@/hooks";
 import styles from "./AssigneePrompt.module.css";
 
 /**
@@ -58,20 +63,8 @@ export function AssigneePrompt({
     }
   }, [isOpen]);
 
-  // Handle Escape key to skip
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onSkip();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onSkip]);
+  // Handle Escape key to skip via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_MODAL, onSkip, isOpen);
 
   // Handle form submission
   const handleSubmit = useCallback(
