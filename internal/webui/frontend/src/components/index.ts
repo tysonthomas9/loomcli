@@ -60,6 +60,7 @@ export * from "./TerminalView";
 export * from "./RepoBadge";
 export * from "./RepoSelector";
 export * from "./WorkspaceBreadcrumb";
+export * from "./WorkspaceSwitcher";
 export * from "./WorkspaceTree";
 export * from "./DaemonUnavailableOverlay";
 export * from "./KeyboardCheatsheet";

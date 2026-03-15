@@ -35,6 +35,7 @@ import type { ViewMode } from "@/components/ViewSwitcher";
 export const LAYER_CONFIRM_DIALOG = 60;
 export const LAYER_TOAST = 50;
 export const LAYER_CHEATSHEET = 45;
+export const LAYER_WORKSPACE_SWITCHER = 42;
 export const LAYER_MODAL = 40;
 export const LAYER_TERMINAL_PANEL = 30;
 export const LAYER_AGENT_PANEL = 20;
@@ -157,6 +158,10 @@ export interface KeyboardShortcutProviderProps {
   onViewChange?: (view: ViewMode) => void;
   onSearchFocus?: () => void;
   onArrowNav?: (event: KeyboardEvent) => void;
+  /** Opens the workspace quick-switcher (Cmd/Ctrl+K in multi-repo mode) */
+  onWorkspaceSwitcher?: () => void;
+  /** Direct workspace switching via Cmd/Ctrl+Shift+1-9 */
+  onWorkspacePositionalSwitch?: (index: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +172,8 @@ export function KeyboardShortcutProvider({
   onViewChange,
   onSearchFocus,
   onArrowNav,
+  onWorkspaceSwitcher,
+  onWorkspacePositionalSwitch,
 }: KeyboardShortcutProviderProps) {
   const [isCheatsheetOpen, setIsCheatsheetOpen] = useState(false);
 
@@ -177,6 +184,10 @@ export function KeyboardShortcutProvider({
   onSearchFocusRef.current = onSearchFocus;
   const onArrowNavRef = useRef(onArrowNav);
   onArrowNavRef.current = onArrowNav;
+  const onWorkspaceSwitcherRef = useRef(onWorkspaceSwitcher);
+  onWorkspaceSwitcherRef.current = onWorkspaceSwitcher;
+  const onWorkspacePositionalSwitchRef = useRef(onWorkspacePositionalSwitch);
+  onWorkspacePositionalSwitchRef.current = onWorkspacePositionalSwitch;
 
   // Global keydown listener for non-Escape shortcuts
   useEffect(() => {
@@ -186,10 +197,31 @@ export function KeyboardShortcutProvider({
 
       const inInput = isInputFocused(event);
 
-      // Cmd/Ctrl+K: handle even in inputs (override browser default)
+      // Cmd/Ctrl+K: workspace switcher (multi-repo) or search focus (single-repo)
+      // Fires even in inputs (override browser default)
       if (event.key === "k" && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
-        onSearchFocusRef.current?.();
+        if (onWorkspaceSwitcherRef.current) {
+          onWorkspaceSwitcherRef.current();
+        } else {
+          onSearchFocusRef.current?.();
+        }
+        return;
+      }
+
+      // Cmd/Ctrl+Shift+1-9: workspace positional switching
+      // Fires even in inputs (override browser default)
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key >= "1" &&
+        event.key <= "9"
+      ) {
+        const index = parseInt(event.key, 10) - 1;
+        if (onWorkspacePositionalSwitchRef.current) {
+          event.preventDefault();
+          onWorkspacePositionalSwitchRef.current(index);
+        }
         return;
       }
 

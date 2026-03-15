@@ -45,6 +45,7 @@ import {
   NavRail,
   ThemeToggle,
   KeyboardCheatsheet,
+  WorkspaceSwitcher,
 } from "@/components";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import type { BlockedInfo } from "@/components/KanbanBoard";
@@ -343,6 +344,9 @@ function App() {
     : agentConnectionLost
       ? agentRetryNow
       : retryConnection;
+
+  // Workspace quick-switcher state (Cmd/Ctrl+K in multi-repo mode)
+  const [isWorkspaceSwitcherOpen, setIsWorkspaceSwitcherOpen] = useState(false);
 
   // Assignee prompt state for Ready → In Progress drag
   const { recentAssignees, addRecentAssignee } = useRecentAssignees();
@@ -701,10 +705,27 @@ function App() {
     setPendingIssueContext(undefined);
   }, []);
 
-  // Focus search input (for Cmd/Ctrl+K shortcut)
+  // Focus search input (for Cmd/Ctrl+K shortcut in single-repo mode)
   const handleSearchFocus = useCallback(() => {
     searchInputRef.current?.focus();
   }, []);
+
+  // Open workspace quick-switcher (Cmd/Ctrl+K in multi-repo mode)
+  const handleWorkspaceSwitcherToggle = useCallback(() => {
+    setIsWorkspaceSwitcherOpen((prev) => !prev);
+  }, []);
+
+  // Direct workspace switching via Cmd/Ctrl+Shift+1-9
+  const handleWorkspacePositionalSwitch = useCallback(
+    (index: number) => {
+      const workspaces = workspace?.workspaces ?? [];
+      const ws = workspaces[index];
+      if (ws) {
+        handleWorkspaceSelect(ws.name);
+      }
+    },
+    [workspace, handleWorkspaceSelect],
+  );
 
   // Handle task click from agent panel (opens issue panel overlay)
   const handleAgentTaskClick = useCallback(
@@ -931,6 +952,10 @@ function App() {
     <KeyboardShortcutProvider
       onViewChange={setActiveView}
       onSearchFocus={handleSearchFocus}
+      {...(isMultiRepo && {
+        onWorkspaceSwitcher: handleWorkspaceSwitcherToggle,
+        onWorkspacePositionalSwitch: handleWorkspacePositionalSwitch,
+      })}
     >
       <SearchTermProvider value={debouncedSearch}>
         <AppLayout
@@ -1123,6 +1148,15 @@ function App() {
         )}
       </SearchTermProvider>
       <KeyboardCheatsheet />
+      {isMultiRepo && (
+        <WorkspaceSwitcher
+          isOpen={isWorkspaceSwitcherOpen}
+          workspaces={workspace?.workspaces ?? []}
+          activeWorkspaceName={workspace?.name ?? null}
+          onSelect={handleWorkspaceSelect}
+          onClose={() => setIsWorkspaceSwitcherOpen(false)}
+        />
+      )}
     </KeyboardShortcutProvider>
   );
 }
