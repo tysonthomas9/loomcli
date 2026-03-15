@@ -17,6 +17,7 @@ import {
   useViewState,
   useAgents,
   useAgentContext,
+  useWorkspaceContext,
 } from "@/hooks";
 import { useIssues } from "@/hooks/useIssues";
 import type { Issue, Status } from "@/types";
@@ -182,6 +183,13 @@ vi.mock("@/components/FileExplorer", () => ({
   FileExplorer: () => <div data-testid="file-explorer">File Explorer</div>,
 }));
 
+// Mock WorkspaceView to avoid lazy-loading issues in jsdom
+vi.mock("@/components/WorkspaceView", () => ({
+  WorkspaceView: () => (
+    <div data-testid="workspace-view">Workspace View</div>
+  ),
+}));
+
 // Create hoisted mock for useViewState to allow per-test control
 const { mockUseViewState, mockSetActiveView, mockSetDetailView } = vi.hoisted(
   () => ({
@@ -307,6 +315,12 @@ vi.mock("@/hooks", () => ({
     setTheme: vi.fn(),
   })),
   useRepoFilter: vi.fn(() => [[], vi.fn()]),
+  useWorkspaceRepos: vi.fn(() => ({
+    repos: [],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
   useWorkspaceContext: vi.fn(() => ({
     workspace: null,
     repos: [],
@@ -2908,6 +2922,304 @@ describe("App", () => {
           type: "error",
         });
       });
+    });
+  });
+
+  describe("sidebar isMultiRepo guard", () => {
+    it("does not render WorkspaceTree sidebar when isMultiRepo is false and activeView is workspace", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: null,
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: null,
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: false,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // WorkspaceTree renders an aria-label with "workspace tree" text
+      expect(
+        screen.queryByLabelText(/workspace tree/i),
+      ).not.toBeInTheDocument();
+      // AgentsSidebar should be shown instead (rendered with collapsible=false, shows "Agents" text)
+      expect(screen.getByText("Agents")).toBeInTheDocument();
+    });
+
+    it("renders WorkspaceTree sidebar when isMultiRepo is true and activeView is workspace", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // WorkspaceTree renders a button with aria-label containing "workspace tree"
+      expect(
+        screen.getByLabelText(/workspace tree/i),
+      ).toBeInTheDocument();
+    });
+
+    it("renders AgentsSidebar when isMultiRepo is true but activeView is not workspace", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // AgentsSidebar should be shown, not WorkspaceTree
+      expect(
+        screen.queryByLabelText(/workspace tree/i),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Agents")).toBeInTheDocument();
+    });
+
+    it("renders AgentsSidebar during loading when isMultiRepo is false and activeView is workspace", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: null,
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: null,
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: false,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      const mockReturn = createMockUseIssuesReturn({ isLoading: true });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // In loading state, single-repo should still show AgentsSidebar, not WorkspaceTree
+      expect(
+        screen.queryByLabelText(/workspace tree/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders WorkspaceTree during loading when isMultiRepo is true and activeView is workspace", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      const mockReturn = createMockUseIssuesReturn({ isLoading: true });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // In loading state, multi-repo + workspace view should show WorkspaceTree
+      expect(
+        screen.getByLabelText(/workspace tree/i),
+      ).toBeInTheDocument();
+    });
+
+    it("renders AgentsSidebar during error when isMultiRepo is false and activeView is workspace", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: null,
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: null,
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: false,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("workspace"));
+      const mockReturn = createMockUseIssuesReturn({
+        error: "Something went wrong",
+        isLoading: false,
+      });
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // In error state, single-repo should still show AgentsSidebar
+      expect(
+        screen.queryByLabelText(/workspace tree/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("WorkspaceBreadcrumb isMultiRepo guard", () => {
+    it("renders Cortex fallback in breadcrumb when isMultiRepo is false", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: false,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // Even though workspace has a name, isMultiRepo=false passes null to WorkspaceBreadcrumb
+      // which renders "Cortex" fallback
+      expect(
+        screen.getByRole("heading", { name: "Cortex", level: 1 }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("my-workspace")).not.toBeInTheDocument();
+    });
+
+    it("renders workspace name in breadcrumb when isMultiRepo is true", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+      mockUseViewState.mockReturnValue(createViewStateReturn("kanban"));
+      const mockReturn = createMockUseIssuesReturn({});
+      vi.mocked(useIssues).mockReturnValue(mockReturn);
+
+      render(<App />);
+
+      // isMultiRepo=true passes workspace.name to WorkspaceBreadcrumb
+      expect(screen.getByText("my-workspace")).toBeInTheDocument();
     });
   });
 });

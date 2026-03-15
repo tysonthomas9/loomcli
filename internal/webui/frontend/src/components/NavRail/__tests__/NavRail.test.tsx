@@ -12,7 +12,20 @@ import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 import { NavRail } from "../NavRail";
 
+// Mock useWorkspaceContext — default to single-repo (isMultiRepo: false)
+const mockUseWorkspaceContext = vi.fn(() => ({
+  isMultiRepo: false,
+}));
+
+vi.mock("@/hooks", () => ({
+  useWorkspaceContext: (...args: unknown[]) => mockUseWorkspaceContext(...args),
+}));
+
 describe("NavRail", () => {
+  beforeEach(() => {
+    mockUseWorkspaceContext.mockReturnValue({ isMultiRepo: false });
+  });
+
   describe("rendering", () => {
     it("renders a Kanban button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
@@ -50,13 +63,28 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Terminal")).toBeInTheDocument();
     });
 
-    it("renders a Workspace button", () => {
+    it("hides Workspace button in single-repo mode", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
+    });
+
+    it("shows Workspace button in multi-repo mode", () => {
+      mockUseWorkspaceContext.mockReturnValue({ isMultiRepo: true });
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       expect(screen.getByLabelText("Workspace")).toBeInTheDocument();
     });
 
-    it("renders exactly seven navigation buttons", () => {
+    it("renders exactly six navigation buttons in single-repo mode", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      const buttons = screen.getAllByRole("button");
+      expect(buttons).toHaveLength(6);
+    });
+
+    it("renders seven navigation buttons in multi-repo mode", () => {
+      mockUseWorkspaceContext.mockReturnValue({ isMultiRepo: true });
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
@@ -69,7 +97,7 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Files")).toBeInTheDocument();
     });
 
-    it("renders tooltips for each button", () => {
+    it("renders tooltips for each button in single-repo mode", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       expect(
@@ -80,8 +108,8 @@ describe("NavRail", () => {
         screen.getByRole("tooltip", { name: "Observability" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole("tooltip", { name: "Workspace" }),
-      ).toBeInTheDocument();
+        screen.queryByRole("tooltip", { name: "Workspace" }),
+      ).not.toBeInTheDocument();
       expect(
         screen.getByRole("tooltip", { name: "Files" }),
       ).toBeInTheDocument();

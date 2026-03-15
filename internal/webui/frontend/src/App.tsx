@@ -115,8 +115,8 @@ function App() {
   // Theme state
   const { theme, toggleTheme } = useTheme();
 
-  // Workspace context for breadcrumb
-  const { workspace } = useWorkspaceContext();
+  // Workspace context for breadcrumb and single-repo guard
+  const { workspace, isMultiRepo } = useWorkspaceContext();
 
   // View state must be read before useIssues to determine fetch mode
   const [activeView, setActiveView] = useViewState();
@@ -284,6 +284,13 @@ function App() {
       clearTimeoutRef(agentPanelTimeoutRef);
     };
   }, [clearTimeoutRef]);
+
+  // Redirect away from workspace view in single-repo mode (e.g. stale URL bookmark)
+  useEffect(() => {
+    if (!isMultiRepo && activeView === "workspace") {
+      setActiveView("kanban");
+    }
+  }, [isMultiRepo, activeView, setActiveView]);
 
   const handleDragEnd = useCallback(
     async (issueId: string, newStatus: Status, oldStatus: Status) => {
@@ -590,7 +597,7 @@ function App() {
 
   const headerTitle = (
     <WorkspaceBreadcrumb
-      workspaceName={workspace?.name ?? null}
+      workspaceName={isMultiRepo ? (workspace?.name ?? null) : null}
       activeView={activeView}
     />
   );
@@ -618,7 +625,7 @@ function App() {
         actions={headerActions}
         navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
         sidebar={
-          activeView === "workspace" ? (
+          activeView === "workspace" && isMultiRepo ? (
             <WorkspaceTree onRepoClick={handleRepoClick} />
           ) : (
             <AgentsSidebar
@@ -650,7 +657,7 @@ function App() {
         actions={headerActions}
         navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
         sidebar={
-          activeView === "workspace" ? (
+          activeView === "workspace" && isMultiRepo ? (
             <WorkspaceTree onRepoClick={handleRepoClick} />
           ) : (
             <AgentsSidebar
@@ -679,7 +686,7 @@ function App() {
       actions={headerActions}
       navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
       sidebar={
-        activeView === "workspace" ? (
+        activeView === "workspace" && isMultiRepo ? (
           <WorkspaceTree onRepoClick={handleRepoClick} />
         ) : (
           <AgentsSidebar
@@ -753,7 +760,7 @@ function App() {
           <SettingsView />
         </Suspense>
       )}
-      {activeView === "workspace" && (
+      {activeView === "workspace" && isMultiRepo && (
         <Suspense fallback={<LoadingSkeleton.Column />}>
           <WorkspaceView />
         </Suspense>

@@ -4,6 +4,7 @@
  */
 
 import type { ViewMode } from "@/components/ViewSwitcher";
+import { useWorkspaceContext } from "@/hooks";
 
 import styles from "./NavRail.module.css";
 
@@ -253,7 +254,11 @@ export function NavRail({
   onChange,
   className,
 }: NavRailProps): JSX.Element {
+  const { isMultiRepo } = useWorkspaceContext();
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
+  const topItems = isMultiRepo
+    ? TOP_ITEMS
+    : TOP_ITEMS.filter((item) => item.id !== "workspace");
 
   const renderButton = (item: NavItem) => {
     const isActive = activeView === item.id;
@@ -276,7 +281,7 @@ export function NavRail({
 
   return (
     <nav className={rootClassName} aria-label="Primary">
-      {TOP_ITEMS.map(renderButton)}
+      {topItems.map(renderButton)}
       <div className={styles.spacer} />
       {BOTTOM_ITEMS.map(renderButton)}
     </nav>
