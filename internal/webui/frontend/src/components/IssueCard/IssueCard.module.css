@@ -332,6 +332,22 @@
 }
 
 /* =================================
+ * Session badge styling
+ * Small terminal icon shown when issue has an active terminal session
+ * ================================= */
+
+.sessionBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  opacity: 0.5;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* =================================
  * Card footer zone
  * Shows repo badge below title in multi-repo workspaces
  * ================================= */

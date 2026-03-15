@@ -6,7 +6,13 @@ import { migrateLocalStorage } from "@/utils/migrateLocalStorage";
 import { initAuth, getAuthState } from "@/api";
 import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { ToastProvider, AgentProvider, WorkspaceProvider } from "@/hooks";
+import {
+  ToastProvider,
+  AgentProvider,
+  WorkspaceProvider,
+  useIssueSessionMap,
+} from "@/hooks";
+import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
 import {
   IssueDetailPanelFixture,
   ErrorTriggerFixture,
@@ -20,6 +26,15 @@ migrateLocalStorage();
 const rootElement = document.getElementById("root");
 if (!rootElement) {
   throw new Error("Failed to find root element");
+}
+
+function IssueSessionWrapper({ children }: { children: React.ReactNode }) {
+  const issueSessionMap = useIssueSessionMap();
+  return (
+    <IssueSessionProvider value={issueSessionMap}>
+      {children}
+    </IssueSessionProvider>
+  );
 }
 
 // Simple path-based routing for test fixtures (development only)
@@ -65,7 +80,9 @@ initAuth()
         <ErrorBoundary>
           <ToastProvider>
             <WorkspaceProvider>
-              <AgentProvider>{getComponent()}</AgentProvider>
+              <AgentProvider>
+                <IssueSessionWrapper>{getComponent()}</IssueSessionWrapper>
+              </AgentProvider>
             </WorkspaceProvider>
           </ToastProvider>
         </ErrorBoundary>

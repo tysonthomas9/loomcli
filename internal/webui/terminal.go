@@ -609,17 +609,3 @@ func (m *TerminalManager) CancelPendingKill(name string) bool {
 	}
 	return false
 }
-
-// HasActiveConnections reports whether there are any active PTY connections
-// to the named session (using the user-facing name, prefix applied internally).
-func (m *TerminalManager) HasActiveConnections(name string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	internalName := m.tmuxName(name)
-	for _, sess := range m.sessions {
-		if sess.Name == internalName {
-			return true
-		}
-	}
-	return false
-}

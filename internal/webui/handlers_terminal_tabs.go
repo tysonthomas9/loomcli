@@ -108,6 +108,7 @@ type tabPatchRequest struct {
 	Label     *string `json:"label"`
 	Notes     *string `json:"notes"`
 	SortOrder *int    `json:"sort_order"`
+	IssueID   *string `json:"issue_id"`
 }
 
 // handlePatchTerminalTab partially updates tab metadata and broadcasts an SSE event.
@@ -141,6 +142,7 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 		}
 
 		// Build partial fields map
+		issueIDChanged := false
 		fields := make(map[string]string)
 		if req.Label != nil {
 			fields["label"] = *req.Label
@@ -150,6 +152,10 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 		}
 		if req.SortOrder != nil {
 			fields["sort_order"] = fmt.Sprintf("%d", *req.SortOrder)
+		}
+		if req.IssueID != nil {
+			fields["issue_id"] = *req.IssueID
+			issueIDChanged = true
 		}
 
 		if len(fields) == 0 {
@@ -178,7 +184,14 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 		if hub != nil {
 			hub.Broadcast(&MutationPayload{
 				Type:      "terminal_metadata",
-				IssueID:   session,
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
+		}
+
+		// Broadcast additional terminal_session_change event when issue linkage changes
+		if issueIDChanged && hub != nil {
+			hub.Broadcast(&MutationPayload{
+				Type:      "terminal_session_change",
 				Timestamp: time.Now().UTC().Format(time.RFC3339),
 			})
 		}
@@ -258,7 +271,6 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 		if hub != nil {
 			hub.Broadcast(&MutationPayload{
 				Type:      "terminal_metadata",
-				IssueID:   session,
 				Timestamp: time.Now().UTC().Format(time.RFC3339),
 			})
 		}
@@ -303,7 +315,6 @@ func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc
 		if hub != nil {
 			hub.Broadcast(&MutationPayload{
 				Type:      "terminal_metadata",
-				IssueID:   session,
 				Timestamp: time.Now().UTC().Format(time.RFC3339),
 			})
 		}

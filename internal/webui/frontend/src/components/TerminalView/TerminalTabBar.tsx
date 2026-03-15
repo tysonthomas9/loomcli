@@ -25,6 +25,7 @@ export interface TerminalTabBarProps {
   onToggleFullHeight: () => void;
   isFullHeight: boolean;
   onTabRename?: (tabId: string, newLabel: string) => void;
+  onCloseAll?: () => void;
 }
 
 export function TerminalTabBar({
@@ -36,6 +37,7 @@ export function TerminalTabBar({
   onToggleFullHeight,
   isFullHeight,
   onTabRename,
+  onCloseAll,
 }: TerminalTabBarProps): JSX.Element {
   const tabRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const tabListRef = useRef<HTMLDivElement | null>(null);
@@ -258,6 +260,17 @@ export function TerminalTabBar({
       >
         +
       </button>
+      {onCloseAll && tabs.length > 0 && (
+        <button
+          className={styles.actionButton}
+          onClick={onCloseAll}
+          aria-label="Close all sessions"
+          data-testid="terminal-close-all-button"
+          title="Close all sessions"
+        >
+          &#x2715;&#x2715;
+        </button>
+      )}
       <button
         className={styles.actionButton}
         onClick={onToggleFullHeight}

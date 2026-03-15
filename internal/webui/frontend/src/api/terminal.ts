@@ -108,6 +108,7 @@ export interface TabMetadata {
   label: string;
   notes: string;
   sort_order: number;
+  issue_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -137,7 +138,12 @@ export async function getTabMetadata(session: string): Promise<TabMetadata> {
  */
 export async function patchTabMetadata(
   session: string,
-  fields: Partial<{ label: string; notes: string; sort_order: number }>,
+  fields: Partial<{
+    label: string;
+    notes: string;
+    sort_order: number;
+    issue_id: string;
+  }>,
 ): Promise<TabMetadata> {
   const response = await patch<ApiResult<TabMetadata>>(
     `/api/terminal/tabs/${encodeURIComponent(session)}`,
@@ -178,4 +184,25 @@ export async function scheduleSessionKill(sessionName: string): Promise<void> {
     `/api/terminal/sessions/${encodeURIComponent(sessionName)}/kill`,
     {},
   );
+}
+
+// ============= Issue Session Management =============
+
+/**
+ * List sessions grouped by issue ID from GET /api/terminal/sessions/by-issue.
+ * Returns a map of issue_id → session_name[].
+ */
+export async function listSessionsByIssue(): Promise<Record<string, string[]>> {
+  const response = await get<ApiResult<Record<string, string[]>>>(
+    "/api/terminal/sessions/by-issue",
+  );
+  return unwrap(response);
+}
+
+/**
+ * Close all terminal sessions via POST /api/terminal/sessions/close-all.
+ * Kills all tmux sessions and clears all tab metadata.
+ */
+export async function closeAllSessions(): Promise<void> {
+  await post<{ success: boolean }>("/api/terminal/sessions/close-all", {});
 }

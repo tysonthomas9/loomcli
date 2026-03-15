@@ -22,6 +22,8 @@ export interface UseTerminalMetadataReturn {
   updateNotes: (session: string, notes: string) => Promise<void>;
   reorderTabs: (orderedSessionNames: string[]) => Promise<void>;
   deleteTab: (session: string) => Promise<void>;
+  linkToIssue: (session: string, issueId: string) => Promise<void>;
+  unlinkFromIssue: (session: string) => Promise<void>;
   refetch: () => Promise<void>;
   /** Call this from an SSE onMutation handler to trigger debounced refetch */
   handleMutation: (mutation: MutationPayload) => void;
@@ -177,6 +179,44 @@ export function useTerminalMetadata(): UseTerminalMetadataReturn {
     }
   }, []);
 
+  const linkToIssue = useCallback(async (session: string, issueId: string) => {
+    let prev: TabMetadata[] = [];
+    setTabs((current) => {
+      prev = current;
+      return current.map((t) =>
+        t.session_name === session ? { ...t, issue_id: issueId } : t,
+      );
+    });
+    try {
+      await patchTabMetadata(session, { issue_id: issueId });
+    } catch (err) {
+      if (mountedRef.current) {
+        setTabs(prev);
+        setError(err instanceof Error ? err : new Error(String(err)));
+      }
+    }
+  }, []);
+
+  const unlinkFromIssue = useCallback(async (session: string) => {
+    let prev: TabMetadata[] = [];
+    setTabs((current) => {
+      prev = current;
+      return current.map((t) => {
+        if (t.session_name !== session) return t;
+        const { issue_id: _, ...rest } = t;
+        return rest;
+      });
+    });
+    try {
+      await patchTabMetadata(session, { issue_id: "" });
+    } catch (err) {
+      if (mountedRef.current) {
+        setTabs(prev);
+        setError(err instanceof Error ? err : new Error(String(err)));
+      }
+    }
+  }, []);
+
   const handleMutation = useCallback(
     (mutation: MutationPayload) => {
       if (mutation.type !== "terminal_metadata") return;
@@ -200,6 +240,8 @@ export function useTerminalMetadata(): UseTerminalMetadataReturn {
     updateNotes,
     reorderTabs,
     deleteTab,
+    linkToIssue,
+    unlinkFromIssue,
     refetch: fetchTabs,
     handleMutation,
   };

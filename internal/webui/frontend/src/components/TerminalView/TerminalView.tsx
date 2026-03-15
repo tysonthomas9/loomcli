@@ -29,11 +29,12 @@ import {
   MAX_TABS,
   BACKEND_BRAND_COLORS,
   type TabState,
-  getBackendFromSessionName,
   generateTabName,
   sanitizeSessionName,
 } from "./terminalTabUtils";
 import { useClipboard } from "./useClipboard";
+import { useSessionManagement } from "./useCloseAllSessions";
+import { useTabInit } from "./useTabInit";
 import styles from "./TerminalView.module.css";
 
 interface TerminalViewProps {
@@ -41,6 +42,7 @@ interface TerminalViewProps {
   pendingIssueContext?: IssueContext | undefined;
   onIssueContextConsumed?: (() => void) | undefined;
   onActiveSessionCountChange?: (count: number) => void;
+  issueId?: string;
 }
 
 export function TerminalView({
@@ -48,6 +50,7 @@ export function TerminalView({
   pendingIssueContext,
   onIssueContextConsumed,
   onActiveSessionCountChange,
+  issueId,
 }: TerminalViewProps): JSX.Element {
   const {
     tabs: tabMetadata,
@@ -80,86 +83,16 @@ export function TerminalView({
     handlePasteCancel,
   } = useClipboard(instanceRefs, activeTabIdRef);
 
-  // Initialize tabs from persisted metadata or auto-create from backend config
-  useEffect(() => {
-    if (initializedRef.current || metaLoading || configLoading) return;
-    initializedRef.current = true;
-
-    if (tabMetadata.length > 0) {
-      // Returning user: restore tabs from persisted metadata, sorted by sort_order
-      const defaultBackend = config?.backend;
-      const restoredTabs: TabState[] = tabMetadata
-        .map((m) => ({
-          id: m.session_name,
-          label: m.label,
-          sessionName: m.session_name,
-          connectionState: "disconnected" as ConnectionState,
-          backendName: getBackendFromSessionName(
-            m.session_name,
-            defaultBackend,
-          ),
-          _sortOrder: m.sort_order,
-        }))
-        .sort((a, b) => (a._sortOrder ?? 999) - (b._sortOrder ?? 999))
-        .map(({ _sortOrder: _, ...tab }) => tab);
-      setTabs(restoredTabs);
-
-      // Restore active tab from sessionStorage, falling back to first tab
-      const savedActiveId = sessionStorage.getItem("terminal-active-tab");
-      const restoredTab =
-        savedActiveId && restoredTabs.find((t) => t.id === savedActiveId);
-      setActiveTabId(
-        restoredTab ? restoredTab.id : (restoredTabs[0]?.id ?? ""),
-      );
-    } else {
-      // First open: auto-create one tab per available backend
-      const backends = config?.available ?? [];
-      if (backends.length === 0) {
-        // Fallback: create a single default tab
-        const fallbackTab: TabState = {
-          id: "talk-to-lead",
-          label: "talk-to-lead",
-          sessionName: "talk-to-lead",
-          connectionState: "disconnected" as ConnectionState,
-          backendName: config?.backend ?? "unknown",
-        };
-        setTabs([fallbackTab]);
-        setActiveTabId(fallbackTab.id);
-        createTab("talk-to-lead", "talk-to-lead", 0).catch((err) =>
-          console.error("Failed to persist fallback tab:", err),
-        );
-        return;
-      }
-
-      const newTabs: TabState[] = backends.map((backend) => {
-        const name = `lead-${backend}-1`;
-        return {
-          id: name,
-          label: name,
-          sessionName: name,
-          connectionState: "disconnected" as ConnectionState,
-          backendName: backend,
-        };
-      });
-      setTabs(newTabs);
-
-      // Set claude tab as active, or first tab if claude unavailable
-      const claudeTab = newTabs.find((t) =>
-        t.sessionName.startsWith("lead-claude-"),
-      );
-      setActiveTabId(claudeTab?.id ?? newTabs[0]?.id ?? "");
-
-      // Persist each auto-created tab via PUT (fire-and-forget with error logging)
-      newTabs.forEach((tab, i) => {
-        createTab(tab.sessionName, tab.label, i).catch((err) =>
-          console.error(
-            `Failed to persist auto-created tab ${tab.sessionName}:`,
-            err,
-          ),
-        );
-      });
-    }
-  }, [tabMetadata, metaLoading, config, configLoading, createTab]);
+  useTabInit({
+    tabMetadata,
+    metaLoading,
+    config: config ?? undefined,
+    configLoading,
+    createTab,
+    setTabs,
+    setActiveTabId,
+    initializedRef,
+  });
 
   // Persist active tab to sessionStorage so it survives page refreshes
   useEffect(() => {
@@ -391,6 +324,17 @@ export function TerminalView({
     setIsSearchOpen((prev) => !prev);
   }, []);
 
+  const handleCloseAll = useSessionManagement({
+    setTabs,
+    setActiveTabId,
+    instanceRefs,
+    initializedRef,
+    issueId,
+    tabs,
+    createTab,
+    backendName: config?.backend ?? "unknown",
+  });
+
   const handleToggleFullHeight = useCallback(() => {
     setIsFullHeight((prev) => !prev);
   }, []);
@@ -435,6 +379,7 @@ export function TerminalView({
             onNewTab={handleNewTabClick}
             onToggleFullHeight={handleToggleFullHeight}
             isFullHeight={isFullHeight}
+            onCloseAll={handleCloseAll}
           />
           <div className={styles.terminalsContainer}>
             {tabs.map((tab) => (

@@ -35,7 +35,7 @@ func init() {
 
 // MutationPayload represents mutation data sent to clients.
 type MutationPayload struct {
-	Type       string `json:"type"` // create, update, delete, comment, status, bonded, squashed, burned, refresh
+	Type       string `json:"type"` // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_session_change
 	IssueID    string `json:"issue_id"`
 	Title      string `json:"title,omitempty"`
 	Assignee   string `json:"assignee,omitempty"`

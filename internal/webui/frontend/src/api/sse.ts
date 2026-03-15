@@ -24,6 +24,7 @@ export type MutationType =
   | "burned"
   | "refresh"
   | "terminal_metadata"
+  | "terminal_session_change"
   | "issue_tabs";
 
 // Server → Client: Mutation payload

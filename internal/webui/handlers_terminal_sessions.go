@@ -13,9 +13,10 @@ import (
 
 // terminalSessionInfo describes a terminal session visible to the frontend.
 type terminalSessionInfo struct {
-	Name    string `json:"name"`    // user-facing name, e.g. "talk-to-lead"
-	Label   string `json:"label"`   // display label (same as name for now)
-	Created int64  `json:"created"` // Unix timestamp, 0 if session not yet created
+	Name    string `json:"name"`               // user-facing name, e.g. "talk-to-lead"
+	Label   string `json:"label"`              // display label (same as name for now)
+	Created int64  `json:"created"`            // Unix timestamp, 0 if session not yet created
+	IssueID string `json:"issue_id,omitempty"` // optional linked issue ID
 }
 
 type terminalSessionsResponse struct {
@@ -187,6 +188,96 @@ func handleScheduleSessionKill(manager *TerminalManager) http.HandlerFunc {
 		}
 
 		manager.ScheduleKill(session, sessionKillGracePeriod)
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+		})
+	}
+}
+
+// handleListSessionsByIssue returns a map of issue_id → session_names for all sessions linked to issues.
+// GET /api/terminal/sessions/by-issue
+func handleListSessionsByIssue(tabMetaStore *tabmeta.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if tabMetaStore == nil {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+				"success": false,
+				"error":   "tab metadata not available (no Redis)",
+			})
+			return
+		}
+
+		sessionMap, err := tabMetaStore.ListIssueSessionMap(r.Context())
+		if err != nil {
+			log.Printf("Failed to list sessions by issue: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "failed to list sessions by issue",
+			})
+			return
+		}
+
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"data":    sessionMap,
+		})
+	}
+}
+
+// handleCloseAllSessions kills all tmux sessions, deletes all tab metadata, and broadcasts SSE event.
+// POST /api/terminal/sessions/close-all
+func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if manager == nil {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+				"success": false,
+				"error":   "terminal manager not initialized",
+			})
+			return
+		}
+
+		// Kill all tmux sessions
+		if err := manager.KillAllSessions(); err != nil {
+			log.Printf("Failed to kill all sessions: %v", err)
+			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "failed to kill all sessions",
+			})
+			return
+		}
+
+		// Delete all tab metadata
+		metaCleanupFailed := false
+		if tabMetaStore != nil {
+			allTabs, err := tabMetaStore.List(r.Context())
+			if err != nil {
+				log.Printf("Failed to list tab metadata for cleanup: %v", err)
+				metaCleanupFailed = true
+			} else {
+				for _, tab := range allTabs {
+					if err := tabMetaStore.Delete(r.Context(), tab.SessionName); err != nil {
+						log.Printf("Failed to delete tab metadata for %s: %v", tab.SessionName, err)
+						metaCleanupFailed = true
+					}
+				}
+			}
+		}
+
+		// Broadcast SSE event
+		if hub != nil {
+			hub.Broadcast(&MutationPayload{
+				Type:      "terminal_session_change",
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
+		}
+
+		if metaCleanupFailed {
+			respondJSON(w, http.StatusOK, map[string]interface{}{
+				"success": true,
+				"warning": "sessions killed but metadata cleanup incomplete",
+			})
+			return
+		}
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{
 			"success": true,

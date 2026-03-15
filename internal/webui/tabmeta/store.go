@@ -29,6 +29,7 @@ type TabMetadata struct {
 	Label       string    `json:"label"`
 	Notes       string    `json:"notes"`
 	SortOrder   int       `json:"sort_order"`
+	IssueID     string    `json:"issue_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -136,6 +137,7 @@ func (s *Store) Set(ctx context.Context, meta *TabMetadata) error {
 		"label":      meta.Label,
 		"notes":      meta.Notes,
 		"sort_order": strconv.Itoa(meta.SortOrder),
+		"issue_id":   meta.IssueID,
 		"created_at": meta.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at": meta.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -244,12 +246,43 @@ func (s *Store) EnsureDefaults(ctx context.Context, activeSessions []string) ([]
 	return existing, nil
 }
 
+// ListByIssue returns all tab metadata associated with the given issue ID.
+func (s *Store) ListByIssue(ctx context.Context, issueID string) ([]TabMetadata, error) {
+	all, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var result []TabMetadata
+	for _, m := range all {
+		if m.IssueID == issueID {
+			result = append(result, m)
+		}
+	}
+	return result, nil
+}
+
+// ListIssueSessionMap returns a map of issue_id → []session_name for all sessions that have an issue_id set.
+func (s *Store) ListIssueSessionMap(ctx context.Context) (map[string][]string, error) {
+	all, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]string)
+	for _, m := range all {
+		if m.IssueID != "" {
+			result[m.IssueID] = append(result[m.IssueID], m.SessionName)
+		}
+	}
+	return result, nil
+}
+
 // parseMetadata converts a Redis hash map to a TabMetadata struct.
 func parseMetadata(sessionName string, vals map[string]string) (*TabMetadata, error) {
 	meta := &TabMetadata{
 		SessionName: sessionName,
 		Label:       vals["label"],
 		Notes:       vals["notes"],
+		IssueID:     vals["issue_id"],
 	}
 
 	if so, ok := vals["sort_order"]; ok {
