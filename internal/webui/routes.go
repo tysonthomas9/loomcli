@@ -54,6 +54,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	mux.HandleFunc("POST /api/issues/{id}/close", handleCloseIssue(pool))
 	mux.HandleFunc("DELETE /api/issues/{id}", handleDeleteIssue(pool))
 	mux.HandleFunc("POST /api/issues/{id}/comments", handleAddComment(pool))
+	mux.HandleFunc("GET /api/issues/{id}/events", handleGetIssueEvents(pool))
 
 	// Dependency management endpoints
 	mux.HandleFunc("POST /api/issues/{id}/dependencies", handleAddDependency(pool))

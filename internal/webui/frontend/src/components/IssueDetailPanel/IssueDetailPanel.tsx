@@ -7,7 +7,12 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
-import { updateIssue, addDependency, removeDependency } from "@/api";
+import {
+  updateIssue,
+  addDependency,
+  removeDependency,
+  getIssueEvents,
+} from "@/api";
 import { deleteTabMetadata, scheduleSessionKill } from "@/api/terminal";
 import type { IssueTab } from "@/api/issueTabs";
 import { useAgentTerminalLogs } from "@/hooks";
@@ -21,17 +26,18 @@ import type {
   IssueType,
   DependencyType,
   Comment,
+  Event,
 } from "@/types";
 import type { Status } from "@/types/status";
 import { getReviewType } from "@/utils/issueCategory";
 
 import type { ConnectionState } from "@/components/TerminalView";
 
+import { ActivityLog } from "./ActivityLog";
 import { AgentStatusBadge } from "./AgentStatusBadge";
 import { AssigneeDropdown } from "./AssigneeDropdown";
 import { StartWorkButton } from "./StartWorkButton";
 import { CommentForm } from "./CommentForm";
-import { CommentsSection } from "./CommentsSection";
 import { DependencySection } from "./DependencySection";
 import { LabelEditor } from "./LabelEditor";
 import { EditableDescription } from "./EditableDescription";
@@ -554,6 +560,9 @@ function DefaultContent({
     initialComments,
   );
 
+  // Local state for events (activity log)
+  const [events, setEvents] = useState<Event[]>([]);
+
   // Sync local comments when issue changes (e.g., different issue selected)
   useEffect(() => {
     if (issue && isIssueDetails(issue)) {
@@ -562,6 +571,27 @@ function DefaultContent({
       setLocalComments(undefined);
     }
   }, [issue]);
+
+  // Fetch events when issue changes
+  const eventIssueId = issue?.id;
+  useEffect(() => {
+    if (!eventIssueId) {
+      setEvents([]);
+      return;
+    }
+    let cancelled = false;
+    getIssueEvents(eventIssueId).then(
+      (data) => {
+        if (!cancelled) setEvents(data ?? []);
+      },
+      () => {
+        if (!cancelled) setEvents([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [eventIssueId]);
 
   // Handler for when a new comment is added
   const handleCommentAdded = useCallback((newComment: Comment) => {
@@ -1216,8 +1246,12 @@ function DefaultContent({
               </section>
             )}
 
-            {/* Comments */}
-            <CommentsSection comments={localComments} />
+            {/* Activity Log (comments + events) */}
+            <ActivityLog
+              comments={localComments ?? []}
+              events={events}
+              issueId={issue.id}
+            />
             <CommentForm
               issueId={issue.id}
               onCommentAdded={handleCommentAdded}

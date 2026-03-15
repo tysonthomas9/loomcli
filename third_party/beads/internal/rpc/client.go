@@ -426,6 +426,11 @@ func (c *Client) AddComment(args *CommentAddArgs) (*Response, error) {
 	return c.Execute(OpCommentAdd, args)
 }
 
+// ListEvents retrieves events for an issue via the daemon
+func (c *Client) ListEvents(args *EventListArgs) (*Response, error) {
+	return c.Execute(OpEventList, args)
+}
+
 // Batch executes multiple operations atomically
 func (c *Client) Batch(args *BatchArgs) (*Response, error) {
 	return c.Execute(OpBatch, args)

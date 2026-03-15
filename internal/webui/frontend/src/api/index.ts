@@ -40,6 +40,9 @@ export type {
   AddCommentRequest,
 } from "./issues";
 
+// Event API functions
+export { getIssueEvents } from "./events";
+
 // Agent API functions (loom server)
 export {
   fetchAgents,

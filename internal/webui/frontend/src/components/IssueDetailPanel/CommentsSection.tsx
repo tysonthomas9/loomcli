@@ -1,11 +1,14 @@
 /**
  * CommentsSection component.
- * Displays a list of comments on an issue with author, timestamp, and text.
+ * Displays a list of comments on an issue with author avatars,
+ * timestamp, and markdown-rendered text.
  */
 
 import { formatDate } from "@/components/table/columns";
 import type { Comment } from "@/types";
 
+import { AuthorAvatar } from "./AuthorAvatar";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 import styles from "./CommentsSection.module.css";
 
 /**
@@ -20,7 +23,7 @@ export interface CommentsSectionProps {
 
 /**
  * CommentsSection displays a chronological list of comments on an issue.
- * Shows author, relative timestamp, and comment text for each comment.
+ * Shows author avatar, relative timestamp, and markdown-rendered comment text.
  * Displays an empty state when no comments exist.
  */
 export function CommentsSection({
@@ -54,6 +57,7 @@ export function CommentsSection({
               data-testid="comment-item"
             >
               <div className={styles.commentHeader}>
+                <AuthorAvatar name={comment.author || "Unknown"} />
                 <span className={styles.commentAuthor}>
                   {comment.author || "Unknown"}
                 </span>
@@ -64,7 +68,9 @@ export function CommentsSection({
                   {formatDate(comment.created_at)}
                 </time>
               </div>
-              <p className={styles.commentText}>{comment.text}</p>
+              <div className={styles.commentBody}>
+                <MarkdownRenderer content={comment.text} />
+              </div>
             </li>
           ))}
         </ul>

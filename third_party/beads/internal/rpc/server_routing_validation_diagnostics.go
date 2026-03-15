@@ -216,6 +216,8 @@ func (s *Server) handleRequest(req *Request, connCtx ...context.Context) Respons
 		resp = s.handleCommentList(req)
 	case OpCommentAdd:
 		resp = s.handleCommentAdd(req)
+	case OpEventList:
+		resp = s.handleEventList(req)
 	case OpBatch:
 		resp = s.handleBatch(req)
 

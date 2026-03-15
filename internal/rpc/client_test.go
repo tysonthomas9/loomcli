@@ -1380,6 +1380,7 @@ func TestClient_RemainingWrappers(t *testing.T) {
 		{"RemoveLabel", OpLabelRemove, func(c *Client) error { _, err := c.RemoveLabel(&LabelRemoveArgs{}); return err }},
 		{"ListComments", OpCommentList, func(c *Client) error { _, err := c.ListComments(&CommentListArgs{}); return err }},
 		{"AddComment", OpCommentAdd, func(c *Client) error { _, err := c.AddComment(&CommentAddArgs{}); return err }},
+		{"ListEvents", OpEventList, func(c *Client) error { _, err := c.ListEvents(&EventListArgs{}); return err }},
 		{"Export", OpExport, func(c *Client) error { _, err := c.Export(&ExportArgs{}); return err }},
 		{"EpicStatus", OpEpicStatus, func(c *Client) error { _, err := c.EpicStatus(&EpicStatusArgs{}); return err }},
 		{"GateList", OpGateList, func(c *Client) error { _, err := c.GateList(&GateListArgs{}); return err }},

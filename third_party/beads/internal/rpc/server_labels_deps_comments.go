@@ -221,6 +221,42 @@ func (s *Server) handleCommentAdd(req *Request) Response {
 	}
 }
 
+func (s *Server) handleEventList(req *Request) Response {
+	var eventArgs EventListArgs
+	if err := json.Unmarshal(req.Args, &eventArgs); err != nil {
+		return Response{
+			Success: false,
+			Error:   fmt.Sprintf("invalid event list args: %v", err),
+		}
+	}
+
+	limit := eventArgs.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	store := s.storage
+
+	ctx, cancel := s.reqCtx(req)
+	defer cancel()
+	events, err := store.GetEvents(ctx, eventArgs.ID, limit)
+	if err != nil {
+		return Response{
+			Success: false,
+			Error:   fmt.Sprintf("failed to list events: %v", err),
+		}
+	}
+
+	data, _ := json.Marshal(events)
+	return Response{
+		Success: true,
+		Data:    data,
+	}
+}
+
 func (s *Server) handleBatch(req *Request) Response {
 	var batchArgs BatchArgs
 	if err := json.Unmarshal(req.Args, &batchArgs); err != nil {

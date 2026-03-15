@@ -49,6 +49,7 @@ vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
+  getIssueEvents: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock the agent terminal logs hook

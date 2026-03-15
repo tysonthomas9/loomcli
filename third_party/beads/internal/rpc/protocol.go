@@ -30,6 +30,7 @@ const (
 	OpLabelRemove = "label_remove"
 	OpCommentList = "comment_list"
 	OpCommentAdd  = "comment_add"
+	OpEventList   = "event_list"
 	OpBatch       = "batch"
 	OpResolveID   = "resolve_id"
 
@@ -394,6 +395,12 @@ type CommentAddArgs struct {
 	ID     string `json:"id"`
 	Author string `json:"author"`
 	Text   string `json:"text"`
+}
+
+// EventListArgs represents arguments for listing events on an issue
+type EventListArgs struct {
+	ID    string `json:"id"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 // EpicStatusArgs represents arguments for the epic status operation
