@@ -6,12 +6,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { ConnectionState } from "./TerminalInstance";
 import styles from "./TerminalTabBar.module.css";
 
 export interface TerminalTab {
   id: string;
   label: string;
-  connectionState: "disconnected" | "connecting" | "connected";
+  connectionState: ConnectionState;
 }
 
 export interface TerminalTabBarProps {

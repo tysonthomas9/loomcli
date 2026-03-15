@@ -290,8 +290,8 @@ describe("TerminalInstance", () => {
       await vi.runAllTimersAsync();
     });
 
-    expect(onStateChange).toHaveBeenCalledWith("connecting");
-    expect(onStateChange).toHaveBeenCalledWith("connected");
+    expect(onStateChange).toHaveBeenCalledWith("connecting", false);
+    expect(onStateChange).toHaveBeenCalledWith("connected", true);
   });
 
   it("calls fitAddon.fit() via requestAnimationFrame when isActive becomes true", () => {

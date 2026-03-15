@@ -80,7 +80,22 @@
 }
 
 .statusDot[data-status="disconnected"] {
-  background-color: #666;
+  background-color: var(--color-danger, #ef4444);
+}
+
+.statusDot[data-status="error"] {
+  background-color: var(--color-danger, #ef4444);
+  box-shadow: 0 0 4px var(--color-danger, #ef4444);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusDot[data-status="connecting"] {
+    animation: none;
+  }
+
+  .statusDot[data-status="error"] {
+    box-shadow: none;
+  }
 }
 
 @keyframes pulse {

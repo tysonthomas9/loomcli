@@ -28,14 +28,21 @@ import {
 import "@xterm/xterm/css/xterm.css";
 import styles from "./TerminalInstance.module.css";
 
-export type ConnectionState = "disconnected" | "connecting" | "connected";
+export type ConnectionState =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "error";
 
 export interface TerminalInstanceProps {
   sessionName: string;
   isActive: boolean;
   fontFamily?: string;
   fontSize?: number;
-  onConnectionStateChange?: (state: ConnectionState) => void;
+  onConnectionStateChange?: (
+    state: ConnectionState,
+    hasConnected: boolean,
+  ) => void;
 }
 
 export interface TerminalInstanceHandle {
@@ -50,6 +57,7 @@ export interface TerminalInstanceHandle {
   findNext: () => boolean;
   findPrevious: () => boolean;
   clearSearch: () => void;
+  reconnect: () => void;
 }
 
 /**
@@ -198,45 +206,17 @@ export const TerminalInstance = forwardRef<
 
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
+  const hasConnectedRef = useRef(false);
 
   // Mirror connection state to parent via callback
   const connectionStateRef = useRef(connectionState);
   useEffect(() => {
     connectionStateRef.current = connectionState;
-    onConnectionStateChange?.(connectionState);
+    if (connectionState === "connected") {
+      hasConnectedRef.current = true;
+    }
+    onConnectionStateChange?.(connectionState, hasConnectedRef.current);
   }, [connectionState, onConnectionStateChange]);
-
-  // Expose search methods via imperative handle
-  useImperativeHandle(
-    ref,
-    () => ({
-      search(term, options) {
-        const addon = searchAddonRef.current;
-        if (!addon) return false;
-        const searchOpts: Record<string, boolean> = {};
-        if (options?.caseSensitive !== undefined)
-          searchOpts.caseSensitive = options.caseSensitive;
-        if (options?.wholeWord !== undefined)
-          searchOpts.wholeWord = options.wholeWord;
-        if (options?.regex !== undefined) searchOpts.regex = options.regex;
-        return addon.findNext(term, searchOpts);
-      },
-      findNext() {
-        const addon = searchAddonRef.current;
-        if (!addon) return false;
-        return addon.findNext("");
-      },
-      findPrevious() {
-        const addon = searchAddonRef.current;
-        if (!addon) return false;
-        return addon.findPrevious("");
-      },
-      clearSearch() {
-        searchAddonRef.current?.clearDecorations();
-      },
-    }),
-    [],
-  );
 
   // Reconnect handler
   const handleReconnect = useCallback(() => {
@@ -265,8 +245,10 @@ export const TerminalInstance = forwardRef<
             handleReconnect();
             return false;
           },
-          (_state: ReconnectState) => {
-            // State tracked internally; parent can observe via onConnectionStateChange
+          (state: ReconnectState) => {
+            if (state.gaveUp) {
+              setConnectionState("error");
+            }
           },
         );
         reconnectCancelRef.current = cancel;
@@ -274,6 +256,45 @@ export const TerminalInstance = forwardRef<
     );
     wsCleanupRef.current = cleanupWs;
   }, [sessionName]);
+
+  // Expose search methods and reconnect via imperative handle
+  useImperativeHandle(
+    ref,
+    () => ({
+      search(term, options) {
+        const addon = searchAddonRef.current;
+        if (!addon) return false;
+        const searchOpts: Record<string, boolean> = {};
+        if (options?.caseSensitive !== undefined)
+          searchOpts.caseSensitive = options.caseSensitive;
+        if (options?.wholeWord !== undefined)
+          searchOpts.wholeWord = options.wholeWord;
+        if (options?.regex !== undefined) searchOpts.regex = options.regex;
+        return addon.findNext(term, searchOpts);
+      },
+      findNext() {
+        const addon = searchAddonRef.current;
+        if (!addon) return false;
+        return addon.findNext("");
+      },
+      findPrevious() {
+        const addon = searchAddonRef.current;
+        if (!addon) return false;
+        return addon.findPrevious("");
+      },
+      clearSearch() {
+        searchAddonRef.current?.clearDecorations();
+      },
+      reconnect() {
+        reconnectCancelRef.current?.();
+        reconnectCancelRef.current = null;
+        wsCleanupRef.current?.();
+        wsCleanupRef.current = null;
+        handleReconnect();
+      },
+    }),
+    [handleReconnect],
+  );
 
   // Terminal lifecycle: create terminal and connect WebSocket
   useEffect(() => {
@@ -352,8 +373,10 @@ export const TerminalInstance = forwardRef<
               doConnect();
               return false;
             },
-            (_state: ReconnectState) => {
-              // Reconnect state tracked internally
+            (state: ReconnectState) => {
+              if (state.gaveUp) {
+                setConnectionState("error");
+              }
             },
           );
           reconnectCancelRef.current = cancel;

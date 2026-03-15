@@ -15,6 +15,7 @@ import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 import { BackendPickerPrompt } from "./BackendPickerPrompt";
 import { NotesBar } from "./NotesBar";
 import { SearchBar } from "./SearchBar";
+import { TerminalConnectionOverlay } from "./TerminalConnectionOverlay";
 import type {
   ConnectionState,
   TerminalInstanceHandle,
@@ -83,6 +84,9 @@ export function TerminalView({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [isSessionPromptOpen, setIsSessionPromptOpen] = useState(false);
+  const [tabHasConnected, setTabHasConnected] = useState<Map<string, boolean>>(
+    () => new Map(),
+  );
   const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map());
   const initializedRef = useRef(false);
   const activeTabIdRef = useRef(activeTabId);
@@ -193,12 +197,21 @@ export function TerminalView({
 
   // Seed the session when it connects for the first time
   const handleConnectionStateChange = useCallback(
-    (tabId: string, state: ConnectionState) => {
+    (tabId: string, state: ConnectionState, hasConnected: boolean) => {
       setTabs((prev) =>
         prev.map((t) =>
           t.id === tabId ? { ...t, connectionState: state } : t,
         ),
       );
+
+      if (hasConnected) {
+        setTabHasConnected((prev) => {
+          if (prev.get(tabId)) return prev;
+          const next = new Map(prev);
+          next.set(tabId, true);
+          return next;
+        });
+      }
 
       // If this tab just connected and has pending seed data, seed it
       if (state === "connected") {
@@ -255,6 +268,10 @@ export function TerminalView({
       document.body.style.overflow = "";
     };
   }, [isFullHeight]);
+
+  const handleReconnect = useCallback((tabId: string) => {
+    instanceRefs.current.get(tabId)?.reconnect();
+  }, []);
 
   const handleTabChange = useCallback((tabId: string) => {
     setActiveTabId(tabId);
@@ -387,9 +404,14 @@ export function TerminalView({
                   ref={setInstanceRef(tab.id)}
                   sessionName={tab.sessionName}
                   isActive={tab.id === activeTabId}
-                  onConnectionStateChange={(state) =>
-                    handleConnectionStateChange(tab.id, state)
+                  onConnectionStateChange={(state, hasConnected) =>
+                    handleConnectionStateChange(tab.id, state, hasConnected)
                   }
+                />
+                <TerminalConnectionOverlay
+                  connectionState={tab.connectionState}
+                  hasConnected={tabHasConnected.get(tab.id) ?? false}
+                  onReconnect={() => handleReconnect(tab.id)}
                 />
                 <NotesBar
                   notes={
