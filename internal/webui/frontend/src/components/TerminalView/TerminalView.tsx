@@ -9,7 +9,6 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 import { useBackendConfig } from "@/hooks/useBackendConfig";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
-import { useTerminalSessions } from "@/hooks/useTerminalSessions";
 
 import { BackendPickerPrompt } from "./BackendPickerPrompt";
 import { NotesBar } from "./NotesBar";
@@ -56,9 +55,9 @@ interface TerminalViewProps {
 export function TerminalView({
   isActive = true,
 }: TerminalViewProps): JSX.Element {
-  const { sessions, isLoading } = useTerminalSessions();
   const {
     tabs: tabMetadata,
+    createTab,
     updateNotes,
     isLoading: metaLoading,
   } = useTerminalMetadata();
@@ -75,22 +74,68 @@ export function TerminalView({
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
 
-  // Initialize tabs from hook sessions on first successful load
+  // Initialize tabs from persisted metadata or auto-create from backend config
   useEffect(() => {
-    if (initializedRef.current || isLoading || sessions.length === 0) return;
+    if (initializedRef.current || metaLoading || configLoading) return;
     initializedRef.current = true;
-    const initialTabs: TabState[] = sessions.map((s) => ({
-      id: s.name,
-      label: s.label,
-      sessionName: s.name,
-      connectionState: "disconnected" as ConnectionState,
-    }));
-    setTabs(initialTabs);
-    const first = initialTabs[0];
-    if (first) {
-      setActiveTabId(first.id);
+
+    if (tabMetadata.length > 0) {
+      // Returning user: restore tabs from persisted metadata
+      const restoredTabs: TabState[] = tabMetadata.map((m) => ({
+        id: m.session_name,
+        label: m.label,
+        sessionName: m.session_name,
+        connectionState: "disconnected" as ConnectionState,
+      }));
+      setTabs(restoredTabs);
+      setActiveTabId(restoredTabs[0]?.id ?? "");
+    } else {
+      // First open: auto-create one tab per available backend
+      const backends = config?.available ?? [];
+      if (backends.length === 0) {
+        // Fallback: create a single default tab
+        const fallbackTab: TabState = {
+          id: "talk-to-lead",
+          label: "talk-to-lead",
+          sessionName: "talk-to-lead",
+          connectionState: "disconnected" as ConnectionState,
+        };
+        setTabs([fallbackTab]);
+        setActiveTabId(fallbackTab.id);
+        createTab("talk-to-lead", "talk-to-lead", 0).catch((err) =>
+          console.error("Failed to persist fallback tab:", err),
+        );
+        return;
+      }
+
+      const newTabs: TabState[] = backends.map((backend) => {
+        const name = `lead-${backend}-1`;
+        return {
+          id: name,
+          label: name,
+          sessionName: name,
+          connectionState: "disconnected" as ConnectionState,
+        };
+      });
+      setTabs(newTabs);
+
+      // Set claude tab as active, or first tab if claude unavailable
+      const claudeTab = newTabs.find((t) =>
+        t.sessionName.startsWith("lead-claude-"),
+      );
+      setActiveTabId(claudeTab?.id ?? newTabs[0]?.id ?? "");
+
+      // Persist each auto-created tab via PUT (fire-and-forget with error logging)
+      newTabs.forEach((tab, i) => {
+        createTab(tab.sessionName, tab.label, i).catch((err) =>
+          console.error(
+            `Failed to persist auto-created tab ${tab.sessionName}:`,
+            err,
+          ),
+        );
+      });
     }
-  }, [sessions, isLoading]);
+  }, [tabMetadata, metaLoading, config, configLoading, createTab]);
 
   // Cmd+F / Ctrl+F intercept (only when view is active)
   useEffect(() => {
@@ -236,7 +281,7 @@ export function TerminalView({
 
   return (
     <div className={containerClassName} data-testid="terminal-view">
-      {isLoading && tabs.length === 0 ? (
+      {(metaLoading || configLoading) && tabs.length === 0 ? (
         <div className={styles.loading}>Loading sessions...</div>
       ) : (
         <>

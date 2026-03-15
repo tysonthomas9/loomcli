@@ -1,4 +1,4 @@
-import { get, patch, del, ApiError } from "./client";
+import { get, put, patch, del, ApiError } from "./client";
 
 // ============= Types =============
 
@@ -117,6 +117,20 @@ export async function patchTabMetadata(
   fields: Partial<{ label: string; notes: string; sort_order: number }>,
 ): Promise<TabMetadata> {
   const response = await patch<ApiResult<TabMetadata>>(
+    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+    fields,
+  );
+  return unwrap(response);
+}
+
+/**
+ * Create or replace tab metadata via PUT /api/terminal/tabs/{session}.
+ */
+export async function putTabMetadata(
+  session: string,
+  fields: { label: string; sort_order: number; notes?: string },
+): Promise<TabMetadata> {
+  const response = await put<ApiResult<TabMetadata>>(
     `/api/terminal/tabs/${encodeURIComponent(session)}`,
     fields,
   );

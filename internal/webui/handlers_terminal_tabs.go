@@ -190,6 +190,86 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 	}
 }
 
+// tabPutRequest represents the full create-or-replace body for PUT.
+type tabPutRequest struct {
+	Label     string `json:"label"`
+	SortOrder int    `json:"sort_order"`
+	Notes     string `json:"notes"`
+}
+
+// handlePutTerminalTab creates or replaces tab metadata and broadcasts an SSE event.
+func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil {
+			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
+				Success: false,
+				Error:   "tab metadata not available (no Redis)",
+			})
+			return
+		}
+
+		session := r.PathValue("session")
+		if err := tabmeta.ValidateSessionName(session); err != nil {
+			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   err.Error(),
+			})
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		var req tabPutRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   "invalid request body",
+			})
+			return
+		}
+
+		if req.Label == "" {
+			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   "label is required",
+			})
+			return
+		}
+
+		now := time.Now().UTC()
+		meta := &tabmeta.TabMetadata{
+			SessionName: session,
+			Label:       req.Label,
+			Notes:       req.Notes,
+			SortOrder:   req.SortOrder,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+
+		if err := store.Set(r.Context(), meta); err != nil {
+			log.Printf("Failed to put tab metadata for %s: %v", session, err)
+			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
+				Success: false,
+				Error:   "failed to create/replace tab metadata",
+			})
+			return
+		}
+
+		// Broadcast SSE event for real-time sync
+		if hub != nil {
+			hub.Broadcast(&MutationPayload{
+				Type:      "terminal_metadata",
+				IssueID:   session,
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
+		}
+
+		respondJSON(w, http.StatusOK, tabMetadataResponse{
+			Success: true,
+			Data:    meta,
+		})
+	}
+}
+
 // handleDeleteTerminalTab removes tab metadata and broadcasts an SSE event.
 func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

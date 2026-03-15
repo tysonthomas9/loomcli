@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 
 import {
   listTabMetadata,
+  putTabMetadata,
   patchTabMetadata,
   deleteTabMetadata,
 } from "@/api/terminal";
@@ -12,6 +13,7 @@ export interface UseTerminalMetadataReturn {
   tabs: TabMetadata[];
   isLoading: boolean;
   error: Error | null;
+  createTab: (session: string, label: string, sortOrder: number) => Promise<void>;
   updateLabel: (session: string, label: string) => Promise<void>;
   updateNotes: (session: string, notes: string) => Promise<void>;
   reorderTabs: (orderedSessionNames: string[]) => Promise<void>;
@@ -62,6 +64,31 @@ export function useTerminalMetadata(): UseTerminalMetadataReturn {
   useEffect(() => {
     fetchTabs();
   }, [fetchTabs]);
+
+  const createTab = useCallback(async (session: string, label: string, sortOrder: number) => {
+    const now = new Date().toISOString();
+    const optimistic: TabMetadata = {
+      session_name: session,
+      label,
+      notes: "",
+      sort_order: sortOrder,
+      created_at: now,
+      updated_at: now,
+    };
+    let prev: TabMetadata[] = [];
+    setTabs((current) => {
+      prev = current;
+      return [...current, optimistic];
+    });
+    try {
+      await putTabMetadata(session, { label, sort_order: sortOrder });
+    } catch (err) {
+      if (mountedRef.current) {
+        setTabs(prev);
+        setError(err instanceof Error ? err : new Error(String(err)));
+      }
+    }
+  }, []);
 
   const updateLabel = useCallback(async (session: string, label: string) => {
     let prev: TabMetadata[] = [];
@@ -161,6 +188,7 @@ export function useTerminalMetadata(): UseTerminalMetadataReturn {
     tabs,
     isLoading,
     error,
+    createTab,
     updateLabel,
     updateNotes,
     reorderTabs,

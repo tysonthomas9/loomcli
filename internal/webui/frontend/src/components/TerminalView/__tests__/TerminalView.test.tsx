@@ -22,19 +22,6 @@ import { SessionNamePrompt } from "../SessionNamePrompt";
 
 // ── Mock shared state ────────────────────────────────────────────────────────
 
-const mockHook = vi.hoisted(() => ({
-  sessions: [] as Array<{ name: string; label: string; created: number }>,
-  isLoading: true,
-  error: null as Error | null,
-  refetch: vi.fn(),
-}));
-
-// ── Mock hooks ───────────────────────────────────────────────────────────────
-
-vi.mock("@/hooks/useTerminalSessions", () => ({
-  useTerminalSessions: () => mockHook,
-}));
-
 const mockMetadataHook = vi.hoisted(() => ({
   tabs: [] as Array<{
     session_name: string;
@@ -46,6 +33,7 @@ const mockMetadataHook = vi.hoisted(() => ({
   }>,
   isLoading: false,
   error: null as Error | null,
+  createTab: vi.fn().mockResolvedValue(undefined),
   updateLabel: vi.fn(),
   updateNotes: vi.fn().mockResolvedValue(undefined),
   reorderTabs: vi.fn(),
@@ -195,18 +183,26 @@ vi.mock("../SessionNamePrompt.module.css", () => ({
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function setHook(
-  sessions: Array<{ name: string; label: string; created: number }>,
-  isLoading: boolean,
+function setMetadata(
+  tabs: Array<{ session_name: string; label: string; notes?: string; sort_order?: number }>,
+  isLoading = false,
 ) {
-  mockHook.sessions = sessions;
-  mockHook.isLoading = isLoading;
-  mockHook.error = null;
+  const now = new Date().toISOString();
+  mockMetadataHook.tabs = tabs.map((t, i) => ({
+    session_name: t.session_name,
+    label: t.label,
+    notes: t.notes ?? "",
+    sort_order: t.sort_order ?? i,
+    created_at: now,
+    updated_at: now,
+  }));
+  mockMetadataHook.isLoading = isLoading;
+  mockMetadataHook.error = null;
 }
 
-const DEFAULT_SESSIONS = [
-  { name: "session-1", label: "Session 1", created: 1 },
-  { name: "session-2", label: "Session 2", created: 2 },
+const DEFAULT_METADATA = [
+  { session_name: "session-1", label: "Session 1" },
+  { session_name: "session-2", label: "Session 2" },
 ];
 
 // ── Tests: TerminalView ──────────────────────────────────────────────────────
@@ -214,21 +210,31 @@ const DEFAULT_SESSIONS = [
 describe("TerminalView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setHook([], true);
+    mockMetadataHook.tabs = [];
+    mockMetadataHook.isLoading = true;
+    mockMetadataHook.error = null;
+    mockMetadataHook.createTab = vi.fn().mockResolvedValue(undefined);
+    mockBackendConfigHook.isLoading = false;
+    mockBackendConfigHook.config = {
+      backend: "claude",
+      source: "default",
+      available: ["claude", "codex", "opencode"],
+      agents: [],
+    };
   });
 
   // ── Session initialization ───────────────────────────────────────────────
 
   describe("session initialization", () => {
-    it("shows loading state while useTerminalSessions is loading", () => {
-      setHook([], true);
+    it("shows loading state while metadata is loading", () => {
+      mockMetadataHook.isLoading = true;
       render(<TerminalView />);
 
       expect(screen.getByText("Loading sessions...")).toBeInTheDocument();
     });
 
-    it("renders tabs from hook sessions once loaded", () => {
-      setHook(DEFAULT_SESSIONS, false);
+    it("restores tabs from persisted metadata once loaded", () => {
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       expect(screen.queryByText("Loading sessions...")).not.toBeInTheDocument();
@@ -237,19 +243,78 @@ describe("TerminalView", () => {
       expect(screen.getByText("Session 2")).toBeInTheDocument();
     });
 
-    it("first session becomes the active tab", () => {
-      setHook(DEFAULT_SESSIONS, false);
+    it("first metadata entry becomes the active tab", () => {
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
     });
 
-    it("tab ids match session names", () => {
-      setHook(DEFAULT_SESSIONS, false);
+    it("tab ids match session names from metadata", () => {
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       expect(screen.getByTestId("tab-session-1")).toBeInTheDocument();
       expect(screen.getByTestId("tab-session-2")).toBeInTheDocument();
+    });
+
+    it("auto-creates tabs from backend config on first open (empty metadata)", () => {
+      setMetadata([]);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("tab-lead-claude-1")).toBeInTheDocument();
+      expect(screen.getByTestId("tab-lead-codex-1")).toBeInTheDocument();
+      expect(screen.getByTestId("tab-lead-opencode-1")).toBeInTheDocument();
+    });
+
+    it("claude tab is active by default on first open", () => {
+      setMetadata([]);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("lead-claude-1");
+    });
+
+    it("first tab active when claude not available", () => {
+      mockBackendConfigHook.config = {
+        backend: "codex",
+        source: "default",
+        available: ["codex", "opencode"],
+        agents: [],
+      };
+      setMetadata([]);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("lead-codex-1");
+    });
+
+    it("fallback tab when backend config returns empty available", () => {
+      mockBackendConfigHook.config = {
+        backend: "claude",
+        source: "default",
+        available: [],
+        agents: [],
+      };
+      setMetadata([]);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("tab-talk-to-lead")).toBeInTheDocument();
+    });
+
+    it("createTab called for each auto-created tab on first open", () => {
+      setMetadata([]);
+      render(<TerminalView />);
+
+      expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(3);
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith("lead-claude-1", "lead-claude-1", 0);
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith("lead-codex-1", "lead-codex-1", 1);
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith("lead-opencode-1", "lead-opencode-1", 2);
+    });
+
+    it("createTab not called when restoring from metadata", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
     });
   });
 
@@ -257,7 +322,7 @@ describe("TerminalView", () => {
 
   describe("new tab prompt", () => {
     it("clicking + opens BackendPickerPrompt modal", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       const overlay = screen.getByTestId("backend-picker-prompt-overlay");
@@ -269,12 +334,11 @@ describe("TerminalView", () => {
     });
 
     it("clicking + when 8 tabs exist does not open prompt", () => {
-      const eightSessions = Array.from({ length: 8 }, (_, i) => ({
-        name: `s${i}`,
+      const eightTabs = Array.from({ length: 8 }, (_, i) => ({
+        session_name: `s${i}`,
         label: `S${i}`,
-        created: i,
       }));
-      setHook(eightSessions, false);
+      setMetadata(eightTabs);
       render(<TerminalView />);
 
       const overlay = screen.getByTestId("backend-picker-prompt-overlay");
@@ -284,7 +348,7 @@ describe("TerminalView", () => {
     });
 
     it("selecting a backend creates a new tab with auto-generated name", async () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       fireEvent.click(screen.getByTestId("new-tab-button"));
@@ -301,7 +365,7 @@ describe("TerminalView", () => {
     });
 
     it("new tab becomes active after creation", async () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       fireEvent.click(screen.getByTestId("new-tab-button"));
@@ -318,7 +382,7 @@ describe("TerminalView", () => {
     });
 
     it("cancelling the prompt does not create a tab", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       fireEvent.click(screen.getByTestId("new-tab-button"));
@@ -333,7 +397,7 @@ describe("TerminalView", () => {
     });
 
     it("creating two tabs with same backend produces sequential names", async () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       // Create first claude tab
@@ -362,7 +426,7 @@ describe("TerminalView", () => {
     });
 
     it("creating tabs with different backends produces independent counters", async () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       // Create claude tab
@@ -396,24 +460,14 @@ describe("TerminalView", () => {
       });
     });
 
-    it("when backends are loading, Create button is disabled", () => {
+    it("shows loading when config is still loading", () => {
       mockBackendConfigHook.isLoading = true;
       mockBackendConfigHook.config = null;
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
-      fireEvent.click(screen.getByTestId("new-tab-button"));
-
-      expect(screen.getByTestId("backend-picker-create-button")).toBeDisabled();
-
-      // Restore
-      mockBackendConfigHook.isLoading = false;
-      mockBackendConfigHook.config = {
-        backend: "claude",
-        source: "default",
-        available: ["claude", "codex", "opencode"],
-        agents: [],
-      };
+      // Initialization blocked by configLoading, so loading indicator shows
+      expect(screen.getByText("Loading sessions...")).toBeInTheDocument();
     });
   });
 
@@ -421,7 +475,7 @@ describe("TerminalView", () => {
 
   describe("tab management", () => {
     it("handleTabClose removes tab", async () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       // Switch to session-2 so closing active won't interfere
@@ -438,7 +492,7 @@ describe("TerminalView", () => {
     });
 
     it("handleTabClose selects previous tab when closing active tab", async () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       // Switch to session-2
@@ -456,7 +510,7 @@ describe("TerminalView", () => {
     });
 
     it("cannot close the last remaining tab", () => {
-      setHook([{ name: "only-session", label: "Only", created: 0 }], false);
+      setMetadata([{ session_name: "only-session", label: "Only" }]);
       render(<TerminalView />);
 
       fireEvent.click(screen.getByTestId("close-tab-button"));
@@ -471,7 +525,7 @@ describe("TerminalView", () => {
 
   describe("search overlay", () => {
     it("search overlay hidden by default", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       expect(
@@ -480,7 +534,7 @@ describe("TerminalView", () => {
     });
 
     it("Cmd+F toggles search overlay open", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       fireEvent.keyDown(document, { key: "f", metaKey: true });
@@ -489,7 +543,7 @@ describe("TerminalView", () => {
     });
 
     it("Escape closes search overlay", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       fireEvent.keyDown(document, { key: "f", metaKey: true });
@@ -502,7 +556,7 @@ describe("TerminalView", () => {
     });
 
     it("search input auto-focuses on open", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       fireEvent.keyDown(document, { key: "f", metaKey: true });
@@ -516,7 +570,7 @@ describe("TerminalView", () => {
 
   describe("full-height", () => {
     it("container does not have fullHeight class by default", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       expect(screen.getByTestId("is-full-height").textContent).toBe("false");
@@ -526,7 +580,7 @@ describe("TerminalView", () => {
     });
 
     it("toggle adds fullHeight class", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       fireEvent.click(screen.getByTestId("toggle-fullheight"));
@@ -542,7 +596,7 @@ describe("TerminalView", () => {
 
   describe("render tests", () => {
     it("only active tab terminal pane is visible (display:flex)", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       const pane1 = screen
@@ -552,7 +606,7 @@ describe("TerminalView", () => {
     });
 
     it("inactive tab panes have display:none", () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       const pane2 = screen
@@ -562,7 +616,7 @@ describe("TerminalView", () => {
     });
 
     it('data-testid="terminal-view" present on container', () => {
-      setHook(DEFAULT_SESSIONS, false);
+      setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
       expect(screen.getByTestId("terminal-view")).toBeInTheDocument();

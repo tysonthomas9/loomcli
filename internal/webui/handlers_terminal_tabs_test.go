@@ -241,6 +241,146 @@ func TestHandleDeleteTerminalTab(t *testing.T) {
 	}
 }
 
+// ── PUT handler tests ─────────────────────────────────────────────────────────
+
+func TestHandlePutTerminalTab_CreatesNew(t *testing.T) {
+	store, hub := setupTabMetaTest(t)
+	handler := handlePutTerminalTab(store, hub)
+
+	body := `{"label": "lead-claude-1", "sort_order": 0}`
+	req := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body))
+	req.SetPathValue("session", "lead-claude-1")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool                `json:"success"`
+		Data    tabmeta.TabMetadata `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success {
+		t.Fatal("expected success=true")
+	}
+	if resp.Data.Label != "lead-claude-1" {
+		t.Errorf("Label = %q, want %q", resp.Data.Label, "lead-claude-1")
+	}
+
+	// Verify stored in Redis
+	meta, err := store.Get(context.Background(), "lead-claude-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected metadata to be stored")
+	}
+	if meta.Label != "lead-claude-1" {
+		t.Errorf("stored Label = %q, want %q", meta.Label, "lead-claude-1")
+	}
+}
+
+func TestHandlePutTerminalTab_InvalidSession(t *testing.T) {
+	store, hub := setupTabMetaTest(t)
+	handler := handlePutTerminalTab(store, hub)
+
+	body := `{"label": "test"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/invalid%20name", strings.NewReader(body))
+	req.SetPathValue("session", "invalid name")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandlePutTerminalTab_EmptyLabel(t *testing.T) {
+	store, hub := setupTabMetaTest(t)
+	handler := handlePutTerminalTab(store, hub)
+
+	body := `{"label": "", "sort_order": 0}`
+	req := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/test-session", strings.NewReader(body))
+	req.SetPathValue("session", "test-session")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandlePutTerminalTab_Idempotent(t *testing.T) {
+	store, hub := setupTabMetaTest(t)
+	handler := handlePutTerminalTab(store, hub)
+
+	body := `{"label": "lead-claude-1", "sort_order": 0}`
+
+	// First PUT
+	req1 := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body))
+	req1.SetPathValue("session", "lead-claude-1")
+	rr1 := httptest.NewRecorder()
+	handler(rr1, req1)
+
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("first PUT: status = %d, want %d", rr1.Code, http.StatusOK)
+	}
+
+	// Second PUT (same data)
+	req2 := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body))
+	req2.SetPathValue("session", "lead-claude-1")
+	rr2 := httptest.NewRecorder()
+	handler(rr2, req2)
+
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("second PUT: status = %d, want %d", rr2.Code, http.StatusOK)
+	}
+}
+
+func TestHandlePutTerminalTab_NilStore(t *testing.T) {
+	handler := handlePutTerminalTab(nil, nil)
+
+	body := `{"label": "test"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/test-session", strings.NewReader(body))
+	req.SetPathValue("session", "test-session")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandlePutTerminalTab_WithNotes(t *testing.T) {
+	store, hub := setupTabMetaTest(t)
+	handler := handlePutTerminalTab(store, hub)
+
+	body := `{"label": "lead-claude-1", "sort_order": 2, "notes": "some notes"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/terminal/tabs/lead-claude-1", strings.NewReader(body))
+	req.SetPathValue("session", "lead-claude-1")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	meta, err := store.Get(context.Background(), "lead-claude-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if meta.Notes != "some notes" {
+		t.Errorf("Notes = %q, want %q", meta.Notes, "some notes")
+	}
+	if meta.SortOrder != 2 {
+		t.Errorf("SortOrder = %d, want %d", meta.SortOrder, 2)
+	}
+}
+
 func TestHandleDeleteTerminalTab_InvalidName(t *testing.T) {
 	store, hub := setupTabMetaTest(t)
 	handler := handleDeleteTerminalTab(store, hub)
