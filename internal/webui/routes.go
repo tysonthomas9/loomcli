@@ -101,7 +101,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 			mux.HandleFunc("GET /api/terminal/token", handleTerminalToken(termAuth))
 			mux.HandleFunc("GET /api/agents/{name}/terminal/token", handleGetAgentTerminalToken(termAuth))
 		}
-		mux.HandleFunc("GET /api/terminal/ws", handleTerminalWS(termManager, termAuth, allowedOrigins))
+		mux.HandleFunc("GET /api/terminal/ws", handleTerminalWS(termManager, termAuth, allowedOrigins, loomServerURL, workspaceConfigFn))
 		mux.HandleFunc("GET /api/agents/{name}/terminal/ws", handleAgentTerminalWS(termManager, termAuth, allowedOrigins))
 		mux.HandleFunc("GET /api/agents/{name}/terminal/info", handleGetAgentTerminalInfo(termManager))
 		mux.HandleFunc("POST /api/terminal/restart", handleTerminalRestart(termManager, pool, termAuth))

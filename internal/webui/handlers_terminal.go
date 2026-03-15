@@ -161,7 +161,7 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 // whose host portions are used as OriginPatterns for the WebSocket upgrade.
 // When nil or empty, only same-origin and non-browser (no Origin header)
 // connections are accepted.
-func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string) http.HandlerFunc {
+func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigins []string, loomServerURL string, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
 	// Compute origin host patterns once at construction time.
 	patterns := originHosts(allowedOrigins)
 
@@ -242,6 +242,10 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 			_ = conn.Close(closeStatus, closeReason)
 		}()
 
+		// Check whether the tmux session already exists before Attach creates it.
+		// Only inject the context banner for freshly created talk-to-lead sessions.
+		isNewSession := session == "talk-to-lead" && !manager.SessionExists(session)
+
 		// Attach to terminal session with default 80x24 size
 		// (frontend sends resize immediately after connect)
 		termSession, err := manager.Attach(session, "", 80, 24)
@@ -255,6 +259,11 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 			return
 		}
 		connID := termSession.ConnID
+
+		// Inject project context banner into freshly created talk-to-lead sessions.
+		if isNewSession && loomServerURL != "" {
+			injectTerminalContextBanner(termSession, loomServerURL, workspaceConfigFn)
+		}
 
 		// Create context for coordinating goroutines
 		ctx, cancel := context.WithCancel(r.Context())
@@ -350,5 +359,29 @@ func wsToPTY(ctx context.Context, conn *websocket.Conn, session *TerminalSession
 			// PTY write failed
 			return
 		}
+	}
+}
+
+// injectTerminalContextBanner fetches project context from the loom server
+// and writes a formatted banner to the terminal session's PTY.
+func injectTerminalContextBanner(session *TerminalSession, loomServerURL string, workspaceConfigFn func() (*WorkspaceData, error)) {
+	tc, err := FetchTerminalContext(loomServerURL)
+	if err != nil {
+		log.Printf("Terminal context fetch failed (skipping banner): %v", err)
+		return
+	}
+
+	var wsName string
+	if workspaceConfigFn != nil {
+		if wsData, wsErr := workspaceConfigFn(); wsErr == nil && wsData != nil {
+			wsName = wsData.Name
+		} else if wsErr != nil {
+			log.Printf("Warning: workspace config unavailable for terminal context: %v", wsErr)
+		}
+	}
+
+	banner := FormatContextBanner(tc, wsName)
+	if _, writeErr := session.PTY.Write([]byte(banner)); writeErr != nil {
+		log.Printf("Warning: failed to write context banner to PTY: %v", writeErr)
 	}
 }

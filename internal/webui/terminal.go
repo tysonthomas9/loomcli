@@ -116,6 +116,12 @@ func (m *TerminalManager) tmuxName(name string) string {
 	return m.sessionPrefix + "-" + name
 }
 
+// SessionExists reports whether the named tmux session already exists.
+// The session prefix is applied automatically.
+func (m *TerminalManager) SessionExists(name string) bool {
+	return m.tmuxHasSession(m.tmuxName(name))
+}
+
 // tmuxHasSession checks whether a tmux session with the given name exists.
 func (m *TerminalManager) tmuxHasSession(name string) bool {
 	cmd := exec.Command(m.tmuxPath, "has-session", "-t", name)
