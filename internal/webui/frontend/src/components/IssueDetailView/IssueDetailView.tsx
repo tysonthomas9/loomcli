@@ -27,6 +27,7 @@ export interface IssueDetailViewProps {
   onReject: (issue: Issue, comment: string) => Promise<void>;
   onOpenInTerminal?: (issue: Issue | IssueDetails) => void;
   onCopyLink?: () => void;
+  onNavigateToIssue?: (issue: Issue) => void;
 }
 
 /**
@@ -91,12 +92,52 @@ function formatIssueType(type: string | undefined): string {
 }
 
 /**
- * Render a dependency/dependent issue link.
+ * Get the CSS class for a dependency status dot.
  */
-function renderDependencyItem(dep: IssueWithDependencyMetadata): JSX.Element {
+function getStatusDotClass(status: string | undefined): string {
+  switch (status) {
+    case "closed":
+      return styles.statusDotClosed ?? "";
+    case "in_progress":
+      return styles.statusDotInProgress ?? "";
+    case "blocked":
+      return styles.statusDotBlocked ?? "";
+    default:
+      return styles.statusDotOpen ?? "";
+  }
+}
+
+/**
+ * Render a dependency/dependent issue as a clickable chip.
+ */
+function renderDependencyChip(
+  dep: IssueWithDependencyMetadata,
+  onNavigateToIssue?: (issue: Issue) => void,
+): JSX.Element {
   const statusClass = dep.status === "closed" ? styles.dependencyClosed : "";
+  const isClickable = !!onNavigateToIssue;
   return (
-    <li key={dep.id} className={`${styles.dependencyItem} ${statusClass}`}>
+    <li
+      key={dep.id}
+      className={`${styles.dependencyChip} ${statusClass} ${isClickable ? styles.clickableChip : ""}`}
+      onClick={isClickable ? () => onNavigateToIssue(dep) : undefined}
+      role={isClickable ? "button" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={
+        isClickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onNavigateToIssue(dep);
+              }
+            }
+          : undefined
+      }
+    >
+      <span
+        className={`${styles.statusDot} ${getStatusDotClass(dep.status)}`}
+        aria-label={dep.status ?? "open"}
+      />
       <span className={styles.dependencyId}>{dep.id}</span>
       <span className={styles.dependencyTitle}>{dep.title}</span>
       {dep.dependency_type && (
@@ -120,6 +161,7 @@ export function IssueDetailView({
   onReject,
   onOpenInTerminal,
   onCopyLink,
+  onNavigateToIssue,
 }: IssueDetailViewProps): JSX.Element {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
@@ -551,7 +593,9 @@ export function IssueDetailView({
               Dependencies ({dependencies.length})
             </h3>
             <ul className={styles.dependencyList}>
-              {dependencies.map(renderDependencyItem)}
+              {dependencies.map((dep) =>
+                renderDependencyChip(dep, onNavigateToIssue),
+              )}
             </ul>
           </section>
         )}
@@ -563,7 +607,9 @@ export function IssueDetailView({
               Blocks ({dependents.length})
             </h3>
             <ul className={styles.dependencyList}>
-              {dependents.map(renderDependencyItem)}
+              {dependents.map((dep) =>
+                renderDependencyChip(dep, onNavigateToIssue),
+              )}
             </ul>
           </section>
         )}

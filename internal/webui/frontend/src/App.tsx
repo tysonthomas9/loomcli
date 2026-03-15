@@ -860,6 +860,7 @@ function App() {
           onReject={handleReject}
           onOpenInTerminal={handleOpenIssueInTerminal}
           onCopyLink={handleCopyLink}
+          onNavigateToIssue={handleIssueClick}
         />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
@@ -872,6 +873,7 @@ function App() {
         onApprove={handleApprove}
         onReject={handleReject}
         onCopyLink={handleCopyLink}
+        onNavigateToIssue={handleIssueClick}
       />
       <AgentDetailPanel
         isOpen={isAgentPanelOpen}

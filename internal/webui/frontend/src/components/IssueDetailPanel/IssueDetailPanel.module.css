@@ -660,19 +660,63 @@
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.dependencyItem {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--color-border-light);
-  font-size: 14px;
+  flex-wrap: wrap;
 }
 
-.dependencyItem:last-child {
-  border-bottom: none;
+.dependencyChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin: 0 6px 6px 0;
+  font-size: 13px;
+  background-color: var(--color-bg-subtle, #f6f8fa);
+  border: 1px solid var(--color-border-light);
+  border-radius: 16px;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.clickableChip {
+  cursor: pointer;
+}
+
+.clickableChip:hover {
+  background-color: var(--color-bg-hover, #f0f2f5);
+  border-color: var(--color-border, #d0d7de);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.clickableChip:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.statusDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.statusDotOpen {
+  background-color: var(--color-text-muted, #8b949e);
+}
+
+.statusDotClosed {
+  background-color: var(--color-success, #1a7f37);
+}
+
+.statusDotInProgress {
+  background-color: var(--color-warning, #bf8700);
+}
+
+.statusDotBlocked {
+  background-color: var(--color-danger, #cf222e);
 }
 
 .dependencyId {
@@ -683,11 +727,11 @@
 }
 
 .dependencyTitle {
-  flex: 1;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 200px;
 }
 
 .dependencyType {

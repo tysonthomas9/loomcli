@@ -203,6 +203,8 @@ export interface IssueDetailPanelProps {
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
   /** Callback when copy-link button is clicked */
   onCopyLink?: () => void;
+  /** Callback when a dependency/dependent issue is clicked for navigation */
+  onNavigateToIssue?: (issue: Issue) => void;
 }
 
 /**
@@ -220,12 +222,52 @@ function isIssueDetails(issue: Issue | IssueDetails): issue is IssueDetails {
 }
 
 /**
- * Render a dependency/dependent issue link.
+ * Get the CSS class for a dependency status dot.
  */
-function renderDependencyItem(dep: IssueWithDependencyMetadata): JSX.Element {
+function getDependentStatusDotClass(status: string | undefined): string {
+  switch (status) {
+    case "closed":
+      return styles.statusDotClosed ?? "";
+    case "in_progress":
+      return styles.statusDotInProgress ?? "";
+    case "blocked":
+      return styles.statusDotBlocked ?? "";
+    default:
+      return styles.statusDotOpen ?? "";
+  }
+}
+
+/**
+ * Render a dependency/dependent issue as a clickable chip.
+ */
+function renderDependencyChip(
+  dep: IssueWithDependencyMetadata,
+  onNavigateToIssue?: (issue: Issue) => void,
+): JSX.Element {
   const statusClass = dep.status === "closed" ? styles.dependencyClosed : "";
+  const isClickable = !!onNavigateToIssue;
   return (
-    <li key={dep.id} className={`${styles.dependencyItem} ${statusClass}`}>
+    <li
+      key={dep.id}
+      className={`${styles.dependencyChip} ${statusClass} ${isClickable ? styles.clickableChip : ""}`}
+      onClick={isClickable ? () => onNavigateToIssue(dep) : undefined}
+      role={isClickable ? "button" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={
+        isClickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onNavigateToIssue(dep);
+              }
+            }
+          : undefined
+      }
+    >
+      <span
+        className={`${styles.statusDot} ${getDependentStatusDotClass(dep.status)}`}
+        aria-label={dep.status ?? "open"}
+      />
       <span className={styles.dependencyId}>{dep.id}</span>
       <span className={styles.dependencyTitle}>{dep.title}</span>
       {dep.dependency_type && (
@@ -253,6 +295,8 @@ interface DefaultContentProps {
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
   /** Callback when copy-link button is clicked */
   onCopyLink?: () => void;
+  /** Callback when a dependency/dependent issue is clicked for navigation */
+  onNavigateToIssue?: (issue: Issue) => void;
 }
 
 /**
@@ -295,6 +339,7 @@ function DefaultContent({
   onApprove,
   onReject,
   onCopyLink,
+  onNavigateToIssue,
 }: DefaultContentProps): JSX.Element {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
@@ -1230,6 +1275,7 @@ function DefaultContent({
                 dependencies={dependencies ?? []}
                 onAddDependency={handleAddDependency}
                 onRemoveDependency={handleRemoveDependency}
+                {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
                 disabled={isLoading}
               />
             )}
@@ -1241,7 +1287,9 @@ function DefaultContent({
                   Blocks ({dependents.length})
                 </h3>
                 <ul className={styles.dependencyList}>
-                  {dependents.map(renderDependencyItem)}
+                  {dependents.map((dep) =>
+                    renderDependencyChip(dep, onNavigateToIssue),
+                  )}
                 </ul>
               </section>
             )}
@@ -1315,6 +1363,7 @@ export function IssueDetailPanel({
   onApprove,
   onReject,
   onCopyLink,
+  onNavigateToIssue,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
@@ -1379,6 +1428,7 @@ export function IssueDetailPanel({
       {...(onApprove !== undefined && { onApprove })}
       {...(onReject !== undefined && { onReject })}
       {...(onCopyLink !== undefined && { onCopyLink })}
+      {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
     />
   );
 

@@ -2,14 +2,34 @@
  * DependencySection component.
  * Editable dependencies section for the Issue Detail Panel.
  * Allows users to add and remove blocking dependencies.
+ * Dependency items are clickable chips with status indicators for navigation.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 
 import type { IssueWithDependencyMetadata, DependencyType } from "@/types";
 
 import { DependencySearchPicker } from "./DependencySearchPicker";
 import styles from "./DependencySection.module.css";
+
+/** Default number of dependency chips to show before truncating. */
+const DEFAULT_DEPTH_LIMIT = 5;
+
+/**
+ * Get the CSS class for a status dot based on issue status.
+ */
+function getStatusDotClass(status: string | undefined): string {
+  switch (status) {
+    case "closed":
+      return styles.statusDotClosed ?? "";
+    case "in_progress":
+      return styles.statusDotInProgress ?? "";
+    case "blocked":
+      return styles.statusDotBlocked ?? "";
+    default:
+      return styles.statusDotOpen ?? "";
+  }
+}
 
 /**
  * Props for the DependencySection component.
@@ -23,8 +43,14 @@ export interface DependencySectionProps {
   onAddDependency: (dependsOnId: string, type: DependencyType) => Promise<void>;
   /** Callback when dependency is removed */
   onRemoveDependency: (dependsOnId: string) => Promise<void>;
+  /** Callback when a dependency chip is clicked to navigate to it */
+  onNavigateToIssue?:
+    | ((issue: IssueWithDependencyMetadata) => void)
+    | undefined;
   /** Whether the section is read-only */
   disabled?: boolean;
+  /** Maximum dependencies to show before truncating (default: 5) */
+  depthLimit?: number;
   /** Custom class name */
   className?: string;
 }
@@ -43,13 +69,23 @@ export function DependencySection({
   dependencies,
   onAddDependency,
   onRemoveDependency,
+  onNavigateToIssue,
   disabled = false,
+  depthLimit = DEFAULT_DEPTH_LIMIT,
   className,
 }: DependencySectionProps): JSX.Element {
   const [isAdding, setIsAdding] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Reset expanded state when navigating to a different issue
+  const prevIssueIdRef = useRef(issueId);
+  if (prevIssueIdRef.current !== issueId) {
+    prevIssueIdRef.current = issueId;
+    if (isExpanded) setIsExpanded(false);
+  }
 
   const handleStartAdd = useCallback(() => {
     if (disabled) return;
@@ -188,17 +224,38 @@ export function DependencySection({
       {/* Dependency list */}
       {dependencies.length > 0 ? (
         <ul className={styles.dependencyList} data-testid="dependency-list">
-          {dependencies.map((dep) => {
+          {(isExpanded || dependencies.length <= depthLimit
+            ? dependencies
+            : dependencies.slice(0, depthLimit)
+          ).map((dep) => {
             const statusClass =
               dep.status === "closed" ? styles.dependencyClosed : "";
             const isRemoving = removingId === dep.id;
+            const isClickable = !!onNavigateToIssue;
 
             return (
               <li
                 key={dep.id}
-                className={`${styles.dependencyItem} ${statusClass} ${isRemoving ? styles.removing : ""}`}
+                className={`${styles.dependencyChip} ${statusClass} ${isRemoving ? styles.removing : ""} ${isClickable ? styles.clickable : ""}`}
                 data-testid={`dependency-item-${dep.id}`}
+                onClick={isClickable ? () => onNavigateToIssue(dep) : undefined}
+                role={isClickable ? "button" : undefined}
+                tabIndex={isClickable ? 0 : undefined}
+                onKeyDown={
+                  isClickable
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onNavigateToIssue(dep);
+                        }
+                      }
+                    : undefined
+                }
               >
+                <span
+                  className={`${styles.statusDot} ${getStatusDotClass(dep.status)}`}
+                  aria-label={dep.status ?? "open"}
+                />
                 <span className={styles.dependencyId}>{dep.id}</span>
                 <span className={styles.dependencyTitle}>{dep.title}</span>
                 {dep.dependency_type && (
@@ -210,7 +267,10 @@ export function DependencySection({
                   <button
                     type="button"
                     className={styles.removeButton}
-                    onClick={() => handleRemove(dep.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemove(dep.id);
+                    }}
                     disabled={isBusy}
                     aria-label={`Remove dependency ${dep.id}`}
                     data-testid={`remove-dependency-${dep.id}`}
@@ -238,6 +298,18 @@ export function DependencySection({
               </li>
             );
           })}
+          {dependencies.length > depthLimit && (
+            <li className={styles.showMoreItem}>
+              <button
+                type="button"
+                className={styles.showMoreButton}
+                onClick={() => setIsExpanded(!isExpanded)}
+                data-testid="show-more-dependencies"
+              >
+                {isExpanded ? "Show less" : `Show all (${dependencies.length})`}
+              </button>
+            </li>
+          )}
         </ul>
       ) : (
         !isAdding && (
