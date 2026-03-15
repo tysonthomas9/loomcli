@@ -18,11 +18,11 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef, createRef } from "react";
 
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyColumn } from "@/components/EmptyColumn";
-import { StatusColumn } from "@/components/StatusColumn";
+import { StatusColumn, VirtualizedCardList } from "@/components/StatusColumn";
 import { formatStatusLabel } from "@/utils/statusFormat";
 import type { FilterState } from "@/hooks/useFilterState";
 import type { BlockerRef, Issue, Status } from "@/types";
@@ -101,6 +101,19 @@ export function KanbanBoard({
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(
     new Set(),
   );
+
+  // Refs for column scroll containers (used by VirtualizedCardList)
+  const columnRefsMap = useRef(
+    new Map<string, React.RefObject<HTMLDivElement | null>>(),
+  );
+  const getColumnRef = useCallback((colId: string) => {
+    let ref = columnRefsMap.current.get(colId);
+    if (!ref) {
+      ref = createRef<HTMLDivElement | null>();
+      columnRefsMap.current.set(colId, ref);
+    }
+    return ref;
+  }, []);
 
   // Resolve columns: props.columns > props.statuses (legacy) > DEFAULT_COLUMNS
   const columns = useMemo(() => {
@@ -312,6 +325,12 @@ export function KanbanBoard({
               </button>
             ) : undefined;
 
+          // Virtualize columns with >50 cards for performance
+          const useVirtualization = colIssues.length > 50;
+          const columnContentRef = useVirtualization
+            ? getColumnRef(col.id)
+            : undefined;
+
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const statusColumnProps = {
             status: col.id,
@@ -326,34 +345,45 @@ export function KanbanBoard({
             }),
             ...(columnType !== undefined && { columnType }),
             ...(footerAction !== undefined && { footerAction }),
+            ...(columnContentRef !== undefined && {
+              contentRef: columnContentRef,
+            }),
+          };
+
+          const renderCard = (issue: Issue) => {
+            const blockedInfo = blockedIssues?.get(issue.id);
+            return (
+              <DraggableIssueCard
+                key={issue.id}
+                issue={issue}
+                columnId={col.id}
+                {...(onIssueClick !== undefined && {
+                  onClick: onIssueClick,
+                })}
+                {...(blockedInfo !== undefined && {
+                  blockedByCount: blockedInfo.blockedByCount,
+                  blockedBy: blockedInfo.blockedBy,
+                  ...(blockedInfo.blockedByDetails !== undefined && {
+                    blockedByDetails: blockedInfo.blockedByDetails,
+                  }),
+                })}
+                {...(isMutedColumn && { isBacklog: true })}
+              />
+            );
           };
 
           return (
             <StatusColumn key={col.id} {...statusColumnProps}>
               {colIssues.length === 0 ? (
                 <EmptyColumn status={col.id} />
+              ) : useVirtualization && columnContentRef ? (
+                <VirtualizedCardList
+                  count={colIssues.length}
+                  scrollContainerRef={columnContentRef}
+                  renderItem={(index) => renderCard(colIssues[index]!)}
+                />
               ) : (
-                colIssues.map((issue) => {
-                  const blockedInfo = blockedIssues?.get(issue.id);
-                  return (
-                    <DraggableIssueCard
-                      key={issue.id}
-                      issue={issue}
-                      columnId={col.id}
-                      {...(onIssueClick !== undefined && {
-                        onClick: onIssueClick,
-                      })}
-                      {...(blockedInfo !== undefined && {
-                        blockedByCount: blockedInfo.blockedByCount,
-                        blockedBy: blockedInfo.blockedBy,
-                        ...(blockedInfo.blockedByDetails !== undefined && {
-                          blockedByDetails: blockedInfo.blockedByDetails,
-                        }),
-                      })}
-                      {...(isMutedColumn && { isBacklog: true })}
-                    />
-                  );
-                })
+                colIssues.map((issue) => renderCard(issue))
               )}
             </StatusColumn>
           );

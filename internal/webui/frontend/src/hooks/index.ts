@@ -152,6 +152,15 @@ export type {
 export { useTheme } from "./useTheme";
 export type { Theme, UseThemeReturn } from "./useTheme";
 
+export { useVirtualList } from "./useVirtualList";
+export type {
+  UseVirtualListOptions,
+  UseVirtualListReturn,
+} from "./useVirtualList";
+
+export { useScrollRestore, clearScrollPositions } from "./useScrollRestore";
+export type { UseScrollRestoreOptions } from "./useScrollRestore";
+
 export { useEditors } from "./useEditors";
 export type { UseEditorsResult } from "./useEditors";
 

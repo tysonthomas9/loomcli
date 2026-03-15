@@ -3,7 +3,7 @@
  * Foundational component for Phase 4 List/Table View.
  */
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 import type { BlockedInfo } from "@/components/KanbanBoard";
 import { useSort, SortDirection } from "@/hooks";
@@ -13,6 +13,7 @@ import type { Issue } from "@/types";
 import { ColumnDef, DEFAULT_ISSUE_COLUMNS } from "./columns";
 import { IssueRow } from "./IssueRow";
 import { TableHeader, SortState } from "./TableHeader";
+import { VirtualizedTableBody } from "./VirtualizedTableBody";
 import "./IssueTable.css";
 
 export interface IssueTableProps {
@@ -106,9 +107,42 @@ export function IssueTable({
   const handleSort = sortable ? hookHandleSort : () => {};
 
   const tableClassName = ["issue-table", className].filter(Boolean).join(" ");
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const colSpan = effectiveColumns.length + (showCheckbox ? 1 : 0);
+  const useVirtualization = displayData.length > 100;
+  const wrapperClassName = [
+    "issue-table__wrapper",
+    useVirtualization ? "issue-table__wrapper--virtualized" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const renderIssueRow = (index: number) => {
+    const issue = displayData[index]!;
+    const blockedInfo = blockedIssues?.get(issue.id);
+    const isBlocked =
+      blockedInfo !== undefined && blockedInfo.blockedByCount > 0;
+    return (
+      <IssueRow
+        key={issue.id}
+        issue={issue}
+        columns={effectiveColumns}
+        isSelected={
+          showCheckbox ? selectedIds?.has(issue.id) : selectedId === issue.id
+        }
+        isClickable={!!onRowClick}
+        onClick={onRowClick}
+        showCheckbox={showCheckbox}
+        onSelectionChange={onSelectionChange}
+        isBlocked={isBlocked}
+        blockedInfo={blockedInfo}
+        searchTerm={searchTerm}
+      />
+    );
+  };
 
   return (
-    <div className="issue-table__wrapper">
+    <div className={wrapperClassName} ref={wrapperRef}>
       <table className={tableClassName} data-testid="issue-table">
         <TableHeader
           columns={effectiveColumns}
@@ -116,44 +150,31 @@ export function IssueTable({
           onSort={handleSort}
           {...(showCheckbox !== undefined && { showCheckbox })}
         />
-        <tbody className="issue-table__body">
-          {displayData.length === 0 ? (
+        {displayData.length === 0 ? (
+          <tbody className="issue-table__body">
             <tr className="issue-table__empty-row">
               <td
-                colSpan={effectiveColumns.length + (showCheckbox ? 1 : 0)}
+                colSpan={colSpan}
                 className="issue-table__empty-cell"
                 data-testid="issue-table-empty"
               >
                 No issues to display
               </td>
             </tr>
-          ) : (
-            displayData.map((issue) => {
-              const blockedInfo = blockedIssues?.get(issue.id);
-              const isBlocked =
-                blockedInfo !== undefined && blockedInfo.blockedByCount > 0;
-              return (
-                <IssueRow
-                  key={issue.id}
-                  issue={issue}
-                  columns={effectiveColumns}
-                  isSelected={
-                    showCheckbox
-                      ? selectedIds?.has(issue.id)
-                      : selectedId === issue.id
-                  }
-                  isClickable={!!onRowClick}
-                  onClick={onRowClick}
-                  showCheckbox={showCheckbox}
-                  onSelectionChange={onSelectionChange}
-                  isBlocked={isBlocked}
-                  blockedInfo={blockedInfo}
-                  searchTerm={searchTerm}
-                />
-              );
-            })
-          )}
-        </tbody>
+          </tbody>
+        ) : useVirtualization ? (
+          <VirtualizedTableBody
+            className="issue-table__body"
+            count={displayData.length}
+            scrollContainerRef={wrapperRef}
+            renderRow={renderIssueRow}
+            colSpan={colSpan}
+          />
+        ) : (
+          <tbody className="issue-table__body">
+            {displayData.map((_issue, index) => renderIssueRow(index))}
+          </tbody>
+        )}
       </table>
     </div>
   );

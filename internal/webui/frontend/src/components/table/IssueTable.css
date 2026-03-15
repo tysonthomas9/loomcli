@@ -12,6 +12,12 @@
   background: var(--color-bg-card);
 }
 
+/* Applied when table uses virtualized rendering (>100 rows) */
+.issue-table__wrapper--virtualized {
+  overflow-y: auto;
+  max-height: 80vh;
+}
+
 /* Main table */
 .issue-table {
   width: 100%;
