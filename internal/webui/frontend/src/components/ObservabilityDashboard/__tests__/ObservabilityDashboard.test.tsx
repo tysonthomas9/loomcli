@@ -115,7 +115,7 @@ describe("ObservabilityDashboard", () => {
   });
 
   describe("loading state", () => {
-    it("shows loading message when isLoading=true and no metrics yet", async () => {
+    it("shows LoadingSkeleton.Observability when isLoading=true and no metrics yet", async () => {
       mockHookResult = {
         metrics: null,
         isLoading: true,
@@ -128,11 +128,11 @@ describe("ObservabilityDashboard", () => {
       await renderDashboard();
 
       expect(
-        screen.getByText("Loading observability data..."),
+        screen.getByTestId("loading-skeleton-observability"),
       ).toBeInTheDocument();
     });
 
-    it("does not show loading state when metrics exist even if isLoading", async () => {
+    it("does not show skeleton when metrics exist even if isLoading", async () => {
       mockHookResult = {
         metrics: createMetrics(),
         isLoading: true,
@@ -145,14 +145,14 @@ describe("ObservabilityDashboard", () => {
       await renderDashboard();
 
       expect(
-        screen.queryByText("Loading observability data..."),
+        screen.queryByTestId("loading-skeleton-observability"),
       ).not.toBeInTheDocument();
       expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
     });
   });
 
   describe("error state", () => {
-    it("shows error message when error and no metrics", async () => {
+    it("shows ErrorDisplay when error and no metrics", async () => {
       mockHookResult = {
         metrics: null,
         isLoading: false,
@@ -164,9 +164,25 @@ describe("ObservabilityDashboard", () => {
 
       await renderDashboard();
 
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
       expect(
-        screen.getByText("Failed to load metrics: Network failure"),
+        screen.getByRole("button", { name: "Try again" }),
       ).toBeInTheDocument();
+    });
+
+    it("shows error details with the error message", async () => {
+      mockHookResult = {
+        metrics: null,
+        isLoading: false,
+        error: new Error("Network failure"),
+        isConnected: false,
+        lastUpdated: null,
+        refetch: vi.fn(),
+      };
+
+      await renderDashboard();
+
+      expect(screen.getByText("Network failure")).toBeInTheDocument();
     });
 
     it("does not show error state when metrics exist despite error", async () => {
@@ -181,15 +197,13 @@ describe("ObservabilityDashboard", () => {
 
       await renderDashboard();
 
-      expect(
-        screen.queryByText(/Failed to load metrics/),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("error-display")).not.toBeInTheDocument();
       expect(screen.getByText("Tasks / Hour")).toBeInTheDocument();
     });
   });
 
   describe("503 state", () => {
-    it("shows observability-not-configured message for 503 errors", async () => {
+    it("shows observability-not-configured ErrorDisplay for 503 errors", async () => {
       mockHookResult = {
         metrics: null,
         isLoading: false,
@@ -201,8 +215,9 @@ describe("ObservabilityDashboard", () => {
 
       await renderDashboard();
 
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
       expect(
-        screen.getByText(/Observability is not yet configured/),
+        screen.getByRole("heading", { name: /Observability not configured/i }),
       ).toBeInTheDocument();
     });
   });

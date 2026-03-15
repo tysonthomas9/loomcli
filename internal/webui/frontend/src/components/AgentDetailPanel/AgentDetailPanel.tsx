@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 
+import { ErrorDisplay } from "@/components";
 import { useAgentTerminalLogs } from "@/hooks";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
@@ -516,10 +517,11 @@ export function AgentDetailPanel({
           </>
         ) : agentName ? (
           /* Agent not found state */
-          <div className={styles.notFound}>
-            <span className={styles.notFoundIcon}>?</span>
-            <span>Agent disconnected or not found</span>
-          </div>
+          <ErrorDisplay
+            variant="connection-error"
+            title="Agent disconnected"
+            description="This agent is no longer connected or could not be found."
+          />
         ) : null}
       </aside>
     </div>

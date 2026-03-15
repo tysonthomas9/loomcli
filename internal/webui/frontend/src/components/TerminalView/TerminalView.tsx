@@ -9,6 +9,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 
 import type { IssueContext } from "@/api/terminal";
 import { seedTerminalSession } from "@/api/terminal";
+import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 
@@ -400,7 +401,7 @@ export function TerminalView({
   return (
     <div className={containerClassName} data-testid="terminal-view">
       {(metaLoading || configLoading) && tabs.length === 0 ? (
-        <div className={styles.loading}>Loading sessions...</div>
+        <LoadingSkeleton.Terminal />
       ) : (
         <>
           <TerminalTabBar

@@ -126,17 +126,27 @@ describe("FileExplorer", () => {
     expect(select.value).toBe("alpha");
   });
 
-  it("shows loading state when isLoading is true", () => {
+  it("shows skeleton loading placeholders when isLoading is true", () => {
     mockUseFileTree.mockReturnValue(defaultFileTreeReturn({ isLoading: true }));
-    render(<FileExplorer />);
-    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    const { container } = render(<FileExplorer />);
+
+    // Loading state renders inline skeleton elements in the tree scroll area
+    const skeletons = container.querySelectorAll('[class*="skeleton"]');
+    expect(skeletons.length).toBeGreaterThan(0);
+
+    // Should not render the FileTree component
+    expect(screen.queryByText("No files found")).not.toBeInTheDocument();
   });
 
-  it("shows error state when error is set", () => {
+  it("shows ErrorDisplay when error is set", () => {
     mockUseFileTree.mockReturnValue(
       defaultFileTreeReturn({ error: "Connection refused" }),
     );
     render(<FileExplorer />);
+    expect(screen.getByTestId("error-display")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /Failed to load file tree/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Connection refused")).toBeInTheDocument();
   });
 

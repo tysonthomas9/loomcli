@@ -26,6 +26,7 @@ import {
   IssueTable,
   LoadingSkeleton,
   ErrorDisplay,
+  ErrorBoundary,
   ConnectionStatus,
   ToastContainer,
   FilterBar,
@@ -720,9 +721,15 @@ function App() {
           className={styles.loadingContainer}
           data-testid="loading-container"
         >
-          <LoadingSkeleton.Column />
-          <LoadingSkeleton.Column />
-          <LoadingSkeleton.Column />
+          {activeView === "table" ? (
+            <LoadingSkeleton.Table />
+          ) : (
+            <>
+              <LoadingSkeleton.Column />
+              <LoadingSkeleton.Column />
+              <LoadingSkeleton.Column />
+            </>
+          )}
         </div>
       </AppLayout>
     );
@@ -779,23 +786,25 @@ function App() {
         }
       >
         {activeView === "kanban" && (
-          <div className={styles.kanbanShell}>
-            <SwimLaneBoard
-              issues={filteredIssues}
-              groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-              onDragEnd={handleDragEnd}
-              onIssueClick={handleIssueClick}
-              {...(blockedIssuesMap !== undefined && {
-                blockedIssues: blockedIssuesMap,
-              })}
-              {...(filters.showBlocked !== undefined && {
-                showBlocked: filters.showBlocked,
-              })}
-            />
-          </div>
+          <ErrorBoundary resetOnChange={[activeView]}>
+            <div className={styles.kanbanShell}>
+              <SwimLaneBoard
+                issues={filteredIssues}
+                groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
+                onDragEnd={handleDragEnd}
+                onIssueClick={handleIssueClick}
+                {...(blockedIssuesMap !== undefined && {
+                  blockedIssues: blockedIssuesMap,
+                })}
+                {...(filters.showBlocked !== undefined && {
+                  showBlocked: filters.showBlocked,
+                })}
+              />
+            </div>
+          </ErrorBoundary>
         )}
         {activeView === "table" && (
-          <>
+          <ErrorBoundary resetOnChange={[activeView]}>
             <IssueTable
               issues={filteredIssues}
               sortable
@@ -816,55 +825,72 @@ function App() {
               selectedIds={selectedIds}
               onClearSelection={clearSelection}
             />
-          </>
+          </ErrorBoundary>
         )}
         {activeView === "graph" && (
-          <Suspense fallback={<LoadingSkeleton.Graph />}>
-            <GraphView issues={filteredIssues} onNodeClick={handleIssueClick} />
-          </Suspense>
+          <ErrorBoundary resetOnChange={[activeView]}>
+            <Suspense fallback={<LoadingSkeleton.Graph />}>
+              <GraphView
+                issues={filteredIssues}
+                onNodeClick={handleIssueClick}
+              />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {activeView === "monitor" && (
-          <Suspense fallback={<LoadingSkeleton.Monitor />}>
-            <MonitorDashboard
-              onViewChange={setActiveView}
-              onIssueClick={handleIssueClick}
-              onAgentClick={handleAgentClick}
-            />
-          </Suspense>
+          <ErrorBoundary resetOnChange={[activeView]}>
+            <Suspense fallback={<LoadingSkeleton.Monitor />}>
+              <MonitorDashboard
+                onViewChange={setActiveView}
+                onIssueClick={handleIssueClick}
+                onAgentClick={handleAgentClick}
+              />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {activeView === "observability" && (
-          <Suspense fallback={<LoadingSkeleton.Column />}>
-            <ObservabilityDashboard />
-          </Suspense>
+          <ErrorBoundary resetOnChange={[activeView]}>
+            <Suspense fallback={<LoadingSkeleton.Observability />}>
+              <ObservabilityDashboard />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {activeView === "settings" && (
-          <Suspense fallback={<LoadingSkeleton.Column />}>
-            <SettingsView />
-          </Suspense>
+          <ErrorBoundary resetOnChange={[activeView]}>
+            <Suspense fallback={<LoadingSkeleton.Column />}>
+              <SettingsView />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {activeView === "workspace" && isMultiRepo && (
-          <Suspense fallback={<LoadingSkeleton.Column />}>
-            <WorkspaceView />
-          </Suspense>
+          <ErrorBoundary resetOnChange={[activeView]}>
+            <Suspense fallback={<LoadingSkeleton.Column />}>
+              <WorkspaceView />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {activeView === "files" && (
-          <Suspense fallback={<LoadingSkeleton.Column />}>
-            <FileExplorer />
-          </Suspense>
+          <ErrorBoundary resetOnChange={[activeView]}>
+            <Suspense fallback={<LoadingSkeleton.FileExplorer />}>
+              <FileExplorer />
+            </Suspense>
+          </ErrorBoundary>
         )}
         {activeView === "issue-detail" && (
-          <IssueDetailView
-            issue={issueDetails}
-            isLoading={isLoadingDetails}
-            error={detailError}
-            previousView={previousView}
-            onBack={handleBackFromDetail}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            onOpenInTerminal={handleOpenIssueInTerminal}
-            onCopyLink={handleCopyLink}
-            onNavigateToIssue={handleIssueClick}
-          />
+          <ErrorBoundary resetOnChange={[selectedIssueId]}>
+            <IssueDetailView
+              issue={issueDetails}
+              isLoading={isLoadingDetails}
+              error={detailError}
+              previousView={previousView}
+              onBack={handleBackFromDetail}
+              onApprove={handleApprove}
+              onReject={handleReject}
+              onOpenInTerminal={handleOpenIssueInTerminal}
+              onCopyLink={handleCopyLink}
+              onNavigateToIssue={handleIssueClick}
+            />
+          </ErrorBoundary>
         )}
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
         <IssueDetailPanel
@@ -889,7 +915,7 @@ function App() {
         <div
           style={{ display: activeView === "terminal" ? "contents" : "none" }}
         >
-          <Suspense fallback={null}>
+          <Suspense fallback={<LoadingSkeleton.Terminal />}>
             <TerminalView
               isActive={activeView === "terminal"}
               pendingIssueContext={pendingIssueContext}

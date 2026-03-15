@@ -236,14 +236,18 @@ describe("TerminalView", () => {
       mockMetadataHook.isLoading = true;
       render(<TerminalView />);
 
-      expect(screen.getByText("Loading sessions...")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("loading-skeleton-terminal"),
+      ).toBeInTheDocument();
     });
 
     it("restores tabs from persisted metadata once loaded", () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
-      expect(screen.queryByText("Loading sessions...")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("loading-skeleton-terminal"),
+      ).not.toBeInTheDocument();
       expect(screen.getByTestId("terminal-tab-bar")).toBeInTheDocument();
       expect(screen.getByText("Session 1")).toBeInTheDocument();
       expect(screen.getByText("Session 2")).toBeInTheDocument();
@@ -559,7 +563,9 @@ describe("TerminalView", () => {
       render(<TerminalView />);
 
       // Initialization blocked by configLoading, so loading indicator shows
-      expect(screen.getByText("Loading sessions...")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("loading-skeleton-terminal"),
+      ).toBeInTheDocument();
     });
   });
 

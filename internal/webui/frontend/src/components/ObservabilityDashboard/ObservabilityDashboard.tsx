@@ -3,6 +3,7 @@
  * Fetches metrics via useObservabilityMetrics and renders 5 presentational panels.
  */
 
+import { ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useObservabilityMetrics } from "@/hooks";
 
 import { AgentUtilizationBars } from "./AgentUtilizationBars";
@@ -27,7 +28,7 @@ export function ObservabilityDashboard({
   if (isLoading && !metrics) {
     return (
       <div className={rootClassName}>
-        <div className={styles.loadingState}>Loading observability data...</div>
+        <LoadingSkeleton.Observability />
       </div>
     );
   }
@@ -36,11 +37,20 @@ export function ObservabilityDashboard({
     const is503 = error.message.includes("503");
     return (
       <div className={rootClassName}>
-        <div className={styles.emptyState}>
-          {is503
-            ? "Observability is not yet configured. Events will appear once the observability system is initialized."
-            : `Failed to load metrics: ${error.message}`}
-        </div>
+        {is503 ? (
+          <ErrorDisplay
+            variant="custom"
+            title="Observability not configured"
+            description="Events will appear once the observability system is initialized."
+          />
+        ) : (
+          <ErrorDisplay
+            variant="fetch-error"
+            error={error}
+            showDetails
+            onRetry={() => void refetch()}
+          />
+        )}
       </div>
     );
   }

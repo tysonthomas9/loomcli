@@ -30,26 +30,16 @@ export interface LoadingSkeletonProps {
 /**
  * Props for preset skeleton variants.
  */
-export interface LoadingSkeletonCardProps {
+export interface LoadingSkeletonPresetProps {
   /** Additional CSS class name */
   className?: string;
 }
 
-export interface LoadingSkeletonColumnProps {
-  /** Additional CSS class name */
-  className?: string;
+export type LoadingSkeletonCardProps = LoadingSkeletonPresetProps;
+
+export interface LoadingSkeletonColumnProps extends LoadingSkeletonPresetProps {
   /** Number of card skeletons to show */
   cardCount?: number;
-}
-
-export interface LoadingSkeletonGraphProps {
-  /** Additional CSS class name */
-  className?: string;
-}
-
-export interface LoadingSkeletonMonitorProps {
-  /** Additional CSS class name */
-  className?: string;
 }
 
 /**
@@ -156,7 +146,7 @@ function Column({
  * Use when lazy loading the GraphView component.
  * Shows a placeholder with simulated nodes and edges.
  */
-function Graph({ className }: LoadingSkeletonGraphProps): JSX.Element {
+function Graph({ className }: LoadingSkeletonPresetProps): JSX.Element {
   const rootClassName = className
     ? `${styles.graph} ${className}`
     : styles.graph;
@@ -192,7 +182,7 @@ function Graph({ className }: LoadingSkeletonGraphProps): JSX.Element {
  * Use when lazy loading the MonitorDashboard component.
  * Shows a 2x2 grid of placeholder panels.
  */
-function Monitor({ className }: LoadingSkeletonMonitorProps): JSX.Element {
+function Monitor({ className }: LoadingSkeletonPresetProps): JSX.Element {
   const rootClassName = className
     ? `${styles.monitor} ${className}`
     : styles.monitor;
@@ -217,8 +207,230 @@ function Monitor({ className }: LoadingSkeletonMonitorProps): JSX.Element {
   );
 }
 
+/**
+ * DetailPanel skeleton matching IssueDetailPanel layout.
+ * Use when loading issue details in a slide-out panel.
+ */
+function DetailPanel({ className }: LoadingSkeletonPresetProps): JSX.Element {
+  const rootClassName = className
+    ? `${styles.detailPanel} ${className}`
+    : styles.detailPanel;
+
+  return (
+    <div
+      className={rootClassName}
+      aria-hidden="true"
+      data-testid="loading-skeleton-detail-panel"
+    >
+      <div className={styles.detailPanelHeader}>
+        <LoadingSkeleton shape="text" width={200} height={18} />
+        <LoadingSkeleton shape="rect" width={24} height={24} />
+      </div>
+      <div className={styles.detailPanelMeta}>
+        <LoadingSkeleton shape="rect" width={60} height={22} />
+        <LoadingSkeleton shape="rect" width={80} height={22} />
+        <LoadingSkeleton shape="rect" width={70} height={22} />
+      </div>
+      <div className={styles.detailPanelBody}>
+        <LoadingSkeleton shape="text" lines={4} />
+      </div>
+      <div className={styles.detailPanelSection}>
+        <LoadingSkeleton shape="text" width={120} height={14} />
+        <LoadingSkeleton shape="rect" width="100%" height={60} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Table skeleton matching IssueTable layout.
+ * Use when loading the table view.
+ */
+function Table({ className }: LoadingSkeletonPresetProps): JSX.Element {
+  const rootClassName = className
+    ? `${styles.table} ${className}`
+    : styles.table;
+
+  return (
+    <div
+      className={rootClassName}
+      aria-hidden="true"
+      data-testid="loading-skeleton-table"
+    >
+      <div className={styles.tableHeader}>
+        <LoadingSkeleton shape="text" width={80} height={14} />
+        <LoadingSkeleton shape="text" width={200} height={14} />
+        <LoadingSkeleton shape="text" width={60} height={14} />
+        <LoadingSkeleton shape="text" width={80} height={14} />
+      </div>
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} className={styles.tableRow}>
+          <LoadingSkeleton shape="text" width={70} height={12} />
+          <LoadingSkeleton shape="text" width={180} height={12} />
+          <LoadingSkeleton shape="text" width={50} height={12} />
+          <LoadingSkeleton shape="text" width={70} height={12} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * FileExplorer skeleton matching the two-pane file browser layout.
+ * Use when lazy loading the FileExplorer component.
+ */
+function FileExplorerSkeleton({
+  className,
+}: LoadingSkeletonPresetProps): JSX.Element {
+  const rootClassName = className
+    ? `${styles.fileExplorer} ${className}`
+    : styles.fileExplorer;
+
+  const treeLevels = [0, 1, 1, 2, 2, 1, 0, 1];
+
+  return (
+    <div
+      className={rootClassName}
+      aria-hidden="true"
+      data-testid="loading-skeleton-file-explorer"
+    >
+      <div className={styles.fileTree}>
+        {treeLevels.map((level, i) => (
+          <div
+            key={i}
+            className={styles.fileTreeItem}
+            style={{ paddingLeft: `${level * 16 + 8}px` }}
+          >
+            <LoadingSkeleton
+              shape="text"
+              width={100 + (i % 4) * 20}
+              height={12}
+            />
+          </div>
+        ))}
+      </div>
+      <div className={styles.codeArea}>
+        {Array.from({ length: 6 }, (_, i) => (
+          <LoadingSkeleton
+            key={i}
+            shape="text"
+            width={`${40 + (i % 3) * 20}%`}
+            height={12}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Terminal skeleton matching TerminalView layout.
+ * Use when lazy loading the TerminalView component.
+ */
+function TerminalSkeleton({
+  className,
+}: LoadingSkeletonPresetProps): JSX.Element {
+  const rootClassName = className
+    ? `${styles.terminal} ${className}`
+    : styles.terminal;
+
+  return (
+    <div
+      className={rootClassName}
+      aria-hidden="true"
+      data-testid="loading-skeleton-terminal"
+    >
+      <div className={styles.terminalTabBar}>
+        <LoadingSkeleton shape="rect" width={100} height={28} />
+        <LoadingSkeleton shape="rect" width={100} height={28} />
+      </div>
+      <div className={styles.terminalBody}>
+        {Array.from({ length: 4 }, (_, i) => (
+          <LoadingSkeleton
+            key={i}
+            shape="text"
+            width={`${30 + (i % 3) * 15}%`}
+            height={12}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Observability skeleton matching ObservabilityDashboard layout.
+ * Use when lazy loading the ObservabilityDashboard component.
+ */
+function Observability({ className }: LoadingSkeletonPresetProps): JSX.Element {
+  const rootClassName = className
+    ? `${styles.observability} ${className}`
+    : styles.observability;
+
+  return (
+    <div
+      className={rootClassName}
+      aria-hidden="true"
+      data-testid="loading-skeleton-observability"
+    >
+      <div className={styles.observabilityCards}>
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className={styles.observabilityCard}>
+            <LoadingSkeleton shape="text" width={60} height={10} />
+            <LoadingSkeleton shape="text" width={80} height={24} />
+          </div>
+        ))}
+      </div>
+      <div className={styles.observabilityChart}>
+        <LoadingSkeleton shape="text" width={140} height={14} />
+        <LoadingSkeleton shape="rect" width="100%" height={160} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * AgentDetail skeleton matching AgentDetailPanel layout.
+ * Use when loading agent details in a slide-out panel.
+ */
+function AgentDetail({ className }: LoadingSkeletonPresetProps): JSX.Element {
+  const rootClassName = className
+    ? `${styles.agentDetail} ${className}`
+    : styles.agentDetail;
+
+  return (
+    <div
+      className={rootClassName}
+      aria-hidden="true"
+      data-testid="loading-skeleton-agent-detail"
+    >
+      <div className={styles.agentDetailHeader}>
+        <LoadingSkeleton shape="circle" width={40} height={40} />
+        <div className={styles.agentDetailInfo}>
+          <LoadingSkeleton shape="text" width={120} height={16} />
+          <LoadingSkeleton shape="text" width={80} height={12} />
+        </div>
+      </div>
+      <div className={styles.agentDetailTabs}>
+        <LoadingSkeleton shape="rect" width={50} height={28} />
+        <LoadingSkeleton shape="rect" width={50} height={28} />
+        <LoadingSkeleton shape="rect" width={50} height={28} />
+      </div>
+      <div className={styles.agentDetailContent}>
+        <LoadingSkeleton shape="text" lines={3} />
+      </div>
+    </div>
+  );
+}
+
 // Attach preset variants as static properties
 LoadingSkeleton.Card = Card;
 LoadingSkeleton.Column = Column;
 LoadingSkeleton.Graph = Graph;
 LoadingSkeleton.Monitor = Monitor;
+LoadingSkeleton.DetailPanel = DetailPanel;
+LoadingSkeleton.Table = Table;
+LoadingSkeleton.FileExplorer = FileExplorerSkeleton;
+LoadingSkeleton.Terminal = TerminalSkeleton;
+LoadingSkeleton.Observability = Observability;
+LoadingSkeleton.AgentDetail = AgentDetail;

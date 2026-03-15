@@ -9,6 +9,7 @@ import { useState, useCallback, useEffect } from "react";
 
 import { ApiError } from "@/api/client";
 import { gitPushAll } from "@/api/git";
+import { ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useAgentContext, useRepoFilter } from "@/hooks";
 import type {
   LoomAgentStatus,
@@ -259,14 +260,20 @@ export function AgentsSidebar({
       {!collapsed && (
         <div className={styles.content}>
           {!isConnected && !isLoading && (
-            <div className={styles.disconnected}>
-              <span className={styles.disconnectedIcon}>!</span>
-              <span>Loom server not available</span>
-            </div>
+            <ErrorDisplay
+              variant="connection-error"
+              title="Loom server not available"
+              description="Unable to connect to the agent server."
+              className={styles.sidebarError ?? ""}
+            />
           )}
 
           {isLoading && agents.length === 0 && !wasEverConnected && (
-            <div className={styles.loading}>Loading agents...</div>
+            <div className={styles.loadingCards}>
+              <LoadingSkeleton.Card />
+              <LoadingSkeleton.Card />
+              <LoadingSkeleton.Card />
+            </div>
           )}
 
           {agents.length === 0 && isConnected && !isLoading && (

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useAgentContext } from "@/hooks";
 import { useFileTree } from "@/hooks/useFileTree";
 import { useFileContent } from "@/hooks/useFileContent";
@@ -79,9 +80,32 @@ export function FileExplorer() {
           />
         </div>
         {isLoading ? (
-          <div className={styles.loading}>Loading...</div>
+          <div className={styles.treeScroll}>
+            {Array.from({ length: 6 }, (_, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: "4px 8px",
+                  paddingLeft: `${(i % 3) * 16 + 8}px`,
+                }}
+              >
+                <LoadingSkeleton
+                  shape="text"
+                  width={100 + (i % 4) * 20}
+                  height={12}
+                />
+              </div>
+            ))}
+          </div>
         ) : error ? (
-          <div className={styles.error}>{error}</div>
+          <div className={styles.treeScroll}>
+            <ErrorDisplay
+              variant="fetch-error"
+              title="Failed to load file tree"
+              error={new Error(error)}
+              showDetails
+            />
+          </div>
         ) : agents.length === 0 ? (
           <div className={styles.empty}>No agents running</div>
         ) : (
