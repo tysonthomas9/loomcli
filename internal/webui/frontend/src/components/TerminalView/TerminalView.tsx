@@ -98,15 +98,26 @@ export function TerminalView({
     initializedRef.current = true;
 
     if (tabMetadata.length > 0) {
-      // Returning user: restore tabs from persisted metadata
-      const restoredTabs: TabState[] = tabMetadata.map((m) => ({
-        id: m.session_name,
-        label: m.label,
-        sessionName: m.session_name,
-        connectionState: "disconnected" as ConnectionState,
-      }));
+      // Returning user: restore tabs from persisted metadata, sorted by sort_order
+      const restoredTabs: TabState[] = tabMetadata
+        .map((m) => ({
+          id: m.session_name,
+          label: m.label,
+          sessionName: m.session_name,
+          connectionState: "disconnected" as ConnectionState,
+          _sortOrder: m.sort_order,
+        }))
+        .sort((a, b) => (a._sortOrder ?? 999) - (b._sortOrder ?? 999))
+        .map(({ _sortOrder: _, ...tab }) => tab);
       setTabs(restoredTabs);
-      setActiveTabId(restoredTabs[0]?.id ?? "");
+
+      // Restore active tab from sessionStorage, falling back to first tab
+      const savedActiveId = sessionStorage.getItem("terminal-active-tab");
+      const restoredTab =
+        savedActiveId && restoredTabs.find((t) => t.id === savedActiveId);
+      setActiveTabId(
+        restoredTab ? restoredTab.id : (restoredTabs[0]?.id ?? ""),
+      );
     } else {
       // First open: auto-create one tab per available backend
       const backends = config?.available ?? [];
@@ -154,6 +165,13 @@ export function TerminalView({
       });
     }
   }, [tabMetadata, metaLoading, config, configLoading, createTab]);
+
+  // Persist active tab to sessionStorage so it survives page refreshes
+  useEffect(() => {
+    if (activeTabId) {
+      sessionStorage.setItem("terminal-active-tab", activeTabId);
+    }
+  }, [activeTabId]);
 
   // Track sessions that have been seeded so we don't re-seed on reconnect
   const seededSessionsRef = useRef<Set<string>>(new Set());

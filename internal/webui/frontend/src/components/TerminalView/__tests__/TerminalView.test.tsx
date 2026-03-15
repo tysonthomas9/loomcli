@@ -184,7 +184,12 @@ vi.mock("../SessionNamePrompt.module.css", () => ({
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function setMetadata(
-  tabs: Array<{ session_name: string; label: string; notes?: string; sort_order?: number }>,
+  tabs: Array<{
+    session_name: string;
+    label: string;
+    notes?: string;
+    sort_order?: number;
+  }>,
   isLoading = false,
 ) {
   const now = new Date().toISOString();
@@ -210,6 +215,7 @@ const DEFAULT_METADATA = [
 describe("TerminalView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
     mockMetadataHook.tabs = [];
     mockMetadataHook.isLoading = true;
     mockMetadataHook.error = null;
@@ -271,7 +277,9 @@ describe("TerminalView", () => {
       setMetadata([]);
       render(<TerminalView />);
 
-      expect(screen.getByTestId("active-tab-id").textContent).toBe("lead-claude-1");
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "lead-claude-1",
+      );
     });
 
     it("first tab active when claude not available", () => {
@@ -284,7 +292,9 @@ describe("TerminalView", () => {
       setMetadata([]);
       render(<TerminalView />);
 
-      expect(screen.getByTestId("active-tab-id").textContent).toBe("lead-codex-1");
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "lead-codex-1",
+      );
     });
 
     it("fallback tab when backend config returns empty available", () => {
@@ -305,9 +315,21 @@ describe("TerminalView", () => {
       render(<TerminalView />);
 
       expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(3);
-      expect(mockMetadataHook.createTab).toHaveBeenCalledWith("lead-claude-1", "lead-claude-1", 0);
-      expect(mockMetadataHook.createTab).toHaveBeenCalledWith("lead-codex-1", "lead-codex-1", 1);
-      expect(mockMetadataHook.createTab).toHaveBeenCalledWith("lead-opencode-1", "lead-opencode-1", 2);
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+        "lead-claude-1",
+        "lead-claude-1",
+        0,
+      );
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+        "lead-codex-1",
+        "lead-codex-1",
+        1,
+      );
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+        "lead-opencode-1",
+        "lead-opencode-1",
+        2,
+      );
     });
 
     it("createTab not called when restoring from metadata", () => {
@@ -315,6 +337,76 @@ describe("TerminalView", () => {
       render(<TerminalView />);
 
       expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Tab sort order ─────────────────────────────────────────────────────────
+
+  describe("tab sort order", () => {
+    it("sorts restored tabs by sort_order from metadata", () => {
+      setMetadata([
+        { session_name: "session-a", label: "A", sort_order: 2 },
+        { session_name: "session-b", label: "B", sort_order: 0 },
+        { session_name: "session-c", label: "C", sort_order: 1 },
+      ]);
+      render(<TerminalView />);
+
+      const tabBar = screen.getByTestId("terminal-tab-bar");
+      const buttons = tabBar.querySelectorAll("button[data-testid^='tab-']");
+      expect(buttons[0]).toHaveTextContent("B");
+      expect(buttons[1]).toHaveTextContent("C");
+      expect(buttons[2]).toHaveTextContent("A");
+    });
+
+    it("first tab in sorted order becomes active (not first in metadata)", () => {
+      setMetadata([
+        { session_name: "session-a", label: "A", sort_order: 2 },
+        { session_name: "session-b", label: "B", sort_order: 0 },
+        { session_name: "session-c", label: "C", sort_order: 1 },
+      ]);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-b");
+    });
+  });
+
+  // ── Active tab persistence ────────────────────────────────────────────────
+
+  describe("active tab persistence", () => {
+    it("persists activeTabId to sessionStorage on tab change", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      fireEvent.click(screen.getByTestId("tab-session-2"));
+
+      expect(sessionStorage.getItem("terminal-active-tab")).toBe("session-2");
+    });
+
+    it("restores activeTabId from sessionStorage on initialization", () => {
+      sessionStorage.setItem("terminal-active-tab", "session-2");
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
+    });
+
+    it("falls back to first tab when sessionStorage has stale ID", () => {
+      sessionStorage.setItem("terminal-active-tab", "deleted-session");
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+    });
+
+    it("falls back to first sorted tab when sessionStorage has stale ID", () => {
+      sessionStorage.setItem("terminal-active-tab", "deleted-session");
+      setMetadata([
+        { session_name: "session-a", label: "A", sort_order: 2 },
+        { session_name: "session-b", label: "B", sort_order: 0 },
+      ]);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-b");
     });
   });
 
