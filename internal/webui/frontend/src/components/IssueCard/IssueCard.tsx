@@ -98,7 +98,7 @@ export function IssueCard({
   columnId,
 }: IssueCardProps): JSX.Element {
   const { getAgentByName } = useAgentContext();
-  const { isMultiRepo } = useWorkspaceContext();
+  const { isMultiRepo, isAllSelected } = useWorkspaceContext();
   const searchTerm = useSearchTerm();
 
   const priority = getPriorityLevel(issue.priority);
@@ -217,7 +217,7 @@ export function IssueCard({
       <h3 className={styles.title}>
         <HighlightText text={displayTitle} searchTerm={searchTerm} />
       </h3>
-      {isMultiRepo && issue.repo && (
+      {isMultiRepo && isAllSelected && issue.repo && (
         <div className={styles.cardFooter}>
           <RepoBadge repoName={issue.repo} />
         </div>

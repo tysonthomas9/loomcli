@@ -66,11 +66,12 @@ export function IssueTable({
   showBlocked = true,
   searchTerm,
 }: IssueTableProps) {
-  // Hide repo column in single-repo workspaces
-  const { isMultiRepo } = useWorkspaceContext();
+  // Show repo column only in multi-repo workspaces with "All Workspaces" selected
+  const { isMultiRepo, isAllSelected } = useWorkspaceContext();
+  const showRepoColumn = isMultiRepo && isAllSelected;
   const effectiveColumns = useMemo(
-    () => (isMultiRepo ? columns : columns.filter((c) => c.id !== "repo")),
-    [columns, isMultiRepo],
+    () => (showRepoColumn ? columns : columns.filter((c) => c.id !== "repo")),
+    [columns, showRepoColumn],
   );
 
   // Filter out blocked issues if showBlocked is false

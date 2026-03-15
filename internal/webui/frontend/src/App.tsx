@@ -118,11 +118,14 @@ function App() {
   // Theme state
   const { theme, toggleTheme } = useTheme();
 
-  // Workspace context for breadcrumb and single-repo guard
+  // Workspace context for breadcrumb, single-repo guard, and workspace selection
   const {
     workspace,
     isMultiRepo,
     repos: workspaceRepos,
+    selectedRepoNames,
+    selectAll,
+    selectRepos,
   } = useWorkspaceContext();
 
   // Available repo names for repo selector
@@ -585,10 +588,18 @@ function App() {
     }, 300);
   }, []);
 
-  // Handle repo click from WorkspaceTree (no-op for now)
-  const handleRepoClick = useCallback((_repoName: string) => {
-    // Future: select repo, show repo detail
-  }, []);
+  // Derive activeRepoName: null = "All Workspaces", string = specific repo
+  const activeRepoName = useMemo(
+    () => (selectedRepoNames.size === 1 ? [...selectedRepoNames][0] : null),
+    [selectedRepoNames],
+  );
+
+  // Handle workspace/repo selection from WorkspaceTree
+  const handleWorkspaceSelect = useCallback(
+    (repoName: string | null) =>
+      repoName === null ? selectAll() : selectRepos([repoName]),
+    [selectAll, selectRepos],
+  );
 
   // Handle Talk to Lead button click
   const handleTalkToLeadClick = useCallback(() => {
@@ -700,6 +711,21 @@ function App() {
     </div>
   );
 
+  // Sidebar: WorkspaceTree (multi-repo workspace view) or AgentsSidebar
+  const sidebarContent =
+    activeView === "workspace" && isMultiRepo ? (
+      <WorkspaceTree
+        activeRepoName={activeRepoName}
+        onWorkspaceSelect={handleWorkspaceSelect}
+      />
+    ) : (
+      <AgentsSidebar
+        onAgentClick={handleAgentClick}
+        defaultCollapsed={false}
+        collapsible={false}
+      />
+    );
+
   // Loading state: show skeleton columns
   if (isLoading) {
     return (
@@ -714,17 +740,7 @@ function App() {
             sessionCount={activeSessionCount}
           />
         }
-        sidebar={
-          activeView === "workspace" && isMultiRepo ? (
-            <WorkspaceTree onRepoClick={handleRepoClick} />
-          ) : (
-            <AgentsSidebar
-              onAgentClick={handleAgentClick}
-              defaultCollapsed={false}
-              collapsible={false}
-            />
-          )
-        }
+        sidebar={sidebarContent}
       >
         <div
           className={styles.loadingContainer}
@@ -758,17 +774,7 @@ function App() {
             sessionCount={activeSessionCount}
           />
         }
-        sidebar={
-          activeView === "workspace" && isMultiRepo ? (
-            <WorkspaceTree onRepoClick={handleRepoClick} />
-          ) : (
-            <AgentsSidebar
-              onAgentClick={handleAgentClick}
-              defaultCollapsed={false}
-              collapsible={false}
-            />
-          )
-        }
+        sidebar={sidebarContent}
       >
         <ErrorDisplay
           variant="fetch-error"
@@ -794,17 +800,7 @@ function App() {
             sessionCount={activeSessionCount}
           />
         }
-        sidebar={
-          activeView === "workspace" && isMultiRepo ? (
-            <WorkspaceTree onRepoClick={handleRepoClick} />
-          ) : (
-            <AgentsSidebar
-              onAgentClick={handleAgentClick}
-              defaultCollapsed={false}
-              collapsible={false}
-            />
-          )
-        }
+        sidebar={sidebarContent}
       >
         {activeView === "kanban" && (
           <ErrorBoundary resetOnChange={[activeView]}>

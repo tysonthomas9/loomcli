@@ -179,6 +179,49 @@
   font-weight: 600;
 }
 
+/* Radio indicator for workspace/repo selection */
+.radioIndicator {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--color-text-tertiary);
+  flex-shrink: 0;
+  position: relative;
+  transition: border-color 0.15s ease;
+}
+
+.radioIndicator[data-active="true"] {
+  border-color: var(--color-primary, #6366f1);
+}
+
+.radioIndicator[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary, #6366f1);
+}
+
+/* All Workspaces icon */
+.allWorkspacesIcon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+/* All Workspaces label */
+.allWorkspacesLabel {
+  font-weight: 600;
+  font-size: 0.78rem;
+  color: var(--color-text-primary);
+  flex: 1;
+  min-width: 0;
+}
+
 /* Loading skeleton */
 .loading {
   padding: 0.5rem 1rem;

@@ -138,14 +138,10 @@ describe("WorkspaceTree", () => {
       render(<WorkspaceTree defaultCollapsed={false} />);
 
       // alpha should show count 2, beta should show count 1
-      const buttons = screen.getAllByRole("button", { name: /alpha|beta/i });
-      // Find the alpha button and check it contains "2"
-      const alphaButton = buttons.find((b) =>
-        b.textContent?.includes("alpha"),
-      )!;
+      const alphaButton = screen.getByText("alpha").closest("button")!;
       expect(alphaButton.textContent).toContain("2");
 
-      const betaButton = buttons.find((b) => b.textContent?.includes("beta"))!;
+      const betaButton = screen.getByText("beta").closest("button")!;
       expect(betaButton.textContent).toContain("1");
     });
 
@@ -166,7 +162,7 @@ describe("WorkspaceTree", () => {
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      const alphaButton = screen.getByRole("button", { name: /alpha/i });
+      const alphaButton = screen.getByText("alpha").closest("button")!;
       expect(alphaButton.textContent).toContain("1");
     });
   });
@@ -316,9 +312,9 @@ describe("WorkspaceTree", () => {
     });
   });
 
-  describe("repo click callback", () => {
-    it("fires onRepoClick with repo name when a repo is clicked", () => {
-      const handleClick = vi.fn();
+  describe("workspace select callback", () => {
+    it("fires onWorkspaceSelect with repo name when a repo is clicked", () => {
+      const handleSelect = vi.fn();
       reposOverride = {
         repos: [
           {
@@ -331,14 +327,151 @@ describe("WorkspaceTree", () => {
       };
 
       render(
-        <WorkspaceTree defaultCollapsed={false} onRepoClick={handleClick} />,
+        <WorkspaceTree
+          defaultCollapsed={false}
+          onWorkspaceSelect={handleSelect}
+        />,
       );
 
       const repoButton = screen.getByText("alpha").closest("button")!;
       fireEvent.click(repoButton);
 
-      expect(handleClick).toHaveBeenCalledTimes(1);
-      expect(handleClick).toHaveBeenCalledWith("alpha");
+      expect(handleSelect).toHaveBeenCalledTimes(1);
+      expect(handleSelect).toHaveBeenCalledWith("alpha");
+    });
+
+    it("fires onWorkspaceSelect with null when All Workspaces is clicked", () => {
+      const handleSelect = vi.fn();
+      reposOverride = {
+        repos: [
+          {
+            name: "alpha",
+            path: "/repos/alpha",
+            default_branch: "main",
+            remote: "origin",
+          },
+        ],
+      };
+
+      render(
+        <WorkspaceTree
+          defaultCollapsed={false}
+          onWorkspaceSelect={handleSelect}
+        />,
+      );
+
+      const allButton = screen.getByText("All Workspaces").closest("button")!;
+      fireEvent.click(allButton);
+
+      expect(handleSelect).toHaveBeenCalledTimes(1);
+      expect(handleSelect).toHaveBeenCalledWith(null);
+    });
+  });
+
+  describe("All Workspaces entry", () => {
+    it("renders All Workspaces option above repo list", () => {
+      reposOverride = {
+        repos: [
+          {
+            name: "alpha",
+            path: "/repos/alpha",
+            default_branch: "main",
+            remote: "origin",
+          },
+          {
+            name: "beta",
+            path: "/repos/beta",
+            default_branch: "main",
+            remote: "origin",
+          },
+        ],
+      };
+
+      render(<WorkspaceTree defaultCollapsed={false} />);
+
+      expect(screen.getByText("All Workspaces")).toBeInTheDocument();
+    });
+
+    it("shows All Workspaces radio as checked when activeRepoName is null", () => {
+      reposOverride = {
+        repos: [
+          {
+            name: "alpha",
+            path: "/repos/alpha",
+            default_branch: "main",
+            remote: "origin",
+          },
+        ],
+      };
+
+      render(<WorkspaceTree defaultCollapsed={false} activeRepoName={null} />);
+
+      const allButton = screen.getByText("All Workspaces").closest("button")!;
+      expect(allButton).toHaveAttribute("aria-checked", "true");
+
+      const alphaButton = screen.getByText("alpha").closest("button")!;
+      expect(alphaButton).toHaveAttribute("aria-checked", "false");
+    });
+
+    it("shows repo radio as checked when activeRepoName matches", () => {
+      reposOverride = {
+        repos: [
+          {
+            name: "alpha",
+            path: "/repos/alpha",
+            default_branch: "main",
+            remote: "origin",
+          },
+          {
+            name: "beta",
+            path: "/repos/beta",
+            default_branch: "main",
+            remote: "origin",
+          },
+        ],
+      };
+
+      render(<WorkspaceTree defaultCollapsed={false} activeRepoName="alpha" />);
+
+      const allButton = screen.getByText("All Workspaces").closest("button")!;
+      expect(allButton).toHaveAttribute("aria-checked", "false");
+
+      const alphaButton = screen.getByText("alpha").closest("button")!;
+      expect(alphaButton).toHaveAttribute("aria-checked", "true");
+
+      const betaButton = screen.getByText("beta").closest("button")!;
+      expect(betaButton).toHaveAttribute("aria-checked", "false");
+    });
+
+    it("shows total agent count on All Workspaces entry", () => {
+      reposOverride = {
+        repos: [
+          {
+            name: "alpha",
+            path: "/repos/alpha",
+            default_branch: "main",
+            remote: "origin",
+          },
+          {
+            name: "beta",
+            path: "/repos/beta",
+            default_branch: "main",
+            remote: "origin",
+          },
+        ],
+      };
+      agentOverride = {
+        agents: [
+          { id: "a1", repo: "alpha" },
+          { id: "a2", repo: "beta" },
+          { id: "a3", repo: "beta" },
+        ],
+      };
+
+      render(<WorkspaceTree defaultCollapsed={false} />);
+
+      const allButton = screen.getByText("All Workspaces").closest("button")!;
+      expect(allButton.textContent).toContain("3");
     });
   });
 

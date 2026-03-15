@@ -17,8 +17,10 @@ export interface WorkspaceTreeProps {
   className?: string;
   /** Default collapsed state */
   defaultCollapsed?: boolean;
-  /** Callback when a repo item is clicked */
-  onRepoClick?: (repoName: string) => void;
+  /** Currently active repo name, or null/undefined for "All Workspaces" */
+  activeRepoName?: string | null | undefined;
+  /** Callback when a workspace/repo is selected. null = "All Workspaces" */
+  onWorkspaceSelect?: (repoName: string | null) => void;
 }
 
 const COLLAPSE_STORAGE_KEY = "workspace-tree-collapsed";
@@ -30,7 +32,8 @@ const COLLAPSE_STORAGE_KEY = "workspace-tree-collapsed";
 export function WorkspaceTree({
   className,
   defaultCollapsed = true,
-  onRepoClick,
+  activeRepoName,
+  onWorkspaceSelect,
 }: WorkspaceTreeProps): JSX.Element {
   // Load initial collapsed state from localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -142,19 +145,84 @@ export function WorkspaceTree({
           )}
 
           {repos.length > 0 && (
-            <div className={styles.repoList}>
+            <div
+              className={styles.repoList}
+              role="radiogroup"
+              aria-label="Workspace selection"
+            >
+              {/* All Workspaces option */}
+              <button
+                type="button"
+                className={styles.repoItem}
+                onClick={() => onWorkspaceSelect?.(null)}
+                role="radio"
+                aria-checked={
+                  activeRepoName === null || activeRepoName === undefined
+                }
+              >
+                <span
+                  className={styles.radioIndicator}
+                  data-active={
+                    activeRepoName === null || activeRepoName === undefined
+                  }
+                />
+                <svg
+                  className={styles.allWorkspacesIcon}
+                  viewBox="0 0 16 16"
+                  width="14"
+                  height="14"
+                >
+                  <rect
+                    x="1"
+                    y="4"
+                    width="10"
+                    height="8"
+                    rx="1.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
+                  />
+                  <rect
+                    x="5"
+                    y="1"
+                    width="10"
+                    height="8"
+                    rx="1.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
+                  />
+                </svg>
+                <span className={styles.allWorkspacesLabel}>
+                  All Workspaces
+                </span>
+                <span
+                  className={styles.agentCount}
+                  data-active={totalActiveCount > 0}
+                >
+                  {totalActiveCount}
+                </span>
+              </button>
+
               {repos.map((repo) => {
                 const agentCount = repoAgentCounts.get(repo.name) ?? 0;
                 const isActive = agentCount > 0;
+                const isSelected = activeRepoName === repo.name;
 
                 return (
                   <button
                     key={repo.name}
                     type="button"
                     className={styles.repoItem}
-                    onClick={() => onRepoClick?.(repo.name)}
+                    onClick={() => onWorkspaceSelect?.(repo.name)}
                     title={repo.path}
+                    role="radio"
+                    aria-checked={isSelected}
                   >
+                    <span
+                      className={styles.radioIndicator}
+                      data-active={isSelected}
+                    />
                     <span className={styles.repoIcon}>
                       <svg
                         width="16"
