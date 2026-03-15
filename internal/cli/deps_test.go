@@ -155,21 +155,23 @@ func (m *MockFileSystem) Remove(path string) error {
 }
 
 // NewTestDeps returns a *Deps with all fields set to mock implementations.
-func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockBDRunner, *MockExecRunner, *MockFileSystem) {
+func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockBDRunner, *MockExecRunner, *MockFileSystem, *MockIssueTracker) {
 	t.Helper()
 	git := &MockGitRunner{}
 	bd := &MockBDRunner{}
 	execR := &MockExecRunner{}
 	fs := NewMockFileSystem()
+	tracker := NewMockTracker()
 	deps := &Deps{
-		Git:    git,
-		Exec:   execR,
-		FS:     fs,
-		Logger: slog.Default(),
-		BD:     bd,
-		Clock:  func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		Git:     git,
+		Exec:    execR,
+		FS:      fs,
+		Logger:  slog.Default(),
+		BD:      bd,
+		Tracker: tracker,
+		Clock:   func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
 	}
-	return deps, git, bd, execR, fs
+	return deps, git, bd, execR, fs, tracker
 }
 
 // --- Tests ---
