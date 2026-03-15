@@ -63,3 +63,47 @@ export function generateTabName(
 export function sanitizeSessionName(issueId: string): string {
   return issueId.replace(/\./g, "-").replace(/[^a-zA-Z0-9_-]/g, "");
 }
+
+/** Regex to match trailing " (N)" counter suffix in a display label. */
+const COUNTER_SUFFIX_RE = /\s+\(\d+\)$/;
+
+/**
+ * Extract the base name from a tab label by stripping any " (N)" suffix.
+ */
+export function extractBaseName(label: string): string {
+  return label.replace(COUNTER_SUFFIX_RE, "");
+}
+
+/**
+ * Compute the next duplicate label and session name for a given tab.
+ * Returns null if MAX_TABS has been reached.
+ *
+ * Label format:  "{baseName} (N)"
+ * Session format: "{sanitized-baseName}-N"
+ */
+export function getNextDuplicateName(
+  sourceLabel: string,
+  existingTabs: TabState[],
+): { label: string; sessionName: string } | null {
+  if (existingTabs.length >= MAX_TABS) return null;
+
+  const baseName = extractBaseName(sourceLabel);
+  // Find the maximum counter among all tabs with the same base name
+  let maxCounter = 1; // The original counts as 1
+  for (const tab of existingTabs) {
+    const tabBase = extractBaseName(tab.label);
+    if (tabBase !== baseName) continue;
+    const match = tab.label.match(/\((\d+)\)$/);
+    if (match?.[1]) {
+      const n = parseInt(match[1], 10);
+      if (n > maxCounter) maxCounter = n;
+    }
+  }
+  const nextCounter = maxCounter + 1;
+  const label = `${baseName} (${nextCounter})`;
+  // Session names must match [a-zA-Z0-9_-]+
+  const sanitizedBase =
+    baseName.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_-]/g, "") || "tab";
+  const sessionName = `${sanitizedBase}-${nextCounter}`;
+  return { label, sessionName };
+}

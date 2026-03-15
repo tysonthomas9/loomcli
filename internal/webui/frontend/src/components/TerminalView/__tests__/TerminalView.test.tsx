@@ -34,10 +34,10 @@ const mockMetadataHook = vi.hoisted(() => ({
   isLoading: false,
   error: null as Error | null,
   createTab: vi.fn().mockResolvedValue(undefined),
-  updateLabel: vi.fn(),
+  updateLabel: vi.fn().mockResolvedValue(undefined),
   updateNotes: vi.fn().mockResolvedValue(undefined),
   reorderTabs: vi.fn(),
-  deleteTab: vi.fn(),
+  deleteTab: vi.fn().mockResolvedValue(undefined),
   refetch: vi.fn(),
   handleMutation: vi.fn(),
 }));

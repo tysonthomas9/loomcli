@@ -25,7 +25,15 @@ export interface TerminalTabBarProps {
   onToggleFullHeight: () => void;
   isFullHeight: boolean;
   onTabRename?: (tabId: string, newLabel: string) => void;
+  onDuplicateTab?: (tabId: string) => void;
+  maxTabsReached?: boolean;
   onCloseAll?: () => void;
+}
+
+interface ContextMenuState {
+  tabId: string;
+  x: number;
+  y: number;
 }
 
 export function TerminalTabBar({
@@ -37,14 +45,18 @@ export function TerminalTabBar({
   onToggleFullHeight,
   isFullHeight,
   onTabRename,
+  onDuplicateTab,
+  maxTabsReached,
   onCloseAll,
 }: TerminalTabBarProps): JSX.Element {
   const tabRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const tabListRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   const setTabRef = useCallback(
     (id: string) => (el: HTMLDivElement | null) => {
@@ -166,6 +178,65 @@ export function TerminalTabBar({
     [onTabClose],
   );
 
+  const handleContextMenu = useCallback(
+    (tabId: string, e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Position the menu, clamping to viewport edges
+      const x = Math.min(e.clientX, window.innerWidth - 160);
+      const y = Math.min(e.clientY, window.innerHeight - 120);
+      setContextMenu({ tabId, x, y });
+    },
+    [],
+  );
+
+  const handleContextMenuDuplicate = useCallback(() => {
+    if (contextMenu && onDuplicateTab) {
+      onDuplicateTab(contextMenu.tabId);
+    }
+    setContextMenu(null);
+  }, [contextMenu, onDuplicateTab]);
+
+  const handleContextMenuRename = useCallback(() => {
+    if (contextMenu) {
+      const tab = tabs.find((t) => t.id === contextMenu.tabId);
+      if (tab) enterEditMode(tab.id, tab.label);
+    }
+    setContextMenu(null);
+  }, [contextMenu, tabs, enterEditMode]);
+
+  const handleContextMenuClose = useCallback(() => {
+    if (contextMenu) {
+      onTabClose(contextMenu.tabId);
+    }
+    setContextMenu(null);
+  }, [contextMenu, onTabClose]);
+
+  // Close context menu on outside click, Escape, or scroll
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (
+        contextMenuRef.current &&
+        !contextMenuRef.current.contains(e.target as Node)
+      ) {
+        setContextMenu(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    const handleScroll = () => setContextMenu(null);
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [contextMenu]);
+
   return (
     <div className={styles.tabBar} data-testid="terminal-tab-bar">
       <div
@@ -190,10 +261,22 @@ export function TerminalTabBar({
               tabIndex={isActive ? 0 : -1}
               className={tabClassName}
               onClick={() => onTabChange(tab.id)}
+              onContextMenu={(e) => handleContextMenu(tab.id, e)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   onTabChange(tab.id);
+                }
+                if (e.shiftKey && e.key === "F10") {
+                  e.preventDefault();
+                  const rect = (
+                    e.currentTarget as HTMLElement
+                  ).getBoundingClientRect();
+                  setContextMenu({
+                    tabId: tab.id,
+                    x: rect.left,
+                    y: rect.bottom,
+                  });
                 }
               }}
               data-testid={`terminal-tab-${tab.id}`}
@@ -280,6 +363,58 @@ export function TerminalTabBar({
       >
         {isFullHeight ? "\u2921" : "\u2922"}
       </button>
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className={styles.contextMenu}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          role="menu"
+          data-testid="terminal-tab-context-menu"
+        >
+          {onDuplicateTab && (
+            <button
+              type="button"
+              className={
+                maxTabsReached
+                  ? `${styles.contextMenuItem} ${styles.contextMenuItemDisabled}`
+                  : styles.contextMenuItem
+              }
+              onClick={handleContextMenuDuplicate}
+              disabled={maxTabsReached}
+              role="menuitem"
+              data-testid="context-menu-duplicate"
+              title={maxTabsReached ? "Maximum tabs reached" : undefined}
+            >
+              Duplicate
+            </button>
+          )}
+          {onTabRename && (
+            <button
+              type="button"
+              className={styles.contextMenuItem}
+              onClick={handleContextMenuRename}
+              role="menuitem"
+              data-testid="context-menu-rename"
+            >
+              Rename
+            </button>
+          )}
+          {(onDuplicateTab || onTabRename) && tabs.length > 1 && (
+            <div className={styles.contextMenuDivider} />
+          )}
+          {tabs.length > 1 && (
+            <button
+              type="button"
+              className={styles.contextMenuItem}
+              onClick={handleContextMenuClose}
+              role="menuitem"
+              data-testid="context-menu-close"
+            >
+              Close
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

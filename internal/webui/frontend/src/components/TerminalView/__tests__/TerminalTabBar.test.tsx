@@ -649,4 +649,159 @@ describe("TerminalTabBar", () => {
       expect(tab1.className).not.toMatch(/active/);
     });
   });
+
+  describe("context menu", () => {
+    const contextMenuProps = {
+      ...defaultProps,
+      onTabRename: vi.fn(),
+      onDuplicateTab: vi.fn(),
+      maxTabsReached: false,
+    };
+
+    it("right-click on a tab opens context menu with Duplicate, Rename, Close options", () => {
+      render(<TerminalTabBar {...contextMenuProps} />);
+
+      const tab = screen.getByTestId("terminal-tab-tab-2");
+      fireEvent.contextMenu(tab);
+
+      expect(
+        screen.getByTestId("terminal-tab-context-menu"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("context-menu-duplicate")).toBeInTheDocument();
+      expect(screen.getByTestId("context-menu-rename")).toBeInTheDocument();
+      expect(screen.getByTestId("context-menu-close")).toBeInTheDocument();
+    });
+
+    it('context menu "Duplicate" calls onDuplicateTab with correct tabId', () => {
+      const onDuplicateTab = vi.fn();
+      render(
+        <TerminalTabBar
+          {...contextMenuProps}
+          onDuplicateTab={onDuplicateTab}
+        />,
+      );
+
+      const tab = screen.getByTestId("terminal-tab-tab-2");
+      fireEvent.contextMenu(tab);
+
+      fireEvent.click(screen.getByTestId("context-menu-duplicate"));
+
+      expect(onDuplicateTab).toHaveBeenCalledTimes(1);
+      expect(onDuplicateTab).toHaveBeenCalledWith("tab-2");
+    });
+
+    it('context menu "Rename" enters edit mode for the tab', () => {
+      const onTabRename = vi.fn();
+      render(
+        <TerminalTabBar {...contextMenuProps} onTabRename={onTabRename} />,
+      );
+
+      const tab = screen.getByTestId("terminal-tab-tab-2");
+      fireEvent.contextMenu(tab);
+
+      fireEvent.click(screen.getByTestId("context-menu-rename"));
+
+      // Context menu should close
+      expect(
+        screen.queryByTestId("terminal-tab-context-menu"),
+      ).not.toBeInTheDocument();
+
+      // Rename input should appear for tab-2
+      expect(
+        screen.getByTestId("terminal-tab-rename-input-tab-2"),
+      ).toBeInTheDocument();
+    });
+
+    it('context menu "Close" calls onTabClose with correct tabId', () => {
+      const onTabClose = vi.fn();
+      render(<TerminalTabBar {...contextMenuProps} onTabClose={onTabClose} />);
+
+      const tab = screen.getByTestId("terminal-tab-tab-2");
+      fireEvent.contextMenu(tab);
+
+      fireEvent.click(screen.getByTestId("context-menu-close"));
+
+      expect(onTabClose).toHaveBeenCalledTimes(1);
+      expect(onTabClose).toHaveBeenCalledWith("tab-2");
+    });
+
+    it('context menu "Duplicate" is disabled when maxTabsReached=true', () => {
+      render(<TerminalTabBar {...contextMenuProps} maxTabsReached={true} />);
+
+      const tab = screen.getByTestId("terminal-tab-tab-1");
+      fireEvent.contextMenu(tab);
+
+      const duplicateBtn = screen.getByTestId("context-menu-duplicate");
+      expect(duplicateBtn).toBeDisabled();
+    });
+
+    it("context menu closes when clicking outside", () => {
+      render(<TerminalTabBar {...contextMenuProps} />);
+
+      const tab = screen.getByTestId("terminal-tab-tab-1");
+      fireEvent.contextMenu(tab);
+
+      expect(
+        screen.getByTestId("terminal-tab-context-menu"),
+      ).toBeInTheDocument();
+
+      // Click outside the context menu
+      fireEvent.mouseDown(document.body);
+
+      expect(
+        screen.queryByTestId("terminal-tab-context-menu"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("context menu closes on Escape key", () => {
+      render(<TerminalTabBar {...contextMenuProps} />);
+
+      const tab = screen.getByTestId("terminal-tab-tab-1");
+      fireEvent.contextMenu(tab);
+
+      expect(
+        screen.getByTestId("terminal-tab-context-menu"),
+      ).toBeInTheDocument();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(
+        screen.queryByTestId("terminal-tab-context-menu"),
+      ).not.toBeInTheDocument();
+    });
+
+    it('context menu "Close" is not shown when only 1 tab', () => {
+      render(
+        <TerminalTabBar
+          {...contextMenuProps}
+          tabs={makeTabs(1)}
+          activeTabId="tab-1"
+        />,
+      );
+
+      const tab = screen.getByTestId("terminal-tab-tab-1");
+      fireEvent.contextMenu(tab);
+
+      expect(
+        screen.getByTestId("terminal-tab-context-menu"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("context-menu-close"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("Shift+F10 keyboard shortcut opens context menu", () => {
+      render(<TerminalTabBar {...contextMenuProps} />);
+
+      const tab = screen.getByTestId("terminal-tab-tab-2");
+      fireEvent.keyDown(tab, { key: "F10", shiftKey: true });
+
+      expect(
+        screen.getByTestId("terminal-tab-context-menu"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("context-menu-duplicate")).toBeInTheDocument();
+      expect(screen.getByTestId("context-menu-rename")).toBeInTheDocument();
+      expect(screen.getByTestId("context-menu-close")).toBeInTheDocument();
+    });
+  });
 });

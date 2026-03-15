@@ -39,6 +39,7 @@ import {
 } from "./terminalTabUtils";
 import { useClipboard } from "./useClipboard";
 import { useSessionManagement } from "./useCloseAllSessions";
+import { useTabActions } from "./useTabActions";
 import { useTabInit } from "./useTabInit";
 import styles from "./TerminalView.module.css";
 
@@ -60,7 +61,9 @@ export function TerminalView({
   const {
     tabs: tabMetadata,
     createTab,
+    updateLabel,
     updateNotes,
+    deleteTab,
     isLoading: metaLoading,
   } = useTerminalMetadata();
   const { config, isLoading: configLoading } = useBackendConfig();
@@ -287,25 +290,18 @@ export function TerminalView({
     setActiveTabId(tabId);
   }, []);
 
-  const handleTabClose = useCallback((tabId: string) => {
-    setTabs((prev) => {
-      if (prev.length <= 1) return prev;
-      const idx = prev.findIndex((t) => t.id === tabId);
-      if (idx === -1) return prev;
-      const next = prev.filter((t) => t.id !== tabId);
-
-      if (tabId === activeTabIdRef.current) {
-        const newActiveIdx = idx > 0 ? idx - 1 : 0;
-        const newActive = next[newActiveIdx];
-        if (newActive) {
-          setActiveTabId(newActive.id);
-        }
-      }
-
-      return next;
-    });
-    instanceRefs.current.delete(tabId);
-  }, []);
+  const { handleTabClose, handleDuplicateTab, handleTabRename } = useTabActions(
+    {
+      tabs,
+      setTabs,
+      setActiveTabId,
+      activeTabIdRef,
+      instanceRefs,
+      createTab,
+      updateLabel,
+      deleteTab,
+    },
+  );
 
   const handleNewTabClick = useCallback(() => {
     if (tabs.length >= MAX_TABS) return;
@@ -419,6 +415,9 @@ export function TerminalView({
             onToggleFullHeight={handleToggleFullHeight}
             isFullHeight={isFullHeight}
             onCloseAll={handleCloseAll}
+            onTabRename={handleTabRename}
+            onDuplicateTab={handleDuplicateTab}
+            maxTabsReached={tabs.length >= MAX_TABS}
           />
           <div className={styles.terminalsContainer}>
             {tabs.map((tab) => (
