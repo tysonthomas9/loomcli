@@ -65,6 +65,7 @@ import {
   useWorkspaceState,
   useWorkspaceParam,
   useDaemonHealth,
+  usePanelManager,
 } from "@/hooks";
 import type { Issue, IssueDetails, Status } from "@/types";
 
@@ -263,24 +264,20 @@ function App() {
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
 
-  // Timeout refs for panel close animations (prevents race conditions)
-  const issuePanelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const agentPanelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  // Centralized panel state (issue detail panel + agent detail panel).
+  // Enforces mutual exclusivity with 300ms close-then-open transitions.
+  const { activePanel, pendingPanel, openPanel, closePanel, isOpen } =
+    usePanelManager();
 
-  // Helper to clear a timeout ref safely
-  const clearTimeoutRef = useCallback(
-    (ref: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
-      if (ref.current !== null) {
-        clearTimeout(ref.current);
-        ref.current = null;
-      }
-    },
-    [],
-  );
+  // Derive backwards-compatible booleans from panel state.
+  const isPanelOpen = activePanel?.type === "issue";
+  const isAgentPanelOpen = activePanel?.type === "agent";
+  const selectedAgentName =
+    activePanel?.type === "agent"
+      ? activePanel.name
+      : pendingPanel?.type === "agent"
+        ? pendingPanel.name
+        : null;
 
   // Workspace snapshot ref — updated synchronously during render (not in an effect)
   const wsState = { view: activeView, filters, searchValue, selectedIssueId };
@@ -294,8 +291,6 @@ function App() {
     deselectAll: clearSelection,
   } = useSelection({ visibleItems: filteredIssues });
 
-  // Issue detail panel state (panel overlay is unused — isPanelOpen always false)
-  const [isPanelOpen, setIsPanelOpen] = useState(false);
   const {
     issueDetails,
     isLoading: isLoadingDetails,
@@ -339,12 +334,6 @@ function App() {
       ? agentRetryNow
       : retryConnection;
 
-  // Agent detail panel state
-  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
-  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(
-    null,
-  );
-
   // Assignee prompt state for Ready → In Progress drag
   const { recentAssignees, addRecentAssignee } = useRecentAssignees();
   const [pendingDragData, setPendingDragData] = useState<{
@@ -358,11 +347,8 @@ function App() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      // Clear any pending panel close timeouts
-      clearTimeoutRef(issuePanelTimeoutRef);
-      clearTimeoutRef(agentPanelTimeoutRef);
     };
-  }, [clearTimeoutRef]);
+  }, []);
 
   // Clear terminal unread when switching to terminal view
   useEffect(() => {
@@ -508,60 +494,41 @@ function App() {
   // Handle issue click from SwimLaneBoard/IssueTable
   const handleIssueClick = useCallback(
     (issue: Issue) => {
-      // If already viewing this issue in detail view, no-op
-      if (issue.id === selectedIssueId && activeView === "issue-detail") {
+      if (activeView === "issue-detail") {
+        // Already in full-page detail — navigate to different issue within the view
+        if (issue.id === selectedIssueId) return;
+        navigateToView("issue-detail", {
+          previousView,
+          issueId: issue.id,
+        });
+        fetchIssue(issue.id);
         return;
       }
 
-      // Close agent panel if open
-      if (isAgentPanelOpen) {
-        clearTimeoutRef(agentPanelTimeoutRef);
-        setIsAgentPanelOpen(false);
-        agentPanelTimeoutRef.current = setTimeout(() => {
-          if (!mountedRef.current) return;
-          setSelectedAgentName(null);
-        }, 300);
-      }
-
-      // Ensure issue panel overlay is closed
-      setIsPanelOpen(false);
-
-      // Save scroll position before navigating away
-      if (activeView !== "issue-detail") {
-        const mainEl = document.getElementById("main-content");
-        if (mainEl) {
-          scrollPositionCache.current.set(activeView, mainEl.scrollTop);
-        }
-        setPreviousView(activeView);
-      }
-
-      // Navigate to issue-detail view with pushState (enables browser back/forward)
-      navigateToView("issue-detail", {
-        previousView: activeView,
-        issueId: issue.id,
-      });
+      // From list/graph/monitor views — open panel overlay
+      // (mutual exclusivity + no-op guard handled by usePanelManager)
+      openPanel({ type: "issue", id: issue.id });
       fetchIssue(issue.id);
     },
     [
-      selectedIssueId,
       activeView,
-      isAgentPanelOpen,
-      fetchIssue,
+      selectedIssueId,
+      previousView,
       navigateToView,
-      clearTimeoutRef,
+      fetchIssue,
+      openPanel,
     ],
   );
 
   // Handle panel close
   const handlePanelClose = useCallback(() => {
-    setIsPanelOpen(false);
-    // Clear issue details after animation completes
-    // Store timeout ID to allow cancellation if panel reopens quickly
-    issuePanelTimeoutRef.current = setTimeout(() => {
+    closePanel();
+    // Clear issue details after close animation completes
+    setTimeout(() => {
       if (!mountedRef.current) return;
       clearIssue();
-    }, 300); // Match CSS transition duration
-  }, [clearIssue]);
+    }, 300);
+  }, [closePanel, clearIssue]);
 
   // Handle back from issue detail view — use history.back() so browser
   // history is naturally traversed (popstate handler restores the previous view)
@@ -635,35 +602,24 @@ function App() {
   // Handle agent click from AgentsSidebar or MonitorDashboard
   const handleAgentClick = useCallback(
     (agentName: string) => {
-      // Cancel any pending agent panel timeout (prevents wiping the new selection)
-      clearTimeoutRef(agentPanelTimeoutRef);
-
-      // Close issue panel if open (only one panel at a time)
-      if (isPanelOpen) {
-        // Cancel pending issue panel timeout before starting new one
-        clearTimeoutRef(issuePanelTimeoutRef);
-        setIsPanelOpen(false);
-        issuePanelTimeoutRef.current = setTimeout(() => {
+      const hadIssuePanel = isOpen("issue");
+      // Mutual exclusivity + no-op guard handled by usePanelManager
+      openPanel({ type: "agent", name: agentName });
+      // Clear stale issue data after close animation when swapping from issue panel
+      if (hadIssuePanel) {
+        setTimeout(() => {
           if (!mountedRef.current) return;
           clearIssue();
         }, 300);
       }
-
-      setSelectedAgentName(agentName);
-      setIsAgentPanelOpen(true);
     },
-    [isPanelOpen, clearIssue, clearTimeoutRef],
+    [openPanel, isOpen, clearIssue],
   );
 
   // Handle agent panel close
   const handleAgentPanelClose = useCallback(() => {
-    setIsAgentPanelOpen(false);
-    // Store timeout ID to allow cancellation if panel reopens quickly
-    agentPanelTimeoutRef.current = setTimeout(() => {
-      if (!mountedRef.current) return;
-      setSelectedAgentName(null);
-    }, 300);
-  }, []);
+    closePanel();
+  }, [closePanel]);
 
   // Derive activeRepoName: null = "All Workspaces", string = specific repo
   const activeRepoName = useMemo(
@@ -673,13 +629,9 @@ function App() {
 
   // Close all panels synchronously (no animation) for workspace switch
   const closeAllPanels = useCallback(() => {
-    clearTimeoutRef(issuePanelTimeoutRef);
-    clearTimeoutRef(agentPanelTimeoutRef);
-    setIsPanelOpen(false);
+    closePanel();
     clearIssue();
-    setIsAgentPanelOpen(false);
-    setSelectedAgentName(null);
-  }, [clearIssue, clearTimeoutRef]);
+  }, [closePanel, clearIssue]);
 
   // Workspace state preservation: save/restore per-workspace UI state on switch
   const { switchWorkspace } = useWorkspaceState({
@@ -739,35 +691,14 @@ function App() {
     setPendingIssueContext(undefined);
   }, []);
 
-  // Handle task click from agent panel (navigates to issue-detail view)
+  // Handle task click from agent panel (opens issue panel overlay)
   const handleAgentTaskClick = useCallback(
     (taskId: string) => {
-      // Cancel any pending timeouts
-      clearTimeoutRef(issuePanelTimeoutRef);
-      clearTimeoutRef(agentPanelTimeoutRef);
-      // Close agent panel
-      setIsAgentPanelOpen(false);
-      setSelectedAgentName(null);
-      // Ensure issue panel overlay is closed
-      setIsPanelOpen(false);
-
-      // Save scroll position and store previous view
-      if (activeView !== "issue-detail") {
-        const mainEl = document.getElementById("main-content");
-        if (mainEl) {
-          scrollPositionCache.current.set(activeView, mainEl.scrollTop);
-        }
-        setPreviousView(activeView);
-      }
-
-      // Navigate to issue-detail view with pushState (enables browser back/forward)
-      navigateToView("issue-detail", {
-        previousView: activeView,
-        issueId: taskId,
-      });
+      // Mutual exclusivity handled by usePanelManager (closes agent panel first)
+      openPanel({ type: "issue", id: taskId });
       fetchIssue(taskId);
     },
-    [activeView, fetchIssue, navigateToView, clearTimeoutRef],
+    [openPanel, fetchIssue],
   );
 
   const headerNavigation = (

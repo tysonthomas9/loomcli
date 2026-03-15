@@ -220,3 +220,10 @@ export type { UseFocusReturnOptions } from "./useFocusReturn";
 
 export { useFocusTrap } from "./useFocusTrap";
 export type { UseFocusTrapOptions } from "./useFocusTrap";
+
+export { usePanelManager } from "./usePanelManager";
+export type {
+  PanelState,
+  PanelType,
+  UsePanelManagerReturn,
+} from "./usePanelManager";
