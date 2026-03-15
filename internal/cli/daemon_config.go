@@ -21,6 +21,7 @@ type DaemonSettings struct {
 	APIKey        string            `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
 	JWTKey        string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
 	OTel          *OTelDaemonConfig `yaml:"otel,omitempty"`
+	FleetDB       *FleetDBSettings  `yaml:"fleet_db,omitempty"`
 }
 
 // OTelDaemonConfig holds OpenTelemetry export configuration for the daemon.
@@ -230,7 +231,7 @@ func validateAgents(agents []AgentEntry, maxAgents *int) error {
 }
 
 // overlayDaemonSettings applies explicitly-set values from src onto dst.
-func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
+func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) { //nolint:cyclop // large overlay function by design
 	if src.PIDFile != "" {
 		dst.PIDFile = src.PIDFile
 	}
@@ -287,6 +288,12 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 			dst.OTel = &OTelDaemonConfig{}
 		}
 		overlayOTelConfig(dst.OTel, src.OTel)
+	}
+	if src.FleetDB != nil {
+		if dst.FleetDB == nil {
+			dst.FleetDB = &FleetDBSettings{}
+		}
+		overlayFleetDBSettings(dst.FleetDB, src.FleetDB)
 	}
 }
 
