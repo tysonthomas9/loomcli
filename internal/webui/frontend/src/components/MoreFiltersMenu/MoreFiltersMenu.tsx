@@ -16,6 +16,7 @@ const GROUP_BY_OPTIONS: { label: string; value: GroupByOption }[] = [
   { label: "Priority", value: "priority" },
   { label: "Type", value: "type" },
   { label: "Label", value: "label" },
+  { label: "Repo", value: "repo" },
 ];
 
 export interface MoreFiltersMenuProps {

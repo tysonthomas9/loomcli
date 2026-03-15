@@ -54,5 +54,6 @@ export * from "./TalkToLeadButton";
 export * from "./ThemeToggle";
 export * from "./TerminalView";
 export * from "./RepoBadge";
+export * from "./RepoSelector";
 export * from "./WorkspaceBreadcrumb";
 export * from "./WorkspaceTree";

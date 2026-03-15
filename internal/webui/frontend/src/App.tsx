@@ -117,7 +117,17 @@ function App() {
   const { theme, toggleTheme } = useTheme();
 
   // Workspace context for breadcrumb and single-repo guard
-  const { workspace, isMultiRepo } = useWorkspaceContext();
+  const {
+    workspace,
+    isMultiRepo,
+    repos: workspaceRepos,
+  } = useWorkspaceContext();
+
+  // Available repo names for repo selector
+  const availableRepoNames = useMemo(
+    () => workspaceRepos.map((r) => r.name),
+    [workspaceRepos],
+  );
 
   // Scroll position cache for restoring scroll on back navigation
   const scrollPositionCache = useRef<Map<string, number>>(new Map());
@@ -139,7 +149,7 @@ function App() {
   });
 
   // Repo filter for multi-repo workspaces
-  const [selectedRepos] = useRepoFilter();
+  const [selectedRepos, setSelectedRepos] = useRepoFilter();
 
   const {
     issues,
@@ -649,6 +659,10 @@ function App() {
           showType={true}
           showLabels={false}
           showGroupBy={false}
+          showRepos={availableRepoNames.length > 1}
+          availableRepos={availableRepoNames}
+          selectedRepos={selectedRepos}
+          onRepoChange={setSelectedRepos}
           variant="header"
           showClear={true}
         />

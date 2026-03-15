@@ -141,7 +141,7 @@ describe("MoreFiltersMenu", () => {
       expect(select).toHaveValue("assignee");
     });
 
-    it("renders all 6 groupBy options", () => {
+    it("renders all 7 groupBy options", () => {
       renderMenu();
 
       fireEvent.click(screen.getByTestId("more-filters-trigger"));
@@ -149,13 +149,14 @@ describe("MoreFiltersMenu", () => {
       const select = screen.getByTestId("more-filters-groupby");
       const options = select.querySelectorAll("option");
 
-      expect(options).toHaveLength(6);
+      expect(options).toHaveLength(7);
       expect(options[0]).toHaveTextContent("All");
       expect(options[1]).toHaveTextContent("Epic");
       expect(options[2]).toHaveTextContent("Assignee");
       expect(options[3]).toHaveTextContent("Priority");
       expect(options[4]).toHaveTextContent("Type");
       expect(options[5]).toHaveTextContent("Label");
+      expect(options[6]).toHaveTextContent("Repo");
     });
   });
 

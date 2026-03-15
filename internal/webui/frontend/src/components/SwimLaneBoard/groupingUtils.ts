@@ -14,7 +14,8 @@ export type GroupByField =
   | "assignee"
   | "priority"
   | "type"
-  | "label";
+  | "label"
+  | "repo";
 
 /**
  * A group of issues forming a swim lane.
@@ -125,6 +126,10 @@ function getGroupKeys(issue: Issue, groupBy: GroupByField): string[] {
       const labels = issue.labels;
       return labels && labels.length > 0 ? labels : ["__no_labels__"];
     }
+    case "repo": {
+      const repo = issue.repo;
+      return repo ? [repo] : ["__no_repo__"];
+    }
     default:
       return ["__ungrouped__"];
   }
@@ -172,6 +177,10 @@ function getLaneTitle(
       if (key === "__no_labels__") return "No Labels";
       return key;
     }
+    case "repo": {
+      if (key === "__no_repo__") return "No Repository";
+      return key;
+    }
     default:
       return key;
   }
@@ -197,7 +206,8 @@ export function sortLanes(
       lane.title === "Unassigned" ||
       lane.title === "No Priority" ||
       lane.title === "No Type" ||
-      lane.title === "No Labels"
+      lane.title === "No Labels" ||
+      lane.title === "No Repository"
     );
   };
 

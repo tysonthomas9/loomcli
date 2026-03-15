@@ -1,0 +1,14 @@
+/**
+ * RepoSelector component-specific styles.
+ * Dropdown chrome reuses FilterBar.module.css classes.
+ */
+
+.repoMenu {
+  max-height: 280px;
+}
+
+.repoItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

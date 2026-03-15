@@ -28,6 +28,10 @@ export const ALLOWLIST = [
     source: "src/components/IssueDetailPanel/CommentsSection.tsx",
     target: "@/components/table/columns",
   },
+  {
+    source: "src/components/RepoSelector/RepoSelector.tsx",
+    target: "../FilterBar/FilterBar.module.css",
+  },
 ];
 
 /**

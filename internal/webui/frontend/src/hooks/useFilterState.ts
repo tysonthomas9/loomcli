@@ -17,7 +17,8 @@ export type GroupByOption =
   | "assignee"
   | "priority"
   | "type"
-  | "label";
+  | "label"
+  | "repo";
 
 /**
  * Valid group by options for URL validation.
@@ -29,6 +30,7 @@ const VALID_GROUP_BY_OPTIONS: ReadonlySet<string> = new Set([
   "priority",
   "type",
   "label",
+  "repo",
 ]);
 
 /**

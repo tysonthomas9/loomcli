@@ -347,14 +347,60 @@ describe("groupIssuesByField", () => {
     });
   });
 
+  describe("groupBy=repo", () => {
+    it("groups issues by repo", () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", repo: "frontend" }),
+        createMockIssue({ id: "issue-2", repo: "frontend" }),
+        createMockIssue({ id: "issue-3", repo: "backend" }),
+      ];
+
+      const result = groupIssuesByField(issues, "repo");
+
+      expect(result).toHaveLength(2);
+
+      const frontendLane = result.find((lane) => lane.title === "frontend");
+      const backendLane = result.find((lane) => lane.title === "backend");
+
+      expect(frontendLane).toBeDefined();
+      expect(frontendLane?.issues).toHaveLength(2);
+      expect(frontendLane?.id).toBe("lane-repo-frontend");
+
+      expect(backendLane).toBeDefined();
+      expect(backendLane?.issues).toHaveLength(1);
+      expect(backendLane?.id).toBe("lane-repo-backend");
+    });
+
+    it('creates "No Repository" lane for issues without repo field', () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", repo: "frontend" }),
+        createMockIssue({ id: "issue-2", repo: undefined }),
+        createMockIssue({ id: "issue-3" }),
+      ];
+
+      const result = groupIssuesByField(issues, "repo");
+
+      expect(result).toHaveLength(2);
+
+      const noRepoLane = result.find((lane) => lane.title === "No Repository");
+      expect(noRepoLane).toBeDefined();
+      expect(noRepoLane?.issues).toHaveLength(2);
+      expect(noRepoLane?.id).toBe("lane-repo-__no_repo__");
+    });
+  });
+
   describe("empty issues", () => {
-    it.each<GroupByField>(["epic", "assignee", "priority", "type", "label"])(
-      "returns empty array when grouping empty issues by %s",
-      (groupBy) => {
-        const result = groupIssuesByField([], groupBy);
-        expect(result).toHaveLength(0);
-      },
-    );
+    it.each<GroupByField>([
+      "epic",
+      "assignee",
+      "priority",
+      "type",
+      "label",
+      "repo",
+    ])("returns empty array when grouping empty issues by %s", (groupBy) => {
+      const result = groupIssuesByField([], groupBy);
+      expect(result).toHaveLength(0);
+    });
   });
 });
 
@@ -397,6 +443,7 @@ describe("sortLanes", () => {
         "No Priority",
         "No Type",
         "No Labels",
+        "No Repository",
       ];
       const lanes: LaneGroup[] = [
         { id: "regular", title: "Regular Lane", issues: [] },
@@ -445,6 +492,20 @@ describe("sortLanes", () => {
 
       expect(result[2].title).toBe("Small");
       expect(result[2].issues).toHaveLength(1);
+    });
+
+    it("places No Repository lane at the end", () => {
+      const lanes: LaneGroup[] = [
+        { id: "1", title: "No Repository", issues: [createMockIssue()] },
+        { id: "2", title: "frontend", issues: [createMockIssue()] },
+        { id: "3", title: "backend", issues: [createMockIssue()] },
+      ];
+
+      const result = sortLanes(lanes, "title");
+
+      expect(result[0].title).toBe("backend");
+      expect(result[1].title).toBe("frontend");
+      expect(result[2].title).toBe("No Repository");
     });
 
     it("places special lanes at the end regardless of count", () => {
