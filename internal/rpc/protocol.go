@@ -130,6 +130,7 @@ type UpdateArgs struct {
 	AcceptanceCriteria *string  `json:"acceptance_criteria,omitempty"`
 	Notes              *string  `json:"notes,omitempty"`
 	Assignee           *string  `json:"assignee,omitempty"`
+	Owner              *string  `json:"owner,omitempty"`
 	ExternalRef        *string  `json:"external_ref,omitempty"`      // Link to external issue trackers
 	EstimatedMinutes   *int     `json:"estimated_minutes,omitempty"` // Time estimate in minutes
 	IssueType          *string  `json:"issue_type,omitempty"`        // Issue type (bug|feature|task|epic|chore)

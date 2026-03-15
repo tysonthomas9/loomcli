@@ -33,6 +33,7 @@ export interface MutationPayload {
   issue_id: string;
   title?: string;
   assignee?: string;
+  owner?: string;
   actor?: string;
   timestamp: string;
   old_status?: string;

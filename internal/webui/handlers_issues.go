@@ -96,6 +96,7 @@ type PatchIssueRequest struct {
 	Status             *string  `json:"status,omitempty"`
 	Priority           *int     `json:"priority,omitempty"`
 	Assignee           *string  `json:"assignee,omitempty"`
+	Owner              *string  `json:"owner,omitempty"`
 	Design             *string  `json:"design,omitempty"`
 	AcceptanceCriteria *string  `json:"acceptance_criteria,omitempty"`
 	Notes              *string  `json:"notes,omitempty"`

@@ -257,6 +257,20 @@ export function IssueCard({
       <h3 className={styles.title}>
         <HighlightText text={displayTitle} searchTerm={searchTerm} />
       </h3>
+      {issue.owner && (
+        <span
+          className={styles.ownerBadge}
+          title={`Owner: ${issue.owner}`}
+          data-testid="issue-card-owner"
+        >
+          {issue.owner
+            .split(/\s+/)
+            .map((w) => w[0])
+            .join("")
+            .toUpperCase()
+            .slice(0, 2)}
+        </span>
+      )}
       {isMultiRepo && isAllSelected && issue.repo && (
         <div className={styles.cardFooter}>
           <RepoBadge repoName={issue.repo} />

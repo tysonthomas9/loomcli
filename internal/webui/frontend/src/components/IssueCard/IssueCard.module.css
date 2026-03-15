@@ -352,6 +352,20 @@
  * Shows repo badge below title in multi-repo workspaces
  * ================================= */
 
+.ownerBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-secondary);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .cardFooter {
   display: flex;
   align-items: center;

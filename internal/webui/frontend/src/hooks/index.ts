@@ -105,6 +105,9 @@ export type {
 export { useRecentAssignees } from "./useRecentAssignees";
 export type { UseRecentAssigneesReturn } from "./useRecentAssignees";
 
+export { useRecentOwners } from "./useRecentOwners";
+export type { UseRecentOwnersReturn } from "./useRecentOwners";
+
 export { useBackendConfig } from "./useBackendConfig";
 export type { UseBackendConfigReturn } from "./useBackendConfig";
 

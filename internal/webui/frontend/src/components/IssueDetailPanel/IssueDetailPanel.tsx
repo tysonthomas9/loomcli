@@ -36,6 +36,7 @@ import type { ConnectionState } from "@/components/TerminalView";
 import { ActivityLog } from "./ActivityLog";
 import { AgentStatusBadge } from "./AgentStatusBadge";
 import { AssigneeDropdown } from "./AssigneeDropdown";
+import { OwnerDropdown } from "./OwnerDropdown";
 import { StartWorkButton } from "./StartWorkButton";
 import { CommentForm } from "./CommentForm";
 import { DependencySection } from "./DependencySection";
@@ -346,6 +347,7 @@ function DefaultContent({
   const [isSavingPriority, setIsSavingPriority] = useState(false);
   const [isSavingType, setIsSavingType] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
+  const [isSavingOwner, setIsSavingOwner] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
@@ -733,6 +735,23 @@ function DefaultContent({
     [issue, onIssueUpdate],
   );
 
+  const handleOwnerSave = useCallback(
+    async (newOwner: string) => {
+      if (!issue) return;
+
+      setIsSavingOwner(true);
+      try {
+        const updatedIssue = await updateIssue(issue.id, {
+          owner: newOwner,
+        });
+        onIssueUpdate?.(updatedIssue);
+      } finally {
+        setIsSavingOwner(false);
+      }
+    },
+    [issue, onIssueUpdate],
+  );
+
   const handleStartWork = useCallback(
     async (agentName: string) => {
       if (!issue) return;
@@ -916,49 +935,18 @@ function DefaultContent({
             </svg>
             {formatIssueType(issue.issue_type)}
           </span>
-          {issue.owner && (
-            <span className={styles.metadataItem} data-testid="metadata-owner">
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle
-                  cx="8"
-                  cy="5"
-                  r="3"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="M2 14c0-2.5 2.5-4 6-4s6 1.5 6 4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              {issue.owner}
-            </span>
-          )}
-          {issue.assignee && (
-            <span
-              className={styles.metadataItem}
-              data-testid="metadata-assignee"
-            >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle
-                  cx="8"
-                  cy="5"
-                  r="3"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="M2 14c0-2.5 2.5-4 6-4s6 1.5 6 4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              @{issue.assignee}
-            </span>
-          )}
+          <OwnerDropdown
+            owner={issue.owner}
+            onSave={handleOwnerSave}
+            isSaving={isSavingOwner}
+          />
+          <AssigneeDropdown
+            assignee={issue.assignee}
+            onSave={handleAssigneeSave}
+            isSaving={isSavingAssignee}
+            agents={agents}
+            agentTasks={agentTasks}
+          />
           {issue.created_at && (
             <span
               className={styles.metadataItem}
@@ -1210,6 +1198,8 @@ function DefaultContent({
                     assignee={issue.assignee}
                     onSave={handleAssigneeSave}
                     isSaving={isSavingAssignee}
+                    agents={agents}
+                    agentTasks={agentTasks}
                   />
                   {issue.assignee && !issue.assignee.startsWith("[H]") && (
                     <AgentStatusBadge

@@ -328,6 +328,7 @@ export interface UpdateIssueRequest {
   priority?: Priority;
   status?: Status;
   assignee?: string;
+  owner?: string;
   labels?: string[];
   add_labels?: string[];
   remove_labels?: string[];

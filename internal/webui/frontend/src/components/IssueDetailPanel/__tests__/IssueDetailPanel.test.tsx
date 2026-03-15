@@ -578,46 +578,52 @@ describe("IssueDetailPanel", () => {
       expect(typeItem).toHaveTextContent("Task");
     });
 
-    it("renders owner when provided", () => {
+    it("renders owner dropdown with owner name when provided", () => {
       const mockIssue = createTestIssueDetails({
         owner: "john-doe",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      const ownerItem = screen.getByTestId("metadata-owner");
-      expect(ownerItem).toHaveTextContent("john-doe");
+      const ownerTrigger = screen.getAllByTestId("owner-dropdown-trigger")[0];
+      expect(ownerTrigger).toHaveTextContent("john-doe");
     });
 
-    it("does not render owner when not provided", () => {
+    it("renders owner dropdown with 'No owner' when not provided", () => {
       const mockIssue = createTestIssueDetails({
         owner: undefined,
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      expect(screen.queryByTestId("metadata-owner")).not.toBeInTheDocument();
+      const ownerTrigger = screen.getAllByTestId("owner-dropdown-trigger")[0];
+      expect(ownerTrigger).toHaveTextContent("No owner");
     });
 
-    it("renders assignee with @ prefix", () => {
+    it("renders assignee dropdown with assignee name when provided", () => {
       const mockIssue = createTestIssueDetails({
         assignee: "jane-smith",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      const assigneeItem = screen.getByTestId("metadata-assignee");
-      expect(assigneeItem).toHaveTextContent("@jane-smith");
+      const assigneeTrigger = screen.getAllByTestId(
+        "assignee-dropdown-trigger",
+      )[0];
+      expect(assigneeTrigger).toHaveTextContent("jane-smith");
     });
 
-    it("does not render assignee when not provided", () => {
+    it("renders assignee dropdown with 'Unassigned' when not provided", () => {
       const mockIssue = createTestIssueDetails({
         assignee: undefined,
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      expect(screen.queryByTestId("metadata-assignee")).not.toBeInTheDocument();
+      const assigneeTrigger = screen.getAllByTestId(
+        "assignee-dropdown-trigger",
+      )[0];
+      expect(assigneeTrigger).toHaveTextContent("Unassigned");
     });
 
     it("renders created date formatted correctly", () => {
