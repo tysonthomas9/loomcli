@@ -1005,7 +1005,7 @@ function App() {
         {activeView === "settings" && (
           <ErrorBoundary resetOnChange={[activeView]}>
             <Suspense fallback={<LoadingSkeleton.Column />}>
-              <SettingsView />
+              <SettingsView onNavigate={setActiveView} />
             </Suspense>
           </ErrorBoundary>
         )}

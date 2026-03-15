@@ -13,20 +13,7 @@ import "@testing-library/jest-dom";
 import { expectNoA11yViolations } from "@/test-utils/a11y-helpers";
 import { NavRail } from "../NavRail";
 
-// Mock useWorkspaceContext — default to single-repo (isMultiRepo: false)
-const mockUseWorkspaceContext = vi.fn(() => ({
-  isMultiRepo: false,
-}));
-
-vi.mock("@/hooks", () => ({
-  useWorkspaceContext: (...args: unknown[]) => mockUseWorkspaceContext(...args),
-}));
-
 describe("NavRail", () => {
-  beforeEach(() => {
-    mockUseWorkspaceContext.mockReturnValue({ isMultiRepo: false });
-  });
-
   describe("rendering", () => {
     it("renders a Kanban button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
@@ -38,18 +25,6 @@ describe("NavRail", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       expect(screen.getByLabelText("Settings")).toBeInTheDocument();
-    });
-
-    it("renders an Observability button", () => {
-      render(<NavRail activeView="kanban" onChange={() => {}} />);
-
-      expect(screen.getByLabelText("Observability")).toBeInTheDocument();
-    });
-
-    it("does not render a Monitor button", () => {
-      render(<NavRail activeView="kanban" onChange={() => {}} />);
-
-      expect(screen.queryByLabelText("Monitor")).not.toBeInTheDocument();
     });
 
     it("renders a List button", () => {
@@ -64,41 +39,28 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Terminal")).toBeInTheDocument();
     });
 
-    it("hides Workspace button in single-repo mode", () => {
+    it("does not render Observability, Files, or Workspace buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
+      expect(screen.queryByLabelText("Observability")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Files")).not.toBeInTheDocument();
       expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
     });
 
-    it("shows Workspace button in multi-repo mode", () => {
-      mockUseWorkspaceContext.mockReturnValue({ isMultiRepo: true });
+    it("does not render a Monitor button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
-      expect(screen.getByLabelText("Workspace")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Monitor")).not.toBeInTheDocument();
     });
 
-    it("renders exactly six navigation buttons in single-repo mode", () => {
-      render(<NavRail activeView="kanban" onChange={() => {}} />);
-
-      const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(6);
-    });
-
-    it("renders seven navigation buttons in multi-repo mode", () => {
-      mockUseWorkspaceContext.mockReturnValue({ isMultiRepo: true });
+    it("renders exactly four navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(7);
+      expect(buttons).toHaveLength(4);
     });
 
-    it("renders a Files button", () => {
-      render(<NavRail activeView="kanban" onChange={() => {}} />);
-
-      expect(screen.getByLabelText("Files")).toBeInTheDocument();
-    });
-
-    it("renders tooltips for each button in single-repo mode", () => {
+    it("renders tooltips for each button", () => {
       const { container } = render(
         <NavRail activeView="kanban" onChange={() => {}} />,
       );
@@ -109,22 +71,17 @@ describe("NavRail", () => {
       const tooltipTexts = Array.from(tooltips).map((t) => t.textContent);
       expect(tooltipTexts).toContain("Kanban");
       expect(tooltipTexts).toContain("List");
-      expect(tooltipTexts).toContain("Observability");
-      expect(tooltipTexts).not.toContain("Workspace");
-      expect(tooltipTexts).toContain("Files");
       expect(tooltipTexts).toContain("Terminal");
       expect(tooltipTexts).toContain("Settings");
     });
 
-    it("renders Terminal as the 3rd nav item (between List and Observability)", () => {
+    it("renders buttons in correct order: Kanban, List, Terminal", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      // TOP_ITEMS order: kanban(0), table(1), terminal(2), observability(3), files(4), workspace(5), settings is BOTTOM
       expect(buttons[0]).toHaveAccessibleName("Kanban");
       expect(buttons[1]).toHaveAccessibleName("List");
       expect(buttons[2]).toHaveAccessibleName("Terminal");
-      expect(buttons[3]).toHaveAccessibleName("Observability");
     });
 
     it("has navigation landmark with aria-label", () => {
@@ -253,16 +210,7 @@ describe("NavRail", () => {
   });
 
   describe("accessibility", () => {
-    it("has no axe violations in single-repo mode", async () => {
-      const { container } = render(
-        <NavRail activeView="kanban" onChange={() => {}} />,
-      );
-
-      await expectNoA11yViolations(container);
-    });
-
-    it("has no axe violations in multi-repo mode", async () => {
-      mockUseWorkspaceContext.mockReturnValue({ isMultiRepo: true });
+    it("has no axe violations", async () => {
       const { container } = render(
         <NavRail activeView="kanban" onChange={() => {}} />,
       );

@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
+import type { ViewMode } from "@/components/ViewSwitcher";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
 import {
   useTerminalFont,
@@ -21,9 +22,13 @@ import styles from "./SettingsView.module.css";
 
 export interface SettingsViewProps {
   className?: string;
+  onNavigate?: (view: ViewMode) => void;
 }
 
-export function SettingsView({ className }: SettingsViewProps): JSX.Element {
+export function SettingsView({
+  className,
+  onNavigate,
+}: SettingsViewProps): JSX.Element {
   const {
     config,
     isLoading,
@@ -283,6 +288,28 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
           </div>
         </div>
       </div>
+
+      {/* Observability Navigation */}
+      {onNavigate && (
+        <div className={styles.panel} data-testid="observability-nav-panel">
+          <div className={styles.panelHeader}>
+            <h3 className={styles.panelTitle}>Observability</h3>
+          </div>
+          <div className={styles.panelContent}>
+            <p className={styles.description}>
+              View system metrics and agent activity.
+            </p>
+            <button
+              type="button"
+              className={styles.navButton}
+              onClick={() => onNavigate("observability")}
+              data-testid="observability-nav-button"
+            >
+              Open Observability
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

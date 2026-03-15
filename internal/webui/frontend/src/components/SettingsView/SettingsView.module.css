@@ -203,6 +203,32 @@
   font-style: italic;
 }
 
+/* Navigation button */
+.navButton {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.navButton:hover {
+  background-color: var(--color-bg-hover, #f0ede6);
+  border-color: var(--color-border-hover);
+}
+
+.navButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 /* Mobile */
 @media (width <= 768px) {
   .settingsView {
