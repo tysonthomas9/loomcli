@@ -40,6 +40,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 
 	// Workspace topology endpoint
 	mux.HandleFunc("GET /api/workspace", handleWorkspace(workspaceConfigFn))
+	mux.HandleFunc("PATCH /api/workspace/rename", handleWorkspaceRename(workspaceConfigFn))
 
 	// Backend health endpoint
 	if backendOps != nil {

@@ -1,13 +1,17 @@
 /**
  * WorkspaceTree component displays a collapsible sidebar with repo navigation.
  * Shows all repos in the workspace with per-repo agent counts and status.
+ * Includes workspace entries with context menu rename support.
  */
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 
+import { renameWorkspace } from "@/api/workspace";
+import type { WorkspaceSummary } from "@/api/workspace";
 import { useWorkspaceRepos, useAgentContext } from "@/hooks";
 
 import styles from "./WorkspaceTree.module.css";
+import { WorkspaceContextMenu } from "./WorkspaceContextMenu";
 
 /**
  * Props for the WorkspaceTree component.
@@ -45,8 +49,22 @@ export function WorkspaceTree({
     }
   });
 
-  const { repos, isLoading, error, refetch } = useWorkspaceRepos();
+  const { workspace, repos, isLoading, error, refetch } = useWorkspaceRepos();
   const { agents } = useAgentContext();
+
+  // Workspace rename state
+  const [editingWorkspace, setEditingWorkspace] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    workspaceName: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Persist collapsed state
   useEffect(() => {
@@ -57,9 +75,104 @@ export function WorkspaceTree({
     }
   }, [isCollapsed]);
 
+  // Focus rename input when entering edit mode
+  useEffect(() => {
+    if (editingWorkspace && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [editingWorkspace]);
+
   const handleToggle = useCallback(() => {
     setIsCollapsed((prev) => !prev);
   }, []);
+
+  // Context menu handlers
+  const handleOverflowClick = useCallback(
+    (e: React.MouseEvent, wsName: string) => {
+      e.stopPropagation();
+      setContextMenu({ workspaceName: wsName, x: e.clientX, y: e.clientY });
+    },
+    [],
+  );
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, wsName: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({ workspaceName: wsName, x: e.clientX, y: e.clientY });
+    },
+    [],
+  );
+
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  // Rename handlers
+  const handleStartRename = useCallback(() => {
+    if (!contextMenu) return;
+    setEditingWorkspace(contextMenu.workspaceName);
+    setDraftName(contextMenu.workspaceName);
+    setRenameError(null);
+  }, [contextMenu]);
+
+  const handleCancelRename = useCallback(() => {
+    setEditingWorkspace(null);
+    setDraftName("");
+    setRenameError(null);
+  }, []);
+
+  const handleSaveRename = useCallback(async () => {
+    if (!editingWorkspace) return;
+
+    const trimmed = draftName.trim();
+
+    // Client-side pre-validation: empty name
+    if (!trimmed) {
+      setRenameError("Name cannot be empty");
+      setTimeout(() => renameInputRef.current?.focus(), 0);
+      return;
+    }
+
+    // No-op if name unchanged
+    if (trimmed === editingWorkspace) {
+      setEditingWorkspace(null);
+      return;
+    }
+
+    setIsSaving(true);
+    setRenameError(null);
+
+    try {
+      await renameWorkspace(editingWorkspace, trimmed);
+      setEditingWorkspace(null);
+      refetch();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to rename workspace";
+      setRenameError(message);
+      setTimeout(() => renameInputRef.current?.focus(), 0);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [editingWorkspace, draftName, refetch]);
+
+  const handleRenameKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleSaveRename();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        handleCancelRename();
+      }
+    },
+    [handleSaveRename, handleCancelRename],
+  );
+
+  // Workspace summaries from the data
+  const workspaces: WorkspaceSummary[] = workspace?.workspaces ?? [];
 
   // Compute per-repo agent counts
   const repoAgentCounts = useMemo(() => {
@@ -142,6 +255,102 @@ export function WorkspaceTree({
 
           {!isLoading && !error && repos.length === 0 && (
             <div className={styles.emptyState}>No repos in workspace</div>
+          )}
+
+          {workspaces.length > 1 && (
+            <div className={styles.workspaceSection}>
+              <div className={styles.workspaceSectionHeader}>Workspaces</div>
+              {workspaces.map((ws) => {
+                const isEditing = editingWorkspace === ws.name;
+
+                return (
+                  <div
+                    key={ws.name}
+                    className={styles.workspaceEntry}
+                    data-active={ws.active}
+                    onContextMenu={(e) => handleContextMenu(e, ws.name)}
+                  >
+                    <svg
+                      className={styles.workspaceEntryIcon}
+                      viewBox="0 0 16 16"
+                      width="14"
+                      height="14"
+                    >
+                      <rect
+                        x="1"
+                        y="4"
+                        width="10"
+                        height="8"
+                        rx="1.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.3"
+                      />
+                      <rect
+                        x="5"
+                        y="1"
+                        width="10"
+                        height="8"
+                        rx="1.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.3"
+                      />
+                    </svg>
+                    {isEditing ? (
+                      <div className={styles.renameContainer}>
+                        <input
+                          ref={renameInputRef}
+                          type="text"
+                          className={styles.renameInput}
+                          value={draftName}
+                          onChange={(e) => setDraftName(e.target.value)}
+                          onBlur={handleSaveRename}
+                          onKeyDown={handleRenameKeyDown}
+                          disabled={isSaving}
+                          aria-label="Rename workspace"
+                          data-testid="workspace-rename-input"
+                        />
+                        {renameError && (
+                          <span
+                            className={styles.renameError}
+                            role="alert"
+                            data-testid="workspace-rename-error"
+                          >
+                            {renameError}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className={styles.workspaceEntryName}>
+                        {ws.name}
+                      </span>
+                    )}
+                    <span className={styles.workspaceEntryMeta}>
+                      <span className={styles.workspaceRepoCount}>
+                        {ws.repo_count}
+                      </span>
+                      {ws.active && (
+                        <span className={styles.workspaceActiveBadge}>
+                          active
+                        </span>
+                      )}
+                    </span>
+                    {!isEditing && (
+                      <button
+                        type="button"
+                        className={styles.overflowButton}
+                        onClick={(e) => handleOverflowClick(e, ws.name)}
+                        aria-label={`More actions for ${ws.name}`}
+                        data-testid={`workspace-overflow-${ws.name}`}
+                      >
+                        &#x2026;
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
 
           {repos.length > 0 && (
@@ -268,6 +477,13 @@ export function WorkspaceTree({
           {totalActiveCount}
         </div>
       )}
+
+      <WorkspaceContextMenu
+        isOpen={contextMenu !== null}
+        position={contextMenu ?? { x: 0, y: 0 }}
+        onRename={handleStartRename}
+        onClose={handleCloseContextMenu}
+      />
     </aside>
   );
 }

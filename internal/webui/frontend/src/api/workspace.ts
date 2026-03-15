@@ -3,7 +3,7 @@
  * Interfaces with GET /api/workspace endpoint.
  */
 
-import { get, ApiError } from "./client";
+import { get, patch, ApiError } from "./client";
 
 // ============= Types =============
 
@@ -110,6 +110,29 @@ export async function refreshWorkspace(): Promise<WorkspaceData> {
   workspaceCache = null;
   fetchPromise = null;
   return fetchWorkspace();
+}
+
+/**
+ * Rename a workspace. On success, invalidates the cache and returns refreshed data.
+ */
+export async function renameWorkspace(
+  oldName: string,
+  newName: string,
+): Promise<WorkspaceData> {
+  const response = await patch<ApiResult<WorkspaceData>>(
+    "/api/workspace/rename",
+    { old_name: oldName, new_name: newName },
+  );
+  const data = unwrap(response);
+  if (data == null) {
+    // Same-name no-op: return current cache or re-fetch
+    return workspaceCache ?? (await refreshWorkspace());
+  }
+  // Refresh cache with the returned data
+  cacheGeneration++;
+  workspaceCache = data;
+  fetchPromise = null;
+  return data;
 }
 
 /**
