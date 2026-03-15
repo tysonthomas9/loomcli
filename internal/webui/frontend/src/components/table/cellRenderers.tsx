@@ -95,6 +95,13 @@ export function renderCellContent(
         </span>
       );
 
+    case "repo":
+      return (
+        <span className="issue-table__repo">
+          {value ? String(value) : "\u2014"}
+        </span>
+      );
+
     case "updated_at":
       return (
         <span className="issue-table__date">

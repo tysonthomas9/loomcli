@@ -9,8 +9,10 @@ import {
   getStatusLabel,
 } from "@/components/AgentCard";
 import { BlockedBadge } from "@/components/BlockedBadge";
+import { RepoBadge } from "@/components/RepoBadge";
 import { TypeIcon } from "@/components/TypeIcon";
 import { useAgentContext } from "@/hooks";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { BlockerRef, Issue } from "@/types";
 import { isKnownIssueType, parseLoomStatus } from "@/types";
 import { formatIssueId } from "@/utils/formatIssueId";
@@ -94,6 +96,7 @@ export function IssueCard({
   columnId,
 }: IssueCardProps): JSX.Element {
   const { getAgentByName } = useAgentContext();
+  const { isMultiRepo } = useWorkspaceContext();
 
   const priority = getPriorityLevel(issue.priority);
   const displayId = formatIssueId(issue.id);
@@ -209,6 +212,11 @@ export function IssueCard({
         </span>
       </header>
       <h3 className={styles.title}>{displayTitle}</h3>
+      {isMultiRepo && issue.repo && (
+        <div className={styles.cardFooter}>
+          <RepoBadge repoName={issue.repo} />
+        </div>
+      )}
       {showAgentRow && issue.assignee && (
         <AgentRow
           agentName={issue.assignee}

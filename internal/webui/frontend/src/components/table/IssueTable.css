@@ -260,6 +260,18 @@
   font-size: var(--font-size-sm);
 }
 
+/* Repo */
+.issue-table__repo {
+  display: inline-block;
+  max-width: 100px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Date */
 .issue-table__date {
   color: var(--color-text-muted);

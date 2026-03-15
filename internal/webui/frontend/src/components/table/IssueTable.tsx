@@ -7,6 +7,7 @@ import { useMemo } from "react";
 
 import type { BlockedInfo } from "@/components/KanbanBoard";
 import { useSort, SortDirection } from "@/hooks";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { Issue } from "@/types";
 
 import { ColumnDef, DEFAULT_ISSUE_COLUMNS } from "./columns";
@@ -62,6 +63,13 @@ export function IssueTable({
   blockedIssues,
   showBlocked = true,
 }: IssueTableProps) {
+  // Hide repo column in single-repo workspaces
+  const { isMultiRepo } = useWorkspaceContext();
+  const effectiveColumns = useMemo(
+    () => (isMultiRepo ? columns : columns.filter((c) => c.id !== "repo")),
+    [columns, isMultiRepo],
+  );
+
   // Filter out blocked issues if showBlocked is false
   const filteredIssues = useMemo(() => {
     if (showBlocked || !blockedIssues) {
@@ -77,7 +85,7 @@ export function IssueTable({
     handleSort: hookHandleSort,
   } = useSort({
     data: filteredIssues,
-    columns,
+    columns: effectiveColumns,
     initialKey: sortable ? (initialSort?.key ?? null) : null,
     initialDirection: initialSort?.direction ?? "asc",
   });
@@ -99,7 +107,7 @@ export function IssueTable({
     <div className="issue-table__wrapper">
       <table className={tableClassName} data-testid="issue-table">
         <TableHeader
-          columns={columns}
+          columns={effectiveColumns}
           sortState={sortState}
           onSort={handleSort}
           {...(showCheckbox !== undefined && { showCheckbox })}
@@ -108,7 +116,7 @@ export function IssueTable({
           {displayData.length === 0 ? (
             <tr className="issue-table__empty-row">
               <td
-                colSpan={columns.length + (showCheckbox ? 1 : 0)}
+                colSpan={effectiveColumns.length + (showCheckbox ? 1 : 0)}
                 className="issue-table__empty-cell"
                 data-testid="issue-table-empty"
               >
@@ -124,7 +132,7 @@ export function IssueTable({
                 <IssueRow
                   key={issue.id}
                   issue={issue}
-                  columns={columns}
+                  columns={effectiveColumns}
                   isSelected={
                     showCheckbox
                       ? selectedIds?.has(issue.id)

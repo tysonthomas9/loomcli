@@ -330,3 +330,16 @@
   background-color: var(--color-success-bg);
   color: var(--color-text);
 }
+
+/* =================================
+ * Card footer zone
+ * Shows repo badge below title in multi-repo workspaces
+ * ================================= */
+
+.cardFooter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
+}
