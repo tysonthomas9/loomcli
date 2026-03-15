@@ -6,9 +6,19 @@ Your job is to review the plan produced by the planning agent and determine if i
 The plan is in the "Previous Steps" section below, under "Step: plan".
 The task details are in the "Project Context" section.
 
-### Review Criteria
+### Step 1: Understand the Context
 
-Evaluate the plan against ALL of the following:
+- Read the plan output from the planning step
+- Read the task details from the Project Context section
+- Extract the task ID
+
+### Step 2: Architecture Review
+
+Launch a code-architect agent (subagent_type='feature-dev:code-architect') to validate the plan against the actual codebase.
+
+### Step 3: Evaluate Against Criteria
+
+Using the architecture review findings AND your own analysis, evaluate the plan against ALL of the following:
 
 #### Completeness
 - Does the summary clearly state what the task does and why?
@@ -29,12 +39,13 @@ Evaluate the plan against ALL of the following:
 - Are file paths specific, not approximate?
 - Is the design field in beads non-empty and substantive (more than 50 words)?
 
-### Output Your Review
+### Step 4: Output Your Review
 
 Write a review covering:
-1. Brief assessment of each criterion (pass/fail with one sentence of reasoning)
-2. List of specific issues if any criteria failed
-3. Final verdict
+1. Architecture review findings (from the spawned agent)
+2. Brief assessment of each criterion (pass/fail with one sentence of reasoning)
+3. List of specific issues if any criteria failed
+4. Final verdict
 
 **If ALL criteria pass:**
 Write: "VERDICT: APPROVED" followed by a one-paragraph summary of why the plan is sound.

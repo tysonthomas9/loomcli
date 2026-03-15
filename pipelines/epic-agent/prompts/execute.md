@@ -28,7 +28,8 @@ Before writing any code:
 - Identify the files to create/modify as specified in the design
 - Note any edge cases or dependencies mentioned
 - Check if any dependencies are missing or incomplete
-- If a required dependency is not ready, go to Step 7 (Handle Blockers)
+- If a required dependency is not ready, go to Step 8 (Handle Blockers)
+- ONLY proceed to Step 3 after you fully understand the plan AND all dependencies are met
 
 ### Step 3: Implement
 
@@ -47,21 +48,21 @@ Before writing any code:
 - Do NOT proceed until tests pass
 
 ### Step 5: Write Tests
-
-- Write unit tests for your changes, following existing test patterns in the codebase
-- Verify tests pass by running `go test ./...`
+- Spawn an agent to write tests for your changes, following existing test patterns in the codebase
+- Verify tests pass after the agent completes
 - If tests fail, fix the code or tests until they pass
 
 ### Step 6: Code Review
+- Launch a code-reviewer agent (subagent_type='feature-dev:code-reviewer') to review your changes
+- Document all issues found
 
-Review your own changes for:
-- Error handling — every `error` return must be handled
-- Naming consistency with the rest of the package
-- Security issues (input validation, path traversal, etc.)
-- No unrelated code was modified
-- Fix all issues found before proceeding
+### Step 7: Fix Review Issues
+- Address ALL issues identified in code review
+- Re-run tests after making fixes
+- If changes were significant, spawn another code review agent
+- Repeat until review passes with no major issues
 
-### Step 7: Handle Blockers
+### Step 8: Handle Blockers
 
 If at ANY point you discover the task cannot be completed:
 - Missing dependency (code/feature not yet implemented)
@@ -81,7 +82,7 @@ Do NOT leave the task in_progress. Instead:
 5. Run `bd sync`
 6. Print `EXIT_CODE=1` and stop
 
-### Step 8: Complete and Signal
+### Step 9: Complete and Signal
 
 Run the quality gate (MANDATORY — DO NOT SKIP):
 ```
@@ -104,7 +105,7 @@ git push origin HEAD
 
 ### CRITICAL: STOP
 
-After completing Step 7 (blocked) or Step 8 (completed), you are DONE.
+After completing Step 8 (blocked) or Step 9 (completed), you are DONE.
 - Do NOT run `bd ready` again
 - Do NOT pick up another task
 - Do NOT continue working

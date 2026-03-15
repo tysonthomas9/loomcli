@@ -32,12 +32,7 @@ You are running in a pipeline. Follow these rules strictly:
 
 ### Step 2: Research the Codebase
 
-Before creating a plan:
-- Read relevant existing code to understand patterns and conventions
-- Identify what files need to be created or modified
-- Understand the existing architecture
-- Look for similar implementations to follow as patterns
-- Identify dependencies and potential blockers
+Launch 2-3 code-explorer agents in parallel (subagent_type='Explore') targeting different aspects of the codebase relevant to this task. After agents return, read the key files they identified to build deep understanding before designing.
 
 ### Step 3: Create a Detailed Plan
 
