@@ -344,6 +344,10 @@ vi.mock("@/hooks", () => ({
     sourceReposFilter: undefined,
     isMultiRepo: false,
   })),
+  useWorkspaceState: vi.fn(() => ({
+    currentWorkspaceId: null,
+    switchWorkspace: vi.fn(),
+  })),
 }));
 
 // Alias for convenience in tests (prefixed with _ to satisfy linter for unused vars)

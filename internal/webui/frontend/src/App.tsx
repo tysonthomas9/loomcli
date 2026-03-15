@@ -60,6 +60,7 @@ import {
   useAgentContext,
   useTheme,
   useWorkspaceContext,
+  useWorkspaceState,
 } from "@/hooks";
 import type { Issue, IssueDetails, Status } from "@/types";
 
@@ -260,6 +261,11 @@ function App() {
     },
     [],
   );
+
+  // Workspace snapshot ref — updated synchronously during render (not in an effect)
+  const wsState = { view: activeView, filters, searchValue, selectedIssueId };
+  const latestStateRef = useRef(wsState);
+  latestStateRef.current = wsState;
 
   // Bulk selection state for Table view
   const {
@@ -598,11 +604,40 @@ function App() {
     [selectedRepoNames],
   );
 
+  // Close all panels synchronously (no animation) for workspace switch
+  const closeAllPanels = useCallback(() => {
+    clearTimeoutRef(issuePanelTimeoutRef);
+    clearTimeoutRef(agentPanelTimeoutRef);
+    setIsPanelOpen(false);
+    clearIssue();
+    setIsAgentPanelOpen(false);
+    setSelectedAgentName(null);
+  }, [clearIssue, clearTimeoutRef]);
+
+  // Workspace state preservation: save/restore per-workspace UI state on switch
+  const { switchWorkspace } = useWorkspaceState({
+    stateRef: latestStateRef,
+    setView: setActiveView,
+    filterActions,
+    setSearchValue,
+    closeAllPanels,
+  });
+
   // Handle workspace/repo selection from WorkspaceTree
   const handleWorkspaceSelect = useCallback(
-    (repoName: string | null) =>
-      repoName === null ? selectAll() : selectRepos([repoName]),
-    [selectAll, selectRepos],
+    (repoName: string | null) => {
+      // Skip if same workspace
+      if (repoName === activeRepoName) return;
+      // Save/restore workspace state
+      switchWorkspace(repoName);
+      // Update repo filter
+      if (repoName === null) {
+        selectAll();
+      } else {
+        selectRepos([repoName]);
+      }
+    },
+    [activeRepoName, switchWorkspace, selectAll, selectRepos],
   );
 
   // Handle Talk to Lead button click

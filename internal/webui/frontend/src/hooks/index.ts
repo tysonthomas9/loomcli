@@ -152,6 +152,13 @@ export type {
 export { useTheme } from "./useTheme";
 export type { Theme, UseThemeReturn } from "./useTheme";
 
+export { useWorkspaceState } from "./useWorkspaceState";
+export type {
+  WorkspaceSnapshot,
+  UseWorkspaceStateParams,
+  UseWorkspaceStateReturn,
+} from "./useWorkspaceState";
+
 export { useVirtualList } from "./useVirtualList";
 export type {
   UseVirtualListOptions,
