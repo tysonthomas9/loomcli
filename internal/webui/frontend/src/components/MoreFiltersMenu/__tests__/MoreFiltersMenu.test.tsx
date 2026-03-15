@@ -52,9 +52,7 @@ describe("MoreFiltersMenu", () => {
     it("does not render menu popover by default", () => {
       renderMenu();
 
-      expect(
-        screen.queryByTestId("more-filters-menu"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("more-filters-menu")).not.toBeInTheDocument();
     });
   });
 
@@ -78,9 +76,7 @@ describe("MoreFiltersMenu", () => {
       expect(screen.getByTestId("more-filters-menu")).toBeInTheDocument();
 
       fireEvent.click(trigger);
-      expect(
-        screen.queryByTestId("more-filters-menu"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("more-filters-menu")).not.toBeInTheDocument();
     });
 
     it("closes popover on outside click", () => {
@@ -92,9 +88,7 @@ describe("MoreFiltersMenu", () => {
       // Click outside
       fireEvent.mouseDown(document.body);
 
-      expect(
-        screen.queryByTestId("more-filters-menu"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("more-filters-menu")).not.toBeInTheDocument();
     });
   });
 
@@ -124,10 +118,7 @@ describe("MoreFiltersMenu", () => {
       groupByValues.forEach((groupByValue) => {
         const onGroupByChange = vi.fn();
         const { unmount } = render(
-          <MoreFiltersMenu
-            groupBy="none"
-            onGroupByChange={onGroupByChange}
-          />,
+          <MoreFiltersMenu groupBy="none" onGroupByChange={onGroupByChange} />,
         );
 
         fireEvent.click(screen.getByTestId("more-filters-trigger"));
@@ -189,10 +180,7 @@ describe("MoreFiltersMenu", () => {
 
       activeValues.forEach((groupByValue) => {
         const { container, unmount } = render(
-          <MoreFiltersMenu
-            groupBy={groupByValue}
-            onGroupByChange={vi.fn()}
-          />,
+          <MoreFiltersMenu groupBy={groupByValue} onGroupByChange={vi.fn()} />,
         );
 
         const indicator = container.querySelector("span");

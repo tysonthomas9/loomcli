@@ -13,7 +13,7 @@ import (
 
 // setupRoutes configures all HTTP routes for the server.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), backendListFn func() ([]BackendInfo, error)) { //nolint:funlen // route registration function
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), backendOps BackendOps) { //nolint:funlen // route registration function
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -41,8 +41,10 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	// Workspace topology endpoint
 	mux.HandleFunc("GET /api/workspace", handleWorkspace(workspaceConfigFn))
 
-	// Backend registry endpoint
-	mux.HandleFunc("GET /api/backends", handleGetBackends(backendListFn))
+	// Backend health endpoint
+	if backendOps != nil {
+		mux.HandleFunc("GET /api/backends", handleGetBackendsHealth(backendOps))
+	}
 
 	// Issue endpoints
 	mux.HandleFunc("GET /api/issues/{id}", handleGetIssue(pool))

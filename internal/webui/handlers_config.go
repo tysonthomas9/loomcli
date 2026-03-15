@@ -19,64 +19,6 @@ import (
 // validBackends is the list of supported AI backend names.
 var validBackends = []string{"claude", "codex", "opencode"}
 
-// BackendInfo describes a registered backend with metadata and health status.
-type BackendInfo struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	Provider    string `json:"provider"`
-	Status      string `json:"status"`
-	BrandColor  string `json:"brand_color"`
-	Description string `json:"description,omitempty"`
-	Version     string `json:"version,omitempty"`
-}
-
-type backendsResponse struct {
-	Success bool          `json:"success"`
-	Data    []BackendInfo `json:"data"`
-	Error   string        `json:"error,omitempty"`
-}
-
-// handleGetBackends returns a handler that lists registered backends with metadata.
-// If listFn is nil, falls back to returning validBackends as basic entries.
-func handleGetBackends(listFn func() ([]BackendInfo, error)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if listFn == nil {
-			// Graceful fallback: return validBackends as basic entries
-			backends := make([]BackendInfo, 0, len(validBackends))
-			for _, name := range validBackends {
-				backends = append(backends, BackendInfo{
-					Name:   name,
-					Status: "unavailable",
-				})
-			}
-			respondJSON(w, http.StatusOK, backendsResponse{
-				Success: true,
-				Data:    backends,
-			})
-			return
-		}
-
-		backends, err := listFn()
-		if err != nil {
-			respondJSON(w, http.StatusInternalServerError, backendsResponse{
-				Success: false,
-				Error:   "failed to list backends",
-			})
-			return
-		}
-
-		// Ensure empty slice for JSON [] marshaling
-		if backends == nil {
-			backends = []BackendInfo{}
-		}
-
-		respondJSON(w, http.StatusOK, backendsResponse{
-			Success: true,
-			Data:    backends,
-		})
-	}
-}
-
 // BackendConfigResponse wraps the backend config data for JSON response.
 type BackendConfigResponse struct {
 	Success bool               `json:"success"`

@@ -180,11 +180,7 @@ describe("issueTabs API", () => {
     it("URL-encodes the issue ID", async () => {
       mockPut.mockResolvedValue({ success: true, data: {} });
 
-      await saveIssueTabState(
-        "issue/with/slashes",
-        [],
-        "details",
-      );
+      await saveIssueTabState("issue/with/slashes", [], "details");
 
       expect(mockPut).toHaveBeenCalledWith(
         "/api/issues/issue%2Fwith%2Fslashes/tabs",

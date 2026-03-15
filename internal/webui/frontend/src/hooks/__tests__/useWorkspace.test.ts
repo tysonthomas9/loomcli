@@ -66,7 +66,12 @@ function createMockWorkspace(
       },
     ],
     workspaces: [
-      { name: "test-workspace", path: "/home/user/workspace", active: true, repo_count: 2 },
+      {
+        name: "test-workspace",
+        path: "/home/user/workspace",
+        active: true,
+        repo_count: 2,
+      },
     ],
     ...overrides,
   };

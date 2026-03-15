@@ -265,8 +265,18 @@ describe("WorkspaceData type", () => {
       groups: [],
       agents: [],
       workspaces: [
-        { name: "my-workspace", path: "/home/user/workspace", active: true, repo_count: 2 },
-        { name: "other", path: "/home/user/other", active: false, repo_count: 1 },
+        {
+          name: "my-workspace",
+          path: "/home/user/workspace",
+          active: true,
+          repo_count: 2,
+        },
+        {
+          name: "other",
+          path: "/home/user/other",
+          active: false,
+          repo_count: 1,
+        },
       ],
     };
 
@@ -307,7 +317,12 @@ describe("WorkspaceData type", () => {
         },
       ],
       workspaces: [
-        { name: "multi-repo-workspace", path: "/home/user/workspace", active: true, repo_count: 2 },
+        {
+          name: "multi-repo-workspace",
+          path: "/home/user/workspace",
+          active: true,
+          repo_count: 2,
+        },
       ],
     };
 

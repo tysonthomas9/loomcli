@@ -69,7 +69,12 @@ export {
   refreshWorkspace,
   getCachedWorkspace,
 } from "./workspace";
-export type { WorkspaceData, RepoInfo, WorkspaceAgentInfo, WorkspaceSummary } from "./workspace";
+export type {
+  WorkspaceData,
+  RepoInfo,
+  WorkspaceAgentInfo,
+  WorkspaceSummary,
+} from "./workspace";
 
 // Editor API functions
 export {
@@ -121,6 +126,10 @@ export {
   buildTerminalWsUrl,
 } from "./terminal";
 export type { TerminalSessionInfo } from "./terminal";
+
+// Backend health API functions
+export { fetchBackends, refreshBackends } from "./backends";
+export type { BackendHealthData } from "./backends";
 
 // File API functions (agent worktree file operations)
 export { listWorktreeDir, readWorktreeFile, writeWorktreeFile } from "./files";

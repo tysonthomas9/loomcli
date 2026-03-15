@@ -240,36 +240,8 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Printf("WARNING: Server bound to %s — exposed to network. Ensure this is intentional.", serveBindAddr)
 	}
 
-	// Cache backend list to avoid per-request subprocess overhead (InspectCapabilities + HealthCheck).
-	cachedBackendList := newCachedValue[[]webui.BackendInfo](30*time.Second, func() []webui.BackendInfo {
-		names := ListBackends()
-		result := make([]webui.BackendInfo, 0, len(names))
-		for _, name := range names {
-			info := webui.BackendInfo{Name: name, Status: "unavailable"}
-			b, ok := GetBackendByName(name)
-			if !ok {
-				result = append(result, info)
-				continue
-			}
-			caps := InspectCapabilities(b)
-			if caps.HasMeta {
-				meta := caps.Meta.Meta()
-				info.DisplayName = meta.DisplayName
-				info.Description = meta.Description
-			}
-			if caps.HasHealthCheck {
-				hs := caps.Health.HealthCheck()
-				if hs.Healthy {
-					info.Status = "available"
-				}
-				info.Version = hs.Version
-			}
-			info.Provider = backendProvider(name)
-			info.BrandColor = backendBrandColor(name)
-			result = append(result, info)
-		}
-		return result
-	})
+	// Create backend ops for health checking.
+	backendOps := NewBackendOps()
 
 	// Resolve backend name for terminal sessions.
 	// ResolveBackendName() checks: flag > env > project-local loom.yaml > global config > default.
@@ -303,9 +275,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				GitOps:            gitOps,
 				FileOps:           gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
 				WorkspaceConfigFn: buildWorkspaceInfo,
-				BackendListFn: func() ([]webui.BackendInfo, error) {
-					return cachedBackendList.get(), nil
-				},
+				BackendOps:        backendOps,
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true
@@ -461,29 +431,3 @@ func runServe(cmd *cobra.Command, args []string) {
 }
 
 // backendProvider maps backend names to their provider labels.
-func backendProvider(name string) string {
-	switch name {
-	case "claude":
-		return "anthropic"
-	case "codex":
-		return "openai"
-	case "opencode":
-		return "openai"
-	default:
-		return name
-	}
-}
-
-// backendBrandColor maps backend names to their brand hex colors.
-func backendBrandColor(name string) string {
-	switch name {
-	case "claude":
-		return "#da7756"
-	case "codex":
-		return "#412991"
-	case "opencode":
-		return "#1f6feb"
-	default:
-		return "#6b7280"
-	}
-}

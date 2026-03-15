@@ -131,8 +131,8 @@ export function WorkspaceProvider({
   >(() => lsGet(LS_ACTIVE_WORKSPACE));
 
   // Repo-level selection
-  const [selectedRepoNames, setSelectedRepoNames] = useState<Set<string>>(
-    () => readStoredRepoSelection(),
+  const [selectedRepoNames, setSelectedRepoNames] = useState<Set<string>>(() =>
+    readStoredRepoSelection(),
   );
 
   // Sync activeWorkspaceName when workspace data loads

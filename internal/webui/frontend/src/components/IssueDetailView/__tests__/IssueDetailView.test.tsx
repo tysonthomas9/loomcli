@@ -7,7 +7,7 @@
  * Focuses on Escape key handling and back button behavior.
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 

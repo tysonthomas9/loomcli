@@ -1084,10 +1084,7 @@ describe("useWorkspaceContext", () => {
         result.current.selectRepos(["frontend", "backend"]);
       });
 
-      expect(result.current.activeRepoNames).toEqual([
-        "frontend",
-        "backend",
-      ]);
+      expect(result.current.activeRepoNames).toEqual(["frontend", "backend"]);
     });
 
     it("returns empty array when no repos exist", () => {

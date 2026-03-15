@@ -79,22 +79,19 @@ export function useIssueTabPersistence(
     fetchState();
   }, [fetchState]);
 
-  const saveTabs = useCallback(
-    (tabs: IssueTab[], activeTabId: string) => {
-      if (saveDebounceRef.current) {
-        clearTimeout(saveDebounceRef.current);
-      }
-      saveDebounceRef.current = setTimeout(() => {
-        if (!mountedRef.current) return;
-        const currentIssueId = issueIdRef.current;
-        if (!currentIssueId) return;
-        saveIssueTabState(currentIssueId, tabs, activeTabId).catch(() => {
-          // Silently fail - persistence is best-effort
-        });
-      }, SAVE_DEBOUNCE_MS);
-    },
-    [],
-  );
+  const saveTabs = useCallback((tabs: IssueTab[], activeTabId: string) => {
+    if (saveDebounceRef.current) {
+      clearTimeout(saveDebounceRef.current);
+    }
+    saveDebounceRef.current = setTimeout(() => {
+      if (!mountedRef.current) return;
+      const currentIssueId = issueIdRef.current;
+      if (!currentIssueId) return;
+      saveIssueTabState(currentIssueId, tabs, activeTabId).catch(() => {
+        // Silently fail - persistence is best-effort
+      });
+    }, SAVE_DEBOUNCE_MS);
+  }, []);
 
   const clearTabs = useCallback(() => {
     const currentIssueId = issueIdRef.current;

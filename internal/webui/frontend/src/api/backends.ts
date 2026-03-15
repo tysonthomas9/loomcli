@@ -1,5 +1,5 @@
 /**
- * API client for backend registry endpoint with module-level caching.
+ * API client for backend health endpoint with module-level caching.
  * Interfaces with GET /api/backends endpoint.
  */
 
@@ -8,16 +8,17 @@ import { get, ApiError } from "./client";
 // ============= Types =============
 
 /**
- * Registered backend with metadata and health status.
+ * Backend health data returned by the API.
  */
-export interface BackendInfo {
+export interface BackendHealthData {
   name: string;
+  /** Human-readable name; may be empty string if backend has no custom display name. */
   display_name: string;
-  provider: string;
-  status: string; // "available" or "unavailable"
-  brand_color: string;
-  description?: string;
+  available: boolean;
+  installed: boolean;
+  api_key_set: boolean;
   version?: string;
+  message?: string;
 }
 
 // ============= Response Types =============
@@ -36,8 +37,8 @@ type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
 // ============= Module-level Cache =============
 
-let backendsCache: BackendInfo[] | null = null;
-let fetchPromise: Promise<BackendInfo[]> | null = null;
+let backendsCache: BackendHealthData[] | null = null;
+let fetchPromise: Promise<BackendHealthData[]> | null = null;
 let cacheGeneration = 0;
 
 // ============= Helpers =============
@@ -52,10 +53,10 @@ function unwrap<T>(response: ApiResult<T>): T {
 // ============= API Functions =============
 
 /**
- * Fetch registered backends. Returns cached data if available.
+ * Fetch registered backends with health status. Returns cached data if available.
  * Deduplicates concurrent in-flight requests.
  */
-export async function fetchBackends(): Promise<BackendInfo[]> {
+export async function fetchBackends(): Promise<BackendHealthData[]> {
   if (backendsCache !== null) {
     return backendsCache;
   }
@@ -63,7 +64,7 @@ export async function fetchBackends(): Promise<BackendInfo[]> {
     return fetchPromise;
   }
   const gen = cacheGeneration;
-  fetchPromise = get<ApiResult<BackendInfo[]>>("/api/backends").then(
+  fetchPromise = get<ApiResult<BackendHealthData[]>>("/api/backends").then(
     (response) => {
       if (gen !== cacheGeneration) {
         return fetchBackends();
@@ -85,7 +86,7 @@ export async function fetchBackends(): Promise<BackendInfo[]> {
 /**
  * Invalidate the cache and re-fetch backends from the server.
  */
-export async function refreshBackends(): Promise<BackendInfo[]> {
+export async function refreshBackends(): Promise<BackendHealthData[]> {
   cacheGeneration++;
   backendsCache = null;
   fetchPromise = null;

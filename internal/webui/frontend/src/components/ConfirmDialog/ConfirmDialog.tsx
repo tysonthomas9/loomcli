@@ -56,33 +56,30 @@ export function ConfirmDialog({
   }, [isOpen, onCancel]);
 
   // Focus trap: keep Tab cycling between the two buttons
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key !== "Tab" || !dialogRef.current) return;
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== "Tab" || !dialogRef.current) return;
 
-      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
+    const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
 
-      const first = focusable[0] as HTMLElement | undefined;
-      const last = focusable[focusable.length - 1] as HTMLElement | undefined;
-      if (!first || !last) return;
+    const first = focusable[0] as HTMLElement | undefined;
+    const last = focusable[focusable.length - 1] as HTMLElement | undefined;
+    if (!first || !last) return;
 
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else {
-        if (document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
       }
-    },
-    [],
-  );
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }, []);
 
   if (!isOpen) return null;
 

@@ -14,7 +14,11 @@ import {
   patchTabMetadata,
   deleteTabMetadata,
 } from "./terminal";
-import type { TerminalSessionInfo, TabMetadata, IssueContext } from "./terminal";
+import type {
+  TerminalSessionInfo,
+  TabMetadata,
+  IssueContext,
+} from "./terminal";
 
 // Mock the client module
 vi.mock("./client", () => ({

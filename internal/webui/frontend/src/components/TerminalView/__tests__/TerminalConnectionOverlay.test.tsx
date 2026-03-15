@@ -128,10 +128,7 @@ describe("TerminalConnectionOverlay", () => {
   describe("error state", () => {
     it("renders Connection failed message", () => {
       render(
-        <TerminalConnectionOverlay
-          {...defaultProps}
-          connectionState="error"
-        />,
+        <TerminalConnectionOverlay {...defaultProps} connectionState="error" />,
       );
 
       expect(
@@ -142,10 +139,7 @@ describe("TerminalConnectionOverlay", () => {
 
     it("renders reconnect button", () => {
       render(
-        <TerminalConnectionOverlay
-          {...defaultProps}
-          connectionState="error"
-        />,
+        <TerminalConnectionOverlay {...defaultProps} connectionState="error" />,
       );
 
       expect(
@@ -155,10 +149,7 @@ describe("TerminalConnectionOverlay", () => {
 
     it("does not render Auto-reconnecting... subtext", () => {
       render(
-        <TerminalConnectionOverlay
-          {...defaultProps}
-          connectionState="error"
-        />,
+        <TerminalConnectionOverlay {...defaultProps} connectionState="error" />,
       );
 
       expect(

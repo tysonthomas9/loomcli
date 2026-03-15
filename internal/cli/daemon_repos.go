@@ -43,24 +43,30 @@ func resolveAgentRepos(agent AgentEntry, repos []RepoConfig) []string {
 
 	// Expand repo groups.
 	for _, group := range agent.RepoGroups {
-		matched := false
-		for _, rc := range repos {
-			for _, g := range rc.Groups {
-				if g == group {
-					if rc.SourceRepoID == "" {
-						log.Printf("[repos] Warning: repo %q matched group %q but has empty SourceRepoID, skipping", rc.Name, group)
-					} else {
-						add(rc.SourceRepoID)
-					}
-					matched = true
-					break
-				}
-			}
-		}
-		if !matched {
+		if !expandRepoGroup(group, repos, add) {
 			log.Printf("[repos] Warning: no repos found for group %q", group)
 		}
 	}
 
 	return result
+}
+
+// expandRepoGroup finds repos belonging to the named group and adds their
+// SourceRepoIDs via the add callback. Returns true if at least one repo matched.
+func expandRepoGroup(group string, repos []RepoConfig, add func(string)) bool {
+	matched := false
+	for _, rc := range repos {
+		for _, g := range rc.Groups {
+			if g == group {
+				if rc.SourceRepoID == "" {
+					log.Printf("[repos] Warning: repo %q matched group %q but has empty SourceRepoID, skipping", rc.Name, group)
+				} else {
+					add(rc.SourceRepoID)
+				}
+				matched = true
+				break
+			}
+		}
+	}
+	return matched
 }
