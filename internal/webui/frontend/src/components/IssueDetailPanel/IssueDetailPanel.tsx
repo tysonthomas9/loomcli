@@ -12,6 +12,7 @@ import {
   addDependency,
   removeDependency,
   getIssueEvents,
+  moveIssue,
 } from "@/api";
 import { deleteTabMetadata, scheduleSessionKill } from "@/api/terminal";
 import type { IssueTab } from "@/api/issueTabs";
@@ -23,6 +24,7 @@ import {
   LAYER_ISSUE_PANEL,
 } from "@/hooks";
 import { useAgentContext } from "@/hooks/useAgentContext";
+import { useWorkspace } from "@/hooks/useWorkspace";
 import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
   Issue,
@@ -55,6 +57,7 @@ import { PriorityDropdown } from "./PriorityDropdown";
 import { RejectCommentForm } from "./RejectCommentForm";
 import { TypeDropdown } from "./TypeDropdown";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { MoveIssueDialog } from "./MoveIssueDialog";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
 import { ErrorToast } from "../ErrorToast";
 import { LogViewer } from "../LogViewer";
@@ -359,6 +362,14 @@ function DefaultContent({
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
+  const [showMoveDialog, setShowMoveDialog] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+
+  // Workspace data for move dialog
+  const { workspace } = useWorkspace();
+  const workspaces = workspace?.workspaces ?? [];
+  const currentWorkspace = workspace?.name ?? "";
+  const canMove = workspaces.length > 1 && issue?.status !== "closed";
 
   // Tab persistence hook - loads/saves tab state to Redis
   const issueId = issue?.id ?? "";
@@ -850,12 +861,32 @@ function DefaultContent({
     [issue, onReject, isRejecting],
   );
 
+  // Move issue handler
+  const handleMoveConfirm = useCallback(
+    async (targetWorkspace: string) => {
+      if (!issue) return;
+      setMoveError(null);
+      try {
+        await moveIssue(issue.id, targetWorkspace);
+        setShowMoveDialog(false);
+        onClose();
+      } catch (err) {
+        setMoveError(
+          err instanceof Error ? err.message : "Failed to move issue",
+        );
+      }
+    },
+    [issue, onClose],
+  );
+
   // Reset reject form state when issue changes
   useEffect(() => {
     setShowRejectForm(false);
     setIsApproving(false);
     setIsRejecting(false);
     setRejectError(null);
+    setShowMoveDialog(false);
+    setMoveError(null);
   }, [issue?.id]);
 
   // Loading state
@@ -922,6 +953,7 @@ function DefaultContent({
           isSavingStatus={isSavingStatus}
           showPriority={true}
           {...(onCopyLink !== undefined && { onCopyLink })}
+          {...(canMove && { onMove: () => setShowMoveDialog(true) })}
           sticky={true}
         />
 
@@ -1331,6 +1363,18 @@ function DefaultContent({
           setPendingCloseTabId(null);
         }}
         onCancel={() => setPendingCloseTabId(null)}
+      />
+
+      {/* Move issue dialog */}
+      <MoveIssueDialog
+        isOpen={showMoveDialog}
+        issue={issue}
+        workspaces={workspaces}
+        currentWorkspace={currentWorkspace}
+        dependencies={dependencies}
+        error={moveError}
+        onConfirm={handleMoveConfirm}
+        onCancel={() => setShowMoveDialog(false)}
       />
     </>
   );

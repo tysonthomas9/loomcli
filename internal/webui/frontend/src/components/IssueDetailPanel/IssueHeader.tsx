@@ -44,6 +44,8 @@ export interface IssueHeaderProps {
   onPriorityClick?: () => void;
   /** Callback when copy-link button is clicked */
   onCopyLink?: () => void;
+  /** Callback when move button is clicked */
+  onMove?: () => void;
   /** Enable sticky mode styling */
   sticky?: boolean;
   /** Additional CSS class name */
@@ -78,6 +80,7 @@ export function IssueHeader({
   showPriority,
   onPriorityClick,
   onCopyLink,
+  onMove,
   sticky,
   className,
 }: IssueHeaderProps): JSX.Element {
@@ -140,6 +143,31 @@ export function IssueHeader({
             >
               <path
                 d="M8.5 11.5l3-3M12 8a2.75 2.75 0 0 1 0 3.89l-2 2A2.75 2.75 0 0 1 6.11 10M8 12a2.75 2.75 0 0 1 0-3.89l2-2A2.75 2.75 0 0 1 13.89 10"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
+        {onMove && (
+          <button
+            type="button"
+            className={styles.moveButton}
+            onClick={onMove}
+            aria-label="Move to workspace"
+            data-testid="header-move-button"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M4 10h12M12 6l4 4-4 4"
                 stroke="currentColor"
                 strokeWidth="1.5"
                 strokeLinecap="round"

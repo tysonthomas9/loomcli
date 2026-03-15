@@ -28,6 +28,7 @@ export {
   createIssue,
   updateIssue,
   closeIssue,
+  moveIssue,
   fetchGraphIssues,
   addDependency,
   removeDependency,
@@ -36,6 +37,7 @@ export {
 export type {
   CreateIssueRequest,
   UpdateIssueRequest,
+  MoveIssueResult,
   GraphFilter,
   AddCommentRequest,
 } from "./issues";

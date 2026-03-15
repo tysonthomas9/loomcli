@@ -403,6 +403,32 @@ export async function removeDependency(
   unwrap(response);
 }
 
+// ============= MOVE OPERATIONS =============
+
+/**
+ * Result from moving an issue to another workspace.
+ */
+export interface MoveIssueResult {
+  source_id: string;
+  target_id: string;
+  warnings?: string[];
+}
+
+/**
+ * Move an issue to a different workspace.
+ * Creates a copy in the target workspace and closes the source.
+ */
+export async function moveIssue(
+  id: string,
+  targetWorkspace: string,
+): Promise<MoveIssueResult> {
+  const response = await post<ApiResult<MoveIssueResult>>(
+    `/api/issues/${encodeURIComponent(id)}/move`,
+    { target_workspace: targetWorkspace },
+  );
+  return unwrap(response);
+}
+
 // ============= COMMENT OPERATIONS =============
 
 /**
