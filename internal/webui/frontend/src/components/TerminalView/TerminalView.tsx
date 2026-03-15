@@ -30,8 +30,10 @@ import {
 } from "./ReconnectingOverlay";
 import { SearchBar } from "./SearchBar";
 import { TerminalConnectionOverlay } from "./TerminalConnectionOverlay";
+import { TerminalContextMenu } from "./TerminalContextMenu";
 import type {
   ConnectionState,
+  ContextMenuEvent,
   SearchResultInfo,
   TerminalInstanceHandle,
 } from "./TerminalInstance";
@@ -90,6 +92,7 @@ export function TerminalView({
     null,
   );
   const [isSessionPromptOpen, setIsSessionPromptOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuEvent | null>(null);
   const [tabHasConnected, setTabHasConnected] = useState<Map<string, boolean>>(
     () => new Map(),
   );
@@ -497,6 +500,40 @@ export function TerminalView({
     setIsSearchOpen((prev) => !prev);
   }, []);
 
+  // Context menu handlers
+  const handleContextMenu = useCallback((event: ContextMenuEvent) => {
+    setContextMenu(event);
+  }, []);
+
+  const handleContextMenuClose = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  const handleContextMenuCopy = useCallback(() => {
+    const instance = instanceRefs.current.get(activeTabId);
+    if (instance) {
+      const sel = instance.getSelection();
+      if (sel) {
+        navigator.clipboard
+          .writeText(sel)
+          .then(() => handleCopyNotify())
+          .catch(() => {});
+      }
+    }
+    setContextMenu(null);
+    instanceRefs.current.get(activeTabId)?.focus();
+  }, [activeTabId, handleCopyNotify]);
+
+  const handleContextMenuPaste = useCallback(() => {
+    setContextMenu(null);
+    handlePasteRequest();
+  }, [handlePasteRequest]);
+
+  const handleContextMenuSelectAll = useCallback(() => {
+    instanceRefs.current.get(activeTabId)?.selectAll();
+    setContextMenu(null);
+  }, [activeTabId]);
+
   const handleCloseAll = useSessionManagement({
     setTabs,
     setActiveTabId,
@@ -582,6 +619,7 @@ export function TerminalView({
                   onCopyNotify={handleCopyNotify}
                   onPasteRequest={handlePasteRequest}
                   onSearchRequest={handleSearchRequest}
+                  onContextMenu={handleContextMenu}
                   onReconnectStateChange={(state) =>
                     handleReconnectStateChange(tab.id, state)
                   }
@@ -656,6 +694,17 @@ export function TerminalView({
         onCancel={handlePasteCancel}
       />
       <CopyToast visible={showCopyToast} />
+      {contextMenu && (
+        <TerminalContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          hasSelection={contextMenu.hasSelection}
+          onCopy={handleContextMenuCopy}
+          onPaste={handleContextMenuPaste}
+          onSelectAll={handleContextMenuSelectAll}
+          onClose={handleContextMenuClose}
+        />
+      )}
     </div>
   );
 }

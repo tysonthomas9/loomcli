@@ -53,6 +53,12 @@ export interface SearchResultInfo {
   resultCount: number;
 }
 
+export interface ContextMenuEvent {
+  x: number;
+  y: number;
+  hasSelection: boolean;
+}
+
 export interface TerminalInstanceProps {
   sessionName: string;
   isActive: boolean;
@@ -65,6 +71,7 @@ export interface TerminalInstanceProps {
   onCopyNotify?: () => void;
   onPasteRequest?: () => void;
   onSearchRequest?: () => void;
+  onContextMenu?: (event: ContextMenuEvent) => void;
   onReconnectStateChange?: (state: ReconnectOverlayState) => void;
   onOutput?: () => void;
   onSearchResultChange?: (result: SearchResultInfo | null) => void;
@@ -85,6 +92,10 @@ export interface TerminalInstanceHandle {
   clearSearch: () => void;
   reconnect: () => void;
   pasteText: (text: string) => void;
+  getSelection: () => string;
+  hasSelection: () => boolean;
+  selectAll: () => void;
+  focus: () => void;
 }
 
 export const TerminalInstance = forwardRef<
@@ -100,6 +111,7 @@ export const TerminalInstance = forwardRef<
     onCopyNotify,
     onPasteRequest,
     onSearchRequest,
+    onContextMenu,
     onReconnectStateChange,
     onOutput,
     onSearchResultChange,
@@ -287,6 +299,19 @@ export const TerminalInstance = forwardRef<
       pasteText(text: string) {
         terminalRef.current?.paste(text);
       },
+      getSelection() {
+        const sel = terminalRef.current?.getSelection() ?? "";
+        return stripAnsi(sel);
+      },
+      hasSelection() {
+        return terminalRef.current?.hasSelection() ?? false;
+      },
+      selectAll() {
+        terminalRef.current?.selectAll();
+      },
+      focus() {
+        terminalRef.current?.focus();
+      },
     }),
     [handleReconnect],
   );
@@ -298,6 +323,8 @@ export const TerminalInstance = forwardRef<
   onPasteRequestRef.current = onPasteRequest;
   const onSearchRequestRef = useRef(onSearchRequest);
   onSearchRequestRef.current = onSearchRequest;
+  const onContextMenuRef = useRef(onContextMenu);
+  onContextMenuRef.current = onContextMenu;
 
   // Terminal lifecycle: create terminal and connect WebSocket
   useEffect(() => {
@@ -312,6 +339,7 @@ export const TerminalInstance = forwardRef<
       fontFamily,
       scrollback: 5000,
       smoothScrollDuration: 120,
+      rightClickSelectsWord: true,
       theme: {
         background: "#1e1e1e",
         foreground: "#d4d4d4",
@@ -357,7 +385,12 @@ export const TerminalInstance = forwardRef<
 
     // Copy-on-select: strip ANSI codes and write clean text to clipboard
     let copyDebounce: ReturnType<typeof setTimeout> | undefined;
+    let suppressCopyOnSelect = false;
     const selectionDisposable = terminal.onSelectionChange(() => {
+      if (suppressCopyOnSelect) {
+        suppressCopyOnSelect = false;
+        return;
+      }
       const text = terminal.getSelection();
       if (!text) return;
       const clean = stripAnsi(text);
@@ -370,11 +403,45 @@ export const TerminalInstance = forwardRef<
       }, 100);
     });
 
-    // Custom key handler for Ctrl+Shift+V (paste) and Ctrl+Shift+F (search)
+    // Custom key handler for clipboard shortcuts and search
     terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.type !== "keydown") return true;
 
-      // Ctrl+Shift+V — request paste from parent
+      // Ctrl+C — smart copy/interrupt
+      if (
+        e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        e.key === "c"
+      ) {
+        if (terminal.hasSelection()) {
+          clearTimeout(copyDebounce); // cancel pending copy-on-select debounce
+          const clean = stripAnsi(terminal.getSelection());
+          navigator.clipboard
+            .writeText(clean)
+            .then(() => onCopyNotifyRef.current?.())
+            .catch(() => {});
+          terminal.clearSelection();
+          return false; // suppress SIGINT
+        }
+        return true; // no selection — send SIGINT
+      }
+
+      // Ctrl+V — paste with multi-line check
+      if (
+        e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        e.key === "v"
+      ) {
+        e.preventDefault();
+        onPasteRequestRef.current?.();
+        return false;
+      }
+
+      // Ctrl+Shift+V — request paste from parent (legacy)
       if (e.ctrlKey && e.shiftKey && e.key === "V") {
         e.preventDefault();
         onPasteRequestRef.current?.();
@@ -392,6 +459,26 @@ export const TerminalInstance = forwardRef<
     });
 
     terminal.open(container);
+
+    // Right-click context menu — suppress copy-on-select for word selection
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      suppressCopyOnSelect = true;
+      onContextMenuRef.current?.({
+        x: e.clientX,
+        y: e.clientY,
+        hasSelection: terminal.hasSelection(),
+      });
+    };
+    container.addEventListener("contextmenu", handleContextMenu);
+
+    // Capture-phase paste listener for macOS Cmd+V
+    const handleBrowserPaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onPasteRequestRef.current?.();
+    };
+    container.addEventListener("paste", handleBrowserPaste, { capture: true });
 
     // Track scroll position to show "New output" pill when scrolled up
     const scrollDisposable = terminal.onScroll(() => {
@@ -499,6 +586,10 @@ export const TerminalInstance = forwardRef<
       clearTimeout(resizeTimer);
       clearTimeout(copyDebounce);
       observer.disconnect();
+      container.removeEventListener("contextmenu", handleContextMenu);
+      container.removeEventListener("paste", handleBrowserPaste, {
+        capture: true,
+      });
       selectionDisposable.dispose();
       scrollDisposable.dispose();
       searchResultDisposable.dispose();
