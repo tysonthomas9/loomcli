@@ -18,7 +18,8 @@ export function TerminalConnectionOverlay({
   hasConnected,
   onReconnect,
 }: TerminalConnectionOverlayProps): JSX.Element | null {
-  if (connectionState === "connected") return null;
+  if (connectionState === "connected" || connectionState === "crashed")
+    return null;
 
   // Reconnecting in background — let terminal remain visible, tab dot shows status
   if (connectionState === "connecting" && hasConnected) return null;

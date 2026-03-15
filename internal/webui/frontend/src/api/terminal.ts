@@ -78,6 +78,54 @@ export function buildTerminalWsUrl(
   return url;
 }
 
+// ============= Restart Session =============
+
+/**
+ * Restart a terminal session with the current backend.
+ * POST /api/terminal/restart?session=<name>&token=<token>
+ */
+export async function restartTerminalSession(
+  sessionName: string,
+  token: string | null,
+): Promise<{ success: boolean; backend: string }> {
+  let url = `/api/terminal/restart?session=${encodeURIComponent(sessionName)}`; // allow-url
+  if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+  return post<{ success: boolean; backend: string }>(url, {});
+}
+
+// ============= Kill Session =============
+
+/**
+ * Forcibly kill a terminal session (for hung backends).
+ * POST /api/terminal/kill?session=<name>&token=<token>
+ */
+export async function killTerminalSession(
+  sessionName: string,
+  token: string | null,
+): Promise<void> {
+  let url = `/api/terminal/kill?session=${encodeURIComponent(sessionName)}`; // allow-url
+  if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+  await post<{ success: boolean }>(url, {});
+}
+
+// ============= Session Status =============
+
+/**
+ * Check whether a terminal session's backend is alive.
+ * GET /api/terminal/session-status?session=<name>
+ */
+export async function getSessionStatus(
+  sessionName: string,
+): Promise<{ alive: boolean; exit_reason?: string }> {
+  return get<{ alive: boolean; exit_reason?: string }>(
+    `/api/terminal/session-status?session=${encodeURIComponent(sessionName)}`, // allow-url
+  );
+}
+
 // ============= Issue Context Seeding =============
 
 export interface IssueContext {

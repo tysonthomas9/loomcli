@@ -152,6 +152,84 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 	}
 }
 
+// handleTerminalKill returns a handler that forcibly kills a terminal session.
+// This is used for hung backends — it kills the tmux session, which triggers the
+// PTY close → crash detection flow in ptyToWS.
+func handleTerminalKill(manager *TerminalManager, auth *terminalAuth) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			respondJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{"success": false, "error": "method not allowed"})
+			return
+		}
+
+		session := r.URL.Query().Get("session")
+		if session == "" || !validTerminalSession.MatchString(session) {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid session"})
+			return
+		}
+
+		if auth != nil {
+			token := r.URL.Query().Get("token")
+			if err := auth.ValidateToken(token, session); err != nil {
+				respondJSON(w, http.StatusUnauthorized, map[string]interface{}{"success": false, "error": "terminal authentication failed"})
+				return
+			}
+		}
+
+		if manager == nil {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"success": false, "error": "terminal manager not initialized"})
+			return
+		}
+
+		_ = manager.KillSessionByName(session)
+		respondJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+	}
+}
+
+// handleTerminalSessionStatus returns a handler that checks whether a tmux session is alive.
+// This is a fallback for when the WebSocket close code is missed.
+func handleTerminalSessionStatus(manager *TerminalManager, auth *terminalAuth) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session := r.URL.Query().Get("session")
+		if session == "" || !validTerminalSession.MatchString(session) {
+			respondJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "invalid session"})
+			return
+		}
+
+		if auth != nil {
+			token := r.URL.Query().Get("token")
+			if err := auth.ValidateToken(token, session); err != nil {
+				respondJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "terminal authentication failed"})
+				return
+			}
+		}
+
+		if manager == nil {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"error": "terminal manager not initialized"})
+			return
+		}
+
+		alive := manager.SessionAlive(session)
+		result := map[string]interface{}{
+			"alive": alive,
+		}
+
+		if !alive {
+			// Try to capture last lines of output for error context
+			if captured, err := manager.CapturePane(session, 10); err == nil && captured != "" {
+				result["exit_reason"] = captured
+			}
+		} else if manager.PaneDead(session) {
+			result["alive"] = false
+			if captured, err := manager.CapturePane(session, 10); err == nil && captured != "" {
+				result["exit_reason"] = captured
+			}
+		}
+
+		respondJSON(w, http.StatusOK, result)
+	}
+}
+
 // handleTerminalWS returns a WebSocket handler for terminal relay.
 // It upgrades HTTP connections to WebSocket, bridges them to tmux sessions
 // via the TerminalManager, and handles bidirectional binary data relay
@@ -284,13 +362,13 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 
-		// Channel to signal when PTY reader finishes
-		done := make(chan struct{})
+		// Channel to signal when PTY reader finishes and communicate crash state
+		crashCh := make(chan crashInfo, 1)
 
 		// Start PTY -> WebSocket goroutine
 		go func() {
-			defer close(done)
-			ptyToWS(ctx, cancel, conn, termSession)
+			result := ptyToWS(ctx, cancel, conn, termSession, manager)
+			crashCh <- result
 		}()
 
 		// Run WebSocket -> PTY relay (blocks until WebSocket closes)
@@ -302,40 +380,94 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 			log.Printf("Failed to detach terminal connection %q: %v", connID, err)
 		}
 
-		// Now wait for PTY reader to finish (should be immediate after Detach)
-		<-done
-
-		// Set normal close status
-		closeStatus = websocket.StatusNormalClosure
-		closeReason = "session detached"
+		// Wait for PTY reader to finish and check for backend crash
+		closeStatus, closeReason = (<-crashCh).wsClose()
 	}
 }
 
+// WebSocket close code for backend process exit (application-defined, 4000-4999 range).
+const wsCloseBackendExited = 4001
+
+// crashInfo holds information about a detected backend crash, communicated
+// from ptyToWS back to the handler so the handler can set the appropriate
+// WebSocket close code via the deferred close.
+type crashInfo struct {
+	crashed bool
+	reason  string
+}
+
+// wsClose returns the WebSocket close status code and reason string for a PTY session exit.
+func (c crashInfo) wsClose() (websocket.StatusCode, string) {
+	if c.crashed {
+		return websocket.StatusCode(wsCloseBackendExited), c.reason
+	}
+	return websocket.StatusNormalClosure, "session detached"
+}
+
 // ptyToWS reads from the PTY and writes to the WebSocket.
-func ptyToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, session *TerminalSession) {
+// When the PTY read fails, it checks whether the tmux session's process has exited
+// and populates the crashResult so the caller can send the appropriate close code.
+func ptyToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, session *TerminalSession, manager *TerminalManager) crashInfo {
 	buf := make([]byte, terminalReadBufSize)
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return crashInfo{}
 		default:
 		}
 
 		n, err := session.PTY.Read(buf)
 		if err != nil {
-			// PTY closed or error - cancel context to unblock wsToPTY
+			// PTY closed or error — check if the backend process has exited.
+			// Use the raw internal tmux session name (session.Name) directly
+			// since SessionAlive/PaneDead apply the prefix and we already have
+			// the internal name.
+			sessionGone := !manager.tmuxHasSession(session.Name)
+			paneDead := false
+			if !sessionGone {
+				paneDead = manager.paneDead(session.Name)
+			}
+
 			cancel()
-			return
+
+			if sessionGone || paneDead {
+				reason := "backend process exited"
+				captured := manager.capturePaneRaw(session.Name, 10)
+				if captured != "" {
+					reason = captured
+				}
+				// WebSocket close reasons are limited to 123 bytes.
+				// Truncate safely at UTF-8 rune boundaries.
+				reason = truncateUTF8(reason, 123)
+				return crashInfo{crashed: true, reason: reason}
+			}
+			return crashInfo{}
 		}
 
 		if n > 0 {
 			if err := conn.Write(ctx, websocket.MessageBinary, buf[:n]); err != nil {
 				// WebSocket write failed - cancel context to unblock wsToPTY
 				cancel()
-				return
+				return crashInfo{}
 			}
 		}
 	}
+}
+
+// truncateUTF8 truncates s to at most maxBytes bytes, keeping the last portion
+// and ensuring the result is valid UTF-8 (doesn't split multi-byte characters).
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Take the tail
+	s = s[len(s)-maxBytes:]
+	// Skip any leading bytes that are continuation bytes (10xxxxxx)
+	// to avoid splitting a multi-byte UTF-8 sequence.
+	for len(s) > 0 && s[0]&0xC0 == 0x80 {
+		s = s[1:]
+	}
+	return s
 }
 
 // wsToPTY reads from the WebSocket and writes to the PTY.

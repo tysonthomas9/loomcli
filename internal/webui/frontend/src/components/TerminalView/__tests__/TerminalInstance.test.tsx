@@ -103,6 +103,7 @@ vi.mock("@xterm/addon-search", () => {
     findNext = shared.findNext;
     findPrevious = shared.findPrevious;
     clearDecorations = shared.clearDecorations;
+    onDidChangeResults = vi.fn(() => ({ dispose: vi.fn() }));
     dispose = vi.fn();
   }
   return { SearchAddon: MockSearchAddon };
@@ -328,9 +329,10 @@ describe("TerminalInstance", () => {
     expect(ref.current).not.toBeNull();
     ref.current!.search("hello", { caseSensitive: true });
 
-    expect(shared.findNext).toHaveBeenCalledWith("hello", {
-      caseSensitive: true,
-    });
+    expect(shared.findNext).toHaveBeenCalledWith(
+      "hello",
+      expect.objectContaining({ caseSensitive: true }),
+    );
   });
 
   it("exposes findNext() and findPrevious() via imperative handle", async () => {
@@ -343,11 +345,22 @@ describe("TerminalInstance", () => {
       await vi.runAllTimersAsync();
     });
 
+    // Search with a term first so findNext/findPrevious have something to search for
+    ref.current!.search("test");
+    shared.findNext.mockClear();
+    shared.findPrevious.mockClear();
+
     ref.current!.findNext();
-    expect(shared.findNext).toHaveBeenCalledWith("");
+    expect(shared.findNext).toHaveBeenCalledWith(
+      "test",
+      expect.objectContaining({}),
+    );
 
     ref.current!.findPrevious();
-    expect(shared.findPrevious).toHaveBeenCalledWith("");
+    expect(shared.findPrevious).toHaveBeenCalledWith(
+      "test",
+      expect.objectContaining({}),
+    );
   });
 
   it("exposes clearSearch() via imperative handle", async () => {

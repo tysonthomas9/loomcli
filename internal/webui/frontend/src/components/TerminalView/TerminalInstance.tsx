@@ -45,7 +45,8 @@ export type ConnectionState =
   | "disconnected"
   | "connecting"
   | "connected"
-  | "error";
+  | "error"
+  | "crashed";
 
 export interface SearchResultInfo {
   resultIndex: number;
@@ -67,6 +68,7 @@ export interface TerminalInstanceProps {
   onReconnectStateChange?: (state: ReconnectOverlayState) => void;
   onOutput?: () => void;
   onSearchResultChange?: (result: SearchResultInfo | null) => void;
+  onBackendCrash?: (reason: string) => void;
 }
 
 export interface TerminalInstanceHandle {
@@ -101,6 +103,7 @@ export const TerminalInstance = forwardRef<
     onReconnectStateChange,
     onOutput,
     onSearchResultChange,
+    onBackendCrash,
   },
   ref,
 ) {
@@ -123,6 +126,8 @@ export const TerminalInstance = forwardRef<
   onOutputRef.current = onOutput;
   const onSearchResultChangeRef = useRef(onSearchResultChange);
   onSearchResultChangeRef.current = onSearchResultChange;
+  const onBackendCrashRef = useRef(onBackendCrash);
+  onBackendCrashRef.current = onBackendCrash;
 
   // Track current search term and options so findNext/findPrevious can reuse them
   const lastSearchTermRef = useRef("");
@@ -202,6 +207,7 @@ export const TerminalInstance = forwardRef<
           reconnectCancelRef.current = cancel;
         },
         handleWsOutput,
+        (reason: string) => onBackendCrashRef.current?.(reason),
       );
       wsCleanupRef.current = cleanupWs;
     };
@@ -446,6 +452,7 @@ export const TerminalInstance = forwardRef<
             reconnectCancelRef.current = cancel;
           },
           handleWsOutput,
+          (reason: string) => onBackendCrashRef.current?.(reason),
         );
         wsCleanupRef.current = cleanup;
       };

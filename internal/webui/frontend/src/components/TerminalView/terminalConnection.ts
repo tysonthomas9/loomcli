@@ -49,6 +49,9 @@ export function encodeResize(cols: number, rows: number): ArrayBuffer {
   return buf;
 }
 
+/** WebSocket close code sent by the backend when the process exits. */
+const WS_CLOSE_BACKEND_EXITED = 4001;
+
 /**
  * Connect a Terminal instance to a WebSocket, returning a cleanup function.
  */
@@ -61,6 +64,7 @@ export function connectWebSocket(
   onConnected?: () => void,
   onDisconnected?: () => void,
   onOutput?: () => void,
+  onBackendCrash?: (reason: string) => void,
 ): () => void {
   setConnectionState("connecting");
 
@@ -90,7 +94,13 @@ export function connectWebSocket(
         onOutput?.();
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event: CloseEvent) => {
+        if (event.code === WS_CLOSE_BACKEND_EXITED) {
+          // Backend process exited — show crash overlay, do NOT auto-reconnect
+          setConnectionState("crashed");
+          onBackendCrash?.(event.reason || "backend process exited");
+          return;
+        }
         setConnectionState("disconnected");
         onDisconnected?.();
       };

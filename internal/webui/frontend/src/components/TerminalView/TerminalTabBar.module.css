@@ -89,6 +89,10 @@
   box-shadow: 0 0 4px var(--color-danger, #ef4444);
 }
 
+.statusDot[data-status="crashed"] {
+  background-color: #ef4444;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .statusDot[data-status="connecting"] {
     animation: none;

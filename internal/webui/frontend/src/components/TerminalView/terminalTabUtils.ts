@@ -20,6 +20,7 @@ export interface TabState {
   sessionName: string;
   connectionState: ConnectionState;
   backendName: string;
+  crashReason?: string | null;
 }
 
 /**

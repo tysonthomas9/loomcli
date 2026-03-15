@@ -17,8 +17,8 @@ export const ALLOWLIST = new Map([
   ["src/components/AgentDetailPanel/AgentDetailPanel.tsx", 575],
   ["src/hooks/useAgentTerminalLogs.ts", 522],
   ["src/components/IssueDetailView/IssueDetailView.tsx", 651],
-  ["src/components/TerminalView/TerminalView.tsx", 601],
-  ["src/components/TerminalView/TerminalInstance.tsx", 570],
+  ["src/components/TerminalView/TerminalView.tsx", 665],
+  ["src/components/TerminalView/TerminalInstance.tsx", 580],
 ]);
 
 // Patterns to skip (test files, generated files, fixtures).

@@ -17,5 +17,6 @@
 516 internal/cli/recover.go
 516 internal/webui/handlers_issues_write.go
 625 internal/webui/terminal.go
+540 internal/webui/handlers_terminal.go
 520 internal/webui/server.go
 506 internal/cli/daemon.go

@@ -8,7 +8,12 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
 import type { IssueContext } from "@/api/terminal";
-import { seedTerminalSession, patchTerminalState } from "@/api/terminal";
+import {
+  seedTerminalSession,
+  patchTerminalState,
+  restartTerminalSession,
+  fetchTerminalToken,
+} from "@/api/terminal";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
 import { useSessionRestore } from "@/hooks/useSessionRestore";
@@ -16,6 +21,7 @@ import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 
 import { BackendPickerPrompt } from "./BackendPickerPrompt";
 import { CopyToast } from "./CopyToast";
+import { CrashOverlay } from "./CrashOverlay";
 import { NotesBar } from "./NotesBar";
 import { PasteConfirmDialog } from "./PasteConfirmDialog";
 import {
@@ -340,6 +346,38 @@ export function TerminalView({
     instanceRefs.current.get(tabId)?.reconnect();
   }, []);
 
+  const handleBackendCrash = useCallback((tabId: string, reason: string) => {
+    setTabs((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, crashReason: reason } : t)),
+    );
+  }, []);
+
+  const handleCrashRestart = useCallback(
+    (tabId: string, sessionName: string) => {
+      // Clear crash state, call restart endpoint, then reconnect
+      setTabs((prev) =>
+        prev.map((t) => (t.id === tabId ? { ...t, crashReason: null } : t)),
+      );
+      fetchTerminalToken(sessionName)
+        .then((token) => {
+          if (!token) {
+            // Token fetch failed — skip restart, just reconnect (creates new session)
+            instanceRefs.current.get(tabId)?.reconnect();
+            return;
+          }
+          return restartTerminalSession(sessionName, token).then(() => {
+            instanceRefs.current.get(tabId)?.reconnect();
+          });
+        })
+        .catch((err) => {
+          console.error(`Failed to restart session ${sessionName}:`, err);
+          // Still try to reconnect — the WebSocket reconnect will create a new session
+          instanceRefs.current.get(tabId)?.reconnect();
+        });
+    },
+    [],
+  );
+
   const handleTabChange = useCallback((tabId: string) => {
     setActiveTabId(tabId);
     setTabUnread((prev) => {
@@ -361,6 +399,13 @@ export function TerminalView({
       updateLabel,
       deleteTab,
     },
+  );
+
+  const handleCrashCloseTab = useCallback(
+    (tabId: string) => {
+      handleTabClose(tabId);
+    },
+    [handleTabClose],
   );
 
   const handleNewTabClick = useCallback(() => {
@@ -544,16 +589,31 @@ export function TerminalView({
                   onSearchResultChange={(result) =>
                     handleSearchResultChange(tab.id, result)
                   }
+                  onBackendCrash={(reason) =>
+                    handleBackendCrash(tab.id, reason)
+                  }
                 />
-                <TerminalConnectionOverlay
-                  connectionState={tab.connectionState}
-                  hasConnected={tabHasConnected.get(tab.id) ?? false}
-                  onReconnect={() => handleReconnect(tab.id)}
-                />
-                <ReconnectingOverlay
-                  state={tabReconnectState.get(tab.id) ?? null}
-                  onReconnect={() => handleReconnect(tab.id)}
-                />
+                {tab.crashReason != null ? (
+                  <CrashOverlay
+                    reason={tab.crashReason}
+                    onRestart={() =>
+                      handleCrashRestart(tab.id, tab.sessionName)
+                    }
+                    onCloseTab={() => handleCrashCloseTab(tab.id)}
+                  />
+                ) : (
+                  <>
+                    <TerminalConnectionOverlay
+                      connectionState={tab.connectionState}
+                      hasConnected={tabHasConnected.get(tab.id) ?? false}
+                      onReconnect={() => handleReconnect(tab.id)}
+                    />
+                    <ReconnectingOverlay
+                      state={tabReconnectState.get(tab.id) ?? null}
+                      onReconnect={() => handleReconnect(tab.id)}
+                    />
+                  </>
+                )}
                 <NotesBar
                   notes={
                     tabMetadata.find((m) => m.session_name === tab.sessionName)
