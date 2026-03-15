@@ -42,6 +42,7 @@ import { DependencySection } from "./DependencySection";
 import { LabelEditor } from "./LabelEditor";
 import { EditableDescription } from "./EditableDescription";
 import { IssueHeader } from "./IssueHeader";
+import { DesignPanel } from "./DesignPanel";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { PriorityDropdown } from "./PriorityDropdown";
 import { RejectCommentForm } from "./RejectCommentForm";
@@ -1198,14 +1199,13 @@ function DefaultContent({
                 </section>
               </div>
 
-              {/* Design in right column (always visible, no CollapsibleSection) */}
+              {/* Design in right column */}
               {issue.design && (
                 <div
                   className={styles.detailColumnRight}
                   data-testid="design-section"
                 >
-                  <h3 className={styles.sectionTitle}>Design</h3>
-                  <MarkdownRenderer content={issue.design} />
+                  <DesignPanel content={issue.design} />
                 </div>
               )}
             </div>

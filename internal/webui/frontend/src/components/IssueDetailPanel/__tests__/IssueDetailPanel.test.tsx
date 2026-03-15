@@ -431,7 +431,7 @@ describe("IssueDetailPanel", () => {
   });
 
   describe("CollapsibleSection", () => {
-    it("renders design section always visible (not collapsible)", () => {
+    it("renders design section always visible (not collapsible at section level)", () => {
       const mockIssue = createTestIssueDetails({
         design: "Short design text",
       });
@@ -440,10 +440,10 @@ describe("IssueDetailPanel", () => {
       );
       const designSection = screen.getByTestId("design-section");
       expect(designSection).toBeInTheDocument();
-      // Design is no longer in a CollapsibleSection — no toggle button
+      // DesignPanel has a fullscreen button but no collapsible toggle for the section itself
       expect(
-        within(designSection).queryByRole("button"),
-      ).not.toBeInTheDocument();
+        within(designSection).getByLabelText("Enter fullscreen"),
+      ).toBeInTheDocument();
     });
 
     it("renders design in right column with heading", () => {
