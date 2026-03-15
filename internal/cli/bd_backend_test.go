@@ -347,31 +347,30 @@ func TestBdBackend_BackendName(t *testing.T) {
 }
 
 func TestBdBackend_ErrorWrapping(t *testing.T) {
-	cmdErr := fmt.Errorf("command not found")
-	mock := &MockBDRunner{Result: CommandResult{Err: cmdErr}}
-	b := newTestBackend(mock)
 	ctx := context.Background()
 
 	tests := []struct {
 		name string
-		fn   func() error
+		fn   func(b *bdBackend) error
 		want string
 	}{
-		{"Ready", func() error { _, e := b.Ready(ctx, ReadyOpts{}); return e }, "bd ready: command not found"},
-		{"List", func() error { _, e := b.List(ctx, ListOpts{}); return e }, "bd list: command not found"},
-		{"Blocked", func() error { _, e := b.Blocked(ctx); return e }, "bd blocked: command not found"},
-		{"Stats", func() error { _, e := b.Stats(ctx); return e }, "bd stats: command not found"},
-		{"GetIssue", func() error { _, e := b.GetIssue(ctx, "x"); return e }, "bd show x: command not found"},
-		{"GetIssueText", func() error { _, e := b.GetIssueText(ctx, "x"); return e }, "bd show x: command not found"},
-		{"UpdateStatus", func() error { return b.UpdateStatus(ctx, "x", "open", "") }, "bd update x: command not found"},
-		{"UpdateExternalRef", func() error { return b.UpdateExternalRef(ctx, "x", "ref") }, "bd update x --external-ref: command not found"},
-		{"CloseIssue", func() error { return b.CloseIssue(ctx, "x", "") }, "bd close x: command not found"},
-		{"SyncStatus", func() error { _, e := b.SyncStatus(ctx); return e }, "bd sync: command not found"},
+		{"Ready", func(b *bdBackend) error { _, e := b.Ready(ctx, ReadyOpts{}); return e }, "bd ready: command not found"},
+		{"List", func(b *bdBackend) error { _, e := b.List(ctx, ListOpts{}); return e }, "bd list: command not found"},
+		{"Blocked", func(b *bdBackend) error { _, e := b.Blocked(ctx); return e }, "bd blocked: command not found"},
+		{"Stats", func(b *bdBackend) error { _, e := b.Stats(ctx); return e }, "bd stats: command not found"},
+		{"GetIssue", func(b *bdBackend) error { _, e := b.GetIssue(ctx, "x"); return e }, "bd show x: command not found"},
+		{"GetIssueText", func(b *bdBackend) error { _, e := b.GetIssueText(ctx, "x"); return e }, "bd show x: command not found"},
+		{"UpdateStatus", func(b *bdBackend) error { return b.UpdateStatus(ctx, "x", "open", "") }, "bd update x: command not found"},
+		{"UpdateExternalRef", func(b *bdBackend) error { return b.UpdateExternalRef(ctx, "x", "ref") }, "bd update x --external-ref: command not found"},
+		{"CloseIssue", func(b *bdBackend) error { return b.CloseIssue(ctx, "x", "") }, "bd close x: command not found"},
+		{"SyncStatus", func(b *bdBackend) error { _, e := b.SyncStatus(ctx); return e }, "bd sync: command not found"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.fn()
+			mock := &MockBDRunner{Result: CommandResult{Err: fmt.Errorf("command not found")}}
+			b := newTestBackend(mock)
+			err := tt.fn(b)
 			if err == nil {
 				t.Fatal("expected error")
 			}
