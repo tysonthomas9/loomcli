@@ -1058,6 +1058,108 @@ describe("popstate handling", () => {
   });
 });
 
+describe("preserving non-filter URL params", () => {
+  let historyMock: { replaceState: ReturnType<typeof vi.fn> };
+
+  beforeEach(() => {
+    historyMock = mockWindowHistory();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("preserves view, repos, and workspace params when setting a filter", () => {
+    mockWindowLocation("?view=table&repos=api&workspace=myproject");
+    historyMock = mockWindowHistory();
+    const { result } = renderHook(() => useFilterState());
+
+    act(() => {
+      result.current[1].setPriority(2 as Priority);
+    });
+
+    const lastCall = historyMock.replaceState.mock.calls.at(
+      -1,
+    )?.[2] as string;
+    expect(lastCall).toContain("view=table");
+    expect(lastCall).toContain("repos=api");
+    expect(lastCall).toContain("workspace=myproject");
+    expect(lastCall).toContain("priority=2");
+  });
+
+  it("preserves non-filter params when clearing all filters", () => {
+    mockWindowLocation("?view=table&repos=api&workspace=myproject&priority=2&type=bug");
+    historyMock = mockWindowHistory();
+    const { result } = renderHook(() => useFilterState());
+
+    act(() => {
+      result.current[1].clearAll();
+    });
+
+    const lastCall = historyMock.replaceState.mock.calls.at(
+      -1,
+    )?.[2] as string;
+    expect(lastCall).toContain("view=table");
+    expect(lastCall).toContain("repos=api");
+    expect(lastCall).toContain("workspace=myproject");
+    // Filter params should be removed
+    expect(lastCall).not.toContain("priority=");
+    expect(lastCall).not.toContain("type=");
+  });
+
+  it("preserves issue param when updating filters", () => {
+    mockWindowLocation("?view=issue-detail&issue=abc-123&priority=1");
+    historyMock = mockWindowHistory();
+    const { result } = renderHook(() => useFilterState());
+
+    act(() => {
+      result.current[1].setType("bug");
+    });
+
+    const lastCall = historyMock.replaceState.mock.calls.at(
+      -1,
+    )?.[2] as string;
+    expect(lastCall).toContain("view=issue-detail");
+    expect(lastCall).toContain("issue=abc-123");
+    expect(lastCall).toContain("type=bug");
+  });
+
+  it("preserves non-filter params when changing labels", () => {
+    mockWindowLocation("?view=kanban&workspace=dev");
+    historyMock = mockWindowHistory();
+    const { result } = renderHook(() => useFilterState());
+
+    act(() => {
+      result.current[1].setLabels(["phase-1", "frontend"]);
+    });
+
+    const lastCall = historyMock.replaceState.mock.calls.at(
+      -1,
+    )?.[2] as string;
+    expect(lastCall).toContain("view=kanban");
+    expect(lastCall).toContain("workspace=dev");
+    expect(lastCall).toContain("labels=");
+  });
+
+  it("preserves non-filter params when clearing a single filter", () => {
+    mockWindowLocation("?view=table&workspace=prod&priority=2&type=bug");
+    historyMock = mockWindowHistory();
+    const { result } = renderHook(() => useFilterState());
+
+    act(() => {
+      result.current[1].clearFilter("priority");
+    });
+
+    const lastCall = historyMock.replaceState.mock.calls.at(
+      -1,
+    )?.[2] as string;
+    expect(lastCall).toContain("view=table");
+    expect(lastCall).toContain("workspace=prod");
+    expect(lastCall).toContain("type=bug");
+    expect(lastCall).not.toContain("priority=");
+  });
+});
+
 describe("action reference stability", () => {
   it("actions object is stable across re-renders", () => {
     const { result, rerender } = renderHook(() =>

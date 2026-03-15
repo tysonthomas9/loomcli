@@ -159,6 +159,12 @@ export type {
   UseWorkspaceStateReturn,
 } from "./useWorkspaceState";
 
+export { useWorkspaceParam, parseWorkspaceFromUrl } from "./useWorkspaceParam";
+export type {
+  UseWorkspaceParamOptions,
+  UseWorkspaceParamReturn,
+} from "./useWorkspaceParam";
+
 export { useVirtualList } from "./useVirtualList";
 export type {
   UseVirtualListOptions,

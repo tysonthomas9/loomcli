@@ -62,6 +62,7 @@ import {
   useTheme,
   useWorkspaceContext,
   useWorkspaceState,
+  useWorkspaceParam,
 } from "@/hooks";
 import type { Issue, IssueDetails, Status } from "@/types";
 
@@ -127,6 +128,9 @@ function App() {
     selectAll,
     selectRepos,
   } = useWorkspaceContext();
+
+  // Workspace URL param sync (deep linking for workspace selection)
+  const [workspaceParam, setWorkspaceParam] = useWorkspaceParam();
 
   // Available repo names for repo selector
   const availableRepoNames = useMemo(
@@ -361,6 +365,20 @@ function App() {
       setActiveView("kanban");
     }
   }, [isMultiRepo, activeView, setActiveView]);
+
+  // Sync workspace URL param → repo selection (mount deep-link + popstate back/forward)
+  useEffect(() => {
+    if (workspaceParam === null) {
+      // null means "all workspaces" — only call selectAll if currently filtered
+      if (selectedRepoNames.size !== workspaceRepos.length && workspaceRepos.length > 0) {
+        selectAll();
+      }
+      return;
+    }
+    if (!(selectedRepoNames.size === 1 && selectedRepoNames.has(workspaceParam))) {
+      selectRepos([workspaceParam]);
+    }
+  }, [workspaceParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Deep-link: auto-fetch issue from URL; handle back/forward via popstate → useViewState
   useEffect(() => {
@@ -668,8 +686,10 @@ function App() {
       } else {
         selectRepos([repoName]);
       }
+      // Sync workspace URL param
+      setWorkspaceParam(repoName);
     },
-    [activeRepoName, switchWorkspace, selectAll, selectRepos],
+    [activeRepoName, switchWorkspace, selectAll, selectRepos, setWorkspaceParam],
   );
 
   // Handle Talk to Lead button click

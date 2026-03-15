@@ -237,12 +237,58 @@ function toQueryString(state: FilterState): string {
 }
 
 /**
+ * Filter-specific URL param keys. Used to clear stale values before setting new ones.
+ */
+const FILTER_PARAM_KEYS = [
+  "priority",
+  "type",
+  "labels",
+  "search",
+  "showBlocked",
+  "groupBy",
+] as const;
+
+/**
  * Update URL with filter state without triggering navigation.
+ * Reads existing URL params and merges filter state, preserving non-filter params
+ * (e.g., view, repos, issue, workspace).
  */
 function updateUrl(state: FilterState): void {
   if (!isBrowser()) return;
 
-  const queryString = toQueryString(state);
+  // Read existing params to preserve non-filter params
+  const params = new URLSearchParams(window.location.search);
+
+  // Clear all filter-specific keys first
+  for (const key of FILTER_PARAM_KEYS) {
+    params.delete(key);
+  }
+
+  // Set active filter values
+  if (state.priority !== undefined) {
+    params.set("priority", state.priority.toString());
+  }
+  if (state.type !== undefined) {
+    params.set("type", state.type);
+  }
+  if (state.labels !== undefined && state.labels.length > 0) {
+    params.set("labels", state.labels.join(","));
+  }
+  if (state.search !== undefined && state.search !== "") {
+    params.set("search", state.search);
+  }
+  if (state.showBlocked === true) {
+    params.set("showBlocked", "true");
+  }
+  if (
+    state.groupBy !== undefined &&
+    state.groupBy !== "none" &&
+    state.groupBy !== DEFAULT_GROUP_BY
+  ) {
+    params.set("groupBy", state.groupBy);
+  }
+
+  const queryString = params.toString();
   const newUrl = queryString
     ? `${window.location.pathname}?${queryString}`
     : window.location.pathname;

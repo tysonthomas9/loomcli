@@ -3,7 +3,7 @@
  * Provides centralized view state management for switching between Kanban, Table, and Graph views.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 import { type ViewMode, DEFAULT_VIEW } from "@/components/ViewSwitcher";
 
@@ -177,14 +177,30 @@ export function useViewState(
     return null;
   });
 
-  // Sync URL when state changes (replaceState only — skip if URL already matches
-  // to avoid overwriting pushState entries from navigateToView)
+  // Track whether this is the initial mount sync (use replaceState on mount,
+  // pushState for user-initiated changes so back/forward works between views)
+  const isInitialSync = useRef(true);
+
+  // Skip flag: set by navigateToView to prevent the sync effect from
+  // duplicating the pushState call that navigateToView already made
+  const skipNextSync = useRef(false);
+
+  // Sync URL when state changes — skip if URL already matches
+  // to avoid overwriting pushState entries from navigateToView
   useEffect(() => {
     if (syncUrl && isBrowser()) {
+      if (skipNextSync.current) {
+        skipNextSync.current = false;
+        isInitialSync.current = false;
+        return;
+      }
       const currentView = parseViewFromUrl();
       const currentIssue = parseIssueFromUrl();
-      if (currentView === view && currentIssue === issueId) return;
-      updateViewUrl(view, issueId);
+      if (currentView !== view || currentIssue !== issueId) {
+        const push = !isInitialSync.current;
+        updateViewUrl(view, issueId, push);
+      }
+      isInitialSync.current = false;
     }
   }, [view, issueId, syncUrl]);
 
@@ -218,6 +234,9 @@ export function useViewState(
         newView === "issue-detail" && state?.issueId
           ? String(state.issueId)
           : null;
+      if (syncUrl) {
+        skipNextSync.current = true;
+      }
       setViewState(newView);
       setIssueId(newIssueId);
       if (syncUrl) {

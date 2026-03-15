@@ -188,14 +188,14 @@ describe("useViewState", () => {
       expect(result.current.view).toBe("table");
     });
 
-    it("calls replaceState when view changes", () => {
+    it("calls pushState when view changes (creates history entry)", () => {
       const { result } = renderHook(() => useViewState());
 
       act(() => {
         result.current.setView("graph");
       });
 
-      expect(historyMock.replaceState).toHaveBeenCalledWith(
+      expect(historyMock.pushState).toHaveBeenCalledWith(
         null,
         "",
         "/app?view=graph",
@@ -211,11 +211,11 @@ describe("useViewState", () => {
       });
 
       // Last call should be to pathname only (no query string)
-      const lastCall = historyMock.replaceState.mock.calls.at(-1);
+      const lastCall = historyMock.pushState.mock.calls.at(-1);
       expect(lastCall?.[2]).toBe("/app");
     });
 
-    it("does not call replaceState when syncUrl is false", () => {
+    it("does not call pushState or replaceState when syncUrl is false", () => {
       const { result } = renderHook(() => useViewState({ syncUrl: false }));
 
       act(() => {
@@ -225,10 +225,13 @@ describe("useViewState", () => {
       // State should update
       expect(result.current.view).toBe("table");
 
-      // replaceState should not be called for view changes
-      const calls = historyMock.replaceState.mock.calls;
-      const viewCall = calls.find((call) => call[2]?.includes("view=table"));
-      expect(viewCall).toBeUndefined();
+      // Neither replaceState nor pushState should be called for view changes
+      const replaceCalls = historyMock.replaceState.mock.calls;
+      const pushCalls = historyMock.pushState.mock.calls;
+      const viewReplaceCall = replaceCalls.find((call) => call[2]?.includes("view=table"));
+      const viewPushCall = pushCalls.find((call) => call[2]?.includes("view=table"));
+      expect(viewReplaceCall).toBeUndefined();
+      expect(viewPushCall).toBeUndefined();
     });
 
     it("allows changing view multiple times", () => {
@@ -303,7 +306,7 @@ describe("useViewState", () => {
         result.current.setView("table");
       });
 
-      const lastCall = historyMock.replaceState.mock.calls.at(
+      const lastCall = historyMock.pushState.mock.calls.at(
         -1,
       )?.[2] as string;
       expect(lastCall).toContain("priority=2");
@@ -319,7 +322,7 @@ describe("useViewState", () => {
         result.current.setView("kanban");
       });
 
-      const lastCall = historyMock.replaceState.mock.calls.at(
+      const lastCall = historyMock.pushState.mock.calls.at(
         -1,
       )?.[2] as string;
       expect(lastCall).toContain("priority=2");
@@ -340,7 +343,7 @@ describe("useViewState", () => {
         result.current.setView("graph");
       });
 
-      expect(historyMock.replaceState).toHaveBeenCalledWith(
+      expect(historyMock.pushState).toHaveBeenCalledWith(
         null,
         "",
         "/board?view=graph",
@@ -682,6 +685,95 @@ describe("SSR/non-browser environment", () => {
   });
 });
 
+describe("pushState vs replaceState behavior", () => {
+  let historyMock: {
+    replaceState: ReturnType<typeof vi.fn>;
+    pushState: ReturnType<typeof vi.fn>;
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("initial mount sync uses replaceState (not pushState)", () => {
+    mockWindowLocation("?view=table");
+    historyMock = mockWindowHistory();
+
+    renderHook(() => useViewState());
+
+    // On initial mount, replaceState may be called to sync URL, but pushState should not
+    const pushCallsWithView = historyMock.pushState.mock.calls.filter(
+      (call) =>
+        typeof call[2] === "string" && call[2].includes("view="),
+    );
+    expect(pushCallsWithView).toHaveLength(0);
+  });
+
+  it("setView after mount uses pushState (creates history entry)", () => {
+    mockWindowLocation("");
+    historyMock = mockWindowHistory();
+
+    const { result } = renderHook(() => useViewState());
+
+    // Clear any calls from mount
+    historyMock.pushState.mockClear();
+    historyMock.replaceState.mockClear();
+
+    act(() => {
+      result.current.setView("graph");
+    });
+
+    expect(historyMock.pushState).toHaveBeenCalledWith(
+      null,
+      "",
+      "/app?view=graph",
+    );
+  });
+
+  it("navigateToView only calls pushState once (skipNextSync prevents double)", () => {
+    mockWindowLocation("");
+    historyMock = mockWindowHistory();
+
+    const { result } = renderHook(() => useViewState());
+
+    // Clear any calls from mount
+    historyMock.pushState.mockClear();
+    historyMock.replaceState.mockClear();
+
+    act(() => {
+      result.current.navigateToView("issue-detail", { issueId: "issue-42" });
+    });
+
+    // navigateToView calls pushState once directly; the sync effect should skip
+    const pushCallsWithIssueDetail = historyMock.pushState.mock.calls.filter(
+      (call) =>
+        typeof call[2] === "string" && call[2].includes("view=issue-detail"),
+    );
+    expect(pushCallsWithIssueDetail).toHaveLength(1);
+  });
+
+  it("navigateToView does not trigger replaceState from sync effect", () => {
+    mockWindowLocation("");
+    historyMock = mockWindowHistory();
+
+    const { result } = renderHook(() => useViewState());
+
+    // Clear any calls from mount
+    historyMock.replaceState.mockClear();
+
+    act(() => {
+      result.current.navigateToView("table");
+    });
+
+    // Sync effect should be skipped, so replaceState should not be called with the view
+    const replaceCallsWithTable = historyMock.replaceState.mock.calls.filter(
+      (call) =>
+        typeof call[2] === "string" && call[2].includes("view=table"),
+    );
+    expect(replaceCallsWithTable).toHaveLength(0);
+  });
+});
+
 describe("syncUrl option", () => {
   let historyMock: {
     replaceState: ReturnType<typeof vi.fn>;
@@ -715,7 +807,7 @@ describe("syncUrl option", () => {
       result.current.setView("graph");
     });
 
-    expect(historyMock.replaceState).toHaveBeenCalledWith(
+    expect(historyMock.pushState).toHaveBeenCalledWith(
       null,
       "",
       expect.stringContaining("view=graph"),
@@ -729,11 +821,15 @@ describe("syncUrl option", () => {
       result.current.setView("graph");
     });
 
-    // replaceState should not be called with view param
-    const viewCalls = historyMock.replaceState.mock.calls.filter(
+    // Neither pushState nor replaceState should be called with view param
+    const pushCalls = historyMock.pushState.mock.calls.filter(
       (call) => typeof call[2] === "string" && call[2].includes("view="),
     );
-    expect(viewCalls).toHaveLength(0);
+    const replaceCalls = historyMock.replaceState.mock.calls.filter(
+      (call) => typeof call[2] === "string" && call[2].includes("view="),
+    );
+    expect(pushCalls).toHaveLength(0);
+    expect(replaceCalls).toHaveLength(0);
   });
 
   it("does not listen to popstate when syncUrl is false", () => {
