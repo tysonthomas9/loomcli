@@ -11,6 +11,7 @@ import { updateIssue, addDependency, removeDependency } from "@/api";
 import { deleteTabMetadata, scheduleSessionKill } from "@/api/terminal";
 import type { IssueTab } from "@/api/issueTabs";
 import { useAgentTerminalLogs } from "@/hooks";
+import { useAgentContext } from "@/hooks/useAgentContext";
 import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
   Issue,
@@ -27,6 +28,7 @@ import { getReviewType } from "@/utils/issueCategory";
 import type { ConnectionState } from "@/components/TerminalView";
 
 import { AssigneeDropdown } from "./AssigneeDropdown";
+import { StartWorkButton } from "./StartWorkButton";
 import { CommentForm } from "./CommentForm";
 import { CommentsSection } from "./CommentsSection";
 import { DependencySection } from "./DependencySection";
@@ -349,20 +351,23 @@ function DefaultContent({
   );
 
   // Close a tab: remove from state, clean up backend resources
-  const closeTab = useCallback((id: string) => {
-    // Find the tab before updating state to extract metadata for cleanup
-    const tab = tabs.find((t) => t.id === id);
+  const closeTab = useCallback(
+    (id: string) => {
+      // Find the tab before updating state to extract metadata for cleanup
+      const tab = tabs.find((t) => t.id === id);
 
-    // Fire-and-forget backend cleanup for terminal tabs
-    if (tab?.type === "terminal" && tab.metadata?.sessionName) {
-      const sessionName = tab.metadata.sessionName;
-      deleteTabMetadata(sessionName).catch(() => {});
-      scheduleSessionKill(sessionName).catch(() => {});
-    }
+      // Fire-and-forget backend cleanup for terminal tabs
+      if (tab?.type === "terminal" && tab.metadata?.sessionName) {
+        const sessionName = tab.metadata.sessionName;
+        deleteTabMetadata(sessionName).catch(() => {});
+        scheduleSessionKill(sessionName).catch(() => {});
+      }
 
-    setTabs((prev) => prev.filter((t) => t.id !== id));
-    setActiveTabId((prev) => (prev === id ? "details" : prev));
-  }, [tabs]);
+      setTabs((prev) => prev.filter((t) => t.id !== id));
+      setActiveTabId((prev) => (prev === id ? "details" : prev));
+    },
+    [tabs],
+  );
 
   // Handle tab close: confirm if terminal has active connection
   const handleTabClose = useCallback(
@@ -391,6 +396,13 @@ function DefaultContent({
     },
     [],
   );
+
+  // Agent data for StartWorkButton (shared context, no duplicate polling)
+  const {
+    agents,
+    agentTasks,
+    isConnected: isLoomConnected,
+  } = useAgentContext();
 
   // Agent-based log connection
   const agentName = issue?.assignee || null;
@@ -445,7 +457,9 @@ function DefaultContent({
             ? { sessionName: t.session_name }
             : undefined,
         connectionState:
-          t.type === "terminal" ? ("disconnected" as ConnectionState) : undefined,
+          t.type === "terminal"
+            ? ("disconnected" as ConnectionState)
+            : undefined,
       }));
 
     // Ensure details tab is always present
@@ -465,12 +479,18 @@ function DefaultContent({
   // Persist tab state on changes (debounced via hook)
   useEffect(() => {
     // Don't persist while still loading persisted state or before restoration
-    if (isLoadingPersistedTabs || !issue?.id || restoredIssueIdRef.current !== issue.id) {
+    if (
+      isLoadingPersistedTabs ||
+      !issue?.id ||
+      restoredIssueIdRef.current !== issue.id
+    ) {
       return;
     }
     // Only persist if there's something beyond the default single details tab
     const isDefault =
-      tabs.length === 1 && tabs[0]?.id === "details" && activeTabId === "details";
+      tabs.length === 1 &&
+      tabs[0]?.id === "details" &&
+      activeTabId === "details";
     if (isDefault) return;
 
     const tabsToSave: IssueTab[] = tabs.map((t, i) => {
@@ -626,6 +646,19 @@ function DefaultContent({
       } finally {
         setIsSavingAssignee(false);
       }
+    },
+    [issue, onIssueUpdate],
+  );
+
+  const handleStartWork = useCallback(
+    async (agentName: string) => {
+      if (!issue) return;
+
+      const updatedIssue = await updateIssue(issue.id, {
+        assignee: agentName,
+        status: "in_progress",
+      });
+      onIssueUpdate?.(updatedIssue);
     },
     [issue, onIssueUpdate],
   );
@@ -1071,6 +1104,15 @@ function DefaultContent({
                     assignee={issue.assignee}
                     onSave={handleAssigneeSave}
                     isSaving={isSavingAssignee}
+                  />
+                  <StartWorkButton
+                    issueId={issue.id}
+                    issueStatus={issue.status}
+                    currentAssignee={issue.assignee}
+                    agents={agents}
+                    agentTasks={agentTasks}
+                    isConnected={isLoomConnected}
+                    onAssign={handleStartWork}
                   />
                 </div>
 
