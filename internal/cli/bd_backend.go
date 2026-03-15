@@ -75,6 +75,8 @@ func (b *bdBackend) Stats(_ context.Context) (BdStats, error) {
 	return stats, nil
 }
 
+// GetIssue returns a single issue by ID.
+// bd show <id> --json returns a JSON array with one element.
 func (b *bdBackend) GetIssue(_ context.Context, id string) (*BdIssue, error) {
 	out, err := b.RunCommand(b.dir, "show", id, "--json")
 	if err != nil {
