@@ -39,19 +39,23 @@ const ISSUE_PARAM = "issue";
 export interface UseViewStateOptions {
   /** Whether to sync with URL (default: true) */
   syncUrl?: boolean;
+  /** Callback invoked on popstate events with the history state */
+  onPopState?: (state: Record<string, unknown> | null) => void;
 }
 
 /**
  * Return type for useViewState hook.
  */
-export type UseViewStateReturn = [ViewMode, (view: ViewMode) => void] & {
-  /** Set view to issue-detail with an issue ID in a single URL update (pushState for history) */
-  setDetailView: (issueId: string) => void;
-  /** Navigate away from issue-detail view (pushState for history) */
-  closeDetailView: (fallbackView: ViewMode) => void;
+export interface UseViewStateReturn {
+  /** Current view mode */
+  view: ViewMode;
+  /** Set view mode (replaceState — no history entry) */
+  setView: (view: ViewMode) => void;
+  /** Navigate to a view with pushState (creates history entry for back/forward) */
+  navigateToView: (view: ViewMode, state?: Record<string, unknown>) => void;
   /** The issue ID from the URL (when in issue-detail view) */
   urlIssueId: string | null;
-};
+}
 
 /**
  * Check if running in browser environment.
@@ -97,6 +101,7 @@ function updateViewUrl(
   view: ViewMode,
   issueId?: string | null,
   push?: boolean,
+  historyState?: Record<string, unknown> | null,
 ): void {
   if (!isBrowser()) return;
 
@@ -122,7 +127,7 @@ function updateViewUrl(
     : window.location.pathname;
 
   const method = push ? "pushState" : "replaceState";
-  window.history[method](null, "", newUrl);
+  window.history[method](historyState ?? null, "", newUrl);
 }
 
 /**
@@ -154,7 +159,7 @@ function parseIssueFromUrl(): string | null {
 export function useViewState(
   options: UseViewStateOptions = {},
 ): UseViewStateReturn {
-  const { syncUrl = true } = options;
+  const { syncUrl = true, onPopState } = options;
 
   // Initialize state from URL if syncing and in browser
   const [view, setViewState] = useState<ViewMode>(() => {
@@ -173,7 +178,7 @@ export function useViewState(
   });
 
   // Sync URL when state changes (replaceState only — skip if URL already matches
-  // to avoid overwriting pushState entries from setDetailView/closeDetailView)
+  // to avoid overwriting pushState entries from navigateToView)
   useEffect(() => {
     if (syncUrl && isBrowser()) {
       const currentView = parseViewFromUrl();
@@ -187,16 +192,17 @@ export function useViewState(
   useEffect(() => {
     if (!syncUrl || !isBrowser()) return;
 
-    const handlePopState = () => {
+    const handlePopState = (event: PopStateEvent) => {
       setViewState(parseViewFromUrl());
       setIssueId(parseIssueFromUrl());
+      onPopState?.((event.state as Record<string, unknown> | null) ?? null);
     };
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [syncUrl]);
+  }, [syncUrl, onPopState]);
 
-  // Memoized setter - clears issueId when switching away from issue-detail
+  // Memoized setter (replaceState) - clears issueId when switching away from issue-detail
   const setView = useCallback((newView: ViewMode) => {
     setViewState(newView);
     if (newView !== "issue-detail") {
@@ -204,35 +210,24 @@ export function useViewState(
     }
   }, []);
 
-  // Set view to issue-detail with an issue ID in one update (pushState for back/forward)
-  const setDetailView = useCallback(
-    (newIssueId: string) => {
-      setViewState("issue-detail");
+  // Navigate to a view with pushState (creates history entry for back/forward).
+  // When view is 'issue-detail', reads state.issueId for the URL issue param.
+  const navigateToView = useCallback(
+    (newView: ViewMode, state?: Record<string, unknown>) => {
+      const newIssueId =
+        newView === "issue-detail" && state?.issueId
+          ? String(state.issueId)
+          : null;
+      setViewState(newView);
       setIssueId(newIssueId);
       if (syncUrl) {
-        updateViewUrl("issue-detail", newIssueId, true);
+        updateViewUrl(newView, newIssueId, true, state ?? null);
       }
     },
     [syncUrl],
   );
 
-  // Navigate away from issue-detail view (pushState for back/forward)
-  const closeDetailView = useCallback(
-    (fallbackView: ViewMode) => {
-      setViewState(fallbackView);
-      setIssueId(null);
-      if (syncUrl) {
-        updateViewUrl(fallbackView, null, true);
-      }
-    },
-    [syncUrl],
-  );
-
-  const result = [view, setView] as UseViewStateReturn;
-  result.setDetailView = setDetailView;
-  result.closeDetailView = closeDetailView;
-  result.urlIssueId = issueId;
-  return result;
+  return { view, setView, navigateToView, urlIssueId: issueId };
 }
 
 // Export helpers for testing

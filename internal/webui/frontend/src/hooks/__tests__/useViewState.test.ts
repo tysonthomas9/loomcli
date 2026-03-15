@@ -31,17 +31,21 @@ function mockWindowLocation(search = ""): void {
 /**
  * Mock window.history for URL sync tests.
  */
-function mockWindowHistory(): { replaceState: ReturnType<typeof vi.fn> } {
+function mockWindowHistory(): {
+  replaceState: ReturnType<typeof vi.fn>;
+  pushState: ReturnType<typeof vi.fn>;
+} {
   const replaceState = vi.fn();
+  const pushState = vi.fn();
   Object.defineProperty(window, "history", {
     value: {
       replaceState,
-      pushState: vi.fn(),
+      pushState,
     },
     writable: true,
     configurable: true,
   });
-  return { replaceState };
+  return { replaceState, pushState };
 }
 
 describe("useViewState", () => {
@@ -59,7 +63,7 @@ describe("useViewState", () => {
       mockWindowLocation("");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe(DEFAULT_VIEW);
       expect(view).toBe("kanban");
     });
@@ -68,7 +72,7 @@ describe("useViewState", () => {
       mockWindowLocation("?view=table");
       const { result } = renderHook(() => useViewState({ syncUrl: false }));
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe(DEFAULT_VIEW);
     });
   });
@@ -78,7 +82,7 @@ describe("useViewState", () => {
       mockWindowLocation("?view=table");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("table");
     });
 
@@ -86,7 +90,7 @@ describe("useViewState", () => {
       mockWindowLocation("?view=kanban");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("kanban");
     });
 
@@ -94,7 +98,7 @@ describe("useViewState", () => {
       mockWindowLocation("?view=graph");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("graph");
     });
 
@@ -102,7 +106,7 @@ describe("useViewState", () => {
       mockWindowLocation("?view=monitor");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("monitor");
     });
 
@@ -110,7 +114,7 @@ describe("useViewState", () => {
       mockWindowLocation("?view=settings");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("settings");
     });
 
@@ -118,15 +122,23 @@ describe("useViewState", () => {
       mockWindowLocation("?view=files");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("files");
+    });
+
+    it("parses issue-detail view from URL", () => {
+      mockWindowLocation("?view=issue-detail");
+      const { result } = renderHook(() => useViewState());
+
+      const { view } = result.current;
+      expect(view).toBe("issue-detail");
     });
 
     it('defaults to kanban for invalid view (?view=invalid returns "kanban")', () => {
       mockWindowLocation("?view=invalid");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("kanban");
     });
 
@@ -134,7 +146,7 @@ describe("useViewState", () => {
       mockWindowLocation("?view=");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("kanban");
     });
 
@@ -142,7 +154,7 @@ describe("useViewState", () => {
       mockWindowLocation("?view=TABLE");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("kanban");
     });
 
@@ -150,13 +162,16 @@ describe("useViewState", () => {
       mockWindowLocation("?priority=2&view=graph&type=bug");
       const { result } = renderHook(() => useViewState());
 
-      const [view] = result.current;
+      const { view } = result.current;
       expect(view).toBe("graph");
     });
   });
 
   describe("setView", () => {
-    let historyMock: { replaceState: ReturnType<typeof vi.fn> };
+    let historyMock: {
+      replaceState: ReturnType<typeof vi.fn>;
+      pushState: ReturnType<typeof vi.fn>;
+    };
 
     beforeEach(() => {
       mockWindowLocation("");
@@ -167,17 +182,17 @@ describe("useViewState", () => {
       const { result } = renderHook(() => useViewState());
 
       act(() => {
-        result.current[1]("table");
+        result.current.setView("table");
       });
 
-      expect(result.current[0]).toBe("table");
+      expect(result.current.view).toBe("table");
     });
 
     it("calls replaceState when view changes", () => {
       const { result } = renderHook(() => useViewState());
 
       act(() => {
-        result.current[1]("graph");
+        result.current.setView("graph");
       });
 
       expect(historyMock.replaceState).toHaveBeenCalledWith(
@@ -192,7 +207,7 @@ describe("useViewState", () => {
       const { result } = renderHook(() => useViewState());
 
       act(() => {
-        result.current[1]("kanban");
+        result.current.setView("kanban");
       });
 
       // Last call should be to pathname only (no query string)
@@ -204,11 +219,11 @@ describe("useViewState", () => {
       const { result } = renderHook(() => useViewState({ syncUrl: false }));
 
       act(() => {
-        result.current[1]("table");
+        result.current.setView("table");
       });
 
       // State should update
-      expect(result.current[0]).toBe("table");
+      expect(result.current.view).toBe("table");
 
       // replaceState should not be called for view changes
       const calls = historyMock.replaceState.mock.calls;
@@ -220,24 +235,27 @@ describe("useViewState", () => {
       const { result } = renderHook(() => useViewState({ syncUrl: false }));
 
       act(() => {
-        result.current[1]("table");
+        result.current.setView("table");
       });
-      expect(result.current[0]).toBe("table");
+      expect(result.current.view).toBe("table");
 
       act(() => {
-        result.current[1]("graph");
+        result.current.setView("graph");
       });
-      expect(result.current[0]).toBe("graph");
+      expect(result.current.view).toBe("graph");
 
       act(() => {
-        result.current[1]("kanban");
+        result.current.setView("kanban");
       });
-      expect(result.current[0]).toBe("kanban");
+      expect(result.current.view).toBe("kanban");
     });
   });
 
   describe("preserving other URL params", () => {
-    let historyMock: { replaceState: ReturnType<typeof vi.fn> };
+    let historyMock: {
+      replaceState: ReturnType<typeof vi.fn>;
+      pushState: ReturnType<typeof vi.fn>;
+    };
 
     beforeEach(() => {
       historyMock = mockWindowHistory();
@@ -248,7 +266,7 @@ describe("useViewState", () => {
       const { result } = renderHook(() => useViewState());
 
       act(() => {
-        result.current[1]("table");
+        result.current.setView("table");
       });
 
       const lastCall = historyMock.replaceState.mock.calls.at(
@@ -264,7 +282,7 @@ describe("useViewState", () => {
       const { result } = renderHook(() => useViewState());
 
       act(() => {
-        result.current[1]("kanban");
+        result.current.setView("kanban");
       });
 
       const lastCall = historyMock.replaceState.mock.calls.at(
@@ -285,7 +303,7 @@ describe("useViewState", () => {
       const { result } = renderHook(() => useViewState());
 
       act(() => {
-        result.current[1]("graph");
+        result.current.setView("graph");
       });
 
       expect(historyMock.replaceState).toHaveBeenCalledWith(
@@ -306,7 +324,7 @@ describe("useViewState", () => {
       mockWindowLocation("?view=table");
       const { result } = renderHook(() => useViewState());
 
-      expect(result.current[0]).toBe("table");
+      expect(result.current.view).toBe("table");
 
       // Simulate browser navigation (change URL and fire popstate)
       act(() => {
@@ -314,14 +332,14 @@ describe("useViewState", () => {
         window.dispatchEvent(new PopStateEvent("popstate"));
       });
 
-      expect(result.current[0]).toBe("graph");
+      expect(result.current.view).toBe("graph");
     });
 
     it("returns to DEFAULT_VIEW when navigating to URL without view param", () => {
       mockWindowLocation("?view=table");
       const { result } = renderHook(() => useViewState());
 
-      expect(result.current[0]).toBe("table");
+      expect(result.current.view).toBe("table");
 
       // Simulate browser navigation to URL without view param
       act(() => {
@@ -329,7 +347,7 @@ describe("useViewState", () => {
         window.dispatchEvent(new PopStateEvent("popstate"));
       });
 
-      expect(result.current[0]).toBe("kanban");
+      expect(result.current.view).toBe("kanban");
     });
 
     it("cleans up popstate listener on unmount", () => {
@@ -357,17 +375,80 @@ describe("useViewState", () => {
     });
   });
 
+  describe("popstate with event.state", () => {
+    beforeEach(() => {
+      mockWindowLocation("");
+      mockWindowHistory();
+    });
+
+    it("calls onPopState callback with event.state on popstate", () => {
+      const onPopState = vi.fn();
+      mockWindowLocation("?view=table");
+      renderHook(() => useViewState({ onPopState }));
+
+      act(() => {
+        mockWindowLocation("?view=kanban");
+        window.dispatchEvent(
+          new PopStateEvent("popstate", {
+            state: { previousView: "table" },
+          }),
+        );
+      });
+
+      expect(onPopState).toHaveBeenCalledWith({ previousView: "table" });
+    });
+
+    it("calls onPopState with null when event.state is null", () => {
+      const onPopState = vi.fn();
+      mockWindowLocation("?view=table");
+      renderHook(() => useViewState({ onPopState }));
+
+      act(() => {
+        mockWindowLocation("");
+        window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      });
+
+      expect(onPopState).toHaveBeenCalledWith(null);
+    });
+
+    it("calls onPopState with null when event.state is undefined", () => {
+      const onPopState = vi.fn();
+      mockWindowLocation("?view=table");
+      renderHook(() => useViewState({ onPopState }));
+
+      act(() => {
+        mockWindowLocation("");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+
+      expect(onPopState).toHaveBeenCalledWith(null);
+    });
+
+    it("does not call onPopState when syncUrl is false", () => {
+      const onPopState = vi.fn();
+      const addEventListenerSpy = vi.spyOn(window, "addEventListener");
+
+      renderHook(() => useViewState({ syncUrl: false, onPopState }));
+
+      // No popstate listener added
+      const popstateListeners = addEventListenerSpy.mock.calls.filter(
+        (call) => call[0] === "popstate",
+      );
+      expect(popstateListeners).toHaveLength(0);
+    });
+  });
+
   describe("setter reference stability", () => {
     it("setView function is stable across re-renders", () => {
       const { result, rerender } = renderHook(() =>
         useViewState({ syncUrl: false }),
       );
 
-      const setView1 = result.current[1];
+      const setView1 = result.current.setView;
 
       rerender();
 
-      const setView2 = result.current[1];
+      const setView2 = result.current.setView;
 
       expect(setView1).toBe(setView2);
     });
@@ -375,15 +456,29 @@ describe("useViewState", () => {
     it("setView remains stable when view changes", () => {
       const { result } = renderHook(() => useViewState({ syncUrl: false }));
 
-      const setView1 = result.current[1];
+      const setView1 = result.current.setView;
 
       act(() => {
-        result.current[1]("table");
+        result.current.setView("table");
       });
 
-      const setView2 = result.current[1];
+      const setView2 = result.current.setView;
 
       expect(setView1).toBe(setView2);
+    });
+
+    it("navigateToView reference is stable across re-renders", () => {
+      const { result, rerender } = renderHook(() =>
+        useViewState({ syncUrl: false }),
+      );
+
+      const nav1 = result.current.navigateToView;
+
+      rerender();
+
+      const nav2 = result.current.navigateToView;
+
+      expect(nav1).toBe(nav2);
     });
   });
 });
@@ -439,6 +534,12 @@ describe("parseViewFromUrl", () => {
     expect(result).toBe("files");
   });
 
+  it("parses issue-detail view", () => {
+    mockWindowLocation("?view=issue-detail");
+    const result = parseViewFromUrl();
+    expect(result).toBe("issue-detail");
+  });
+
   it("returns DEFAULT_VIEW for invalid view", () => {
     mockWindowLocation("?view=invalid");
     const result = parseViewFromUrl();
@@ -487,6 +588,10 @@ describe("isValidViewMode", () => {
 
   it("returns true for files", () => {
     expect(isValidViewMode("files")).toBe(true);
+  });
+
+  it("returns true for issue-detail", () => {
+    expect(isValidViewMode("issue-detail")).toBe(true);
   });
 
   it("returns false for invalid string", () => {
@@ -544,7 +649,10 @@ describe("SSR/non-browser environment", () => {
 });
 
 describe("syncUrl option", () => {
-  let historyMock: { replaceState: ReturnType<typeof vi.fn> };
+  let historyMock: {
+    replaceState: ReturnType<typeof vi.fn>;
+    pushState: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     mockWindowLocation("?view=table");
@@ -557,12 +665,12 @@ describe("syncUrl option", () => {
 
   it("reads from URL when syncUrl is true (default)", () => {
     const { result } = renderHook(() => useViewState());
-    expect(result.current[0]).toBe("table");
+    expect(result.current.view).toBe("table");
   });
 
   it("ignores URL when syncUrl is false", () => {
     const { result } = renderHook(() => useViewState({ syncUrl: false }));
-    expect(result.current[0]).toBe(DEFAULT_VIEW);
+    expect(result.current.view).toBe(DEFAULT_VIEW);
   });
 
   it("writes to URL when syncUrl is true (default)", () => {
@@ -570,7 +678,7 @@ describe("syncUrl option", () => {
     const { result } = renderHook(() => useViewState());
 
     act(() => {
-      result.current[1]("graph");
+      result.current.setView("graph");
     });
 
     expect(historyMock.replaceState).toHaveBeenCalledWith(
@@ -584,7 +692,7 @@ describe("syncUrl option", () => {
     const { result } = renderHook(() => useViewState({ syncUrl: false }));
 
     act(() => {
-      result.current[1]("graph");
+      result.current.setView("graph");
     });
 
     // replaceState should not be called with view param
@@ -620,26 +728,26 @@ describe("edge cases", () => {
     const { result } = renderHook(() => useViewState({ syncUrl: false }));
 
     act(() => {
-      result.current[1]("table");
+      result.current.setView("table");
     });
-    expect(result.current[0]).toBe("table");
+    expect(result.current.view).toBe("table");
 
     act(() => {
-      result.current[1]("table");
+      result.current.setView("table");
     });
-    expect(result.current[0]).toBe("table");
+    expect(result.current.view).toBe("table");
   });
 
   it("handles rapid view changes", () => {
     const { result } = renderHook(() => useViewState({ syncUrl: false }));
 
     act(() => {
-      result.current[1]("table");
-      result.current[1]("graph");
-      result.current[1]("kanban");
+      result.current.setView("table");
+      result.current.setView("graph");
+      result.current.setView("kanban");
     });
 
-    expect(result.current[0]).toBe("kanban");
+    expect(result.current.view).toBe("kanban");
   });
 
   it("works with URL containing hash", () => {
@@ -648,7 +756,7 @@ describe("edge cases", () => {
     mockWindowLocation("?view=table");
     const { result } = renderHook(() => useViewState());
 
-    expect(result.current[0]).toBe("table");
+    expect(result.current.view).toBe("table");
   });
 
   it("handles URL with multiple view params (uses first)", () => {
@@ -656,11 +764,11 @@ describe("edge cases", () => {
     mockWindowLocation("?view=table&view=graph");
     const { result } = renderHook(() => useViewState());
 
-    expect(result.current[0]).toBe("table");
+    expect(result.current.view).toBe("table");
   });
 });
 
-describe("deep-link URL (setDetailView / closeDetailView)", () => {
+describe("navigateToView", () => {
   let pushStateSpy: ReturnType<typeof vi.fn>;
   let replaceStateSpy: ReturnType<typeof vi.fn>;
 
@@ -682,140 +790,142 @@ describe("deep-link URL (setDetailView / closeDetailView)", () => {
     vi.restoreAllMocks();
   });
 
-  it("setDetailView calls pushState (not replaceState) with correct URL params", () => {
+  it("calls pushState (not replaceState) with correct URL params", () => {
     const { result } = renderHook(() => useViewState());
 
     act(() => {
-      result.current.setDetailView("issue-42");
+      result.current.navigateToView("issue-detail", { issueId: "issue-42" });
     });
 
     // pushState should be called with issue-detail view and issue param
     expect(pushStateSpy).toHaveBeenCalledWith(
-      null,
+      { issueId: "issue-42" },
       "",
       "/app?view=issue-detail&issue=issue-42",
     );
-
-    // The meaningful navigation action should go through pushState,
-    // not just replaceState. Verify pushState was called first (before any
-    // useEffect sync replaceState).
     expect(pushStateSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("setDetailView updates view state to issue-detail", () => {
+  it("passes state object to pushState", () => {
     const { result } = renderHook(() => useViewState());
 
     act(() => {
-      result.current.setDetailView("abc-123");
+      result.current.navigateToView("issue-detail", {
+        previousView: "kanban",
+        issueId: "issue-42",
+      });
     });
 
-    expect(result.current[0]).toBe("issue-detail");
+    expect(pushStateSpy).toHaveBeenCalledWith(
+      { previousView: "kanban", issueId: "issue-42" },
+      "",
+      expect.any(String),
+    );
   });
 
-  it("setDetailView sets urlIssueId", () => {
+  it("updates view state locally", () => {
     const { result } = renderHook(() => useViewState());
 
     act(() => {
-      result.current.setDetailView("abc-123");
+      result.current.navigateToView("issue-detail", { issueId: "abc-123" });
+    });
+
+    expect(result.current.view).toBe("issue-detail");
+  });
+
+  it("includes issue param in URL when navigating to issue-detail", () => {
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.navigateToView("issue-detail", { issueId: "abc-123" });
+    });
+
+    const url = pushStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(url).toContain("view=issue-detail");
+    expect(url).toContain("issue=abc-123");
+  });
+
+  it("sets urlIssueId when navigating to issue-detail", () => {
+    const { result } = renderHook(() => useViewState());
+
+    act(() => {
+      result.current.navigateToView("issue-detail", { issueId: "abc-123" });
     });
 
     expect(result.current.urlIssueId).toBe("abc-123");
   });
 
-  it("closeDetailView calls pushState with correct URL (issue param removed)", () => {
+  it("navigates to a non-detail view with pushState (issue param removed)", () => {
     const { result } = renderHook(() => useViewState());
 
-    // First open a detail view
+    // First navigate to detail
     act(() => {
-      result.current.setDetailView("issue-99");
+      result.current.navigateToView("issue-detail", { issueId: "issue-99" });
     });
 
     pushStateSpy.mockClear();
 
-    // Now close it, falling back to table view
+    // Now navigate to table
     act(() => {
-      result.current.closeDetailView("table");
+      result.current.navigateToView("table");
     });
 
-    expect(pushStateSpy).toHaveBeenCalledWith(
-      null,
-      "",
-      "/app?view=table",
-    );
+    expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/app?view=table");
 
-    // The URL should not contain issue param
-    const lastPushCall = pushStateSpy.mock.calls.at(-1)?.[2] as string;
-    expect(lastPushCall).not.toContain("issue=");
+    const url = pushStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(url).not.toContain("issue=");
   });
 
-  it("closeDetailView returns urlIssueId as null after closing", () => {
+  it("clears urlIssueId when navigating to non-detail view", () => {
     const { result } = renderHook(() => useViewState());
 
     act(() => {
-      result.current.setDetailView("issue-99");
+      result.current.navigateToView("issue-detail", { issueId: "issue-99" });
     });
 
     expect(result.current.urlIssueId).toBe("issue-99");
 
     act(() => {
-      result.current.closeDetailView("kanban");
+      result.current.navigateToView("kanban");
     });
 
     expect(result.current.urlIssueId).toBeNull();
   });
 
-  it("closeDetailView sets view to fallback view", () => {
+  it("navigating to DEFAULT_VIEW removes view param from URL", () => {
     const { result } = renderHook(() => useViewState());
 
     act(() => {
-      result.current.setDetailView("issue-1");
-    });
-
-    act(() => {
-      result.current.closeDetailView("graph");
-    });
-
-    expect(result.current[0]).toBe("graph");
-  });
-
-  it("closeDetailView to DEFAULT_VIEW removes view param from URL", () => {
-    const { result } = renderHook(() => useViewState());
-
-    act(() => {
-      result.current.setDetailView("issue-1");
+      result.current.navigateToView("issue-detail", { issueId: "issue-1" });
     });
 
     pushStateSpy.mockClear();
 
     act(() => {
-      result.current.closeDetailView("kanban");
+      result.current.navigateToView("kanban");
     });
 
-    // kanban is DEFAULT_VIEW, so view param should be omitted for clean URL
-    const lastPushCall = pushStateSpy.mock.calls.at(-1)?.[2] as string;
-    expect(lastPushCall).toBe("/app");
-    expect(lastPushCall).not.toContain("view=");
-    expect(lastPushCall).not.toContain("issue=");
+    const url = pushStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(url).toBe("/app");
+    expect(url).not.toContain("view=");
+    expect(url).not.toContain("issue=");
   });
 
   it("URL sync useEffect skips replaceState when URL already matches state (after pushState)", () => {
     const { result } = renderHook(() => useViewState());
 
-    // setDetailView calls pushState, which updates the URL
     act(() => {
-      result.current.setDetailView("issue-42");
+      result.current.navigateToView("issue-detail", { issueId: "issue-42" });
     });
 
     // Simulate URL already matching after pushState
     mockWindowLocation("?view=issue-detail&issue=issue-42");
 
-    // Clear spy counts after setDetailView
     replaceStateSpy.mockClear();
 
     // Force a re-render to trigger the useEffect sync
     act(() => {
-      // Trigger re-render without changing state
-      result.current[1](result.current[0]);
+      result.current.setView(result.current.view);
     });
 
     // replaceState should not be called because URL already matches state
@@ -830,7 +940,7 @@ describe("deep-link URL (setDetailView / closeDetailView)", () => {
     mockWindowLocation("?view=issue-detail&issue=deep-link-1");
     const { result } = renderHook(() => useViewState());
 
-    expect(result.current[0]).toBe("issue-detail");
+    expect(result.current.view).toBe("issue-detail");
     expect(result.current.urlIssueId).toBe("deep-link-1");
 
     // Simulate browser back to a different issue
@@ -847,74 +957,43 @@ describe("deep-link URL (setDetailView / closeDetailView)", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
-    expect(result.current[0]).toBe("table");
+    expect(result.current.view).toBe("table");
     expect(result.current.urlIssueId).toBeNull();
   });
 
-  it("setDetailView preserves other URL params (priority, type, etc.)", () => {
+  it("preserves other URL params (priority, type, etc.)", () => {
     mockWindowLocation("?priority=2&view=kanban&type=bug");
     const { result } = renderHook(() => useViewState());
 
     act(() => {
-      result.current.setDetailView("issue-55");
+      result.current.navigateToView("issue-detail", { issueId: "issue-55" });
     });
 
-    const lastPushCall = pushStateSpy.mock.calls.at(-1)?.[2] as string;
-    expect(lastPushCall).toContain("priority=2");
-    expect(lastPushCall).toContain("type=bug");
-    expect(lastPushCall).toContain("view=issue-detail");
-    expect(lastPushCall).toContain("issue=issue-55");
+    const url = pushStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(url).toContain("priority=2");
+    expect(url).toContain("type=bug");
+    expect(url).toContain("view=issue-detail");
+    expect(url).toContain("issue=issue-55");
   });
 
-  it("closeDetailView preserves other URL params (priority, type, etc.)", () => {
-    mockWindowLocation("?priority=3&view=issue-detail&issue=issue-55&type=feature");
-    const { result } = renderHook(() => useViewState());
-
-    act(() => {
-      result.current.closeDetailView("table");
-    });
-
-    const lastPushCall = pushStateSpy.mock.calls.at(-1)?.[2] as string;
-    expect(lastPushCall).toContain("priority=3");
-    expect(lastPushCall).toContain("type=feature");
-    expect(lastPushCall).toContain("view=table");
-    expect(lastPushCall).not.toContain("issue=");
-  });
-
-  it("setDetailView does not use pushState when syncUrl is false", () => {
+  it("does not use pushState when syncUrl is false", () => {
     const { result } = renderHook(() => useViewState({ syncUrl: false }));
 
     act(() => {
-      result.current.setDetailView("issue-1");
+      result.current.navigateToView("issue-detail", { issueId: "issue-1" });
     });
 
     expect(pushStateSpy).not.toHaveBeenCalled();
     // But state should still be updated
-    expect(result.current[0]).toBe("issue-detail");
+    expect(result.current.view).toBe("issue-detail");
     expect(result.current.urlIssueId).toBe("issue-1");
-  });
-
-  it("closeDetailView does not use pushState when syncUrl is false", () => {
-    const { result } = renderHook(() => useViewState({ syncUrl: false }));
-
-    act(() => {
-      result.current.setDetailView("issue-1");
-    });
-
-    act(() => {
-      result.current.closeDetailView("table");
-    });
-
-    expect(pushStateSpy).not.toHaveBeenCalled();
-    expect(result.current[0]).toBe("table");
-    expect(result.current.urlIssueId).toBeNull();
   });
 
   it("initializes urlIssueId from URL on mount", () => {
     mockWindowLocation("?view=issue-detail&issue=from-url");
     const { result } = renderHook(() => useViewState());
 
-    expect(result.current[0]).toBe("issue-detail");
+    expect(result.current.view).toBe("issue-detail");
     expect(result.current.urlIssueId).toBe("from-url");
   });
 

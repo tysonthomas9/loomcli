@@ -119,15 +119,24 @@ function App() {
   // Workspace context for breadcrumb and single-repo guard
   const { workspace, isMultiRepo } = useWorkspaceContext();
 
+  // Scroll position cache for restoring scroll on back navigation
+  const scrollPositionCache = useRef<Map<string, number>>(new Map());
+
   // View state must be read before useIssues to determine fetch mode
-  const viewState = useViewState();
-  const activeView = viewState[0];
-  const setActiveView = viewState[1];
   const {
-    setDetailView,
-    closeDetailView,
+    view: activeView,
+    setView: setActiveView,
+    navigateToView,
     urlIssueId: selectedIssueId,
-  } = viewState;
+  } = useViewState({
+    onPopState: useCallback((state: Record<string, unknown> | null) => {
+      // Restore previousView from history state on browser back/forward
+      // so the back button label is correct when navigating forward into issue-detail
+      if (state?.previousView && typeof state.previousView === "string") {
+        setPreviousView(state.previousView as ViewMode);
+      }
+    }, []),
+  });
 
   // Repo filter for multi-repo workspaces
   const [selectedRepos] = useRepoFilter();
@@ -309,6 +318,22 @@ function App() {
     }
   }, [selectedIssueId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Restore scroll position when returning from issue-detail view
+  useEffect(() => {
+    if (activeView !== "issue-detail") {
+      const savedPosition = scrollPositionCache.current.get(activeView);
+      if (savedPosition !== undefined) {
+        requestAnimationFrame(() => {
+          const mainEl = document.getElementById("main-content");
+          if (mainEl) {
+            mainEl.scrollTop = savedPosition;
+          }
+        });
+        scrollPositionCache.current.delete(activeView);
+      }
+    }
+  }, [activeView]);
+
   // Copy link handler: copies current URL to clipboard
   const handleCopyLink = useCallback(async () => {
     try {
@@ -411,13 +436,20 @@ function App() {
       // Ensure issue panel overlay is closed
       setIsPanelOpen(false);
 
-      // Store current view as previous (but not if already in issue-detail)
+      // Save scroll position before navigating away
       if (activeView !== "issue-detail") {
+        const mainEl = document.getElementById("main-content");
+        if (mainEl) {
+          scrollPositionCache.current.set(activeView, mainEl.scrollTop);
+        }
         setPreviousView(activeView);
       }
 
       // Navigate to issue-detail view with pushState (enables browser back/forward)
-      setDetailView(issue.id);
+      navigateToView("issue-detail", {
+        previousView: activeView,
+        issueId: issue.id,
+      });
       fetchIssue(issue.id);
     },
     [
@@ -425,7 +457,7 @@ function App() {
       activeView,
       isAgentPanelOpen,
       fetchIssue,
-      setDetailView,
+      navigateToView,
       clearTimeoutRef,
     ],
   );
@@ -441,11 +473,11 @@ function App() {
     }, 300); // Match CSS transition duration
   }, [clearIssue]);
 
-  // Handle back from issue detail view (pushState for browser history)
+  // Handle back from issue detail view — use history.back() so browser
+  // history is naturally traversed (popstate handler restores the previous view)
   const handleBackFromDetail = useCallback(() => {
-    closeDetailView(previousView);
-    clearIssue();
-  }, [previousView, clearIssue, closeDetailView]);
+    window.history.back();
+  }, []);
 
   // Handle approve button click on review cards
   const handleApprove = useCallback(
@@ -579,16 +611,23 @@ function App() {
       // Ensure issue panel overlay is closed
       setIsPanelOpen(false);
 
-      // Store current view as previous (but not if already in issue-detail)
+      // Save scroll position and store previous view
       if (activeView !== "issue-detail") {
+        const mainEl = document.getElementById("main-content");
+        if (mainEl) {
+          scrollPositionCache.current.set(activeView, mainEl.scrollTop);
+        }
         setPreviousView(activeView);
       }
 
       // Navigate to issue-detail view with pushState (enables browser back/forward)
-      setDetailView(taskId);
+      navigateToView("issue-detail", {
+        previousView: activeView,
+        issueId: taskId,
+      });
       fetchIssue(taskId);
     },
-    [activeView, fetchIssue, setDetailView, clearTimeoutRef],
+    [activeView, fetchIssue, navigateToView, clearTimeoutRef],
   );
 
   const headerNavigation = (

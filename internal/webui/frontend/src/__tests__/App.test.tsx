@@ -185,45 +185,37 @@ vi.mock("@/components/FileExplorer", () => ({
 
 // Mock WorkspaceView to avoid lazy-loading issues in jsdom
 vi.mock("@/components/WorkspaceView", () => ({
-  WorkspaceView: () => (
-    <div data-testid="workspace-view">Workspace View</div>
-  ),
+  WorkspaceView: () => <div data-testid="workspace-view">Workspace View</div>,
 }));
 
 // Create hoisted mock for useViewState to allow per-test control
-const {
-  mockUseViewState,
-  mockSetActiveView,
-  mockSetDetailView,
-  mockCloseDetailView,
-} = vi.hoisted(() => ({
-  mockUseViewState: vi.fn(),
-  mockSetActiveView: vi.fn(),
-  mockSetDetailView: vi.fn(),
-  mockCloseDetailView: vi.fn(),
-}));
+const { mockUseViewState, mockSetActiveView, mockNavigateToView } = vi.hoisted(
+  () => ({
+    mockUseViewState: vi.fn(),
+    mockSetActiveView: vi.fn(),
+    mockNavigateToView: vi.fn(),
+  }),
+);
 
 /**
- * Helper to create a useViewState return value with extra properties.
+ * Helper to create a useViewState return value (object shape).
  */
 function createViewStateReturn(
   view: string,
   setter = mockSetActiveView,
   issueId: string | null = null,
-): [string, typeof mockSetActiveView] & {
-  setDetailView: typeof mockSetDetailView;
-  closeDetailView: typeof mockCloseDetailView;
+): {
+  view: string;
+  setView: typeof mockSetActiveView;
+  navigateToView: typeof mockNavigateToView;
   urlIssueId: string | null;
 } {
-  const result = [view, setter] as [string, typeof mockSetActiveView] & {
-    setDetailView: typeof mockSetDetailView;
-    closeDetailView: typeof mockCloseDetailView;
-    urlIssueId: string | null;
+  return {
+    view,
+    setView: setter,
+    navigateToView: mockNavigateToView,
+    urlIssueId: issueId,
   };
-  result.setDetailView = mockSetDetailView;
-  result.closeDetailView = mockCloseDetailView;
-  result.urlIssueId = issueId;
-  return result;
 }
 
 // Mock the hooks barrel file that App.tsx imports from
@@ -1438,7 +1430,7 @@ describe("App", () => {
       fireEvent.click(issueCard);
 
       // Should navigate to issue-detail view
-      expect(mockSetDetailView).toHaveBeenCalled();
+      expect(mockNavigateToView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
     });
 
@@ -1495,13 +1487,19 @@ describe("App", () => {
 
       render(<App />);
 
+      // Mock history.back
+      const historyBackSpy = vi
+        .spyOn(window.history, "back")
+        .mockImplementation(() => {});
+
       // Click the back button in IssueDetailView
       const backButton = screen.getByTestId("detail-back-button");
       fireEvent.click(backButton);
 
-      // Should navigate back (defaults to kanban since previousView starts as kanban)
-      expect(mockCloseDetailView).toHaveBeenCalledWith("kanban");
-      expect(clearIssue).toHaveBeenCalled();
+      // Should call history.back() for proper browser navigation
+      expect(historyBackSpy).toHaveBeenCalled();
+
+      historyBackSpy.mockRestore();
     });
 
     it("does not re-fetch when clicking the same issue that is already selected in detail view", () => {
@@ -2219,7 +2217,7 @@ describe("App", () => {
       fireEvent.click(
         screen.getByRole("button", { name: /Issue: First Issue/ }),
       );
-      expect(mockSetDetailView).toHaveBeenCalled();
+      expect(mockNavigateToView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // Click second issue
@@ -2258,7 +2256,7 @@ describe("App", () => {
       fireEvent.click(screen.getByText("Issue Three"));
 
       // All navigated to issue-detail view
-      expect(mockSetDetailView).toHaveBeenCalled();
+      expect(mockNavigateToView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenLastCalledWith("issue-3");
     });
 
@@ -2392,7 +2390,7 @@ describe("App", () => {
       // Click issue - should close agent panel and navigate to detail view
       vi.advanceTimersByTime(100);
       fireEvent.click(screen.getByText("Test Issue"));
-      expect(mockSetDetailView).toHaveBeenCalled();
+      expect(mockNavigateToView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // Agent panel should be closed
@@ -2420,7 +2418,7 @@ describe("App", () => {
 
       // Click issue - should navigate to issue-detail view, not open the panel overlay
       fireEvent.click(screen.getByText("Test Issue"));
-      expect(mockSetDetailView).toHaveBeenCalled();
+      expect(mockNavigateToView).toHaveBeenCalled();
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // The overlay panel should remain closed (we now use IssueDetailView instead)
@@ -2481,7 +2479,7 @@ describe("App", () => {
       });
       fireEvent.click(issueCard);
       expect(fetchIssue).toHaveBeenCalledTimes(1);
-      expect(mockSetDetailView).toHaveBeenCalled();
+      expect(mockNavigateToView).toHaveBeenCalled();
     });
 
     it("agent panel timeout is properly cancelled when clicking another agent", () => {
@@ -3005,9 +3003,7 @@ describe("App", () => {
       render(<App />);
 
       // WorkspaceTree renders a button with aria-label containing "workspace tree"
-      expect(
-        screen.getByLabelText(/workspace tree/i),
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
     it("renders AgentsSidebar when isMultiRepo is true but activeView is not workspace", () => {
@@ -3114,9 +3110,7 @@ describe("App", () => {
       render(<App />);
 
       // In loading state, multi-repo + workspace view should show WorkspaceTree
-      expect(
-        screen.getByLabelText(/workspace tree/i),
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
     it("renders AgentsSidebar during error when isMultiRepo is false and activeView is workspace", () => {

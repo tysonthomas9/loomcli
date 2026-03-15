@@ -134,17 +134,37 @@ export function IssueDetailView({
     setIsRejecting(false);
   }, [issue?.id]);
 
-  // Escape key handler
+  // Escape key handler — layered to avoid conflicts with inner components
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        // Don't navigate back if reject form is open — close the form instead
-        if (showRejectForm) {
-          setShowRejectForm(false);
-          return;
-        }
-        onBack();
+      if (event.key !== "Escape") return;
+
+      // Don't navigate back if focused on an input, textarea, or contentEditable
+      const target = event.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
       }
+
+      // Don't navigate back if a dialog or listbox overlay is open
+      // (dropdowns like PriorityDropdown, TypeDropdown handle their own Escape)
+      if (
+        document.querySelector('[role="dialog"]') ||
+        document.querySelector('[role="listbox"]')
+      ) {
+        return;
+      }
+
+      // Don't navigate back if reject form is open — close the form instead
+      if (showRejectForm) {
+        setShowRejectForm(false);
+        return;
+      }
+
+      onBack();
     };
 
     document.addEventListener("keydown", handleKeyDown);
