@@ -9,8 +9,10 @@ import {
   getStatusLabel,
 } from "@/components/AgentCard";
 import { BlockedBadge } from "@/components/BlockedBadge";
+import { HighlightText } from "@/components/HighlightText";
 import { RepoBadge } from "@/components/RepoBadge";
 import { TypeIcon } from "@/components/TypeIcon";
+import { useSearchTerm } from "@/contexts/SearchTermContext";
 import { useAgentContext } from "@/hooks";
 import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { BlockerRef, Issue } from "@/types";
@@ -97,6 +99,7 @@ export function IssueCard({
 }: IssueCardProps): JSX.Element {
   const { getAgentByName } = useAgentContext();
   const { isMultiRepo } = useWorkspaceContext();
+  const searchTerm = useSearchTerm();
 
   const priority = getPriorityLevel(issue.priority);
   const displayId = formatIssueId(issue.id);
@@ -211,7 +214,9 @@ export function IssueCard({
           P{priority}
         </span>
       </header>
-      <h3 className={styles.title}>{displayTitle}</h3>
+      <h3 className={styles.title}>
+        <HighlightText text={displayTitle} searchTerm={searchTerm} />
+      </h3>
       {isMultiRepo && issue.repo && (
         <div className={styles.cardFooter}>
           <RepoBadge repoName={issue.repo} />

@@ -23,6 +23,7 @@ export * from "./ConfirmDialog";
 export * from "./EmbeddedTerminal";
 export * from "./ErrorBoundary";
 export * from "./ErrorDisplay";
+export * from "./HighlightText";
 export * from "./ErrorToast";
 export * from "./IssueNode";
 export * from "./DependencyEdge";

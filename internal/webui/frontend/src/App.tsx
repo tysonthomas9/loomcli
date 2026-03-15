@@ -42,6 +42,7 @@ import {
   NavRail,
   ThemeToggle,
 } from "@/components";
+import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import type { BlockedInfo } from "@/components/KanbanBoard";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import {
@@ -759,150 +760,155 @@ function App() {
 
   // Success state: show view based on activeView with filtered issues
   return (
-    <AppLayout
-      title={headerTitle}
-      navigation={headerNavigation}
-      actions={headerActions}
-      navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
-      sidebar={
-        activeView === "workspace" && isMultiRepo ? (
-          <WorkspaceTree onRepoClick={handleRepoClick} />
-        ) : (
-          <AgentsSidebar
-            onAgentClick={handleAgentClick}
-            defaultCollapsed={false}
-            collapsible={false}
+    <SearchTermProvider value={debouncedSearch}>
+      <AppLayout
+        title={headerTitle}
+        navigation={headerNavigation}
+        actions={headerActions}
+        navRail={<NavRail activeView={activeView} onChange={setActiveView} />}
+        sidebar={
+          activeView === "workspace" && isMultiRepo ? (
+            <WorkspaceTree onRepoClick={handleRepoClick} />
+          ) : (
+            <AgentsSidebar
+              onAgentClick={handleAgentClick}
+              defaultCollapsed={false}
+              collapsible={false}
+            />
+          )
+        }
+      >
+        {activeView === "kanban" && (
+          <div className={styles.kanbanShell}>
+            <SwimLaneBoard
+              issues={filteredIssues}
+              groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
+              onDragEnd={handleDragEnd}
+              onIssueClick={handleIssueClick}
+              {...(blockedIssuesMap !== undefined && {
+                blockedIssues: blockedIssuesMap,
+              })}
+              {...(filters.showBlocked !== undefined && {
+                showBlocked: filters.showBlocked,
+              })}
+            />
+          </div>
+        )}
+        {activeView === "table" && (
+          <>
+            <IssueTable
+              issues={filteredIssues}
+              sortable
+              showCheckbox
+              selectedIds={selectedIds}
+              onSelectionChange={toggleSelection}
+              onRowClick={handleIssueClick}
+              searchTerm={debouncedSearch}
+              {...(selectedIssueId !== null && { selectedId: selectedIssueId })}
+              {...(blockedIssuesMap !== undefined && {
+                blockedIssues: blockedIssuesMap,
+              })}
+              {...(filters.showBlocked !== undefined && {
+                showBlocked: filters.showBlocked,
+              })}
+            />
+            <BulkActionToolbar
+              selectedIds={selectedIds}
+              onClearSelection={clearSelection}
+            />
+          </>
+        )}
+        {activeView === "graph" && (
+          <Suspense fallback={<LoadingSkeleton.Graph />}>
+            <GraphView issues={filteredIssues} onNodeClick={handleIssueClick} />
+          </Suspense>
+        )}
+        {activeView === "monitor" && (
+          <Suspense fallback={<LoadingSkeleton.Monitor />}>
+            <MonitorDashboard
+              onViewChange={setActiveView}
+              onIssueClick={handleIssueClick}
+              onAgentClick={handleAgentClick}
+            />
+          </Suspense>
+        )}
+        {activeView === "observability" && (
+          <Suspense fallback={<LoadingSkeleton.Column />}>
+            <ObservabilityDashboard />
+          </Suspense>
+        )}
+        {activeView === "settings" && (
+          <Suspense fallback={<LoadingSkeleton.Column />}>
+            <SettingsView />
+          </Suspense>
+        )}
+        {activeView === "workspace" && isMultiRepo && (
+          <Suspense fallback={<LoadingSkeleton.Column />}>
+            <WorkspaceView />
+          </Suspense>
+        )}
+        {activeView === "files" && (
+          <Suspense fallback={<LoadingSkeleton.Column />}>
+            <FileExplorer />
+          </Suspense>
+        )}
+        {activeView === "issue-detail" && (
+          <IssueDetailView
+            issue={issueDetails}
+            isLoading={isLoadingDetails}
+            error={detailError}
+            previousView={previousView}
+            onBack={handleBackFromDetail}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onOpenInTerminal={handleOpenIssueInTerminal}
+            onCopyLink={handleCopyLink}
+            onNavigateToIssue={handleIssueClick}
           />
-        )
-      }
-    >
-      {activeView === "kanban" && (
-        <div className={styles.kanbanShell}>
-          <SwimLaneBoard
-            issues={filteredIssues}
-            groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-            onDragEnd={handleDragEnd}
-            onIssueClick={handleIssueClick}
-            {...(blockedIssuesMap !== undefined && {
-              blockedIssues: blockedIssuesMap,
-            })}
-            {...(filters.showBlocked !== undefined && {
-              showBlocked: filters.showBlocked,
-            })}
-          />
-        </div>
-      )}
-      {activeView === "table" && (
-        <>
-          <IssueTable
-            issues={filteredIssues}
-            sortable
-            showCheckbox
-            selectedIds={selectedIds}
-            onSelectionChange={toggleSelection}
-            onRowClick={handleIssueClick}
-            {...(selectedIssueId !== null && { selectedId: selectedIssueId })}
-            {...(blockedIssuesMap !== undefined && {
-              blockedIssues: blockedIssuesMap,
-            })}
-            {...(filters.showBlocked !== undefined && {
-              showBlocked: filters.showBlocked,
-            })}
-          />
-          <BulkActionToolbar
-            selectedIds={selectedIds}
-            onClearSelection={clearSelection}
-          />
-        </>
-      )}
-      {activeView === "graph" && (
-        <Suspense fallback={<LoadingSkeleton.Graph />}>
-          <GraphView issues={filteredIssues} onNodeClick={handleIssueClick} />
-        </Suspense>
-      )}
-      {activeView === "monitor" && (
-        <Suspense fallback={<LoadingSkeleton.Monitor />}>
-          <MonitorDashboard
-            onViewChange={setActiveView}
-            onIssueClick={handleIssueClick}
-            onAgentClick={handleAgentClick}
-          />
-        </Suspense>
-      )}
-      {activeView === "observability" && (
-        <Suspense fallback={<LoadingSkeleton.Column />}>
-          <ObservabilityDashboard />
-        </Suspense>
-      )}
-      {activeView === "settings" && (
-        <Suspense fallback={<LoadingSkeleton.Column />}>
-          <SettingsView />
-        </Suspense>
-      )}
-      {activeView === "workspace" && isMultiRepo && (
-        <Suspense fallback={<LoadingSkeleton.Column />}>
-          <WorkspaceView />
-        </Suspense>
-      )}
-      {activeView === "files" && (
-        <Suspense fallback={<LoadingSkeleton.Column />}>
-          <FileExplorer />
-        </Suspense>
-      )}
-      {activeView === "issue-detail" && (
-        <IssueDetailView
+        )}
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+        <IssueDetailPanel
+          isOpen={isPanelOpen}
           issue={issueDetails}
           isLoading={isLoadingDetails}
           error={detailError}
-          previousView={previousView}
-          onBack={handleBackFromDetail}
+          onClose={handlePanelClose}
           onApprove={handleApprove}
           onReject={handleReject}
-          onOpenInTerminal={handleOpenIssueInTerminal}
           onCopyLink={handleCopyLink}
           onNavigateToIssue={handleIssueClick}
         />
-      )}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-      <IssueDetailPanel
-        isOpen={isPanelOpen}
-        issue={issueDetails}
-        isLoading={isLoadingDetails}
-        error={detailError}
-        onClose={handlePanelClose}
-        onApprove={handleApprove}
-        onReject={handleReject}
-        onCopyLink={handleCopyLink}
-        onNavigateToIssue={handleIssueClick}
-      />
-      <AgentDetailPanel
-        isOpen={isAgentPanelOpen}
-        agentName={selectedAgentName}
-        agents={agents}
-        agentTasks={agentTasks}
-        onClose={handleAgentPanelClose}
-        onTaskClick={handleAgentTaskClick}
-      />
-      <div style={{ display: activeView === "terminal" ? "contents" : "none" }}>
-        <Suspense fallback={null}>
-          <TerminalView
-            isActive={activeView === "terminal"}
-            pendingIssueContext={pendingIssueContext}
-            onIssueContextConsumed={handleIssueContextConsumed}
-          />
-        </Suspense>
-      </div>
-      <TalkToLeadButton
-        onClick={handleTalkToLeadClick}
-        isActive={activeView === "terminal"}
-      />
-      <AssigneePrompt
-        isOpen={pendingDragData !== null}
-        onConfirm={handleAssigneeConfirm}
-        onSkip={handleAssigneeSkip}
-        recentNames={recentAssignees}
-      />
-    </AppLayout>
+        <AgentDetailPanel
+          isOpen={isAgentPanelOpen}
+          agentName={selectedAgentName}
+          agents={agents}
+          agentTasks={agentTasks}
+          onClose={handleAgentPanelClose}
+          onTaskClick={handleAgentTaskClick}
+        />
+        <div
+          style={{ display: activeView === "terminal" ? "contents" : "none" }}
+        >
+          <Suspense fallback={null}>
+            <TerminalView
+              isActive={activeView === "terminal"}
+              pendingIssueContext={pendingIssueContext}
+              onIssueContextConsumed={handleIssueContextConsumed}
+            />
+          </Suspense>
+        </div>
+        <TalkToLeadButton
+          onClick={handleTalkToLeadClick}
+          isActive={activeView === "terminal"}
+        />
+        <AssigneePrompt
+          isOpen={pendingDragData !== null}
+          onConfirm={handleAssigneeConfirm}
+          onSkip={handleAssigneeSkip}
+          recentNames={recentAssignees}
+        />
+      </AppLayout>
+    </SearchTermProvider>
   );
 }
 

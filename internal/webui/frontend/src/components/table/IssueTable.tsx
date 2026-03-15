@@ -43,6 +43,8 @@ export interface IssueTableProps {
   blockedIssues?: Map<string, BlockedInfo>;
   /** Whether to show blocked issues (default: true) */
   showBlocked?: boolean;
+  /** Search term for title highlighting */
+  searchTerm?: string;
 }
 
 /**
@@ -62,6 +64,7 @@ export function IssueTable({
   initialSort,
   blockedIssues,
   showBlocked = true,
+  searchTerm,
 }: IssueTableProps) {
   // Hide repo column in single-repo workspaces
   const { isMultiRepo } = useWorkspaceContext();
@@ -144,6 +147,7 @@ export function IssueTable({
                   onSelectionChange={onSelectionChange}
                   isBlocked={isBlocked}
                   blockedInfo={blockedInfo}
+                  searchTerm={searchTerm}
                 />
               );
             })
