@@ -17,10 +17,11 @@ type DaemonSettings struct {
 	EventsDir     string            `yaml:"events_dir,omitempty"`
 	RestartPolicy RestartPolicy     `yaml:"restart_policy,omitempty"`
 	MaxAgents     *int              `yaml:"max_agents,omitempty"`
-	RedisURL      string            `yaml:"redis_url,omitempty"`
+	RedisURL      string            `yaml:"redis_url,omitempty"`        // stale-detector/serve Redis — NOT used by fleet-db (see FleetDBSettings.RedisURL)
 	APIKey        string            `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
 	JWTKey        string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
 	OTel          *OTelDaemonConfig `yaml:"otel,omitempty"`
+	FleetDB       *FleetDBSettings  `yaml:"fleetdb,omitempty"` // fleet-db backend config (separate from RedisURL above)
 }
 
 // OTelDaemonConfig holds OpenTelemetry export configuration for the daemon.
@@ -331,36 +332,7 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	if src.EventsDir != "" {
 		dst.EventsDir = src.EventsDir
 	}
-	if src.RestartPolicy.MaxRetries != nil {
-		dst.RestartPolicy.MaxRetries = src.RestartPolicy.MaxRetries
-	}
-	if src.RestartPolicy.BackoffInitial != nil {
-		dst.RestartPolicy.BackoffInitial = src.RestartPolicy.BackoffInitial
-	}
-	if src.RestartPolicy.BackoffMax != nil {
-		dst.RestartPolicy.BackoffMax = src.RestartPolicy.BackoffMax
-	}
-	if src.RestartPolicy.OutputTimeout != nil {
-		dst.RestartPolicy.OutputTimeout = src.RestartPolicy.OutputTimeout
-	}
-	if src.RestartPolicy.RateLimitBackoff != nil {
-		dst.RestartPolicy.RateLimitBackoff = src.RestartPolicy.RateLimitBackoff
-	}
-	if src.RestartPolicy.RateLimitMaxWait != nil {
-		dst.RestartPolicy.RateLimitMaxWait = src.RestartPolicy.RateLimitMaxWait
-	}
-	if src.RestartPolicy.RateLimitNoCount != nil {
-		dst.RestartPolicy.RateLimitNoCount = src.RestartPolicy.RateLimitNoCount
-	}
-	if src.RestartPolicy.TimeoutBackoff != nil {
-		dst.RestartPolicy.TimeoutBackoff = src.RestartPolicy.TimeoutBackoff
-	}
-	if src.RestartPolicy.NoWorkBackoff != nil {
-		dst.RestartPolicy.NoWorkBackoff = src.RestartPolicy.NoWorkBackoff
-	}
-	if src.RestartPolicy.IdlePollInterval != nil {
-		dst.RestartPolicy.IdlePollInterval = src.RestartPolicy.IdlePollInterval
-	}
+	overlayRestartPolicy(&dst.RestartPolicy, &src.RestartPolicy)
 	if src.MaxAgents != nil {
 		dst.MaxAgents = src.MaxAgents
 	}
@@ -378,6 +350,45 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 			dst.OTel = &OTelDaemonConfig{}
 		}
 		overlayOTelConfig(dst.OTel, src.OTel)
+	}
+	if src.FleetDB != nil {
+		if dst.FleetDB == nil {
+			dst.FleetDB = &FleetDBSettings{}
+		}
+		overlayFleetDBSettings(dst.FleetDB, src.FleetDB)
+	}
+}
+
+func overlayRestartPolicy(dst, src *RestartPolicy) {
+	if src.MaxRetries != nil {
+		dst.MaxRetries = src.MaxRetries
+	}
+	if src.BackoffInitial != nil {
+		dst.BackoffInitial = src.BackoffInitial
+	}
+	if src.BackoffMax != nil {
+		dst.BackoffMax = src.BackoffMax
+	}
+	if src.OutputTimeout != nil {
+		dst.OutputTimeout = src.OutputTimeout
+	}
+	if src.RateLimitBackoff != nil {
+		dst.RateLimitBackoff = src.RateLimitBackoff
+	}
+	if src.RateLimitMaxWait != nil {
+		dst.RateLimitMaxWait = src.RateLimitMaxWait
+	}
+	if src.RateLimitNoCount != nil {
+		dst.RateLimitNoCount = src.RateLimitNoCount
+	}
+	if src.TimeoutBackoff != nil {
+		dst.TimeoutBackoff = src.TimeoutBackoff
+	}
+	if src.NoWorkBackoff != nil {
+		dst.NoWorkBackoff = src.NoWorkBackoff
+	}
+	if src.IdlePollInterval != nil {
+		dst.IdlePollInterval = src.IdlePollInterval
 	}
 }
 

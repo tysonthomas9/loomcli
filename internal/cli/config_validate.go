@@ -70,6 +70,9 @@ func ValidateProjectConfig(dc *DaemonConfig, projectDir string) *ValidationResul
 	validateAgentEntries(r, dc.Agents, dc.Roles)
 	validateRoles(r, dc.Roles, projectDir)
 	validateRestartPolicy(r, dc.Daemon.RestartPolicy)
+	if dc.Daemon.FleetDB != nil {
+		validateFleetDBSettings(r, dc.Daemon.FleetDB)
+	}
 
 	return r
 }
@@ -205,6 +208,20 @@ func validateRestartPolicy(r *ValidationResult, rp RestartPolicy) {
 	}
 }
 
+// validateFleetDBSettings checks fleet-db config fields for validity.
+func validateFleetDBSettings(r *ValidationResult, fdb *FleetDBSettings) {
+	if fdb.RedisURL != "" {
+		if !strings.HasPrefix(fdb.RedisURL, "redis://") && !strings.HasPrefix(fdb.RedisURL, "rediss://") {
+			r.addWarning("daemon.fleetdb.redis_url", fmt.Sprintf(
+				"%q does not start with redis:// or rediss://", fdb.RedisURL))
+		}
+	}
+	if fdb.Workspace != "" && !isValidWorktreeName(fdb.Workspace) {
+		r.addWarning("daemon.fleetdb.workspace", fmt.Sprintf(
+			"%q contains invalid characters; use only alphanumeric, hyphens, and underscores", fdb.Workspace))
+	}
+}
+
 // ValidateGlobalConfig validates the global LoomConfig.
 func ValidateGlobalConfig(cfg *LoomConfig) *ValidationResult {
 	r := &ValidationResult{}
@@ -234,6 +251,10 @@ func ValidateGlobalConfig(cfg *LoomConfig) *ValidationResult {
 			}
 		}
 		validateWorkspaceRepos(r, field, ws)
+	}
+
+	if cfg.Daemon != nil && cfg.Daemon.FleetDB != nil {
+		validateFleetDBSettings(r, cfg.Daemon.FleetDB)
 	}
 
 	return r
