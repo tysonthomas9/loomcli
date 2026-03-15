@@ -12,6 +12,7 @@ import (
 type LoomConfig struct {
 	Version          int                        `yaml:"version,omitempty"`
 	DefaultWorkspace string                     `yaml:"default_workspace,omitempty"`
+	WorkspaceOrder   []string                   `yaml:"workspace_order,omitempty"`
 	Backend          string                     `yaml:"backend,omitempty"`
 	Workspaces       map[string]WorkspaceConfig `yaml:"workspaces"`
 	Daemon           *DaemonSettings            `yaml:"daemon,omitempty"`

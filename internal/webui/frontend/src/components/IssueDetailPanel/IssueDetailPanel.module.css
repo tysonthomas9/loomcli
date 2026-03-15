@@ -782,11 +782,7 @@
     width: 20px;
     z-index: 1;
     pointer-events: none;
-    background: linear-gradient(
-      to left,
-      var(--color-panel-bg),
-      transparent
-    );
+    background: linear-gradient(to left, var(--color-panel-bg), transparent);
   }
 
   .tabBar {

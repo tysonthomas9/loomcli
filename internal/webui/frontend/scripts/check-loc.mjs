@@ -22,6 +22,7 @@ export const ALLOWLIST = new Map([
   ["src/components/TerminalView/TerminalView.tsx", 710],
   ["src/components/TerminalView/TerminalInstance.tsx", 678],
   ["src/components/IssueDetailPanel/AssigneeDropdown.tsx", 535],
+  ["src/components/WorkspaceTree/WorkspaceTree.tsx", 614],
 ]);
 
 // Patterns to skip (test files, generated files, fixtures).

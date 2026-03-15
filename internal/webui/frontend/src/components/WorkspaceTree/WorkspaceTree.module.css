@@ -419,6 +419,41 @@
   text-overflow: ellipsis;
 }
 
+/* Drag handle for sortable workspace entries */
+.dragHandle {
+  opacity: 0;
+  cursor: grab;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+  width: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s ease;
+  touch-action: none;
+}
+
+.workspaceEntry:hover .dragHandle {
+  opacity: 0.6;
+}
+
+.dragHandle:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+.workspaceEntry[data-dragging="true"] {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.workspaceEntry[data-dragging="true"] .dragHandle {
+  opacity: 1;
+  cursor: grabbing;
+}
+
 /* Empty state */
 .emptyState {
   padding: 1rem 1.25rem;

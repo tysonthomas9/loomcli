@@ -36,6 +36,7 @@ func validWorkspaceName(name string) bool {
 type loomConfigForRename struct {
 	Version          int                               `yaml:"version,omitempty"`
 	DefaultWorkspace string                            `yaml:"default_workspace,omitempty"`
+	WorkspaceOrder   []string                          `yaml:"workspace_order,omitempty"`
 	Backend          string                            `yaml:"backend,omitempty"`
 	Workspaces       map[string]loomWorkspaceForRename `yaml:"workspaces"`
 	Daemon           yaml.Node                         `yaml:"daemon,omitempty"`
@@ -123,6 +124,23 @@ func validateWorkspaceRenameRequest(req *WorkspaceRenameRequest) (int, string) {
 	return 0, ""
 }
 
+// applyWorkspaceRename mutates the config to rename a workspace, updating all references.
+func applyWorkspaceRename(cfg *loomConfigForRename, oldName, newName string, ws loomWorkspaceForRename) {
+	delete(cfg.Workspaces, oldName)
+	cfg.Workspaces[newName] = ws
+
+	if cfg.DefaultWorkspace == oldName {
+		cfg.DefaultWorkspace = newName
+	}
+
+	for i, n := range cfg.WorkspaceOrder {
+		if n == oldName {
+			cfg.WorkspaceOrder[i] = newName
+			break
+		}
+	}
+}
+
 // handleWorkspaceRename returns a handler that renames a workspace in the global config.
 // After renaming, it calls workspaceConfigFn to return refreshed workspace data.
 func handleWorkspaceRename(workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
@@ -171,13 +189,7 @@ func handleWorkspaceRename(workspaceConfigFn func() (*WorkspaceData, error)) htt
 			return
 		}
 
-		// Perform rename: delete old, insert new
-		delete(cfg.Workspaces, req.OldName)
-		cfg.Workspaces[req.NewName] = ws
-
-		if cfg.DefaultWorkspace == req.OldName {
-			cfg.DefaultWorkspace = req.NewName
-		}
+		applyWorkspaceRename(cfg, req.OldName, req.NewName, ws)
 
 		if err := saveLoomConfig(cfg); err != nil {
 			respondJSON(w, http.StatusInternalServerError, workspaceResponse{Success: false, Error: "failed to save config"})

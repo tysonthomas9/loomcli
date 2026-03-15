@@ -40,6 +40,15 @@ func deleteWorkspace(name string) error {
 	// Remove from config
 	delete(cfg.Workspaces, name)
 
+	// Remove from workspace order
+	filtered := cfg.WorkspaceOrder[:0]
+	for _, n := range cfg.WorkspaceOrder {
+		if n != name {
+			filtered = append(filtered, n)
+		}
+	}
+	cfg.WorkspaceOrder = filtered
+
 	// Update default workspace if needed
 	if cfg.DefaultWorkspace == name {
 		cfg.DefaultWorkspace = ""
@@ -139,16 +148,45 @@ func buildWorkspaceInfo() (*webui.WorkspaceData, error) {
 			RepoCount: len(w.Repos),
 		})
 	}
-	sort.Slice(summaries, func(i, j int) bool {
-		return summaries[i].Name < summaries[j].Name
-	})
+	sortWorkspaceSummaries(summaries, cfg.WorkspaceOrder)
 
 	return &webui.WorkspaceData{
-		Name:       wsName,
-		Path:       ws.Path,
-		Repos:      repos,
-		Groups:     groups,
-		Agents:     agents,
-		Workspaces: summaries,
+		Name:           wsName,
+		Path:           ws.Path,
+		Repos:          repos,
+		Groups:         groups,
+		Agents:         agents,
+		Workspaces:     summaries,
+		WorkspaceOrder: cfg.WorkspaceOrder,
 	}, nil
+}
+
+// sortWorkspaceSummaries sorts workspace summaries using custom order if provided,
+// falling back to alphabetical sort. Items in the order list come first (in order),
+// followed by unlisted items sorted alphabetically.
+func sortWorkspaceSummaries(summaries []webui.WorkspaceSummary, order []string) {
+	if len(order) > 0 {
+		orderIndex := make(map[string]int, len(order))
+		for i, name := range order {
+			orderIndex[name] = i
+		}
+		sort.SliceStable(summaries, func(i, j int) bool {
+			oi, okI := orderIndex[summaries[i].Name]
+			oj, okJ := orderIndex[summaries[j].Name]
+			if okI && okJ {
+				return oi < oj
+			}
+			if okI {
+				return true
+			}
+			if okJ {
+				return false
+			}
+			return summaries[i].Name < summaries[j].Name
+		})
+	} else {
+		sort.Slice(summaries, func(i, j int) bool {
+			return summaries[i].Name < summaries[j].Name
+		})
+	}
 }

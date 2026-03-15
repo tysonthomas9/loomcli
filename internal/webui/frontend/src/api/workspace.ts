@@ -3,7 +3,7 @@
  * Interfaces with GET /api/workspace endpoint.
  */
 
-import { get, patch, del, ApiError } from "./client";
+import { get, patch, put, del, ApiError } from "./client";
 
 // ============= Types =============
 
@@ -37,6 +37,7 @@ export interface WorkspaceData {
   groups: string[];
   agents: WorkspaceAgentInfo[];
   workspaces: WorkspaceSummary[];
+  workspace_order?: string[];
 }
 
 // ============= Response Types =============
@@ -152,6 +153,23 @@ export async function deleteWorkspace(
   workspaceCache = response.data ?? null;
   fetchPromise = null;
   return workspaceCache;
+}
+
+/**
+ * Reorder workspaces. On success, invalidates the cache and returns refreshed data.
+ */
+export async function reorderWorkspaces(
+  order: string[],
+): Promise<WorkspaceData> {
+  const response = await put<ApiResult<WorkspaceData>>("/api/workspace/order", {
+    order,
+  });
+  const data = unwrap(response);
+  // Refresh cache with the returned data
+  cacheGeneration++;
+  workspaceCache = data;
+  fetchPromise = null;
+  return data;
 }
 
 /**

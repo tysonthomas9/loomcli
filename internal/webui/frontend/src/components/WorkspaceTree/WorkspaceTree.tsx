@@ -6,11 +6,32 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 
-import { renameWorkspace, deleteWorkspace } from "@/api/workspace";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+
+import {
+  renameWorkspace,
+  deleteWorkspace,
+  reorderWorkspaces,
+  refreshWorkspace,
+} from "@/api/workspace";
 import type { WorkspaceSummary } from "@/api/workspace";
 import { useWorkspaceRepos, useAgentContext, useToast } from "@/hooks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
+import { SortableWorkspaceEntry } from "./SortableWorkspaceEntry";
 import styles from "./WorkspaceTree.module.css";
 import { WorkspaceContextMenu } from "./WorkspaceContextMenu";
 
@@ -75,6 +96,77 @@ export function WorkspaceTree({
     x: number;
     y: number;
   } | null>(null);
+
+  // Workspace ordering state for drag-and-drop reorder
+  const [workspaceOrder, setWorkspaceOrder] = useState<string[]>([]);
+
+  // Initialize/sync order from API data
+  useEffect(() => {
+    if (workspace?.workspaces) {
+      setWorkspaceOrder(workspace.workspaces.map((ws) => ws.name));
+    }
+  }, [workspace?.workspaces]);
+
+  // DnD sensors with 5px activation distance to prevent accidental drags on click
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  // Re-fetch order from server on error (safe under rapid sequential reorders)
+  const rollbackOrder = useCallback(() => {
+    refreshWorkspace().then((data) => {
+      if (data?.workspaces) {
+        setWorkspaceOrder(data.workspaces.map((w) => w.name));
+      }
+    });
+  }, []);
+
+  // Drag-end handler: reorder and persist
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      setWorkspaceOrder((prev) => {
+        const oldIndex = prev.indexOf(active.id as string);
+        const newIndex = prev.indexOf(over.id as string);
+        if (oldIndex < 0 || newIndex < 0) return prev;
+        const newOrder = arrayMove(prev, oldIndex, newIndex);
+        reorderWorkspaces(newOrder).catch(rollbackOrder);
+        return newOrder;
+      });
+    },
+    [rollbackOrder],
+  );
+
+  // Alt+Up keyboard reorder
+  const handleMoveUp = useCallback(
+    (name: string) => {
+      setWorkspaceOrder((prev) => {
+        const idx = prev.indexOf(name);
+        if (idx <= 0) return prev;
+        const newOrder = arrayMove(prev, idx, idx - 1);
+        reorderWorkspaces(newOrder).catch(rollbackOrder);
+        return newOrder;
+      });
+    },
+    [rollbackOrder],
+  );
+
+  // Alt+Down keyboard reorder
+  const handleMoveDown = useCallback(
+    (name: string) => {
+      setWorkspaceOrder((prev) => {
+        const idx = prev.indexOf(name);
+        if (idx < 0 || idx >= prev.length - 1) return prev;
+        const newOrder = arrayMove(prev, idx, idx + 1);
+        reorderWorkspaces(newOrder).catch(rollbackOrder);
+        return newOrder;
+      });
+    },
+    [rollbackOrder],
+  );
 
   // Persist collapsed state
   useEffect(() => {
@@ -333,96 +425,45 @@ export function WorkspaceTree({
           {workspaces.length > 1 && (
             <div className={styles.workspaceSection}>
               <div className={styles.workspaceSectionHeader}>Workspaces</div>
-              {workspaces.map((ws) => {
-                const isEditing = editingWorkspace === ws.name;
-
-                return (
-                  <div
-                    key={ws.name}
-                    className={styles.workspaceEntry}
-                    data-active={ws.active}
-                    onContextMenu={(e) => handleContextMenu(e, ws.name)}
-                  >
-                    <svg
-                      className={styles.workspaceEntryIcon}
-                      viewBox="0 0 16 16"
-                      width="14"
-                      height="14"
-                    >
-                      <rect
-                        x="1"
-                        y="4"
-                        width="10"
-                        height="8"
-                        rx="1.5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.3"
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={workspaceOrder}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {workspaceOrder.map((name, idx) => {
+                    const ws = workspaces.find((w) => w.name === name);
+                    if (!ws) return null;
+                    return (
+                      <SortableWorkspaceEntry
+                        key={ws.name}
+                        ws={ws}
+                        isEditing={editingWorkspace === ws.name}
+                        draftName={draftName}
+                        isSaving={isSaving}
+                        renameError={renameError}
+                        renameInputRef={renameInputRef}
+                        onDraftChange={setDraftName}
+                        onSaveRename={handleSaveRename}
+                        onRenameKeyDown={handleRenameKeyDown}
+                        onContextMenu={handleContextMenu}
+                        onOverflowClick={handleOverflowClick}
+                        onMoveUp={
+                          idx > 0 ? () => handleMoveUp(name) : undefined
+                        }
+                        onMoveDown={
+                          idx < workspaceOrder.length - 1
+                            ? () => handleMoveDown(name)
+                            : undefined
+                        }
                       />
-                      <rect
-                        x="5"
-                        y="1"
-                        width="10"
-                        height="8"
-                        rx="1.5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.3"
-                      />
-                    </svg>
-                    {isEditing ? (
-                      <div className={styles.renameContainer}>
-                        <input
-                          ref={renameInputRef}
-                          type="text"
-                          className={styles.renameInput}
-                          value={draftName}
-                          onChange={(e) => setDraftName(e.target.value)}
-                          onBlur={handleSaveRename}
-                          onKeyDown={handleRenameKeyDown}
-                          disabled={isSaving}
-                          aria-label="Rename workspace"
-                          data-testid="workspace-rename-input"
-                        />
-                        {renameError && (
-                          <span
-                            className={styles.renameError}
-                            role="alert"
-                            data-testid="workspace-rename-error"
-                          >
-                            {renameError}
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className={styles.workspaceEntryName}>
-                        {ws.name}
-                      </span>
-                    )}
-                    <span className={styles.workspaceEntryMeta}>
-                      <span className={styles.workspaceRepoCount}>
-                        {ws.repo_count}
-                      </span>
-                      {ws.active && (
-                        <span className={styles.workspaceActiveBadge}>
-                          active
-                        </span>
-                      )}
-                    </span>
-                    {!isEditing && (
-                      <button
-                        type="button"
-                        className={styles.overflowButton}
-                        onClick={(e) => handleOverflowClick(e, ws.name)}
-                        aria-label={`More actions for ${ws.name}`}
-                        data-testid={`workspace-overflow-${ws.name}`}
-                      >
-                        &#x2026;
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </SortableContext>
+              </DndContext>
             </div>
           )}
 

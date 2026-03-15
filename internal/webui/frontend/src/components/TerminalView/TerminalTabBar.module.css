@@ -287,11 +287,7 @@
     bottom: 0;
     width: 20px;
     flex-shrink: 0;
-    background: linear-gradient(
-      to left,
-      var(--terminal-surface),
-      transparent
-    );
+    background: linear-gradient(to left, var(--terminal-surface), transparent);
     pointer-events: none;
   }
 
