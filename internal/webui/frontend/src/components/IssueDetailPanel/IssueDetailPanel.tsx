@@ -32,6 +32,7 @@ import { StartWorkButton } from "./StartWorkButton";
 import { CommentForm } from "./CommentForm";
 import { CommentsSection } from "./CommentsSection";
 import { DependencySection } from "./DependencySection";
+import { LabelEditor } from "./LabelEditor";
 import { EditableDescription } from "./EditableDescription";
 import { IssueHeader } from "./IssueHeader";
 import { MarkdownRenderer } from "./MarkdownRenderer";
@@ -686,6 +687,28 @@ function DefaultContent({
     [issue],
   );
 
+  const handleAddLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+      const updatedIssue = await updateIssue(issue.id, {
+        add_labels: [label],
+      });
+      onIssueUpdate?.(updatedIssue);
+    },
+    [issue, onIssueUpdate],
+  );
+
+  const handleRemoveLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+      const updatedIssue = await updateIssue(issue.id, {
+        remove_labels: [label],
+      });
+      onIssueUpdate?.(updatedIssue);
+    },
+    [issue, onIssueUpdate],
+  );
+
   // Approve handler
   const handleApprove = useCallback(async () => {
     if (!issue || !onApprove || isApproving) return;
@@ -1194,18 +1217,12 @@ function DefaultContent({
             />
 
             {/* Labels */}
-            {issue.labels && issue.labels.length > 0 && (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>Labels</h3>
-                <div className={styles.labels}>
-                  {issue.labels.map((label) => (
-                    <span key={label} className={styles.label}>
-                      {label}
-                    </span>
-                  ))}
-                </div>
-              </section>
-            )}
+            <LabelEditor
+              labels={issue.labels ?? []}
+              onAddLabel={handleAddLabel}
+              onRemoveLabel={handleRemoveLabel}
+              disabled={isLoading}
+            />
           </div>
         </div>
       )}

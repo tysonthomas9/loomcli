@@ -84,6 +84,9 @@ export type { UseViewStateOptions, UseViewStateReturn } from "./useViewState";
 export { useIssueDetail } from "./useIssueDetail";
 export type { UseIssueDetailReturn } from "./useIssueDetail";
 
+export { useIssueSearch } from "./useIssueSearch";
+export type { UseIssueSearchReturn } from "./useIssueSearch";
+
 export { useAgents } from "./useAgents";
 export type { UseAgentsOptions, UseAgentsResult } from "./useAgents";
 
@@ -140,10 +143,7 @@ export type {
 export { useWorkspace } from "./useWorkspace";
 export type { UseWorkspaceOptions, UseWorkspaceReturn } from "./useWorkspace";
 
-export {
-  WorkspaceProvider,
-  useWorkspaceContext,
-} from "./useWorkspaceContext";
+export { WorkspaceProvider, useWorkspaceContext } from "./useWorkspaceContext";
 export type {
   WorkspaceContextValue,
   WorkspaceProviderProps,

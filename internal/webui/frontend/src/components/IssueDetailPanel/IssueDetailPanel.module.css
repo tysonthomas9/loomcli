@@ -655,21 +655,6 @@
   margin: 0;
 }
 
-/* Labels */
-.labels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.label {
-  padding: 2px 8px;
-  background-color: var(--color-bg-subtle);
-  color: var(--color-text-secondary);
-  font-size: var(--font-xs);
-  border-radius: var(--radius-full);
-}
-
 /* Dependencies */
 .dependencyList {
   list-style: none;

@@ -23,6 +23,16 @@ import {
   type DependencySectionProps,
 } from "../DependencySection";
 
+// Mock useIssueSearch used by DependencySearchPicker
+vi.mock("@/hooks/useIssueSearch", () => ({
+  useIssueSearch: () => ({
+    results: [],
+    isLoading: false,
+    search: vi.fn(),
+    query: "",
+  }),
+}));
+
 // Helper to create test dependencies
 function createDependency(
   id: string,
@@ -158,7 +168,7 @@ describe("DependencySection", () => {
       fireEvent.click(screen.getByTestId("add-dependency-button"));
 
       expect(screen.getByTestId("add-dependency-form")).toBeInTheDocument();
-      expect(screen.getByTestId("dependency-input")).toBeInTheDocument();
+      expect(screen.getByTestId("dependency-search-input")).toBeInTheDocument();
       expect(screen.getByTestId("confirm-add-dependency")).toBeInTheDocument();
       expect(screen.getByTestId("cancel-add-dependency")).toBeInTheDocument();
     });
@@ -168,7 +178,7 @@ describe("DependencySection", () => {
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
 
-      expect(screen.getByTestId("dependency-input")).toHaveFocus();
+      expect(screen.getByTestId("dependency-search-input")).toHaveFocus();
     });
 
     it("hides add button when in add mode", () => {
@@ -197,7 +207,7 @@ describe("DependencySection", () => {
       render(<DependencySection {...defaultProps()} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
-      fireEvent.keyDown(screen.getByTestId("dependency-input"), {
+      fireEvent.keyDown(screen.getByTestId("dependency-search-input"), {
         key: "Escape",
       });
 
@@ -206,12 +216,12 @@ describe("DependencySection", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("calls onAddDependency with issue ID when form is submitted", async () => {
+    it("calls onAddDependency when confirm button is clicked with typed ID", async () => {
       const onAddDependency = vi.fn().mockResolvedValue(undefined);
       render(<DependencySection {...defaultProps({ onAddDependency })} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
-      fireEvent.change(screen.getByTestId("dependency-input"), {
+      fireEvent.change(screen.getByTestId("dependency-search-input"), {
         target: { value: "new-dep-id" },
       });
       fireEvent.click(screen.getByTestId("confirm-add-dependency"));
@@ -226,10 +236,10 @@ describe("DependencySection", () => {
       render(<DependencySection {...defaultProps({ onAddDependency })} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
-      fireEvent.change(screen.getByTestId("dependency-input"), {
+      fireEvent.change(screen.getByTestId("dependency-search-input"), {
         target: { value: "new-dep-id" },
       });
-      fireEvent.keyDown(screen.getByTestId("dependency-input"), {
+      fireEvent.keyDown(screen.getByTestId("dependency-search-input"), {
         key: "Enter",
       });
 
@@ -243,7 +253,7 @@ describe("DependencySection", () => {
       render(<DependencySection {...defaultProps({ onAddDependency })} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
-      fireEvent.change(screen.getByTestId("dependency-input"), {
+      fireEvent.change(screen.getByTestId("dependency-search-input"), {
         target: { value: "new-dep-id" },
       });
       fireEvent.click(screen.getByTestId("confirm-add-dependency"));
@@ -255,47 +265,37 @@ describe("DependencySection", () => {
       });
     });
 
-    it("shows error when pressing Enter with empty input", () => {
-      render(<DependencySection {...defaultProps()} />);
-
-      fireEvent.click(screen.getByTestId("add-dependency-button"));
-      // Press Enter on empty input - this will call handleAdd which validates
-      fireEvent.keyDown(screen.getByTestId("dependency-input"), {
-        key: "Enter",
-      });
-
-      expect(screen.getByTestId("dependency-error")).toHaveTextContent(
-        "Please enter an issue ID",
-      );
-    });
-
-    it("shows error when adding self as dependency", () => {
+    it("shows error when adding self as dependency", async () => {
       render(<DependencySection {...defaultProps({ issueId: "issue-1" })} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
-      fireEvent.change(screen.getByTestId("dependency-input"), {
+      fireEvent.change(screen.getByTestId("dependency-search-input"), {
         target: { value: "issue-1" },
       });
       fireEvent.click(screen.getByTestId("confirm-add-dependency"));
 
-      expect(screen.getByTestId("dependency-error")).toHaveTextContent(
-        "Cannot add self as dependency",
-      );
+      await waitFor(() => {
+        expect(screen.getByTestId("dependency-error")).toHaveTextContent(
+          "Cannot add self as dependency",
+        );
+      });
     });
 
-    it("shows error when adding duplicate dependency", () => {
+    it("shows error when adding duplicate dependency", async () => {
       const deps = [createDependency("existing-dep", "Existing")];
       render(<DependencySection {...defaultProps({ dependencies: deps })} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
-      fireEvent.change(screen.getByTestId("dependency-input"), {
+      fireEvent.change(screen.getByTestId("dependency-search-input"), {
         target: { value: "existing-dep" },
       });
       fireEvent.click(screen.getByTestId("confirm-add-dependency"));
 
-      expect(screen.getByTestId("dependency-error")).toHaveTextContent(
-        "Already a dependency",
-      );
+      await waitFor(() => {
+        expect(screen.getByTestId("dependency-error")).toHaveTextContent(
+          "Already a dependency",
+        );
+      });
     });
 
     it("shows error from API failure", async () => {
@@ -305,7 +305,7 @@ describe("DependencySection", () => {
       render(<DependencySection {...defaultProps({ onAddDependency })} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
-      fireEvent.change(screen.getByTestId("dependency-input"), {
+      fireEvent.change(screen.getByTestId("dependency-search-input"), {
         target: { value: "nonexistent" },
       });
       fireEvent.click(screen.getByTestId("confirm-add-dependency"));
@@ -328,7 +328,7 @@ describe("DependencySection", () => {
       render(<DependencySection {...defaultProps({ onAddDependency })} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
-      fireEvent.change(screen.getByTestId("dependency-input"), {
+      fireEvent.change(screen.getByTestId("dependency-search-input"), {
         target: { value: "new-dep" },
       });
       fireEvent.click(screen.getByTestId("confirm-add-dependency"));
@@ -466,27 +466,29 @@ describe("DependencySection", () => {
       );
     });
 
-    it("has aria-label on input", () => {
+    it("has aria-label on search input", () => {
       render(<DependencySection {...defaultProps()} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
 
-      expect(screen.getByTestId("dependency-input")).toHaveAttribute(
+      expect(screen.getByTestId("dependency-search-input")).toHaveAttribute(
         "aria-label",
-        "Issue ID",
+        "Search issues",
       );
     });
 
-    it('error has role="alert"', () => {
-      render(<DependencySection {...defaultProps()} />);
+    it('error has role="alert"', async () => {
+      render(<DependencySection {...defaultProps({ issueId: "issue-1" })} />);
 
       fireEvent.click(screen.getByTestId("add-dependency-button"));
-      // Press Enter on empty input to trigger validation error
-      fireEvent.keyDown(screen.getByTestId("dependency-input"), {
-        key: "Enter",
+      fireEvent.change(screen.getByTestId("dependency-search-input"), {
+        target: { value: "issue-1" },
       });
+      fireEvent.click(screen.getByTestId("confirm-add-dependency"));
 
-      expect(screen.getByRole("alert")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toBeInTheDocument();
+      });
     });
   });
 

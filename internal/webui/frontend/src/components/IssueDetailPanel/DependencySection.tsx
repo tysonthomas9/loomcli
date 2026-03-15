@@ -4,16 +4,11 @@
  * Allows users to add and remove blocking dependencies.
  */
 
-import {
-  useState,
-  useCallback,
-  useRef,
-  useEffect,
-  type KeyboardEvent,
-} from "react";
+import { useState, useCallback } from "react";
 
 import type { IssueWithDependencyMetadata, DependencyType } from "@/types";
 
+import { DependencySearchPicker } from "./DependencySearchPicker";
 import styles from "./DependencySection.module.css";
 
 /**
@@ -52,18 +47,9 @@ export function DependencySection({
   className,
 }: DependencySectionProps): JSX.Element {
   const [isAdding, setIsAdding] = useState(false);
-  const [inputValue, setInputValue] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Focus input when add mode is activated
-  useEffect(() => {
-    if (isAdding && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [isAdding]);
 
   const handleStartAdd = useCallback(() => {
     if (disabled) return;
@@ -73,46 +59,47 @@ export function DependencySection({
 
   const handleCancelAdd = useCallback(() => {
     setIsAdding(false);
-    setInputValue("");
     setError(null);
   }, []);
 
-  const handleAdd = useCallback(async () => {
-    const trimmedId = inputValue.trim();
+  const handleSelectDependency = useCallback(
+    async (selectedId: string) => {
+      const trimmedId = selectedId.trim();
 
-    if (!trimmedId) {
-      setError("Please enter an issue ID");
-      return;
-    }
+      if (!trimmedId) {
+        setError("Please enter an issue ID");
+        return;
+      }
 
-    // Prevent self-dependency
-    if (trimmedId === issueId) {
-      setError("Cannot add self as dependency");
-      return;
-    }
+      // Prevent self-dependency
+      if (trimmedId === issueId) {
+        setError("Cannot add self as dependency");
+        return;
+      }
 
-    // Check if already a dependency
-    if (dependencies.some((dep) => dep.id === trimmedId)) {
-      setError("Already a dependency");
-      return;
-    }
+      // Check if already a dependency
+      if (dependencies.some((dep) => dep.id === trimmedId)) {
+        setError("Already a dependency");
+        return;
+      }
 
-    setError(null);
-    setSavingId(trimmedId);
+      setError(null);
+      setSavingId(trimmedId);
 
-    try {
-      await onAddDependency(trimmedId, "blocks");
-      // Success - reset form
-      setIsAdding(false);
-      setInputValue("");
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to add dependency";
-      setError(message);
-    } finally {
-      setSavingId(null);
-    }
-  }, [inputValue, issueId, dependencies, onAddDependency]);
+      try {
+        await onAddDependency(trimmedId, "blocks");
+        // Success - reset form
+        setIsAdding(false);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to add dependency";
+        setError(message);
+      } finally {
+        setSavingId(null);
+      }
+    },
+    [issueId, dependencies, onAddDependency],
+  );
 
   const handleRemove = useCallback(
     async (depId: string) => {
@@ -132,19 +119,6 @@ export function DependencySection({
       }
     },
     [disabled, removingId, onRemoveDependency],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        handleAdd();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        handleCancelAdd();
-      }
-    },
-    [handleAdd, handleCancelAdd],
   );
 
   const rootClassName = [styles.dependencySection, className]
@@ -198,41 +172,16 @@ export function DependencySection({
         </div>
       )}
 
-      {/* Add input */}
+      {/* Add dependency search picker */}
       {isAdding && (
         <div className={styles.addForm} data-testid="add-dependency-form">
-          <input
-            ref={inputRef}
-            type="text"
-            className={styles.input}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Enter issue ID (e.g., beads-abc1)"
-            disabled={savingId !== null}
-            aria-label="Issue ID"
-            data-testid="dependency-input"
+          <DependencySearchPicker
+            issueId={issueId}
+            existingDependencyIds={dependencies.map((d) => d.id)}
+            onSelect={handleSelectDependency}
+            onCancel={handleCancelAdd}
+            isSaving={savingId !== null}
           />
-          <div className={styles.formActions}>
-            <button
-              type="button"
-              className={styles.cancelButton}
-              onClick={handleCancelAdd}
-              disabled={savingId !== null}
-              data-testid="cancel-add-dependency"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={styles.confirmButton}
-              onClick={handleAdd}
-              disabled={savingId !== null || !inputValue.trim()}
-              data-testid="confirm-add-dependency"
-            >
-              {savingId !== null ? "Adding..." : "Add"}
-            </button>
-          </div>
         </div>
       )}
 
