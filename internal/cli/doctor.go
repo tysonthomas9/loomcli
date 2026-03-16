@@ -105,6 +105,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		checkBdCLI,
 		checkBdDaemon,
 		checkBdSocket,
+		checkIssueBackend,
 		checkBackendCLI,
 		checkBeadsInit,
 		checkProjectConfig,
@@ -291,8 +292,15 @@ func checkTmux() CheckResult {
 }
 
 func checkBdCLI() CheckResult {
-	_, err := exec.LookPath("bd")
+	_, err := lookPath("bd")
 	if err != nil {
+		if isFleetDBActive() {
+			return CheckResult{
+				Name:    "bd_cli",
+				Status:  StatusWarn,
+				Summary: "bd CLI not found (optional — fleet-db is active backend)",
+			}
+		}
 		return CheckResult{
 			Name:    "bd_cli",
 			Status:  StatusFail,
@@ -320,6 +328,13 @@ func checkBdCLI() CheckResult {
 
 func checkBdDaemon() CheckResult {
 	if _, err := lookPath("bd"); err != nil {
+		if isFleetDBActive() {
+			return CheckResult{
+				Name:    "bd_daemon",
+				Status:  StatusWarn,
+				Summary: "bd not found (optional — fleet-db is active backend)",
+			}
+		}
 		return CheckResult{
 			Name:    "bd_daemon",
 			Status:  StatusFail,
@@ -364,6 +379,10 @@ func checkBdDaemon() CheckResult {
 }
 
 func checkBdSocket() CheckResult {
+	if isFleetDBActive() {
+		return CheckResult{} // skip — fleet-db is active backend, bd socket not needed
+	}
+
 	beadsDir := GetBeadsDir()
 	socketPath := rpc.ShortSocketPath(beadsDir)
 
@@ -663,5 +682,75 @@ func checkRedis() CheckResult {
 		Name:    "redis",
 		Status:  StatusPass,
 		Summary: fmt.Sprintf("Redis reachable at %s", addr),
+	}
+}
+
+// isFleetDBActive returns true when fleet-db is the active issue backend.
+func isFleetDBActive() bool {
+	dc, err := LoadDaemonConfig(".")
+	if err == nil && dc != nil {
+		return resolveFleetDBEnabled(dc.Daemon.FleetDB)
+	}
+	return resolveFleetDBEnabled(nil)
+}
+
+// checkIssueBackend dispatches to checkFleetDB when fleet-db is active.
+// When bd is the active backend, returns an empty result (bd checks are
+// handled by checkBdCLI and checkBdDaemon).
+func checkIssueBackend() CheckResult {
+	if isFleetDBActive() {
+		return checkFleetDB()
+	}
+	return CheckResult{}
+}
+
+// checkFleetDB verifies the fleet-db binary and Redis connectivity.
+func checkFleetDB() CheckResult {
+	if _, err := lookPath("fleet-db"); err != nil {
+		return CheckResult{
+			Name:    "fleet_db",
+			Status:  StatusFail,
+			Summary: "fleet-db binary not found",
+			Detail:  "Install the fleet-db CLI and ensure it is on your PATH",
+		}
+	}
+
+	dc, _ := LoadDaemonConfig(".")
+	cfg := FleetDBServerConfig{}
+	if dc != nil {
+		cfg = resolveFleetDBConfig(&dc.Daemon)
+	}
+
+	if cfg.RedisURL == "" && !cfg.AutoStart {
+		return CheckResult{
+			Name:    "fleet_db",
+			Status:  StatusWarn,
+			Summary: "fleet-db binary found but no Redis configured",
+			Detail:  "Configure redis_url in loom.yaml fleet_db section or set LOOM_FLEETDB_REDIS_URL, or enable auto_start",
+		}
+	}
+
+	if cfg.RedisURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		password := os.Getenv("LOOM_REDIS_PASSWORD")
+		client := kv.NewClient(cfg.RedisURL, password, 0)
+		defer func() { _ = client.Close() }()
+
+		if err := client.Ping(ctx); err != nil {
+			return CheckResult{
+				Name:    "fleet_db",
+				Status:  StatusFail,
+				Summary: fmt.Sprintf("fleet-db Redis not reachable at %s", cfg.RedisURL),
+				Detail:  err.Error(),
+			}
+		}
+	}
+
+	return CheckResult{
+		Name:    "fleet_db",
+		Status:  StatusPass,
+		Summary: "fleet-db healthy",
 	}
 }

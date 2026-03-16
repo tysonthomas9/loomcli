@@ -83,6 +83,15 @@ func runInit(cmd *cobra.Command, args []string) {
 	}
 	fmt.Println("")
 
+	// Fleet-db path: skip worktree steps and show fleet-db workspace info
+	if isFleetDBActive() {
+		fmt.Println("Step 3: Fleet-DB workspace")
+		showFleetDBWorkspaceInfo()
+		fmt.Println("")
+		showFleetDBSummary()
+		return
+	}
+
 	// Step 3: Create worktrees directory
 	fmt.Println("Step 3: Create worktrees directory")
 	worktreesDir := getWorktreesDirForInit()
@@ -165,6 +174,10 @@ func runInitWorkspace(_ *cobra.Command, _ []string) {
 }
 
 func initBeadsInWorkspace(wsPath string) {
+	if isFleetDBActive() {
+		fmt.Println("→ Skipping beads init (fleet-db is active backend)")
+		return
+	}
 	fmt.Printf("→ Initializing beads in %s...\n", wsPath)
 	result := execCommand(wsPath, "bd", "init")
 	if result.Err != nil {
@@ -193,7 +206,15 @@ func showWorkspaceSummary(ws WorkspaceConfig) {
 	fmt.Println("")
 }
 
-// checkPrerequisites verifies bd and git are available and we're in a git repo
+// ResolveIssueBackendBinary returns the binary name for the active issue backend.
+func ResolveIssueBackendBinary() string {
+	if isFleetDBActive() {
+		return "fleet-db"
+	}
+	return "bd"
+}
+
+// checkPrerequisites verifies the issue backend binary and git are available and we're in a git repo.
 func checkPrerequisites() bool {
 	// Check if we're in a git repository
 	result := execCommand(".", "git", "rev-parse", "--is-inside-work-tree")
@@ -221,22 +242,38 @@ func checkPrerequisites() bool {
 		}
 	}
 
-	// Check if bd (beads) CLI is available (run from cwd — just checking PATH)
-	result = execCommand(".", "bd", "--version")
-	if result.Err != nil {
-		fmt.Println("✗ bd (beads CLI) not found")
-		fmt.Println("")
-		fmt.Println("  Please install beads CLI from the vendored source:")
-		fmt.Println("    make install-bd")
-		return false
+	// Check the active issue backend binary
+	if isFleetDBActive() {
+		if _, err := lookPath("fleet-db"); err != nil {
+			fmt.Println("✗ fleet-db binary not found")
+			fmt.Println("")
+			fmt.Println("  Install the fleet-db CLI and ensure it is on your PATH")
+			return false
+		}
+		fmt.Println("✓ fleet-db binary found (active issue backend)")
+	} else {
+		// Check if bd (beads) CLI is available (run from cwd — just checking PATH)
+		result = execCommand(".", "bd", "--version")
+		if result.Err != nil {
+			fmt.Println("✗ bd (beads CLI) not found")
+			fmt.Println("")
+			fmt.Println("  Please install beads CLI from the vendored source:")
+			fmt.Println("    make install-bd")
+			return false
+		}
+		fmt.Println("✓ bd (beads CLI) found")
 	}
-	fmt.Println("✓ bd (beads CLI) found")
 
 	return true
 }
 
 // initBeads initializes beads if not already done
 func initBeads() bool {
+	if isFleetDBActive() {
+		fmt.Println("→ Skipping beads init (fleet-db is active backend)")
+		return true
+	}
+
 	// Check if .beads/ already exists
 	if _, err := os.Stat(filepath.Join(GetBeadsDir(), ".beads")); err == nil {
 		fmt.Println("✓ beads already initialized, skipping...")
@@ -590,4 +627,39 @@ func promptInt(prompt string, defaultVal int) int {
 		return defaultVal
 	}
 	return val
+}
+
+// showFleetDBWorkspaceInfo prints fleet-db workspace info during init.
+func showFleetDBWorkspaceInfo() {
+	if _, err := lookPath("fleet-db"); err != nil {
+		fmt.Println("⚠ fleet-db binary not found on PATH")
+		return
+	}
+	fmt.Println("✓ fleet-db binary found")
+
+	dc, _ := LoadDaemonConfig(".")
+	cfg := FleetDBServerConfig{Workspace: "default"}
+	if dc != nil {
+		cfg = resolveFleetDBConfig(&dc.Daemon)
+	}
+	fmt.Printf("  Workspace: %s\n", cfg.Workspace)
+	if cfg.RedisURL != "" {
+		fmt.Printf("  Redis: %s\n", cfg.RedisURL)
+	} else if cfg.AutoStart {
+		fmt.Println("  Redis: auto-start enabled")
+	} else {
+		fmt.Println("  Redis: not configured (will auto-start embedded)")
+	}
+}
+
+// showFleetDBSummary prints fleet-db specific next steps.
+func showFleetDBSummary() {
+	fmt.Println("Setup complete! 🎉")
+	fmt.Println("")
+	fmt.Println("Fleet-db is the active issue backend.")
+	fmt.Println("")
+	fmt.Println("Next steps:")
+	fmt.Println("  1. Start server:     loom serve")
+	fmt.Println("  2. Monitor:          loom monitor")
+	fmt.Println("")
 }

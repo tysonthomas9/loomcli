@@ -12,6 +12,16 @@ type daemonStatus struct {
 	PID    int    `json:"pid"`
 }
 
+// EnsureIssueBackendRunning ensures the active issue backend is running.
+// When fleet-db is active it returns (false, nil) immediately — fleet-db startup
+// is handled separately in serve.go. Otherwise it delegates to EnsureBdDaemonRunning.
+func EnsureIssueBackendRunning(timeout time.Duration) (bool, error) {
+	if isFleetDBActive() {
+		return false, nil
+	}
+	return EnsureBdDaemonRunning(timeout)
+}
+
 // EnsureBdDaemonRunning checks if the bd daemon is running and starts it if not.
 // Returns (true, nil) if we started the daemon, (false, nil) if it was already running,
 // or (false, err) if the daemon could not be started or did not become ready in time.

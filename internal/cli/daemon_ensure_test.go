@@ -147,6 +147,54 @@ func TestEnsureBdDaemonRunning(t *testing.T) {
 	})
 }
 
+func TestEnsureIssueBackendRunning(t *testing.T) {
+	t.Run("fleet-db active skips bd daemon", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		oldExec := execCommand
+		defer func() { execCommand = oldExec }()
+		execCommand = func(dir, name string, args ...string) CommandResult {
+			t.Fatalf("no commands should be called when fleet-db is active, got: %s %v", name, args)
+			return CommandResult{}
+		}
+
+		started, err := EnsureIssueBackendRunning(100 * time.Millisecond)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if started {
+			t.Error("expected started=false when fleet-db is active")
+		}
+	})
+
+	t.Run("bd active delegates to EnsureBdDaemonRunning", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		oldExec := execCommand
+		defer func() { execCommand = oldExec }()
+
+		execCommand = func(dir, name string, args ...string) CommandResult {
+			if len(args) >= 2 && args[1] == "status" {
+				return CommandResult{
+					Stdout: `{"status":"running","pid":1234}`,
+				}
+			}
+			t.Fatalf("unexpected command: %s %v", name, args)
+			return CommandResult{}
+		}
+
+		started, err := EnsureIssueBackendRunning(100 * time.Millisecond)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if started {
+			t.Error("expected started=false when daemon already running")
+		}
+	})
+}
+
 func TestIsDaemonRunning(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -493,6 +493,194 @@ func TestCheckBackendCLI(t *testing.T) {
 	})
 }
 
+func TestIsFleetDBActive(t *testing.T) {
+	t.Run("enabled via env var", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		// Prevent config file from interfering
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		if !isFleetDBActive() {
+			t.Error("expected isFleetDBActive() to return true when LOOM_FLEETDB_ENABLED=true")
+		}
+	})
+
+	t.Run("disabled via env var", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		if isFleetDBActive() {
+			t.Error("expected isFleetDBActive() to return false when LOOM_FLEETDB_ENABLED=false")
+		}
+	})
+
+	t.Run("not set defaults to false", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		if isFleetDBActive() {
+			t.Error("expected isFleetDBActive() to return false when env var not set")
+		}
+	})
+}
+
+func TestCheckIssueBackend(t *testing.T) {
+	t.Run("fleet-db not active returns empty", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		result := checkIssueBackend()
+		if result.Name != "" {
+			t.Errorf("expected empty result when fleet-db not active, got name=%q", result.Name)
+		}
+	})
+
+	t.Run("fleet-db active returns fleet_db check", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		oldLookPath := lookPath
+		defer func() { lookPath = oldLookPath }()
+		lookPath = func(name string) (string, error) {
+			if name == "fleet-db" {
+				return "/usr/bin/fleet-db", nil
+			}
+			return "", exec.ErrNotFound
+		}
+
+		result := checkIssueBackend()
+		if result.Name != "fleet_db" {
+			t.Errorf("expected name 'fleet_db', got %q", result.Name)
+		}
+	})
+}
+
+func TestCheckFleetDB(t *testing.T) {
+	t.Run("binary not found", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		oldLookPath := lookPath
+		defer func() { lookPath = oldLookPath }()
+		lookPath = func(string) (string, error) {
+			return "", exec.ErrNotFound
+		}
+
+		result := checkFleetDB()
+		if result.Status != StatusFail {
+			t.Errorf("expected fail when fleet-db binary not found, got %v", result.Status)
+		}
+		if !strings.Contains(result.Summary, "not found") {
+			t.Errorf("expected summary to mention 'not found', got %q", result.Summary)
+		}
+	})
+
+	t.Run("binary found but no Redis configured", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		t.Setenv("LOOM_FLEETDB_REDIS_URL", "")
+		t.Setenv("LOOM_FLEETDB_AUTO_START", "")
+
+		oldLookPath := lookPath
+		defer func() { lookPath = oldLookPath }()
+		lookPath = func(name string) (string, error) {
+			if name == "fleet-db" {
+				return "/usr/bin/fleet-db", nil
+			}
+			return "", exec.ErrNotFound
+		}
+
+		result := checkFleetDB()
+		if result.Status != StatusWarn {
+			t.Errorf("expected warn when no Redis configured, got %v: %s", result.Status, result.Summary)
+		}
+	})
+
+	t.Run("binary found with auto_start", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+		t.Setenv("LOOM_FLEETDB_REDIS_URL", "")
+		t.Setenv("LOOM_FLEETDB_AUTO_START", "true")
+
+		oldLookPath := lookPath
+		defer func() { lookPath = oldLookPath }()
+		lookPath = func(name string) (string, error) {
+			if name == "fleet-db" {
+				return "/usr/bin/fleet-db", nil
+			}
+			return "", exec.ErrNotFound
+		}
+
+		result := checkFleetDB()
+		if result.Status != StatusPass {
+			t.Errorf("expected pass with auto_start, got %v: %s", result.Status, result.Summary)
+		}
+	})
+}
+
+func TestCheckBdCLI_FleetDBActive(t *testing.T) {
+	t.Run("bd not found returns warn when fleet-db active", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		oldLookPath := lookPath
+		defer func() { lookPath = oldLookPath }()
+		lookPath = func(string) (string, error) {
+			return "", exec.ErrNotFound
+		}
+
+		result := checkBdCLI()
+		if result.Status != StatusWarn {
+			t.Errorf("expected warn when bd not found and fleet-db active, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "optional") {
+			t.Errorf("expected summary to mention 'optional', got %q", result.Summary)
+		}
+	})
+
+	t.Run("bd found returns pass when fleet-db active", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		oldLookPath := lookPath
+		oldExec := execCommand
+		defer func() { lookPath = oldLookPath; execCommand = oldExec }()
+
+		lookPath = func(string) (string, error) { return "/usr/bin/bd", nil }
+		execCommand = func(dir, name string, args ...string) CommandResult {
+			if name == "bd" && len(args) > 0 && args[0] == "--version" {
+				return CommandResult{Stdout: "beads v1.0.0\n"}
+			}
+			return CommandResult{Err: fmt.Errorf("unexpected")}
+		}
+
+		result := checkBdCLI()
+		if result.Status != StatusPass {
+			t.Errorf("expected pass when bd found (even with fleet-db active), got %v: %s", result.Status, result.Summary)
+		}
+	})
+}
+
+func TestCheckBdDaemon_FleetDBActive(t *testing.T) {
+	t.Run("bd not on PATH returns warn when fleet-db active", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		oldLookPath := lookPath
+		defer func() { lookPath = oldLookPath }()
+		lookPath = func(string) (string, error) {
+			return "", exec.ErrNotFound
+		}
+
+		result := checkBdDaemon()
+		if result.Status != StatusWarn {
+			t.Errorf("expected warn when bd not found and fleet-db active, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "optional") {
+			t.Errorf("expected summary to mention 'optional', got %q", result.Summary)
+		}
+	})
+}
+
 func TestCheckLoomDaemon(t *testing.T) {
 	t.Run("no pid file", func(t *testing.T) {
 		dir := t.TempDir()
