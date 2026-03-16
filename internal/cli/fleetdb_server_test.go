@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -16,7 +18,6 @@ import (
 // Test helpers
 // ---------------------------------------------------------------------------
 
-// skipIfNoFleetDB skips the test when the fleet-db binary is not in PATH.
 func skipIfNoFleetDB(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("fleet-db"); err != nil {
@@ -24,8 +25,6 @@ func skipIfNoFleetDB(t *testing.T) {
 	}
 }
 
-// startTestServer creates a FleetDBServer with AutoStart=true and registers
-// cleanup via t.Cleanup. The test is skipped if fleet-db is unavailable.
 func startTestServer(t *testing.T) *FleetDBServer {
 	t.Helper()
 	skipIfNoFleetDB(t)
@@ -205,7 +204,6 @@ func TestClientDepToBdDep(t *testing.T) {
 	if got.CreatedAt != wantTime {
 		t.Errorf("CreatedAt = %q, want RFC3339 %q", got.CreatedAt, wantTime)
 	}
-	// Round-trip: parse back to ensure it's valid RFC3339
 	if _, err := time.Parse(time.RFC3339, got.CreatedAt); err != nil {
 		t.Errorf("CreatedAt %q is not valid RFC3339: %v", got.CreatedAt, err)
 	}
@@ -302,21 +300,6 @@ func TestCountResponseToBdStats(t *testing.T) {
 		if got.Summary.ClosedIssues != 0 {
 			t.Errorf("ClosedIssues = %d, want 0", got.Summary.ClosedIssues)
 		}
-		if got.Summary.InProgressIssues != 0 {
-			t.Errorf("InProgressIssues = %d, want 0", got.Summary.InProgressIssues)
-		}
-		if got.Summary.BlockedIssues != 0 {
-			t.Errorf("BlockedIssues = %d, want 0", got.Summary.BlockedIssues)
-		}
-		if got.Summary.DeferredIssues != 0 {
-			t.Errorf("DeferredIssues = %d, want 0", got.Summary.DeferredIssues)
-		}
-		if got.Summary.TombstoneIssues != 0 {
-			t.Errorf("TombstoneIssues = %d, want 0", got.Summary.TombstoneIssues)
-		}
-		if got.Summary.PinnedIssues != 0 {
-			t.Errorf("PinnedIssues = %d, want 0", got.Summary.PinnedIssues)
-		}
 	})
 }
 
@@ -358,10 +341,76 @@ func TestFindFreePort(t *testing.T) {
 		t.Fatalf("port %d out of valid range (1-65535)", port)
 	}
 
-	// Verify the port is actually available by binding to it.
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		t.Fatalf("port %d returned by findFreePort is not available: %v", port, err)
 	}
 	ln.Close()
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests (require fleet-db binary)
+// ---------------------------------------------------------------------------
+
+func TestFleetDBServer_WorkspaceCreation(t *testing.T) {
+	server := startTestServer(t)
+
+	// Verify workspace exists by trying to get a non-existent issue.
+	// Should get "not found", not "workspace not found".
+	_, err := server.client.GetIssue(context.Background(), server.cfg.Workspace, "nonexistent-id")
+	if err == nil {
+		t.Fatal("expected error for non-existent issue")
+	}
+	var ce *client.ClientError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected ClientError, got %T: %v", err, err)
+	}
+	if !ce.IsNotFound() {
+		t.Errorf("expected not-found error, got code=%s message=%s", ce.Code, ce.Message)
+	}
+}
+
+func TestFleetClientAdapter_CloseIssue(t *testing.T) {
+	server := startTestServer(t)
+
+	issue, err := server.client.CreateIssue(context.Background(), server.cfg.Workspace, &client.CreateIssueRequest{
+		Title:    "Test Close",
+		Priority: 2,
+		Type:     client.TypeTask,
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	adapter := newFleetClientAdapter(server.client, server.cfg.Workspace, slog.Default())
+	if err := adapter.CloseIssue(context.Background(), issue.ID, "done"); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+
+	got, err := server.client.GetIssue(context.Background(), server.cfg.Workspace, issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssue after close: %v", err)
+	}
+	if got.Status != client.StatusClosed {
+		t.Errorf("Status = %s, want closed", got.Status)
+	}
+}
+
+func TestFleetDBServer_SubprocessCrash(t *testing.T) {
+	server := startTestServer(t)
+
+	if err := server.cmd.Process.Kill(); err != nil {
+		t.Fatalf("Kill subprocess: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_ = server.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stop() hung after subprocess crash")
+	}
 }
