@@ -39,12 +39,13 @@ type FileSystem interface {
 // Deps is the central dependency-injection container for CLI commands.
 // It holds all external dependencies so they can be swapped for testing.
 type Deps struct {
-	Git    GitRunner
-	Exec   ExecRunner
-	FS     FileSystem
-	Logger *slog.Logger
-	Clock  func() time.Time
-	BD     BDRunner
+	Git     GitRunner
+	Exec    ExecRunner
+	FS      FileSystem
+	Logger  *slog.Logger
+	Clock   func() time.Time
+	BD      BDRunner
+	Tracker IssueTracker
 }
 
 // --- default implementations ---
@@ -95,13 +96,15 @@ func (defaultFileSystem) Remove(path string) error {
 
 // DefaultDeps returns a Deps populated with real (production) implementations.
 func DefaultDeps() *Deps {
+	bd := defaultBDRunner{}
 	return &Deps{
-		Git:    defaultGitRunner{},
-		Exec:   defaultExecRunner{},
-		FS:     defaultFileSystem{},
-		Logger: slog.Default(),
-		Clock:  time.Now,
-		BD:     defaultBDRunner{},
+		Git:     defaultGitRunner{},
+		Exec:    defaultExecRunner{},
+		FS:      defaultFileSystem{},
+		Logger:  slog.Default(),
+		Clock:   time.Now,
+		BD:      bd,
+		Tracker: newBDBackend(bd, GetBeadsDir()),
 	}
 }
 
@@ -109,6 +112,10 @@ func DefaultDeps() *Deps {
 // wrapper functions (RunGitCommand, fetchReadyIssues, etc.). Initialized to
 // DefaultDeps() so that production code works without explicit wiring.
 var defaultDeps = DefaultDeps()
+
+func init() {
+	setDefaultTracker(defaultDeps.Tracker)
+}
 
 // --- cobra context helpers ---
 
