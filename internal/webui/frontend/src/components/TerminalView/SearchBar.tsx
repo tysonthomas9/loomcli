@@ -70,9 +70,15 @@ export function SearchBar({
   };
 
   return (
-    <div className={styles.searchOverlay} data-testid="terminal-search-bar">
+    <div
+      className={styles.searchOverlay}
+      role="search"
+      aria-label="Search terminal output"
+      data-testid="terminal-search-bar"
+    >
       <input
         ref={inputRef}
+        id="terminal-search-input"
         type="text"
         className={styles.searchInput}
         value={value}

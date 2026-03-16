@@ -461,6 +461,17 @@ export const TerminalInstance = forwardRef<
         return false;
       }
 
+      // Cmd/Ctrl+1-9, Cmd/Ctrl+T, Cmd/Ctrl+W — suppress xterm processing
+      // so the events bubble to the document handler in TerminalView
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        (e.key === "t" || e.key === "w" || (e.key >= "1" && e.key <= "9"))
+      ) {
+        return false;
+      }
+
       return true;
     });
 
@@ -682,6 +693,7 @@ export const TerminalInstance = forwardRef<
       <div
         className={styles.container}
         ref={termRef}
+        role="application"
         data-testid="terminal-instance"
       />
       {showNewOutputPill && (

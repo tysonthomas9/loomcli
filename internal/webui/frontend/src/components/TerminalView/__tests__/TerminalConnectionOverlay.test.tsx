@@ -189,4 +189,129 @@ describe("TerminalConnectionOverlay", () => {
       expect(onReconnect).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("ARIA roles and live regions", () => {
+    it("connecting state overlay has role='status' and aria-live='polite'", () => {
+      render(
+        <TerminalConnectionOverlay
+          {...defaultProps}
+          connectionState="connecting"
+          hasConnected={false}
+        />,
+      );
+
+      const overlay = screen.getByTestId("terminal-connection-overlay");
+      expect(overlay).toHaveAttribute("role", "status");
+      expect(overlay).toHaveAttribute("aria-live", "polite");
+    });
+
+    it("error state overlay has role='alert'", () => {
+      render(
+        <TerminalConnectionOverlay {...defaultProps} connectionState="error" />,
+      );
+
+      const overlay = screen.getByTestId("terminal-connection-overlay");
+      expect(overlay).toHaveAttribute("role", "alert");
+    });
+
+    it("disconnected state overlay has role='alert'", () => {
+      render(
+        <TerminalConnectionOverlay
+          {...defaultProps}
+          connectionState="disconnected"
+        />,
+      );
+
+      const overlay = screen.getByTestId("terminal-connection-overlay");
+      expect(overlay).toHaveAttribute("role", "alert");
+    });
+
+    it("error state overlay does NOT have aria-live (implicit for role=alert)", () => {
+      render(
+        <TerminalConnectionOverlay {...defaultProps} connectionState="error" />,
+      );
+
+      const overlay = screen.getByTestId("terminal-connection-overlay");
+      expect(overlay).not.toHaveAttribute("aria-live");
+    });
+
+    it("disconnected state overlay does NOT have aria-live (implicit for role=alert)", () => {
+      render(
+        <TerminalConnectionOverlay
+          {...defaultProps}
+          connectionState="disconnected"
+        />,
+      );
+
+      const overlay = screen.getByTestId("terminal-connection-overlay");
+      expect(overlay).not.toHaveAttribute("aria-live");
+    });
+  });
+
+  describe("reconnect button accessibility", () => {
+    it("reconnect button in error state has aria-label='Reconnect to terminal'", () => {
+      render(
+        <TerminalConnectionOverlay {...defaultProps} connectionState="error" />,
+      );
+
+      const button = screen.getByTestId("terminal-reconnect-button");
+      expect(button).toHaveAttribute("aria-label", "Reconnect to terminal");
+    });
+
+    it("reconnect button in disconnected state has aria-label='Reconnect to terminal'", () => {
+      render(
+        <TerminalConnectionOverlay
+          {...defaultProps}
+          connectionState="disconnected"
+        />,
+      );
+
+      const button = screen.getByTestId("terminal-reconnect-button");
+      expect(button).toHaveAttribute("aria-label", "Reconnect to terminal");
+    });
+
+    it("reconnect button auto-focuses when entering error state", () => {
+      // jsdom doesn't implement layout, so offsetParent is always null.
+      // Mock it to simulate a visible element.
+      Object.defineProperty(HTMLButtonElement.prototype, "offsetParent", {
+        configurable: true,
+        get: () => document.body,
+      });
+
+      render(
+        <TerminalConnectionOverlay {...defaultProps} connectionState="error" />,
+      );
+
+      const button = screen.getByTestId("terminal-reconnect-button");
+      expect(document.activeElement).toBe(button);
+
+      // Restore default
+      Object.defineProperty(HTMLButtonElement.prototype, "offsetParent", {
+        configurable: true,
+        get: () => null,
+      });
+    });
+
+    it("reconnect button auto-focuses when entering disconnected state", () => {
+      Object.defineProperty(HTMLButtonElement.prototype, "offsetParent", {
+        configurable: true,
+        get: () => document.body,
+      });
+
+      render(
+        <TerminalConnectionOverlay
+          {...defaultProps}
+          connectionState="disconnected"
+        />,
+      );
+
+      const button = screen.getByTestId("terminal-reconnect-button");
+      expect(document.activeElement).toBe(button);
+
+      Object.defineProperty(HTMLButtonElement.prototype, "offsetParent", {
+        configurable: true,
+        get: () => null,
+      });
+    });
+  });
 });

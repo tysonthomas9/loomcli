@@ -4,6 +4,8 @@
  * connection status (spinner, disconnect message, error) with a reconnect button.
  */
 
+import { useEffect, useRef } from "react";
+
 import type { ConnectionState } from "./TerminalInstance";
 import styles from "./TerminalConnectionOverlay.module.css";
 
@@ -18,6 +20,20 @@ export function TerminalConnectionOverlay({
   hasConnected,
   onReconnect,
 }: TerminalConnectionOverlayProps): JSX.Element | null {
+  const reconnectButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Auto-focus reconnect button when entering error/disconnected state.
+  // Only focus if the button is visible (offsetParent is null for display:none ancestors,
+  // which is how inactive tabs are hidden — prevents stealing focus from the active tab).
+  useEffect(() => {
+    if (connectionState === "error" || connectionState === "disconnected") {
+      const btn = reconnectButtonRef.current;
+      if (btn && btn.offsetParent !== null) {
+        btn.focus();
+      }
+    }
+  }, [connectionState]);
+
   if (connectionState === "connected" || connectionState === "crashed")
     return null;
 
@@ -28,6 +44,8 @@ export function TerminalConnectionOverlay({
     return (
       <div
         className={`${styles.overlay} ${styles.backdrop}`}
+        role="status"
+        aria-live="polite"
         data-testid="terminal-connection-overlay"
       >
         <div className={styles.content}>
@@ -42,14 +60,17 @@ export function TerminalConnectionOverlay({
     return (
       <div
         className={`${styles.overlay} ${styles.errorBackdrop}`}
+        role="alert"
         data-testid="terminal-connection-overlay"
       >
         <div className={styles.content}>
           <div className={styles.message}>Connection failed</div>
           <button
+            ref={reconnectButtonRef}
             type="button"
             className={styles.reconnectButton}
             onClick={onReconnect}
+            aria-label="Reconnect to terminal"
             data-testid="terminal-reconnect-button"
           >
             Reconnect
@@ -63,14 +84,17 @@ export function TerminalConnectionOverlay({
   return (
     <div
       className={`${styles.overlay} ${styles.backdrop}`}
+      role="alert"
       data-testid="terminal-connection-overlay"
     >
       <div className={styles.content}>
         <div className={styles.message}>Disconnected</div>
         <button
+          ref={reconnectButtonRef}
           type="button"
           className={styles.reconnectButton}
           onClick={onReconnect}
+          aria-label="Reconnect to terminal"
           data-testid="terminal-reconnect-button"
         >
           Reconnect

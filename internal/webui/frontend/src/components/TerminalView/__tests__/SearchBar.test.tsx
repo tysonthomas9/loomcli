@@ -173,4 +173,35 @@ describe("SearchBar", () => {
     fireEvent.click(screen.getByLabelText("Close search"));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  describe("accessibility attributes", () => {
+    it("container has role='search'", () => {
+      render(<SearchBar {...defaultProps} />);
+
+      const container = screen.getByTestId("terminal-search-bar");
+      expect(container).toHaveAttribute("role", "search");
+    });
+
+    it("container has aria-label='Search terminal output'", () => {
+      render(<SearchBar {...defaultProps} />);
+
+      const container = screen.getByTestId("terminal-search-bar");
+      expect(container).toHaveAttribute("aria-label", "Search terminal output");
+    });
+
+    it("input has id='terminal-search-input'", () => {
+      render(<SearchBar {...defaultProps} />);
+
+      const input = screen.getByTestId("terminal-search-input");
+      expect(input).toHaveAttribute("id", "terminal-search-input");
+    });
+
+    it("input element is accessible via getElementById", () => {
+      render(<SearchBar {...defaultProps} />);
+
+      const input = document.getElementById("terminal-search-input");
+      expect(input).toBeInstanceOf(HTMLInputElement);
+      expect(input).toHaveAttribute("type", "text");
+    });
+  });
 });

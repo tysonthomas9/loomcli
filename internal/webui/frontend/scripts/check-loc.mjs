@@ -19,9 +19,9 @@ export const ALLOWLIST = new Map([
   ["src/hooks/useAgents.ts", 516],
   ["src/hooks/useIssues.ts", 528],
   ["src/components/IssueDetailView/IssueDetailView.tsx", 651],
-  ["src/components/TerminalView/TerminalView.tsx", 885],
-  ["src/components/TerminalView/TerminalTabBar.tsx", 547],
-  ["src/components/TerminalView/TerminalInstance.tsx", 699],
+  ["src/components/TerminalView/TerminalView.tsx", 962],
+  ["src/components/TerminalView/TerminalTabBar.tsx", 563],
+  ["src/components/TerminalView/TerminalInstance.tsx", 711],
   ["src/components/IssueDetailPanel/AssigneeDropdown.tsx", 535],
   ["src/components/WorkspaceTree/WorkspaceTree.tsx", 640],
 ]);

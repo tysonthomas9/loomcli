@@ -1264,4 +1264,118 @@ describe("TerminalTabBar", () => {
       );
     });
   });
+
+  describe("keyboard: Delete/Backspace closes tab", () => {
+    it("Delete key on tablist calls onTabClose with active tab id", () => {
+      const onTabClose = vi.fn();
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          activeTabId="tab-2"
+          onTabClose={onTabClose}
+        />,
+      );
+
+      const tablist = screen.getByRole("tablist");
+      fireEvent.keyDown(tablist, { key: "Delete" });
+
+      expect(onTabClose).toHaveBeenCalledTimes(1);
+      expect(onTabClose).toHaveBeenCalledWith("tab-2");
+    });
+
+    it("Backspace key on tablist calls onTabClose with active tab id", () => {
+      const onTabClose = vi.fn();
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          activeTabId="tab-3"
+          onTabClose={onTabClose}
+        />,
+      );
+
+      const tablist = screen.getByRole("tablist");
+      fireEvent.keyDown(tablist, { key: "Backspace" });
+
+      expect(onTabClose).toHaveBeenCalledTimes(1);
+      expect(onTabClose).toHaveBeenCalledWith("tab-3");
+    });
+
+    it("Delete does NOT close when only one tab remains", () => {
+      const onTabClose = vi.fn();
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          tabs={makeTabs(1)}
+          activeTabId="tab-1"
+          onTabClose={onTabClose}
+        />,
+      );
+
+      const tablist = screen.getByRole("tablist");
+      fireEvent.keyDown(tablist, { key: "Delete" });
+
+      expect(onTabClose).not.toHaveBeenCalled();
+    });
+
+    it("Backspace does NOT close when only one tab remains", () => {
+      const onTabClose = vi.fn();
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          tabs={makeTabs(1)}
+          activeTabId="tab-1"
+          onTabClose={onTabClose}
+        />,
+      );
+
+      const tablist = screen.getByRole("tablist");
+      fireEvent.keyDown(tablist, { key: "Backspace" });
+
+      expect(onTabClose).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("accessibility: aria-keyshortcuts and id attributes", () => {
+    it("tablist has aria-keyshortcuts attribute listing keyboard shortcuts", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      const shortcuts = tablist.getAttribute("aria-keyshortcuts");
+      expect(shortcuts).toBeTruthy();
+      expect(shortcuts).toContain("Meta+1");
+      expect(shortcuts).toContain("Meta+9");
+      expect(shortcuts).toContain("Meta+T");
+      expect(shortcuts).toContain("Meta+W");
+    });
+
+    it("each tab element has an id attribute of terminal-tab-{id}", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tabs = screen.getAllByRole("tab");
+      expect(tabs[0]).toHaveAttribute("id", "terminal-tab-tab-1");
+      expect(tabs[1]).toHaveAttribute("id", "terminal-tab-tab-2");
+      expect(tabs[2]).toHaveAttribute("id", "terminal-tab-tab-3");
+    });
+  });
+
+  describe("forwardRef support", () => {
+    it("forwards ref to the outer container div", () => {
+      const ref = { current: null as HTMLDivElement | null };
+      render(<TerminalTabBar ref={ref} {...defaultProps} />);
+
+      expect(ref.current).toBeInstanceOf(HTMLDivElement);
+      expect(ref.current).toBe(screen.getByTestId("terminal-tab-bar"));
+    });
+
+    it("callback ref receives the outer container element", () => {
+      let refValue: HTMLDivElement | null = null;
+      const callbackRef = (el: HTMLDivElement | null) => {
+        refValue = el;
+      };
+      render(<TerminalTabBar ref={callbackRef} {...defaultProps} />);
+
+      expect(refValue).toBeInstanceOf(HTMLDivElement);
+      expect(refValue).toBe(screen.getByTestId("terminal-tab-bar"));
+    });
+  });
 });

@@ -133,6 +133,12 @@ export function TerminalView({
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
 
+  // ARIA live region for screen reader announcements (useRef avoids re-renders)
+  const liveRegionRef = useRef<HTMLDivElement>(null);
+  const announce = useCallback((msg: string) => {
+    if (liveRegionRef.current) liveRegionRef.current.textContent = msg;
+  }, []);
+
   const {
     showCopyToast,
     pendingPasteText,
@@ -350,6 +356,58 @@ export function TerminalView({
         return;
       }
 
+      // Cmd/Ctrl+1-9: switch tabs by index
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key >= "1" &&
+        e.key <= "9"
+      ) {
+        e.preventDefault();
+        const index = parseInt(e.key) - 1;
+        const currentTabs = tabsRef.current;
+        const targetTab = currentTabs[index];
+        if (targetTab) {
+          handleTabChangeRef.current(targetTab.id);
+          announce(`Switched to tab ${targetTab.label}`);
+        }
+        return;
+      }
+
+      // Cmd/Ctrl+T: new tab
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key === "t"
+      ) {
+        e.preventDefault();
+        if (tabsRef.current.length < MAX_TABS) {
+          setIsSessionPromptOpen(true);
+        }
+        return;
+      }
+
+      // Cmd/Ctrl+W: close active tab
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key === "w"
+      ) {
+        e.preventDefault();
+        const currentTabs = tabsRef.current;
+        if (currentTabs.length > 1) {
+          const closedTab = currentTabs.find(
+            (t) => t.id === activeTabIdRef.current,
+          );
+          handleTabCloseRef.current(activeTabIdRef.current);
+          if (closedTab) announce(`Tab ${closedTab.label} closed`);
+        }
+        return;
+      }
+
       // Cmd+F / Ctrl+F: toggle search
       if ((e.metaKey || e.ctrlKey) && e.key === "f") {
         e.preventDefault();
@@ -358,7 +416,14 @@ export function TerminalView({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [isActive, isSearchOpen, isSessionPromptOpen, pendingPasteText, onEscape]);
+  }, [
+    isActive,
+    isSearchOpen,
+    isSessionPromptOpen,
+    pendingPasteText,
+    onEscape,
+    announce,
+  ]);
 
   // The tab targeted by search: in split mode, use the focused pane's tab
   const searchTargetTabId =
@@ -454,6 +519,9 @@ export function TerminalView({
       return next;
     });
   }, []);
+  // Stable ref for handleTabChange — avoids forward-reference issue in keydown effect
+  const handleTabChangeRef = useRef(handleTabChange);
+  handleTabChangeRef.current = handleTabChange;
 
   const { handleTabClose, handleDuplicateTab, handleTabRename } = useTabActions(
     {
@@ -467,6 +535,9 @@ export function TerminalView({
       deleteTab,
     },
   );
+  // Stable ref for handleTabClose — avoids adding it to keydown effect deps
+  const handleTabCloseRef = useRef(handleTabClose);
+  handleTabCloseRef.current = handleTabClose;
 
   const handleNewTabClick = useCallback(() => {
     if (tabs.length >= MAX_TABS) return;
@@ -491,8 +562,9 @@ export function TerminalView({
         },
       ]);
       setActiveTabId(name);
+      announce(`New tab ${name} created`);
     },
-    [tabs],
+    [tabs, announce],
   );
 
   const handleSessionPromptCancel = useCallback(() => {
@@ -878,6 +950,13 @@ export function TerminalView({
           onClose={handleContextMenuClose}
         />
       )}
+      <div
+        ref={liveRegionRef}
+        className={styles.visuallyHidden}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      />
     </div>
   );
 }
