@@ -794,6 +794,89 @@ func TestCreateSingleWorktree_RetryFails(t *testing.T) {
 	}
 }
 
+func TestResolveIssueBackendBinary(t *testing.T) {
+	t.Run("fleet-db active returns fleet-db", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		got := ResolveIssueBackendBinary()
+		if got != "fleet-db" {
+			t.Errorf("ResolveIssueBackendBinary() = %q, want %q", got, "fleet-db")
+		}
+	})
+
+	t.Run("fleet-db not active returns bd", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		got := ResolveIssueBackendBinary()
+		if got != "bd" {
+			t.Errorf("ResolveIssueBackendBinary() = %q, want %q", got, "bd")
+		}
+	})
+}
+
+func TestCheckPrerequisites_FleetDB(t *testing.T) {
+	t.Run("fleet-db binary found", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		oldLookPath := lookPath
+		defer func() { lookPath = oldLookPath }()
+		lookPath = func(name string) (string, error) {
+			if name == "fleet-db" {
+				return "/usr/bin/fleet-db", nil
+			}
+			return "", errors.New("not found")
+		}
+
+		mock := NewCommandMock(t, []CommandStub{
+			{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
+			{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: ".git"},
+			{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: ".git"},
+		})
+		mock.Install()
+
+		result := checkPrerequisites()
+		if !result {
+			t.Error("checkPrerequisites() should return true when fleet-db binary found")
+		}
+	})
+
+	t.Run("fleet-db binary not found", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+		oldLookPath := lookPath
+		defer func() { lookPath = oldLookPath }()
+		lookPath = func(string) (string, error) {
+			return "", errors.New("not found")
+		}
+
+		mock := NewCommandMock(t, []CommandStub{
+			{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},
+			{Name: "git", Args: []string{"rev-parse", "--git-common-dir"}, Stdout: ".git"},
+			{Name: "git", Args: []string{"rev-parse", "--git-dir"}, Stdout: ".git"},
+		})
+		mock.Install()
+
+		result := checkPrerequisites()
+		if result {
+			t.Error("checkPrerequisites() should return false when fleet-db binary not found")
+		}
+	})
+}
+
+func TestInitBeads_FleetDBActive(t *testing.T) {
+	t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	result := initBeads()
+	if !result {
+		t.Error("initBeads() should return true when fleet-db is active (skips beads)")
+	}
+}
+
 func TestCheckPrerequisites_InsideWorktree(t *testing.T) {
 	mock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, Stdout: "true"},

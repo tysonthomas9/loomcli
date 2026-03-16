@@ -172,13 +172,15 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Auto-start bd daemon if needed (unless --no-daemon)
 	var daemonWeStarted bool
 	if !serveNoDaemon {
-		started, err := EnsureBdDaemonRunning(5 * time.Second)
+		started, err := EnsureIssueBackendRunning(5 * time.Second)
 		if err != nil {
 			log.Printf("Warning: failed to auto-start bd daemon: %v", err)
 			log.Printf("Some API endpoints may return incomplete data. Run 'bd daemon start' manually.")
 		} else if started {
 			daemonWeStarted = true
 			log.Printf("Auto-started bd daemon")
+		} else if isFleetDBActive() {
+			log.Printf("fleet-db is active backend; bd daemon not started")
 		} else {
 			log.Printf("bd daemon already running")
 		}

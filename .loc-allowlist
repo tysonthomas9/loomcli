@@ -10,9 +10,9 @@
 635 internal/cli/push.go
 631 internal/cli/automode_tmux.go
 593 internal/rpc/client.go
-593 internal/cli/init.go
+665 internal/cli/init.go
 574 internal/cli/daemon_cmd.go
 517 internal/types/issue.go
-667 internal/cli/doctor.go
+756 internal/cli/doctor.go
 516 internal/cli/recover.go
 516 internal/webui/handlers_issues_write.go
