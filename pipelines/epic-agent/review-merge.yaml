@@ -1,0 +1,37 @@
+name: review-merge
+description: Post-merge integration code review with fix loop
+
+shared_context_file: layer-context.txt
+
+eval_loop:
+  gate: verify
+  fix_steps:
+    - fix-merge
+  max_passes: 2
+
+steps:
+  - id: review
+    type: prompt
+    prompt: prompts/review-merge.md
+    context: compact
+    goal_gate: true
+
+  - id: fix-merge
+    type: prompt
+    prompt: prompts/fix-merge.md
+    context: full
+    after:
+      - review
+    when: failed
+
+  - id: verify
+    type: shell
+    command: |
+      echo "==> Running integration gate"
+      make gate 2>&1
+      EXIT_STATUS=$?
+      echo "EXIT_CODE=$EXIT_STATUS"
+    goal_gate: true
+    after:
+      - review
+    when: passed
