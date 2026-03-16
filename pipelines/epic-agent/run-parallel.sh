@@ -169,7 +169,7 @@ for layer_idx in $(seq 0 $((NUM_LAYERS - 1))); do
 
   STASHED=false
   if ! git -C "$REPO_ROOT" diff --quiet 2>/dev/null || ! git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
-    git -C "$REPO_ROOT" stash push -m "parallel-merge-layer-$layer_idx" --include-untracked 2>/dev/null || true
+    git -C "$REPO_ROOT" stash push -m "parallel-merge-layer-$layer_idx" 2>/dev/null || true
     STASHED=true
     log "Stashed uncommitted changes"
   fi
