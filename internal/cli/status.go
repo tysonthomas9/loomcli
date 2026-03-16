@@ -128,7 +128,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		defer wg.Done()
-		monData = collectMonitorData(100, statusBranch)
+		monData = collectMonitorData(context.Background(), defaultTracker(), 100, statusBranch)
 	}()
 
 	wg.Wait()
