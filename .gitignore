@@ -30,3 +30,4 @@ loom.yaml
 # Local worktrees
 worktrees/
 .agentflow-worktrees/
+.agentflow-runs/
