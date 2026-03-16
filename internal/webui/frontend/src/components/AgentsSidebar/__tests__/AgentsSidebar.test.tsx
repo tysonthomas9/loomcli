@@ -7,8 +7,8 @@
  * Focuses on the viewSwitcher slot behavior and sync status rendering.
  */
 
-import { render, screen, fireEvent, within } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import "@testing-library/jest-dom";
 import type { LoomAgentStatus } from "@/types";
@@ -992,6 +992,152 @@ describe("AgentsSidebar", () => {
       expect(stored).toBeTruthy();
       const parsed = JSON.parse(stored!);
       expect(parsed["backend"]).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Responsive layout breakpoint (auto-collapse at <1024px)
+  // ---------------------------------------------------------------------------
+
+  describe("responsive layout breakpoint", () => {
+    let originalMatchMedia: typeof window.matchMedia;
+
+    // Helper to create a mock matchMedia for the max-width:1024px query
+    function createMockMatchMedia(matches: boolean) {
+      const listeners: Array<(e: MediaQueryListEvent) => void> = [];
+      const mql = {
+        matches,
+        media: "(max-width: 1024px)",
+        addEventListener: vi.fn(
+          (_event: string, handler: (e: MediaQueryListEvent) => void) => {
+            listeners.push(handler);
+          },
+        ),
+        removeEventListener: vi.fn(
+          (_event: string, handler: (e: MediaQueryListEvent) => void) => {
+            const idx = listeners.indexOf(handler);
+            if (idx >= 0) listeners.splice(idx, 1);
+          },
+        ),
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      };
+      const matchMediaMock = vi.fn(() => mql);
+      return { matchMediaMock, mql, listeners };
+    }
+
+    beforeEach(() => {
+      originalMatchMedia = window.matchMedia;
+    });
+
+    afterEach(() => {
+      window.matchMedia = originalMatchMedia;
+    });
+
+    it("auto-collapses the sidebar when viewport is below 1024px on mount", () => {
+      const { matchMediaMock } = createMockMatchMedia(true);
+      window.matchMedia = matchMediaMock as unknown as typeof window.matchMedia;
+
+      render(
+        <AgentsSidebar
+          viewSwitcher={<div data-testid="sidebar-content">Content</div>}
+        />,
+      );
+
+      // Sidebar should be collapsed — viewSwitcher hidden when collapsed
+      expect(screen.queryByTestId("sidebar-content")).not.toBeInTheDocument();
+
+      // The expand button should be visible (collapsed state)
+      expect(
+        screen.getByRole("button", { name: /expand agents sidebar/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not auto-collapse when viewport is at or above 1024px on mount", () => {
+      const { matchMediaMock } = createMockMatchMedia(false);
+      window.matchMedia = matchMediaMock as unknown as typeof window.matchMedia;
+
+      render(
+        <AgentsSidebar
+          viewSwitcher={<div data-testid="sidebar-content">Content</div>}
+        />,
+      );
+
+      // Sidebar should remain expanded — viewSwitcher visible
+      expect(screen.getByTestId("sidebar-content")).toBeInTheDocument();
+
+      // The collapse button should be visible (expanded state)
+      expect(
+        screen.getByRole("button", { name: /collapse agents sidebar/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("collapses when matchMedia change event fires with matches=true", () => {
+      const { matchMediaMock, listeners } = createMockMatchMedia(false);
+      window.matchMedia = matchMediaMock as unknown as typeof window.matchMedia;
+
+      render(
+        <AgentsSidebar
+          viewSwitcher={<div data-testid="sidebar-content">Content</div>}
+        />,
+      );
+
+      // Initially expanded
+      expect(screen.getByTestId("sidebar-content")).toBeInTheDocument();
+
+      // Simulate viewport shrinking below 1024px
+      act(() => {
+        for (const listener of listeners) {
+          listener({ matches: true } as MediaQueryListEvent);
+        }
+      });
+
+      // Sidebar should now be collapsed
+      expect(screen.queryByTestId("sidebar-content")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /expand agents sidebar/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("registers and cleans up the matchMedia event listener", () => {
+      const { matchMediaMock, mql } = createMockMatchMedia(false);
+      window.matchMedia = matchMediaMock as unknown as typeof window.matchMedia;
+
+      const { unmount } = render(<AgentsSidebar />);
+
+      // addEventListener should have been called with "change"
+      expect(mql.addEventListener).toHaveBeenCalledWith(
+        "change",
+        expect.any(Function),
+      );
+
+      unmount();
+
+      // removeEventListener should have been called on cleanup
+      expect(mql.removeEventListener).toHaveBeenCalledWith(
+        "change",
+        expect.any(Function),
+      );
+    });
+
+    it("does not crash when matchMedia is not available", () => {
+      // Remove matchMedia entirely to simulate environments without it
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).matchMedia = undefined;
+
+      // Should not throw
+      expect(() => {
+        render(
+          <AgentsSidebar
+            viewSwitcher={<div data-testid="sidebar-content">Content</div>}
+          />,
+        );
+      }).not.toThrow();
+
+      // Sidebar should render normally (expanded by default)
+      expect(screen.getByTestId("sidebar-content")).toBeInTheDocument();
     });
   });
 });

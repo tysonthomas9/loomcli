@@ -131,3 +131,35 @@
     transform: scale(1);
   }
 }
+
+/* Responsive: bottom tab bar on mobile */
+@media (width <= 768px) {
+  .navRail {
+    flex-direction: row;
+    width: 100%;
+    min-width: unset;
+    height: var(--nav-bottom-height);
+    padding: 0 var(--space-2);
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: var(--z-sticky);
+    border-right: none;
+    border-top: 1px solid var(--color-border);
+    justify-content: space-around;
+  }
+
+  .navButton {
+    width: var(--touch-target-min);
+    height: var(--touch-target-min);
+  }
+
+  .spacer {
+    display: none;
+  }
+
+  .tooltip {
+    display: none;
+  }
+}

@@ -794,7 +794,14 @@
   white-space: pre-wrap;
 }
 
-/* ============= Responsive: Tab Bar Scroll Indicators ============= */
+/* ============= Responsive: Mobile overlay & touch targets ============= */
+
+@media (width <= 768px) {
+  .panel {
+    width: 100%;
+    bottom: var(--nav-bottom-height);
+  }
+}
 
 @media (width <= 768px) {
   .tabBarWrapper {

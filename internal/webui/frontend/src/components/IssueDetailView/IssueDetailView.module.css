@@ -469,6 +469,16 @@
 /* ============= Responsive: Mobile (768px) ============= */
 
 @media (width <= 768px) {
+  .container {
+    position: fixed;
+    top: var(--unified-header-height);
+    left: 0;
+    right: 0;
+    bottom: var(--nav-bottom-height);
+    z-index: var(--z-overlay);
+    background: var(--color-panel-bg);
+  }
+
   .headerBar {
     flex-wrap: wrap;
     gap: 8px;

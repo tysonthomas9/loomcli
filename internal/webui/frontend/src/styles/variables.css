@@ -235,6 +235,8 @@
   --breakpoint-mobile: 768px;
   --breakpoint-small: 520px;
   --touch-target-min: 44px;
+  --nav-bottom-height: 56px;
+  --sidebar-icon-width: 52px;
 }
 
 /* ===========================

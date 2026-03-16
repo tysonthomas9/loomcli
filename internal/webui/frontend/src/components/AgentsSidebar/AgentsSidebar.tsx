@@ -145,6 +145,18 @@ export function AgentsSidebar({
     }
   }, [isWorkQueueExpanded]);
 
+  // Auto-collapse at <1024px viewport width
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia("(max-width: 1024px)");
+    if (mql.matches) setIsCollapsed(true);
+    const onChange = (e: MediaQueryListEvent) => {
+      if (e.matches) setIsCollapsed(true);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
   const handleToggle = useCallback(() => {
     if (!collapsible) return;
     setIsCollapsed((prev) => !prev);

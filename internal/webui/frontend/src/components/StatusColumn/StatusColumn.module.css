@@ -236,3 +236,12 @@
 .statusColumn[data-column-type="backlog"] .count {
   background-color: var(--color-bg-active);
 }
+
+/* Responsive: fixed-width columns for horizontal scrolling on mobile */
+@media (width <= 768px) {
+  .statusColumn {
+    min-width: 260px;
+    flex: 0 0 260px;
+    scroll-snap-align: start;
+  }
+}

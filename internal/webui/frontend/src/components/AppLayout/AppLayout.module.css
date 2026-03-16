@@ -96,6 +96,13 @@
   }
 }
 
+/* Responsive: mobile layout — bottom nav padding */
+@media (width <= 768px) {
+  .contentWrapper {
+    padding-bottom: var(--nav-bottom-height);
+  }
+}
+
 /* Responsive: mobile adjustments */
 @media (width <= 640px) {
   .headerContent {
