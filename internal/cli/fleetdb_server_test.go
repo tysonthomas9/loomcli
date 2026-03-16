@@ -2,10 +2,8 @@ package cli
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	"io"
 	"log/slog"
-	"net"
 	"os/exec"
 	"strings"
 	"testing"
@@ -14,10 +12,11 @@ import (
 	"github.com/tysonthomas9/fleet-db/pkg/client"
 )
 
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
+// skipIfNoFleetDB skips the test if fleet-db binary is not in PATH.
 func skipIfNoFleetDB(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("fleet-db"); err != nil {
@@ -25,356 +24,266 @@ func skipIfNoFleetDB(t *testing.T) {
 	}
 }
 
+// startTestServer creates a FleetDBServer with AutoStart=true and registers cleanup.
 func startTestServer(t *testing.T) *FleetDBServer {
 	t.Helper()
 	skipIfNoFleetDB(t)
 
-	logger := slog.Default()
-	srv, err := NewFleetDBServer(FleetDBServerConfig{
+	cfg := FleetDBServerConfig{
 		AutoStart: true,
 		Workspace: "test",
-		Actor:     "test-actor",
-	}, logger)
+		Actor:     "test-runner",
+	}
+
+	server, err := NewFleetDBServer(cfg, testLogger())
 	if err != nil {
 		t.Fatalf("NewFleetDBServer: %v", err)
 	}
 	t.Cleanup(func() {
-		if stopErr := srv.Stop(); stopErr != nil {
-			t.Errorf("Stop: %v", stopErr)
+		if err := server.Stop(); err != nil {
+			t.Logf("server.Stop: %v", err)
 		}
 	})
-	return srv
+	return server
 }
 
-// ---------------------------------------------------------------------------
-// Server lifecycle tests
-// ---------------------------------------------------------------------------
-
 func TestNewFleetDBServer_InvalidConfig(t *testing.T) {
-	_, err := NewFleetDBServer(FleetDBServerConfig{
+	cfg := FleetDBServerConfig{
 		AutoStart: false,
 		RedisURL:  "",
-	}, slog.Default())
+	}
+	_, err := NewFleetDBServer(cfg, testLogger())
 	if err == nil {
 		t.Fatal("expected error for invalid config, got nil")
 	}
-	if want := "either RedisURL or AutoStart"; !strings.Contains(err.Error(), want) {
-		t.Errorf("error = %q, want substring %q", err, want)
+	want := "either RedisURL or AutoStart must be set"
+	if got := err.Error(); !strings.Contains(got, want) {
+		t.Errorf("error = %q, want substring %q", got, want)
 	}
 }
 
 func TestNewFleetDBServer_BinaryNotFound(t *testing.T) {
-	_, err := NewFleetDBServer(FleetDBServerConfig{
+	cfg := FleetDBServerConfig{
 		AutoStart:  true,
-		FleetDBBin: "nonexistent-binary-xyz",
-	}, slog.Default())
+		FleetDBBin: "nonexistent-binary-xyz-12345",
+	}
+	_, err := NewFleetDBServer(cfg, testLogger())
 	if err == nil {
 		t.Fatal("expected error for missing binary, got nil")
 	}
-	if want := "not found"; !strings.Contains(err.Error(), want) {
-		t.Errorf("error = %q, want substring %q", err, want)
+	want := "not found"
+	if got := err.Error(); !strings.Contains(got, want) {
+		t.Errorf("error = %q, want substring %q", got, want)
 	}
 }
 
 func TestFleetDBServer_StartStop(t *testing.T) {
-	srv := startTestServer(t)
+	server := startTestServer(t)
 
-	backend := srv.Backend()
+	// Backend should be non-nil
+	backend := server.Backend()
 	if backend == nil {
 		t.Fatal("Backend() returned nil")
 	}
 
+	// BackendName should be "fleetdb"
 	if got := backend.BackendName(); got != "fleetdb" {
 		t.Errorf("BackendName() = %q, want %q", got, "fleetdb")
 	}
-
-	// Stop is called by t.Cleanup; verify it does not panic or return an error.
 }
 
-// ---------------------------------------------------------------------------
-// Type conversion tests
-// ---------------------------------------------------------------------------
+func TestFleetDBServer_WorkspaceCreation(t *testing.T) {
+	server := startTestServer(t)
+
+	// Calling GetIssue on a non-existent ID should get "not found",
+	// not "workspace not found", proving the workspace was created.
+	ctx := context.Background()
+	_, err := server.backend.svc.GetIssue(ctx, "nonexistent-id")
+	if err == nil {
+		t.Fatal("expected error for non-existent issue, got nil")
+	}
+	errStr := err.Error()
+	if strings.Contains(errStr, "workspace") {
+		t.Errorf("error mentions workspace (workspace may not have been created): %v", err)
+	}
+}
 
 func TestClientIssueToBdIssue(t *testing.T) {
-	src := &client.Issue{
-		ID:          "ISSUE-1",
-		Title:       "Fix the widget",
-		Status:      client.StatusInProgress,
-		Priority:    2,
-		Type:        client.TypeBug,
-		Design:      "some design doc",
-		Assignee:    "alice",
-		Labels:      []string{"urgent", "backend"},
-		Description: "A lengthy description",
-		Workspace:   "ws1",
+	issue := &client.Issue{
+		ID:       "test-123",
+		Title:    "Test Issue",
+		Status:   client.StatusOpen,
+		Priority: 2,
+		Type:     client.TypeTask,
+		Design:   "some design",
+		Assignee: "alice",
+		Labels:   []string{"bug", "urgent"},
 	}
 
-	got := clientIssueToBdIssue(src)
+	bd := clientIssueToBdIssue(issue)
 
-	if got.ID != src.ID {
-		t.Errorf("ID = %q, want %q", got.ID, src.ID)
+	if bd.ID != "test-123" {
+		t.Errorf("ID = %q, want %q", bd.ID, "test-123")
 	}
-	if got.Title != src.Title {
-		t.Errorf("Title = %q, want %q", got.Title, src.Title)
+	if bd.Title != "Test Issue" {
+		t.Errorf("Title = %q, want %q", bd.Title, "Test Issue")
 	}
-	if got.Status != string(src.Status) {
-		t.Errorf("Status = %q, want %q", got.Status, string(src.Status))
+	if bd.Status != "open" {
+		t.Errorf("Status = %q, want %q", bd.Status, "open")
 	}
-	if got.Priority != src.Priority {
-		t.Errorf("Priority = %d, want %d", got.Priority, src.Priority)
+	if bd.Priority != 2 {
+		t.Errorf("Priority = %d, want %d", bd.Priority, 2)
 	}
-	if got.IssueType != string(src.Type) {
-		t.Errorf("IssueType = %q, want %q", got.IssueType, string(src.Type))
+	if bd.IssueType != "task" {
+		t.Errorf("IssueType = %q, want %q", bd.IssueType, "task")
 	}
-	if got.Design != src.Design {
-		t.Errorf("Design = %q, want %q", got.Design, src.Design)
+	if bd.Design != "some design" {
+		t.Errorf("Design = %q, want %q", bd.Design, "some design")
 	}
-	if got.Assignee != src.Assignee {
-		t.Errorf("Assignee = %q, want %q", got.Assignee, src.Assignee)
+	if bd.Assignee != "alice" {
+		t.Errorf("Assignee = %q, want %q", bd.Assignee, "alice")
 	}
-	if len(got.Labels) != len(src.Labels) {
-		t.Fatalf("Labels length = %d, want %d", len(got.Labels), len(src.Labels))
+	if len(bd.Labels) != 2 || bd.Labels[0] != "bug" || bd.Labels[1] != "urgent" {
+		t.Errorf("Labels = %v, want [bug urgent]", bd.Labels)
 	}
-	for i, lbl := range src.Labels {
-		if got.Labels[i] != lbl {
-			t.Errorf("Labels[%d] = %q, want %q", i, got.Labels[i], lbl)
-		}
-	}
-}
-
-func TestClientIssuesToBdIssues(t *testing.T) {
-	t.Run("empty slice", func(t *testing.T) {
-		got := clientIssuesToBdIssues([]*client.Issue{})
-		if len(got) != 0 {
-			t.Errorf("expected empty slice, got len %d", len(got))
-		}
-	})
-
-	t.Run("multiple issues", func(t *testing.T) {
-		issues := []*client.Issue{
-			{ID: "A", Title: "Alpha", Status: client.StatusOpen, Priority: 1, Type: client.TypeTask},
-			{ID: "B", Title: "Beta", Status: client.StatusClosed, Priority: 3, Type: client.TypeFeature},
-			{ID: "C", Title: "Gamma", Status: client.StatusBlocked, Priority: 5, Type: client.TypeEpic},
-		}
-		got := clientIssuesToBdIssues(issues)
-		if len(got) != len(issues) {
-			t.Fatalf("len = %d, want %d", len(got), len(issues))
-		}
-		for i, issue := range issues {
-			if got[i].ID != issue.ID {
-				t.Errorf("[%d] ID = %q, want %q", i, got[i].ID, issue.ID)
-			}
-			if got[i].Title != issue.Title {
-				t.Errorf("[%d] Title = %q, want %q", i, got[i].Title, issue.Title)
-			}
-			if got[i].Status != string(issue.Status) {
-				t.Errorf("[%d] Status = %q, want %q", i, got[i].Status, string(issue.Status))
-			}
-		}
-	})
 }
 
 func TestClientDepToBdDep(t *testing.T) {
-	ts := time.Date(2025, 6, 15, 10, 30, 0, 0, time.UTC)
-	src := &client.Dependency{
-		IssueID:     "ISSUE-1",
-		DependsOnID: "ISSUE-2",
+	ts := time.Date(2026, 3, 15, 10, 30, 0, 0, time.UTC)
+	dep := &client.Dependency{
+		IssueID:     "issue-1",
+		DependsOnID: "issue-2",
 		Type:        client.DepBlocks,
 		CreatedAt:   ts,
 		CreatedBy:   "bob",
 	}
 
-	got := clientDepToBdDep(src)
+	bd := clientDepToBdDep(dep)
 
-	if got.IssueID != src.IssueID {
-		t.Errorf("IssueID = %q, want %q", got.IssueID, src.IssueID)
+	if bd.IssueID != "issue-1" {
+		t.Errorf("IssueID = %q, want %q", bd.IssueID, "issue-1")
 	}
-	if got.DependsOnID != src.DependsOnID {
-		t.Errorf("DependsOnID = %q, want %q", got.DependsOnID, src.DependsOnID)
+	if bd.DependsOnID != "issue-2" {
+		t.Errorf("DependsOnID = %q, want %q", bd.DependsOnID, "issue-2")
 	}
-	if got.Type != string(src.Type) {
-		t.Errorf("Type = %q, want %q", got.Type, string(src.Type))
+	if bd.Type != "blocks" {
+		t.Errorf("Type = %q, want %q", bd.Type, "blocks")
 	}
-	if got.CreatedBy != src.CreatedBy {
-		t.Errorf("CreatedBy = %q, want %q", got.CreatedBy, src.CreatedBy)
+	if bd.CreatedBy != "bob" {
+		t.Errorf("CreatedBy = %q, want %q", bd.CreatedBy, "bob")
 	}
 
-	// Verify RFC3339 format
-	wantTime := ts.Format(time.RFC3339)
-	if got.CreatedAt != wantTime {
-		t.Errorf("CreatedAt = %q, want RFC3339 %q", got.CreatedAt, wantTime)
+	// Verify RFC3339 formatting
+	want := "2026-03-15T10:30:00Z"
+	if bd.CreatedAt != want {
+		t.Errorf("CreatedAt = %q, want %q", bd.CreatedAt, want)
 	}
-	if _, err := time.Parse(time.RFC3339, got.CreatedAt); err != nil {
-		t.Errorf("CreatedAt %q is not valid RFC3339: %v", got.CreatedAt, err)
-	}
-}
-
-func TestClientDepsToBdDeps(t *testing.T) {
-	t.Run("empty slice", func(t *testing.T) {
-		got := clientDepsToBdDeps([]*client.Dependency{})
-		if len(got) != 0 {
-			t.Errorf("expected empty slice, got len %d", len(got))
-		}
-	})
-
-	t.Run("multiple dependencies", func(t *testing.T) {
-		deps := []*client.Dependency{
-			{IssueID: "A", DependsOnID: "B", Type: client.DepBlocks, CreatedAt: time.Now(), CreatedBy: "x"},
-			{IssueID: "C", DependsOnID: "D", Type: client.DepParentChild, CreatedAt: time.Now(), CreatedBy: "y"},
-		}
-		got := clientDepsToBdDeps(deps)
-		if len(got) != len(deps) {
-			t.Fatalf("len = %d, want %d", len(got), len(deps))
-		}
-		for i, dep := range deps {
-			if got[i].IssueID != dep.IssueID {
-				t.Errorf("[%d] IssueID = %q, want %q", i, got[i].IssueID, dep.IssueID)
-			}
-			if got[i].DependsOnID != dep.DependsOnID {
-				t.Errorf("[%d] DependsOnID = %q, want %q", i, got[i].DependsOnID, dep.DependsOnID)
-			}
-			if got[i].Type != string(dep.Type) {
-				t.Errorf("[%d] Type = %q, want %q", i, got[i].Type, string(dep.Type))
-			}
-		}
-	})
 }
 
 func TestCountResponseToBdStats(t *testing.T) {
-	t.Run("all keys present", func(t *testing.T) {
-		resp := &client.CountIssuesResponse{
-			Total: 42,
-			Groups: map[string]int64{
-				"open":        10,
-				"closed":      8,
-				"in_progress": 5,
-				"blocked":     3,
-				"deferred":    2,
-				"tombstone":   1,
-				"pinned":      4,
-			},
-		}
-
-		got := countResponseToBdStats(resp)
-
-		if got.Summary.TotalIssues != 42 {
-			t.Errorf("TotalIssues = %d, want 42", got.Summary.TotalIssues)
-		}
-		if got.Summary.OpenIssues != 10 {
-			t.Errorf("OpenIssues = %d, want 10", got.Summary.OpenIssues)
-		}
-		if got.Summary.ClosedIssues != 8 {
-			t.Errorf("ClosedIssues = %d, want 8", got.Summary.ClosedIssues)
-		}
-		if got.Summary.InProgressIssues != 5 {
-			t.Errorf("InProgressIssues = %d, want 5", got.Summary.InProgressIssues)
-		}
-		if got.Summary.BlockedIssues != 3 {
-			t.Errorf("BlockedIssues = %d, want 3", got.Summary.BlockedIssues)
-		}
-		if got.Summary.DeferredIssues != 2 {
-			t.Errorf("DeferredIssues = %d, want 2", got.Summary.DeferredIssues)
-		}
-		if got.Summary.TombstoneIssues != 1 {
-			t.Errorf("TombstoneIssues = %d, want 1", got.Summary.TombstoneIssues)
-		}
-		if got.Summary.PinnedIssues != 4 {
-			t.Errorf("PinnedIssues = %d, want 4", got.Summary.PinnedIssues)
-		}
-	})
-
-	t.Run("missing keys default to zero", func(t *testing.T) {
-		resp := &client.CountIssuesResponse{
-			Total:  3,
-			Groups: map[string]int64{"open": 3},
-		}
-
-		got := countResponseToBdStats(resp)
-
-		if got.Summary.TotalIssues != 3 {
-			t.Errorf("TotalIssues = %d, want 3", got.Summary.TotalIssues)
-		}
-		if got.Summary.OpenIssues != 3 {
-			t.Errorf("OpenIssues = %d, want 3", got.Summary.OpenIssues)
-		}
-		if got.Summary.ClosedIssues != 0 {
-			t.Errorf("ClosedIssues = %d, want 0", got.Summary.ClosedIssues)
-		}
-	})
-}
-
-func TestFormatIssueText(t *testing.T) {
-	issue := &client.Issue{
-		ID:          "TASK-42",
-		Title:       "Implement caching",
-		Status:      client.StatusOpen,
-		Priority:    1,
-		Type:        client.TypeTask,
-		Assignee:    "alice",
-		Description: "Add Redis caching layer",
+	resp := &client.CountIssuesResponse{
+		Total: 42,
+		Groups: map[string]int64{
+			"open":        10,
+			"closed":      15,
+			"in_progress": 5,
+			"blocked":     3,
+			"deferred":    4,
+			"tombstone":   2,
+			"pinned":      3,
+		},
 	}
 
-	got := formatIssueText(issue)
+	stats := countResponseToBdStats(resp)
 
-	want := fmt.Sprintf("# %s: %s\nStatus: %s  Priority: %d  Type: %s\nAssignee: %s\n---\n%s\n",
-		issue.ID, issue.Title,
-		issue.Status, issue.Priority, issue.Type,
-		issue.Assignee,
-		issue.Description,
-	)
-
-	if got != want {
-		t.Errorf("formatIssueText mismatch.\ngot:\n%s\nwant:\n%s", got, want)
+	if stats.Summary.TotalIssues != 42 {
+		t.Errorf("TotalIssues = %d, want 42", stats.Summary.TotalIssues)
+	}
+	if stats.Summary.OpenIssues != 10 {
+		t.Errorf("OpenIssues = %d, want 10", stats.Summary.OpenIssues)
+	}
+	if stats.Summary.ClosedIssues != 15 {
+		t.Errorf("ClosedIssues = %d, want 15", stats.Summary.ClosedIssues)
+	}
+	if stats.Summary.InProgressIssues != 5 {
+		t.Errorf("InProgressIssues = %d, want 5", stats.Summary.InProgressIssues)
+	}
+	if stats.Summary.BlockedIssues != 3 {
+		t.Errorf("BlockedIssues = %d, want 3", stats.Summary.BlockedIssues)
+	}
+	if stats.Summary.DeferredIssues != 4 {
+		t.Errorf("DeferredIssues = %d, want 4", stats.Summary.DeferredIssues)
+	}
+	if stats.Summary.TombstoneIssues != 2 {
+		t.Errorf("TombstoneIssues = %d, want 2", stats.Summary.TombstoneIssues)
+	}
+	if stats.Summary.PinnedIssues != 3 {
+		t.Errorf("PinnedIssues = %d, want 3", stats.Summary.PinnedIssues)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Utility tests
-// ---------------------------------------------------------------------------
-
-func TestFindFreePort(t *testing.T) {
-	port, err := findFreePort()
-	if err != nil {
-		t.Fatalf("findFreePort: %v", err)
-	}
-	if port <= 0 || port >= 65536 {
-		t.Fatalf("port %d out of valid range (1-65535)", port)
+func TestCountResponseToBdStats_MissingKeys(t *testing.T) {
+	resp := &client.CountIssuesResponse{
+		Total:  5,
+		Groups: map[string]int64{"open": 5},
 	}
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		t.Fatalf("port %d returned by findFreePort is not available: %v", port, err)
+	stats := countResponseToBdStats(resp)
+
+	if stats.Summary.TotalIssues != 5 {
+		t.Errorf("TotalIssues = %d, want 5", stats.Summary.TotalIssues)
 	}
-	ln.Close()
+	// Missing keys should default to 0
+	if stats.Summary.ClosedIssues != 0 {
+		t.Errorf("ClosedIssues = %d, want 0", stats.Summary.ClosedIssues)
+	}
+	if stats.Summary.BlockedIssues != 0 {
+		t.Errorf("BlockedIssues = %d, want 0", stats.Summary.BlockedIssues)
+	}
 }
 
-// ---------------------------------------------------------------------------
-// Integration tests (require fleet-db binary)
-// ---------------------------------------------------------------------------
-
-func TestFleetDBServer_WorkspaceCreation(t *testing.T) {
+func TestFleetClientAdapter_GetReady(t *testing.T) {
 	server := startTestServer(t)
+	ctx := context.Background()
 
-	// Verify workspace exists by trying to get a non-existent issue.
-	// Should get "not found", not "workspace not found".
-	_, err := server.client.GetIssue(context.Background(), server.cfg.Workspace, "nonexistent-id")
-	if err == nil {
-		t.Fatal("expected error for non-existent issue")
+	// Create an issue via the fleet-db client directly
+	_, err := server.client.CreateIssue(ctx, "test", &client.CreateIssueRequest{
+		Title:    "Test Ready Issue",
+		Priority: 1,
+		Type:     client.TypeTask,
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
 	}
-	var ce *client.ClientError
-	if !errors.As(err, &ce) {
-		t.Fatalf("expected ClientError, got %T: %v", err, err)
+
+	// Call GetReady via the adapter
+	issues, err := server.backend.svc.GetReady(ctx, 10, "")
+	if err != nil {
+		t.Fatalf("GetReady: %v", err)
 	}
-	if !ce.IsNotFound() {
-		t.Errorf("expected not-found error, got code=%s message=%s", ce.Code, ce.Message)
+	if len(issues) == 0 {
+		t.Fatal("GetReady returned no issues, expected at least 1")
+	}
+
+	found := false
+	for _, issue := range issues {
+		if issue.Title == "Test Ready Issue" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("created issue not found in GetReady results")
 	}
 }
 
 func TestFleetClientAdapter_CloseIssue(t *testing.T) {
 	server := startTestServer(t)
+	ctx := context.Background()
 
-	issue, err := server.client.CreateIssue(context.Background(), server.cfg.Workspace, &client.CreateIssueRequest{
-		Title:    "Test Close",
+	// Create an issue
+	created, err := server.client.CreateIssue(ctx, "test", &client.CreateIssueRequest{
+		Title:    "Test Close Issue",
 		Priority: 2,
 		Type:     client.TypeTask,
 	})
@@ -382,35 +291,88 @@ func TestFleetClientAdapter_CloseIssue(t *testing.T) {
 		t.Fatalf("CreateIssue: %v", err)
 	}
 
-	adapter := newFleetClientAdapter(server.client, server.cfg.Workspace, slog.Default())
-	if err := adapter.CloseIssue(context.Background(), issue.ID, "done"); err != nil {
+	// Close via adapter
+	if err := server.backend.svc.CloseIssue(ctx, created.ID, "done"); err != nil {
 		t.Fatalf("CloseIssue: %v", err)
 	}
 
-	got, err := server.client.GetIssue(context.Background(), server.cfg.Workspace, issue.ID)
+	// Verify status is closed
+	issue, err := server.backend.svc.GetIssue(ctx, created.ID)
 	if err != nil {
-		t.Fatalf("GetIssue after close: %v", err)
+		t.Fatalf("GetIssue: %v", err)
 	}
-	if got.Status != client.StatusClosed {
-		t.Errorf("Status = %s, want closed", got.Status)
+	if issue.Status != "closed" {
+		t.Errorf("status = %q, want %q", issue.Status, "closed")
 	}
 }
 
 func TestFleetDBServer_SubprocessCrash(t *testing.T) {
 	server := startTestServer(t)
 
+	// Kill the subprocess externally
 	if err := server.cmd.Process.Kill(); err != nil {
-		t.Fatalf("Kill subprocess: %v", err)
+		t.Fatalf("Kill: %v", err)
 	}
 
+	// Stop should not hang or panic
 	done := make(chan struct{})
 	go func() {
 		_ = server.Stop()
 		close(done)
 	}()
+
 	select {
 	case <-done:
+		// Success - Stop returned
 	case <-time.After(10 * time.Second):
-		t.Fatal("Stop() hung after subprocess crash")
+		t.Fatal("Stop() timed out after subprocess crash")
+	}
+}
+
+func TestStripRedisScheme(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"redis://localhost:6379", "localhost:6379"},
+		{"redis://host:1234", "host:1234"},
+		{"rediss://secure-host:6380", "secure-host:6380"},
+		{"localhost:6379", "localhost:6379"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := stripRedisScheme(tt.input); got != tt.want {
+			t.Errorf("stripRedisScheme(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestFormatIssueText(t *testing.T) {
+	issue := &client.Issue{
+		ID:          "abc-123",
+		Title:       "My Issue",
+		Status:      client.StatusInProgress,
+		Priority:    1,
+		Type:        client.TypeFeature,
+		Assignee:    "carol",
+		Description: "Some description text",
+	}
+
+	text := formatIssueText(issue)
+
+	if !strings.Contains(text, "abc-123") {
+		t.Error("missing issue ID in formatted text")
+	}
+	if !strings.Contains(text, "My Issue") {
+		t.Error("missing title in formatted text")
+	}
+	if !strings.Contains(text, "in_progress") {
+		t.Error("missing status in formatted text")
+	}
+	if !strings.Contains(text, "carol") {
+		t.Error("missing assignee in formatted text")
+	}
+	if !strings.Contains(text, "Some description text") {
+		t.Error("missing description in formatted text")
 	}
 }

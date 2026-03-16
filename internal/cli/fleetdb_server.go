@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os/exec"
-	"strings"
 	"syscall"
 	"time"
 
@@ -17,9 +15,9 @@ import (
 	"github.com/tysonthomas9/fleet-db/pkg/client"
 )
 
-// FleetDBServer manages the full lifecycle of an embedded fleet-db backend:
-// starts miniredis (dev) or connects to real Redis (prod), launches a fleet-db
-// HTTP subprocess, and exposes an IssueTracker via the pkg/client HTTP transport.
+// FleetDBServer manages the lifecycle of an embedded fleet-db backend.
+// It starts an embedded miniredis (dev) or connects to real Redis (production),
+// launches a fleet-db HTTP subprocess, and connects via the public pkg/client.
 type FleetDBServer struct {
 	cfg       FleetDBServerConfig
 	backend   *fleetDBBackend
@@ -31,7 +29,15 @@ type FleetDBServer struct {
 }
 
 // NewFleetDBServer creates and starts a FleetDBServer.
-func NewFleetDBServer(cfg FleetDBServerConfig, logger *slog.Logger) (*FleetDBServer, error) {
+//
+// Startup sequence:
+//  1. Validate config and apply defaults
+//  2. Start miniredis or parse real Redis URL
+//  3. Find fleet-db binary
+//  4. Start fleet-db subprocess
+//  5. Wait for readiness
+//  6. Create client, ensure workspace, build adapter/backend
+func NewFleetDBServer(cfg FleetDBServerConfig, logger *slog.Logger) (*FleetDBServer, error) { //nolint:gocognit // startup sequence is inherently sequential
 	if cfg.RedisURL == "" && !cfg.AutoStart {
 		return nil, fmt.Errorf("fleet-db: either RedisURL or AutoStart must be set")
 	}
@@ -42,36 +48,32 @@ func NewFleetDBServer(cfg FleetDBServerConfig, logger *slog.Logger) (*FleetDBSer
 		return nil, err
 	}
 
-	cleanupRedis := func() {
-		if mr != nil {
-			mr.Close()
-		}
-	}
-
 	fleetDBPath, err := exec.LookPath(cfg.FleetDBBin)
 	if err != nil {
-		cleanupRedis()
+		closeMiniRedis(mr)
 		return nil, fmt.Errorf("fleet-db binary not found in PATH; build it with: cd ../fleet-db && go install ./cmd/fleet-db")
 	}
 
 	port, err := findFreePort()
 	if err != nil {
-		cleanupRedis()
+		closeMiniRedis(mr)
 		return nil, fmt.Errorf("fleet-db: failed to find free port: %w", err)
 	}
 
-	cmd, err := startFleetDBProcess(fleetDBPath, port, redisAddr, logger)
+	cmd, err := startFleetDBProcess(fleetDBPath, port, redisAddr)
 	if err != nil {
-		cleanupRedis()
+		closeMiniRedis(mr)
 		return nil, err
 	}
+	logger.Info("fleet-db: subprocess started", "pid", cmd.Process.Pid, "port", port)
 
-	healthURL := fmt.Sprintf("http://127.0.0.1:%d/readyz", port)
-	if err := waitForHealth(healthURL, 10*time.Second); err != nil {
+	readyzURL := fmt.Sprintf("http://127.0.0.1:%d/readyz", port)
+	if err := waitForHealth(readyzURL, 10*time.Second); err != nil {
 		killProcessGroup(cmd)
-		cleanupRedis()
+		closeMiniRedis(mr)
 		return nil, fmt.Errorf("fleet-db subprocess did not become ready within 10s")
 	}
+	logger.Info("fleet-db: subprocess ready", "port", port)
 
 	c, err := client.New(client.Config{
 		Transport: client.TransportHTTP,
@@ -82,24 +84,23 @@ func NewFleetDBServer(cfg FleetDBServerConfig, logger *slog.Logger) (*FleetDBSer
 	})
 	if err != nil {
 		killProcessGroup(cmd)
-		cleanupRedis()
+		closeMiniRedis(mr)
 		return nil, fmt.Errorf("fleet-db: failed to create client: %w", err)
 	}
 
-	ensureWorkspace(c, cfg.Workspace, logger)
+	if err := ensureWorkspace(c, cfg.Workspace); err != nil {
+		_ = c.Close()
+		killProcessGroup(cmd)
+		closeMiniRedis(mr)
+		return nil, err
+	}
 
 	adapter := newFleetClientAdapter(c, cfg.Workspace, logger)
 	backend := newFleetDBBackend(adapter, logger)
 
-	logger.Info("fleet-db: server started", "port", port, "workspace", cfg.Workspace)
 	return &FleetDBServer{
-		cfg:       cfg,
-		backend:   backend,
-		client:    c,
-		miniRedis: mr,
-		cmd:       cmd,
-		httpPort:  port,
-		logger:    logger,
+		cfg: cfg, backend: backend, client: c,
+		miniRedis: mr, cmd: cmd, httpPort: port, logger: logger,
 	}, nil
 }
 
@@ -108,36 +109,30 @@ func (s *FleetDBServer) Backend() IssueTracker {
 	return s.backend
 }
 
-// Stop gracefully shuts down the fleet-db subprocess and cleans up resources.
+// Stop gracefully shuts down the fleet-db subprocess and related resources.
 func (s *FleetDBServer) Stop() error {
-	if s.client != nil {
-		if err := s.client.Close(); err != nil {
-			s.logger.Warn("fleet-db: client close warning", "error", err)
-		}
+	_ = s.client.Close()
+
+	// Send SIGTERM to process group
+	_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGTERM)
+
+	// Wait for process exit with timeout
+	done := make(chan error, 1)
+	go func() { done <- s.cmd.Wait() }()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+		<-done
 	}
 
-	if s.cmd != nil && s.cmd.Process != nil {
-		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGTERM)
-
-		done := make(chan error, 1)
-		go func() { done <- s.cmd.Wait() }()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
-			<-done
-		}
-	}
-
-	if s.miniRedis != nil {
-		s.miniRedis.Close()
-	}
-
+	closeMiniRedis(s.miniRedis)
 	s.logger.Info("fleet-db: shutdown complete")
 	return nil
 }
 
-// --- Internal helpers ---
+// --- helpers ---
 
 func applyFleetDBDefaults(cfg *FleetDBServerConfig) {
 	if cfg.Workspace == "" {
@@ -152,20 +147,19 @@ func applyFleetDBDefaults(cfg *FleetDBServerConfig) {
 }
 
 func resolveRedis(cfg FleetDBServerConfig, logger *slog.Logger) (*miniredis.Miniredis, string, error) {
-	if cfg.RedisURL == "" {
-		mr, err := miniredis.Run()
-		if err != nil {
-			return nil, "", fmt.Errorf("fleet-db: failed to start miniredis: %w", err)
-		}
-		logger.Info("fleet-db: started embedded miniredis", "addr", mr.Addr())
-		return mr, mr.Addr(), nil
+	if cfg.RedisURL != "" {
+		return nil, stripRedisScheme(cfg.RedisURL), nil
 	}
-	addr := strings.TrimPrefix(cfg.RedisURL, "redis://")
-	return nil, addr, nil
+	mr, err := miniredis.Run()
+	if err != nil {
+		return nil, "", fmt.Errorf("fleet-db: failed to start miniredis: %w", err)
+	}
+	logger.Info("fleet-db: started embedded miniredis", "addr", mr.Addr())
+	return mr, mr.Addr(), nil
 }
 
-func startFleetDBProcess(binPath string, port int, redisAddr string, logger *slog.Logger) (*exec.Cmd, error) {
-	cmd := exec.Command(binPath, //nolint:gosec // binPath is from exec.LookPath, not user input
+func startFleetDBProcess(binPath string, port int, redisAddr string) (*exec.Cmd, error) {
+	cmd := exec.Command(binPath, //nolint:gosec // binPath is resolved via exec.LookPath
 		"--addr", fmt.Sprintf("127.0.0.1:%d", port),
 		"--redis-addr", redisAddr,
 		"--auth-enabled=false",
@@ -173,22 +167,13 @@ func startFleetDBProcess(binPath string, port int, redisAddr string, logger *slo
 		"--rpc-enabled=false",
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout = slogWriter{logger: logger, level: slog.LevelDebug}
-	cmd.Stderr = slogWriter{logger: logger, level: slog.LevelWarn}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("fleet-db: failed to start subprocess: %w", err)
 	}
 	return cmd, nil
 }
 
-func killProcessGroup(cmd *exec.Cmd) {
-	if cmd != nil && cmd.Process != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		_ = cmd.Wait()
-	}
-}
-
-func ensureWorkspace(c client.Client, workspace string, logger *slog.Logger) {
+func ensureWorkspace(c client.Client, workspace string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, err := c.CreateWorkspace(ctx, &client.CreateWorkspaceRequest{
@@ -198,29 +183,41 @@ func ensureWorkspace(c client.Client, workspace string, logger *slog.Logger) {
 	if err != nil {
 		var ce *client.ClientError
 		if errors.As(err, &ce) && ce.IsConflict() {
-			return // workspace already exists
+			return nil // workspace already exists
 		}
-		logger.Warn("fleet-db: workspace creation warning", "error", err)
+		return fmt.Errorf("fleet-db: failed to create workspace %q: %w", workspace, err)
+	}
+	return nil
+}
+
+func killProcessGroup(cmd *exec.Cmd) {
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	_ = cmd.Wait()
+}
+
+func closeMiniRedis(mr *miniredis.Miniredis) {
+	if mr != nil {
+		mr.Close()
 	}
 }
 
+// findFreePort binds a TCP listener to an ephemeral port and returns the port number.
 func findFreePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, err
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	if err := l.Close(); err != nil {
-		return 0, fmt.Errorf("close listener: %w", err)
-	}
+	_ = l.Close()
 	return port, nil
 }
 
+// waitForHealth polls the given URL until it returns HTTP 200 or the timeout expires.
 func waitForHealth(url string, timeout time.Duration) error {
 	httpClient := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		resp, err := httpClient.Get(url) //nolint:gosec // local subprocess health check, not user-controlled
+		resp, err := httpClient.Get(url) //nolint:gosec // localhost health check URL constructed internally
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -232,16 +229,12 @@ func waitForHealth(url string, timeout time.Duration) error {
 	return fmt.Errorf("fleet-db not ready after %v", timeout)
 }
 
-// slogWriter adapts slog.Logger to io.Writer for subprocess stdout/stderr.
-type slogWriter struct {
-	logger *slog.Logger
-	level  slog.Level
+// stripRedisScheme removes a redis:// or rediss:// prefix from a URL, returning host:port.
+func stripRedisScheme(rawURL string) string {
+	for _, prefix := range []string{"rediss://", "redis://"} {
+		if len(rawURL) > len(prefix) && rawURL[:len(prefix)] == prefix {
+			return rawURL[len(prefix):]
+		}
+	}
+	return rawURL
 }
-
-func (w slogWriter) Write(p []byte) (int, error) {
-	w.logger.Log(context.Background(), w.level, "fleet-db", "output", string(p))
-	return len(p), nil
-}
-
-// Verify slogWriter satisfies io.Writer at compile time.
-var _ io.Writer = slogWriter{}

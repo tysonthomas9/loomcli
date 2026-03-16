@@ -18,8 +18,14 @@ type fleetClientAdapter struct {
 }
 
 func newFleetClientAdapter(c client.Client, workspace string, logger *slog.Logger) *fleetClientAdapter {
-	return &fleetClientAdapter{client: c, workspace: workspace, logger: logger}
+	return &fleetClientAdapter{
+		client:    c,
+		workspace: workspace,
+		logger:    logger,
+	}
 }
+
+// --- Queries ---
 
 func (a *fleetClientAdapter) GetReady(ctx context.Context, limit int, parentID string) ([]BdIssue, error) {
 	resp, err := a.client.GetReady(ctx, a.workspace, &client.ReadyOptions{
@@ -50,10 +56,12 @@ func (a *fleetClientAdapter) GetBlocked(ctx context.Context) ([]BdIssue, error) 
 	if err != nil {
 		return nil, err
 	}
-	// Extract the Issue pointer from each BlockedIssue
+	// BlockedListResponse has []BlockedIssue; extract the Issue pointer from each.
 	issues := make([]*client.Issue, 0, len(resp.Issues))
 	for i := range resp.Issues {
-		issues = append(issues, resp.Issues[i].Issue)
+		if resp.Issues[i].Issue != nil {
+			issues = append(issues, resp.Issues[i].Issue)
+		}
 	}
 	return clientIssuesToBdIssues(issues), nil
 }
@@ -73,8 +81,8 @@ func (a *fleetClientAdapter) GetIssue(ctx context.Context, id string) (*BdIssue,
 	if err != nil {
 		return nil, err
 	}
-	bi := clientIssueToBdIssue(issue)
-	return &bi, nil
+	result := clientIssueToBdIssue(issue)
+	return &result, nil
 }
 
 func (a *fleetClientAdapter) GetIssueText(ctx context.Context, id string) (string, error) {
@@ -92,6 +100,8 @@ func (a *fleetClientAdapter) GetDependencies(ctx context.Context, id string) ([]
 	}
 	return clientDepsToBdDeps(resp.Dependencies), nil
 }
+
+// --- Mutations ---
 
 func (a *fleetClientAdapter) ClaimIssue(ctx context.Context, id string) error {
 	_, err := a.client.ClaimIssue(ctx, a.workspace, id, 0)
@@ -114,7 +124,9 @@ func (a *fleetClientAdapter) DeferIssue(ctx context.Context, id string, until ti
 }
 
 func (a *fleetClientAdapter) AssignIssue(ctx context.Context, id, assignee string) error {
-	a.logger.Warn("fleet-db: AssignIssue uses ClaimIssue (assignee parameter ignored, uses actor identity)", "issue", id, "assignee", assignee)
+	// Fleet-db has no standalone AssignIssue; ClaimIssue sets assignee to the actor.
+	a.logger.Warn("fleet-db: AssignIssue uses ClaimIssue (assignee param used as actor context only)",
+		"issue", id, "assignee", assignee)
 	_, err := a.client.ClaimIssue(ctx, a.workspace, id, 0)
 	return err
 }
@@ -140,9 +152,6 @@ func (a *fleetClientAdapter) UpdateFields(ctx context.Context, id string, fields
 // --- Type conversion functions ---
 
 func clientIssueToBdIssue(issue *client.Issue) BdIssue {
-	if issue == nil {
-		return BdIssue{}
-	}
 	return BdIssue{
 		ID:        issue.ID,
 		Title:     issue.Title,
@@ -152,21 +161,22 @@ func clientIssueToBdIssue(issue *client.Issue) BdIssue {
 		Design:    issue.Design,
 		Assignee:  issue.Assignee,
 		Labels:    issue.Labels,
+		// Dependencies: populated separately by hydration in fleetDBBackend
 	}
 }
 
 func clientIssuesToBdIssues(issues []*client.Issue) []BdIssue {
-	result := make([]BdIssue, len(issues))
-	for i, issue := range issues {
-		result[i] = clientIssueToBdIssue(issue)
+	result := make([]BdIssue, 0, len(issues))
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		result = append(result, clientIssueToBdIssue(issue))
 	}
 	return result
 }
 
 func clientDepToBdDep(dep *client.Dependency) Dependency {
-	if dep == nil {
-		return Dependency{}
-	}
 	return Dependency{
 		IssueID:     dep.IssueID,
 		DependsOnID: dep.DependsOnID,
@@ -177,9 +187,12 @@ func clientDepToBdDep(dep *client.Dependency) Dependency {
 }
 
 func clientDepsToBdDeps(deps []*client.Dependency) []Dependency {
-	result := make([]Dependency, len(deps))
-	for i, dep := range deps {
-		result[i] = clientDepToBdDep(dep)
+	result := make([]Dependency, 0, len(deps))
+	for _, dep := range deps {
+		if dep == nil {
+			continue
+		}
+		result = append(result, clientDepToBdDep(dep))
 	}
 	return result
 }
@@ -210,10 +223,13 @@ func countResponseToBdStats(resp *client.CountIssuesResponse) BdStats {
 }
 
 func formatIssueText(issue *client.Issue) string {
-	return fmt.Sprintf("# %s: %s\nStatus: %s  Priority: %d  Type: %s\nAssignee: %s\n---\n%s\n",
-		issue.ID, issue.Title,
-		issue.Status, issue.Priority, issue.Type,
-		issue.Assignee,
-		issue.Description,
-	)
+	text := fmt.Sprintf("# %s: %s\nStatus: %s  Priority: %d  Type: %s\n",
+		issue.ID, issue.Title, issue.Status, issue.Priority, issue.Type)
+	if issue.Assignee != "" {
+		text += fmt.Sprintf("Assignee: %s\n", issue.Assignee)
+	}
+	if issue.Description != "" {
+		text += "---\n" + issue.Description + "\n"
+	}
+	return text
 }
