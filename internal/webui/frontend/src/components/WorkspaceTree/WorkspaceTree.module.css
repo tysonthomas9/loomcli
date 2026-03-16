@@ -544,6 +544,77 @@
   color: var(--color-text-tertiary);
 }
 
+/* Connection status indicator dot */
+.connectionDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-warning, #f59e0b);
+  flex-shrink: 0;
+}
+
+.connectionDot[data-state="reconnecting"] {
+  animation: connectionPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes connectionPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Elapsed time counter next to connection dot */
+.elapsedTime {
+  font-size: 0.625rem;
+  color: var(--color-warning, #f59e0b);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Daemon disconnection prompt banner */
+.daemonPrompt {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  background: color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent);
+  border-top: 1px solid
+    color-mix(in srgb, var(--color-warning, #f59e0b) 25%, transparent);
+}
+
+.daemonPromptIcon {
+  flex-shrink: 0;
+  font-size: 0.875rem;
+}
+
+.daemonPromptText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.daemonPromptTitle {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.daemonPromptDesc {
+  font-size: 0.6875rem;
+  color: var(--color-text-tertiary);
+}
+
+/* Collapsed badge in disconnected state */
+.collapsedBadge[data-disconnected="true"] {
+  background: var(--color-warning, #f59e0b);
+}
+
 /* Empty state */
 .emptyState {
   padding: 1rem 1.25rem;

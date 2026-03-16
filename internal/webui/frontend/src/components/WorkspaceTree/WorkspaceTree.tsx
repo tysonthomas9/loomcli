@@ -28,6 +28,7 @@ import {
   refreshWorkspace,
 } from "@/api/workspace";
 import type { WorkspaceSummary } from "@/api/workspace";
+import type { ConnectionState } from "@/api/sse";
 import type { LoomAgentStatus } from "@/types";
 import { useWorkspaceRepos, useAgentContext, useToast } from "@/hooks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -55,6 +56,14 @@ export interface WorkspaceTreeProps {
   agentTasks?: Record<string, { title: string }>;
   /** Callback when the "+" button is clicked */
   onAddClick?: () => void;
+  /** SSE connection state */
+  connectionState?: ConnectionState;
+  /** True when reconnection failed after max attempts */
+  connectionLost?: boolean;
+  /** Timestamp (ms) when disconnection started, null if connected */
+  disconnectedSince?: number | null;
+  /** Callback for retry button in daemon prompt */
+  onRetryConnection?: () => void;
 }
 
 const COLLAPSE_STORAGE_KEY = "workspace-tree-collapsed";
@@ -73,6 +82,10 @@ export function WorkspaceTree({
   onAgentClick,
   agentTasks,
   onAddClick,
+  connectionState,
+  connectionLost,
+  disconnectedSince,
+  onRetryConnection,
 }: WorkspaceTreeProps): JSX.Element {
   // Load initial collapsed state from localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -411,6 +424,12 @@ export function WorkspaceTree({
     return count;
   }, [repoAgents, unassignedAgents]);
 
+  const isDisconnected =
+    connectionState !== undefined &&
+    connectionState !== "connected" &&
+    connectionState !== "connecting" &&
+    disconnectedSince != null;
+
   const rootClassName = [
     styles.sidebar,
     isCollapsed && styles.collapsed,
@@ -603,18 +622,50 @@ export function WorkspaceTree({
                 onAgentClick={onAgentClick}
                 onRepoToggle={handleRepoToggle}
                 agentTasks={agentTasks}
+                connectionState={connectionState}
+                disconnectedSince={disconnectedSince}
               />
             </div>
           )}
         </div>
       )}
 
-      {isCollapsed && totalActiveCount > 0 && (
+      {!isCollapsed && connectionLost && (
+        <div className={styles.daemonPrompt} role="alert">
+          <span className={styles.daemonPromptIcon}>&#9888;</span>
+          <div className={styles.daemonPromptText}>
+            <span className={styles.daemonPromptTitle}>Connection lost</span>
+            <span className={styles.daemonPromptDesc}>
+              Check that the daemon is running.
+            </span>
+          </div>
+          {onRetryConnection && (
+            <button
+              type="button"
+              className={styles.retryButton}
+              onClick={onRetryConnection}
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+
+      {isCollapsed && (totalActiveCount > 0 || isDisconnected) && (
         <div
           className={styles.collapsedBadge}
-          title={`${totalActiveCount} active agent(s)`}
+          data-disconnected={isDisconnected}
+          title={
+            connectionLost
+              ? "Connection lost"
+              : connectionState === "reconnecting"
+                ? "Reconnecting..."
+                : isDisconnected
+                  ? "Disconnected"
+                  : `${totalActiveCount} active agent(s)`
+          }
         >
-          {totalActiveCount}
+          {isDisconnected ? "!" : totalActiveCount}
         </div>
       )}
 

@@ -140,6 +140,8 @@ export type {
   UseObservabilityMetricsResult,
 } from "./useObservabilityMetrics";
 
+export { useElapsedTime } from "./useElapsedTime";
+
 export { useWorkspaceRepos } from "./useWorkspaceRepos";
 export type { UseWorkspaceReposReturn } from "./useWorkspaceRepos";
 

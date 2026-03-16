@@ -803,6 +803,10 @@ function App() {
         onAgentClick={handleAgentClick}
         agentTasks={agentTasks}
         onAddClick={() => setActiveView("settings")}
+        connectionState={connectionState}
+        connectionLost={isConnectionLost}
+        disconnectedSince={staleBannerDisconnectedSince}
+        onRetryConnection={staleBannerRetry}
       />
     ) : (
       <AgentsSidebar

@@ -3,9 +3,11 @@
  * Extracted from WorkspaceTree to keep file sizes manageable.
  */
 
+import type { ConnectionState } from "@/api/sse";
 import type { LoomAgentStatus } from "@/types";
 import { AgentCard } from "@/components/AgentCard";
 
+import { ConnectionIndicator } from "./ConnectionIndicator";
 import styles from "./WorkspaceTree.module.css";
 
 interface RepoInfo {
@@ -23,6 +25,10 @@ export interface RepoGroupListProps {
   onAgentClick?: ((agentName: string) => void) | undefined;
   onRepoToggle: (repoName: string) => void;
   agentTasks?: Record<string, { title: string }> | undefined;
+  /** SSE connection state */
+  connectionState?: ConnectionState | undefined;
+  /** Timestamp when disconnect began */
+  disconnectedSince?: number | null | undefined;
 }
 
 export function RepoGroupList({
@@ -35,7 +41,14 @@ export function RepoGroupList({
   onAgentClick,
   onRepoToggle,
   agentTasks,
+  connectionState,
+  disconnectedSince,
 }: RepoGroupListProps): JSX.Element {
+  const isDisconnected =
+    connectionState !== undefined &&
+    connectionState !== "connected" &&
+    connectionState !== "connecting" &&
+    disconnectedSince != null;
   return (
     <>
       {repos.map((repo) => {
@@ -75,12 +88,21 @@ export function RepoGroupList({
               </span>
               <span className={styles.repoName}>{repo.name}</span>
               <span className={styles.repoMeta}>
-                {isActive && (
-                  <span className={styles.agentCount} data-active={isActive}>
-                    {agentCount}
-                  </span>
+                {isActive &&
+                  (connectionState === undefined ||
+                    connectionState === "connected") && (
+                    <span className={styles.agentCount} data-active={isActive}>
+                      {agentCount}
+                    </span>
+                  )}
+                {isDisconnected ? (
+                  <ConnectionIndicator
+                    state={connectionState!}
+                    disconnectedSince={disconnectedSince!}
+                  />
+                ) : (
+                  <span className={styles.statusDot} data-active={isActive} />
                 )}
-                <span className={styles.statusDot} data-active={isActive} />
               </span>
               <span
                 className={styles.collapseChevron}
