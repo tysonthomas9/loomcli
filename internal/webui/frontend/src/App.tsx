@@ -800,6 +800,9 @@ function App() {
       <WorkspaceTree
         activeRepoName={activeRepoName}
         onWorkspaceSelect={handleWorkspaceSelect}
+        onAgentClick={handleAgentClick}
+        agentTasks={agentTasks}
+        onAddClick={() => setActiveView("settings")}
       />
     ) : (
       <AgentsSidebar

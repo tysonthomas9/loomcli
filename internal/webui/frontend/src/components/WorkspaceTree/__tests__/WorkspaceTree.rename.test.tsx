@@ -102,6 +102,7 @@ let agentOverride: Partial<typeof defaultAgentContext> = {};
 vi.mock("@/hooks", () => ({
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
   useAgentContext: () => ({ ...defaultAgentContext, ...agentOverride }),
+  useToast: () => ({ showToast: vi.fn() }),
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
     isCheatsheetOpen: false,

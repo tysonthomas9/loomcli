@@ -24,10 +24,12 @@ vi.mock("../WorkspaceContextMenu.module.css", () => ({
 
 describe("WorkspaceContextMenu", () => {
   let onRename: ReturnType<typeof vi.fn>;
+  let onRemove: ReturnType<typeof vi.fn>;
   let onClose: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     onRename = vi.fn();
+    onRemove = vi.fn();
     onClose = vi.fn();
   });
 
@@ -39,6 +41,7 @@ describe("WorkspaceContextMenu", () => {
         isOpen={isOpen}
         position={defaultPosition}
         onRename={onRename}
+        onRemove={onRemove}
         onClose={onClose}
       />,
     );
@@ -59,7 +62,7 @@ describe("WorkspaceContextMenu", () => {
       expect(screen.getByRole("menu")).toBeInTheDocument();
       expect(screen.getByTestId("workspace-context-menu")).toBeInTheDocument();
       expect(screen.getByText("Rename")).toBeInTheDocument();
-      expect(screen.getByRole("menuitem")).toBeInTheDocument();
+      expect(screen.getAllByRole("menuitem").length).toBeGreaterThanOrEqual(1);
     });
 
     it("positions the menu at the given coordinates", () => {

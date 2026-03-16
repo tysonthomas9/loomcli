@@ -28,9 +28,11 @@ import {
   refreshWorkspace,
 } from "@/api/workspace";
 import type { WorkspaceSummary } from "@/api/workspace";
+import type { LoomAgentStatus } from "@/types";
 import { useWorkspaceRepos, useAgentContext, useToast } from "@/hooks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
+import { RepoGroupList } from "./RepoGroupList";
 import { SortableWorkspaceEntry } from "./SortableWorkspaceEntry";
 import styles from "./WorkspaceTree.module.css";
 import { WorkspaceContextMenu } from "./WorkspaceContextMenu";
@@ -47,6 +49,12 @@ export interface WorkspaceTreeProps {
   activeRepoName?: string | null | undefined;
   /** Callback when a workspace/repo is selected. null = "All Workspaces" */
   onWorkspaceSelect?: (repoName: string | null) => void;
+  /** Callback when an agent card is clicked */
+  onAgentClick?: (agentName: string) => void;
+  /** Map of agent name to task info for display in AgentCards */
+  agentTasks?: Record<string, { title: string }>;
+  /** Callback when the "+" button is clicked */
+  onAddClick?: () => void;
 }
 
 const COLLAPSE_STORAGE_KEY = "workspace-tree-collapsed";
@@ -55,11 +63,16 @@ const COLLAPSE_STORAGE_KEY = "workspace-tree-collapsed";
  * WorkspaceTree displays a collapsible sidebar with repo navigation.
  * Consumes useWorkspaceRepos for repo list and useAgents for agent counts.
  */
+const REPO_COLLAPSE_STORAGE_KEY = "workspace-tree-repo-collapsed";
+
 export function WorkspaceTree({
   className,
   defaultCollapsed = true,
   activeRepoName,
   onWorkspaceSelect,
+  onAgentClick,
+  agentTasks,
+  onAddClick,
 }: WorkspaceTreeProps): JSX.Element {
   // Load initial collapsed state from localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -339,33 +352,64 @@ export function WorkspaceTree({
   // Workspace summaries from the data
   const workspaces: WorkspaceSummary[] = workspace?.workspaces ?? [];
 
-  // Compute per-repo agent counts
-  const repoAgentCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const repo of repos) {
-      counts.set(repo.name, 0);
+  // Per-repo collapse state (persisted to localStorage)
+  const [repoCollapseState, setRepoCollapseState] = useState<
+    Record<string, boolean>
+  >(() => {
+    try {
+      const stored = localStorage.getItem(REPO_COLLAPSE_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
     }
+  });
+
+  const handleRepoToggle = useCallback((repoName: string) => {
+    setRepoCollapseState((prev) => {
+      const next = { ...prev, [repoName]: !prev[repoName] };
+      try {
+        localStorage.setItem(REPO_COLLAPSE_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore localStorage errors
+      }
+      return next;
+    });
+  }, []);
+
+  // Group agents by repo, collect unassigned
+  const { repoAgents, unassignedAgents } = useMemo(() => {
+    const grouped = new Map<string, LoomAgentStatus[]>();
+    for (const repo of repos) {
+      grouped.set(repo.name, []);
+    }
+    const unassigned: LoomAgentStatus[] = [];
     for (const agent of agents) {
+      let matched = false;
       if (agent.repo) {
         for (const repo of repos) {
           if (agent.repo === repo.name || agent.repo === repo.path) {
-            counts.set(repo.name, (counts.get(repo.name) ?? 0) + 1);
+            grouped.get(repo.name)!.push(agent);
+            matched = true;
             break;
           }
         }
       }
+      if (!matched) {
+        unassigned.push(agent);
+      }
     }
-    return counts;
+    return { repoAgents: grouped, unassignedAgents: unassigned };
   }, [repos, agents]);
 
   // Count total active agents across workspace repos
   const totalActiveCount = useMemo(() => {
     let count = 0;
-    for (const [, v] of repoAgentCounts) {
-      count += v;
+    for (const [, agentList] of repoAgents) {
+      count += agentList.length;
     }
+    count += unassignedAgents.length;
     return count;
-  }, [repoAgentCounts]);
+  }, [repoAgents, unassignedAgents]);
 
   const rootClassName = [
     styles.sidebar,
@@ -390,6 +434,28 @@ export function WorkspaceTree({
           <>
             <span className={styles.toggleText}>Workspace</span>
             <span className={styles.sectionCount}>{repos.length}</span>
+            {onAddClick && (
+              <span
+                role="button"
+                tabIndex={0}
+                className={styles.addButton}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddClick();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onAddClick();
+                  }
+                }}
+                aria-label="Add workspace"
+                title="Add workspace"
+              >
+                +
+              </span>
+            )}
           </>
         )}
         <span className={styles.toggleIcon}>{isCollapsed ? ">" : "<"}</span>
@@ -527,57 +593,17 @@ export function WorkspaceTree({
                 </span>
               </button>
 
-              {repos.map((repo) => {
-                const agentCount = repoAgentCounts.get(repo.name) ?? 0;
-                const isActive = agentCount > 0;
-                const isSelected = activeRepoName === repo.name;
-
-                return (
-                  <button
-                    key={repo.name}
-                    type="button"
-                    className={styles.repoItem}
-                    onClick={() => onWorkspaceSelect?.(repo.name)}
-                    title={repo.path}
-                    role="radio"
-                    aria-checked={isSelected}
-                  >
-                    <span
-                      className={styles.radioIndicator}
-                      data-active={isSelected}
-                    />
-                    <span className={styles.repoIcon}>
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          d="M1.5 2.5C1.5 1.95 1.95 1.5 2.5 1.5H6.29L8.29 3.5H13.5C14.05 3.5 14.5 3.95 14.5 4.5V12.5C14.5 13.05 14.05 13.5 13.5 13.5H2.5C1.95 13.5 1.5 13.05 1.5 12.5V2.5Z"
-                          fill="currentColor"
-                        />
-                      </svg>
-                    </span>
-                    <span className={styles.repoName}>{repo.name}</span>
-                    <span className={styles.repoMeta}>
-                      {isActive && (
-                        <span
-                          className={styles.agentCount}
-                          data-active={isActive}
-                        >
-                          {agentCount}
-                        </span>
-                      )}
-                      <span
-                        className={styles.statusDot}
-                        data-active={isActive}
-                      />
-                    </span>
-                  </button>
-                );
-              })}
+              <RepoGroupList
+                repos={repos}
+                repoAgents={repoAgents}
+                unassignedAgents={unassignedAgents}
+                activeRepoName={activeRepoName}
+                repoCollapseState={repoCollapseState}
+                onWorkspaceSelect={onWorkspaceSelect}
+                onAgentClick={onAgentClick}
+                onRepoToggle={handleRepoToggle}
+                agentTasks={agentTasks}
+              />
             </div>
           )}
         </div>
