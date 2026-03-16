@@ -144,7 +144,12 @@ func (f *fleetDBBackend) UpdateStatus(ctx context.Context, id, status, assignee 
 	if err := f.applyStatusChange(ctx, id, status); err != nil {
 		return fmt.Errorf("fleetdb update %s: %w", id, err)
 	}
-	if assignee != "" {
+	switch {
+	case assignee == ClearAssignee:
+		if err := f.svc.AssignIssue(ctx, id, ""); err != nil {
+			return fmt.Errorf("fleetdb update %s: %w", id, err)
+		}
+	case assignee != "":
 		if err := f.svc.AssignIssue(ctx, id, assignee); err != nil {
 			return fmt.Errorf("fleetdb update %s: %w", id, err)
 		}

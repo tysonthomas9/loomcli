@@ -277,6 +277,20 @@ func TestBdBackend_UpdateStatus(t *testing.T) {
 			t.Errorf("args = %v, want %v", mock.Calls[0].Args, want)
 		}
 	})
+
+	t.Run("with ClearAssignee sentinel", func(t *testing.T) {
+		mock := &MockBDRunner{Result: CommandResult{}}
+		b := newTestBackend(mock)
+
+		err := b.UpdateStatus(context.Background(), "t-1", "open", ClearAssignee)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []string{"update", "t-1", "--status", "open", "--assignee", ""}
+		if !slicesEqual(mock.Calls[0].Args, want) {
+			t.Errorf("args = %v, want %v", mock.Calls[0].Args, want)
+		}
+	})
 }
 
 func TestBdBackend_UpdateExternalRef(t *testing.T) {
