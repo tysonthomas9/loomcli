@@ -43,7 +43,9 @@ var (
 
 	// collectDataFunc is the function used to collect monitor data.
 	// This is a package-level variable to allow tests to inject mock data.
-	collectDataFunc = func() *MonitorData { return collectMonitorData(50, monitorBranch) }
+	collectDataFunc = func() *MonitorData {
+		return collectMonitorData(context.Background(), defaultTracker(), 50, monitorBranch)
+	}
 
 	// staleDetectorInstance holds the running stale detector for status queries.
 	staleDetectorInstance *kv.StaleDetector
@@ -156,7 +158,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// concurrent API requests. The frontend polls 3 endpoints every 5s;
 	// without this cache each poll cycle spawns ~60-90 subprocesses.
 	collector := newCachedValue[*MonitorData](2*time.Second, func() *MonitorData {
-		return collectMonitorData(50, monitorBranch)
+		return collectMonitorData(context.Background(), defaultTracker(), 50, monitorBranch)
 	})
 	collectDataFunc = collector.get
 

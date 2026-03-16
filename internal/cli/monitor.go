@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -98,7 +99,9 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		fmt.Print("\033[?25h") // Show cursor
 
 		// Collect first batch before entering loop (loading message visible during this)
-		data := collectMonitorData(100, monitorBranch)
+		ctx := context.Background()
+		tracker := defaultTracker()
+		data := collectMonitorData(ctx, tracker, 100, monitorBranch)
 		output := renderDashboard(data)
 		fullOutput := output + fmt.Sprintf("\nPress Ctrl+C to exit (refreshing every %ds)", monitorInterval)
 		fmt.Print("\033[?25l")
@@ -110,7 +113,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		// Watch mode - refresh in place without flickering
 		for {
 			time.Sleep(time.Duration(monitorInterval) * time.Second)
-			data = collectMonitorData(100, monitorBranch)
+			data = collectMonitorData(ctx, tracker, 100, monitorBranch)
 			output = renderDashboard(data)
 
 			// Build complete output including status line (no trailing newline)
@@ -125,7 +128,7 @@ func runMonitor(cmd *cobra.Command, args []string) {
 	} else {
 		// One-shot mode - show loading message on stderr
 		fmt.Fprint(os.Stderr, "Loading...")
-		data := collectMonitorData(100, monitorBranch)
+		data := collectMonitorData(context.Background(), defaultTracker(), 100, monitorBranch)
 		fmt.Fprint(os.Stderr, "\r          \r") // Clear loading message
 		fmt.Print(renderDashboard(data))
 	}
@@ -134,10 +137,10 @@ func runMonitor(cmd *cobra.Command, args []string) {
 // CollectMonitorData gathers all dashboard data.
 // Exported for use by the HTTP server.
 func CollectMonitorData(branch string) *MonitorData {
-	return collectMonitorData(100, branch)
+	return collectMonitorData(context.Background(), defaultTracker(), 100, branch)
 }
 
-func collectMonitorData(readyLimit int, branch string) *MonitorData {
+func collectMonitorData(ctx context.Context, tracker IssueTracker, readyLimit int, branch string) *MonitorData {
 	data := &MonitorData{Timestamp: time.Now()}
 
 	// Start stats and sync bd call in parallel with task collection
@@ -151,16 +154,16 @@ func collectMonitorData(readyLimit int, branch string) *MonitorData {
 
 	go func() {
 		defer wg.Done()
-		stats = collectStatistics()
+		stats = collectStatistics(ctx, tracker)
 	}()
 
 	go func() {
 		defer wg.Done()
-		syncBdInfo = collectSyncBdStatus()
+		syncBdInfo = collectSyncBdStatus(ctx, tracker)
 	}()
 
 	// Collect tasks (internally parallel) to get agent-task mapping
-	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.ClosedTasks, data.AgentTasks = collectTaskStatus(readyLimit)
+	data.Tasks, data.NeedsPlanningTasks, data.ReadyToImplement, data.ReviewTasks, data.InProgressTasks, data.BacklogTasks, data.ClosedTasks, data.AgentTasks = collectTaskStatus(ctx, tracker, readyLimit)
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
@@ -433,7 +436,7 @@ func getWorktreeGitSyncStatus(path, defaultBranch string, overrideBranch string)
 	return ahead, behind
 }
 
-func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
+func collectTaskStatus(ctx context.Context, tracker IssueTracker, readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, []TaskInfo, map[string]TaskInfo) {
 	var summary TaskSummary
 	var needsPlanningTasks []TaskInfo
 	var readyToImplementTasks []TaskInfo
@@ -443,91 +446,88 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	var closedTasks []TaskInfo
 	agentTasks := make(map[string]TaskInfo)
 
-	// Run all 5 bd commands in parallel
+	// Run all 5 tracker calls in parallel
 	var (
-		readyOutput, inProgressOutput, needReviewOutput, backlogOutput, closedOutput string
-		readyErr, inProgressErr, needReviewErr, backlogErr, closedErr                error
-		wg                                                                           sync.WaitGroup
+		readyIssues, inProgressIssues, reviewIssues, blockedIssues, closedIssues []BdIssue
+		readyErr, inProgressErr, reviewErr, blockedErr, closedErr                error
+		wg                                                                       sync.WaitGroup
 	)
 
 	wg.Add(5)
 
 	go func() {
 		defer wg.Done()
-		readyOutput, readyErr = runBdCommand("ready", "--json", "--limit", strconv.Itoa(readyLimit))
+		readyIssues, readyErr = tracker.Ready(ctx, ReadyOpts{Limit: readyLimit})
 	}()
 
 	go func() {
 		defer wg.Done()
-		inProgressOutput, inProgressErr = runBdCommand("list", "--status=in_progress", "--json")
+		inProgressIssues, inProgressErr = tracker.List(ctx, ListOpts{Status: "in_progress"})
 	}()
 
 	go func() {
 		defer wg.Done()
-		needReviewOutput, needReviewErr = runBdCommand("list", "--status=review", "--json")
+		reviewIssues, reviewErr = tracker.List(ctx, ListOpts{Status: "review"})
 	}()
 
 	go func() {
 		defer wg.Done()
-		backlogOutput, backlogErr = runBdCommand("blocked", "--json")
+		blockedIssues, blockedErr = tracker.Blocked(ctx)
 	}()
 
 	go func() {
 		defer wg.Done()
-		closedOutput, closedErr = runBdCommand("list", "--status=closed", "--json", "--limit", "50")
+		closedIssues, closedErr = tracker.List(ctx, ListOpts{Status: "closed", Limit: 50})
 	}()
 
 	wg.Wait()
 
-	// Build unclosed issue ID set from existing responses for accurate blocker filtering.
+	// Build unclosed issue ID set from typed results for accurate blocker filtering.
 	// A blocker is only resolved when closed — not when it moves to in_progress/review.
-	unclosedIDs := buildUnclosedIDsFromResponses(readyOutput, inProgressOutput, needReviewOutput, backlogOutput)
+	unclosedIDs := buildUnclosedIDs(readyIssues, inProgressIssues, reviewIssues, blockedIssues)
 
 	// Process ready tasks, split by workflow stage
 	// Note: bd ready returns tasks not blocked by dependencies (open, in_progress, review)
 	if readyErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(readyOutput), &issues) == nil {
-			needsPlanningCount := 0
-			readyToImplementCount := 0
-			for _, issue := range issues {
-				// Skip non-open tasks - they appear in their own sections
-				if !IsOpen(issue) {
-					continue
-				}
-				if IsEpic(issue) {
-					summary.Epics++
-					continue
-				}
-				if HasUnclosedBlockers(issue.Dependencies, unclosedIDs) {
-					// Count these in backlog — they have open deps
-					summary.Backlog++
-					continue
-				}
+		needsPlanningCount := 0
+		readyToImplementCount := 0
+		for _, issue := range readyIssues {
+			// Skip non-open tasks - they appear in their own sections
+			if !IsOpen(issue) {
+				continue
+			}
+			if IsEpic(issue) {
+				summary.Epics++
+				continue
+			}
+			if HasUnclosedBlockers(issue.Dependencies, unclosedIDs) {
+				// Count these in backlog — they have open deps
+				summary.Backlog++
+				continue
+			}
 
-				// Split by workflow stage using shared predicates
-				// SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
-				if ReadyToImplement(issue) {
-					summary.ReadyToImplement++
-					if readyToImplementCount < 5 {
-						readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
-							ID:       issue.ID,
-							Title:    issue.Title,
-							Priority: issue.Priority,
-						})
-						readyToImplementCount++
-					}
-				} else {
-					// NeedsPlan: no design OR needs-revision label
-					summary.NeedsPlanning++
-					if needsPlanningCount < 5 {
-						needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
-							ID:       issue.ID,
-							Title:    issue.Title,
-							Priority: issue.Priority,
-						})
-						needsPlanningCount++
-					}
+			// Split by workflow stage using shared predicates
+			// SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
+			if ReadyToImplement(issue) {
+				summary.ReadyToImplement++
+				if readyToImplementCount < 5 {
+					readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
+						ID:       issue.ID,
+						Title:    issue.Title,
+						Priority: issue.Priority,
+					})
+					readyToImplementCount++
+				}
+			} else {
+				// NeedsPlan: no design OR needs-revision label
+				summary.NeedsPlanning++
+				if needsPlanningCount < 5 {
+					needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
+						ID:       issue.ID,
+						Title:    issue.Title,
+						Priority: issue.Priority,
+					})
+					needsPlanningCount++
 				}
 			}
 		}
@@ -535,21 +535,18 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 
 	// Process in_progress tasks and build agent-task map
 	if inProgressErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(inProgressOutput), &issues) == nil {
-			summary.InProgress = len(issues)
-			for _, issue := range issues {
-				taskInfo := TaskInfo{
-					ID:       issue.ID,
-					Title:    issue.Title,
-					Priority: issue.Priority,
-					Status:   "in_progress",
-				}
-				inProgressTasks = append(inProgressTasks, taskInfo)
-				// Build agent-task map from assignee field
-				if issue.Assignee != "" {
-					agentTasks[issue.Assignee] = taskInfo
-				}
+		summary.InProgress = len(inProgressIssues)
+		for _, issue := range inProgressIssues {
+			taskInfo := TaskInfo{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+				Status:   "in_progress",
+			}
+			inProgressTasks = append(inProgressTasks, taskInfo)
+			// Build agent-task map from assignee field
+			if issue.Assignee != "" {
+				agentTasks[issue.Assignee] = taskInfo
 			}
 		}
 	}
@@ -558,69 +555,60 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	// Note: Don't add to agentTasks - these tasks have status=review meaning
 	// the planning agent finished and released its lock. The assignee field
 	// still points to the planning agent but it's no longer running.
-	if needReviewErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(needReviewOutput), &issues) == nil {
-			// All tasks with status=review are review tasks
-			summary.NeedReview = len(issues)
-			for i, issue := range issues {
-				if i >= 5 {
-					break
-				}
-				reviewTasks = append(reviewTasks, TaskInfo{
-					ID:       issue.ID,
-					Title:    issue.Title,
-					Priority: issue.Priority,
-				})
+	if reviewErr == nil {
+		// All tasks with status=review are review tasks
+		summary.NeedReview = len(reviewIssues)
+		for i, issue := range reviewIssues {
+			if i >= 5 {
+				break
 			}
+			reviewTasks = append(reviewTasks, TaskInfo{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+			})
 		}
 	}
 
 	// Process backlog tasks
-	if backlogErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(backlogOutput), &issues) == nil {
-			summary.Backlog += len(issues)
-			// Store up to 20 backlog tasks for display
-			for i, issue := range issues {
-				if i >= 20 {
-					break
-				}
-				backlogTasks = append(backlogTasks, TaskInfo{
-					ID:       issue.ID,
-					Title:    issue.Title,
-					Priority: issue.Priority,
-					Status:   issue.Status,
-				})
+	if blockedErr == nil {
+		summary.Backlog += len(blockedIssues)
+		// Store up to 20 backlog tasks for display
+		for i, issue := range blockedIssues {
+			if i >= 20 {
+				break
 			}
+			backlogTasks = append(backlogTasks, TaskInfo{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+				Status:   issue.Status,
+			})
 		}
 	}
 
 	// Process closed tasks (top 50)
 	if closedErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(closedOutput), &issues) == nil {
-			for i, issue := range issues {
-				if i >= 50 {
-					break
-				}
-				closedTasks = append(closedTasks, TaskInfo{
-					ID:       issue.ID,
-					Title:    issue.Title,
-					Priority: issue.Priority,
-					Status:   issue.Status,
-				})
+		for i, issue := range closedIssues {
+			if i >= 50 {
+				break
 			}
+			closedTasks = append(closedTasks, TaskInfo{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+				Status:   issue.Status,
+			})
 		}
 	}
 
 	return summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks
 }
 
-// collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).
-func collectSyncBdStatus() SyncInfo {
+// collectSyncBdStatus queries the tracker sync status (safe to call concurrently).
+func collectSyncBdStatus(ctx context.Context, tracker IssueTracker) SyncInfo {
 	var info SyncInfo
-	syncOutput, err := runBdCommand("sync", "--status")
+	syncOutput, err := tracker.SyncStatus(ctx)
 	if err == nil {
 		info.DBSynced = !strings.Contains(syncOutput, "error") && !strings.Contains(syncOutput, "failed")
 		info.DBLastSync = "recently"
@@ -652,42 +640,39 @@ func completeSyncStatus(info SyncInfo, agents []AgentStatus) SyncInfo {
 }
 
 // collectSyncStatus is the original sequential version, kept for external callers.
-func collectSyncStatus(agents []AgentStatus) SyncInfo {
-	info := collectSyncBdStatus()
+func collectSyncStatus(ctx context.Context, tracker IssueTracker, agents []AgentStatus) SyncInfo {
+	info := collectSyncBdStatus(ctx, tracker)
 	return completeSyncStatus(info, agents)
 }
 
-func collectStatistics() MonitorStats {
+func collectStatistics(ctx context.Context, tracker IssueTracker) MonitorStats {
 	var stats MonitorStats
 
-	// Get stats from bd
-	statsOutput, err := runBdCommand("stats", "--json")
+	// Get stats from tracker
+	bdStats, err := tracker.Stats(ctx)
 	if err == nil {
-		var bdStats BdStats
-		if json.Unmarshal([]byte(statsOutput), &bdStats) == nil {
-			stats.Open = bdStats.Summary.OpenIssues
-			stats.Closed = bdStats.Summary.ClosedIssues
-			stats.Total = bdStats.Summary.TotalIssues
-			stats.InProgress = bdStats.Summary.InProgressIssues
-			stats.Blocked = bdStats.Summary.BlockedIssues
-			if stats.Total > 0 {
-				stats.Completion = float64(stats.Closed) / float64(stats.Total) * 100
-			}
+		stats.Open = bdStats.Summary.OpenIssues
+		stats.Closed = bdStats.Summary.ClosedIssues
+		stats.Total = bdStats.Summary.TotalIssues
+		stats.InProgress = bdStats.Summary.InProgressIssues
+		stats.Blocked = bdStats.Summary.BlockedIssues
+		if stats.Total > 0 {
+			stats.Completion = float64(stats.Closed) / float64(stats.Total) * 100
+		}
 
-			// Remaining = total - closed
-			// Note: bd stats total_issues already excludes tombstones
-			stats.Remaining = stats.Total - stats.Closed
-			if stats.Remaining < 0 {
-				stats.Remaining = 0
-			}
+		// Remaining = total - closed
+		// Note: bd stats total_issues already excludes tombstones
+		stats.Remaining = stats.Total - stats.Closed
+		if stats.Remaining < 0 {
+			stats.Remaining = 0
+		}
 
-			// Review = total - open - inProgress - closed - blocked - deferred - pinned
-			// Note: bd stats total_issues already excludes tombstones
-			stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
-				stats.Blocked - bdStats.Summary.DeferredIssues - bdStats.Summary.PinnedIssues
-			if stats.Review < 0 {
-				stats.Review = 0
-			}
+		// Review = total - open - inProgress - closed - blocked - deferred - pinned
+		// Note: bd stats total_issues already excludes tombstones
+		stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
+			stats.Blocked - bdStats.Summary.DeferredIssues - bdStats.Summary.PinnedIssues
+		if stats.Review < 0 {
+			stats.Review = 0
 		}
 	}
 
@@ -697,20 +682,15 @@ func collectStatistics() MonitorStats {
 // collectReadyTasksByPriority returns counts of ready tasks grouped by priority (0-4).
 // It iterates ready tasks (excluding epics, in_progress, and review) and returns
 // a map of priority -> count for Prometheus metrics.
-func collectReadyTasksByPriority(readyLimit int) map[int]int {
+func collectReadyTasksByPriority(ctx context.Context, tracker IssueTracker, readyLimit int) map[int]int {
 	counts := make(map[int]int)
 	// Initialize all priorities to 0
 	for i := 0; i <= 4; i++ {
 		counts[i] = 0
 	}
 
-	output, err := runBdCommand("ready", "--json", "--limit", strconv.Itoa(readyLimit))
+	issues, err := tracker.Ready(ctx, ReadyOpts{Limit: readyLimit})
 	if err != nil {
-		return counts
-	}
-
-	var issues []BdIssue
-	if json.Unmarshal([]byte(output), &issues) != nil {
 		return counts
 	}
 
@@ -735,40 +715,30 @@ func collectReadyTasksByPriority(readyLimit int) map[int]int {
 	return counts
 }
 
-// buildUnclosedIDsFromResponses builds a set of unclosed issue IDs from the
-// JSON responses already fetched by collectTaskStatus's parallel bd commands.
-// Issues from ready/in_progress/review are unclosed by definition; backlog
-// issues need a status check since bd blocked may include closed issues.
-func buildUnclosedIDsFromResponses(readyJSON, inProgressJSON, reviewJSON, backlogJSON string) map[string]bool {
+// buildUnclosedIDs builds a set of unclosed issue IDs from typed issue slices
+// already fetched by collectTaskStatus's parallel tracker calls.
+// Issues from ready/in_progress/review are unclosed by definition; blocked
+// issues need a status check since tracker.Blocked may include closed issues.
+func buildUnclosedIDs(ready, inProgress, review, blocked []BdIssue) map[string]bool {
 	unclosed := make(map[string]bool)
 
-	addAll := func(jsonStr string) {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(jsonStr), &issues) == nil {
-			for _, issue := range issues {
-				unclosed[issue.ID] = true
-			}
-		}
+	// Ready, in_progress, and review issues are all unclosed by definition
+	for _, issue := range ready {
+		unclosed[issue.ID] = true
+	}
+	for _, issue := range inProgress {
+		unclosed[issue.ID] = true
+	}
+	for _, issue := range review {
+		unclosed[issue.ID] = true
 	}
 
-	// Ready, in_progress, and review issues are all unclosed by definition
-	addAll(readyJSON)
-	addAll(inProgressJSON)
-	addAll(reviewJSON)
-
-	// Backlog (blocked) issues need status filtering
-	var backlogIssues []BdIssue
-	if json.Unmarshal([]byte(backlogJSON), &backlogIssues) == nil {
-		for _, issue := range backlogIssues {
-			if issue.Status != "closed" {
-				unclosed[issue.ID] = true
-			}
+	// Blocked issues need status filtering
+	for _, issue := range blocked {
+		if issue.Status != "closed" {
+			unclosed[issue.ID] = true
 		}
 	}
 
 	return unclosed
-}
-
-func runBdCommand(args ...string) (string, error) {
-	return defaultTracker().RunCommand(GetBeadsDir(), args...)
 }

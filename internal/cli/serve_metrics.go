@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,7 +17,7 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	data := collectDataFunc()
 
 	// Get ready tasks broken down by priority
-	readyByPriority := collectReadyTasksByPriority(50)
+	readyByPriority := collectReadyTasksByPriority(context.Background(), defaultTracker(), 50)
 
 	// Get in-progress count
 	inProgress := 0
