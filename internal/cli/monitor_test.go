@@ -729,15 +729,12 @@ func TestRunBdCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				if name != "bd" {
-					t.Errorf("expected 'bd' command, got %q", name)
-				}
-				return CommandResult{Stdout: tt.stdout, Stderr: tt.stderr, Err: tt.err}
+			mock := NewMockTracker()
+			mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+				return tt.stdout, tt.err
 			}
+			setDefaultTracker(mock)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			output, err := runBdCommand(tt.args...)
 			if (err != nil) != tt.wantErr {
@@ -748,6 +745,26 @@ func TestRunBdCommand(t *testing.T) {
 				t.Errorf("runBdCommand() = %q, want %q", output, tt.wantOutput)
 			}
 		})
+	}
+}
+
+func TestRunBdCommand_PassesBeadsDir(t *testing.T) {
+	// Verify that runBdCommand passes GetBeadsDir() as the dir argument
+	// to the tracker's RunCommand, confirming the delegation wiring.
+	mock := NewMockTracker()
+	var capturedDir string
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+		capturedDir = dir
+		return "ok", nil
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
+
+	_, _ = runBdCommand("stats", "--json")
+
+	expectedDir := GetBeadsDir()
+	if capturedDir != expectedDir {
+		t.Errorf("runBdCommand passed dir=%q, want %q (GetBeadsDir())", capturedDir, expectedDir)
 	}
 }
 
@@ -895,12 +912,15 @@ func TestCollectStatistics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			mock := NewMockTracker()
+			mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+				if tt.bdErr != nil {
+					return "", tt.bdErr
+				}
+				return tt.bdOutput, nil
 			}
+			setDefaultTracker(mock)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			stats := collectStatistics()
 
@@ -1001,12 +1021,15 @@ func TestCollectSyncStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			mock := NewMockTracker()
+			mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+				if tt.bdErr != nil {
+					return "", tt.bdErr
+				}
+				return tt.bdOutput, nil
 			}
+			setDefaultTracker(mock)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			syncInfo := collectSyncStatus(tt.agents)
 
@@ -1212,30 +1235,30 @@ func TestCollectTaskStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
+			mock := NewMockTracker()
+			mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
 				if len(args) > 0 && args[0] == "ready" {
-					return CommandResult{Stdout: tt.readyOutput}
+					return tt.readyOutput, nil
 				}
 				if len(args) > 1 && args[0] == "list" && args[1] == "--status=in_progress" {
-					return CommandResult{Stdout: tt.inProgressOutput}
+					return tt.inProgressOutput, nil
 				}
 				if len(args) > 1 && args[0] == "list" && args[1] == "--status=review" {
-					return CommandResult{Stdout: tt.needReviewOutput}
+					return tt.needReviewOutput, nil
 				}
 				if len(args) > 1 && args[0] == "list" && args[1] == "--status=closed" {
 					if tt.closedOutput != "" {
-						return CommandResult{Stdout: tt.closedOutput}
+						return tt.closedOutput, nil
 					}
-					return CommandResult{Stdout: "[]"}
+					return "[]", nil
 				}
 				if len(args) > 0 && args[0] == "blocked" {
-					return CommandResult{Stdout: tt.blockedOutput}
+					return tt.blockedOutput, nil
 				}
-				return CommandResult{}
+				return "", nil
 			}
+			setDefaultTracker(mock)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks := collectTaskStatus(100)
 
@@ -1281,19 +1304,17 @@ func TestCollectTaskStatus(t *testing.T) {
 
 func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
 	// This test verifies that the "ready" command is called with the passed readyLimit
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
+	mock := NewMockTracker()
 	var capturedArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			capturedArgs = args
-			// Return minimal valid JSON
-			return CommandResult{Stdout: "[]"}
+			return "[]", nil
 		}
-		// Return empty for other commands (list, blocked, etc.)
-		return CommandResult{Stdout: "[]"}
+		return "[]", nil
 	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	collectTaskStatus(100)
 
@@ -1606,28 +1627,33 @@ func TestCollectMonitorData(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: mustJSON([]BdIssue{
-					{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
-					{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
-				})}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				return CommandResult{Stdout: `{"summary":{"total_issues":10,"open_issues":3,"closed_issues":7}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: "[]"}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			return mustJSON([]BdIssue{
+				{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
+				{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
+			}), nil
+		}
+		if len(args) > 0 && args[0] == "stats" {
+			return `{"summary":{"total_issues":10,"open_issues":3,"closed_issues":7}}`, nil
+		}
+		if len(args) > 0 && args[0] == "sync" {
+			return "synced", nil
+		}
+		if len(args) > 0 && args[0] == "blocked" {
+			return "[]", nil
+		}
+		if len(args) > 0 && args[0] == "list" {
+			return "[]", nil
+		}
+		return "", nil
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	data := collectMonitorData(100, "")
 
@@ -1701,25 +1727,30 @@ func TestCollectMonitorDataExported(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: "[]"}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				return CommandResult{Stdout: `{"summary":{"total_issues":5,"open_issues":2,"closed_issues":3}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: "[]"}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			return "[]", nil
+		}
+		if len(args) > 0 && args[0] == "stats" {
+			return `{"summary":{"total_issues":5,"open_issues":2,"closed_issues":3}}`, nil
+		}
+		if len(args) > 0 && args[0] == "sync" {
+			return "synced", nil
+		}
+		if len(args) > 0 && args[0] == "blocked" {
+			return "[]", nil
+		}
+		if len(args) > 0 && args[0] == "list" {
+			return "[]", nil
+		}
+		return "", nil
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	data := CollectMonitorData("")
 	if data == nil {
@@ -1833,25 +1864,30 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: string(readyJSON)}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				return CommandResult{Stdout: `{"summary":{"total_issues":20,"open_issues":10,"closed_issues":5}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: string(blockedJSON)}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			return string(readyJSON), nil
+		}
+		if len(args) > 0 && args[0] == "stats" {
+			return `{"summary":{"total_issues":20,"open_issues":10,"closed_issues":5}}`, nil
+		}
+		if len(args) > 0 && args[0] == "sync" {
+			return "synced", nil
+		}
+		if len(args) > 0 && args[0] == "blocked" {
+			return string(blockedJSON), nil
+		}
+		if len(args) > 0 && args[0] == "list" {
+			return "[]", nil
+		}
+		return "", nil
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	data := collectMonitorData(100, "")
 
@@ -1915,25 +1951,30 @@ func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: string(readyJSON)}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				return CommandResult{Stdout: `{"summary":{"total_issues":10,"open_issues":5,"closed_issues":3}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: "[]"}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			return string(readyJSON), nil
+		}
+		if len(args) > 0 && args[0] == "stats" {
+			return `{"summary":{"total_issues":10,"open_issues":5,"closed_issues":3}}`, nil
+		}
+		if len(args) > 0 && args[0] == "sync" {
+			return "synced", nil
+		}
+		if len(args) > 0 && args[0] == "blocked" {
+			return "[]", nil
+		}
+		if len(args) > 0 && args[0] == "list" {
+			return "[]", nil
+		}
+		return "", nil
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	data := collectMonitorData(100, "")
 
@@ -2014,38 +2055,43 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: string(readyJSON)}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				// bd stats says 50 total, 40 closed — but Remaining should come from work queue, not subtraction
-				return CommandResult{Stdout: `{"summary":{"total_issues":50,"open_issues":8,"closed_issues":40}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: string(blockedJSON)}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				// Match the specific status queries
-				for _, arg := range args {
-					if arg == "--status=in_progress" {
-						return CommandResult{Stdout: string(inProgressJSON)}
-					}
-					if arg == "--status=review" {
-						return CommandResult{Stdout: string(reviewJSON)}
-					}
-					if arg == "--status=closed" {
-						return CommandResult{Stdout: "[]"}
-					}
-				}
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "ready" {
+			return string(readyJSON), nil
+		}
+		if len(args) > 0 && args[0] == "stats" {
+			// bd stats says 50 total, 40 closed — but Remaining should come from work queue, not subtraction
+			return `{"summary":{"total_issues":50,"open_issues":8,"closed_issues":40}}`, nil
+		}
+		if len(args) > 0 && args[0] == "sync" {
+			return "synced", nil
+		}
+		if len(args) > 0 && args[0] == "blocked" {
+			return string(blockedJSON), nil
+		}
+		if len(args) > 0 && args[0] == "list" {
+			// Match the specific status queries
+			for _, arg := range args {
+				if arg == "--status=in_progress" {
+					return string(inProgressJSON), nil
+				}
+				if arg == "--status=review" {
+					return string(reviewJSON), nil
+				}
+				if arg == "--status=closed" {
+					return "[]", nil
+				}
+			}
+			return "[]", nil
+		}
+		return "", nil
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	data := collectMonitorData(100, "")
 
@@ -2114,11 +2160,15 @@ func TestRunMonitorOneShot(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
+		return "[]", nil
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	// Save and set monitorNoWatch
 	oldNoWatch := monitorNoWatch
@@ -2987,17 +3037,17 @@ func TestRenderDashboardWithDaemonManagedAgents(t *testing.T) {
 // TestCollectTaskStatusReadyCommandArgs tests limit=100 (monitor default);
 // this test covers limit=50 (serve default).
 func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
+	mock := NewMockTracker()
 	var capturedReadyArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			capturedReadyArgs = args
-			return CommandResult{Stdout: "[]"}
+			return "[]", nil
 		}
-		return CommandResult{Stdout: "[]"}
+		return "[]", nil
 	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	collectTaskStatus(50)
 
@@ -3016,20 +3066,20 @@ func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
 // collectReadyTasksByPriority passes the readyLimit parameter through to the
 // bd ready command (limit=50, matching the serve use case).
 func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
+	mock := NewMockTracker()
 	var capturedReadyArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
+	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			capturedReadyArgs = args
-			return CommandResult{Stdout: mustJSON([]BdIssue{
+			return mustJSON([]BdIssue{
 				{ID: "T-1", Title: "P1 task", Status: "open", Priority: 1, Design: "plan"},
 				{ID: "T-2", Title: "P2 task", Status: "open", Priority: 2, Design: ""},
-			})}
+			}), nil
 		}
-		return CommandResult{Stdout: "[]"}
+		return "[]", nil
 	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	counts := collectReadyTasksByPriority(50)
 

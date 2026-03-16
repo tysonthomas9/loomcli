@@ -155,21 +155,23 @@ func (m *MockFileSystem) Remove(path string) error {
 }
 
 // NewTestDeps returns a *Deps with all fields set to mock implementations.
-func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockBDRunner, *MockExecRunner, *MockFileSystem) {
+func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockBDRunner, *MockExecRunner, *MockFileSystem, *MockIssueTracker) {
 	t.Helper()
 	git := &MockGitRunner{}
 	bd := &MockBDRunner{}
 	execR := &MockExecRunner{}
 	fs := NewMockFileSystem()
+	tracker := NewMockTracker()
 	deps := &Deps{
-		Git:    git,
-		Exec:   execR,
-		FS:     fs,
-		Logger: slog.Default(),
-		BD:     bd,
-		Clock:  func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		Git:     git,
+		Exec:    execR,
+		FS:      fs,
+		Logger:  slog.Default(),
+		BD:      bd,
+		Clock:   func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		Tracker: tracker,
 	}
-	return deps, git, bd, execR, fs
+	return deps, git, bd, execR, fs, tracker
 }
 
 // --- Tests ---
@@ -193,6 +195,31 @@ func TestDefaultDeps_NonNilFields(t *testing.T) {
 	}
 	if d.BD == nil {
 		t.Error("BD is nil")
+	}
+	if d.Tracker == nil {
+		t.Error("Tracker is nil")
+	}
+}
+
+func TestDefaultDeps_TrackerField(t *testing.T) {
+	d := DefaultDeps()
+	if d.Tracker == nil {
+		t.Fatal("Tracker is nil")
+	}
+	if d.Tracker.BackendName() != "beads" {
+		t.Errorf("Tracker.BackendName() = %q, want %q", d.Tracker.BackendName(), "beads")
+	}
+}
+
+func TestDefaultTracker_InitializedByInit(t *testing.T) {
+	// The init() function in deps.go should have called setDefaultTracker,
+	// so defaultTracker() should not panic and should return a valid tracker.
+	tracker := defaultTracker()
+	if tracker == nil {
+		t.Fatal("defaultTracker() returned nil")
+	}
+	if tracker.BackendName() != "beads" {
+		t.Errorf("defaultTracker().BackendName() = %q, want %q", tracker.BackendName(), "beads")
 	}
 }
 
