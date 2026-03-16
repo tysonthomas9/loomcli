@@ -61,7 +61,7 @@ func resolveFleetDBConfig(daemon *DaemonSettings) FleetDBServerConfig {
 	}
 
 	// Apply YAML settings (already merged by overlayDaemonSettings)
-	if daemon.FleetDB != nil {
+	if daemon != nil && daemon.FleetDB != nil {
 		if daemon.FleetDB.RedisURL != "" {
 			cfg.RedisURL = daemon.FleetDB.RedisURL
 		}
@@ -77,6 +77,11 @@ func resolveFleetDBConfig(daemon *DaemonSettings) FleetDBServerConfig {
 	}
 	if v := os.Getenv("LOOM_FLEETDB_WORKSPACE"); v != "" {
 		cfg.Workspace = v
+	}
+	if v := os.Getenv("LOOM_FLEETDB_AUTO_START"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.AutoStart = b
+		}
 	}
 
 	return cfg
