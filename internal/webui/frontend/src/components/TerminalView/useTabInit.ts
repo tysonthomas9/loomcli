@@ -65,18 +65,9 @@ export function useTabInit(args: TabInitArgs) {
     } else {
       const backends = (config?.available ?? []).filter((b) => b !== "shell");
       if (backends.length === 0) {
-        const fallbackTab: TabState = {
-          id: "talk-to-lead",
-          label: "talk-to-lead",
-          sessionName: "talk-to-lead",
-          connectionState: "disconnected" as ConnectionState,
-          backendName: config?.backend ?? "unknown",
-        };
-        setTabs([fallbackTab]);
-        setActiveTabId(fallbackTab.id);
-        createTab("talk-to-lead", "talk-to-lead", 0).catch((err) =>
-          console.error("Failed to persist fallback tab:", err),
-        );
+        // No backends configured — render empty state (NoBackendsEmptyState)
+        setTabs([]);
+        setActiveTabId("");
         return;
       }
 

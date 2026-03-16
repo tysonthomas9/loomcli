@@ -305,7 +305,7 @@ describe("TerminalView", () => {
       );
     });
 
-    it("fallback tab when backend config returns empty available", () => {
+    it("shows empty state when backend config returns empty available", () => {
       mockBackendConfigHook.config = {
         backend: "claude",
         source: "default",
@@ -315,7 +315,7 @@ describe("TerminalView", () => {
       setMetadata([]);
       render(<TerminalView />);
 
-      expect(screen.getByTestId("tab-talk-to-lead")).toBeInTheDocument();
+      expect(screen.getByTestId("no-backends-empty-state")).toBeInTheDocument();
     });
 
     it("createTab called for each auto-created tab on first open", () => {
@@ -948,7 +948,7 @@ describe("TerminalView", () => {
       expect(codexTab?.brandColor).toBe("#22c55e");
     });
 
-    it("talk-to-lead session uses default backend's brand color (claude -> #D97706)", async () => {
+    it("shows empty state when no backends are available", () => {
       mockBackendConfigHook.config = {
         backend: "claude",
         source: "default",
@@ -958,14 +958,7 @@ describe("TerminalView", () => {
       setMetadata([]);
       render(<TerminalView />);
 
-      const { TerminalTabBar } = await import("../TerminalTabBar");
-      const mockTabBar = vi.mocked(TerminalTabBar);
-      const lastCallProps =
-        mockTabBar.mock.calls[mockTabBar.mock.calls.length - 1][0];
-      const fallbackTab = lastCallProps.tabs.find(
-        (t: { id: string }) => t.id === "talk-to-lead",
-      );
-      expect(fallbackTab?.brandColor).toBe("#D97706");
+      expect(screen.getByTestId("no-backends-empty-state")).toBeInTheDocument();
     });
 
     it("unknown backend names get undefined brandColor (CSS fallbacks apply)", async () => {

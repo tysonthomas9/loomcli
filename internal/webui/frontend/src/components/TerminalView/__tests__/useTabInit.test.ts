@@ -169,7 +169,7 @@ describe("useTabInit", () => {
     expect(setActiveTabId).toHaveBeenCalledWith("lead-claude-1");
   });
 
-  it("creates fallback tab when no metadata and no backends", () => {
+  it("sets empty tabs when no metadata and no backends", () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
     const createTab = vi.fn().mockResolvedValue(undefined);
@@ -194,10 +194,9 @@ describe("useTabInit", () => {
 
     expect(setTabs).toHaveBeenCalledTimes(1);
     const tabs = setTabs.mock.calls[0][0] as TabState[];
-    expect(tabs).toHaveLength(1);
-    expect(tabs[0].sessionName).toBe("talk-to-lead");
-    expect(setActiveTabId).toHaveBeenCalledWith("talk-to-lead");
-    expect(createTab).toHaveBeenCalledWith("talk-to-lead", "talk-to-lead", 0);
+    expect(tabs).toHaveLength(0);
+    expect(setActiveTabId).toHaveBeenCalledWith("");
+    expect(createTab).not.toHaveBeenCalled();
   });
 
   it("creates one tab per backend when no metadata exists", () => {
@@ -345,7 +344,7 @@ describe("useTabInit", () => {
     expect(createTab).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back to talk-to-lead when only shell is available", () => {
+  it("sets empty tabs when only shell is available", () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
     const createTab = vi.fn().mockResolvedValue(undefined);
@@ -370,10 +369,10 @@ describe("useTabInit", () => {
 
     expect(setTabs).toHaveBeenCalledTimes(1);
     const tabs = setTabs.mock.calls[0][0] as TabState[];
-    // When all backends are filtered (only "shell"), should fall back to talk-to-lead
-    expect(tabs).toHaveLength(1);
-    expect(tabs[0].sessionName).toBe("talk-to-lead");
-    expect(setActiveTabId).toHaveBeenCalledWith("talk-to-lead");
+    // When all backends are filtered (only "shell"), show empty state
+    expect(tabs).toHaveLength(0);
+    expect(setActiveTabId).toHaveBeenCalledWith("");
+    expect(createTab).not.toHaveBeenCalled();
   });
 
   it("extracts backend name from session name pattern", () => {

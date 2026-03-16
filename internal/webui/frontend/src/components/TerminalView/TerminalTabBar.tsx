@@ -62,6 +62,7 @@ export interface TerminalTabBarProps {
   onTabPin?: (tabId: string, pinned: boolean) => void;
   onCloseOthers?: (tabId: string) => void;
   onReorderTabs?: (orderedTabIds: string[]) => void;
+  onHelpClick?: () => void;
 }
 
 interface ContextMenuState {
@@ -91,6 +92,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
       onTabPin,
       onCloseOthers,
       onReorderTabs,
+      onHelpClick,
     } = props;
     const tabListRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -514,6 +516,16 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
         >
           {isFullHeight ? "\u2921" : "\u2922"}
         </button>
+        {onHelpClick && (
+          <button
+            className={styles.actionButton}
+            onClick={onHelpClick}
+            aria-label="Help"
+            data-testid="terminal-help-button"
+          >
+            ?
+          </button>
+        )}
         {contextMenu && ctxTab && (
           <TabContextMenu
             tabId={contextMenu.tabId}

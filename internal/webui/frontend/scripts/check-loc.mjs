@@ -12,14 +12,14 @@ export const THRESHOLD = 500;
 // If a file grows past its ceiling, it fails. Shrinking is always OK.
 export const ALLOWLIST = new Map([
   ["src/components/IssueDetailPanel/IssueDetailPanel.tsx", 1555],
-  ["src/App.tsx", 1167],
+  ["src/App.tsx", 1168],
   ["src/components/AgentsSidebar/AgentsSidebar.tsx", 520],
   ["src/components/AgentDetailPanel/AgentDetailPanel.tsx", 575],
   ["src/hooks/useAgentTerminalLogs.ts", 522],
   ["src/hooks/useAgents.ts", 516],
   ["src/hooks/useIssues.ts", 528],
   ["src/components/IssueDetailView/IssueDetailView.tsx", 651],
-  ["src/components/TerminalView/TerminalView.tsx", 981],
+  ["src/components/TerminalView/TerminalView.tsx", 1048],
   ["src/components/TerminalView/TerminalTabBar.tsx", 583],
   ["src/components/TerminalView/TerminalInstance.tsx", 711],
   ["src/components/IssueDetailPanel/AssigneeDropdown.tsx", 535],

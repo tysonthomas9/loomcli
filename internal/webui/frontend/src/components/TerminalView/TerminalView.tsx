@@ -19,6 +19,9 @@ import { useSessionRestore } from "@/hooks/useSessionRestore";
 import { useTerminalMetadata } from "@/hooks/useTerminalMetadata";
 
 import { BackendPickerPrompt } from "./BackendPickerPrompt";
+import { HelpPopover } from "./HelpPopover";
+import { NoBackendsEmptyState } from "./NoBackendsEmptyState";
+import { WelcomeBanner } from "./WelcomeBanner";
 import { CopyToast } from "./CopyToast";
 import { CrashOverlay } from "./CrashOverlay";
 import { NotesBar } from "./NotesBar";
@@ -64,6 +67,7 @@ interface TerminalViewProps {
   onUnreadChange?: (hasAnyUnread: boolean) => void;
   onEscape?: () => void;
   issueId?: string;
+  onNavigateToSettings?: () => void;
 }
 
 export function TerminalView({
@@ -74,6 +78,7 @@ export function TerminalView({
   onUnreadChange,
   onEscape,
   issueId,
+  onNavigateToSettings,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -130,6 +135,21 @@ export function TerminalView({
   const [tabUnread, setTabUnread] = useState<Map<string, boolean>>(
     () => new Map(),
   );
+  const [dismissedWelcome, setDismissedWelcome] = useState<Set<string>>(() => {
+    const set = new Set<string>();
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith("terminal-welcome-dismissed-")) {
+          set.add(key.slice("terminal-welcome-dismissed-".length));
+        }
+      }
+    } catch {
+      // localStorage unavailable — show banners every session
+    }
+    return set;
+  });
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map());
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
@@ -694,6 +714,24 @@ export function TerminalView({
     backendName: config?.backend ?? "unknown",
   });
 
+  const handleDismissWelcome = useCallback((backendName: string) => {
+    setDismissedWelcome((prev) => {
+      if (prev.has(backendName)) return prev;
+      const next = new Set(prev);
+      next.add(backendName);
+      return next;
+    });
+    try {
+      localStorage.setItem(`terminal-welcome-dismissed-${backendName}`, "1");
+    } catch {
+      // localStorage unavailable
+    }
+  }, []);
+
+  const handleToggleHelp = useCallback(() => {
+    setIsHelpOpen((prev) => !prev);
+  }, []);
+
   const handleToggleFullHeight = useCallback(() => {
     setIsFullHeight((prev) => !prev);
   }, []);
@@ -771,6 +809,22 @@ export function TerminalView({
             />
           </>
         )}
+        {tabHasConnected.get(tab.id) &&
+          !dismissedWelcome.has(tab.backendName) && (
+            <WelcomeBanner
+              backendName={tab.backendName}
+              isActive={
+                pane === "right"
+                  ? tab.id === rightPaneTabId
+                  : tab.id === activeTabId
+              }
+              onDismiss={() => handleDismissWelcome(tab.backendName)}
+              onExampleClick={(text) => {
+                instanceRefs.current.get(tab.id)?.pasteText(text);
+                handleDismissWelcome(tab.backendName);
+              }}
+            />
+          )}
         <NotesBar
           notes={
             tabMetadata.find((m) => m.session_name === tab.sessionName)
@@ -804,6 +858,8 @@ export function TerminalView({
       metaLoading,
       setFocusedLeft,
       setFocusedRight,
+      dismissedWelcome,
+      handleDismissWelcome,
     ],
   );
 
@@ -818,6 +874,12 @@ export function TerminalView({
     <div className={containerClassName} data-testid="terminal-view">
       {(metaLoading || configLoading) && tabs.length === 0 ? (
         <LoadingSkeleton.Terminal />
+      ) : tabs.length === 0 ? (
+        <NoBackendsEmptyState
+          {...(onNavigateToSettings != null && {
+            onGoToSettings: onNavigateToSettings,
+          })}
+        />
       ) : (
         <>
           <TerminalTabBar
@@ -853,6 +915,11 @@ export function TerminalView({
               if (t)
                 window.open(getExportUrl(t.sessionName), "_blank", "noopener");
             }}
+            onHelpClick={handleToggleHelp}
+          />
+          <HelpPopover
+            isOpen={isHelpOpen}
+            onClose={() => setIsHelpOpen(false)}
           />
           <div className={styles.terminalsContainer}>
             {isSplitView && rightPaneTabId ? (
