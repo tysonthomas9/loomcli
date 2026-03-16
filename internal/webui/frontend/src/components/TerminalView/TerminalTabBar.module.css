@@ -223,6 +223,21 @@
   outline-offset: -2px;
 }
 
+.actionButton:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.actionButton:disabled:hover {
+  background-color: transparent;
+  color: var(--terminal-text-muted);
+}
+
+.actionButton[aria-pressed="true"] {
+  background-color: var(--terminal-tab-active, #3c3c3c);
+  color: var(--terminal-text-bright, #fff);
+}
+
 /* ============= Scroll Buttons ============= */
 
 .scrollButton {

@@ -1,0 +1,17 @@
+/**
+ * SplitDivider styles.
+ * Vertical drag handle between split terminal panes.
+ */
+
+.divider {
+  width: 4px;
+  cursor: col-resize;
+  background: var(--terminal-border, #333);
+  flex-shrink: 0;
+  transition: background-color 150ms;
+}
+
+.divider:hover,
+.divider:active {
+  background: var(--color-primary, #3b82f6);
+}

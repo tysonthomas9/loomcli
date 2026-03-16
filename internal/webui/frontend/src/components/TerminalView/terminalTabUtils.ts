@@ -7,6 +7,12 @@ import type { ConnectionState } from "./TerminalInstance";
 
 export const MAX_TABS = 8;
 
+/** Split view constants */
+export const MIN_SPLIT_RATIO = 0.2;
+export const MAX_SPLIT_RATIO = 0.8;
+export const DEFAULT_SPLIT_RATIO = 0.5;
+export const MIN_SPLIT_WIDTH_PX = 900;
+
 /** Brand colors for each known backend. */
 export const BACKEND_BRAND_COLORS: Record<string, string> = {
   claude: "#D97706",

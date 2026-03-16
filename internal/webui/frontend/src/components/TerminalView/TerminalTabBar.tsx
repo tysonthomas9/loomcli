@@ -29,6 +29,9 @@ export interface TerminalTabBarProps {
   onDuplicateTab?: (tabId: string) => void;
   maxTabsReached?: boolean;
   onCloseAll?: () => void;
+  isSplitView?: boolean;
+  canSplit?: boolean;
+  onToggleSplit?: () => void;
 }
 
 interface ContextMenuState {
@@ -49,6 +52,9 @@ export function TerminalTabBar({
   onDuplicateTab,
   maxTabsReached,
   onCloseAll,
+  isSplitView,
+  canSplit,
+  onToggleSplit,
 }: TerminalTabBarProps): JSX.Element {
   const tabRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const tabListRef = useRef<HTMLDivElement | null>(null);
@@ -448,6 +454,18 @@ export function TerminalTabBar({
           title="Close all sessions"
         >
           &#x2715;&#x2715;
+        </button>
+      )}
+      {onToggleSplit && (
+        <button
+          className={styles.actionButton}
+          onClick={onToggleSplit}
+          disabled={!canSplit}
+          aria-label="Toggle split view"
+          aria-pressed={isSplitView}
+          data-testid="terminal-split-toggle"
+        >
+          {"\u2016"}
         </button>
       )}
       <button

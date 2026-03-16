@@ -75,6 +75,7 @@ export interface TerminalInstanceProps {
   onOutput?: () => void;
   onSearchResultChange?: (result: SearchResultInfo | null) => void;
   onBackendCrash?: (reason: string) => void;
+  onTerminalFocus?: (() => void) | undefined;
 }
 
 export interface TerminalInstanceHandle {
@@ -115,6 +116,7 @@ export const TerminalInstance = forwardRef<
     onOutput,
     onSearchResultChange,
     onBackendCrash,
+    onTerminalFocus,
   },
   ref,
 ) {
@@ -324,6 +326,8 @@ export const TerminalInstance = forwardRef<
   onSearchRequestRef.current = onSearchRequest;
   const onContextMenuRef = useRef(onContextMenu);
   onContextMenuRef.current = onContextMenu;
+  const onTerminalFocusRef = useRef(onTerminalFocus);
+  onTerminalFocusRef.current = onTerminalFocus;
 
   // Terminal lifecycle: create terminal and connect WebSocket
   useEffect(() => {
@@ -455,6 +459,11 @@ export const TerminalInstance = forwardRef<
 
     terminal.open(container);
 
+    // Focus tracking for split view — fires when user clicks into terminal
+    const textarea = terminal.textarea;
+    const focusHandler = () => onTerminalFocusRef.current?.();
+    textarea?.addEventListener("focus", focusHandler);
+
     // Right-click context menu — suppress copy-on-select for word selection
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
@@ -585,6 +594,7 @@ export const TerminalInstance = forwardRef<
       container.removeEventListener("paste", handleBrowserPaste, {
         capture: true,
       });
+      textarea?.removeEventListener("focus", focusHandler);
       selectionDisposable.dispose();
       scrollDisposable.dispose();
       searchResultDisposable.dispose();

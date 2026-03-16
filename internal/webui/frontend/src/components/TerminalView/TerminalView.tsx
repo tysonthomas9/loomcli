@@ -37,6 +37,8 @@ import type {
 } from "./TerminalInstance";
 import { TerminalInstance } from "./TerminalInstance";
 import { TerminalTabBar } from "./TerminalTabBar";
+import { SplitDivider } from "./SplitDivider";
+import { SplitPaneSelector } from "./SplitPaneSelector";
 import {
   MAX_TABS,
   BACKEND_BRAND_COLORS,
@@ -46,6 +48,7 @@ import {
 } from "./terminalTabUtils";
 import { useClipboard } from "./useClipboard";
 import { useSessionManagement } from "./useCloseAllSessions";
+import { useSplitView } from "./useSplitView";
 import { useTabActions } from "./useTabActions";
 import { useTabInit } from "./useTabInit";
 import { useWorkspaceTabState } from "./useWorkspaceTabState";
@@ -93,6 +96,18 @@ export function TerminalView({
   const { activeTabId: restoredTabId, isRestoring } = useSessionRestore();
 
   const [isFullHeight, setIsFullHeight] = useState(false);
+  const {
+    isSplitView,
+    splitRatio,
+    rightPaneTabId,
+    focusedPane,
+    setFocusedPane,
+    canSplit,
+    handleToggleSplit,
+    handleSplitRatioChange,
+    handleRightPaneTabChange,
+  } = useSplitView({ tabs, activeTabId });
+  const splitContainerRef = useRef<HTMLDivElement>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -344,12 +359,18 @@ export function TerminalView({
     return () => document.removeEventListener("keydown", handler);
   }, [isActive, isSearchOpen, isSessionPromptOpen, pendingPasteText, onEscape]);
 
+  // The tab targeted by search: in split mode, use the focused pane's tab
+  const searchTargetTabId =
+    isSplitView && focusedPane === "right" ? rightPaneTabId : activeTabId;
+  const searchTargetTabIdRef = useRef(searchTargetTabId);
+  searchTargetTabIdRef.current = searchTargetTabId;
+
   const closeTerminalSearch = useCallback(() => {
     setIsSearchOpen(false);
-    instanceRefs.current.get(activeTabId)?.clearSearch();
+    instanceRefs.current.get(searchTargetTabId)?.clearSearch();
     setSearchTerm("");
     setSearchResult(null);
-  }, [activeTabId]);
+  }, [searchTargetTabId]);
 
   useRegisterEscapeLayer(
     LAYER_TERMINAL_SEARCH,
@@ -361,10 +382,10 @@ export function TerminalView({
   useEffect(() => {
     if (isSearchOpen && searchTerm) {
       instanceRefs.current
-        .get(activeTabId)
+        .get(searchTargetTabId)
         ?.search(searchTerm, { caseSensitive, regex: useRegex });
     }
-  }, [activeTabId, isSearchOpen, searchTerm, caseSensitive, useRegex]);
+  }, [searchTargetTabId, isSearchOpen, searchTerm, caseSensitive, useRegex]);
 
   // Body scroll lock for full-height mode
   useEffect(() => {
@@ -484,51 +505,51 @@ export function TerminalView({
     (term: string) => {
       setSearchTerm(term);
       instanceRefs.current
-        .get(activeTabId)
+        .get(searchTargetTabId)
         ?.search(term, { caseSensitive, regex: useRegex });
     },
-    [activeTabId, caseSensitive, useRegex],
+    [searchTargetTabId, caseSensitive, useRegex],
   );
 
   const handleFindNext = useCallback(() => {
-    instanceRefs.current.get(activeTabId)?.findNext();
-  }, [activeTabId]);
+    instanceRefs.current.get(searchTargetTabId)?.findNext();
+  }, [searchTargetTabId]);
 
   const handleFindPrevious = useCallback(() => {
-    instanceRefs.current.get(activeTabId)?.findPrevious();
-  }, [activeTabId]);
+    instanceRefs.current.get(searchTargetTabId)?.findPrevious();
+  }, [searchTargetTabId]);
 
   const handleSearchClose = useCallback(() => {
     setIsSearchOpen(false);
-    instanceRefs.current.get(activeTabId)?.clearSearch();
+    instanceRefs.current.get(searchTargetTabId)?.clearSearch();
     setSearchTerm("");
     setSearchResult(null);
-  }, [activeTabId]);
+  }, [searchTargetTabId]);
 
   const handleToggleCaseSensitive = useCallback(() => {
     const next = !caseSensitive;
     setCaseSensitive(next);
     if (searchTerm) {
       instanceRefs.current
-        .get(activeTabId)
+        .get(searchTargetTabId)
         ?.search(searchTerm, { caseSensitive: next, regex: useRegex });
     }
-  }, [activeTabId, searchTerm, caseSensitive, useRegex]);
+  }, [searchTargetTabId, searchTerm, caseSensitive, useRegex]);
 
   const handleToggleRegex = useCallback(() => {
     const next = !useRegex;
     setUseRegex(next);
     if (searchTerm) {
       instanceRefs.current
-        .get(activeTabId)
+        .get(searchTargetTabId)
         ?.search(searchTerm, { caseSensitive, regex: next });
     }
-  }, [activeTabId, searchTerm, caseSensitive, useRegex]);
+  }, [searchTargetTabId, searchTerm, caseSensitive, useRegex]);
 
-  // Only process search result changes from the active tab
+  // Only process search result changes from the search-targeted tab
   const handleSearchResultChange = useCallback(
     (tabId: string, result: SearchResultInfo | null) => {
-      if (tabId === activeTabIdRef.current) {
+      if (tabId === searchTargetTabIdRef.current) {
         setSearchResult(result);
       }
     },
@@ -602,6 +623,104 @@ export function TerminalView({
     [],
   );
 
+  const setFocusedLeft = useCallback(
+    () => setFocusedPane("left"),
+    [setFocusedPane],
+  );
+  const setFocusedRight = useCallback(
+    () => setFocusedPane("right"),
+    [setFocusedPane],
+  );
+
+  const renderTerminalPane = useCallback(
+    (tab: TabState, pane: "left" | "right" | null) => (
+      <>
+        <TerminalInstance
+          ref={setInstanceRef(tab.id)}
+          sessionName={tab.sessionName}
+          isActive={
+            pane === "right"
+              ? tab.id === rightPaneTabId
+              : tab.id === activeTabId
+          }
+          onConnectionStateChange={(state, hasConnected) =>
+            handleConnectionStateChange(tab.id, state, hasConnected)
+          }
+          onCopyNotify={handleCopyNotify}
+          onPasteRequest={handlePasteRequest}
+          onSearchRequest={handleSearchRequest}
+          onContextMenu={handleContextMenu}
+          onReconnectStateChange={(state) =>
+            handleReconnectStateChange(tab.id, state)
+          }
+          onOutput={() => handleOutput(tab.id)}
+          onSearchResultChange={(result) =>
+            handleSearchResultChange(tab.id, result)
+          }
+          onBackendCrash={(reason) => handleBackendCrash(tab.id, reason)}
+          onTerminalFocus={
+            pane === "left"
+              ? setFocusedLeft
+              : pane === "right"
+                ? setFocusedRight
+                : undefined
+          }
+        />
+        {tab.crashReason != null ? (
+          <CrashOverlay
+            reason={tab.crashReason}
+            onRestart={() => handleCrashRestart(tab.id, tab.sessionName)}
+            onCloseTab={() => handleTabClose(tab.id)}
+          />
+        ) : (
+          <>
+            <TerminalConnectionOverlay
+              connectionState={tab.connectionState}
+              hasConnected={tabHasConnected.get(tab.id) ?? false}
+              onReconnect={() => handleReconnect(tab.id)}
+            />
+            <ReconnectingOverlay
+              state={tabReconnectState.get(tab.id) ?? null}
+              onReconnect={() => handleReconnect(tab.id)}
+            />
+          </>
+        )}
+        <NotesBar
+          notes={
+            tabMetadata.find((m) => m.session_name === tab.sessionName)
+              ?.notes ?? ""
+          }
+          onSave={(text) => updateNotes(tab.sessionName, text)}
+          isLoading={metaLoading}
+        />
+      </>
+    ),
+    [
+      activeTabId,
+      rightPaneTabId,
+      setInstanceRef,
+      handleConnectionStateChange,
+      handleCopyNotify,
+      handlePasteRequest,
+      handleSearchRequest,
+      handleContextMenu,
+      handleReconnectStateChange,
+      handleOutput,
+      handleSearchResultChange,
+      handleBackendCrash,
+      handleCrashRestart,
+      handleTabClose,
+      handleReconnect,
+      tabHasConnected,
+      tabReconnectState,
+      tabMetadata,
+      updateNotes,
+      metaLoading,
+      setFocusedLeft,
+      setFocusedRight,
+    ],
+  );
+
   const containerClassName = [
     styles.container,
     isFullHeight && styles.fullHeight,
@@ -636,72 +755,82 @@ export function TerminalView({
             onTabRename={handleTabRename}
             onDuplicateTab={handleDuplicateTab}
             maxTabsReached={tabs.length >= MAX_TABS}
+            isSplitView={isSplitView}
+            canSplit={canSplit}
+            onToggleSplit={handleToggleSplit}
           />
           <div className={styles.terminalsContainer}>
-            {tabs.map((tab) => (
+            {isSplitView && rightPaneTabId ? (
               <div
-                key={tab.id}
-                className={styles.terminalPane}
+                ref={splitContainerRef}
+                className={styles.splitContainer}
                 style={{
-                  display: tab.id === activeTabId ? "flex" : "none",
+                  gridTemplateColumns: `${splitRatio}fr auto ${1 - splitRatio}fr`,
                 }}
-                role="tabpanel"
-                id={`terminal-panel-${tab.id}`}
-                aria-labelledby={`terminal-tab-${tab.id}`}
+                data-testid="split-container"
               >
-                <TerminalInstance
-                  ref={setInstanceRef(tab.id)}
-                  sessionName={tab.sessionName}
-                  isActive={tab.id === activeTabId}
-                  onConnectionStateChange={(state, hasConnected) =>
-                    handleConnectionStateChange(tab.id, state, hasConnected)
-                  }
-                  onCopyNotify={handleCopyNotify}
-                  onPasteRequest={handlePasteRequest}
-                  onSearchRequest={handleSearchRequest}
-                  onContextMenu={handleContextMenu}
-                  onReconnectStateChange={(state) =>
-                    handleReconnectStateChange(tab.id, state)
-                  }
-                  onOutput={() => handleOutput(tab.id)}
-                  onSearchResultChange={(result) =>
-                    handleSearchResultChange(tab.id, result)
-                  }
-                  onBackendCrash={(reason) =>
-                    handleBackendCrash(tab.id, reason)
-                  }
+                <div className={styles.splitPaneLeft}>
+                  {tabs.map((tab) => (
+                    <div
+                      key={tab.id}
+                      className={styles.terminalPaneSplit}
+                      style={{
+                        display: tab.id === activeTabId ? "flex" : "none",
+                      }}
+                      role="tabpanel"
+                      id={`terminal-panel-${tab.id}`}
+                      aria-labelledby={`terminal-tab-${tab.id}`}
+                    >
+                      {renderTerminalPane(tab, "left")}
+                    </div>
+                  ))}
+                </div>
+                <SplitDivider
+                  onRatioChange={handleSplitRatioChange}
+                  containerRef={splitContainerRef}
                 />
-                {tab.crashReason != null ? (
-                  <CrashOverlay
-                    reason={tab.crashReason}
-                    onRestart={() =>
-                      handleCrashRestart(tab.id, tab.sessionName)
-                    }
-                    onCloseTab={() => handleTabClose(tab.id)}
+                <div className={styles.splitPaneRight}>
+                  <SplitPaneSelector
+                    tabs={tabs.map((t) => ({
+                      id: t.id,
+                      label: t.label,
+                      brandColor: BACKEND_BRAND_COLORS[t.backendName],
+                    }))}
+                    activeLeftTabId={activeTabId}
+                    rightPaneTabId={rightPaneTabId}
+                    onTabChange={handleRightPaneTabChange}
                   />
-                ) : (
-                  <>
-                    <TerminalConnectionOverlay
-                      connectionState={tab.connectionState}
-                      hasConnected={tabHasConnected.get(tab.id) ?? false}
-                      onReconnect={() => handleReconnect(tab.id)}
-                    />
-                    <ReconnectingOverlay
-                      state={tabReconnectState.get(tab.id) ?? null}
-                      onReconnect={() => handleReconnect(tab.id)}
-                    />
-                  </>
-                )}
-                <NotesBar
-                  notes={
-                    tabMetadata.find((m) => m.session_name === tab.sessionName)
-                      ?.notes ?? ""
-                  }
-                  onSave={(text) => updateNotes(tab.sessionName, text)}
-                  isLoading={metaLoading}
-                />
+                  {tabs.map((tab) => (
+                    <div
+                      key={tab.id}
+                      className={styles.terminalPaneSplit}
+                      style={{
+                        display: tab.id === rightPaneTabId ? "flex" : "none",
+                      }}
+                      role="tabpanel"
+                      id={`terminal-panel-right-${tab.id}`}
+                    >
+                      {renderTerminalPane(tab, "right")}
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
+            ) : (
+              tabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={styles.terminalPane}
+                  style={{
+                    display: tab.id === activeTabId ? "flex" : "none",
+                  }}
+                  role="tabpanel"
+                  id={`terminal-panel-${tab.id}`}
+                  aria-labelledby={`terminal-tab-${tab.id}`}
+                >
+                  {renderTerminalPane(tab, null)}
+                </div>
+              ))
+            )}
           </div>
           {isSearchOpen && (
             <SearchBar
