@@ -701,6 +701,25 @@ func TestFleetDBBackend_TypedMethods(t *testing.T) {
 		}
 	})
 
+	t.Run("UpdateStatus with ClearAssignee clears assignee", func(t *testing.T) {
+		mock := &mockFleetService{}
+		b := newTestFleetDBBackend(mock)
+
+		err := b.UpdateStatus(ctx, "t-1", "open", ClearAssignee)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.lastReopenID != "t-1" {
+			t.Errorf("reopen ID = %q, want t-1", mock.lastReopenID)
+		}
+		if mock.lastAssignID != "t-1" {
+			t.Errorf("assign ID = %q, want t-1", mock.lastAssignID)
+		}
+		if mock.lastAssignee != "" {
+			t.Errorf("assignee = %q, want empty string", mock.lastAssignee)
+		}
+	})
+
 	t.Run("UpdateExternalRef is noop", func(t *testing.T) {
 		mock := &mockFleetService{}
 		b := newTestFleetDBBackend(mock)

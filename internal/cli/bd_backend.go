@@ -104,7 +104,10 @@ func (b *bdBackend) GetIssueText(_ context.Context, id string) (string, error) {
 
 func (b *bdBackend) UpdateStatus(_ context.Context, id, status, assignee string) error {
 	args := []string{"update", id, "--status", status}
-	if assignee != "" {
+	switch {
+	case assignee == ClearAssignee:
+		args = append(args, "--assignee", "")
+	case assignee != "":
 		args = append(args, "--assignee", assignee)
 	}
 	_, err := b.RunCommand(b.dir, args...)

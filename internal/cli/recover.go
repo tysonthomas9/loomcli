@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -212,8 +212,8 @@ func handleOrphanedTask(worktreePath, taskID string, analyze bool) {
 // to give Claude the most complete picture of relevant commits.
 func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason string) {
 	// Get task details
-	taskResult := execCommand(GetBeadsDir(), "bd", "show", taskID)
-	if taskResult.Err != nil {
+	taskText, err := defaultTracker().GetIssueText(context.Background(), taskID)
+	if err != nil {
 		return false, "Could not fetch task details"
 	}
 
@@ -245,7 +245,7 @@ func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason 
 
 	// Truncate and wrap untrusted inputs in XML tags to mitigate prompt injection.
 	const maxInputLen = 4000
-	taskDetails := truncateUTF8Safe(taskResult.Stdout, maxInputLen)
+	taskDetails := truncateUTF8Safe(taskText, maxInputLen)
 	gitOutput = truncateUTF8Safe(gitOutput, maxInputLen)
 
 	prompt := fmt.Sprintf(`You are analyzing whether a software task was completed before the agent crashed.
@@ -307,13 +307,9 @@ INCOMPLETE: <brief reason>
 // closeTask closes a completed task
 func closeTask(taskID, reason string) {
 	closeReason := fmt.Sprintf("Completed (verified by recovery analysis): %s", reason)
-	result := execCommand(GetBeadsDir(), "bd", "close", taskID, "--reason", closeReason)
-	if result.Err != nil {
-		fmt.Printf("Warning: failed to close task: %v\n", result.Err)
-		output := result.Stdout + result.Stderr
-		if len(output) > 0 {
-			fmt.Printf("Output: %s\n", output)
-		}
+	err := defaultTracker().CloseIssue(context.Background(), taskID, closeReason)
+	if err != nil {
+		fmt.Printf("Warning: failed to close task: %v\n", err)
 	} else {
 		fmt.Printf("✓ Task %s closed\n", taskID)
 	}
@@ -324,27 +320,17 @@ func closeTask(taskID, reason string) {
 // processed and should not be reset.
 func resetTask(taskID string) {
 	// Check current status before resetting
-	showResult := execCommand(GetBeadsDir(), "bd", "show", taskID, "--json")
-	if showResult.Err == nil {
-		var issues []struct {
-			Status string `json:"status"`
-		}
-		if json.Unmarshal([]byte(showResult.Stdout), &issues) == nil && len(issues) > 0 {
-			status := issues[0].Status
-			if status == "review" || status == "closed" {
-				fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, status)
-				return
-			}
+	issue, err := defaultTracker().GetIssue(context.Background(), taskID)
+	if err == nil && issue != nil {
+		if issue.Status == "review" || issue.Status == "closed" {
+			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, issue.Status)
+			return
 		}
 	}
 
-	result := execCommand(GetBeadsDir(), "bd", "update", taskID, "--status", "open", "--assignee", "")
-	if result.Err != nil {
-		fmt.Printf("Warning: failed to reset task: %v\n", result.Err)
-		output := result.Stdout + result.Stderr
-		if len(output) > 0 {
-			fmt.Printf("Output: %s\n", output)
-		}
+	err = defaultTracker().UpdateStatus(context.Background(), taskID, "open", ClearAssignee)
+	if err != nil {
+		fmt.Printf("Warning: failed to reset task: %v\n", err)
 		fmt.Println("")
 		fmt.Println("You may need to manually reset the task:")
 		fmt.Printf("  bd update %s --status open --assignee \"\"\n", taskID)
@@ -469,29 +455,20 @@ func resetOrphanedAgentTasks(worktreePath, agentName, alreadyHandledTaskID strin
 		return
 	}
 
-	result := execCommand(GetBeadsDir(), "bd", "list", "--assignee", agentName, "--status", "in_progress", "--json")
-	if result.Err != nil {
-		fmt.Printf("Warning: could not check for orphaned tasks: %v\n", result.Err)
-		return
-	}
-
-	var tasks []struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	}
-	if err := json.Unmarshal([]byte(result.Stdout), &tasks); err != nil {
-		fmt.Printf("Warning: could not parse task list: %v\n", err)
+	issues, err := defaultTracker().List(context.Background(), ListOpts{
+		Assignee: agentName,
+		Status:   "in_progress",
+	})
+	if err != nil {
+		fmt.Printf("Warning: could not check for orphaned tasks: %v\n", err)
 		return
 	}
 
 	// Filter out the task already handled from lock file
-	var orphaned []struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	}
-	for _, t := range tasks {
-		if t.ID != alreadyHandledTaskID {
-			orphaned = append(orphaned, t)
+	var orphaned []BdIssue
+	for _, issue := range issues {
+		if issue.ID != alreadyHandledTaskID {
+			orphaned = append(orphaned, issue)
 		}
 	}
 

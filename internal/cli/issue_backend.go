@@ -42,6 +42,10 @@ type ListOpts struct {
 	Limit     int
 }
 
+// ClearAssignee is a sentinel value for UpdateStatus that explicitly clears the
+// assignee field. An empty string "" means "do not change the assignee."
+const ClearAssignee = "\x00clear-assignee"
+
 var (
 	trackerMu       sync.RWMutex
 	trackerInstance IssueTracker
