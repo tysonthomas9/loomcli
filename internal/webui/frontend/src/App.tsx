@@ -1124,6 +1124,7 @@ function App() {
                 onIssueContextConsumed={handleIssueContextConsumed}
                 onActiveSessionCountChange={setActiveSessionCount}
                 onUnreadChange={setHasTerminalUnread}
+                onEscape={() => setActiveView(previousView || "kanban")}
                 {...(selectedIssueId != null && { issueId: selectedIssueId })}
               />
             </Suspense>

@@ -223,6 +223,43 @@
   outline-offset: -2px;
 }
 
+/* ============= Scroll Buttons ============= */
+
+.scrollButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 100%;
+  background: none;
+  border: none;
+  color: var(--terminal-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition:
+    background-color 150ms,
+    color 150ms;
+}
+
+.scrollButton:hover {
+  background-color: var(--terminal-surface-hover);
+  color: var(--terminal-text-bright);
+}
+
+.scrollButtonLeft {
+  border-right: 1px solid var(--terminal-border);
+}
+
+.scrollButtonRight {
+  border-left: 1px solid var(--terminal-border);
+}
+
+.scrollButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
 /* ============= Context Menu ============= */
 
 .contextMenu {

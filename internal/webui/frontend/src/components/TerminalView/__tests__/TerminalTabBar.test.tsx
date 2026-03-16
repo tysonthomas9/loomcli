@@ -6,11 +6,30 @@
  * Unit tests for TerminalTabBar component.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import "@testing-library/jest-dom";
 import { TerminalTabBar, type TerminalTab } from "../TerminalTabBar";
+
+// Mock ResizeObserver (not available in jsdom)
+// Stores callbacks so tests can trigger overflow recalculation
+let resizeObserverCallbacks: Array<() => void> = [];
+
+class MockResizeObserver {
+  callback: ResizeObserverCallback;
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    resizeObserverCallbacks.push(() =>
+      callback([], this as unknown as ResizeObserver),
+    );
+  }
+}
+globalThis.ResizeObserver =
+  MockResizeObserver as unknown as typeof ResizeObserver;
 
 function makeTabs(count: number): TerminalTab[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -877,6 +896,323 @@ describe("TerminalTabBar", () => {
       expect(screen.getByTestId("context-menu-duplicate")).toBeInTheDocument();
       expect(screen.getByTestId("context-menu-rename")).toBeInTheDocument();
       expect(screen.getByTestId("context-menu-close")).toBeInTheDocument();
+    });
+  });
+
+  describe("overflow scroll buttons", () => {
+    /**
+     * Helper: simulates overflow by patching scrollWidth / clientWidth / scrollLeft
+     * on the tablist element, then triggering the ResizeObserver callback.
+     */
+    function simulateOverflow(
+      tablist: HTMLElement,
+      overrides: {
+        scrollWidth?: number;
+        clientWidth?: number;
+        scrollLeft?: number;
+      },
+    ) {
+      Object.defineProperty(tablist, "scrollWidth", {
+        value: overrides.scrollWidth ?? 1000,
+        configurable: true,
+      });
+      Object.defineProperty(tablist, "clientWidth", {
+        value: overrides.clientWidth ?? 400,
+        configurable: true,
+      });
+      Object.defineProperty(tablist, "scrollLeft", {
+        value: overrides.scrollLeft ?? 0,
+        configurable: true,
+      });
+    }
+
+    beforeEach(() => {
+      resizeObserverCallbacks = [];
+    });
+
+    it("does not show scroll buttons when tabs fit in the container", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      simulateOverflow(tablist, {
+        scrollWidth: 400,
+        clientWidth: 400,
+        scrollLeft: 0,
+      });
+
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+
+      expect(screen.queryByTestId("scroll-tabs-left")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("scroll-tabs-right")).not.toBeInTheDocument();
+    });
+
+    it("shows right scroll button when content overflows to the right", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      simulateOverflow(tablist, {
+        scrollWidth: 800,
+        clientWidth: 400,
+        scrollLeft: 0,
+      });
+
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+
+      expect(screen.queryByTestId("scroll-tabs-left")).not.toBeInTheDocument();
+      expect(screen.getByTestId("scroll-tabs-right")).toBeInTheDocument();
+    });
+
+    it("shows left scroll button when scrolled past the start", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      // scrollLeft=400 + clientWidth=400 = 800 = scrollWidth => no right overflow
+      simulateOverflow(tablist, {
+        scrollWidth: 800,
+        clientWidth: 400,
+        scrollLeft: 400,
+      });
+
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+
+      expect(screen.getByTestId("scroll-tabs-left")).toBeInTheDocument();
+      expect(screen.queryByTestId("scroll-tabs-right")).not.toBeInTheDocument();
+    });
+
+    it("shows both scroll buttons when scrolled in the middle", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      simulateOverflow(tablist, {
+        scrollWidth: 1200,
+        clientWidth: 400,
+        scrollLeft: 200,
+      });
+
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+
+      expect(screen.getByTestId("scroll-tabs-left")).toBeInTheDocument();
+      expect(screen.getByTestId("scroll-tabs-right")).toBeInTheDocument();
+    });
+
+    it("left scroll button has correct aria-label", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      simulateOverflow(tablist, {
+        scrollWidth: 1200,
+        clientWidth: 400,
+        scrollLeft: 200,
+      });
+
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+
+      expect(screen.getByTestId("scroll-tabs-left")).toHaveAttribute(
+        "aria-label",
+        "Scroll tabs left",
+      );
+    });
+
+    it("right scroll button has correct aria-label", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      simulateOverflow(tablist, {
+        scrollWidth: 1200,
+        clientWidth: 400,
+        scrollLeft: 200,
+      });
+
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+
+      expect(screen.getByTestId("scroll-tabs-right")).toHaveAttribute(
+        "aria-label",
+        "Scroll tabs right",
+      );
+    });
+
+    it("clicking left scroll button calls scrollBy with negative offset", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      simulateOverflow(tablist, {
+        scrollWidth: 1200,
+        clientWidth: 400,
+        scrollLeft: 200,
+      });
+      const scrollBySpy = vi.fn();
+      tablist.scrollBy = scrollBySpy;
+
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+
+      fireEvent.click(screen.getByTestId("scroll-tabs-left"));
+
+      expect(scrollBySpy).toHaveBeenCalledWith({
+        left: -150,
+        behavior: "smooth",
+      });
+    });
+
+    it("clicking right scroll button calls scrollBy with positive offset", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      simulateOverflow(tablist, {
+        scrollWidth: 1200,
+        clientWidth: 400,
+        scrollLeft: 200,
+      });
+      const scrollBySpy = vi.fn();
+      tablist.scrollBy = scrollBySpy;
+
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+
+      fireEvent.click(screen.getByTestId("scroll-tabs-right"));
+
+      expect(scrollBySpy).toHaveBeenCalledWith({
+        left: 150,
+        behavior: "smooth",
+      });
+    });
+
+    it("scroll buttons have tabIndex=-1 (not focusable in tab order)", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+      simulateOverflow(tablist, {
+        scrollWidth: 1200,
+        clientWidth: 400,
+        scrollLeft: 200,
+      });
+
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+
+      expect(screen.getByTestId("scroll-tabs-left")).toHaveAttribute(
+        "tabIndex",
+        "-1",
+      );
+      expect(screen.getByTestId("scroll-tabs-right")).toHaveAttribute(
+        "tabIndex",
+        "-1",
+      );
+    });
+
+    it("overflow updates on scroll events", () => {
+      render(<TerminalTabBar {...defaultProps} />);
+
+      const tablist = screen.getByRole("tablist");
+
+      // Initially no overflow
+      simulateOverflow(tablist, {
+        scrollWidth: 400,
+        clientWidth: 400,
+        scrollLeft: 0,
+      });
+      act(() => {
+        resizeObserverCallbacks.forEach((cb) => cb());
+      });
+      expect(screen.queryByTestId("scroll-tabs-right")).not.toBeInTheDocument();
+
+      // Simulate scrollWidth change and fire scroll event
+      simulateOverflow(tablist, {
+        scrollWidth: 800,
+        clientWidth: 400,
+        scrollLeft: 0,
+      });
+      act(() => {
+        fireEvent.scroll(tablist);
+      });
+
+      expect(screen.getByTestId("scroll-tabs-right")).toBeInTheDocument();
+    });
+  });
+
+  describe("auto-scroll new tab", () => {
+    let rafCallback: FrameRequestCallback | null = null;
+
+    beforeEach(() => {
+      rafCallback = null;
+      resizeObserverCallbacks = [];
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+        rafCallback = cb;
+        return 1;
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("scrolls to end when a new tab is added", () => {
+      const initialTabs = makeTabs(3);
+      const { rerender } = render(
+        <TerminalTabBar {...defaultProps} tabs={initialTabs} />,
+      );
+
+      const tablist = screen.getByRole("tablist");
+      const scrollToSpy = vi.fn();
+      tablist.scrollTo = scrollToSpy;
+      Object.defineProperty(tablist, "scrollWidth", {
+        value: 1000,
+        configurable: true,
+      });
+
+      // Add a 4th tab
+      const newTabs = makeTabs(4);
+      rerender(<TerminalTabBar {...defaultProps} tabs={newTabs} />);
+
+      // The effect schedules a rAF — flush it
+      expect(rafCallback).not.toBeNull();
+      act(() => {
+        rafCallback!(0);
+      });
+
+      expect(scrollToSpy).toHaveBeenCalledWith({
+        left: 1000,
+        behavior: "smooth",
+      });
+    });
+
+    it("does NOT auto-scroll when a tab is removed (count decreases)", () => {
+      const initialTabs = makeTabs(4);
+      const { rerender } = render(
+        <TerminalTabBar {...defaultProps} tabs={initialTabs} />,
+      );
+
+      const tablist = screen.getByRole("tablist");
+      const scrollToSpy = vi.fn();
+      tablist.scrollTo = scrollToSpy;
+
+      // Remove a tab (4 -> 3)
+      const fewerTabs = makeTabs(3);
+      rerender(<TerminalTabBar {...defaultProps} tabs={fewerTabs} />);
+
+      // rAF should not have been called for scroll
+      if (rafCallback) {
+        act(() => {
+          rafCallback!(0);
+        });
+      }
+
+      expect(scrollToSpy).not.toHaveBeenCalled();
     });
   });
 

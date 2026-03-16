@@ -984,6 +984,226 @@ describe("TerminalView", () => {
       expect(geminiTab?.brandColor).toBeUndefined();
     });
   });
+
+  // ── Keyboard shortcuts: tab cycling ──────────────────────────────────────
+
+  describe("keyboard shortcuts: tab cycling", () => {
+    it("Ctrl+Tab switches to the next tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      // Default active tab is session-1
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+
+      fireEvent.keyDown(document, { key: "Tab", ctrlKey: true });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
+    });
+
+    it("Ctrl+Shift+Tab switches to the previous tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      // Switch to session-2 first
+      fireEvent.click(screen.getByTestId("tab-session-2"));
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
+
+      fireEvent.keyDown(document, {
+        key: "Tab",
+        ctrlKey: true,
+        shiftKey: true,
+      });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+    });
+
+    it("Ctrl+Tab wraps from last tab to first", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      // Switch to session-2 (last tab)
+      fireEvent.click(screen.getByTestId("tab-session-2"));
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
+
+      fireEvent.keyDown(document, { key: "Tab", ctrlKey: true });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+    });
+
+    it("Ctrl+Shift+Tab wraps from first tab to last", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      // Active tab is session-1 (first)
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+
+      fireEvent.keyDown(document, {
+        key: "Tab",
+        ctrlKey: true,
+        shiftKey: true,
+      });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
+    });
+
+    it("Alt+ArrowRight switches to the next tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+
+      fireEvent.keyDown(document, { key: "ArrowRight", altKey: true });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
+    });
+
+    it("Alt+ArrowLeft switches to the previous tab", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      // Switch to session-2
+      fireEvent.click(screen.getByTestId("tab-session-2"));
+
+      fireEvent.keyDown(document, { key: "ArrowLeft", altKey: true });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+    });
+
+    it("Alt+ArrowRight wraps from last to first", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      // Switch to last tab
+      fireEvent.click(screen.getByTestId("tab-session-2"));
+
+      fireEvent.keyDown(document, { key: "ArrowRight", altKey: true });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+    });
+
+    it("Alt+ArrowLeft wraps from first to last", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+
+      fireEvent.keyDown(document, { key: "ArrowLeft", altKey: true });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-2");
+    });
+
+    it("Ctrl+Tab is a no-op with only one tab", () => {
+      setMetadata([{ session_name: "only-session", label: "Only" }]);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "only-session",
+      );
+
+      fireEvent.keyDown(document, { key: "Tab", ctrlKey: true });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "only-session",
+      );
+    });
+
+    it("Alt+ArrowRight is a no-op with only one tab", () => {
+      setMetadata([{ session_name: "only-session", label: "Only" }]);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "only-session",
+      );
+
+      fireEvent.keyDown(document, { key: "ArrowRight", altKey: true });
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "only-session",
+      );
+    });
+
+    it("tab cycling with 3 tabs cycles correctly forward", () => {
+      setMetadata([
+        { session_name: "s1", label: "S1" },
+        { session_name: "s2", label: "S2" },
+        { session_name: "s3", label: "S3" },
+      ]);
+      render(<TerminalView />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("s1");
+
+      fireEvent.keyDown(document, { key: "Tab", ctrlKey: true });
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("s2");
+
+      fireEvent.keyDown(document, { key: "Tab", ctrlKey: true });
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("s3");
+
+      fireEvent.keyDown(document, { key: "Tab", ctrlKey: true });
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("s1");
+    });
+
+    it("tab cycling does not fire when isActive=false", () => {
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView isActive={false} />);
+
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+
+      fireEvent.keyDown(document, { key: "Tab", ctrlKey: true });
+
+      // Should still be on session-1 — handler not registered
+      expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
+    });
+  });
+
+  // ── Escape key ──────────────────────────────────────────────────────────
+
+  describe("escape key behavior", () => {
+    it("Escape calls onEscape when nothing else is open", () => {
+      const onEscape = vi.fn();
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView onEscape={onEscape} />);
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(onEscape).toHaveBeenCalledTimes(1);
+    });
+
+    it("Escape does NOT call onEscape when search is open", () => {
+      const onEscape = vi.fn();
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView onEscape={onEscape} />);
+
+      // Open search overlay
+      fireEvent.keyDown(document, { key: "f", metaKey: true });
+      expect(screen.getByTestId("terminal-search-bar")).toBeInTheDocument();
+
+      // Press Escape — should close search, not call onEscape
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(onEscape).not.toHaveBeenCalled();
+    });
+
+    it("Escape does NOT call onEscape when isActive=false", () => {
+      const onEscape = vi.fn();
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView isActive={false} onEscape={onEscape} />);
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(onEscape).not.toHaveBeenCalled();
+    });
+
+    it("Escape does nothing when onEscape is not provided", () => {
+      setMetadata(DEFAULT_METADATA);
+      // Should not throw
+      render(<TerminalView />);
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      // Just verify the component is still rendered (no crash)
+      expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+    });
+  });
 });
 
 // ── Tests: SessionNamePrompt ─────────────────────────────────────────────────

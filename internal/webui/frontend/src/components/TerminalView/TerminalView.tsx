@@ -56,6 +56,7 @@ interface TerminalViewProps {
   onIssueContextConsumed?: (() => void) | undefined;
   onActiveSessionCountChange?: (count: number) => void;
   onUnreadChange?: (hasAnyUnread: boolean) => void;
+  onEscape?: () => void;
   issueId?: string;
 }
 
@@ -65,6 +66,7 @@ export function TerminalView({
   onIssueContextConsumed,
   onActiveSessionCountChange,
   onUnreadChange,
+  onEscape,
   issueId,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
@@ -111,6 +113,8 @@ export function TerminalView({
   const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map());
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
 
   const {
     showCopyToast,
@@ -287,10 +291,49 @@ export function TerminalView({
     [tabs],
   );
 
-  // Cmd+F / Ctrl+F intercept (only when view is active)
+  // Keyboard shortcuts (only when view is active)
   useEffect(() => {
     if (!isActive) return;
     const handler = (e: KeyboardEvent) => {
+      // Ctrl+Tab / Ctrl+Shift+Tab: cycle tabs
+      // Alt+ArrowRight / Alt+ArrowLeft: Firefox-compatible fallback
+      if (
+        (e.ctrlKey && e.key === "Tab") ||
+        (e.altKey && (e.key === "ArrowRight" || e.key === "ArrowLeft"))
+      ) {
+        e.preventDefault();
+        const currentTabs = tabsRef.current;
+        if (currentTabs.length <= 1) return;
+        const goForward =
+          e.key === "Tab" ? !e.shiftKey : e.key === "ArrowRight";
+        const currentIdx = currentTabs.findIndex(
+          (t) => t.id === activeTabIdRef.current,
+        );
+        const nextIdx = goForward
+          ? currentIdx < currentTabs.length - 1
+            ? currentIdx + 1
+            : 0
+          : currentIdx > 0
+            ? currentIdx - 1
+            : currentTabs.length - 1;
+        const nextTab = currentTabs[nextIdx];
+        if (nextTab) setActiveTabId(nextTab.id);
+        return;
+      }
+
+      // Escape: return to previous view when nothing else to dismiss
+      if (
+        e.key === "Escape" &&
+        !isSearchOpen &&
+        !isSessionPromptOpen &&
+        pendingPasteText === null
+      ) {
+        e.preventDefault();
+        onEscape?.();
+        return;
+      }
+
+      // Cmd+F / Ctrl+F: toggle search
       if ((e.metaKey || e.ctrlKey) && e.key === "f") {
         e.preventDefault();
         setIsSearchOpen((prev) => !prev);
@@ -298,7 +341,7 @@ export function TerminalView({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [isActive]);
+  }, [isActive, isSearchOpen, isSessionPromptOpen, pendingPasteText, onEscape]);
 
   const closeTerminalSearch = useCallback(() => {
     setIsSearchOpen(false);

@@ -58,6 +58,11 @@ export function TerminalTabBar({
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [overflowState, setOverflowState] = useState({
+    canScrollLeft: false,
+    canScrollRight: false,
+  });
+  const prevTabCountRef = useRef(tabs.length);
 
   const setTabRef = useCallback(
     (id: string) => (el: HTMLDivElement | null) => {
@@ -89,6 +94,56 @@ export function TerminalTabBar({
       setEditingTabId(null);
     }
   }, [tabs, editingTabId]);
+
+  // Track tab list overflow for scroll button visibility (mount-only listeners)
+  useEffect(() => {
+    const el = tabListRef.current;
+    if (!el) return;
+
+    const updateOverflow = () => {
+      const { scrollLeft, scrollWidth, clientWidth } = el;
+      setOverflowState({
+        canScrollLeft: scrollLeft > 1,
+        canScrollRight: scrollLeft + clientWidth < scrollWidth - 1,
+      });
+    };
+
+    updateOverflow();
+    el.addEventListener("scroll", updateOverflow, { passive: true });
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(el);
+
+    return () => {
+      el.removeEventListener("scroll", updateOverflow);
+      observer.disconnect();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-check overflow when tab count changes (DOM may not have updated yet)
+  useEffect(() => {
+    const el = tabListRef.current;
+    if (!el) return;
+    // Use rAF to read layout after React commits DOM changes
+    const id = requestAnimationFrame(() => {
+      const { scrollLeft, scrollWidth, clientWidth } = el;
+      setOverflowState({
+        canScrollLeft: scrollLeft > 1,
+        canScrollRight: scrollLeft + clientWidth < scrollWidth - 1,
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [tabs.length]);
+
+  // Auto-scroll new tab into view
+  useEffect(() => {
+    if (tabs.length > prevTabCountRef.current) {
+      requestAnimationFrame(() => {
+        const el = tabListRef.current;
+        if (el) el.scrollTo({ left: el.scrollWidth, behavior: "smooth" });
+      });
+    }
+    prevTabCountRef.current = tabs.length;
+  }, [tabs.length]);
 
   // Focus and select input when entering edit mode
   useEffect(() => {
@@ -213,6 +268,14 @@ export function TerminalTabBar({
     setContextMenu(null);
   }, [contextMenu, onTabClose]);
 
+  const handleScrollLeft = useCallback(() => {
+    tabListRef.current?.scrollBy({ left: -150, behavior: "smooth" });
+  }, []);
+
+  const handleScrollRight = useCallback(() => {
+    tabListRef.current?.scrollBy({ left: 150, behavior: "smooth" });
+  }, []);
+
   // Close context menu on outside click, Escape, or scroll
   useEffect(() => {
     if (!contextMenu) return;
@@ -240,6 +303,18 @@ export function TerminalTabBar({
 
   return (
     <div className={styles.tabBar} data-testid="terminal-tab-bar">
+      {overflowState.canScrollLeft && (
+        <button
+          type="button"
+          className={`${styles.scrollButton} ${styles.scrollButtonLeft}`}
+          onClick={handleScrollLeft}
+          aria-label="Scroll tabs left"
+          tabIndex={-1}
+          data-testid="scroll-tabs-left"
+        >
+          &#x2039;
+        </button>
+      )}
       <div
         ref={tabListRef}
         className={styles.tabList}
@@ -344,6 +419,18 @@ export function TerminalTabBar({
           );
         })}
       </div>
+      {overflowState.canScrollRight && (
+        <button
+          type="button"
+          className={`${styles.scrollButton} ${styles.scrollButtonRight}`}
+          onClick={handleScrollRight}
+          aria-label="Scroll tabs right"
+          tabIndex={-1}
+          data-testid="scroll-tabs-right"
+        >
+          &#x203a;
+        </button>
+      )}
       <button
         className={styles.actionButton}
         onClick={onNewTab}
