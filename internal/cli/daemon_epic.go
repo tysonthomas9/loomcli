@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"log"
 	"sort"
@@ -127,20 +127,18 @@ func (ea *EpicAssigner) Assignments() map[string]string {
 	return result
 }
 
-// queryOpenEpics runs `bd list --type=epic --status=open --json` and parses results.
+// queryOpenEpics queries open epics via the IssueTracker and returns them as EpicInfo.
 var queryOpenEpics = defaultQueryOpenEpics
 
 func defaultQueryOpenEpics() ([]EpicInfo, error) {
-	result := execCommand(GetBeadsDir(), "bd", "list", "--type=epic", "--status=open", "--json", "--limit", "0")
-	if result.Err != nil {
-		return nil, fmt.Errorf("bd list failed: %w", result.Err)
+	issues, err := defaultTracker().List(context.Background(), ListOpts{
+		IssueType: "epic",
+		Status:    "open",
+		Limit:     0,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list open epics: %w", err)
 	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse epic list: %w", err)
-	}
-
 	epics := make([]EpicInfo, 0, len(issues))
 	for _, issue := range issues {
 		epics = append(epics, EpicInfo{
@@ -151,19 +149,16 @@ func defaultQueryOpenEpics() ([]EpicInfo, error) {
 	return epics, nil
 }
 
-// epicHasReadyTasks runs `bd ready --parent <epicID> --json --limit 1` and returns
-// true if there are any ready tasks under the epic.
+// epicHasReadyTasks checks whether the given epic has any ready tasks via the IssueTracker.
 var epicHasReadyTasks = defaultEpicHasReadyTasks
 
 func defaultEpicHasReadyTasks(epicID string) (bool, error) {
-	result := execCommand(GetBeadsDir(), "bd", "ready", "--parent", epicID, "--json", "--limit", "1")
-	if result.Err != nil {
-		return false, fmt.Errorf("bd ready failed for epic %s: %w", epicID, result.Err)
-	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return false, fmt.Errorf("failed to parse ready tasks for epic %s: %w", epicID, err)
+	issues, err := defaultTracker().Ready(context.Background(), ReadyOpts{
+		ParentID: epicID,
+		Limit:    1,
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to check ready tasks for epic %s: %w", epicID, err)
 	}
 	return len(issues) > 0, nil
 }
