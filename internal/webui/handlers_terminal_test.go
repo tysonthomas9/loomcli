@@ -1665,6 +1665,7 @@ func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
 	now := time.Now().UTC()
 	err = store.Set(ctx, &tabmeta.TabMetadata{
 		SessionName: "issue-PROJ-42",
+		Workspace:   DefaultWorkspace,
 		Label:       "issue-PROJ-42",
 		IssueID:     "PROJ-42",
 		CreatedAt:   now,
@@ -1740,6 +1741,7 @@ func TestHandleTerminalWS_NoSSEBroadcastWithoutIssueID(t *testing.T) {
 	now := time.Now().UTC()
 	err = store.Set(ctx, &tabmeta.TabMetadata{
 		SessionName: "plain-session",
+		Workspace:   DefaultWorkspace,
 		Label:       "plain-session",
 		IssueID:     "",
 		CreatedAt:   now,

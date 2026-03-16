@@ -69,10 +69,10 @@ func TestHandleListSessionsByIssue_ReturnsGroupedSessions(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	sessions := []tabmeta.TabMetadata{
-		{SessionName: "s1", Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s2", Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s3", Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s4", Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s1", Workspace: DefaultWorkspace, Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s2", Workspace: DefaultWorkspace, Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s3", Workspace: DefaultWorkspace, Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s4", Workspace: DefaultWorkspace, Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, s := range sessions {
 		s := s
@@ -168,6 +168,7 @@ func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 	for _, name := range []string{"session-a", "session-b"} {
 		if err := store.Set(ctx, &tabmeta.TabMetadata{
 			SessionName: name,
+			Workspace:   DefaultWorkspace,
 			Label:       name,
 			SortOrder:   1,
 			IssueID:     "PROJ-1",
@@ -179,9 +180,9 @@ func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 	}
 
 	// Verify metadata exists before close-all
-	before, err := store.List(ctx)
+	before, err := store.ListAll(ctx)
 	if err != nil {
-		t.Fatalf("List before: %v", err)
+		t.Fatalf("ListAll before: %v", err)
 	}
 	if len(before) != 2 {
 		t.Fatalf("expected 2 tabs before close-all, got %d", len(before))
@@ -205,9 +206,9 @@ func TestHandleCloseAllSessions_DeletesTabMetadata(t *testing.T) {
 	}
 
 	// Verify all metadata was deleted
-	after, err := store.List(ctx)
+	after, err := store.ListAll(ctx)
 	if err != nil {
-		t.Fatalf("List after: %v", err)
+		t.Fatalf("ListAll after: %v", err)
 	}
 	if len(after) != 0 {
 		t.Errorf("expected 0 tabs after close-all, got %d", len(after))

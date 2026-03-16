@@ -355,13 +355,13 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Fleet registration endpoint will return 503 until a fleet API key is configured")
 	}
 
-	// Initialize tab metadata store for terminal tab persistence
 	var tabMetaStore *tabmeta.Store
 	if config.FleetRedis != nil {
 		tmClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
 		tabMetaStore = tabmeta.NewStore(tmClient, nil)
 		defer func() { _ = tabMetaStore.Close() }()
 		log.Printf("Tab metadata store initialized (Redis: %s)", config.FleetRedis.Address)
+		_ = tabMetaStore.MigrateLegacyKeys(ctx, DefaultWorkspace) // best-effort migration
 	}
 
 	// Initialize issue tab state store for tab persistence across navigation

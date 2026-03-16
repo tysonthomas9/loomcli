@@ -348,7 +348,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		// Use background context since r.Context() may be invalid after WebSocket hijack.
 		if tabMetaStore != nil && hub != nil {
 			metaCtx, metaCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			if meta, err := tabMetaStore.Get(metaCtx, session); err == nil && meta != nil && meta.IssueID != "" {
+			if meta, err := tabMetaStore.Get(metaCtx, DefaultWorkspace, session); err == nil && meta != nil && meta.IssueID != "" {
 				hub.Broadcast(&MutationPayload{
 					Type:      "terminal_session_change",
 					IssueID:   meta.IssueID,

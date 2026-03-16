@@ -163,20 +163,32 @@ export interface TabMetadata {
 
 // ============= Tab Metadata API Functions =============
 
+/** Build workspace query string suffix for tab metadata requests. */
+function wsQuery(workspace?: string): string {
+  return workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+}
+
 /**
  * List all tab metadata from GET /api/terminal/tabs.
  */
-export async function listTabMetadata(): Promise<TabMetadata[]> {
-  const response = await get<ApiResult<TabMetadata[]>>("/api/terminal/tabs");
+export async function listTabMetadata(
+  workspace?: string,
+): Promise<TabMetadata[]> {
+  const response = await get<ApiResult<TabMetadata[]>>(
+    `/api/terminal/tabs${wsQuery(workspace)}`,
+  );
   return unwrap(response);
 }
 
 /**
  * Get metadata for a single tab from GET /api/terminal/tabs/{session}.
  */
-export async function getTabMetadata(session: string): Promise<TabMetadata> {
+export async function getTabMetadata(
+  session: string,
+  workspace?: string,
+): Promise<TabMetadata> {
   const response = await get<ApiResult<TabMetadata>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
   );
   return unwrap(response);
 }
@@ -192,9 +204,10 @@ export async function patchTabMetadata(
     sort_order: number;
     issue_id: string;
   }>,
+  workspace?: string,
 ): Promise<TabMetadata> {
   const response = await patch<ApiResult<TabMetadata>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
     fields,
   );
   return unwrap(response);
@@ -206,9 +219,10 @@ export async function patchTabMetadata(
 export async function putTabMetadata(
   session: string,
   fields: { label: string; sort_order: number; notes?: string },
+  workspace?: string,
 ): Promise<TabMetadata> {
   const response = await put<ApiResult<TabMetadata>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
     fields,
   );
   return unwrap(response);
@@ -217,9 +231,12 @@ export async function putTabMetadata(
 /**
  * Delete tab metadata via DELETE /api/terminal/tabs/{session}.
  */
-export async function deleteTabMetadata(session: string): Promise<void> {
+export async function deleteTabMetadata(
+  session: string,
+  workspace?: string,
+): Promise<void> {
   await del<ApiResult<undefined>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
   );
 }
 

@@ -246,16 +246,16 @@ func handleCloseAllSessions(manager *TerminalManager, tabMetaStore *tabmeta.Stor
 			return
 		}
 
-		// Delete all tab metadata
+		// Delete all tab metadata (across all workspaces)
 		metaCleanupFailed := false
 		if tabMetaStore != nil {
-			allTabs, err := tabMetaStore.List(r.Context())
+			allTabs, err := tabMetaStore.ListAll(r.Context())
 			if err != nil {
 				log.Printf("Failed to list tab metadata for cleanup: %v", err)
 				metaCleanupFailed = true
 			} else {
 				for _, tab := range allTabs {
-					if err := tabMetaStore.Delete(r.Context(), tab.SessionName); err != nil {
+					if err := tabMetaStore.Delete(r.Context(), tab.Workspace, tab.SessionName); err != nil {
 						log.Printf("Failed to delete tab metadata for %s: %v", tab.SessionName, err)
 						metaCleanupFailed = true
 					}

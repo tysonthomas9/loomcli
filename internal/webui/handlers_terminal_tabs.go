@@ -11,11 +11,23 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
+// DefaultWorkspace is the workspace name used when no workspace query parameter is provided.
+const DefaultWorkspace = "default"
+
 // tabMetadataResponse wraps tab metadata API responses.
 type tabMetadataResponse struct {
 	Success bool        `json:"success"`
 	Data    interface{} `json:"data,omitempty"`
 	Error   string      `json:"error,omitempty"`
+}
+
+// workspaceFromRequest reads the "workspace" query parameter, defaulting to DefaultWorkspace.
+func workspaceFromRequest(r *http.Request) string {
+	ws := r.URL.Query().Get("workspace")
+	if ws == "" {
+		return DefaultWorkspace
+	}
+	return ws
 }
 
 // handleListTerminalTabs returns all tab metadata, auto-creating defaults for new sessions.
@@ -25,6 +37,15 @@ func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http
 			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
 				Success: false,
 				Error:   "tab metadata not available (no Redis)",
+			})
+			return
+		}
+
+		workspace := workspaceFromRequest(r)
+		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
+			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   err.Error(),
 			})
 			return
 		}
@@ -42,7 +63,7 @@ func handleListTerminalTabs(store *tabmeta.Store, manager *TerminalManager) http
 			}
 		}
 
-		tabs, err := store.EnsureDefaults(r.Context(), activeNames)
+		tabs, err := store.EnsureDefaults(r.Context(), workspace, activeNames)
 		if err != nil {
 			log.Printf("Failed to list tab metadata: %v", err)
 			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
@@ -70,6 +91,15 @@ func handleGetTerminalTab(store *tabmeta.Store) http.HandlerFunc {
 			return
 		}
 
+		workspace := workspaceFromRequest(r)
+		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
+			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   err.Error(),
+			})
+			return
+		}
+
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
 			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
@@ -79,7 +109,7 @@ func handleGetTerminalTab(store *tabmeta.Store) http.HandlerFunc {
 			return
 		}
 
-		meta, err := store.Get(r.Context(), session)
+		meta, err := store.Get(r.Context(), workspace, session)
 		if err != nil {
 			log.Printf("Failed to get tab metadata for %s: %v", session, err)
 			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
@@ -118,6 +148,15 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 			respondJSON(w, http.StatusServiceUnavailable, tabMetadataResponse{
 				Success: false,
 				Error:   "tab metadata not available (no Redis)",
+			})
+			return
+		}
+
+		workspace := workspaceFromRequest(r)
+		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
+			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   err.Error(),
 			})
 			return
 		}
@@ -166,7 +205,7 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 			return
 		}
 
-		meta, err := store.Patch(r.Context(), session, fields)
+		meta, err := store.Patch(r.Context(), workspace, session, fields)
 		if err != nil {
 			log.Printf("Failed to patch tab metadata for %s: %v", session, err)
 			status := http.StatusInternalServerError
@@ -221,6 +260,15 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 			return
 		}
 
+		workspace := workspaceFromRequest(r)
+		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
+			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   err.Error(),
+			})
+			return
+		}
+
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
 			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
@@ -251,6 +299,7 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 		now := time.Now().UTC()
 		meta := &tabmeta.TabMetadata{
 			SessionName: session,
+			Workspace:   workspace,
 			Label:       req.Label,
 			Notes:       req.Notes,
 			SortOrder:   req.SortOrder,
@@ -293,6 +342,15 @@ func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc
 			return
 		}
 
+		workspace := workspaceFromRequest(r)
+		if err := tabmeta.ValidateWorkspaceName(workspace); err != nil {
+			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
+				Success: false,
+				Error:   err.Error(),
+			})
+			return
+		}
+
 		session := r.PathValue("session")
 		if err := tabmeta.ValidateSessionName(session); err != nil {
 			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
@@ -302,7 +360,7 @@ func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc
 			return
 		}
 
-		if err := store.Delete(r.Context(), session); err != nil {
+		if err := store.Delete(r.Context(), workspace, session); err != nil {
 			log.Printf("Failed to delete tab metadata for %s: %v", session, err)
 			respondJSON(w, http.StatusInternalServerError, tabMetadataResponse{
 				Success: false,

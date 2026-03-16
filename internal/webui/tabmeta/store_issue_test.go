@@ -13,6 +13,7 @@ func TestSetAndGet_WithIssueID(t *testing.T) {
 
 	meta := &TabMetadata{
 		SessionName: "issue-session",
+		Workspace:   testWorkspace,
 		Label:       "Issue Session",
 		Notes:       "",
 		SortOrder:   1,
@@ -25,7 +26,7 @@ func TestSetAndGet_WithIssueID(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	got, err := store.Get(ctx, "issue-session")
+	got, err := store.Get(ctx, testWorkspace, "issue-session")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -57,10 +58,10 @@ func TestListByIssue_FiltersCorrectly(t *testing.T) {
 
 	// Create sessions with different issue IDs
 	sessions := []TabMetadata{
-		{SessionName: "s1", Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s2", Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s3", Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s4", Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s1", Workspace: testWorkspace, Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s2", Workspace: testWorkspace, Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s3", Workspace: testWorkspace, Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s4", Workspace: testWorkspace, Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, s := range sessions {
 		s := s
@@ -117,10 +118,10 @@ func TestListIssueSessionMap_GroupsByIssue(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	sessions := []TabMetadata{
-		{SessionName: "s1", Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s2", Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s3", Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
-		{SessionName: "s4", Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s1", Workspace: testWorkspace, Label: "s1", SortOrder: 1, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s2", Workspace: testWorkspace, Label: "s2", SortOrder: 2, IssueID: "PROJ-1", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s3", Workspace: testWorkspace, Label: "s3", SortOrder: 3, IssueID: "PROJ-2", CreatedAt: now, UpdatedAt: now},
+		{SessionName: "s4", Workspace: testWorkspace, Label: "s4", SortOrder: 4, IssueID: "", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, s := range sessions {
 		s := s
@@ -166,6 +167,7 @@ func TestListIssueSessionMap_ExcludesEmptyIssueID(t *testing.T) {
 	// Only sessions without issue IDs
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "orphan",
+		Workspace:   testWorkspace,
 		Label:       "Orphan",
 		SortOrder:   1,
 		IssueID:     "",
@@ -191,6 +193,7 @@ func TestPatch_IssueID(t *testing.T) {
 
 	if err := store.Set(ctx, &TabMetadata{
 		SessionName: "patch-issue",
+		Workspace:   testWorkspace,
 		Label:       "test",
 		SortOrder:   1,
 		CreatedAt:   now,
@@ -199,7 +202,7 @@ func TestPatch_IssueID(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	got, err := store.Patch(ctx, "patch-issue", map[string]string{"issue_id": "PROJ-99"})
+	got, err := store.Patch(ctx, testWorkspace, "patch-issue", map[string]string{"issue_id": "PROJ-99"})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
 	}

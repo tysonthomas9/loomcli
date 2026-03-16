@@ -31,7 +31,9 @@ export interface UseTerminalMetadataReturn {
 
 const DEBOUNCE_MS = 100;
 
-export function useTerminalMetadata(): UseTerminalMetadataReturn {
+export function useTerminalMetadata(
+  workspace?: string,
+): UseTerminalMetadataReturn {
   const [tabs, setTabs] = useState<TabMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -52,7 +54,7 @@ export function useTerminalMetadata(): UseTerminalMetadataReturn {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await listTabMetadata();
+      const data = await listTabMetadata(workspace);
       if (mountedRef.current) {
         setTabs(data);
       }
@@ -65,9 +67,12 @@ export function useTerminalMetadata(): UseTerminalMetadataReturn {
         setIsLoading(false);
       }
     }
-  }, []);
+  }, [workspace]);
 
+  // Re-fetch when workspace changes
   useEffect(() => {
+    setTabs([]);
+    setIsLoading(true);
     fetchTabs();
   }, [fetchTabs]);
 
@@ -88,7 +93,11 @@ export function useTerminalMetadata(): UseTerminalMetadataReturn {
         return [...current, optimistic];
       });
       try {
-        await putTabMetadata(session, { label, sort_order: sortOrder });
+        await putTabMetadata(
+          session,
+          { label, sort_order: sortOrder },
+          workspace,
+        );
       } catch (err) {
         if (mountedRef.current) {
           setTabs(prev);
@@ -96,126 +105,144 @@ export function useTerminalMetadata(): UseTerminalMetadataReturn {
         }
       }
     },
-    [],
+    [workspace],
   );
 
-  const updateLabel = useCallback(async (session: string, label: string) => {
-    let prev: TabMetadata[] = [];
-    setTabs((current) => {
-      prev = current;
-      return current.map((t) =>
-        t.session_name === session ? { ...t, label } : t,
-      );
-    });
-    try {
-      await patchTabMetadata(session, { label });
-    } catch (err) {
-      if (mountedRef.current) {
-        setTabs(prev);
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    }
-  }, []);
-
-  const updateNotes = useCallback(async (session: string, notes: string) => {
-    let prev: TabMetadata[] = [];
-    setTabs((current) => {
-      prev = current;
-      return current.map((t) =>
-        t.session_name === session ? { ...t, notes } : t,
-      );
-    });
-    try {
-      await patchTabMetadata(session, { notes });
-    } catch (err) {
-      if (mountedRef.current) {
-        setTabs(prev);
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    }
-  }, []);
-
-  const reorderTabs = useCallback(async (orderedSessionNames: string[]) => {
-    let prev: TabMetadata[] = [];
-    setTabs((current) => {
-      prev = current;
-      const byName = new Map(current.map((t) => [t.session_name, t]));
-      return orderedSessionNames
-        .map((name, i) => {
-          const tab = byName.get(name);
-          if (!tab) return null;
-          return { ...tab, sort_order: i };
-        })
-        .filter((t): t is TabMetadata => t !== null);
-    });
-
-    try {
-      await Promise.all(
-        orderedSessionNames.map((name, i) =>
-          patchTabMetadata(name, { sort_order: i }),
-        ),
-      );
-    } catch (err) {
-      if (mountedRef.current) {
-        setTabs(prev);
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    }
-  }, []);
-
-  const deleteTab = useCallback(async (session: string) => {
-    let prev: TabMetadata[] = [];
-    setTabs((current) => {
-      prev = current;
-      return current.filter((t) => t.session_name !== session);
-    });
-    try {
-      await deleteTabMetadata(session);
-    } catch (err) {
-      if (mountedRef.current) {
-        setTabs(prev);
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    }
-  }, []);
-
-  const linkToIssue = useCallback(async (session: string, issueId: string) => {
-    let prev: TabMetadata[] = [];
-    setTabs((current) => {
-      prev = current;
-      return current.map((t) =>
-        t.session_name === session ? { ...t, issue_id: issueId } : t,
-      );
-    });
-    try {
-      await patchTabMetadata(session, { issue_id: issueId });
-    } catch (err) {
-      if (mountedRef.current) {
-        setTabs(prev);
-        setError(err instanceof Error ? err : new Error(String(err)));
-      }
-    }
-  }, []);
-
-  const unlinkFromIssue = useCallback(async (session: string) => {
-    let prev: TabMetadata[] = [];
-    setTabs((current) => {
-      prev = current;
-      return current.map((t) => {
-        if (t.session_name !== session) return t;
-        const { issue_id: _, ...rest } = t;
-        return rest;
+  const updateLabel = useCallback(
+    async (session: string, label: string) => {
+      let prev: TabMetadata[] = [];
+      setTabs((current) => {
+        prev = current;
+        return current.map((t) =>
+          t.session_name === session ? { ...t, label } : t,
+        );
       });
-    });
-    try {
-      await patchTabMetadata(session, { issue_id: "" });
-    } catch (err) {
-      if (mountedRef.current) {
-        setTabs(prev);
-        setError(err instanceof Error ? err : new Error(String(err)));
+      try {
+        await patchTabMetadata(session, { label }, workspace);
+      } catch (err) {
+        if (mountedRef.current) {
+          setTabs(prev);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
       }
-    }
-  }, []);
+    },
+    [workspace],
+  );
+
+  const updateNotes = useCallback(
+    async (session: string, notes: string) => {
+      let prev: TabMetadata[] = [];
+      setTabs((current) => {
+        prev = current;
+        return current.map((t) =>
+          t.session_name === session ? { ...t, notes } : t,
+        );
+      });
+      try {
+        await patchTabMetadata(session, { notes }, workspace);
+      } catch (err) {
+        if (mountedRef.current) {
+          setTabs(prev);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    },
+    [workspace],
+  );
+
+  const reorderTabs = useCallback(
+    async (orderedSessionNames: string[]) => {
+      let prev: TabMetadata[] = [];
+      setTabs((current) => {
+        prev = current;
+        const byName = new Map(current.map((t) => [t.session_name, t]));
+        return orderedSessionNames
+          .map((name, i) => {
+            const tab = byName.get(name);
+            if (!tab) return null;
+            return { ...tab, sort_order: i };
+          })
+          .filter((t): t is TabMetadata => t !== null);
+      });
+
+      try {
+        await Promise.all(
+          orderedSessionNames.map((name, i) =>
+            patchTabMetadata(name, { sort_order: i }, workspace),
+          ),
+        );
+      } catch (err) {
+        if (mountedRef.current) {
+          setTabs(prev);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    },
+    [workspace],
+  );
+
+  const deleteTab = useCallback(
+    async (session: string) => {
+      let prev: TabMetadata[] = [];
+      setTabs((current) => {
+        prev = current;
+        return current.filter((t) => t.session_name !== session);
+      });
+      try {
+        await deleteTabMetadata(session, workspace);
+      } catch (err) {
+        if (mountedRef.current) {
+          setTabs(prev);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    },
+    [workspace],
+  );
+
+  const linkToIssue = useCallback(
+    async (session: string, issueId: string) => {
+      let prev: TabMetadata[] = [];
+      setTabs((current) => {
+        prev = current;
+        return current.map((t) =>
+          t.session_name === session ? { ...t, issue_id: issueId } : t,
+        );
+      });
+      try {
+        await patchTabMetadata(session, { issue_id: issueId }, workspace);
+      } catch (err) {
+        if (mountedRef.current) {
+          setTabs(prev);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    },
+    [workspace],
+  );
+
+  const unlinkFromIssue = useCallback(
+    async (session: string) => {
+      let prev: TabMetadata[] = [];
+      setTabs((current) => {
+        prev = current;
+        return current.map((t) => {
+          if (t.session_name !== session) return t;
+          const { issue_id: _, ...rest } = t;
+          return rest;
+        });
+      });
+      try {
+        await patchTabMetadata(session, { issue_id: "" }, workspace);
+      } catch (err) {
+        if (mountedRef.current) {
+          setTabs(prev);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    },
+    [workspace],
+  );
 
   const handleMutation = useCallback(
     (mutation: MutationPayload) => {

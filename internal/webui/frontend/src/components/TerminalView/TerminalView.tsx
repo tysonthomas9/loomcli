@@ -1,10 +1,3 @@
-/**
- * TerminalView container component.
- * Orchestrates multiple tabbed terminal sessions with a search overlay.
- * All terminal instances are mounted in the DOM but only the active one
- * is visible, preserving xterm buffers and WebSocket connections.
- */
-
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
 import type { IssueContext } from "@/api/terminal";
@@ -54,6 +47,7 @@ import { useClipboard } from "./useClipboard";
 import { useSessionManagement } from "./useCloseAllSessions";
 import { useTabActions } from "./useTabActions";
 import { useTabInit } from "./useTabInit";
+import { useWorkspaceTabState } from "./useWorkspaceTabState";
 import styles from "./TerminalView.module.css";
 
 interface TerminalViewProps {
@@ -73,6 +67,16 @@ export function TerminalView({
   onUnreadChange,
   issueId,
 }: TerminalViewProps): JSX.Element {
+  const [tabs, setTabs] = useState<TabState[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string>("");
+  const initializedRef = useRef(false);
+  const workspace = useWorkspaceTabState({
+    tabs,
+    activeTabId,
+    setTabs,
+    setActiveTabId,
+    initializedRef,
+  });
   const {
     tabs: tabMetadata,
     createTab,
@@ -81,12 +85,10 @@ export function TerminalView({
     deleteTab,
     linkToIssue,
     isLoading: metaLoading,
-  } = useTerminalMetadata();
+  } = useTerminalMetadata(workspace);
   const { config, isLoading: configLoading } = useBackendConfig();
   const { activeTabId: restoredTabId, isRestoring } = useSessionRestore();
 
-  const [tabs, setTabs] = useState<TabState[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string>("");
   const [isFullHeight, setIsFullHeight] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -107,7 +109,6 @@ export function TerminalView({
     () => new Map(),
   );
   const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map());
-  const initializedRef = useRef(false);
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
 
@@ -120,7 +121,6 @@ export function TerminalView({
     handlePasteCancel,
   } = useClipboard(instanceRefs, activeTabIdRef);
 
-  // Track output on non-active tabs as unread
   const handleOutput = useCallback((tabId: string) => {
     if (tabId !== activeTabIdRef.current) {
       setTabUnread((prev) => {
