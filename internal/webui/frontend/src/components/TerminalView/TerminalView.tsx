@@ -47,6 +47,7 @@ import {
   generateTabName,
   sanitizeSessionName,
 } from "./terminalTabUtils";
+import { useTabOrdering } from "./useTabOrdering";
 import { useClipboard } from "./useClipboard";
 import { useSessionManagement } from "./useCloseAllSessions";
 import { useSplitView } from "./useSplitView";
@@ -89,8 +90,10 @@ export function TerminalView({
     createTab,
     updateLabel,
     updateNotes,
+    updatePinned,
     deleteTab,
     linkToIssue,
+    reorderTabs: reorderTabMeta,
     isLoading: metaLoading,
   } = useTerminalMetadata(workspace);
   const { config, isLoading: configLoading } = useBackendConfig();
@@ -539,6 +542,18 @@ export function TerminalView({
   const handleTabCloseRef = useRef(handleTabClose);
   handleTabCloseRef.current = handleTabClose;
 
+  const { handleTabPin, handleCloseOthers, handleReorderTabs } = useTabOrdering(
+    {
+      tabs,
+      setTabs,
+      setActiveTabId,
+      handleTabClose,
+      updatePinned,
+      reorderTabMeta,
+      deleteTab,
+    },
+  );
+
   const handleNewTabClick = useCallback(() => {
     if (tabs.length >= MAX_TABS) return;
     setIsSessionPromptOpen(true);
@@ -814,6 +829,7 @@ export function TerminalView({
                 connectionState: t.connectionState,
                 ...(color != null && { brandColor: color }),
                 ...(tabUnread.get(t.id) && { hasUnread: true }),
+                ...(t.pinned && { isPinned: true }),
               };
             })}
             activeTabId={activeTabId}
@@ -826,6 +842,9 @@ export function TerminalView({
             onTabRename={handleTabRename}
             onDuplicateTab={handleDuplicateTab}
             maxTabsReached={tabs.length >= MAX_TABS}
+            onTabPin={handleTabPin}
+            onCloseOthers={handleCloseOthers}
+            onReorderTabs={handleReorderTabs}
             isSplitView={isSplitView}
             canSplit={canSplit}
             onToggleSplit={handleToggleSplit}

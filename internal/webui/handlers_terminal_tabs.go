@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,7 +139,30 @@ type tabPatchRequest struct {
 	Label     *string `json:"label"`
 	Notes     *string `json:"notes"`
 	SortOrder *int    `json:"sort_order"`
+	Pinned    *bool   `json:"pinned"`
 	IssueID   *string `json:"issue_id"`
+}
+
+// buildPatchFields converts a tabPatchRequest into a partial fields map for store.Patch.
+func buildPatchFields(req tabPatchRequest) (fields map[string]string, issueIDChanged bool) {
+	fields = make(map[string]string)
+	if req.Label != nil {
+		fields["label"] = *req.Label
+	}
+	if req.Notes != nil {
+		fields["notes"] = *req.Notes
+	}
+	if req.SortOrder != nil {
+		fields["sort_order"] = fmt.Sprintf("%d", *req.SortOrder)
+	}
+	if req.Pinned != nil {
+		fields["pinned"] = strconv.FormatBool(*req.Pinned)
+	}
+	if req.IssueID != nil {
+		fields["issue_id"] = *req.IssueID
+		issueIDChanged = true
+	}
+	return fields, issueIDChanged
 }
 
 // handlePatchTerminalTab partially updates tab metadata and broadcasts an SSE event.
@@ -180,22 +204,7 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 			return
 		}
 
-		// Build partial fields map
-		issueIDChanged := false
-		fields := make(map[string]string)
-		if req.Label != nil {
-			fields["label"] = *req.Label
-		}
-		if req.Notes != nil {
-			fields["notes"] = *req.Notes
-		}
-		if req.SortOrder != nil {
-			fields["sort_order"] = fmt.Sprintf("%d", *req.SortOrder)
-		}
-		if req.IssueID != nil {
-			fields["issue_id"] = *req.IssueID
-			issueIDChanged = true
-		}
+		fields, issueIDChanged := buildPatchFields(req)
 
 		if len(fields) == 0 {
 			respondJSON(w, http.StatusBadRequest, tabMetadataResponse{
@@ -247,6 +256,7 @@ type tabPutRequest struct {
 	Label     string `json:"label"`
 	SortOrder int    `json:"sort_order"`
 	Notes     string `json:"notes"`
+	Pinned    bool   `json:"pinned"`
 }
 
 // handlePutTerminalTab creates or replaces tab metadata and broadcasts an SSE event.
@@ -303,6 +313,7 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 			Label:       req.Label,
 			Notes:       req.Notes,
 			SortOrder:   req.SortOrder,
+			Pinned:      req.Pinned,
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}

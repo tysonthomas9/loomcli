@@ -45,10 +45,15 @@ export function useTabInit(args: TabInitArgs) {
             m.session_name,
             defaultBackend,
           ),
+          pinned: m.pinned,
           _sortOrder: m.sort_order,
+          _pinned: m.pinned,
         }))
-        .sort((a, b) => (a._sortOrder ?? 999) - (b._sortOrder ?? 999))
-        .map(({ _sortOrder: _, ...tab }) => tab);
+        .sort((a, b) => {
+          if (a._pinned !== b._pinned) return a._pinned ? -1 : 1;
+          return (a._sortOrder ?? 999) - (b._sortOrder ?? 999);
+        })
+        .map(({ _sortOrder: _, _pinned: _p, ...tab }) => tab);
       setTabs(restoredTabs);
 
       const savedActiveId = sessionStorage.getItem("terminal-active-tab");

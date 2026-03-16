@@ -27,6 +27,7 @@ export interface TabState {
   sessionName: string;
   connectionState: ConnectionState;
   backendName: string;
+  pinned?: boolean;
   crashReason?: string | null;
 }
 

@@ -20,6 +20,7 @@ export interface UseTerminalMetadataReturn {
   ) => Promise<void>;
   updateLabel: (session: string, label: string) => Promise<void>;
   updateNotes: (session: string, notes: string) => Promise<void>;
+  updatePinned: (session: string, pinned: boolean) => Promise<void>;
   reorderTabs: (orderedSessionNames: string[]) => Promise<void>;
   deleteTab: (session: string) => Promise<void>;
   linkToIssue: (session: string, issueId: string) => Promise<void>;
@@ -84,6 +85,7 @@ export function useTerminalMetadata(
         label,
         notes: "",
         sort_order: sortOrder,
+        pinned: false,
         created_at: now,
         updated_at: now,
       };
@@ -140,6 +142,27 @@ export function useTerminalMetadata(
       });
       try {
         await patchTabMetadata(session, { notes }, workspace);
+      } catch (err) {
+        if (mountedRef.current) {
+          setTabs(prev);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    },
+    [workspace],
+  );
+
+  const updatePinned = useCallback(
+    async (session: string, pinned: boolean) => {
+      let prev: TabMetadata[] = [];
+      setTabs((current) => {
+        prev = current;
+        return current.map((t) =>
+          t.session_name === session ? { ...t, pinned } : t,
+        );
+      });
+      try {
+        await patchTabMetadata(session, { pinned }, workspace);
       } catch (err) {
         if (mountedRef.current) {
           setTabs(prev);
@@ -265,6 +288,7 @@ export function useTerminalMetadata(
     createTab,
     updateLabel,
     updateNotes,
+    updatePinned,
     reorderTabs,
     deleteTab,
     linkToIssue,

@@ -32,6 +32,7 @@ type TabMetadata struct {
 	Label       string    `json:"label"`
 	Notes       string    `json:"notes"`
 	SortOrder   int       `json:"sort_order"`
+	Pinned      bool      `json:"pinned"`
 	IssueID     string    `json:"issue_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -148,6 +149,9 @@ func (s *Store) List(ctx context.Context, workspace string) ([]TabMetadata, erro
 	}
 
 	sort.Slice(result, func(i, j int) bool {
+		if result[i].Pinned != result[j].Pinned {
+			return result[i].Pinned
+		}
 		return result[i].SortOrder < result[j].SortOrder
 	})
 
@@ -199,6 +203,9 @@ func (s *Store) ListAll(ctx context.Context) ([]TabMetadata, error) {
 	}
 
 	sort.Slice(result, func(i, j int) bool {
+		if result[i].Pinned != result[j].Pinned {
+			return result[i].Pinned
+		}
 		return result[i].SortOrder < result[j].SortOrder
 	})
 
@@ -214,10 +221,15 @@ func (s *Store) Set(ctx context.Context, meta *TabMetadata) error {
 		return err
 	}
 
+	pinnedStr := "false"
+	if meta.Pinned {
+		pinnedStr = "true"
+	}
 	fields := map[string]interface{}{
 		"label":      meta.Label,
 		"notes":      meta.Notes,
 		"sort_order": strconv.Itoa(meta.SortOrder),
+		"pinned":     pinnedStr,
 		"issue_id":   meta.IssueID,
 		"created_at": meta.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at": meta.UpdatedAt.UTC().Format(time.RFC3339),
@@ -328,6 +340,9 @@ func (s *Store) EnsureDefaults(ctx context.Context, workspace string, activeSess
 	}
 
 	sort.Slice(existing, func(i, j int) bool {
+		if existing[i].Pinned != existing[j].Pinned {
+			return existing[i].Pinned
+		}
 		return existing[i].SortOrder < existing[j].SortOrder
 	})
 
@@ -422,6 +437,10 @@ func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabM
 		if err == nil {
 			meta.SortOrder = n
 		}
+	}
+
+	if p, ok := vals["pinned"]; ok {
+		meta.Pinned = p == "true"
 	}
 
 	if ca, ok := vals["created_at"]; ok {

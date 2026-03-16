@@ -172,6 +172,7 @@ export interface TabMetadata {
   label: string;
   notes: string;
   sort_order: number;
+  pinned: boolean;
   issue_id?: string;
   created_at: string;
   updated_at: string;
@@ -218,6 +219,7 @@ export async function patchTabMetadata(
     label: string;
     notes: string;
     sort_order: number;
+    pinned: boolean;
     issue_id: string;
   }>,
   workspace?: string,
