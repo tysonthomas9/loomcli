@@ -2047,7 +2047,6 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 			return string(blockedJSON), nil
 		}
 		if len(args) > 1 && args[0] == "list" {
-			// Match the specific status queries
 			for _, arg := range args {
 				if arg == "--status=in_progress" {
 					return string(inProgressJSON), nil
