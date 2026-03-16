@@ -3,6 +3,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { IssueContext } from "@/api/terminal";
 import {
   seedTerminalSession,
+  spawnTerminalSession,
   patchTerminalState,
   restartTerminalSession,
   fetchTerminalToken,
@@ -447,13 +448,6 @@ export function TerminalView({
     },
   );
 
-  const handleCrashCloseTab = useCallback(
-    (tabId: string) => {
-      handleTabClose(tabId);
-    },
-    [handleTabClose],
-  );
-
   const handleNewTabClick = useCallback(() => {
     if (tabs.length >= MAX_TABS) return;
     setIsSessionPromptOpen(true);
@@ -463,6 +457,9 @@ export function TerminalView({
     (backend: string) => {
       setIsSessionPromptOpen(false);
       const name = generateTabName(backend, tabs);
+      // Pre-create tmux session for shell tabs (WS handler also detects lead-shell-* as fallback)
+      if (backend === "shell")
+        spawnTerminalSession(name, backend).catch(() => {});
       setTabs((prev) => [
         ...prev,
         {
@@ -680,7 +677,7 @@ export function TerminalView({
                     onRestart={() =>
                       handleCrashRestart(tab.id, tab.sessionName)
                     }
-                    onCloseTab={() => handleCrashCloseTab(tab.id)}
+                    onCloseTab={() => handleTabClose(tab.id)}
                   />
                 ) : (
                   <>

@@ -58,7 +58,7 @@ export function useTabInit(args: TabInitArgs) {
         restoredTab ? restoredTab.id : (restoredTabs[0]?.id ?? ""),
       );
     } else {
-      const backends = config?.available ?? [];
+      const backends = (config?.available ?? []).filter((b) => b !== "shell");
       if (backends.length === 0) {
         const fallbackTab: TabState = {
           id: "talk-to-lead",

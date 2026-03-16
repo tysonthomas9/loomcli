@@ -305,6 +305,77 @@ describe("useTabInit", () => {
     expect(tabs[0].connectionState).toBe("disconnected");
   });
 
+  it("filters shell from auto-created backends", () => {
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const createTab = vi.fn().mockResolvedValue(undefined);
+
+    const args = createArgs({
+      config: {
+        backend: "claude",
+        source: "config",
+        available: ["claude", "codex", "shell"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+      createTab,
+    });
+
+    renderHook(() => useTabInit(args));
+
+    expect(setTabs).toHaveBeenCalledTimes(1);
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    // Shell should be filtered out — only claude and codex remain
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0].sessionName).toBe("lead-claude-1");
+    expect(tabs[0].backendName).toBe("claude");
+    expect(tabs[1].sessionName).toBe("lead-codex-1");
+    expect(tabs[1].backendName).toBe("codex");
+
+    // No shell tab should have been created
+    const shellTab = tabs.find((t) => t.backendName === "shell");
+    expect(shellTab).toBeUndefined();
+
+    // Only 2 tabs persisted (not 3)
+    expect(createTab).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to talk-to-lead when only shell is available", () => {
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const createTab = vi.fn().mockResolvedValue(undefined);
+
+    const args = createArgs({
+      config: {
+        backend: "claude",
+        source: "config",
+        available: ["shell"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+      createTab,
+    });
+
+    renderHook(() => useTabInit(args));
+
+    expect(setTabs).toHaveBeenCalledTimes(1);
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    // When all backends are filtered (only "shell"), should fall back to talk-to-lead
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].sessionName).toBe("talk-to-lead");
+    expect(setActiveTabId).toHaveBeenCalledWith("talk-to-lead");
+  });
+
   it("extracts backend name from session name pattern", () => {
     const metadata: TabMetadata[] = [
       {

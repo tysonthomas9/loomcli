@@ -1360,9 +1360,9 @@ describe("BackendPickerPrompt", () => {
     const options = select.querySelectorAll("option");
 
     expect(options).toHaveLength(3);
-    expect(options[0]).toHaveTextContent("claude");
-    expect(options[1]).toHaveTextContent("codex");
-    expect(options[2]).toHaveTextContent("opencode");
+    expect(options[0]).toHaveTextContent("Claude");
+    expect(options[1]).toHaveTextContent("Codex");
+    expect(options[2]).toHaveTextContent("OpenCode");
   });
 
   it("calls onSelect with correct backend when Create is clicked", async () => {

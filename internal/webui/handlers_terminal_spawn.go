@@ -89,15 +89,18 @@ func handleTerminalSpawnImpl(manager terminalSpawner) http.HandlerFunc {
 			return
 		}
 
-		if !isValidBackend(req.Backend) {
+		var command string
+		if req.Backend == "shell" {
+			command = shellCommand()
+		} else if !isValidBackend(req.Backend) {
 			respondJSON(w, http.StatusBadRequest, terminalSpawnResponse{
 				Error: fmt.Sprintf("invalid backend %q; valid: %s", req.Backend, strings.Join(validBackends, ", ")),
 			})
 			return
+		} else {
+			// The command is the backend name itself (e.g., "claude")
+			command = req.Backend
 		}
-
-		// The command is the backend name itself (e.g., "claude")
-		command := req.Backend
 
 		created, err := manager.Spawn(sanitizedName, command, 120, 40)
 		if err != nil {

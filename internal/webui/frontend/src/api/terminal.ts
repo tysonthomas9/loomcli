@@ -78,6 +78,22 @@ export function buildTerminalWsUrl(
   return url;
 }
 
+// ============= Spawn Session =============
+
+/**
+ * Pre-create a tmux session for the given backend via POST /api/terminal/spawn.
+ * Used for shell tabs to ensure the correct command before WebSocket connects.
+ */
+export async function spawnTerminalSession(
+  sessionName: string,
+  backend: string,
+): Promise<void> {
+  await post<{ success: boolean; data?: unknown; error?: string }>(
+    "/api/terminal/spawn",
+    { session_name: sessionName, backend },
+  );
+}
+
 // ============= Restart Session =============
 
 /**

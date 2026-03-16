@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -116,7 +117,12 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{"success": false, "error": "terminal manager not initialized"})
 			return
 		}
-
+		// Shell tabs: kill and return without changing defaultCommand.
+		if strings.HasPrefix(session, "lead-shell-") {
+			_ = manager.KillSessionByName(session)
+			respondJSON(w, http.StatusOK, map[string]interface{}{"success": true, "backend": "shell"})
+			return
+		}
 		// Read current backend from loom.yaml via daemon
 		backend := manager.DefaultCommand() // fallback to current
 		if configPool != nil {
@@ -327,7 +333,7 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 
 		// Attach to terminal session with default 80x24 size
 		// (frontend sends resize immediately after connect)
-		termSession, err := manager.Attach(session, "", 80, 24)
+		termSession, err := manager.Attach(session, attachCommandForSession(session), 80, 24)
 		if err != nil {
 			if errors.Is(err, ErrMaxSessionsReached) {
 				log.Printf("Terminal session limit reached for %q", session)

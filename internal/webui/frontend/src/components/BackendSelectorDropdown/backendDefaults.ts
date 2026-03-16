@@ -39,6 +39,11 @@ export const KNOWN_BACKEND_DEFAULTS: Record<string, BackendDefaults> = {
     provider: "Open Source",
     brandColor: "#6366f1",
   },
+  shell: {
+    displayName: "Terminal",
+    provider: "System",
+    brandColor: "#6b7280",
+  },
 };
 
 /**

@@ -326,3 +326,75 @@ func TestHandleTerminalSpawn_OversizedBody(t *testing.T) {
 		t.Errorf("error = %q, want it to contain %q", resp.Error, "request body too large")
 	}
 }
+
+func TestHandleTerminalSpawn_ShellBackend(t *testing.T) {
+	mock := &mockSpawner{spawnCreated: true}
+	handler := handleTerminalSpawnImpl(mock)
+
+	body := `{"session_name":"lead-shell-1","backend":"shell"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var resp terminalSpawnResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected success=true, got false; error=%s", resp.Error)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected non-nil data")
+	}
+	if resp.Data.Backend != "shell" {
+		t.Errorf("backend = %q, want %q", resp.Data.Backend, "shell")
+	}
+	// The command should be the shell path, NOT the literal string "shell"
+	if resp.Data.Command == "shell" {
+		t.Error("command should be the shell executable path, not the literal string \"shell\"")
+	}
+	// The command should be a non-empty shell path (e.g., /bin/bash or $SHELL)
+	if resp.Data.Command == "" {
+		t.Error("command should not be empty for shell backend")
+	}
+	if resp.Data.SessionName != "lead-shell-1" {
+		t.Errorf("session_name = %q, want %q", resp.Data.SessionName, "lead-shell-1")
+	}
+	if !resp.Data.Created {
+		t.Error("expected created=true")
+	}
+}
+
+func TestHandleTerminalSpawn_ShellBackendUsesShellCommand(t *testing.T) {
+	mock := &mockSpawner{spawnCreated: true}
+	handler := handleTerminalSpawnImpl(mock)
+
+	body := `{"session_name":"lead-shell-2","backend":"shell"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var resp terminalSpawnResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected success=true, got false; error=%s", resp.Error)
+	}
+	if resp.Data == nil {
+		t.Fatal("expected non-nil data")
+	}
+	// The command should match shellCommand() output
+	expected := shellCommand()
+	if resp.Data.Command != expected {
+		t.Errorf("command = %q, want shellCommand() = %q", resp.Data.Command, expected)
+	}
+}

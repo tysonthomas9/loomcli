@@ -86,8 +86,8 @@ func TestHandleGetBackendConfig_WithProjectBackend(t *testing.T) {
 	if resp.Data.Source != "project" {
 		t.Errorf("expected source project, got %s", resp.Data.Source)
 	}
-	if len(resp.Data.Available) != 3 {
-		t.Errorf("expected 3 available backends, got %d", len(resp.Data.Available))
+	if len(resp.Data.Available) != 4 {
+		t.Errorf("expected 4 available backends (including shell), got %d", len(resp.Data.Available))
 	}
 }
 
@@ -366,5 +366,78 @@ func TestHandlePatchBackendConfig_NilPool(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestHandlePatchBackendConfig_ShellRejected(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: claude\n"), 0644)
+
+	pool := newMockConfigPool(dir)
+	handler := handlePatchBackendConfigWithPool(pool)
+
+	body := strings.NewReader(`{"backend":"shell"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/config/backend", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp BackendConfigResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	if resp.Success {
+		t.Fatal("expected failure when setting shell as project default")
+	}
+	if !strings.Contains(resp.Error, "invalid backend") {
+		t.Errorf("expected invalid backend error, got: %s", resp.Error)
+	}
+
+	// Verify loom.yaml was NOT updated
+	data, _ := os.ReadFile(filepath.Join(dir, "loom.yaml"))
+	if strings.Contains(string(data), "backend: shell") {
+		t.Errorf("loom.yaml should not have been updated to shell: %s", string(data))
+	}
+}
+
+func TestHandleGetBackendConfig_AvailableIncludesShell(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: claude\n"), 0644)
+
+	pool := newMockConfigPool(dir)
+	handler := handleGetBackendConfigWithPool(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config/backend", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp BackendConfigResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	// Available should include shell as the 4th item
+	if len(resp.Data.Available) != 4 {
+		t.Errorf("expected 4 available backends, got %d: %v", len(resp.Data.Available), resp.Data.Available)
+	}
+
+	found := false
+	for _, b := range resp.Data.Available {
+		if b == "shell" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'shell' in available list, got: %v", resp.Data.Available)
 	}
 }

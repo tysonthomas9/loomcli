@@ -6,7 +6,10 @@ import { describe, it, expect } from "vitest";
 
 import {
   extractBaseName,
+  generateTabName,
+  getBackendFromSessionName,
   getNextDuplicateName,
+  BACKEND_BRAND_COLORS,
   MAX_TABS,
   type TabState,
 } from "../terminalTabUtils";
@@ -123,5 +126,70 @@ describe("getNextDuplicateName", () => {
       label: "Codex (2)",
       sessionName: "Codex-2",
     });
+  });
+});
+
+describe("generateTabName (shell backend)", () => {
+  it('generates "lead-shell-1" when no existing shell tabs', () => {
+    const result = generateTabName("shell", []);
+    expect(result).toBe("lead-shell-1");
+  });
+
+  it('generates "lead-shell-2" when lead-shell-1 exists', () => {
+    const existing = [
+      makeTab({ sessionName: "lead-shell-1", label: "Terminal" }),
+    ];
+    const result = generateTabName("shell", existing);
+    expect(result).toBe("lead-shell-2");
+  });
+
+  it("increments correctly with multiple shell tabs", () => {
+    const existing = [
+      makeTab({ sessionName: "lead-shell-1", label: "Terminal" }),
+      makeTab({ sessionName: "lead-shell-3", label: "Terminal (3)" }),
+    ];
+    const result = generateTabName("shell", existing);
+    expect(result).toBe("lead-shell-4");
+  });
+
+  it("ignores non-shell tabs when counting", () => {
+    const existing = [
+      makeTab({ sessionName: "lead-claude-1", label: "Claude" }),
+      makeTab({ sessionName: "lead-shell-1", label: "Terminal" }),
+    ];
+    const result = generateTabName("shell", existing);
+    expect(result).toBe("lead-shell-2");
+  });
+});
+
+describe("getBackendFromSessionName (shell backend)", () => {
+  it('returns "shell" for "lead-shell-1"', () => {
+    expect(getBackendFromSessionName("lead-shell-1")).toBe("shell");
+  });
+
+  it('returns "shell" for "lead-shell-5"', () => {
+    expect(getBackendFromSessionName("lead-shell-5")).toBe("shell");
+  });
+
+  it('returns "claude" for "lead-claude-1" (non-shell)', () => {
+    expect(getBackendFromSessionName("lead-claude-1")).toBe("claude");
+  });
+
+  it("returns default for non-matching session name", () => {
+    expect(getBackendFromSessionName("talk-to-lead", "claude")).toBe("claude");
+  });
+});
+
+describe("BACKEND_BRAND_COLORS (shell)", () => {
+  it('includes "shell" with gray color', () => {
+    expect(BACKEND_BRAND_COLORS).toHaveProperty("shell");
+    expect(BACKEND_BRAND_COLORS.shell).toBe("#6b7280");
+  });
+
+  it("has entries for all known backends", () => {
+    expect(BACKEND_BRAND_COLORS).toHaveProperty("claude");
+    expect(BACKEND_BRAND_COLORS).toHaveProperty("codex");
+    expect(BACKEND_BRAND_COLORS).toHaveProperty("opencode");
+    expect(BACKEND_BRAND_COLORS).toHaveProperty("shell");
   });
 });

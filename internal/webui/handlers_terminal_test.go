@@ -1642,6 +1642,85 @@ func TestHandleTerminalRestart_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// TestHandleTerminalRestart_ShellSession tests that restarting a lead-shell-*
+// session returns backend:"shell" and does not read loom.yaml or update defaultCommand.
+func TestHandleTerminalRestart_ShellSession(t *testing.T) {
+	manager, err := NewTerminalManager("claude", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: codex\n"), 0644)
+
+	pool := newMockConfigPool(dir)
+	handler := handleTerminalRestartWithPool(manager, pool, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-1", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != true {
+		t.Errorf("expected success to be true, got %v", resp["success"])
+	}
+	if resp["backend"] != "shell" {
+		t.Errorf("expected backend %q, got %q", "shell", resp["backend"])
+	}
+
+	// Verify manager's default command was NOT changed (should still be the original)
+	if got := manager.DefaultCommand(); got != "claude" {
+		t.Errorf("expected manager default command to remain %q, got %q", "claude", got)
+	}
+}
+
+// TestHandleTerminalRestart_ShellSession_NilPool tests that restarting a
+// lead-shell-* session works even when configPool is nil.
+func TestHandleTerminalRestart_ShellSession_NilPool(t *testing.T) {
+	manager, err := NewTerminalManager("claude", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	handler := handleTerminalRestartWithPool(manager, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-3", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != true {
+		t.Errorf("expected success to be true, got %v", resp["success"])
+	}
+	if resp["backend"] != "shell" {
+		t.Errorf("expected backend %q, got %q", "shell", resp["backend"])
+	}
+}
+
 // TestHandleTerminalWS_SSEBroadcastOnIssueSession verifies that when a WebSocket
 // connects to a session that has issue_id metadata, the handler broadcasts a
 // terminal_session_change SSE event to the hub.

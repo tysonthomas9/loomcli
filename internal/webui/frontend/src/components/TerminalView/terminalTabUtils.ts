@@ -12,6 +12,7 @@ export const BACKEND_BRAND_COLORS: Record<string, string> = {
   claude: "#D97706",
   codex: "#22c55e",
   opencode: "#3B82F6",
+  shell: "#6b7280",
 };
 
 export interface TabState {

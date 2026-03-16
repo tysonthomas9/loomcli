@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
+import { KNOWN_BACKEND_DEFAULTS } from "@/components/BackendSelectorDropdown";
 import { useRegisterEscapeLayer, LAYER_MODAL } from "@/hooks";
 import styles from "./BackendPickerPrompt.module.css";
 
@@ -119,7 +120,7 @@ export function BackendPickerPrompt({
                 >
                   {availableBackends.map((b) => (
                     <option key={b} value={b}>
-                      {b}
+                      {KNOWN_BACKEND_DEFAULTS[b]?.displayName ?? b}
                     </option>
                   ))}
                 </select>

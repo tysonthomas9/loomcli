@@ -8,10 +8,18 @@ import { toBackendInfo, KNOWN_BACKEND_DEFAULTS } from "./backendDefaults";
 
 describe("backendDefaults", () => {
   describe("KNOWN_BACKEND_DEFAULTS", () => {
-    it("has defaults for claude, codex, and opencode", () => {
+    it("has defaults for claude, codex, opencode, and shell", () => {
       expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("claude");
       expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("codex");
       expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("opencode");
+      expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("shell");
+    });
+
+    it('has shell with displayName "Terminal", provider "System", brandColor "#6b7280"', () => {
+      const shell = KNOWN_BACKEND_DEFAULTS.shell;
+      expect(shell.displayName).toBe("Terminal");
+      expect(shell.provider).toBe("System");
+      expect(shell.brandColor).toBe("#6b7280");
     });
   });
 
@@ -53,6 +61,15 @@ describe("backendDefaults", () => {
       });
       expect(info.provider).toBe("Anthropic Inc.");
       expect(info.brandColor).toBe("#ff0000");
+    });
+
+    it('returns shell defaults: displayName "Terminal", provider "System"', () => {
+      const info = toBackendInfo("shell");
+      expect(info.name).toBe("shell");
+      expect(info.displayName).toBe("Terminal");
+      expect(info.provider).toBe("System");
+      expect(info.brandColor).toBe("#6b7280");
+      expect(info.available).toBe(true);
     });
   });
 });
