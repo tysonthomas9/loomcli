@@ -118,6 +118,8 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("POST /api/terminal/spawn", handleTerminalSpawn(termManager))
 		mux.HandleFunc("POST /api/terminal/sessions/{name}/seed", handleSeedTerminalSession(termManager))
 		mux.HandleFunc("GET /api/terminal/sessions/{session}/scrollback", handleGetScrollback(termManager))
+		mux.HandleFunc("GET /api/terminal/sessions/{session}/export", handleExportSession(termManager))
+		mux.HandleFunc("GET /api/terminal/sessions/{session}/scrollback-info", handleScrollbackInfo(termManager))
 		mux.HandleFunc("POST /api/terminal/sessions/{session}/kill", handleScheduleSessionKill(termManager))
 		mux.HandleFunc("GET /api/terminal/sessions/by-issue", handleListSessionsByIssue(tabMetaStore))
 		mux.HandleFunc("POST /api/terminal/sessions/close-all", handleCloseAllSessions(termManager, tabMetaStore, hub))

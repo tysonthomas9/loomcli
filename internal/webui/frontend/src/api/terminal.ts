@@ -303,6 +303,37 @@ export async function fetchScrollback(
   return unwrap(response);
 }
 
+// ============= Export API =============
+
+export interface ScrollbackInfo {
+  line_count: number;
+  max_lines: number;
+  truncated_count: number;
+}
+
+/**
+ * Get scrollback buffer info for a terminal session.
+ * GET /api/terminal/sessions/{session}/scrollback-info
+ */
+export async function getScrollbackInfo(
+  sessionName: string,
+): Promise<ScrollbackInfo> {
+  return get<ScrollbackInfo>(
+    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/scrollback-info`,
+  );
+}
+
+/**
+ * Export session scrollback as a downloadable file.
+ * Returns the URL for direct browser download.
+ */
+export function getExportUrl(
+  sessionName: string,
+  format: "txt" | "md" = "txt",
+): string {
+  return `/api/terminal/sessions/${encodeURIComponent(sessionName)}/export?format=${format}`;
+}
+
 // ============= Terminal UI State =============
 
 /**

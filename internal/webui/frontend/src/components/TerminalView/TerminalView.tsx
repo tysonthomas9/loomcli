@@ -7,6 +7,7 @@ import {
   patchTerminalState,
   restartTerminalSession,
   fetchTerminalToken,
+  getExportUrl,
 } from "@/api/terminal";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
@@ -389,9 +390,7 @@ export function TerminalView({
 
   // Body scroll lock for full-height mode
   useEffect(() => {
-    if (isFullHeight) {
-      document.body.style.overflow = "hidden";
-    }
+    if (isFullHeight) document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = "";
     };
@@ -758,6 +757,11 @@ export function TerminalView({
             isSplitView={isSplitView}
             canSplit={canSplit}
             onToggleSplit={handleToggleSplit}
+            onExport={() => {
+              const t = tabs.find((x) => x.id === activeTabId);
+              if (t)
+                window.open(getExportUrl(t.sessionName), "_blank", "noopener");
+            }}
           />
           <div className={styles.terminalsContainer}>
             {isSplitView && rightPaneTabId ? (

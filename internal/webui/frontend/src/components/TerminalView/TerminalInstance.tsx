@@ -343,7 +343,7 @@ export const TerminalInstance = forwardRef<
       cursorBlink: true,
       fontSize,
       fontFamily,
-      scrollback: 5000,
+      scrollback: 10000,
       smoothScrollDuration: 120,
       rightClickSelectsWord: true,
       theme: getTerminalTheme(),

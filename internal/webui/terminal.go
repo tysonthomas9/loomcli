@@ -75,16 +75,18 @@ const defaultMaxTerminalSessions = 20
 // Multiple WebSocket connections can attach to the same tmux session simultaneously,
 // each tracked by a unique connection ID.
 type TerminalManager struct {
-	sessions       map[string]*TerminalSession   // keyed by connection ID
-	pendingKills   map[string]context.CancelFunc // deferred session kills, guarded by mu
-	mu             sync.RWMutex
-	tmuxPath       string
-	sessionPrefix  string // prepended to tmux session names for isolation between server instances
-	defaultCommand string // command to run in all terminal sessions
-	defaultCols    uint16
-	defaultRows    uint16
-	maxSessions    int // maximum concurrent connections (immutable after construction)
-	connCounter    atomic.Uint64
+	sessions           map[string]*TerminalSession   // keyed by connection ID
+	pendingKills       map[string]context.CancelFunc // deferred session kills, guarded by mu
+	scrollbackBuffers  map[string]*ScrollbackBuffer  // keyed by tmux session name (internal)
+	mu                 sync.RWMutex
+	tmuxPath           string
+	sessionPrefix      string // prepended to tmux session names for isolation between server instances
+	defaultCommand     string // command to run in all terminal sessions
+	defaultCols        uint16
+	defaultRows        uint16
+	maxSessions        int // maximum concurrent connections (immutable after construction)
+	scrollbackMaxLines int // max lines per scrollback buffer (default: defaultScrollbackMaxLines)
+	connCounter        atomic.Uint64
 }
 
 // NewTerminalManager creates a manager. Returns ErrTmuxNotFound if tmux is not installed.
@@ -101,14 +103,16 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 		maxSessions = defaultMaxTerminalSessions
 	}
 	return &TerminalManager{
-		sessions:       make(map[string]*TerminalSession),
-		pendingKills:   make(map[string]context.CancelFunc),
-		tmuxPath:       tmuxPath,
-		sessionPrefix:  sessionPrefix,
-		defaultCommand: defaultCommand,
-		defaultCols:    80,
-		defaultRows:    24,
-		maxSessions:    maxSessions,
+		sessions:           make(map[string]*TerminalSession),
+		pendingKills:       make(map[string]context.CancelFunc),
+		scrollbackBuffers:  make(map[string]*ScrollbackBuffer),
+		tmuxPath:           tmuxPath,
+		sessionPrefix:      sessionPrefix,
+		defaultCommand:     defaultCommand,
+		defaultCols:        80,
+		defaultRows:        24,
+		maxSessions:        maxSessions,
+		scrollbackMaxLines: defaultScrollbackMaxLines,
 	}, nil
 }
 
@@ -149,12 +153,16 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 		return err
 	}
 
-	// Enable mouse mode so wheel events reach the application inside tmux
-	mouseCmd := exec.Command(m.tmuxPath, "set-option", "-t", name, "mouse", "on")
-	if err := mouseCmd.Run(); err != nil {
-		log.Printf("Warning: failed to enable mouse mode for session %q: %v", name, err)
+	// Enable mouse mode and set scrollback history limit.
+	for _, opt := range [][2]string{
+		{"mouse", "on"},
+		{"history-limit", fmt.Sprintf("%d", m.scrollbackMaxLines)},
+	} {
+		c := exec.Command(m.tmuxPath, "set-option", "-t", name, opt[0], opt[1])
+		if err := c.Run(); err != nil {
+			log.Printf("Warning: failed to set %s for session %q: %v", opt[0], name, err)
+		}
 	}
-
 	return nil
 }
 
@@ -456,6 +464,7 @@ func (m *TerminalManager) Shutdown() error {
 		sessions[k] = v
 	}
 	m.sessions = make(map[string]*TerminalSession)
+	m.scrollbackBuffers = make(map[string]*ScrollbackBuffer)
 	m.mu.Unlock()
 
 	// Close all PTYs first.
@@ -521,6 +530,11 @@ func (m *TerminalManager) KillSessionByName(name string) error {
 	// Kill the tmux session. Ignore errors (session may not exist).
 	cmd := exec.Command(m.tmuxPath, "kill-session", "-t", internalName)
 	_ = cmd.Run()
+
+	// Clean up the scrollback buffer for this session.
+	m.mu.Lock()
+	delete(m.scrollbackBuffers, internalName)
+	m.mu.Unlock()
 
 	return nil
 }

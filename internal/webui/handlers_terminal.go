@@ -371,9 +371,10 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 		// Channel to signal when PTY reader finishes and communicate crash state
 		crashCh := make(chan crashInfo, 1)
 
-		// Start PTY -> WebSocket goroutine
+		// Start PTY -> WebSocket goroutine (with scrollback capture)
+		scrollback := manager.GetScrollbackBuffer(session)
 		go func() {
-			result := ptyToWS(ctx, cancel, conn, termSession, manager)
+			result := ptyToWS(ctx, cancel, conn, termSession, manager, scrollback)
 			crashCh <- result
 		}()
 
@@ -391,12 +392,9 @@ func handleTerminalWS(manager *TerminalManager, auth *terminalAuth, allowedOrigi
 	}
 }
 
-// WebSocket close code for backend process exit (application-defined, 4000-4999 range).
-const wsCloseBackendExited = 4001
+const wsCloseBackendExited = 4001 // WebSocket close code for backend process exit (4000-4999 range)
 
-// crashInfo holds information about a detected backend crash, communicated
-// from ptyToWS back to the handler so the handler can set the appropriate
-// WebSocket close code via the deferred close.
+// crashInfo communicates crash state from ptyToWS so the handler sets the right close code.
 type crashInfo struct {
 	crashed bool
 	reason  string
@@ -410,10 +408,9 @@ func (c crashInfo) wsClose() (websocket.StatusCode, string) {
 	return websocket.StatusNormalClosure, "session detached"
 }
 
-// ptyToWS reads from the PTY and writes to the WebSocket.
-// When the PTY read fails, it checks whether the tmux session's process has exited
-// and populates the crashResult so the caller can send the appropriate close code.
-func ptyToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, session *TerminalSession, manager *TerminalManager) crashInfo {
+// ptyToWS relays PTY data to the WebSocket and detects backend crashes.
+// If scrollback is non-nil, PTY output is also captured in the ring buffer.
+func ptyToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, session *TerminalSession, manager *TerminalManager, scrollback *ScrollbackBuffer) crashInfo {
 	buf := make([]byte, terminalReadBufSize)
 	for {
 		select {
@@ -455,6 +452,9 @@ func ptyToWS(ctx context.Context, cancel context.CancelFunc, conn *websocket.Con
 				// WebSocket write failed - cancel context to unblock wsToPTY
 				cancel()
 				return crashInfo{}
+			}
+			if scrollback != nil {
+				scrollback.Append(buf[:n])
 			}
 		}
 	}

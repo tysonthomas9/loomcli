@@ -1,7 +1,5 @@
-// Package webui provides the web UI server for loomcli.
-//
-// This server embeds the React frontend at compile time and serves it
-// along with API endpoints for interacting with the loomcli daemon.
+// Package webui provides the web UI server for loomcli, embedding the React frontend
+// at compile time and serving it along with API endpoints for the loomcli daemon.
 package webui
 
 import (
@@ -61,6 +59,7 @@ type ServerConfig struct {
 	WorkspaceConfigFn   func() (*WorkspaceData, error) // Workspace topology supplier; nil = single-repo mode
 	WorkspaceDeleteFn   func(name string) error        // Workspace deletion function; nil = deletion unavailable
 	BackendOps          BackendOps                     // Backend health operations interface (optional; nil disables backend health endpoint)
+	ScrollbackMaxLines  int                            // Maximum lines per scrollback buffer (0 = default 10000)
 }
 
 // WorkspaceData represents the full workspace topology returned by the API.
@@ -263,16 +262,16 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Initialize terminal manager for WebSocket terminal sessions
 	var termMgr *TerminalManager
-	termMgr, err = NewTerminalManager(config.TerminalCmd, fmt.Sprintf("%d", actualPort), config.MaxTerminalSessions)
-	if err != nil {
+	if termMgr, err = NewTerminalManager(config.TerminalCmd, fmt.Sprintf("%d", actualPort), config.MaxTerminalSessions); err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {
 			log.Printf("Warning: tmux not found, terminal feature disabled")
 		} else {
 			log.Printf("Warning: failed to initialize terminal manager: %v", err)
 		}
-		termMgr = nil
-	}
-	if termMgr != nil {
+	} else {
+		if config.ScrollbackMaxLines > 0 {
+			termMgr.SetScrollbackMaxLines(config.ScrollbackMaxLines)
+		}
 		log.Printf("Terminal manager initialized (default command: %s)", config.TerminalCmd)
 	}
 

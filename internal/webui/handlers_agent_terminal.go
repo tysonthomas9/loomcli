@@ -241,7 +241,7 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 
 		crashCh := make(chan crashInfo, 1)
 		go func() {
-			result := ptyToWS(ctx, cancel, conn, termSession, manager)
+			result := ptyToWS(ctx, cancel, conn, termSession, manager, nil)
 			crashCh <- result
 		}()
 

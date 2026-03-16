@@ -32,6 +32,7 @@ export interface TerminalTabBarProps {
   isSplitView?: boolean;
   canSplit?: boolean;
   onToggleSplit?: () => void;
+  onExport?: () => void;
 }
 
 interface ContextMenuState {
@@ -55,6 +56,7 @@ export function TerminalTabBar({
   isSplitView,
   canSplit,
   onToggleSplit,
+  onExport,
 }: TerminalTabBarProps): JSX.Element {
   const tabRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const tabListRef = useRef<HTMLDivElement | null>(null);
@@ -466,6 +468,17 @@ export function TerminalTabBar({
           data-testid="terminal-split-toggle"
         >
           {"\u2016"}
+        </button>
+      )}
+      {onExport && (
+        <button
+          className={styles.actionButton}
+          onClick={onExport}
+          aria-label="Export session"
+          data-testid="terminal-export-button"
+          title="Export session"
+        >
+          {"\u21E3"}
         </button>
       )}
       <button
