@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -69,6 +70,33 @@ func stopOTelExporter(exp *otelexport.Exporter) {
 	if err := exp.Stop(ctx); err != nil {
 		log.Printf("warning: OTel shutdown error: %v", err)
 	}
+}
+
+// initFleetDBServer starts the fleet-db backend if enabled in config.
+// Returns the server (for deferred Stop) or nil if not enabled.
+// Returns an error if fleet-db is enabled but fails to start.
+func initFleetDBServer(config *DaemonConfig) (*FleetDBServer, error) {
+	fleetSettings := &FleetDBSettings{}
+	if config.Daemon.FleetDB != nil {
+		fleetSettings = config.Daemon.FleetDB
+	}
+	if !resolveFleetDBEnabled(fleetSettings) {
+		return nil, nil
+	}
+
+	fleetCfg := resolveFleetDBConfig(&config.Daemon)
+	if fleetCfg.RedisURL == "" {
+		fleetCfg.AutoStart = true
+	}
+	fleetCfg.Actor = "loom"
+
+	srv, err := NewFleetDBServer(fleetCfg, slog.Default())
+	if err != nil {
+		return nil, fmt.Errorf("starting fleet-db backend: %w", err)
+	}
+	setDefaultTracker(srv.Backend())
+	log.Printf("fleet-db backend active (workspace: %s)", fleetCfg.Workspace)
+	return srv, nil
 }
 
 // printDryRunInfo displays what would happen in dry-run mode.

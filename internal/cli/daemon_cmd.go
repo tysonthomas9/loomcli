@@ -210,6 +210,21 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		defer stopOTelExporter(otelExp)
 	}
 
+	// 9.7. Initialize fleet-db backend if enabled
+	fleetSrv, fleetErr := initFleetDBServer(config)
+	if fleetErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", fleetErr)
+		os.Exit(1)
+	}
+	if fleetSrv != nil {
+		defer func() {
+			log.Printf("Stopping fleet-db server...")
+			if err := fleetSrv.Stop(); err != nil {
+				log.Printf("Warning: fleet-db shutdown error: %v", err)
+			}
+		}()
+	}
+
 	// 10. Create and start daemon (from daemon.go)
 	daemon, err := NewDaemon(config, projectDir, eventBus)
 	if err != nil {
