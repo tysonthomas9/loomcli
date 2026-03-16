@@ -8,29 +8,44 @@ import (
 	"testing"
 )
 
-// setupParityBackends constructs both a bdBackend (mock runner returning fixture JSON)
-// and a fleetDBBackend (mock service returning typed structs) from shared fixture data.
-// Both backends should produce structurally identical results through the IssueTracker interface.
-func setupParityBackends(t *testing.T) (bd IssueTracker, fleet IssueTracker) {
+// setupParityBackends constructs both a bdBackend and fleetDBBackend from shared
+// fixture data, so parity tests compare identical logical inputs through both paths.
+func setupParityBackends(t *testing.T) (IssueTracker, IssueTracker) {
 	t.Helper()
 
-	// Shared fixture data — defined once as the source of truth.
-	fixtureDeps := []Dependency{
-		{IssueID: "test-1", DependsOnID: "dep-1", Type: "blocks", CreatedAt: "2026-01-01T00:00:00Z", CreatedBy: "test"},
-	}
+	fixtureDeps := []Dependency{{
+		IssueID:     "test-1",
+		DependsOnID: "dep-1",
+		Type:        "blocks",
+		CreatedAt:   "2026-01-01T00:00:00Z",
+		CreatedBy:   "test",
+	}}
+
 	fixtureIssueWithDeps := BdIssue{
-		ID: "test-1", Title: "Test issue", Status: "open",
-		Priority: 2, IssueType: "task", Assignee: "alice",
+		ID:           "test-1",
+		Title:        "Test issue",
+		Status:       "open",
+		Priority:     2,
+		IssueType:    "task",
+		Design:       "some design text",
+		Assignee:     "alice",
 		Labels:       []string{"phase-1"},
 		Dependencies: fixtureDeps,
 	}
+
 	fixtureIssueNoDeps := BdIssue{
-		ID: "test-1", Title: "Test issue", Status: "open",
-		Priority: 2, IssueType: "task", Assignee: "alice",
+		ID:           "test-1",
+		Title:        "Test issue",
+		Status:       "open",
+		Priority:     2,
+		IssueType:    "task",
+		Design:       "some design text",
+		Assignee:     "alice",
 		Labels:       []string{"phase-1"},
 		Dependencies: []Dependency{},
 	}
-	var fixtureStats BdStats
+
+	fixtureStats := BdStats{}
 	fixtureStats.Summary.TotalIssues = 10
 	fixtureStats.Summary.OpenIssues = 3
 	fixtureStats.Summary.ClosedIssues = 4
@@ -40,9 +55,7 @@ func setupParityBackends(t *testing.T) (bd IssueTracker, fleet IssueTracker) {
 	fixtureStats.Summary.TombstoneIssues = 3
 	fixtureStats.Summary.PinnedIssues = 1
 
-	// bdBackend: MockBDRunner returns fixture JSON matching what the real bd CLI would output.
-	// "ready" and "show" include deps inline (matching hydrated fleet output).
-	// "list" and "blocked" omit deps (matching un-hydrated fleet output).
+	// Configure MockBDRunner to return fixture JSON based on subcommand.
 	mockRunner := &MockBDRunner{
 		RunFunc: func(_ string, args ...string) CommandResult {
 			var data interface{}
@@ -66,11 +79,9 @@ func setupParityBackends(t *testing.T) (bd IssueTracker, fleet IssueTracker) {
 		},
 	}
 
-	// fleetDBBackend: mockFleetService returns typed structs.
-	// Ready() hydrates deps via GetDependencies; List/Blocked do not.
-	// GetIssue() fetches deps directly via svc.GetDependencies.
-	issueCopy := fixtureIssueNoDeps // struct copy to isolate mutation; GetIssue overwrites .Dependencies with fetched deps
-	mock := &mockFleetService{
+	// Configure mockFleetService with matching fixture data.
+	issueCopy := fixtureIssueNoDeps // struct copy so GetIssue mutation doesn't affect fixture
+	mockSvc := &mockFleetService{
 		readyIssues:   []BdIssue{fixtureIssueNoDeps},
 		listIssues:    []BdIssue{fixtureIssueNoDeps},
 		blockedIssues: []BdIssue{fixtureIssueNoDeps},
@@ -79,7 +90,9 @@ func setupParityBackends(t *testing.T) (bd IssueTracker, fleet IssueTracker) {
 		issue:         &issueCopy,
 	}
 
-	return newBDBackend(mockRunner, "/test"), newTestFleetDBBackend(mock)
+	bd := newBDBackend(mockRunner, "/test")
+	fleet := newTestFleetDBBackend(mockSvc)
+	return bd, fleet
 }
 
 func TestBackendParity(t *testing.T) {
@@ -102,7 +115,7 @@ func TestBackendParity(t *testing.T) {
 			t.Error("bd Ready: Dependencies should not be nil")
 		}
 		if len(bdResult[0].Dependencies) != 1 {
-			t.Errorf("bd Ready: expected 1 dependency, got %d", len(bdResult[0].Dependencies))
+			t.Errorf("bd Ready: expected 1 dep, got %d", len(bdResult[0].Dependencies))
 		}
 		if bdResult[0].Labels == nil {
 			t.Error("bd Ready: Labels should not be nil")
@@ -123,10 +136,10 @@ func TestBackendParity(t *testing.T) {
 			t.Errorf("List mismatch:\n  bd:    %+v\n  fleet: %+v", bdResult, fleetResult)
 		}
 		if bdResult[0].Dependencies == nil {
-			t.Error("bd List: Dependencies should be empty slice, not nil")
+			t.Error("bd List: Dependencies should be [] not nil")
 		}
 		if fleetResult[0].Dependencies == nil {
-			t.Error("fleet List: Dependencies should be empty slice, not nil")
+			t.Error("fleet List: Dependencies should be [] not nil")
 		}
 	})
 
@@ -182,30 +195,34 @@ func TestBackendParity(t *testing.T) {
 	})
 
 	t.Run("EmptyResults", func(t *testing.T) {
+		emptyStats := BdStats{}
+
 		emptyRunner := &MockBDRunner{
 			RunFunc: func(_ string, args ...string) CommandResult {
-				var data interface{}
 				switch args[0] {
 				case "ready", "list", "blocked":
-					data = []BdIssue{}
+					return CommandResult{Stdout: "[]"}
 				case "stats":
-					data = BdStats{}
+					jsonBytes, _ := json.Marshal(emptyStats)
+					return CommandResult{Stdout: string(jsonBytes)}
 				default:
 					return CommandResult{Err: fmt.Errorf("unexpected: %s", args[0])}
 				}
-				jsonBytes, _ := json.Marshal(data)
-				return CommandResult{Stdout: string(jsonBytes)}
 			},
 		}
-		emptyMock := &mockFleetService{
+
+		emptySvc := &mockFleetService{
 			readyIssues:   []BdIssue{},
 			listIssues:    []BdIssue{},
 			blockedIssues: []BdIssue{},
 			deps:          []Dependency{},
+			stats:         emptyStats,
 		}
-		bd := newBDBackend(emptyRunner, "/test")
-		fleet := newTestFleetDBBackend(emptyMock)
 
+		bd := newBDBackend(emptyRunner, "/test")
+		fleet := newTestFleetDBBackend(emptySvc)
+
+		// Ready
 		bdReady, err := bd.Ready(ctx, ReadyOpts{})
 		if err != nil {
 			t.Fatalf("bd.Ready: %v", err)
@@ -215,33 +232,35 @@ func TestBackendParity(t *testing.T) {
 			t.Fatalf("fleet.Ready: %v", err)
 		}
 		if !reflect.DeepEqual(bdReady, fleetReady) {
-			t.Errorf("Empty Ready mismatch:\n  bd:    %v\n  fleet: %v", bdReady, fleetReady)
+			t.Errorf("Empty Ready mismatch:\n  bd:    %+v\n  fleet: %+v", bdReady, fleetReady)
 		}
 		if bdReady == nil {
-			t.Error("bd Ready: should be non-nil empty slice")
+			t.Error("bd empty Ready should be non-nil []BdIssue{}")
 		}
 		if fleetReady == nil {
-			t.Error("fleet Ready: should be non-nil empty slice")
+			t.Error("fleet empty Ready should be non-nil []BdIssue{}")
 		}
 
-		bdList, err := bd.List(ctx, ListOpts{})
+		// List
+		bdList, err := bd.List(ctx, ListOpts{Status: "open"})
 		if err != nil {
 			t.Fatalf("bd.List: %v", err)
 		}
-		fleetList, err := fleet.List(ctx, ListOpts{})
+		fleetList, err := fleet.List(ctx, ListOpts{Status: "open"})
 		if err != nil {
 			t.Fatalf("fleet.List: %v", err)
 		}
 		if !reflect.DeepEqual(bdList, fleetList) {
-			t.Errorf("Empty List mismatch:\n  bd:    %v\n  fleet: %v", bdList, fleetList)
+			t.Errorf("Empty List mismatch:\n  bd:    %+v\n  fleet: %+v", bdList, fleetList)
 		}
 		if bdList == nil {
-			t.Error("bd List: should be non-nil empty slice")
+			t.Error("bd empty List should be non-nil")
 		}
 		if fleetList == nil {
-			t.Error("fleet List: should be non-nil empty slice")
+			t.Error("fleet empty List should be non-nil")
 		}
 
+		// Blocked
 		bdBlocked, err := bd.Blocked(ctx)
 		if err != nil {
 			t.Fatalf("bd.Blocked: %v", err)
@@ -251,15 +270,16 @@ func TestBackendParity(t *testing.T) {
 			t.Fatalf("fleet.Blocked: %v", err)
 		}
 		if !reflect.DeepEqual(bdBlocked, fleetBlocked) {
-			t.Errorf("Empty Blocked mismatch:\n  bd:    %v\n  fleet: %v", bdBlocked, fleetBlocked)
+			t.Errorf("Empty Blocked mismatch:\n  bd:    %+v\n  fleet: %+v", bdBlocked, fleetBlocked)
 		}
 		if bdBlocked == nil {
-			t.Error("bd Blocked: should be non-nil empty slice")
+			t.Error("bd empty Blocked should be non-nil")
 		}
 		if fleetBlocked == nil {
-			t.Error("fleet Blocked: should be non-nil empty slice")
+			t.Error("fleet empty Blocked should be non-nil")
 		}
 
+		// Stats
 		bdStats, err := bd.Stats(ctx)
 		if err != nil {
 			t.Fatalf("bd.Stats: %v", err)
@@ -281,15 +301,16 @@ func TestBackendParity(t *testing.T) {
 				return CommandResult{Err: testErr}
 			},
 		}
-		errMock := &mockFleetService{
+		errSvc := &mockFleetService{
 			readyErr:   testErr,
 			listErr:    testErr,
 			blockedErr: testErr,
 			statsErr:   testErr,
 			issueErr:   testErr,
 		}
+
 		bd := newBDBackend(errRunner, "/test")
-		fleet := newTestFleetDBBackend(errMock)
+		fleet := newTestFleetDBBackend(errSvc)
 
 		// Both backends must return non-nil errors.
 		// Do NOT compare error strings — prefixes differ by design.
