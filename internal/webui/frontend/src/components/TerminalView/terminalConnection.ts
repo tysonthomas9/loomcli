@@ -65,6 +65,11 @@ export function connectWebSocket(
   onDisconnected?: () => void,
   onOutput?: () => void,
   onBackendCrash?: (reason: string) => void,
+  onInput?: (
+    data: string,
+    sendToWs: (data: string) => void,
+    terminal: Terminal,
+  ) => void,
 ): () => void {
   setConnectionState("connecting");
 
@@ -109,9 +114,16 @@ export function connectWebSocket(
         setConnectionState("disconnected");
       };
 
-      const onDataDisposable = terminal.onData((data: string) => {
+      const sendToWs = (data: string) => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(data);
+        }
+      };
+      const onDataDisposable = terminal.onData((data: string) => {
+        if (onInput) {
+          onInput(data, sendToWs, terminal);
+        } else {
+          sendToWs(data);
         }
       });
 

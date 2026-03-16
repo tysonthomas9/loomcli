@@ -21,7 +21,7 @@ export const ALLOWLIST = new Map([
   ["src/components/IssueDetailView/IssueDetailView.tsx", 651],
   ["src/components/TerminalView/TerminalView.tsx", 879],
   ["src/components/TerminalView/TerminalTabBar.tsx", 534],
-  ["src/components/TerminalView/TerminalInstance.tsx", 687],
+  ["src/components/TerminalView/TerminalInstance.tsx", 699],
   ["src/components/IssueDetailPanel/AssigneeDropdown.tsx", 535],
   ["src/components/WorkspaceTree/WorkspaceTree.tsx", 640],
 ]);

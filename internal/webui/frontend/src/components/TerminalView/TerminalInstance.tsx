@@ -27,6 +27,7 @@ import {
 } from "@/utils/reconnectBackoff";
 import type { ReconnectOverlayState } from "./ReconnectingOverlay";
 import styles from "./TerminalInstance.module.css";
+import { SlashCommandInterceptor } from "./slashCommandInterceptor";
 import { connectWebSocket, encodeResize } from "./terminalConnection";
 import { getTerminalTheme } from "./terminalTheme";
 import "@xterm/xterm/css/xterm.css";
@@ -131,6 +132,7 @@ export const TerminalInstance = forwardRef<
     null,
   );
   const reconnectAttemptRef = useRef(0);
+  const interceptorRef = useRef<SlashCommandInterceptor | null>(null);
 
   // Scroll-tracking and new output pill
   const isAtBottomRef = useRef(true);
@@ -221,6 +223,7 @@ export const TerminalInstance = forwardRef<
         },
         handleWsOutput,
         (reason: string) => onBackendCrashRef.current?.(reason),
+        (data, sendToWs) => interceptorRef.current?.handleData(data, sendToWs),
       );
       wsCleanupRef.current = cleanupWs;
     };
@@ -374,6 +377,10 @@ export const TerminalInstance = forwardRef<
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
+
+    // Create slash command interceptor for this terminal instance
+    const interceptor = new SlashCommandInterceptor(terminal);
+    interceptorRef.current = interceptor;
 
     // Forward search result changes (N of M counter)
     const searchResultDisposable = searchAddon.onDidChangeResults(
@@ -544,6 +551,8 @@ export const TerminalInstance = forwardRef<
           },
           handleWsOutput,
           (reason: string) => onBackendCrashRef.current?.(reason),
+          (data, sendToWs) =>
+            interceptorRef.current?.handleData(data, sendToWs),
         );
         wsCleanupRef.current = cleanup;
       };
@@ -609,6 +618,9 @@ export const TerminalInstance = forwardRef<
 
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;
+
+      interceptorRef.current?.dispose();
+      interceptorRef.current = null;
 
       webglAddon?.dispose();
       terminal.dispose();
