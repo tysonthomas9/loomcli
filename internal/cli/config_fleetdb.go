@@ -15,9 +15,11 @@ type FleetDBSettings struct {
 
 // FleetDBServerConfig is the resolved configuration passed to NewFleetDBServer.
 type FleetDBServerConfig struct {
-	RedisURL  string
-	Workspace string
-	AutoStart bool
+	RedisURL   string
+	Workspace  string
+	AutoStart  bool
+	FleetDBBin string // path to fleet-db binary (default: "fleet-db" via PATH)
+	Actor      string // identity for fleet-db client (default: "loom")
 }
 
 // overlayFleetDBSettings applies non-zero fields from src onto dst.
