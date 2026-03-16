@@ -60,9 +60,12 @@ import { RepoDropdown } from "./RepoDropdown";
 import { TypeDropdown } from "./TypeDropdown";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MoveIssueDialog } from "./MoveIssueDialog";
+import { SplitDetailSummary } from "./SplitDetailSummary";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
+import { ResizeDivider } from "./ResizeDivider";
 import { ErrorToast } from "../ErrorToast";
 import { LogViewer } from "../LogViewer";
+import { useSplitRatio } from "@/hooks/useSplitRatio";
 import styles from "./IssueDetailPanel.module.css";
 
 /**
@@ -367,6 +370,11 @@ function DefaultContent({
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+
+  // Split view state for terminal tabs
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const { ratio, applyDelta, resetRatio, isMaximized, toggleMaximize } =
+    useSplitRatio();
 
   // Workspace data for move dialog
   const { workspace } = useWorkspace();
@@ -1165,7 +1173,7 @@ function DefaultContent({
         )}
       </div>
 
-      {/* Terminal tab content */}
+      {/* Terminal tab content — split view: details on top, terminal on bottom */}
       {activeTabId.startsWith("terminal-") &&
         (() => {
           const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -1173,21 +1181,53 @@ function DefaultContent({
             return null;
           return (
             <div
-              className={styles.logsContainer}
+              ref={splitContainerRef}
+              className={styles.splitContainer}
               role="tabpanel"
               id={`issue-panel-tabpanel-${activeTabId}`}
               aria-labelledby={`issue-panel-tab-${activeTabId}`}
             >
-              <EmbeddedTerminal
-                sessionName={activeTab.metadata.sessionName}
-                backend={activeTab.metadata.backend}
-                agentName={activeTab.metadata.agentName ?? null}
-                worktreePath={activeTab.metadata.worktreePath}
-                isActive={true}
-                onConnectionStateChange={(state) =>
-                  handleConnectionStateChange(activeTab.id, state)
+              <div
+                className={styles.splitTop}
+                style={{ flex: `0 0 ${ratio * 100}%` }}
+              >
+                <SplitDetailSummary
+                  issue={issue}
+                  isSavingPriority={isSavingPriority}
+                  isSavingType={isSavingType}
+                  isSavingAssignee={isSavingAssignee}
+                  agents={agents}
+                  agentTasks={agentTasks}
+                  onPrioritySave={handlePrioritySave}
+                  onTypeSave={handleTypeSave}
+                  onAssigneeSave={handleAssigneeSave}
+                  onIssueUpdate={onIssueUpdate}
+                />
+              </div>
+              <ResizeDivider
+                onDragDelta={(deltaY) =>
+                  applyDelta(
+                    splitContainerRef.current?.clientHeight ?? 600,
+                    deltaY,
+                  )
                 }
+                onDoubleClick={resetRatio}
+                ratio={ratio}
               />
+              <div className={styles.splitBottom}>
+                <EmbeddedTerminal
+                  sessionName={activeTab.metadata.sessionName}
+                  backend={activeTab.metadata.backend}
+                  agentName={activeTab.metadata.agentName ?? null}
+                  worktreePath={activeTab.metadata.worktreePath}
+                  isActive={true}
+                  onConnectionStateChange={(state) =>
+                    handleConnectionStateChange(activeTab.id, state)
+                  }
+                  onMaximize={toggleMaximize}
+                  isMaximized={isMaximized}
+                />
+              </div>
             </div>
           );
         })()}

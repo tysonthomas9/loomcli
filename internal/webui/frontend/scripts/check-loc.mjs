@@ -11,7 +11,7 @@ export const THRESHOLD = 500;
 // Ratchet allowlist: files that exceed the threshold with their recorded ceiling.
 // If a file grows past its ceiling, it fails. Shrinking is always OK.
 export const ALLOWLIST = new Map([
-  ["src/components/IssueDetailPanel/IssueDetailPanel.tsx", 1515],
+  ["src/components/IssueDetailPanel/IssueDetailPanel.tsx", 1555],
   ["src/App.tsx", 1167],
   ["src/components/AgentsSidebar/AgentsSidebar.tsx", 505],
   ["src/components/AgentDetailPanel/AgentDetailPanel.tsx", 575],

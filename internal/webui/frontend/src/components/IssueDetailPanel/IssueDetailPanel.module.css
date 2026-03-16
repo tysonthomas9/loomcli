@@ -475,6 +475,34 @@
   min-width: 0;
 }
 
+/* ============= Split View (Terminal + Details) ============= */
+
+.splitContainer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.splitTop {
+  overflow: hidden auto;
+  min-height: 60px;
+}
+
+.splitBottom {
+  flex: 1;
+  min-height: 60px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.splitBottom > [data-testid="embedded-terminal"] {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
 /* ============= Logs Meta Row ============= */
 
 .logsMetaRow {

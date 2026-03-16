@@ -424,6 +424,85 @@ describe("TerminalHeader", () => {
     });
   });
 
+  describe("maximize button", () => {
+    it("renders maximize button when onMaximize is provided", () => {
+      render(
+        <TerminalHeader
+          backend="claude"
+          agentName="a1"
+          connectionState="connected"
+          onMaximize={vi.fn()}
+          isMaximized={false}
+        />,
+      );
+
+      expect(screen.getByTestId("maximize-btn")).toBeInTheDocument();
+    });
+
+    it("does not render maximize button when onMaximize is undefined", () => {
+      render(
+        <TerminalHeader
+          backend="claude"
+          agentName="a1"
+          connectionState="connected"
+        />,
+      );
+
+      expect(screen.queryByTestId("maximize-btn")).not.toBeInTheDocument();
+    });
+
+    it("shows 'Maximize terminal' label when isMaximized is false", () => {
+      render(
+        <TerminalHeader
+          backend="claude"
+          agentName="a1"
+          connectionState="connected"
+          onMaximize={vi.fn()}
+          isMaximized={false}
+        />,
+      );
+
+      expect(screen.getByTestId("maximize-btn")).toHaveAttribute(
+        "aria-label",
+        "Maximize terminal",
+      );
+    });
+
+    it("shows 'Restore terminal' label when isMaximized is true", () => {
+      render(
+        <TerminalHeader
+          backend="claude"
+          agentName="a1"
+          connectionState="connected"
+          onMaximize={vi.fn()}
+          isMaximized={true}
+        />,
+      );
+
+      expect(screen.getByTestId("maximize-btn")).toHaveAttribute(
+        "aria-label",
+        "Restore terminal",
+      );
+    });
+
+    it("calls onMaximize callback when clicked", () => {
+      const onMaximize = vi.fn();
+
+      render(
+        <TerminalHeader
+          backend="claude"
+          agentName="a1"
+          connectionState="connected"
+          onMaximize={onMaximize}
+          isMaximized={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("maximize-btn"));
+      expect(onMaximize).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("connection state dot", () => {
     it("shows data-state=disconnected", () => {
       render(

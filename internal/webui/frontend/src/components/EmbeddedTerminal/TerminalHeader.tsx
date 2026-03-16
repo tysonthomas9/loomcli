@@ -21,6 +21,8 @@ export interface TerminalHeaderProps {
   agentName: string | null;
   connectionState: ConnectionState;
   gitActions?: UseGitActionsReturn | undefined;
+  onMaximize?: (() => void) | undefined;
+  isMaximized?: boolean | undefined;
 }
 
 /**
@@ -38,6 +40,8 @@ export function TerminalHeader({
   agentName,
   connectionState,
   gitActions,
+  onMaximize,
+  isMaximized,
 }: TerminalHeaderProps): JSX.Element {
   const display = BACKEND_DISPLAY[backend] ?? {
     label: backend,
@@ -68,7 +72,45 @@ export function TerminalHeader({
         </span>
       )}
 
-      {/* Right: git actions (only when agentName is non-null) */}
+      {/* Right: maximize button */}
+      {onMaximize && (
+        <button
+          type="button"
+          className={styles.actionBtn}
+          onClick={onMaximize}
+          aria-label={isMaximized ? "Restore terminal" : "Maximize terminal"}
+          data-testid="maximize-btn"
+          style={{ marginLeft: "auto" }}
+        >
+          {isMaximized ? (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <path d="M9 1h4v4M5 13H1V9M13 1L8.5 5.5M1 13l4.5-4.5" />
+            </svg>
+          ) : (
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <path d="M9 5h4V1M5 9H1v4M13 1L9 5M1 13l4-4" />
+            </svg>
+          )}
+        </button>
+      )}
+
+      {/* Right: git actions */}
       {agentName !== null && gitActions && (
         <div className={styles.actions} data-testid="git-actions">
           <button

@@ -31,6 +31,8 @@ export interface EmbeddedTerminalProps {
   worktreePath?: string | undefined;
   isActive: boolean;
   onConnectionStateChange?: ((state: ConnectionState) => void) | undefined;
+  onMaximize?: (() => void) | undefined;
+  isMaximized?: boolean | undefined;
 }
 
 export const EmbeddedTerminal = forwardRef<
@@ -44,6 +46,8 @@ export const EmbeddedTerminal = forwardRef<
     worktreePath,
     isActive,
     onConnectionStateChange: onExternalStateChange,
+    onMaximize,
+    isMaximized,
   },
   ref,
 ) {
@@ -137,6 +141,8 @@ export const EmbeddedTerminal = forwardRef<
         agentName={agentName}
         connectionState={connectionState}
         gitActions={agentName !== null ? gitActions : undefined}
+        onMaximize={onMaximize}
+        isMaximized={isMaximized}
       />
       <div className={styles.terminalContainer}>
         <TerminalInstance
