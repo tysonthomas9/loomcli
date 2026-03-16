@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -336,19 +335,13 @@ func TestRunGitCommandWithOutput_UsesDefaultDeps(t *testing.T) {
 	}
 }
 
-func TestFetchReadyIssues_UsesBDRunner(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
-
+func TestFetchReadyIssues_UsesTracker(t *testing.T) {
 	issues := []BdIssue{
 		{ID: "test-1", Title: "Test task", Status: "open"},
 	}
-	jsonData, _ := json.Marshal(issues)
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: string(jsonData)},
-	}
-	defaultDeps = &Deps{BD: mock}
+	mt := &MockIssueTracker{ReadyResult: issues, BackendNameResult: "mock"}
+	setDefaultTracker(mt)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	got, err := fetchReadyIssues("epic-1")
 	if err != nil {
@@ -357,49 +350,47 @@ func TestFetchReadyIssues_UsesBDRunner(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "test-1" {
 		t.Errorf("got %v, want [{ID:test-1 ...}]", got)
 	}
-	if len(mock.Calls) != 1 {
-		t.Fatalf("expected 1 BD call, got %d", len(mock.Calls))
+	if mt.CallCount("Ready") != 1 {
+		t.Fatalf("expected 1 Ready call, got %d", mt.CallCount("Ready"))
 	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--parent", "epic-1"}) {
-		t.Errorf("BD args = %v", args)
+	call := mt.LastCall("Ready")
+	opts := call.Args[1].(ReadyOpts)
+	if opts.ParentID != "epic-1" {
+		t.Errorf("ReadyOpts.ParentID = %q, want %q", opts.ParentID, "epic-1")
+	}
+	if opts.Limit != 100 {
+		t.Errorf("ReadyOpts.Limit = %d, want 100", opts.Limit)
 	}
 }
 
 func TestFetchReadyIssues_NoParent(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: "[]"},
-	}
-	defaultDeps = &Deps{BD: mock}
+	mt := MockTrackerWithIssues([]BdIssue{}, []BdIssue{})
+	setDefaultTracker(mt)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	_, err := fetchReadyIssues("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100"}) {
-		t.Errorf("BD args = %v (should not have --parent)", args)
+	call := mt.LastCall("Ready")
+	if call == nil {
+		t.Fatal("Ready was not called")
+	}
+	opts := call.Args[1].(ReadyOpts)
+	if opts.ParentID != "" {
+		t.Errorf("ReadyOpts.ParentID = %q, want empty", opts.ParentID)
 	}
 }
 
-func TestFetchUnclosedIssueIDs_UsesBDRunner(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
-
+func TestFetchUnclosedIssueIDs_UsesTracker(t *testing.T) {
 	issues := []BdIssue{
 		{ID: "open-1", Status: "open"},
 		{ID: "closed-1", Status: "closed"},
 		{ID: "review-1", Status: "review"},
 	}
-	jsonData, _ := json.Marshal(issues)
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: string(jsonData)},
-	}
-	defaultDeps = &Deps{BD: mock}
+	mt := &MockIssueTracker{ListResult: issues, BackendNameResult: "mock"}
+	setDefaultTracker(mt)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	got, err := fetchUnclosedIssueIDs()
 	if err != nil {

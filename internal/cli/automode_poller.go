@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -47,39 +47,22 @@ func (p *adaptivePoller) hadNoActivity() {
 	p.currentInterval = newInterval
 }
 
-// fetchReadyIssues runs "bd ready --json" and returns the parsed issues.
+// fetchReadyIssues returns ready issues via the package-level IssueTracker.
 // When parentID is non-empty, filters to tasks under that epic.
-// It routes through the package-level defaultDeps.BD runner.
 func fetchReadyIssues(parentID string) ([]BdIssue, error) {
-	args := []string{"ready", "--json", "--limit", "100"}
-	if parentID != "" {
-		args = append(args, "--parent", parentID)
-	}
-	result := defaultDeps.BD.Run(GetBeadsDir(), args...)
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
-	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse task list: %w", err)
-	}
-	return issues, nil
+	return defaultTracker().Ready(context.Background(), ReadyOpts{
+		Limit:    100,
+		ParentID: parentID,
+	})
 }
 
 // fetchUnclosedIssueIDs returns IDs of all issues that are NOT closed.
 // Used for accurate blocker checking — a blocker is resolved only when closed,
 // not when it merely moves to in_progress or review.
-// It routes through the package-level defaultDeps.BD runner.
 func fetchUnclosedIssueIDs() (map[string]bool, error) {
-	result := defaultDeps.BD.Run(GetBeadsDir(), "list", "--json", "--limit", "500")
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to list issues: %w", result.Err)
-	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse issue list: %w", err)
+	issues, err := defaultTracker().List(context.Background(), ListOpts{Limit: 500})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list issues: %w", err)
 	}
 	ids := make(map[string]bool, len(issues))
 	for _, issue := range issues {

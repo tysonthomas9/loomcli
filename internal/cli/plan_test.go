@@ -243,13 +243,9 @@ func TestRunPlan_SkipsInProgress(t *testing.T) {
 }
 
 func TestHasAvailablePlanningTasks_Success(t *testing.T) {
-	// Task with no design and open status is available for planning
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
-	})
-	mock.Install()
+	issues := []BdIssue{{ID: "bd-1", Status: "open", IssueType: "task", Design: ""}}
+	setDefaultTracker(MockTrackerWithIssues(issues, issues))
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	available, err := HasAvailablePlanningTasks("")
 	if err != nil {
@@ -261,13 +257,9 @@ func TestHasAvailablePlanningTasks_Success(t *testing.T) {
 }
 
 func TestHasAvailablePlanningTasks_SkipsTasksWithDesign(t *testing.T) {
-	// Task with existing design should be skipped
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan here"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
-	})
-	mock.Install()
+	issues := []BdIssue{{ID: "bd-1", Status: "open", IssueType: "task", Design: "Some plan here"}}
+	setDefaultTracker(MockTrackerWithIssues(issues, issues))
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	available, err := HasAvailablePlanningTasks("")
 	if err != nil {
@@ -279,10 +271,9 @@ func TestHasAvailablePlanningTasks_SkipsTasksWithDesign(t *testing.T) {
 }
 
 func TestHasAvailablePlanningTasks_BdError(t *testing.T) {
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
-	})
-	mock.Install()
+	mt := &MockIssueTracker{ReadyErr: os.ErrNotExist, BackendNameResult: "mock"}
+	setDefaultTracker(mt)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	_, err := HasAvailablePlanningTasks("")
 	if err == nil {
@@ -291,16 +282,13 @@ func TestHasAvailablePlanningTasks_BdError(t *testing.T) {
 }
 
 // ============================================================================
-// GetAvailablePlanningTasks Tests (CommandMock-based)
+// GetAvailablePlanningTasks Tests (MockIssueTracker-based)
 // ============================================================================
 
 func TestGetAvailablePlanningTasks_Success(t *testing.T) {
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":""}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
-	})
-	mock.Install()
+	issues := []BdIssue{{ID: "bd-1", Status: "open", IssueType: "task", Design: ""}}
+	setDefaultTracker(MockTrackerWithIssues(issues, issues))
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	tasks, err := GetAvailablePlanningTasks("")
 	if err != nil {
@@ -315,12 +303,9 @@ func TestGetAvailablePlanningTasks_Success(t *testing.T) {
 }
 
 func TestGetAvailablePlanningTasks_ReturnsEmpty(t *testing.T) {
-	taskJSON := `[{"id":"bd-1","status":"open","issue_type":"task","design":"Some plan here"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Stdout: taskJSON},
-		{Name: "bd", Args: []string{"list", "--json", "--limit", "500"}, Stdout: taskJSON},
-	})
-	mock.Install()
+	issues := []BdIssue{{ID: "bd-1", Status: "open", IssueType: "task", Design: "Some plan here"}}
+	setDefaultTracker(MockTrackerWithIssues(issues, issues))
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	tasks, err := GetAvailablePlanningTasks("")
 	if err != nil {
@@ -332,10 +317,9 @@ func TestGetAvailablePlanningTasks_ReturnsEmpty(t *testing.T) {
 }
 
 func TestGetAvailablePlanningTasks_BdError(t *testing.T) {
-	mock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"ready", "--json", "--limit", "100"}, Err: os.ErrNotExist},
-	})
-	mock.Install()
+	mt := &MockIssueTracker{ReadyErr: os.ErrNotExist, BackendNameResult: "mock"}
+	setDefaultTracker(mt)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	_, err := GetAvailablePlanningTasks("")
 	if err == nil {

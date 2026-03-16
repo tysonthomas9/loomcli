@@ -47,107 +47,107 @@ func setTmuxRemainOnExit(t *testing.T) {
 
 func TestHasAvailablePlanningTasks(t *testing.T) {
 	tests := []struct {
-		name     string
-		bdOutput string
-		bdErr    error
-		want     bool
-		wantErr  bool
+		name    string
+		issues  []BdIssue
+		err     error
+		want    bool
+		wantErr bool
 	}{
 		{
 			name: "has task needing planning (no design)",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "task has design - not needing planning",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "include tasks with needs-revision label (revision task)",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "existing design", Labels: []string{"needs-revision"}},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "skip in_progress tasks",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "skip review tasks",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "In review", Status: "review", Design: ""},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "skip epics",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
-			}),
+			},
 			want: false,
 		},
 		{
-			name:     "empty list",
-			bdOutput: "[]",
-			want:     false,
+			name:   "empty list",
+			issues: []BdIssue{},
+			want:   false,
 		},
 		{
 			name: "mixed - one valid task",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Has design and needs-revision", Status: "open", Design: "plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Work on me", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Has design", Status: "open", Design: "Already planned"},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "skip task with blocks dependency",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-0", Title: "Blocker", Status: "open", Design: "has design"},
 				{ID: "T-1", Title: "Task with deps", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "parent-child dependency does not block planning",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Task with parent-child dep", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "parent-child", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "task with design and parent-child dep not needing planning",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Task with deps and design", Status: "open", Design: "Approved plan", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "parent-child", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
-			}),
+			},
 			want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			if tt.wantErr {
+				mt := &MockIssueTracker{ReadyErr: tt.err, ListErr: tt.err, BackendNameResult: "mock"}
+				setDefaultTracker(mt)
+			} else {
+				setDefaultTracker(MockTrackerWithIssues(tt.issues, tt.issues))
 			}
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			got, err := HasAvailablePlanningTasks("")
 			if (err != nil) != tt.wantErr {
@@ -163,107 +163,107 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 
 func TestHasAvailableImplementationTasks(t *testing.T) {
 	tests := []struct {
-		name     string
-		bdOutput string
-		bdErr    error
-		want     bool
-		wantErr  bool
+		name    string
+		issues  []BdIssue
+		err     error
+		want    bool
+		wantErr bool
 	}{
 		{
 			name: "has task with design - ready for implementation",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Implementation plan here"},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "task has no design - not ready for implementation",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "skip tasks with needs-revision label even with design",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "skip in_progress tasks",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: "Has design"},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "skip review tasks",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "In review", Status: "review", Design: "Has design"},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "skip epics even with design",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: "Has design"},
-			}),
+			},
 			want: false,
 		},
 		{
-			name:     "empty list",
-			bdOutput: "[]",
-			want:     false,
+			name:   "empty list",
+			issues: []BdIssue{},
+			want:   false,
 		},
 		{
 			name: "mixed - one valid task with design",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Has needs-revision label", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "No design yet", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Ready to implement", Status: "open", Design: "Detailed plan"},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "skip task with blocks dependency even with design",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-0", Title: "Blocker", Status: "open"},
 				{ID: "T-1", Title: "Blocked with design", Status: "open", Design: "Implementation plan", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "parent-child dependency does not block implementation",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Ready with parent-child dep", Status: "open", Design: "Implementation plan", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "parent-child", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "task with parent-child dep but no design not ready",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Not ready with deps", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "parent-child", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
-			}),
+			},
 			want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			if tt.wantErr {
+				mt := &MockIssueTracker{ReadyErr: tt.err, ListErr: tt.err, BackendNameResult: "mock"}
+				setDefaultTracker(mt)
+			} else {
+				setDefaultTracker(MockTrackerWithIssues(tt.issues, tt.issues))
 			}
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			got, err := HasAvailableImplementationTasks("")
 			if (err != nil) != tt.wantErr {
@@ -2336,103 +2336,103 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 
 func TestHasAnyAvailableTasks(t *testing.T) {
 	tests := []struct {
-		name     string
-		bdOutput string
-		bdErr    error
-		want     bool
-		wantErr  bool
+		name    string
+		issues  []BdIssue
+		err     error
+		want    bool
+		wantErr bool
 	}{
 		{
 			name: "task with no design - available",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "task with design - available",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "task with needs-revision label - available (for HasAny)",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "", Labels: []string{"needs-revision"}},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "skip in_progress tasks",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "skip review tasks",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "In review", Status: "review", Design: ""},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "skip epics",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
-			}),
+			},
 			want: false,
 		},
 		{
-			name:     "empty list",
-			bdOutput: "[]",
-			want:     false,
+			name:   "empty list",
+			issues: []BdIssue{},
+			want:   false,
 		},
 		{
 			name: "mixed - epic + valid task",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Valid task with revision", Status: "open", Design: "plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
 				{ID: "T-3", Title: "Valid task", Status: "open", Design: ""},
-			}),
+			},
 			want: true,
 		},
 		{
 			name: "skip task with blocks dependency",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-0", Title: "Blocker", Status: "open", IssueType: "epic"},
 				{ID: "T-1", Title: "Blocked task", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
-			}),
+			},
 			want: false,
 		},
 		{
 			name: "parent-child dependency does not block",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Child task", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "EPIC-1", Type: "parent-child", CreatedAt: "2025-01-01T00:00:00Z", CreatedBy: "user1"},
 				}},
-			}),
+			},
 			want: true,
 		},
 		{
 			name:    "bd command error",
-			bdErr:   fmt.Errorf("bd error"),
+			err:     fmt.Errorf("bd error"),
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			if tt.wantErr {
+				mt := &MockIssueTracker{ReadyErr: tt.err, ListErr: tt.err, BackendNameResult: "mock"}
+				setDefaultTracker(mt)
+			} else {
+				setDefaultTracker(MockTrackerWithIssues(tt.issues, tt.issues))
 			}
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			got, err := HasAnyAvailableTasks("")
 			if (err != nil) != tt.wantErr {
@@ -2713,108 +2713,109 @@ func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 
 func TestGetAvailablePlanningTasks(t *testing.T) {
 	tests := []struct {
-		name     string
-		bdOutput string
-		bdErr    error
-		wantIDs  []string
-		wantErr  bool
+		name    string
+		issues  []BdIssue
+		err     error
+		wantIDs []string
+		wantErr bool
 	}{
 		{
 			name: "returns task needing planning (no design)",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
-			}),
+			},
 			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "returns task with needs-revision label",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "existing design", Labels: []string{"needs-revision"}},
-			}),
+			},
 			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "excludes task with design and no revision label",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
 			name: "skips in_progress tasks",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
 			name: "skips epics",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
-			name:     "empty list returns empty slice",
-			bdOutput: "[]",
-			wantIDs:  nil,
+			name:    "empty list returns empty slice",
+			issues:  []BdIssue{},
+			wantIDs: nil,
 		},
 		{
 			name: "multiple valid tasks returns all",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "No design", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Has design no revision", Status: "open", Design: "Plan"},
 				{ID: "T-3", Title: "Needs revision", Status: "open", Design: "Old plan", Labels: []string{"needs-revision"}},
 				{ID: "T-4", Title: "Also no design", Status: "open", Design: ""},
-			}),
+			},
 			wantIDs: []string{"T-1", "T-3", "T-4"},
 		},
 		{
 			name: "skips task with blocks dependency when blocker is open",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Blocked task", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
 				}},
-			}),
+			},
 			wantIDs: []string{"T-0"},
 		},
 		{
 			name: "does not skip task when blocker is resolved",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Was blocked", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
 				}},
-			}),
+			},
 			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "mixed blocked and unblocked returns only unblocked",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Unblocked", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Blocked", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-2", DependsOnID: "T-0", Type: "blocks"},
 				}},
 				{ID: "T-3", Title: "Also unblocked", Status: "open", Design: ""},
-			}),
+			},
 			wantIDs: []string{"T-0", "T-1", "T-3"},
 		},
 		{
 			name:    "bd error propagates",
-			bdErr:   fmt.Errorf("bd error"),
+			err:     fmt.Errorf("bd error"),
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			if tt.wantErr {
+				mt := &MockIssueTracker{ReadyErr: tt.err, ListErr: tt.err, BackendNameResult: "mock"}
+				setDefaultTracker(mt)
+			} else {
+				setDefaultTracker(MockTrackerWithIssues(tt.issues, tt.issues))
 			}
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			got, err := GetAvailablePlanningTasks("")
 			if (err != nil) != tt.wantErr {
@@ -2844,108 +2845,109 @@ func TestGetAvailablePlanningTasks(t *testing.T) {
 
 func TestGetAvailableImplementationTasks(t *testing.T) {
 	tests := []struct {
-		name     string
-		bdOutput string
-		bdErr    error
-		wantIDs  []string
-		wantErr  bool
+		name    string
+		issues  []BdIssue
+		err     error
+		wantIDs []string
+		wantErr bool
 	}{
 		{
 			name: "returns task with design ready for implementation",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Implementation plan"},
-			}),
+			},
 			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "excludes task without design",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
 			name: "excludes task with needs-revision label",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Has design", Labels: []string{"needs-revision"}},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
 			name: "skips in_progress tasks",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: "Has design"},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
 			name: "skips epics even with design",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: "Has design"},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
-			name:     "empty list returns empty slice",
-			bdOutput: "[]",
-			wantIDs:  nil,
+			name:    "empty list returns empty slice",
+			issues:  []BdIssue{},
+			wantIDs: nil,
 		},
 		{
 			name: "multiple valid tasks returns all",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "No design", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Has design", Status: "open", Design: "Plan A"},
 				{ID: "T-3", Title: "Needs revision", Status: "open", Design: "Old plan", Labels: []string{"needs-revision"}},
 				{ID: "T-4", Title: "Also has design", Status: "open", Design: "Plan B"},
-			}),
+			},
 			wantIDs: []string{"T-2", "T-4"},
 		},
 		{
 			name: "skips task with blocks dependency when blocker is open",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Blocked with design", Status: "open", Design: "Plan", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
 				}},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
 			name: "does not skip task when blocker is resolved",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Was blocked with design", Status: "open", Design: "Plan", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
 				}},
-			}),
+			},
 			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "mixed blocked and unblocked returns only unblocked",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Unblocked with design", Status: "open", Design: "Plan A"},
 				{ID: "T-2", Title: "Blocked with design", Status: "open", Design: "Plan B", Dependencies: []Dependency{
 					{IssueID: "T-2", DependsOnID: "T-0", Type: "blocks"},
 				}},
 				{ID: "T-3", Title: "Also unblocked", Status: "open", Design: "Plan C"},
-			}),
+			},
 			wantIDs: []string{"T-1", "T-3"},
 		},
 		{
 			name:    "bd error propagates",
-			bdErr:   fmt.Errorf("bd error"),
+			err:     fmt.Errorf("bd error"),
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			if tt.wantErr {
+				mt := &MockIssueTracker{ReadyErr: tt.err, ListErr: tt.err, BackendNameResult: "mock"}
+				setDefaultTracker(mt)
+			} else {
+				setDefaultTracker(MockTrackerWithIssues(tt.issues, tt.issues))
 			}
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			got, err := GetAvailableImplementationTasks("")
 			if (err != nil) != tt.wantErr {
@@ -2975,109 +2977,110 @@ func TestGetAvailableImplementationTasks(t *testing.T) {
 
 func TestGetAnyAvailableTasks(t *testing.T) {
 	tests := []struct {
-		name     string
-		bdOutput string
-		bdErr    error
-		wantIDs  []string
-		wantErr  bool
+		name    string
+		issues  []BdIssue
+		err     error
+		wantIDs []string
+		wantErr bool
 	}{
 		{
 			name: "returns task without design",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: ""},
-			}),
+			},
 			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "returns task with design",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "Some design"},
-			}),
+			},
 			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "returns task with needs-revision label",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "open", Design: "", Labels: []string{"needs-revision"}},
-			}),
+			},
 			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "skips in_progress tasks",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Add feature", Status: "in_progress", Design: ""},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
 			name: "skips epics",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Big Epic", Status: "open", IssueType: "epic", Design: ""},
-			}),
+			},
 			wantIDs: nil,
 		},
 		{
-			name:     "empty list returns empty slice",
-			bdOutput: "[]",
-			wantIDs:  nil,
+			name:    "empty list returns empty slice",
+			issues:  []BdIssue{},
+			wantIDs: nil,
 		},
 		{
 			name: "multiple valid tasks returns all",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "No design", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Big Epic", Status: "open", IssueType: "epic"},
 				{ID: "T-3", Title: "Has design", Status: "open", Design: "Plan"},
 				{ID: "T-4", Title: "In progress", Status: "in_progress", Design: ""},
 				{ID: "T-5", Title: "Revision needed", Status: "open", Labels: []string{"needs-revision"}},
-			}),
+			},
 			wantIDs: []string{"T-1", "T-3", "T-5"},
 		},
 		{
 			name: "skips task with blocks dependency when blocker is open",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Blocked task", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-0", Type: "blocks"},
 				}},
-			}),
+			},
 			wantIDs: []string{"T-0"},
 		},
 		{
 			name: "does not skip task when blocker is resolved",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-1", Title: "Was blocked", Status: "open", Design: "", Dependencies: []Dependency{
 					{IssueID: "T-1", DependsOnID: "T-CLOSED", Type: "blocks"},
 				}},
-			}),
+			},
 			wantIDs: []string{"T-1"},
 		},
 		{
 			name: "mixed blocked and unblocked returns only unblocked",
-			bdOutput: mustJSON([]BdIssue{
+			issues: []BdIssue{
 				{ID: "T-0", Title: "Open blocker", Status: "open", Design: ""},
 				{ID: "T-1", Title: "Unblocked", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Blocked", Status: "open", Design: "Plan", Dependencies: []Dependency{
 					{IssueID: "T-2", DependsOnID: "T-0", Type: "blocks"},
 				}},
 				{ID: "T-3", Title: "Also unblocked", Status: "open", Design: ""},
-			}),
+			},
 			wantIDs: []string{"T-0", "T-1", "T-3"},
 		},
 		{
 			name:    "bd error propagates",
-			bdErr:   fmt.Errorf("bd error"),
+			err:     fmt.Errorf("bd error"),
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			if tt.wantErr {
+				mt := &MockIssueTracker{ReadyErr: tt.err, ListErr: tt.err, BackendNameResult: "mock"}
+				setDefaultTracker(mt)
+			} else {
+				setDefaultTracker(MockTrackerWithIssues(tt.issues, tt.issues))
 			}
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			got, err := GetAnyAvailableTasks("")
 			if (err != nil) != tt.wantErr {
@@ -3106,17 +3109,12 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 }
 
 func TestHasAvailableDelegatesToGet(t *testing.T) {
-	bdOutput := mustJSON([]BdIssue{
+	issues := []BdIssue{
 		{ID: "T-1", Title: "No design", Status: "open", Design: ""},
 		{ID: "T-2", Title: "Has design", Status: "open", Design: "Plan"},
-	})
-
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: bdOutput}
 	}
+	setDefaultTracker(MockTrackerWithIssues(issues, issues))
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	// HasAvailablePlanningTasks should return true (T-1 has no design)
 	hasPlan, err := HasAvailablePlanningTasks("")
@@ -3578,387 +3576,279 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 }
 
 // TestGetAvailablePlanningTasks_WithParentID verifies that when a non-empty parentID
-// is provided, the --parent flag is included in the bd ready command.
+// is provided, the ReadyOpts.ParentID is set correctly.
 func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
+		wantLimit    int
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "T-123",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "T-123"},
+			name:         "with parent ID passes ParentID in opts",
+			parentID:     "T-123",
+			wantParentID: "T-123",
+			wantLimit:    100,
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty ParentID",
+			parentID:     "",
+			wantParentID: "",
+			wantLimit:    100,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				// Capture only the first call (bd ready) args for parentID verification
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
-					}),
-				}
-			}
+			issues := []BdIssue{{ID: "T-1", Title: "Task", Status: "open", Design: ""}}
+			mt := MockTrackerWithIssues(issues, issues)
+			setDefaultTracker(mt)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			_, err := GetAvailablePlanningTasks(tt.parentID)
 			if err != nil {
 				t.Fatalf("GetAvailablePlanningTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("GetAvailablePlanningTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
+			call := mt.LastCall("Ready")
+			if call == nil {
+				t.Fatal("Ready was not called")
 			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("GetAvailablePlanningTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			opts := call.Args[1].(ReadyOpts)
+			if opts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", opts.ParentID, tt.wantParentID)
+			}
+			if opts.Limit != tt.wantLimit {
+				t.Errorf("ReadyOpts.Limit = %d, want %d", opts.Limit, tt.wantLimit)
 			}
 		})
 	}
 }
 
 // TestGetAvailableImplementationTasks_WithParentID verifies that when a non-empty parentID
-// is provided, the --parent flag is included in the bd ready command.
+// is provided, the ReadyOpts.ParentID is set correctly.
 func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-456",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-456"},
+			name:         "with parent ID passes ParentID in opts",
+			parentID:     "EPIC-456",
+			wantParentID: "EPIC-456",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty ParentID",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				// Capture only the first call (bd ready) args for parentID verification
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
-					}),
-				}
-			}
+			issues := []BdIssue{{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}}
+			mt := MockTrackerWithIssues(issues, issues)
+			setDefaultTracker(mt)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			_, err := GetAvailableImplementationTasks(tt.parentID)
 			if err != nil {
 				t.Fatalf("GetAvailableImplementationTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("GetAvailableImplementationTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
+			call := mt.LastCall("Ready")
+			if call == nil {
+				t.Fatal("Ready was not called")
 			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("GetAvailableImplementationTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			opts := call.Args[1].(ReadyOpts)
+			if opts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", opts.ParentID, tt.wantParentID)
 			}
 		})
 	}
 }
 
 // TestGetAnyAvailableTasks_WithParentID verifies that when a non-empty parentID
-// is provided, the --parent flag is included in the bd ready command.
+// is provided, the ReadyOpts.ParentID is set correctly.
 func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-789",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-789"},
+			name:         "with parent ID passes ParentID in opts",
+			parentID:     "EPIC-789",
+			wantParentID: "EPIC-789",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty ParentID",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				// Capture only the first call (bd ready) args for parentID verification
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},
-					}),
-				}
-			}
+			issues := []BdIssue{{ID: "T-3", Title: "Any task", Status: "open", Design: ""}}
+			mt := MockTrackerWithIssues(issues, issues)
+			setDefaultTracker(mt)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			_, err := GetAnyAvailableTasks(tt.parentID)
 			if err != nil {
 				t.Fatalf("GetAnyAvailableTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("GetAnyAvailableTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
+			call := mt.LastCall("Ready")
+			if call == nil {
+				t.Fatal("Ready was not called")
 			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("GetAnyAvailableTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			opts := call.Args[1].(ReadyOpts)
+			if opts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", opts.ParentID, tt.wantParentID)
 			}
 		})
 	}
 }
 
 // TestHasAvailablePlanningTasks_WithParentID verifies that HasAvailablePlanningTasks
-// properly passes the parentID through to GetAvailablePlanningTasks.
+// properly passes the parentID through to Ready via ReadyOpts.
 func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-100",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-100"},
+			name:         "with parent ID passes ParentID in opts",
+			parentID:     "EPIC-100",
+			wantParentID: "EPIC-100",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty ParentID",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
-					}),
-				}
-			}
+			issues := []BdIssue{{ID: "T-1", Title: "Task", Status: "open", Design: ""}}
+			mt := MockTrackerWithIssues(issues, issues)
+			setDefaultTracker(mt)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			got, err := HasAvailablePlanningTasks(tt.parentID)
 			if err != nil {
 				t.Fatalf("HasAvailablePlanningTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
-
 			if !got {
 				t.Errorf("HasAvailablePlanningTasks(%q) = false, want true", tt.parentID)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("HasAvailablePlanningTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
+			call := mt.LastCall("Ready")
+			if call == nil {
+				t.Fatal("Ready was not called")
 			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("HasAvailablePlanningTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			opts := call.Args[1].(ReadyOpts)
+			if opts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", opts.ParentID, tt.wantParentID)
 			}
 		})
 	}
 }
 
 // TestHasAvailableImplementationTasks_WithParentID verifies that HasAvailableImplementationTasks
-// properly passes the parentID through to GetAvailableImplementationTasks.
+// properly passes the parentID through to Ready via ReadyOpts.
 func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-200",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-200"},
+			name:         "with parent ID passes ParentID in opts",
+			parentID:     "EPIC-200",
+			wantParentID: "EPIC-200",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty ParentID",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
-					}),
-				}
-			}
+			issues := []BdIssue{{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}}
+			mt := MockTrackerWithIssues(issues, issues)
+			setDefaultTracker(mt)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			got, err := HasAvailableImplementationTasks(tt.parentID)
 			if err != nil {
 				t.Fatalf("HasAvailableImplementationTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
-
 			if !got {
 				t.Errorf("HasAvailableImplementationTasks(%q) = false, want true", tt.parentID)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("HasAvailableImplementationTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
+			call := mt.LastCall("Ready")
+			if call == nil {
+				t.Fatal("Ready was not called")
 			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("HasAvailableImplementationTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			opts := call.Args[1].(ReadyOpts)
+			if opts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", opts.ParentID, tt.wantParentID)
 			}
 		})
 	}
 }
 
 // TestHasAnyAvailableTasks_WithParentID verifies that HasAnyAvailableTasks
-// properly passes the parentID through to GetAnyAvailableTasks.
+// properly passes the parentID through to Ready via ReadyOpts.
 func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-300",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-300"},
+			name:         "with parent ID passes ParentID in opts",
+			parentID:     "EPIC-300",
+			wantParentID: "EPIC-300",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty ParentID",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},
-					}),
-				}
-			}
+			issues := []BdIssue{{ID: "T-3", Title: "Any task", Status: "open", Design: ""}}
+			mt := MockTrackerWithIssues(issues, issues)
+			setDefaultTracker(mt)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 			got, err := HasAnyAvailableTasks(tt.parentID)
 			if err != nil {
 				t.Fatalf("HasAnyAvailableTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
-
 			if !got {
 				t.Errorf("HasAnyAvailableTasks(%q) = false, want true", tt.parentID)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("HasAnyAvailableTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
+			call := mt.LastCall("Ready")
+			if call == nil {
+				t.Fatal("Ready was not called")
 			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("HasAnyAvailableTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			opts := call.Args[1].(ReadyOpts)
+			if opts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", opts.ParentID, tt.wantParentID)
 			}
 		})
 	}
@@ -4040,30 +3930,10 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 // fetchReadyIssues Tests
 // ============================================================================
 
-func TestFetchReadyIssues_InvalidJSON(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: "not valid json"}
-	}
-
-	_, err := fetchReadyIssues("")
-	if err == nil {
-		t.Fatal("fetchReadyIssues() expected error for invalid JSON, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to parse task list") {
-		t.Errorf("fetchReadyIssues() error = %v, want to contain 'failed to parse task list'", err)
-	}
-}
-
 func TestFetchReadyIssues_EmptyArray(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: "[]"}
-	}
+	mt := MockTrackerWithIssues([]BdIssue{}, []BdIssue{})
+	setDefaultTracker(mt)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	issues, err := fetchReadyIssues("")
 	if err != nil {
@@ -4075,18 +3945,14 @@ func TestFetchReadyIssues_EmptyArray(t *testing.T) {
 }
 
 func TestFetchReadyIssues_ValidIssues(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{
-			Stdout: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "First", Status: "open"},
-				{ID: "T-2", Title: "Second", Status: "open", Design: "plan"},
-				{ID: "T-3", Title: "Third", Status: "open", IssueType: "epic"},
-			}),
-		}
+	fixture := []BdIssue{
+		{ID: "T-1", Title: "First", Status: "open"},
+		{ID: "T-2", Title: "Second", Status: "open", Design: "plan"},
+		{ID: "T-3", Title: "Third", Status: "open", IssueType: "epic"},
 	}
+	mt := MockTrackerWithIssues(fixture, fixture)
+	setDefaultTracker(mt)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	issues, err := fetchReadyIssues("")
 	if err != nil {
@@ -4101,46 +3967,33 @@ func TestFetchReadyIssues_ValidIssues(t *testing.T) {
 }
 
 func TestFetchReadyIssues_CommandError(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Err: fmt.Errorf("command failed")}
-	}
+	mt := &MockIssueTracker{ReadyErr: fmt.Errorf("command failed"), BackendNameResult: "mock"}
+	setDefaultTracker(mt)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	_, err := fetchReadyIssues("")
 	if err == nil {
 		t.Fatal("fetchReadyIssues() expected error for command failure, got nil")
 	}
-	if !strings.Contains(err.Error(), "failed to check ready tasks") {
-		t.Errorf("fetchReadyIssues() error = %v, want to contain 'failed to check ready tasks'", err)
-	}
 }
 
 func TestFetchReadyIssues_WithParentID(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	var capturedArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		capturedArgs = append([]string{name}, args...)
-		return CommandResult{Stdout: "[]"}
-	}
+	mt := MockTrackerWithIssues([]BdIssue{}, []BdIssue{})
+	setDefaultTracker(mt)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	_, err := fetchReadyIssues("epic-123")
 	if err != nil {
 		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
 	}
 
-	found := false
-	for i, arg := range capturedArgs {
-		if arg == "--parent" && i+1 < len(capturedArgs) && capturedArgs[i+1] == "epic-123" {
-			found = true
-			break
-		}
+	call := mt.LastCall("Ready")
+	if call == nil {
+		t.Fatal("Ready was not called")
 	}
-	if !found {
-		t.Errorf("fetchReadyIssues() did not pass --parent epic-123, args: %v", capturedArgs)
+	opts := call.Args[1].(ReadyOpts)
+	if opts.ParentID != "epic-123" {
+		t.Errorf("ReadyOpts.ParentID = %q, want %q", opts.ParentID, "epic-123")
 	}
 }
 
