@@ -109,16 +109,25 @@ func TestBackendParity(t *testing.T) {
 			t.Fatalf("fleet.Ready: %v", err)
 		}
 		if !reflect.DeepEqual(bdResult, fleetResult) {
-			t.Errorf("Ready mismatch:\n  bd:    %+v\n  fleet: %+v", bdResult, fleetResult)
+			t.Fatalf("Ready mismatch:\n  bd:    %+v\n  fleet: %+v", bdResult, fleetResult)
+		}
+		if len(bdResult) == 0 {
+			t.Fatal("expected non-empty Ready result")
 		}
 		if bdResult[0].Dependencies == nil {
-			t.Error("bd Ready: Dependencies should not be nil")
+			t.Error("bd Dependencies should not be nil")
+		}
+		if fleetResult[0].Dependencies == nil {
+			t.Error("fleet Dependencies should not be nil")
 		}
 		if len(bdResult[0].Dependencies) != 1 {
 			t.Errorf("bd Ready: expected 1 dep, got %d", len(bdResult[0].Dependencies))
 		}
 		if bdResult[0].Labels == nil {
-			t.Error("bd Ready: Labels should not be nil")
+			t.Error("bd Labels should not be nil")
+		}
+		if fleetResult[0].Labels == nil {
+			t.Error("fleet Labels should not be nil")
 		}
 	})
 
@@ -135,10 +144,10 @@ func TestBackendParity(t *testing.T) {
 		if !reflect.DeepEqual(bdResult, fleetResult) {
 			t.Errorf("List mismatch:\n  bd:    %+v\n  fleet: %+v", bdResult, fleetResult)
 		}
-		if bdResult[0].Dependencies == nil {
+		if len(bdResult) > 0 && bdResult[0].Dependencies == nil {
 			t.Error("bd List: Dependencies should be [] not nil")
 		}
-		if fleetResult[0].Dependencies == nil {
+		if len(fleetResult) > 0 && fleetResult[0].Dependencies == nil {
 			t.Error("fleet List: Dependencies should be [] not nil")
 		}
 	})
@@ -182,6 +191,9 @@ func TestBackendParity(t *testing.T) {
 		fleetResult, err := fleet.GetIssue(ctx, "test-1")
 		if err != nil {
 			t.Fatalf("fleet.GetIssue: %v", err)
+		}
+		if bdResult == nil || fleetResult == nil {
+			t.Fatalf("GetIssue returned nil without error: bd=%v fleet=%v", bdResult, fleetResult)
 		}
 		if !reflect.DeepEqual(*bdResult, *fleetResult) {
 			t.Errorf("GetIssue mismatch:\n  bd:    %+v\n  fleet: %+v", *bdResult, *fleetResult)
