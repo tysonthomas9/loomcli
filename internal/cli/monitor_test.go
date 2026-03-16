@@ -1417,6 +1417,13 @@ func TestCollectAgentStatus(t *testing.T) {
 			os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644)
 		}
 
+		// Mock issue tracker for getTaskStatus
+		tracker := &MockIssueTracker{
+			GetIssueResult: &BdIssue{Status: "in_progress"},
+		}
+		setDefaultTracker(tracker)
+		t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
+
 		oldExec := execCommand
 		t.Cleanup(func() { execCommand = oldExec })
 
@@ -1429,10 +1436,6 @@ func TestCollectAgentStatus(t *testing.T) {
 			}
 			if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 				return CommandResult{Stdout: "0\t0"}
-			}
-			// bd show for task status
-			if name == "bd" && len(args) > 0 && args[0] == "show" {
-				return CommandResult{Stdout: `[{"title":"Test Task","status":"in_progress"}]`}
 			}
 			return CommandResult{}
 		}
@@ -2326,6 +2329,18 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			lockData, _ := json.Marshal(lockInfo)
 			os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644)
 
+			// Mock issue tracker for getTaskStatus
+			// Reverse the "needs_review" → "review" mapping since BdIssue stores "review"
+			bdStatus := tt.taskStatus
+			if bdStatus == "needs_review" {
+				bdStatus = "review"
+			}
+			tracker := &MockIssueTracker{
+				GetIssueResult: &BdIssue{Status: bdStatus},
+			}
+			setDefaultTracker(tracker)
+			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
+
 			oldExec := execCommand
 			t.Cleanup(func() { execCommand = oldExec })
 
@@ -2338,13 +2353,6 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 				}
 				if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 					return CommandResult{Stdout: "0\t0"}
-				}
-				// Mock bd show for getTaskStatus
-				if name == "bd" && len(args) > 0 && args[0] == "show" {
-					return CommandResult{Stdout: mustJSON([]struct {
-						Title  string `json:"title"`
-						Status string `json:"status"`
-					}{{Title: "Test Task", Status: tt.taskStatus}})}
 				}
 				return CommandResult{}
 			}

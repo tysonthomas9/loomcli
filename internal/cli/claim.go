@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -34,12 +34,6 @@ func init() {
 	rootCmd.AddCommand(claimCmd)
 }
 
-// bdShowOutput represents the JSON output from 'bd show --json'
-type bdShowOutput struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-}
-
 func runClaim(cmd *cobra.Command, args []string) {
 	taskID := args[0]
 
@@ -50,8 +44,8 @@ func runClaim(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Get task title from bd show
-	taskTitle := getTaskTitle(cwd, taskID)
+	// Get task title from issue tracker
+	taskTitle := getTaskTitle(taskID)
 
 	// Update the lock file
 	if err := UpdateLockTask(cwd, taskID, taskTitle); err != nil {
@@ -105,20 +99,10 @@ func emitTaskClaimedEvent(taskID, taskTitle string) {
 	}
 }
 
-func getTaskTitle(dir string, taskID string) string {
-	result := execCommand(dir, "bd", "show", taskID, "--json")
-	if result.Err != nil {
+func getTaskTitle(taskID string) string {
+	issue, err := defaultTracker().GetIssue(context.Background(), taskID)
+	if err != nil || issue == nil {
 		return ""
 	}
-
-	// bd show --json returns an array
-	var results []bdShowOutput
-	if err := json.Unmarshal([]byte(result.Stdout), &results); err != nil {
-		return ""
-	}
-	if len(results) == 0 {
-		return ""
-	}
-
-	return results[0].Title
+	return issue.Title
 }

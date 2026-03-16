@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -411,18 +412,12 @@ func GetLockStatus(worktreePath string) string {
 // getTaskStatus returns the status of a beads task
 // Returns "needs_review", "closed", "in_progress", "open", or ""
 func getTaskStatus(taskID string) string {
-	result := execCommand(GetBeadsDir(), "bd", "show", taskID, "--json")
-	if result.Err != nil {
+	issue, err := defaultTracker().GetIssue(context.Background(), taskID)
+	if err != nil || issue == nil {
 		return ""
 	}
-	var issues []struct {
-		Status string `json:"status"`
-	}
-	if json.Unmarshal([]byte(result.Stdout), &issues) != nil || len(issues) == 0 {
-		return ""
-	}
-	if issues[0].Status == "review" {
+	if issue.Status == "review" {
 		return "needs_review"
 	}
-	return issues[0].Status
+	return issue.Status
 }

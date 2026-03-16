@@ -29,12 +29,12 @@ func TestRunClaim_Success(t *testing.T) {
 	lockData, _ := json.Marshal(lockInfo)
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
-	// Mock bd show command - verify it receives the worktree dir (tmpDir), not "."
-	taskJSON := `[{"id": "bd-123", "title": "Test Task Title"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: tmpDir, Name: "bd", Args: []string{"show", "bd-123", "--json"}, Stdout: taskJSON},
-	})
-	mock.Install()
+	// Mock issue tracker
+	tracker := &MockIssueTracker{
+		GetIssueResult: &BdIssue{Title: "Test Task Title"},
+	}
+	setDefaultTracker(tracker)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -75,7 +75,7 @@ func TestRunClaim_Success(t *testing.T) {
 }
 
 func TestRunClaim_NoTitle(t *testing.T) {
-	// When bd show returns error, claim should still work but without title
+	// When GetIssue returns error, claim should still work but without title
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 	// Set LOOM_EVENTS_DIR to avoid git rev-parse call in emitTaskClaimedEvent
@@ -93,11 +93,12 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	lockData, _ := json.Marshal(lockInfo)
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
-	// Mock bd show command with error - verify it receives the worktree dir (tmpDir)
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: tmpDir, Name: "bd", Args: []string{"show", "bd-456", "--json"}, Err: errors.New("bd error")},
-	})
-	mock.Install()
+	// Mock issue tracker with error
+	tracker := &MockIssueTracker{
+		GetIssueErr: errors.New("bd error"),
+	}
+	setDefaultTracker(tracker)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -117,77 +118,84 @@ func TestRunClaim_NoTitle(t *testing.T) {
 		t.Errorf("expected 'Claimed task: bd-456' in output, got: %s", output)
 	}
 	if strings.Contains(output, "Title:") {
-		t.Errorf("should not show title when bd show fails, got: %s", output)
+		t.Errorf("should not show title when GetIssue fails, got: %s", output)
 	}
 }
 
 func TestGetTaskTitle_Success(t *testing.T) {
-	taskJSON := `[{"id": "bd-789", "title": "My Task Title"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: ".", Name: "bd", Args: []string{"show", "bd-789", "--json"}, Stdout: taskJSON},
-	})
-	mock.Install()
+	tracker := &MockIssueTracker{
+		GetIssueResult: &BdIssue{Title: "My Task Title"},
+	}
+	setDefaultTracker(tracker)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
-	title := getTaskTitle(".", "bd-789")
+	title := getTaskTitle("bd-789")
 	if title != "My Task Title" {
 		t.Errorf("expected 'My Task Title', got %q", title)
 	}
 }
 
 func TestGetTaskTitle_BdError(t *testing.T) {
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: ".", Name: "bd", Args: []string{"show", "bd-error", "--json"}, Err: errors.New("bd error")},
-	})
-	mock.Install()
+	tracker := &MockIssueTracker{
+		GetIssueErr: errors.New("bd error"),
+	}
+	setDefaultTracker(tracker)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
-	title := getTaskTitle(".", "bd-error")
+	title := getTaskTitle("bd-error")
 	if title != "" {
 		t.Errorf("expected empty string on error, got %q", title)
 	}
 }
 
-func TestGetTaskTitle_InvalidJSON(t *testing.T) {
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: ".", Name: "bd", Args: []string{"show", "bd-bad", "--json"}, Stdout: "not valid json"},
-	})
-	mock.Install()
+func TestGetTaskTitle_ParseError(t *testing.T) {
+	// GetIssue returning error (replaces invalid JSON scenario)
+	tracker := &MockIssueTracker{
+		GetIssueErr: errors.New("parse error"),
+	}
+	setDefaultTracker(tracker)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
-	title := getTaskTitle(".", "bd-bad")
+	title := getTaskTitle("bd-bad")
 	if title != "" {
-		t.Errorf("expected empty string on invalid JSON, got %q", title)
+		t.Errorf("expected empty string on parse error, got %q", title)
 	}
 }
 
-func TestGetTaskTitle_EmptyArray(t *testing.T) {
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: ".", Name: "bd", Args: []string{"show", "bd-empty", "--json"}, Stdout: "[]"},
-	})
-	mock.Install()
+func TestGetTaskTitle_NilIssue(t *testing.T) {
+	// GetIssue returning nil issue with no error (replaces empty array scenario)
+	tracker := &MockIssueTracker{
+		GetIssueResult: nil,
+		GetIssueErr:    nil,
+	}
+	setDefaultTracker(tracker)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
-	title := getTaskTitle(".", "bd-empty")
+	title := getTaskTitle("bd-empty")
 	if title != "" {
-		t.Errorf("expected empty string on empty array, got %q", title)
+		t.Errorf("expected empty string on nil issue, got %q", title)
 	}
 }
 
-func TestGetTaskTitle_UsesProvidedDir(t *testing.T) {
-	taskJSON := `[{"id": "bd-123", "title": "Dir Test"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: "/some/specific/path", Name: "bd", Args: []string{"show", "bd-123", "--json"}, Stdout: taskJSON},
-	})
-	mock.Install()
+func TestGetTaskTitle_VerifiesTrackerCall(t *testing.T) {
+	// Verify the tracker's GetIssue is called with the correct ID
+	tracker := &MockIssueTracker{
+		GetIssueResult: &BdIssue{Title: "Dir Test"},
+	}
+	setDefaultTracker(tracker)
+	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
 
-	title := getTaskTitle("/some/specific/path", "bd-123")
+	title := getTaskTitle("bd-123")
 	if title != "Dir Test" {
 		t.Errorf("expected 'Dir Test', got %q", title)
 	}
 
-	// Verify the mock recorded the correct directory
-	calls := mock.Calls()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(calls))
+	// Verify tracker was called with correct args
+	if tracker.CallCount("GetIssue") != 1 {
+		t.Fatalf("expected 1 GetIssue call, got %d", tracker.CallCount("GetIssue"))
 	}
-	if calls[0].Dir != "/some/specific/path" {
-		t.Errorf("expected dir '/some/specific/path', got %q", calls[0].Dir)
+	lastCall := tracker.LastCall("GetIssue")
+	if id, ok := lastCall.Args[1].(string); !ok || id != "bd-123" {
+		t.Errorf("expected GetIssue called with 'bd-123', got %v", lastCall.Args[1])
 	}
 }
