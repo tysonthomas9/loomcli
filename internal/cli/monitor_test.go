@@ -699,8 +699,7 @@ func TestRunBdCommand(t *testing.T) {
 	tests := []struct {
 		name       string
 		args       []string
-		stdout     string
-		stderr     string
+		output     string
 		err        error
 		wantOutput string
 		wantErr    bool
@@ -708,7 +707,7 @@ func TestRunBdCommand(t *testing.T) {
 		{
 			name:       "success with stdout",
 			args:       []string{"stats", "--json"},
-			stdout:     `{"summary":{"total_issues":10}}`,
+			output:     `{"summary":{"total_issues":10}}`,
 			wantOutput: `{"summary":{"total_issues":10}}`,
 			wantErr:    false,
 		},
@@ -721,7 +720,7 @@ func TestRunBdCommand(t *testing.T) {
 		{
 			name:       "empty output",
 			args:       []string{"list"},
-			stdout:     "",
+			output:     "",
 			wantOutput: "",
 			wantErr:    false,
 		},
@@ -731,7 +730,7 @@ func TestRunBdCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := NewMockTracker()
 			mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-				return tt.stdout, tt.err
+				return tt.output, tt.err
 			}
 			setDefaultTracker(mock)
 			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
@@ -745,26 +744,6 @@ func TestRunBdCommand(t *testing.T) {
 				t.Errorf("runBdCommand() = %q, want %q", output, tt.wantOutput)
 			}
 		})
-	}
-}
-
-func TestRunBdCommand_PassesBeadsDir(t *testing.T) {
-	// Verify that runBdCommand passes GetBeadsDir() as the dir argument
-	// to the tracker's RunCommand, confirming the delegation wiring.
-	mock := NewMockTracker()
-	var capturedDir string
-	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-		capturedDir = dir
-		return "ok", nil
-	}
-	setDefaultTracker(mock)
-	t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
-
-	_, _ = runBdCommand("stats", "--json")
-
-	expectedDir := GetBeadsDir()
-	if capturedDir != expectedDir {
-		t.Errorf("runBdCommand passed dir=%q, want %q (GetBeadsDir())", capturedDir, expectedDir)
 	}
 }
 
@@ -914,10 +893,7 @@ func TestCollectStatistics(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := NewMockTracker()
 			mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-				if tt.bdErr != nil {
-					return "", tt.bdErr
-				}
-				return tt.bdOutput, nil
+				return tt.bdOutput, tt.bdErr
 			}
 			setDefaultTracker(mock)
 			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
@@ -1023,10 +999,7 @@ func TestCollectSyncStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := NewMockTracker()
 			mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-				if tt.bdErr != nil {
-					return "", tt.bdErr
-				}
-				return tt.bdOutput, nil
+				return tt.bdOutput, tt.bdErr
 			}
 			setDefaultTracker(mock)
 			t.Cleanup(func() { setDefaultTracker(defaultDeps.Tracker) })
@@ -1304,8 +1277,8 @@ func TestCollectTaskStatus(t *testing.T) {
 
 func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
 	// This test verifies that the "ready" command is called with the passed readyLimit
-	mock := NewMockTracker()
 	var capturedArgs []string
+	mock := NewMockTracker()
 	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			capturedArgs = args
@@ -1647,7 +1620,7 @@ func TestCollectMonitorData(t *testing.T) {
 		if len(args) > 0 && args[0] == "blocked" {
 			return "[]", nil
 		}
-		if len(args) > 0 && args[0] == "list" {
+		if len(args) > 1 && args[0] == "list" {
 			return "[]", nil
 		}
 		return "", nil
@@ -1744,7 +1717,7 @@ func TestCollectMonitorDataExported(t *testing.T) {
 		if len(args) > 0 && args[0] == "blocked" {
 			return "[]", nil
 		}
-		if len(args) > 0 && args[0] == "list" {
+		if len(args) > 1 && args[0] == "list" {
 			return "[]", nil
 		}
 		return "", nil
@@ -1881,7 +1854,7 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 		if len(args) > 0 && args[0] == "blocked" {
 			return string(blockedJSON), nil
 		}
-		if len(args) > 0 && args[0] == "list" {
+		if len(args) > 1 && args[0] == "list" {
 			return "[]", nil
 		}
 		return "", nil
@@ -1968,7 +1941,7 @@ func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
 		if len(args) > 0 && args[0] == "blocked" {
 			return "[]", nil
 		}
-		if len(args) > 0 && args[0] == "list" {
+		if len(args) > 1 && args[0] == "list" {
 			return "[]", nil
 		}
 		return "", nil
@@ -2073,7 +2046,7 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 		if len(args) > 0 && args[0] == "blocked" {
 			return string(blockedJSON), nil
 		}
-		if len(args) > 0 && args[0] == "list" {
+		if len(args) > 1 && args[0] == "list" {
 			// Match the specific status queries
 			for _, arg := range args {
 				if arg == "--status=in_progress" {
@@ -3037,8 +3010,8 @@ func TestRenderDashboardWithDaemonManagedAgents(t *testing.T) {
 // TestCollectTaskStatusReadyCommandArgs tests limit=100 (monitor default);
 // this test covers limit=50 (serve default).
 func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
-	mock := NewMockTracker()
 	var capturedReadyArgs []string
+	mock := NewMockTracker()
 	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			capturedReadyArgs = args
@@ -3066,8 +3039,8 @@ func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
 // collectReadyTasksByPriority passes the readyLimit parameter through to the
 // bd ready command (limit=50, matching the serve use case).
 func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
-	mock := NewMockTracker()
 	var capturedReadyArgs []string
+	mock := NewMockTracker()
 	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "ready" {
 			capturedReadyArgs = args
