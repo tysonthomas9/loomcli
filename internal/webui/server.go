@@ -22,6 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -275,6 +276,36 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Terminal manager initialized (default command: %s)", config.TerminalCmd)
 	}
 
+	// Wire session history callback (deferred until sessionHistoryStore is initialized below).
+	// We use a closure that captures a pointer so it can reference sessionHistoryStore
+	// which is initialized later. The callback is only invoked after server startup,
+	// by which point sessionHistoryStore is set.
+	var sessionHistoryStoreRef *sessionhistory.Store
+	if termMgr != nil {
+		termMgr.SetOnSessionKilled(func(sessionName string) {
+			store := sessionHistoryStoreRef
+			if store == nil {
+				return
+			}
+			issueID := extractIssueID(sessionName)
+			if issueID == "" {
+				return
+			}
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return
+			}
+			scrollbackPath := homeDir + "/.loom/session-scrollback/" + sessionName + ".log"
+			// Check if file exists before recording path.
+			if _, err := os.Stat(scrollbackPath); err != nil {
+				scrollbackPath = ""
+			}
+			if err := store.Complete(context.Background(), issueID, sessionName, scrollbackPath); err != nil {
+				log.Printf("Warning: failed to complete session history for %s: %v", sessionName, err)
+			}
+		})
+	}
+
 	// Initialize terminal auth for one-time WebSocket tokens
 	var termAuth *terminalAuth
 	if termMgr != nil {
@@ -372,6 +403,16 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		log.Printf("Issue tab store initialized (Redis: %s)", config.FleetRedis.Address)
 	}
 
+	// Initialize session history store for terminal session audit trail
+	var sessionHistoryStore *sessionhistory.Store
+	if config.FleetRedis != nil {
+		shClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
+		sessionHistoryStore = sessionhistory.NewStore(shClient, nil)
+		defer func() { _ = sessionHistoryStore.Close() }()
+		sessionHistoryStoreRef = sessionHistoryStore
+		log.Printf("Session history store initialized (Redis: %s)", config.FleetRedis.Address)
+	}
+
 	// Load or generate API key for authentication
 	var apiKey string
 	if config.AuthEnabled {
@@ -400,7 +441,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.BackendOps)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.BackendOps, sessionHistoryStore)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.

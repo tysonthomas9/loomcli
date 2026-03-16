@@ -3,9 +3,53 @@ package webui
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 )
+
+// SetOnSessionKilled sets a callback invoked after a tmux session is killed.
+// Must be called once during initialization, before any sessions are created.
+func (m *TerminalManager) SetOnSessionKilled(fn func(sessionName string)) {
+	m.onSessionKilled = fn
+}
+
+// captureScrollbackToFile captures the scrollback buffer of a tmux session and writes
+// it to ~/.loom/session-scrollback/{sessionName}.log. Returns the file path on success.
+// Best-effort: failure does not prevent the kill.
+func (m *TerminalManager) captureScrollbackToFile(name string) string {
+	internalName := m.tmuxName(name)
+	if !m.tmuxHasSession(internalName) {
+		return ""
+	}
+
+	cmd := exec.Command(m.tmuxPath, "capture-pane", "-p", "-t", internalName, "-S", "-10000") //nolint:gosec // tmuxPath from LookPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Warning: failed to capture scrollback for session %q: %v", name, err)
+		return ""
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Printf("Warning: failed to get home dir for scrollback capture: %v", err)
+		return ""
+	}
+
+	dir := homeDir + "/.loom/session-scrollback"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("Warning: failed to create scrollback dir: %v", err)
+		return ""
+	}
+
+	path := dir + "/" + name + ".log"
+	if err := os.WriteFile(path, out, 0o644); err != nil { //nolint:gosec // non-sensitive scrollback content
+		log.Printf("Warning: failed to write scrollback file %s: %v", path, err)
+		return ""
+	}
+
+	return path
+}
 
 // KillAllSessions closes all PTY connections and kills all prefixed tmux sessions.
 // Unlike Shutdown, it does not reset the manager itself — it remains usable for new sessions.

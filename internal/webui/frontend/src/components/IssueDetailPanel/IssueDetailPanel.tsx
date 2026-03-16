@@ -66,66 +66,9 @@ import { ResizeDivider } from "./ResizeDivider";
 import { ErrorToast } from "../ErrorToast";
 import { LogViewer } from "../LogViewer";
 import { useSplitRatio } from "@/hooks/useSplitRatio";
+import { CollapsibleSection } from "./CollapsibleSection";
+import { SessionHistorySection } from "./SessionHistorySection";
 import styles from "./IssueDetailPanel.module.css";
-
-/**
- * Props for CollapsibleSection.
- */
-interface CollapsibleSectionProps {
-  title: string;
-  count?: number;
-  defaultExpanded?: boolean;
-  children: React.ReactNode;
-  testId?: string;
-}
-
-/**
- * Collapsible section with chevron indicator.
- */
-function CollapsibleSection({
-  title,
-  count,
-  defaultExpanded = true,
-  children,
-  testId,
-}: CollapsibleSectionProps): JSX.Element {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-
-  return (
-    <section className={styles.collapsibleSection} data-testid={testId}>
-      <button
-        type="button"
-        className={styles.collapsibleHeader}
-        onClick={() => setIsExpanded(!isExpanded)}
-        aria-expanded={isExpanded}
-      >
-        <span className={styles.collapsibleTitle}>
-          {title}
-          {count !== undefined && (
-            <span className={styles.collapsibleCount}>({count})</span>
-          )}
-        </span>
-        <svg
-          className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ""}`}
-          viewBox="0 0 16 16"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M6 4l4 4-4 4"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
-      {isExpanded && (
-        <div className={styles.collapsibleContent}>{children}</div>
-      )}
-    </section>
-  );
-}
 
 /**
  * Blocking banner component - shows when issue is in blocked state with open dependencies.
@@ -1402,6 +1345,24 @@ function DefaultContent({
                 </ul>
               </section>
             )}
+
+            {/* Session History */}
+            <CollapsibleSection
+              title="Session History"
+              defaultExpanded={false}
+              testId="session-history-section"
+            >
+              <SessionHistorySection
+                issueId={issue.id}
+                onJumpToSession={(sessionName) => {
+                  const tabId = `terminal-${sessionName}`;
+                  const tab = tabs.find((t) => t.id === tabId);
+                  if (tab) {
+                    setActiveTabId(tabId);
+                  }
+                }}
+              />
+            </CollapsibleSection>
 
             {/* Activity Log (comments + events) */}
             <ActivityLog

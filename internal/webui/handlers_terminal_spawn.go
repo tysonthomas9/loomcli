@@ -4,8 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"regexp"
 	"strings"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
 // terminalSpawnRequest is the JSON body for POST /api/terminal/spawn.
@@ -34,8 +39,21 @@ type terminalSpawner interface {
 	Spawn(name, command string, cols, rows uint16) (bool, error)
 }
 
+// issueSessionPattern matches issue-linked session names: "issue-{project}-{number}".
+var issueSessionPattern = regexp.MustCompile(`^issue-(.+)-(\d+)$`)
+
+// extractIssueID converts a sanitized session name back to an issue ID.
+// e.g., "issue-loomcli-fghge-1" → "loomcli-fghge.1"
+func extractIssueID(sessionName string) string {
+	m := issueSessionPattern.FindStringSubmatch(sessionName)
+	if m == nil {
+		return ""
+	}
+	return m[1] + "." + m[2]
+}
+
 // handleTerminalSpawn returns a handler that creates a tmux session for a given issue and backend.
-func handleTerminalSpawn(manager *TerminalManager) http.HandlerFunc {
+func handleTerminalSpawn(manager *TerminalManager, sessionHistoryStore *sessionhistory.Store) http.HandlerFunc {
 	if manager == nil {
 		return func(w http.ResponseWriter, r *http.Request) {
 			respondJSON(w, http.StatusServiceUnavailable, terminalSpawnResponse{
@@ -43,11 +61,11 @@ func handleTerminalSpawn(manager *TerminalManager) http.HandlerFunc {
 			})
 		}
 	}
-	return handleTerminalSpawnImpl(manager)
+	return handleTerminalSpawnImplWithHistory(manager, sessionHistoryStore)
 }
 
-// handleTerminalSpawnImpl is the internal testable implementation that accepts an interface.
-func handleTerminalSpawnImpl(manager terminalSpawner) http.HandlerFunc {
+// handleTerminalSpawnImplWithHistory is the implementation that accepts an interface and optional session history store.
+func handleTerminalSpawnImplWithHistory(manager terminalSpawner, sessionHistoryStore *sessionhistory.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 
@@ -110,6 +128,25 @@ func handleTerminalSpawnImpl(manager terminalSpawner) http.HandlerFunc {
 			return
 		}
 
+		// Record session creation in session history (only for issue-linked sessions).
+		if created && sessionHistoryStore != nil {
+			if issueID := extractIssueID(sanitizedName); issueID != "" {
+				now := time.Now().UTC()
+				record := sessionhistory.SessionRecord{
+					ID:          fmt.Sprintf("%s:%d", sanitizedName, now.Unix()),
+					SessionName: sanitizedName,
+					IssueID:     issueID,
+					Backend:     req.Backend,
+					Status:      "active",
+					Launcher:    "user",
+					StartedAt:   now,
+				}
+				if err := sessionHistoryStore.Add(r.Context(), record); err != nil {
+					log.Printf("Warning: failed to record session history for %s: %v", sanitizedName, err)
+				}
+			}
+		}
+
 		respondJSON(w, http.StatusOK, terminalSpawnResponse{
 			Success: true,
 			Data: &terminalSpawnData{
@@ -120,4 +157,9 @@ func handleTerminalSpawnImpl(manager terminalSpawner) http.HandlerFunc {
 			},
 		})
 	}
+}
+
+// handleTerminalSpawnImpl is the internal testable implementation that accepts an interface (no session history).
+func handleTerminalSpawnImpl(manager terminalSpawner) http.HandlerFunc {
+	return handleTerminalSpawnImplWithHistory(manager, nil)
 }

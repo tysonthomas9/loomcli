@@ -16,7 +16,7 @@
 667 internal/cli/doctor.go
 516 internal/cli/recover.go
 517 internal/webui/handlers_issues_write.go
-625 internal/webui/terminal.go
+635 internal/webui/terminal.go
 540 internal/webui/handlers_terminal.go
-521 internal/webui/server.go
+565 internal/webui/server.go
 506 internal/cli/daemon.go

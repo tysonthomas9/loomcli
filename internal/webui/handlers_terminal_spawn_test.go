@@ -222,7 +222,7 @@ func TestHandleTerminalSpawn_InvalidBackend(t *testing.T) {
 }
 
 func TestHandleTerminalSpawn_NilManager(t *testing.T) {
-	handler := handleTerminalSpawn(nil)
+	handler := handleTerminalSpawn(nil, nil)
 
 	body := `{"session_name":"my-session","backend":"claude"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/terminal/spawn", strings.NewReader(body))
@@ -366,6 +366,30 @@ func TestHandleTerminalSpawn_ShellBackend(t *testing.T) {
 	}
 	if !resp.Data.Created {
 		t.Error("expected created=true")
+	}
+}
+
+func TestExtractIssueID(t *testing.T) {
+	tests := []struct {
+		sessionName string
+		want        string
+	}{
+		{"issue-loomcli-fghge-1", "loomcli-fghge.1"},
+		{"talk-to-lead", ""},
+		{"issue-proj-42", "proj.42"},
+		{"issue-my-project-name-99", "my-project-name.99"},
+		{"issue-a-0", "a.0"},
+		{"not-an-issue", ""},
+		{"", ""},
+		{"issue-", ""},
+		{"issue--1", ""},
+	}
+
+	for _, tt := range tests {
+		got := extractIssueID(tt.sessionName)
+		if got != tt.want {
+			t.Errorf("extractIssueID(%q) = %q, want %q", tt.sessionName, got, tt.want)
+		}
 	}
 }
 

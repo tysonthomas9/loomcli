@@ -87,6 +87,7 @@ type TerminalManager struct {
 	maxSessions        int // maximum concurrent connections (immutable after construction)
 	scrollbackMaxLines int // max lines per scrollback buffer (default: defaultScrollbackMaxLines)
 	connCounter        atomic.Uint64
+	onSessionKilled    func(sessionName string) // set once at init, read-only after
 }
 
 // NewTerminalManager creates a manager. Returns ErrTmuxNotFound if tmux is not installed.
@@ -527,6 +528,9 @@ func (m *TerminalManager) KillSessionByName(name string) error {
 		}
 	}
 
+	// Capture scrollback to file before killing tmux session (best-effort).
+	m.captureScrollbackToFile(name)
+
 	// Kill the tmux session. Ignore errors (session may not exist).
 	cmd := exec.Command(m.tmuxPath, "kill-session", "-t", internalName)
 	_ = cmd.Run()
@@ -535,6 +539,11 @@ func (m *TerminalManager) KillSessionByName(name string) error {
 	m.mu.Lock()
 	delete(m.scrollbackBuffers, internalName)
 	m.mu.Unlock()
+
+	// Invoke the session-killed callback (for session history recording).
+	if m.onSessionKilled != nil {
+		m.onSessionKilled(name)
+	}
 
 	return nil
 }
