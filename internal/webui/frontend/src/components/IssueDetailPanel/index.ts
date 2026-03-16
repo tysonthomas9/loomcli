@@ -14,6 +14,8 @@ export { MarkdownRenderer } from "./MarkdownRenderer";
 export type { MarkdownRendererProps } from "./MarkdownRenderer";
 export { PriorityDropdown } from "./PriorityDropdown";
 export type { PriorityDropdownProps } from "./PriorityDropdown";
+export { RepoDropdown } from "./RepoDropdown";
+export type { RepoDropdownProps } from "./RepoDropdown";
 export { TypeDropdown } from "./TypeDropdown";
 export type { TypeDropdownProps } from "./TypeDropdown";
 export { DependencySection } from "./DependencySection";

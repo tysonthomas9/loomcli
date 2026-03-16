@@ -5,7 +5,7 @@
  * and markdown rendering for design field.
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 
 import {
   updateIssue,
@@ -25,6 +25,7 @@ import {
 } from "@/hooks";
 import { useAgentContext } from "@/hooks/useAgentContext";
 import { useWorkspace } from "@/hooks/useWorkspace";
+import { useWorkspaceRepos } from "@/hooks/useWorkspaceRepos";
 import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
   Issue,
@@ -55,6 +56,7 @@ import { DesignPanel } from "./DesignPanel";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { PriorityDropdown } from "./PriorityDropdown";
 import { RejectCommentForm } from "./RejectCommentForm";
+import { RepoDropdown } from "./RepoDropdown";
 import { TypeDropdown } from "./TypeDropdown";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MoveIssueDialog } from "./MoveIssueDialog";
@@ -357,6 +359,7 @@ function DefaultContent({
   const [isSavingType, setIsSavingType] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
   const [isSavingOwner, setIsSavingOwner] = useState(false);
+  const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
@@ -370,6 +373,14 @@ function DefaultContent({
   const workspaces = workspace?.workspaces ?? [];
   const currentWorkspace = workspace?.name ?? "";
   const canMove = workspaces.length > 1 && issue?.status !== "closed";
+
+  // Workspace repos for repo assignment
+  const { repos } = useWorkspaceRepos();
+
+  const currentRepo = useMemo(() => {
+    const repoLabel = issue?.labels?.find((l) => l.startsWith("repo:"));
+    return repoLabel ? repoLabel.slice(5) : null;
+  }, [issue?.labels]);
 
   // Tab persistence hook - loads/saves tab state to Redis
   const issueId = issue?.id ?? "";
@@ -761,6 +772,30 @@ function DefaultContent({
         onIssueUpdate?.(updatedIssue);
       } finally {
         setIsSavingOwner(false);
+      }
+    },
+    [issue, onIssueUpdate],
+  );
+
+  const handleRepoSave = useCallback(
+    async (newRepo: string | null) => {
+      if (!issue) return;
+
+      setIsSavingRepo(true);
+      try {
+        const currentLabels = issue.labels ?? [];
+        const repoLabelsToRemove = currentLabels.filter((l) =>
+          l.startsWith("repo:"),
+        );
+        const updatedIssue = await updateIssue(issue.id, {
+          ...(repoLabelsToRemove.length > 0
+            ? { remove_labels: repoLabelsToRemove }
+            : {}),
+          ...(newRepo ? { add_labels: [`repo:${newRepo}`] } : {}),
+        });
+        onIssueUpdate?.(updatedIssue);
+      } finally {
+        setIsSavingRepo(false);
       }
     },
     [issue, onIssueUpdate],
@@ -1237,6 +1272,14 @@ function DefaultContent({
                     agents={agents}
                     agentTasks={agentTasks}
                   />
+                  {(repos.length > 0 || currentRepo !== null) && (
+                    <RepoDropdown
+                      currentRepo={currentRepo}
+                      repos={repos.map((r) => r.name)}
+                      onSave={handleRepoSave}
+                      isSaving={isSavingRepo}
+                    />
+                  )}
                   {issue.assignee && !issue.assignee.startsWith("[H]") && (
                     <AgentStatusBadge
                       agentName={issue.assignee}
