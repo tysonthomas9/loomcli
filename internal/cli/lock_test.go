@@ -670,7 +670,7 @@ func TestAcquireLockStale_ConcurrentRetry(t *testing.T) {
 		t.Fatalf("CheckLock failed: %v", err)
 	}
 	if !running {
-		t.Error("expected running process after acquiring lock")
+		t.Fatal("expected running process after acquiring lock")
 	}
 	if info.PID != os.Getpid() {
 		t.Errorf("expected PID %d, got %d", os.Getpid(), info.PID)
