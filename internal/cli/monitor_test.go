@@ -700,7 +700,6 @@ func TestRunBdCommand(t *testing.T) {
 		name       string
 		args       []string
 		stdout     string
-		stderr     string
 		err        error
 		wantOutput string
 		wantErr    bool
@@ -729,15 +728,13 @@ func TestRunBdCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				if name != "bd" {
-					t.Errorf("expected 'bd' command, got %q", name)
-				}
-				return CommandResult{Stdout: tt.stdout, Stderr: tt.stderr, Err: tt.err}
+			mock := &MockIssueTracker{
+				RunCommandFunc: func(dir string, args ...string) (string, error) {
+					return tt.stdout, tt.err
+				},
 			}
+			setDefaultTracker(mock)
+			defer resetDefaultTracker()
 
 			output, err := runBdCommand(tt.args...)
 			if (err != nil) != tt.wantErr {

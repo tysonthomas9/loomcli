@@ -196,6 +196,12 @@ func TestDefaultDeps_NonNilFields(t *testing.T) {
 	if d.BD == nil {
 		t.Error("BD is nil")
 	}
+	if d.Tracker == nil {
+		t.Error("Tracker is nil")
+	}
+	if d.Tracker.BackendName() != "beads" {
+		t.Errorf("Tracker.BackendName() = %q, want beads", d.Tracker.BackendName())
+	}
 }
 
 func TestWithDeps_GetDeps_RoundTrip(t *testing.T) {

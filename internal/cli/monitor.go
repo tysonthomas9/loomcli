@@ -777,9 +777,5 @@ func buildUnclosedIDsFromResponses(readyJSON, inProgressJSON, reviewJSON, backlo
 }
 
 func runBdCommand(args ...string) (string, error) {
-	result := execCommand(GetBeadsDir(), "bd", args...)
-	if result.Err != nil {
-		return "", result.Err
-	}
-	return result.Stdout, nil
+	return defaultTracker().RunCommand(GetBeadsDir(), args...)
 }

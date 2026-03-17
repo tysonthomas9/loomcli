@@ -97,12 +97,13 @@ func (defaultFileSystem) Remove(path string) error {
 // DefaultDeps returns a Deps populated with real (production) implementations.
 func DefaultDeps() *Deps {
 	return &Deps{
-		Git:    defaultGitRunner{},
-		Exec:   defaultExecRunner{},
-		FS:     defaultFileSystem{},
-		Logger: slog.Default(),
-		Clock:  time.Now,
-		BD:     defaultBDRunner{},
+		Git:     defaultGitRunner{},
+		Exec:    defaultExecRunner{},
+		FS:      defaultFileSystem{},
+		Logger:  slog.Default(),
+		Clock:   time.Now,
+		BD:      defaultBDRunner{},
+		Tracker: newBdBackend(defaultBDRunner{}, GetBeadsDir()),
 	}
 }
 

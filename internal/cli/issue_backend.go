@@ -8,7 +8,10 @@
 
 package cli
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 // IssueBackend is the backward-compatible interface for Phase 1 migration.
 // It wraps raw bd-style command execution so existing callers don't change.
@@ -65,4 +68,42 @@ type UpdateOpts struct {
 	Assignee *string // new assignee (nil = don't change, pointer to "" = clear)
 	Design   string  // new design text (empty = don't change)
 	Claim    bool    // if true, atomically claim the issue
+}
+
+// --- Package-level tracker state ---
+
+var (
+	trackerMu   sync.RWMutex
+	trackerInst IssueTracker
+)
+
+// defaultTracker returns the package-level IssueTracker, lazily initializing
+// from defaultDeps.Tracker if not explicitly set.
+func defaultTracker() IssueTracker {
+	trackerMu.RLock()
+	t := trackerInst
+	trackerMu.RUnlock()
+	if t != nil {
+		return t
+	}
+	trackerMu.Lock()
+	defer trackerMu.Unlock()
+	if trackerInst == nil {
+		trackerInst = defaultDeps.Tracker
+	}
+	return trackerInst
+}
+
+// setDefaultTracker overrides the package-level tracker (for testing).
+func setDefaultTracker(t IssueTracker) {
+	trackerMu.Lock()
+	defer trackerMu.Unlock()
+	trackerInst = t
+}
+
+// resetDefaultTracker clears the override so defaultTracker() re-initializes.
+func resetDefaultTracker() {
+	trackerMu.Lock()
+	defer trackerMu.Unlock()
+	trackerInst = nil
 }
