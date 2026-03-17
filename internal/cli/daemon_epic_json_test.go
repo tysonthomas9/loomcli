@@ -1,24 +1,22 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 )
 
-// stubExecCommand replaces execCommand for the duration of the test.
-func stubExecCommand(t *testing.T, fn commandExecutor) {
-	t.Helper()
-	orig := execCommand
-	execCommand = fn
-	t.Cleanup(func() { execCommand = orig })
-}
+func TestDefaultQueryOpenEpics_ReturnsTrackerResults(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-func TestDefaultQueryOpenEpics_ParsesValidJSON(t *testing.T) {
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		return CommandResult{
-			Stdout: `[{"id":"epic-1","title":"Auth epic","priority":0,"issue_type":"epic","status":"open"},{"id":"epic-2","title":"Billing epic","priority":2,"issue_type":"epic","status":"open"}]`,
-		}
-	})
+	mock := NewMockTracker()
+	mock.ListResult = []BdIssue{
+		{ID: "epic-1", Priority: 0},
+		{ID: "epic-2", Priority: 2},
+	}
+	setDefaultTracker(mock)
 
 	epics, err := defaultQueryOpenEpics()
 	if err != nil {
@@ -27,24 +25,21 @@ func TestDefaultQueryOpenEpics_ParsesValidJSON(t *testing.T) {
 	if len(epics) != 2 {
 		t.Fatalf("expected 2 epics, got %d", len(epics))
 	}
-	if epics[0].ID != "epic-1" {
-		t.Errorf("epics[0].ID = %q, want epic-1", epics[0].ID)
+	if epics[0].ID != "epic-1" || epics[0].Priority != 0 {
+		t.Errorf("epics[0] = %+v, want {ID:epic-1, Priority:0}", epics[0])
 	}
-	if epics[0].Priority != 0 {
-		t.Errorf("epics[0].Priority = %d, want 0", epics[0].Priority)
-	}
-	if epics[1].ID != "epic-2" {
-		t.Errorf("epics[1].ID = %q, want epic-2", epics[1].ID)
-	}
-	if epics[1].Priority != 2 {
-		t.Errorf("epics[1].Priority = %d, want 2", epics[1].Priority)
+	if epics[1].ID != "epic-2" || epics[1].Priority != 2 {
+		t.Errorf("epics[1] = %+v, want {ID:epic-2, Priority:2}", epics[1])
 	}
 }
 
-func TestDefaultQueryOpenEpics_EmptyArray(t *testing.T) {
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: `[]`}
-	})
+func TestDefaultQueryOpenEpics_EmptyResults(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	mock.ListResult = []BdIssue{}
+	setDefaultTracker(mock)
 
 	epics, err := defaultQueryOpenEpics()
 	if err != nil {
@@ -55,68 +50,58 @@ func TestDefaultQueryOpenEpics_EmptyArray(t *testing.T) {
 	}
 }
 
-func TestDefaultQueryOpenEpics_InvalidJSON(t *testing.T) {
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: "not valid json"}
-	})
+func TestDefaultQueryOpenEpics_TrackerError(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	mock.ListErr = fmt.Errorf("connection refused")
+	setDefaultTracker(mock)
 
 	epics, err := defaultQueryOpenEpics()
 	if err == nil {
-		t.Fatal("expected error for invalid JSON")
+		t.Fatal("expected error from tracker")
 	}
 	if epics != nil {
 		t.Errorf("expected nil slice, got %v", epics)
 	}
-	assertContains(t, err.Error(), "failed to parse")
+	if got := err.Error(); !strings.HasPrefix(got, "failed to list open epics:") {
+		t.Errorf("error = %q, want prefix 'failed to list open epics:'", got)
+	}
 }
 
-func TestDefaultQueryOpenEpics_ExecCommandFails(t *testing.T) {
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Err: fmt.Errorf("bd not found")}
-	})
+func TestDefaultQueryOpenEpics_PassesCorrectOpts(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	epics, err := defaultQueryOpenEpics()
-	if err == nil {
-		t.Fatal("expected error when exec fails")
+	mock := NewMockTracker()
+	mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
+		if opts.Type != "epic" {
+			t.Errorf("Type = %q, want epic", opts.Type)
+		}
+		if opts.Status != "open" {
+			t.Errorf("Status = %q, want open", opts.Status)
+		}
+		if opts.Limit != 0 {
+			t.Errorf("Limit = %d, want 0", opts.Limit)
+		}
+		return nil, nil
 	}
-	if epics != nil {
-		t.Errorf("expected nil slice, got %v", epics)
-	}
-	assertContains(t, err.Error(), "bd list failed")
-}
-
-func TestDefaultQueryOpenEpics_CommandArgs(t *testing.T) {
-	var capturedName string
-	var capturedArgs []string
-
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		capturedName = name
-		capturedArgs = args
-		return CommandResult{Stdout: `[]`}
-	})
+	setDefaultTracker(mock)
 
 	defaultQueryOpenEpics()
-
-	if capturedName != "bd" {
-		t.Errorf("command name = %q, want bd", capturedName)
-	}
-	expectedArgs := []string{"list", "--type=epic", "--status=open", "--json", "--limit", "0"}
-	if len(capturedArgs) != len(expectedArgs) {
-		t.Fatalf("args length = %d, want %d: %v", len(capturedArgs), len(expectedArgs), capturedArgs)
-	}
-	for i, arg := range expectedArgs {
-		if capturedArgs[i] != arg {
-			t.Errorf("args[%d] = %q, want %q", i, capturedArgs[i], arg)
-		}
+	if mock.CallCount("List") != 1 {
+		t.Errorf("expected 1 List call, got %d", mock.CallCount("List"))
 	}
 }
 
 func TestDefaultEpicHasReadyTasks_HasTasks(t *testing.T) {
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		return CommandResult{
-			Stdout: `[{"id":"task-1","title":"Implement auth","priority":1,"issue_type":"task","status":"open"}]`,
-		}
-	})
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	mock.ReadyResult = []BdIssue{{ID: "task-1"}}
+	setDefaultTracker(mock)
 
 	has, err := defaultEpicHasReadyTasks("epic-xyz")
 	if err != nil {
@@ -128,9 +113,12 @@ func TestDefaultEpicHasReadyTasks_HasTasks(t *testing.T) {
 }
 
 func TestDefaultEpicHasReadyTasks_NoTasks(t *testing.T) {
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: `[]`}
-	})
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	mock.ReadyResult = []BdIssue{}
+	setDefaultTracker(mock)
 
 	has, err := defaultEpicHasReadyTasks("epic-xyz")
 	if err != nil {
@@ -141,91 +129,44 @@ func TestDefaultEpicHasReadyTasks_NoTasks(t *testing.T) {
 	}
 }
 
-func TestDefaultEpicHasReadyTasks_InvalidJSON(t *testing.T) {
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: "not json"}
-	})
+func TestDefaultEpicHasReadyTasks_TrackerError(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	mock.ReadyErr = fmt.Errorf("timeout")
+	setDefaultTracker(mock)
 
 	has, err := defaultEpicHasReadyTasks("epic-xyz")
 	if err == nil {
-		t.Fatal("expected error for invalid JSON")
+		t.Fatal("expected error from tracker")
 	}
 	if has {
 		t.Error("expected false on error")
 	}
+	if got := err.Error(); !strings.HasPrefix(got, "failed to check ready tasks for epic") {
+		t.Errorf("error = %q, want prefix 'failed to check ready tasks for epic'", got)
+	}
 }
 
-func TestDefaultEpicHasReadyTasks_ExecCommandFails(t *testing.T) {
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Err: fmt.Errorf("bd not found")}
-	})
+func TestDefaultEpicHasReadyTasks_PassesCorrectOpts(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	has, err := defaultEpicHasReadyTasks("epic-xyz")
-	if err == nil {
-		t.Fatal("expected error when exec fails")
+	mock := NewMockTracker()
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		if opts.ParentID != "epic-xyz" {
+			t.Errorf("ParentID = %q, want epic-xyz", opts.ParentID)
+		}
+		if opts.Limit != 1 {
+			t.Errorf("Limit = %d, want 1", opts.Limit)
+		}
+		return nil, nil
 	}
-	if has {
-		t.Error("expected false on error")
-	}
-	assertContains(t, err.Error(), "bd ready failed")
-}
-
-func TestDefaultEpicHasReadyTasks_CommandArgs(t *testing.T) {
-	var capturedName string
-	var capturedArgs []string
-
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		capturedName = name
-		capturedArgs = args
-		return CommandResult{Stdout: `[]`}
-	})
+	setDefaultTracker(mock)
 
 	defaultEpicHasReadyTasks("epic-xyz")
-
-	if capturedName != "bd" {
-		t.Errorf("command name = %q, want bd", capturedName)
+	if mock.CallCount("Ready") != 1 {
+		t.Errorf("expected 1 Ready call, got %d", mock.CallCount("Ready"))
 	}
-	expectedArgs := []string{"ready", "--parent", "epic-xyz", "--json", "--limit", "1"}
-	if len(capturedArgs) != len(expectedArgs) {
-		t.Fatalf("args length = %d, want %d: %v", len(capturedArgs), len(expectedArgs), capturedArgs)
-	}
-	for i, arg := range expectedArgs {
-		if capturedArgs[i] != arg {
-			t.Errorf("args[%d] = %q, want %q", i, capturedArgs[i], arg)
-		}
-	}
-}
-
-func TestDefaultQueryOpenEpics_UnknownFieldsForwardCompat(t *testing.T) {
-	stubExecCommand(t, func(dir, name string, args ...string) CommandResult {
-		return CommandResult{
-			Stdout: `[{"id":"epic-1","title":"Auth","priority":1,"issue_type":"epic","status":"open","some_future_field":"value","nested":{"a":1}}]`,
-		}
-	})
-
-	epics, err := defaultQueryOpenEpics()
-	if err != nil {
-		t.Fatalf("unexpected error with unknown fields: %v", err)
-	}
-	if len(epics) != 1 {
-		t.Fatalf("expected 1 epic, got %d", len(epics))
-	}
-	if epics[0].ID != "epic-1" {
-		t.Errorf("ID = %q, want epic-1", epics[0].ID)
-	}
-}
-
-// assertContains is a test helper that checks if s contains substr.
-func assertContains(t *testing.T, s, substr string) {
-	t.Helper()
-	if len(s) == 0 || len(substr) == 0 {
-		t.Errorf("assertContains: empty string or substr")
-		return
-	}
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return
-		}
-	}
-	t.Errorf("expected %q to contain %q", s, substr)
 }
