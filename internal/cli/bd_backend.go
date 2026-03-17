@@ -41,6 +41,12 @@ func (b *bdBackend) Ready(_ context.Context, opts ReadyOpts) ([]BdIssue, error) 
 	if opts.ParentID != "" {
 		args = append(args, "--parent", opts.ParentID)
 	}
+	for _, label := range opts.Labels {
+		args = append(args, "--label", label)
+	}
+	if len(opts.SourceRepos) > 0 {
+		args = append(args, "--source-repos="+strings.Join(opts.SourceRepos, ","))
+	}
 	return b.queryIssues("Ready", args)
 }
 

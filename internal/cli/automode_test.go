@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -141,13 +142,21 @@ func TestHasAvailablePlanningTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			var issues []BdIssue
+			if tt.bdOutput != "" {
+				json.Unmarshal([]byte(tt.bdOutput), &issues)
 			}
+			if tt.bdErr != nil {
+				mock.ReadyErr = tt.bdErr
+				mock.ListErr = tt.bdErr
+			} else {
+				mock.ReadyResult = issues
+				mock.ListResult = issues
+			}
+			setDefaultTracker(mock)
 
 			got, err := HasAvailablePlanningTasks("", "")
 			if (err != nil) != tt.wantErr {
@@ -257,13 +266,21 @@ func TestHasAvailableImplementationTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			var issues []BdIssue
+			if tt.bdOutput != "" {
+				json.Unmarshal([]byte(tt.bdOutput), &issues)
 			}
+			if tt.bdErr != nil {
+				mock.ReadyErr = tt.bdErr
+				mock.ListErr = tt.bdErr
+			} else {
+				mock.ReadyResult = issues
+				mock.ListResult = issues
+			}
+			setDefaultTracker(mock)
 
 			got, err := HasAvailableImplementationTasks("", "")
 			if (err != nil) != tt.wantErr {
@@ -2809,12 +2826,21 @@ func TestGetAvailablePlanningTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			var issues []BdIssue
+			if tt.bdOutput != "" {
+				json.Unmarshal([]byte(tt.bdOutput), &issues)
 			}
+			if tt.bdErr != nil {
+				mock.ReadyErr = tt.bdErr
+				mock.ListErr = tt.bdErr
+			} else {
+				mock.ReadyResult = issues
+				mock.ListResult = issues
+			}
+			setDefaultTracker(mock)
 
 			got, err := GetAvailablePlanningTasks("", "")
 			if (err != nil) != tt.wantErr {
@@ -2940,12 +2966,21 @@ func TestGetAvailableImplementationTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			var issues []BdIssue
+			if tt.bdOutput != "" {
+				json.Unmarshal([]byte(tt.bdOutput), &issues)
 			}
+			if tt.bdErr != nil {
+				mock.ReadyErr = tt.bdErr
+				mock.ListErr = tt.bdErr
+			} else {
+				mock.ReadyResult = issues
+				mock.ListResult = issues
+			}
+			setDefaultTracker(mock)
 
 			got, err := GetAvailableImplementationTasks("", "")
 			if (err != nil) != tt.wantErr {
@@ -3072,12 +3107,21 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			var issues []BdIssue
+			if tt.bdOutput != "" {
+				json.Unmarshal([]byte(tt.bdOutput), &issues)
 			}
+			if tt.bdErr != nil {
+				mock.ReadyErr = tt.bdErr
+				mock.ListErr = tt.bdErr
+			} else {
+				mock.ReadyResult = issues
+				mock.ListResult = issues
+			}
+			setDefaultTracker(mock)
 
 			got, err := GetAnyAvailableTasks("", "")
 			if (err != nil) != tt.wantErr {
@@ -3106,17 +3150,16 @@ func TestGetAnyAvailableTasks(t *testing.T) {
 }
 
 func TestHasAvailableDelegatesToGet(t *testing.T) {
-	bdOutput := mustJSON([]BdIssue{
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	issues := []BdIssue{
 		{ID: "T-1", Title: "No design", Status: "open", Design: ""},
 		{ID: "T-2", Title: "Has design", Status: "open", Design: "Plan"},
-	})
-
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: bdOutput}
 	}
+	mock := NewMockTracker()
+	mock.ReadyResult = issues
+	mock.ListResult = issues
+	setDefaultTracker(mock)
 
 	// HasAvailablePlanningTasks should return true (T-1 has no design)
 	hasPlan, err := HasAvailablePlanningTasks("", "")
@@ -3578,233 +3621,189 @@ func TestStartTmuxSession_ClaudeBackend_HasTermDumb(t *testing.T) {
 }
 
 // TestGetAvailablePlanningTasks_WithParentID verifies that when a non-empty parentID
-// is provided, the --parent flag is included in the bd ready command.
+// is provided, it is passed through to the tracker's ReadyOpts.
 func TestGetAvailablePlanningTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "T-123",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "T-123"},
+			name:         "with parent ID passes to tracker",
+			parentID:     "T-123",
+			wantParentID: "T-123",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty to tracker",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				// Capture only the first call (bd ready) args for parentID verification
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
-					}),
-				}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			issues := []BdIssue{{ID: "T-1", Title: "Task", Status: "open", Design: ""}}
+			mock.ReadyResult = issues
+			mock.ListResult = issues
+			var capturedOpts ReadyOpts
+			mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+				capturedOpts = opts
+				return issues, nil
 			}
+			setDefaultTracker(mock)
 
 			_, err := GetAvailablePlanningTasks(tt.parentID, "")
 			if err != nil {
 				t.Fatalf("GetAvailablePlanningTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("GetAvailablePlanningTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
+			if capturedOpts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", capturedOpts.ParentID, tt.wantParentID)
 			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("GetAvailablePlanningTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			if capturedOpts.Limit != 100 {
+				t.Errorf("ReadyOpts.Limit = %d, want 100", capturedOpts.Limit)
 			}
 		})
 	}
 }
 
 // TestGetAvailableImplementationTasks_WithParentID verifies that when a non-empty parentID
-// is provided, the --parent flag is included in the bd ready command.
+// is provided, it is passed through to the tracker's ReadyOpts.
 func TestGetAvailableImplementationTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-456",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-456"},
+			name:         "with parent ID passes to tracker",
+			parentID:     "EPIC-456",
+			wantParentID: "EPIC-456",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty to tracker",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				// Capture only the first call (bd ready) args for parentID verification
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
-					}),
-				}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			issues := []BdIssue{{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}}
+			mock.ReadyResult = issues
+			mock.ListResult = issues
+			var capturedOpts ReadyOpts
+			mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+				capturedOpts = opts
+				return issues, nil
 			}
+			setDefaultTracker(mock)
 
 			_, err := GetAvailableImplementationTasks(tt.parentID, "")
 			if err != nil {
 				t.Fatalf("GetAvailableImplementationTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("GetAvailableImplementationTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
+			if capturedOpts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", capturedOpts.ParentID, tt.wantParentID)
 			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("GetAvailableImplementationTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			if capturedOpts.Limit != 100 {
+				t.Errorf("ReadyOpts.Limit = %d, want 100", capturedOpts.Limit)
 			}
 		})
 	}
 }
 
 // TestGetAnyAvailableTasks_WithParentID verifies that when a non-empty parentID
-// is provided, the --parent flag is included in the bd ready command.
+// is provided, it is passed through to the tracker's ReadyOpts.
 func TestGetAnyAvailableTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-789",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-789"},
+			name:         "with parent ID passes to tracker",
+			parentID:     "EPIC-789",
+			wantParentID: "EPIC-789",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty to tracker",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				// Capture only the first call (bd ready) args for parentID verification
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},
-					}),
-				}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			issues := []BdIssue{{ID: "T-3", Title: "Any task", Status: "open", Design: ""}}
+			mock.ReadyResult = issues
+			mock.ListResult = issues
+			var capturedOpts ReadyOpts
+			mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+				capturedOpts = opts
+				return issues, nil
 			}
+			setDefaultTracker(mock)
 
 			_, err := GetAnyAvailableTasks(tt.parentID, "")
 			if err != nil {
 				t.Fatalf("GetAnyAvailableTasks(%q) unexpected error: %v", tt.parentID, err)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("GetAnyAvailableTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
+			if capturedOpts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", capturedOpts.ParentID, tt.wantParentID)
 			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("GetAnyAvailableTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			if capturedOpts.Limit != 100 {
+				t.Errorf("ReadyOpts.Limit = %d, want 100", capturedOpts.Limit)
 			}
 		})
 	}
 }
 
 // TestHasAvailablePlanningTasks_WithParentID verifies that HasAvailablePlanningTasks
-// properly passes the parentID through to GetAvailablePlanningTasks.
+// properly passes the parentID through to the tracker's ReadyOpts.
 func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-100",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-100"},
+			name:         "with parent ID passes to tracker",
+			parentID:     "EPIC-100",
+			wantParentID: "EPIC-100",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty to tracker",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-1", Title: "Task", Status: "open", Design: ""},
-					}),
-				}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			issues := []BdIssue{{ID: "T-1", Title: "Task", Status: "open", Design: ""}}
+			mock.ReadyResult = issues
+			mock.ListResult = issues
+			var capturedOpts ReadyOpts
+			mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+				capturedOpts = opts
+				return issues, nil
 			}
+			setDefaultTracker(mock)
 
 			got, err := HasAvailablePlanningTasks(tt.parentID, "")
 			if err != nil {
@@ -3815,62 +3814,47 @@ func TestHasAvailablePlanningTasks_WithParentID(t *testing.T) {
 				t.Errorf("HasAvailablePlanningTasks(%q) = false, want true", tt.parentID)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("HasAvailablePlanningTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
-			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("HasAvailablePlanningTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			if capturedOpts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", capturedOpts.ParentID, tt.wantParentID)
 			}
 		})
 	}
 }
 
 // TestHasAvailableImplementationTasks_WithParentID verifies that HasAvailableImplementationTasks
-// properly passes the parentID through to GetAvailableImplementationTasks.
+// properly passes the parentID through to the tracker's ReadyOpts.
 func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-200",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-200"},
+			name:         "with parent ID passes to tracker",
+			parentID:     "EPIC-200",
+			wantParentID: "EPIC-200",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty to tracker",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"},
-					}),
-				}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			issues := []BdIssue{{ID: "T-2", Title: "Task with design", Status: "open", Design: "Implementation plan"}}
+			mock.ReadyResult = issues
+			mock.ListResult = issues
+			var capturedOpts ReadyOpts
+			mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+				capturedOpts = opts
+				return issues, nil
 			}
+			setDefaultTracker(mock)
 
 			got, err := HasAvailableImplementationTasks(tt.parentID, "")
 			if err != nil {
@@ -3881,62 +3865,47 @@ func TestHasAvailableImplementationTasks_WithParentID(t *testing.T) {
 				t.Errorf("HasAvailableImplementationTasks(%q) = false, want true", tt.parentID)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("HasAvailableImplementationTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
-			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("HasAvailableImplementationTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			if capturedOpts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", capturedOpts.ParentID, tt.wantParentID)
 			}
 		})
 	}
 }
 
 // TestHasAnyAvailableTasks_WithParentID verifies that HasAnyAvailableTasks
-// properly passes the parentID through to GetAnyAvailableTasks.
+// properly passes the parentID through to the tracker's ReadyOpts.
 func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
 	tests := []struct {
-		name     string
-		parentID string
-		wantArgs []string
+		name         string
+		parentID     string
+		wantParentID string
 	}{
 		{
-			name:     "with parent ID includes --parent flag",
-			parentID: "EPIC-300",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100", "--parent", "EPIC-300"},
+			name:         "with parent ID passes to tracker",
+			parentID:     "EPIC-300",
+			wantParentID: "EPIC-300",
 		},
 		{
-			name:     "empty parent ID excludes --parent flag",
-			parentID: "",
-			wantArgs: []string{"bd", "ready", "--json", "--limit", "100"},
+			name:         "empty parent ID passes empty to tracker",
+			parentID:     "",
+			wantParentID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save and restore execCommand
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			var capturedArgs []string
-			callCount := 0
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				callCount++
-				if callCount == 1 {
-					capturedArgs = append([]string{name}, args...)
-				}
-				return CommandResult{
-					Stdout: mustJSON([]BdIssue{
-						{ID: "T-3", Title: "Any task", Status: "open", Design: ""},
-					}),
-				}
+			resetDefaultTracker()
+			t.Cleanup(resetDefaultTracker)
+			mock := NewMockTracker()
+			issues := []BdIssue{{ID: "T-3", Title: "Any task", Status: "open", Design: ""}}
+			mock.ReadyResult = issues
+			mock.ListResult = issues
+			var capturedOpts ReadyOpts
+			mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+				capturedOpts = opts
+				return issues, nil
 			}
+			setDefaultTracker(mock)
 
 			got, err := HasAnyAvailableTasks(tt.parentID, "")
 			if err != nil {
@@ -3947,18 +3916,8 @@ func TestHasAnyAvailableTasks_WithParentID(t *testing.T) {
 				t.Errorf("HasAnyAvailableTasks(%q) = false, want true", tt.parentID)
 			}
 
-			// Verify the args match expected
-			if len(capturedArgs) != len(tt.wantArgs) {
-				t.Errorf("HasAnyAvailableTasks(%q) args length = %d, want %d\nGot: %v\nWant: %v",
-					tt.parentID, len(capturedArgs), len(tt.wantArgs), capturedArgs, tt.wantArgs)
-				return
-			}
-
-			for i, arg := range tt.wantArgs {
-				if capturedArgs[i] != arg {
-					t.Errorf("HasAnyAvailableTasks(%q) arg[%d] = %q, want %q\nGot: %v\nWant: %v",
-						tt.parentID, i, capturedArgs[i], arg, capturedArgs, tt.wantArgs)
-				}
+			if capturedOpts.ParentID != tt.wantParentID {
+				t.Errorf("ReadyOpts.ParentID = %q, want %q", capturedOpts.ParentID, tt.wantParentID)
 			}
 		})
 	}
@@ -4037,33 +3996,15 @@ func TestStartTmuxSession_WithParentID(t *testing.T) {
 }
 
 // ============================================================================
-// fetchReadyIssues Tests
+// fetchReadyIssues Tests (via MockIssueTracker)
 // ============================================================================
 
-func TestFetchReadyIssues_InvalidJSON(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: "not valid json"}
-	}
-
-	_, err := fetchReadyIssues("", "")
-	if err == nil {
-		t.Fatal("fetchReadyIssues() expected error for invalid JSON, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to parse task list") {
-		t.Errorf("fetchReadyIssues() error = %v, want to contain 'failed to parse task list'", err)
-	}
-}
-
-func TestFetchReadyIssues_EmptyArray(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Stdout: "[]"}
-	}
+func TestFetchReadyIssues_EmptyResult(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	mock.ReadyResult = []BdIssue{}
+	setDefaultTracker(mock)
 
 	issues, err := fetchReadyIssues("", "")
 	if err != nil {
@@ -4074,19 +4015,16 @@ func TestFetchReadyIssues_EmptyArray(t *testing.T) {
 	}
 }
 
-func TestFetchReadyIssues_ValidIssues(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{
-			Stdout: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "First", Status: "open"},
-				{ID: "T-2", Title: "Second", Status: "open", Design: "plan"},
-				{ID: "T-3", Title: "Third", Status: "open", IssueType: "epic"},
-			}),
-		}
+func TestFetchReadyIssues_ReturnsTrackerResult(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	mock.ReadyResult = []BdIssue{
+		{ID: "T-1", Title: "First", Status: "open"},
+		{ID: "T-2", Title: "Second", Status: "open", Design: "plan"},
+		{ID: "T-3", Title: "Third", Status: "open", IssueType: "epic"},
 	}
+	setDefaultTracker(mock)
 
 	issues, err := fetchReadyIssues("", "")
 	if err != nil {
@@ -4100,181 +4038,250 @@ func TestFetchReadyIssues_ValidIssues(t *testing.T) {
 	}
 }
 
-func TestFetchReadyIssues_CommandError(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		return CommandResult{Err: fmt.Errorf("command failed")}
-	}
+func TestFetchReadyIssues_TrackerError(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	mock.ReadyErr = fmt.Errorf("command failed")
+	setDefaultTracker(mock)
 
 	_, err := fetchReadyIssues("", "")
 	if err == nil {
-		t.Fatal("fetchReadyIssues() expected error for command failure, got nil")
+		t.Fatal("fetchReadyIssues() expected error, got nil")
 	}
 	if !strings.Contains(err.Error(), "failed to check ready tasks") {
 		t.Errorf("fetchReadyIssues() error = %v, want to contain 'failed to check ready tasks'", err)
 	}
 }
 
-func TestFetchReadyIssues_WithParentID(t *testing.T) {
-	oldExec := execCommand
-	t.Cleanup(func() { execCommand = oldExec })
-
-	var capturedArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		capturedArgs = append([]string{name}, args...)
-		return CommandResult{Stdout: "[]"}
+func TestFetchReadyIssues_PassesParentID(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
+	setDefaultTracker(mock)
 
 	_, err := fetchReadyIssues("epic-123", "")
 	if err != nil {
 		t.Fatalf("fetchReadyIssues() unexpected error: %v", err)
 	}
-
-	found := false
-	for i, arg := range capturedArgs {
-		if arg == "--parent" && i+1 < len(capturedArgs) && capturedArgs[i+1] == "epic-123" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("fetchReadyIssues() did not pass --parent epic-123, args: %v", capturedArgs)
+	if capturedOpts.ParentID != "epic-123" {
+		t.Errorf("ReadyOpts.ParentID = %q, want epic-123", capturedOpts.ParentID)
 	}
 }
 
 // ============================================================================
-// fetchReadyIssues - Repo Label Filtering Tests
+// fetchReadyIssues - Repo Label Filtering Tests (via MockIssueTracker)
 // ============================================================================
 
-func TestFetchReadyIssues_WithRepoLabel(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: "[]"},
+func TestFetchReadyIssues_PassesRepoLabel(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
-	defaultDeps = &Deps{BD: mock}
+	setDefaultTracker(mock)
 
 	_, err := fetchReadyIssues("", "frontend")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(mock.Calls) != 1 {
-		t.Fatalf("expected 1 BD call, got %d", len(mock.Calls))
-	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--label", "repo:frontend"}) {
-		t.Errorf("BD args = %v, want [ready --json --limit 100 --label repo:frontend]", args)
+	if len(capturedOpts.Labels) != 1 || capturedOpts.Labels[0] != "repo:frontend" {
+		t.Errorf("ReadyOpts.Labels = %v, want [repo:frontend]", capturedOpts.Labels)
 	}
 }
 
-func TestFetchReadyIssues_WithoutRepoLabel(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: "[]"},
+func TestFetchReadyIssues_NoRepoLabel(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
-	defaultDeps = &Deps{BD: mock}
+	setDefaultTracker(mock)
 
 	_, err := fetchReadyIssues("", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100"}) {
-		t.Errorf("BD args = %v (should not have --label)", args)
+	if len(capturedOpts.Labels) != 0 {
+		t.Errorf("ReadyOpts.Labels = %v, want nil/empty", capturedOpts.Labels)
 	}
 }
 
-func TestFetchReadyIssues_WithParentAndRepoLabel(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: "[]"},
+func TestFetchReadyIssues_PassesBothFilters(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
-	defaultDeps = &Deps{BD: mock}
+	setDefaultTracker(mock)
 
 	_, err := fetchReadyIssues("E-1", "backend")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(mock.Calls) != 1 {
-		t.Fatalf("expected 1 BD call, got %d", len(mock.Calls))
+	if capturedOpts.ParentID != "E-1" {
+		t.Errorf("ReadyOpts.ParentID = %q, want E-1", capturedOpts.ParentID)
 	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--parent", "E-1", "--label", "repo:backend"}) {
-		t.Errorf("BD args = %v, want [ready --json --limit 100 --parent E-1 --label repo:backend]", args)
+	if len(capturedOpts.Labels) != 1 || capturedOpts.Labels[0] != "repo:backend" {
+		t.Errorf("ReadyOpts.Labels = %v, want [repo:backend]", capturedOpts.Labels)
 	}
 }
 
-// fetchReadyIssues - Source Repos Filtering Tests
+// ============================================================================
+// fetchReadyIssues - Source Repos Filtering Tests (via MockIssueTracker)
 // ============================================================================
 
-func TestFetchReadyIssues_WithSourceRepos(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: "[]"},
+func TestFetchReadyIssues_PassesSourceRepos(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
-	defaultDeps = &Deps{BD: mock}
+	setDefaultTracker(mock)
 	t.Setenv("LOOM_SOURCE_REPOS", "repo-a,repo-b")
 
 	_, err := fetchReadyIssues("", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(mock.Calls) != 1 {
-		t.Fatalf("expected 1 BD call, got %d", len(mock.Calls))
-	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--source-repos=repo-a,repo-b"}) {
-		t.Errorf("BD args = %v, want [ready --json --limit 100 --source-repos=repo-a,repo-b]", args)
+	if len(capturedOpts.SourceRepos) != 2 || capturedOpts.SourceRepos[0] != "repo-a" || capturedOpts.SourceRepos[1] != "repo-b" {
+		t.Errorf("ReadyOpts.SourceRepos = %v, want [repo-a repo-b]", capturedOpts.SourceRepos)
 	}
 }
 
-func TestFetchReadyIssues_WithSourceReposAndParent(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: "[]"},
+func TestFetchReadyIssues_SourceReposWithParent(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
-	defaultDeps = &Deps{BD: mock}
+	setDefaultTracker(mock)
 	t.Setenv("LOOM_SOURCE_REPOS", "repo-a")
 
 	_, err := fetchReadyIssues("epic-123", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--parent", "epic-123", "--source-repos=repo-a"}) {
-		t.Errorf("BD args = %v, want [ready --json --limit 100 --parent epic-123 --source-repos=repo-a]", args)
+	if capturedOpts.ParentID != "epic-123" {
+		t.Errorf("ReadyOpts.ParentID = %q, want epic-123", capturedOpts.ParentID)
+	}
+	if len(capturedOpts.SourceRepos) != 1 || capturedOpts.SourceRepos[0] != "repo-a" {
+		t.Errorf("ReadyOpts.SourceRepos = %v, want [repo-a]", capturedOpts.SourceRepos)
 	}
 }
 
-func TestFetchReadyIssues_WithoutSourceRepos(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: "[]"},
+func TestFetchReadyIssues_NoSourceRepos(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
-	defaultDeps = &Deps{BD: mock}
-	// Explicitly unset LOOM_SOURCE_REPOS
+	setDefaultTracker(mock)
 	t.Setenv("LOOM_SOURCE_REPOS", "")
 
 	_, err := fetchReadyIssues("", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100"}) {
-		t.Errorf("BD args = %v (should not have --source-repos)", args)
+	if len(capturedOpts.SourceRepos) != 0 {
+		t.Errorf("ReadyOpts.SourceRepos = %v, want nil/empty", capturedOpts.SourceRepos)
+	}
+}
+
+// ============================================================================
+// fetchUnclosedIssueIDs Tests (via MockIssueTracker)
+// ============================================================================
+
+func TestFetchUnclosedIssueIDs_NoStatusFilter(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	var capturedOpts ListOpts
+	mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
+	}
+	setDefaultTracker(mock)
+
+	_, err := fetchUnclosedIssueIDs()
+	if err != nil {
+		t.Fatalf("fetchUnclosedIssueIDs() unexpected error: %v", err)
+	}
+	// CRITICAL: verify no implicit status filter
+	if capturedOpts.Status != "" {
+		t.Errorf("ListOpts.Status = %q, want empty (all statuses)", capturedOpts.Status)
+	}
+	if capturedOpts.Limit != 500 {
+		t.Errorf("ListOpts.Limit = %d, want 500", capturedOpts.Limit)
+	}
+}
+
+func TestFetchUnclosedIssueIDs_IncludesAllNonClosed(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	mock.ListResult = []BdIssue{
+		{ID: "open-1", Status: "open"},
+		{ID: "ip-1", Status: "in_progress"},
+		{ID: "review-1", Status: "review"},
+		{ID: "closed-1", Status: "closed"},
+	}
+	setDefaultTracker(mock)
+
+	got, err := fetchUnclosedIssueIDs()
+	if err != nil {
+		t.Fatalf("fetchUnclosedIssueIDs() unexpected error: %v", err)
+	}
+	if !got["open-1"] {
+		t.Error("expected open-1 in unclosed set")
+	}
+	if !got["ip-1"] {
+		t.Error("expected ip-1 in unclosed set")
+	}
+	if !got["review-1"] {
+		t.Error("expected review-1 in unclosed set")
+	}
+	if got["closed-1"] {
+		t.Error("closed-1 should not be in unclosed set")
+	}
+}
+
+func TestFetchUnclosedIssueIDs_TrackerError(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+	mock := NewMockTracker()
+	mock.ListErr = fmt.Errorf("list failed")
+	setDefaultTracker(mock)
+
+	_, err := fetchUnclosedIssueIDs()
+	if err == nil {
+		t.Fatal("fetchUnclosedIssueIDs() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to list issues") {
+		t.Errorf("fetchUnclosedIssueIDs() error = %v, want to contain 'failed to list issues'", err)
 	}
 }
 

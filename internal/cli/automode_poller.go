@@ -1,9 +1,10 @@
 package cli
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -47,29 +48,21 @@ func (p *adaptivePoller) hadNoActivity() {
 	p.currentInterval = newInterval
 }
 
-// fetchReadyIssues runs "bd ready --json" and returns the parsed issues.
+// fetchReadyIssues returns parsed ready issues via the typed IssueTracker.
 // When parentID is non-empty, filters to tasks under that epic.
 // When repoLabel is non-empty, filters to tasks labeled repo:<name>.
-// It routes through the package-level defaultDeps.BD runner.
 func fetchReadyIssues(parentID string, repoLabel string) ([]BdIssue, error) {
-	args := []string{"ready", "--json", "--limit", "100"}
-	if parentID != "" {
-		args = append(args, "--parent", parentID)
-	}
+	tracker := defaultTracker()
+	opts := ReadyOpts{Limit: 100, ParentID: parentID}
 	if repoLabel != "" {
-		args = append(args, "--label", "repo:"+repoLabel)
+		opts.Labels = []string{"repo:" + repoLabel}
 	}
 	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
-		args = append(args, "--source-repos="+sourceRepos)
+		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-	result := defaultDeps.BD.Run(GetBeadsDir(), args...)
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
-	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse task list: %w", err)
+	issues, err := tracker.Ready(context.Background(), opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check ready tasks: %w", err)
 	}
 	return issues, nil
 }
@@ -77,16 +70,13 @@ func fetchReadyIssues(parentID string, repoLabel string) ([]BdIssue, error) {
 // fetchUnclosedIssueIDs returns IDs of all issues that are NOT closed.
 // Used for accurate blocker checking — a blocker is resolved only when closed,
 // not when it merely moves to in_progress or review.
-// It routes through the package-level defaultDeps.BD runner.
+// ListOpts{Limit: 500} with zero-value Status returns ALL statuses (per
+// IssueTracker contract); client-side filtering then excludes closed.
 func fetchUnclosedIssueIDs() (map[string]bool, error) {
-	result := defaultDeps.BD.Run(GetBeadsDir(), "list", "--json", "--limit", "500")
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to list issues: %w", result.Err)
-	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse issue list: %w", err)
+	tracker := defaultTracker()
+	issues, err := tracker.List(context.Background(), ListOpts{Limit: 500})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list issues: %w", err)
 	}
 	ids := make(map[string]bool, len(issues))
 	for _, issue := range issues {

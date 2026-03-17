@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -317,19 +316,20 @@ func TestRunGitCommandWithOutput_UsesDefaultDeps(t *testing.T) {
 	}
 }
 
-func TestFetchReadyIssues_UsesBDRunner(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
+func TestFetchReadyIssues_UsesTracker(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	issues := []BdIssue{
+	mock := NewMockTracker()
+	mock.ReadyResult = []BdIssue{
 		{ID: "test-1", Title: "Test task", Status: "open"},
 	}
-	jsonData, _ := json.Marshal(issues)
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: string(jsonData)},
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return mock.ReadyResult, nil
 	}
-	defaultDeps = &Deps{BD: mock}
+	setDefaultTracker(mock)
 
 	got, err := fetchReadyIssues("epic-1", "")
 	if err != nil {
@@ -338,49 +338,54 @@ func TestFetchReadyIssues_UsesBDRunner(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "test-1" {
 		t.Errorf("got %v, want [{ID:test-1 ...}]", got)
 	}
-	if len(mock.Calls) != 1 {
-		t.Fatalf("expected 1 BD call, got %d", len(mock.Calls))
+	if capturedOpts.ParentID != "epic-1" {
+		t.Errorf("opts.ParentID = %q, want epic-1", capturedOpts.ParentID)
 	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100", "--parent", "epic-1"}) {
-		t.Errorf("BD args = %v", args)
+	if capturedOpts.Limit != 100 {
+		t.Errorf("opts.Limit = %d, want 100", capturedOpts.Limit)
 	}
 }
 
-func TestFetchReadyIssues_NoParent(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
+func TestFetchReadyIssues_NoParentViaTracker(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: "[]"},
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
-	defaultDeps = &Deps{BD: mock}
+	setDefaultTracker(mock)
 
 	_, err := fetchReadyIssues("", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	args := mock.Calls[0].Args
-	if !slicesEqual(args, []string{"ready", "--json", "--limit", "100"}) {
-		t.Errorf("BD args = %v (should not have --parent)", args)
+	if capturedOpts.ParentID != "" {
+		t.Errorf("opts.ParentID = %q, want empty", capturedOpts.ParentID)
+	}
+	if capturedOpts.Limit != 100 {
+		t.Errorf("opts.Limit = %d, want 100", capturedOpts.Limit)
 	}
 }
 
-func TestFetchUnclosedIssueIDs_UsesBDRunner(t *testing.T) {
-	orig := defaultDeps
-	t.Cleanup(func() { defaultDeps = orig })
+func TestFetchUnclosedIssueIDs_UsesTracker(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	issues := []BdIssue{
+	mock := NewMockTracker()
+	mock.ListResult = []BdIssue{
 		{ID: "open-1", Status: "open"},
 		{ID: "closed-1", Status: "closed"},
 		{ID: "review-1", Status: "review"},
 	}
-	jsonData, _ := json.Marshal(issues)
-
-	mock := &MockBDRunner{
-		Result: CommandResult{Stdout: string(jsonData)},
+	var capturedOpts ListOpts
+	mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return mock.ListResult, nil
 	}
-	defaultDeps = &Deps{BD: mock}
+	setDefaultTracker(mock)
 
 	got, err := fetchUnclosedIssueIDs()
 	if err != nil {
@@ -394,6 +399,13 @@ func TestFetchUnclosedIssueIDs_UsesBDRunner(t *testing.T) {
 	}
 	if !got["review-1"] {
 		t.Error("expected review-1 in unclosed set")
+	}
+	// CRITICAL: verify no implicit status filter (empty = all statuses)
+	if capturedOpts.Status != "" {
+		t.Errorf("opts.Status = %q, want empty (all statuses)", capturedOpts.Status)
+	}
+	if capturedOpts.Limit != 500 {
+		t.Errorf("opts.Limit = %d, want 500", capturedOpts.Limit)
 	}
 }
 

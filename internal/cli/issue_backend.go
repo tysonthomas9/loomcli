@@ -50,8 +50,10 @@ type IssueTracker interface {
 
 // ReadyOpts configures the Ready query.
 type ReadyOpts struct {
-	ParentID string // filter by parent epic ID (empty = no filter)
-	Limit    int    // max results (0 = backend default)
+	ParentID    string   // filter by parent epic ID (empty = no filter)
+	Limit       int      // max results (0 = backend default)
+	Labels      []string // filter by labels (empty = no filter); e.g. ["repo:frontend"]
+	SourceRepos []string // filter by source repos (empty = no filter); maps to --source-repos
 }
 
 // ListOpts configures the List query.
