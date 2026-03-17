@@ -132,6 +132,7 @@ export const TerminalInstance = forwardRef<
     null,
   );
   const reconnectAttemptRef = useRef(0);
+  const reconnectResolveRef = useRef<((result: boolean) => void) | null>(null);
   const interceptorRef = useRef<SlashCommandInterceptor | null>(null);
 
   // Scroll-tracking and new output pill
@@ -190,6 +191,7 @@ export const TerminalInstance = forwardRef<
     const fitAddon = fitAddonRef.current;
     if (!terminal || !fitAddon) return;
 
+    reconnectResolveRef.current = null;
     clearReconnectState();
     reconnectCancelRef.current?.();
     reconnectCancelRef.current = null;
@@ -527,11 +529,15 @@ export const TerminalInstance = forwardRef<
           wsRef,
           setConnectionState,
           () => {
+            reconnectResolveRef.current?.(true);
+            reconnectResolveRef.current = null;
             reconnectCancelRef.current?.();
             reconnectCancelRef.current = null;
             clearReconnectState();
           },
           () => {
+            reconnectResolveRef.current?.(false);
+            reconnectResolveRef.current = null;
             if (!mounted || reconnectCancelRef.current) return;
             onReconnectStateChangeRef.current?.("reconnecting");
             if (!reconnectTimeoutRef.current) {
@@ -546,8 +552,10 @@ export const TerminalInstance = forwardRef<
             const cancel = startAutoReconnect(
               () => {
                 if (!mounted) return true;
-                doConnect(true);
-                return false;
+                return new Promise<boolean>((resolve) => {
+                  reconnectResolveRef.current = resolve;
+                  doConnect(true);
+                });
               },
               (state: ReconnectState) => {
                 reconnectAttemptRef.current = state.attempt;
@@ -621,6 +629,7 @@ export const TerminalInstance = forwardRef<
 
       reconnectCancelRef.current?.();
       reconnectCancelRef.current = null;
+      reconnectResolveRef.current = null;
 
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
