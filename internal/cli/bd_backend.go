@@ -61,6 +61,9 @@ func (b *bdBackend) List(_ context.Context, opts ListOpts) ([]BdIssue, error) {
 	if opts.Type != "" {
 		args = append(args, "--type", opts.Type)
 	}
+	if opts.ParentID != "" {
+		args = append(args, "--parent", opts.ParentID)
+	}
 	if opts.Limit > 0 {
 		args = append(args, "--limit", strconv.Itoa(opts.Limit))
 	}

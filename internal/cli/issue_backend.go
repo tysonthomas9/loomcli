@@ -61,6 +61,7 @@ type ListOpts struct {
 	Status   string // filter by status (empty = all)
 	Assignee string // filter by assignee (empty = all)
 	Type     string // filter by issue_type (empty = all)
+	ParentID string // filter by parent epic ID (empty = no filter)
 	Limit    int    // max results (0 = backend default)
 }
 
