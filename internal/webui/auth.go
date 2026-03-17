@@ -159,6 +159,15 @@ func LoadOrCreateAPIKey(path string) (string, error) {
 	return key, nil
 }
 
+// handleAuthTokenDisabled returns a handler that explicitly responds with
+// 404 JSON when auth is disabled. This prevents the SPA catch-all from
+// returning 200 HTML, which the frontend would misparse as a JSON error.
+func handleAuthTokenDisabled() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		respondError(w, http.StatusNotFound, "authentication not enabled")
+	}
+}
+
 // handleAuthToken returns a handler that serves the API key to same-origin
 // requests. This allows the frontend (served from the same origin) to
 // bootstrap authentication without the user manually copying the key.

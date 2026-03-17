@@ -762,6 +762,33 @@ func TestNewAuthMiddleware_PreservesHandlerResponse(t *testing.T) {
 	}
 }
 
+// TestHandleAuthTokenDisabled_Returns404JSON verifies that when auth is disabled
+// the handler returns a 404 JSON response (not HTML from SPA catch-all).
+func TestHandleAuthTokenDisabled_Returns404JSON(t *testing.T) {
+	handler := handleAuthTokenDisabled()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/token", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["error"] != "authentication not enabled" {
+		t.Errorf("error = %q, want %q", resp["error"], "authentication not enabled")
+	}
+}
+
 // TestNewAuthMiddleware_OptionsOnProtectedRoute verifies that OPTIONS requests
 // pass through even on protected API routes when auth is enabled.
 func TestNewAuthMiddleware_OptionsOnProtectedRoute(t *testing.T) {

@@ -462,8 +462,8 @@ func TestDefaultDeps_NoBDField(t *testing.T) {
 
 	// All 6 fields must be non-nil.
 	fields := []struct {
-		name   string
-		isNil  bool
+		name  string
+		isNil bool
 	}{
 		{"Git", d.Git == nil},
 		{"Exec", d.Exec == nil},

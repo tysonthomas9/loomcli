@@ -104,6 +104,12 @@ export async function initAuth(
           });
 
           if (response.ok) {
+            const contentType = response.headers.get("Content-Type") || "";
+            if (!contentType.includes("application/json")) {
+              // Non-JSON 200 response (e.g., SPA HTML fallback) means endpoint not registered
+              setAuthState("disabled");
+              return;
+            }
             const data = (await response.json()) as { token: string };
             authToken = data.token;
             setAuthState("authenticated");

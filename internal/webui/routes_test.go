@@ -1484,9 +1484,9 @@ func TestSetupRoutes_AuthTokenRegisteredWhenEnabled(t *testing.T) {
 	}
 }
 
-// TestSetupRoutes_AuthTokenNotRegisteredWhenDisabled verifies that GET /api/auth/token
-// falls through to the frontend when authEnabled=false.
-func TestSetupRoutes_AuthTokenNotRegisteredWhenDisabled(t *testing.T) {
+// TestSetupRoutes_AuthTokenReturns404WhenDisabled verifies that GET /api/auth/token
+// returns a 404 JSON response when authEnabled=false (not falling through to the SPA).
+func TestSetupRoutes_AuthTokenReturns404WhenDisabled(t *testing.T) {
 	mux := http.NewServeMux()
 	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil)
 
@@ -1494,15 +1494,15 @@ func TestSetupRoutes_AuthTokenNotRegisteredWhenDisabled(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	// Route is not registered; falls through to frontend
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected /api/auth/token to fall through to frontend with status %d, got %d",
-			http.StatusOK, rr.Code)
+	// Route is registered with the disabled handler; returns 404 JSON
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected /api/auth/token to return %d when auth disabled, got %d",
+			http.StatusNotFound, rr.Code)
 	}
 
 	ct := rr.Header().Get("Content-Type")
-	if ct != "text/html; charset=utf-8" {
-		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
 	}
 }
 

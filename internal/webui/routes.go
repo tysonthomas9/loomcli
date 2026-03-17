@@ -22,8 +22,12 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	mux.HandleFunc("GET /api/health", handleAPIHealth(pool))
 
 	// Auth token bootstrap endpoint (same-origin only)
+	// Always register this route so that when auth is disabled, the frontend
+	// gets an explicit 404 JSON response instead of a 200 HTML from the SPA catch-all.
 	if authEnabled {
 		mux.HandleFunc("GET /api/auth/token", handleAuthToken(apiKey))
+	} else {
+		mux.HandleFunc("GET /api/auth/token", handleAuthTokenDisabled())
 	}
 
 	// Stats endpoint for project statistics
