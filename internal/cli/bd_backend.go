@@ -21,16 +21,6 @@ func newBdBackend(runner BDRunner, dir string) *bdBackend {
 	return &bdBackend{runner: runner, dir: dir}
 }
 
-// --- IssueBackend (Phase 1 shim) ---
-
-func (b *bdBackend) RunCommand(dir string, args ...string) (string, error) {
-	result := b.runner.Run(dir, args...)
-	if result.Err != nil {
-		return "", result.Err
-	}
-	return result.Stdout, nil
-}
-
 // --- Query methods ---
 
 func (b *bdBackend) Ready(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {

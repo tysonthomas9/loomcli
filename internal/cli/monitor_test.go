@@ -872,65 +872,42 @@ func TestCollectStatistics(t *testing.T) {
 func TestCollectSyncStatus(t *testing.T) {
 	tests := []struct {
 		name          string
-		bdOutput      string
-		bdErr         error
 		agents        []AgentStatus
-		wantDBSynced  bool
 		wantNeedsPush int
 		wantNeedsPull int
 	}{
 		{
-			name:         "synced state (no errors in output)",
-			bdOutput:     "Database synced successfully",
-			wantDBSynced: true,
+			name:          "no agents",
+			agents:        nil,
+			wantNeedsPush: 0,
+			wantNeedsPull: 0,
 		},
 		{
-			name:         "unsynced state (error in output)",
-			bdOutput:     "error: sync failed",
-			wantDBSynced: false,
-		},
-		{
-			name:         "unsynced state (failed in output)",
-			bdOutput:     "failed to connect",
-			wantDBSynced: false,
-		},
-		{
-			name:         "command failure",
-			bdErr:        fmt.Errorf("command failed"),
-			wantDBSynced: false, // DBError will be set
-		},
-		{
-			name:     "count git push needs from agents",
-			bdOutput: "ok",
+			name: "count git push needs from agents",
 			agents: []AgentStatus{
 				{Name: "falcon", Ahead: 3, Behind: 0},
 				{Name: "nova", Ahead: 1, Behind: 0},
 				{Name: "spark", Ahead: 0, Behind: 0},
 			},
-			wantDBSynced:  true,
 			wantNeedsPush: 2,
 			wantNeedsPull: 0,
 		},
 		{
-			name:     "count git pull needs from agents",
-			bdOutput: "ok",
+			name: "count git pull needs from agents",
 			agents: []AgentStatus{
 				{Name: "falcon", Ahead: 0, Behind: 2},
 				{Name: "nova", Ahead: 0, Behind: 1},
 			},
-			wantDBSynced:  true,
 			wantNeedsPush: 0,
 			wantNeedsPull: 2,
 		},
 		{
-			name:     "mixed push and pull needs",
-			bdOutput: "ok",
+			name: "mixed push and pull needs",
 			agents: []AgentStatus{
 				{Name: "falcon", Ahead: 3, Behind: 1},
 				{Name: "nova", Ahead: 0, Behind: 2},
 				{Name: "spark", Ahead: 1, Behind: 0},
 			},
-			wantDBSynced:  true,
 			wantNeedsPush: 2,
 			wantNeedsPull: 2,
 		},
@@ -938,24 +915,15 @@ func TestCollectSyncStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &MockIssueTracker{
-				RunCommandFunc: func(dir string, args ...string) (string, error) {
-					return tt.bdOutput, tt.bdErr
-				},
-			}
-			setDefaultTracker(mock)
-			defer resetDefaultTracker()
+			// completeSyncStatus computes git push/pull counts from agent data.
+			// collectSyncBdStatus uses execCommand directly and is tested via integration.
+			info := completeSyncStatus(SyncInfo{}, tt.agents)
 
-			syncInfo := collectSyncStatus(tt.agents)
-
-			if syncInfo.DBSynced != tt.wantDBSynced {
-				t.Errorf("DBSynced = %v, want %v", syncInfo.DBSynced, tt.wantDBSynced)
+			if info.GitNeedsPush != tt.wantNeedsPush {
+				t.Errorf("GitNeedsPush = %d, want %d", info.GitNeedsPush, tt.wantNeedsPush)
 			}
-			if syncInfo.GitNeedsPush != tt.wantNeedsPush {
-				t.Errorf("GitNeedsPush = %d, want %d", syncInfo.GitNeedsPush, tt.wantNeedsPush)
-			}
-			if syncInfo.GitNeedsPull != tt.wantNeedsPull {
-				t.Errorf("GitNeedsPull = %d, want %d", syncInfo.GitNeedsPull, tt.wantNeedsPull)
+			if info.GitNeedsPull != tt.wantNeedsPull {
+				t.Errorf("GitNeedsPull = %d, want %d", info.GitNeedsPull, tt.wantNeedsPull)
 			}
 		})
 	}
@@ -1512,9 +1480,6 @@ func TestCollectMonitorData(t *testing.T) {
 		TombstoneIssues  int `json:"tombstone_issues"`
 		PinnedIssues     int `json:"pinned_issues"`
 	}{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7}}
-	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-		return "synced", nil
-	}
 	setDefaultTracker(mock)
 	t.Cleanup(func() { resetDefaultTracker() })
 
@@ -1604,9 +1569,6 @@ func TestCollectMonitorDataExported(t *testing.T) {
 		TombstoneIssues  int `json:"tombstone_issues"`
 		PinnedIssues     int `json:"pinned_issues"`
 	}{TotalIssues: 5, OpenIssues: 2, ClosedIssues: 3}}
-	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-		return "synced", nil
-	}
 	setDefaultTracker(mock)
 	t.Cleanup(func() { resetDefaultTracker() })
 
@@ -1732,9 +1694,6 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 		TombstoneIssues  int `json:"tombstone_issues"`
 		PinnedIssues     int `json:"pinned_issues"`
 	}{TotalIssues: 20, OpenIssues: 10, ClosedIssues: 5}}
-	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-		return "synced", nil
-	}
 	setDefaultTracker(mock)
 	t.Cleanup(func() { resetDefaultTracker() })
 
@@ -1811,9 +1770,6 @@ func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
 		TombstoneIssues  int `json:"tombstone_issues"`
 		PinnedIssues     int `json:"pinned_issues"`
 	}{TotalIssues: 10, OpenIssues: 5, ClosedIssues: 3}}
-	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-		return "synced", nil
-	}
 	setDefaultTracker(mock)
 	t.Cleanup(func() { resetDefaultTracker() })
 
@@ -1914,9 +1870,6 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 		TombstoneIssues  int `json:"tombstone_issues"`
 		PinnedIssues     int `json:"pinned_issues"`
 	}{TotalIssues: 50, OpenIssues: 8, ClosedIssues: 40}}
-	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-		return "synced", nil
-	}
 	setDefaultTracker(mock)
 	t.Cleanup(func() { resetDefaultTracker() })
 
@@ -1991,9 +1944,6 @@ func TestRunMonitorOneShot(t *testing.T) {
 	}
 
 	mock := NewMockTracker()
-	mock.RunCommandFunc = func(dir string, args ...string) (string, error) {
-		return "synced", nil
-	}
 	setDefaultTracker(mock)
 	t.Cleanup(func() { resetDefaultTracker() })
 

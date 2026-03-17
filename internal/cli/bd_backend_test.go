@@ -4,8 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 )
+
+// MockBDRunner records calls and returns configurable results.
+// Used by bdBackend tests to mock the BDRunner interface.
+type MockBDRunner struct {
+	mu      sync.Mutex
+	Calls   []mockBDCall
+	Result  CommandResult
+	RunFunc func(dir string, args ...string) CommandResult
+}
+
+type mockBDCall struct {
+	Dir  string
+	Args []string
+}
+
+func (m *MockBDRunner) Run(dir string, args ...string) CommandResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls = append(m.Calls, mockBDCall{Dir: dir, Args: args})
+	if m.RunFunc != nil {
+		return m.RunFunc(dir, args...)
+	}
+	return m.Result
+}
 
 func TestBdBackend_Ready(t *testing.T) {
 	issues := []BdIssue{{ID: "T-1", Title: "Task 1", Status: "open", Priority: 1}}
@@ -224,25 +249,6 @@ func TestBdBackend_CloseIssue(t *testing.T) {
 	}
 }
 
-func TestBdBackend_RunCommand(t *testing.T) {
-	bd := &MockBDRunner{RunFunc: func(dir string, args ...string) CommandResult {
-		if dir != "/custom" {
-			t.Errorf("dir = %q, want /custom", dir)
-		}
-		assertArgs(t, args, "ready", "--json")
-		return CommandResult{Stdout: "raw output"}
-	}}
-	b := newBdBackend(bd, "/work")
-
-	got, err := b.RunCommand("/custom", "ready", "--json")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "raw output" {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestBdBackend_BackendName(t *testing.T) {
 	b := newBdBackend(&MockBDRunner{}, "/work")
 	if name := b.BackendName(); name != "beads" {
@@ -268,7 +274,6 @@ func TestBdBackend_ErrorPropagation(t *testing.T) {
 		{"UpdateIssue", func() error { return b.UpdateIssue(ctx, "X", UpdateOpts{Status: "open"}) }},
 		{"UpdateExternalRef", func() error { return b.UpdateExternalRef(ctx, "X", "ref") }},
 		{"CloseIssue", func() error { return b.CloseIssue(ctx, "X", "reason") }},
-		{"RunCommand", func() error { _, e := b.RunCommand("/d", "test"); return e }},
 	}
 
 	for _, tt := range tests {
@@ -313,6 +318,61 @@ func TestBdBackend_UsesStructDir(t *testing.T) {
 	_, _ = b.Ready(context.Background(), ReadyOpts{})
 	if capturedDir != "/my/project" {
 		t.Errorf("dir = %q, want /my/project", capturedDir)
+	}
+}
+
+// Compile-time check: defaultBDRunnerImpl implements BDRunner.
+var _ BDRunner = defaultBDRunnerImpl{}
+
+func TestBdBackend_Ready_LabelsAndSourceRepos(t *testing.T) {
+	bd := &MockBDRunner{RunFunc: func(dir string, args ...string) CommandResult {
+		assertArgs(t, args, "ready", "--json", "--limit", "5", "--label", "repo:frontend", "--label", "priority:high", "--source-repos=repo-a,repo-b")
+		return CommandResult{Stdout: "[]"}
+	}}
+	b := newBdBackend(bd, "/work")
+
+	_, err := b.Ready(context.Background(), ReadyOpts{
+		Limit:       5,
+		Labels:      []string{"repo:frontend", "priority:high"},
+		SourceRepos: []string{"repo-a", "repo-b"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBdBackend_List_WithParentID(t *testing.T) {
+	issues := []BdIssue{{ID: "T-20", Status: "open"}}
+	data, _ := json.Marshal(issues)
+
+	bd := &MockBDRunner{RunFunc: func(dir string, args ...string) CommandResult {
+		assertArgs(t, args, "list", "--json", "--parent", "epic-2")
+		return CommandResult{Stdout: string(data)}
+	}}
+	b := newBdBackend(bd, "/work")
+
+	got, err := b.List(context.Background(), ListOpts{ParentID: "epic-2"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "T-20" {
+		t.Errorf("got %v, want [{ID:T-20}]", got)
+	}
+}
+
+func TestBdBackend_List_NoOpts(t *testing.T) {
+	bd := &MockBDRunner{RunFunc: func(dir string, args ...string) CommandResult {
+		assertArgs(t, args, "list", "--json")
+		return CommandResult{Stdout: "[]"}
+	}}
+	b := newBdBackend(bd, "/work")
+
+	got, err := b.List(context.Background(), ListOpts{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty slice, got %v", got)
 	}
 }
 

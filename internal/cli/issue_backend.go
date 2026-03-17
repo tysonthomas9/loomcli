@@ -1,10 +1,9 @@
 // Issue tracking interfaces.
 //
-// This file defines IssueBackend and IssueTracker for abstracting issue
-// data operations (ready, list, update, close, etc.) across backends
-// (beads bd CLI, fleet-db). These are distinct from Backend and
-// StreamingBackend (defined in backend.go and backend_capabilities.go)
-// which handle AI agent invocation (Claude, etc.).
+// This file defines IssueTracker for abstracting issue data operations
+// (ready, list, update, close, etc.) across backends (beads bd CLI, fleet-db).
+// These are distinct from Backend and StreamingBackend (defined in backend.go
+// and backend_capabilities.go) which handle AI agent invocation (Claude, etc.).
 
 package cli
 
@@ -13,24 +12,9 @@ import (
 	"sync"
 )
 
-// IssueBackend is the backward-compatible interface for Phase 1 migration.
-// It wraps raw bd-style command execution so existing callers don't change.
-// Phase 1 callers use only this interface via RunCommand.
-type IssueBackend interface {
-	// RunCommand executes a bd-style command and returns stdout or error.
-	// The dir parameter specifies the working directory (typically GetBeadsDir()).
-	// Example: RunCommand(dir, "ready", "--json", "--limit", "50")
-	RunCommand(dir string, args ...string) (string, error)
-}
-
-// IssueTracker extends IssueBackend with typed methods for direct data access.
-// Phase 2+ consumers should prefer these over RunCommand to avoid JSON
-// serialization overhead. This interface is defined upfront to establish
-// the full contract that bdBackend (task .2) and fleetDBBackend (task .3)
-// must satisfy.
+// IssueTracker provides typed methods for direct issue data access across
+// backends (bdBackend for beads CLI, fleetDBBackend for fleet-db RPC).
 type IssueTracker interface {
-	IssueBackend
-
 	// Query operations
 	Ready(ctx context.Context, opts ReadyOpts) ([]BdIssue, error)
 	List(ctx context.Context, opts ListOpts) ([]BdIssue, error)
@@ -98,7 +82,7 @@ func defaultTracker() IssueTracker {
 			// Fallback: don't cache nil — return an ephemeral backend so
 			// callers never get a nil pointer even if defaultDeps.Tracker
 			// was not set (e.g. partial test fixtures).
-			return newBdBackend(defaultBDRunner{}, GetBeadsDir())
+			return newBdBackend(defaultBDRunnerImpl{}, GetBeadsDir())
 		}
 	}
 	return trackerInst

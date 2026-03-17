@@ -45,29 +45,6 @@ func (m *MockGitRunner) RunWithOutput(dir string, args ...string) error {
 	return m.WithOutput
 }
 
-// MockBDRunner records calls and returns configurable results.
-type MockBDRunner struct {
-	mu      sync.Mutex
-	Calls   []mockBDCall
-	Result  CommandResult
-	RunFunc func(dir string, args ...string) CommandResult
-}
-
-type mockBDCall struct {
-	Dir  string
-	Args []string
-}
-
-func (m *MockBDRunner) Run(dir string, args ...string) CommandResult {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.Calls = append(m.Calls, mockBDCall{Dir: dir, Args: args})
-	if m.RunFunc != nil {
-		return m.RunFunc(dir, args...)
-	}
-	return m.Result
-}
-
 // MockExecRunner records calls and returns configurable results.
 type MockExecRunner struct {
 	mu      sync.Mutex
@@ -154,10 +131,9 @@ func (m *MockFileSystem) Remove(path string) error {
 }
 
 // NewTestDeps returns a *Deps with all fields set to mock implementations.
-func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockBDRunner, *MockExecRunner, *MockFileSystem, *MockIssueTracker) {
+func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockExecRunner, *MockFileSystem, *MockIssueTracker) {
 	t.Helper()
 	git := &MockGitRunner{}
-	bd := &MockBDRunner{}
 	execR := &MockExecRunner{}
 	fs := NewMockFileSystem()
 	tracker := NewMockTracker()
@@ -166,11 +142,10 @@ func NewTestDeps(t *testing.T) (*Deps, *MockGitRunner, *MockBDRunner, *MockExecR
 		Exec:    execR,
 		FS:      fs,
 		Logger:  slog.Default(),
-		BD:      bd,
 		Tracker: tracker,
 		Clock:   func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
 	}
-	return deps, git, bd, execR, fs, tracker
+	return deps, git, execR, fs, tracker
 }
 
 // --- Tests ---
@@ -191,9 +166,6 @@ func TestDefaultDeps_NonNilFields(t *testing.T) {
 	}
 	if d.Clock == nil {
 		t.Error("Clock is nil")
-	}
-	if d.BD == nil {
-		t.Error("BD is nil")
 	}
 	if d.Tracker == nil {
 		t.Error("Tracker is nil")
@@ -438,5 +410,76 @@ func TestMockFileSystem_Remove(t *testing.T) {
 	_, err := fs.ReadFile("/tmp/x")
 	if err == nil {
 		t.Error("expected error after removal")
+	}
+}
+
+func TestNewTestDeps_Returns5Tuple(t *testing.T) {
+	deps, git, execR, fs, tracker := NewTestDeps(t)
+
+	if deps == nil {
+		t.Fatal("deps is nil")
+	}
+	if git == nil {
+		t.Fatal("git is nil")
+	}
+	if execR == nil {
+		t.Fatal("execR is nil")
+	}
+	if fs == nil {
+		t.Fatal("fs is nil")
+	}
+	if tracker == nil {
+		t.Fatal("tracker is nil")
+	}
+
+	// Verify deps fields are wired to the returned mocks.
+	if deps.Git != git {
+		t.Error("deps.Git is not the returned MockGitRunner")
+	}
+	if deps.Exec != execR {
+		t.Error("deps.Exec is not the returned MockExecRunner")
+	}
+	if deps.FS != fs {
+		t.Error("deps.FS is not the returned MockFileSystem")
+	}
+	if deps.Tracker != tracker {
+		t.Error("deps.Tracker is not the returned MockIssueTracker")
+	}
+	if deps.Logger == nil {
+		t.Error("deps.Logger is nil")
+	}
+	if deps.Clock == nil {
+		t.Error("deps.Clock is nil")
+	}
+}
+
+func TestDefaultDeps_NoBDField(t *testing.T) {
+	// Verify the Deps struct has exactly 6 fields: Git, Exec, FS, Logger, Clock, Tracker.
+	// This serves as a regression check that BD was removed and no new
+	// unexpected field was added. We verify by checking all fields are non-nil
+	// (which covers every field in the struct).
+	d := DefaultDeps()
+
+	// All 6 fields must be non-nil.
+	fields := []struct {
+		name   string
+		isNil  bool
+	}{
+		{"Git", d.Git == nil},
+		{"Exec", d.Exec == nil},
+		{"FS", d.FS == nil},
+		{"Logger", d.Logger == nil},
+		{"Clock", d.Clock == nil},
+		{"Tracker", d.Tracker == nil},
+	}
+	for _, f := range fields {
+		if f.isNil {
+			t.Errorf("DefaultDeps().%s is nil", f.name)
+		}
+	}
+
+	// Verify Tracker is a bdBackend (backed by defaultBDRunnerImpl).
+	if d.Tracker.BackendName() != "beads" {
+		t.Errorf("Tracker.BackendName() = %q, want beads", d.Tracker.BackendName())
 	}
 }

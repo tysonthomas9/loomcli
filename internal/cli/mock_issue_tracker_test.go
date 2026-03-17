@@ -22,11 +22,6 @@ type MockIssueTracker struct {
 	mu    sync.Mutex
 	Calls []MockTrackerCall
 
-	// RunCommand (IssueBackend)
-	RunCommandResult string
-	RunCommandErr    error
-	RunCommandFunc   func(dir string, args ...string) (string, error)
-
 	// Ready
 	ReadyResult []BdIssue
 	ReadyErr    error
@@ -86,24 +81,6 @@ func MockTrackerWithReady(issues []BdIssue) *MockIssueTracker {
 
 func (m *MockIssueTracker) record(method string, args ...interface{}) {
 	m.Calls = append(m.Calls, MockTrackerCall{Method: method, Args: args})
-}
-
-// RunCommand implements IssueBackend.
-func (m *MockIssueTracker) RunCommand(dir string, args ...string) (string, error) {
-	m.mu.Lock()
-	iArgs := make([]interface{}, 0, 1+len(args))
-	iArgs = append(iArgs, dir)
-	for _, a := range args {
-		iArgs = append(iArgs, a)
-	}
-	m.record("RunCommand", iArgs...)
-	fn := m.RunCommandFunc
-	result, resultErr := m.RunCommandResult, m.RunCommandErr
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(dir, args...)
-	}
-	return result, resultErr
 }
 
 // Ready implements IssueTracker.

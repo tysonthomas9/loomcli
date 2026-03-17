@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
+	"context"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -57,12 +57,13 @@ func TestFleetDBServer_InMemoryStorage(t *testing.T) {
 	}
 
 	// List issues — should return empty list for fresh in-memory storage.
-	out, err := backend.RunCommand("", "list", "--json")
+	ctx := context.Background()
+	issues, err := backend.List(ctx, ListOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error from list: %v", err)
 	}
-	if out != "[]" {
-		t.Errorf("expected '[]' for empty issue list, got %q", out)
+	if len(issues) != 0 {
+		t.Errorf("expected empty issue list, got %d issues", len(issues))
 	}
 }
 
@@ -91,23 +92,21 @@ func TestFleetDBServer_BackendRoundTrip(t *testing.T) {
 		t.Fatal("expected Backend() to return non-nil")
 	}
 
+	ctx := context.Background()
+
 	// Verify list returns empty initially.
-	out, err := backend.RunCommand("", "list", "--json")
+	issues, err := backend.List(ctx, ListOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error from list: %v", err)
 	}
-	if out != "[]" {
-		t.Errorf("expected '[]', got %q", out)
+	if len(issues) != 0 {
+		t.Errorf("expected empty list, got %d issues", len(issues))
 	}
 
-	// Verify stats works and returns valid JSON.
-	out, err = backend.RunCommand("", "stats", "--json")
+	// Verify stats works and returns valid data.
+	stats, err := backend.Stats(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error from stats: %v", err)
-	}
-	var stats BdStats
-	if err := json.Unmarshal([]byte(out), &stats); err != nil {
-		t.Fatalf("failed to unmarshal stats output: %v", err)
 	}
 	// Fresh database should have zero issues.
 	if stats.Summary.TotalIssues != 0 {
@@ -115,30 +114,21 @@ func TestFleetDBServer_BackendRoundTrip(t *testing.T) {
 	}
 
 	// Verify ready returns empty list.
-	out, err = backend.RunCommand("", "ready", "--json")
+	readyIssues, err := backend.Ready(ctx, ReadyOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error from ready: %v", err)
 	}
-	if out != "[]" {
-		t.Errorf("expected '[]' from ready, got %q", out)
+	if len(readyIssues) != 0 {
+		t.Errorf("expected empty ready list, got %d issues", len(readyIssues))
 	}
 
 	// Verify blocked returns empty list.
-	out, err = backend.RunCommand("", "blocked", "--json")
+	blockedIssues, err := backend.Blocked(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error from blocked: %v", err)
 	}
-	if out != "[]" {
-		t.Errorf("expected '[]' from blocked, got %q", out)
-	}
-
-	// Verify sync (no-op) works.
-	out, err = backend.RunCommand("", "sync")
-	if err != nil {
-		t.Fatalf("unexpected error from sync: %v", err)
-	}
-	if out != "" {
-		t.Errorf("expected empty string from sync, got %q", out)
+	if len(blockedIssues) != 0 {
+		t.Errorf("expected empty blocked list, got %d issues", len(blockedIssues))
 	}
 
 	// Stop the server.
@@ -215,23 +205,21 @@ func TestFleetDBServer_NoRedis(t *testing.T) {
 		t.Fatal("expected Backend() to return non-nil even without Redis")
 	}
 
+	ctx := context.Background()
+
 	// List issues — should still return empty list.
-	out, err := backend.RunCommand("", "list", "--json")
+	issues, err := backend.List(ctx, ListOpts{})
 	if err != nil {
 		t.Fatalf("unexpected error from list: %v", err)
 	}
-	if out != "[]" {
-		t.Errorf("expected '[]', got %q", out)
+	if len(issues) != 0 {
+		t.Errorf("expected empty list, got %d issues", len(issues))
 	}
 
 	// Stats should work.
-	out, err = backend.RunCommand("", "stats", "--json")
+	stats, err := backend.Stats(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error from stats: %v", err)
-	}
-	var stats BdStats
-	if err := json.Unmarshal([]byte(out), &stats); err != nil {
-		t.Fatalf("failed to unmarshal stats: %v", err)
 	}
 	if stats.Summary.TotalIssues != 0 {
 		t.Errorf("expected 0 total issues, got %d", stats.Summary.TotalIssues)

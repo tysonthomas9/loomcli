@@ -1,6 +1,5 @@
 // fleetdb_backend_tracker.go — IssueTracker typed methods for fleetDBBackend.
-// These methods provide direct typed access to the RPC client, avoiding the
-// JSON round-trip through RunCommand. Phase 2+ consumers should prefer these.
+// These methods provide direct typed access to the RPC client.
 package cli
 
 import (
