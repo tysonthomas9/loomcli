@@ -323,6 +323,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
             }
             aria-label="Scroll tabs left"
             tabIndex={-1}
+            data-testid="scroll-tabs-left"
           >
             &#x2039;
           </button>
@@ -342,6 +343,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
               className={styles.tabList}
               role="tablist"
               aria-label="Terminal tabs"
+              aria-keyshortcuts="Meta+1 Meta+2 Meta+3 Meta+4 Meta+5 Meta+6 Meta+7 Meta+8 Meta+9 Meta+T Meta+W"
               onKeyDown={handleKeyDown}
             >
               {tabs.map((tab, index) => {
@@ -365,6 +367,10 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           onTabChange(tab.id);
+                        } else if (e.key === "F10" && e.shiftKey) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setContextMenu({ tabId: tab.id, x: 0, y: 0 });
                         }
                       }}
                       data-testid={`terminal-tab-${tab.id}`}
@@ -384,6 +390,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
                       <span
                         className={styles.statusDot}
                         data-status={tab.connectionState}
+                        data-testid={`terminal-tab-status-${tab.id}`}
                         aria-label={`Connection: ${tab.connectionState}`}
                         style={
                           tab.brandColor
@@ -404,6 +411,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
                           onKeyDown={handleEditKeyDown}
                           onClick={(e) => e.stopPropagation()}
                           aria-label="Rename tab"
+                          data-testid={`terminal-tab-rename-input-${tab.id}`}
                         />
                       ) : (
                         <span
@@ -412,6 +420,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
                             e.stopPropagation();
                             enterEditMode(tab.id, tab.label);
                           }}
+                          data-testid={`terminal-tab-label-${tab.id}`}
                         >
                           {tab.label}
                         </span>
@@ -421,6 +430,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
                           role="img"
                           className={styles.unreadDot}
                           aria-label="has new output"
+                          data-testid={`terminal-tab-unread-${tab.id}`}
                         />
                       )}
                       {tabs.length > 1 && (
@@ -433,6 +443,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
                             onTabClose(tab.id);
                           }}
                           aria-label={`Close ${tab.label}`}
+                          data-testid={`terminal-tab-close-${tab.id}`}
                         >
                           ×
                         </button>
@@ -466,6 +477,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
             }
             aria-label="Scroll tabs right"
             tabIndex={-1}
+            data-testid="scroll-tabs-right"
           >
             &#x203a;
           </button>
@@ -474,6 +486,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
           className={styles.actionButton}
           onClick={onNewTab}
           aria-label="New terminal tab"
+          data-testid="terminal-new-tab-button"
         >
           +
         </button>
@@ -494,6 +507,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
             disabled={!canSplit}
             aria-label="Toggle split view"
             aria-pressed={isSplitView}
+            data-testid="terminal-split-toggle"
           >
             {"\u2016"}
           </button>
@@ -513,6 +527,7 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
           onClick={onToggleFullHeight}
           aria-label="Toggle full height"
           aria-pressed={isFullHeight}
+          data-testid="terminal-fullheight-toggle"
         >
           {isFullHeight ? "\u2921" : "\u2922"}
         </button>
