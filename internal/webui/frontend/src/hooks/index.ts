@@ -143,7 +143,10 @@ export type {
 export { useElapsedTime } from "./useElapsedTime";
 
 export { useWorkspaceRepos } from "./useWorkspaceRepos";
-export type { UseWorkspaceReposReturn } from "./useWorkspaceRepos";
+export type {
+  UseWorkspaceReposReturn,
+  WorkspaceConnectionState,
+} from "./useWorkspaceRepos";
 
 export { useRepoFilter, parseReposFromUrl } from "./useRepoFilter";
 export type {

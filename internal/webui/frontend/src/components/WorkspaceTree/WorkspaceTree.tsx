@@ -32,6 +32,7 @@ import type { ConnectionState } from "@/api/sse";
 import type { LoomAgentStatus } from "@/types";
 import { useWorkspaceRepos, useAgentContext, useToast } from "@/hooks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ErrorDisplay } from "@/components/ErrorDisplay";
 
 import { RepoGroupList } from "./RepoGroupList";
 import { SortableWorkspaceEntry } from "./SortableWorkspaceEntry";
@@ -97,7 +98,16 @@ export function WorkspaceTree({
     }
   });
 
-  const { workspace, repos, isLoading, error, refetch } = useWorkspaceRepos();
+  const {
+    workspace,
+    repos,
+    isLoading,
+    error,
+    refetch,
+    connectionState: wsConnectionState,
+    retryCountdown,
+    retryNow,
+  } = useWorkspaceRepos();
   const { agents } = useAgentContext();
   const { showToast } = useToast();
 
@@ -490,15 +500,32 @@ export function WorkspaceTree({
             </div>
           )}
 
-          {error && (
-            <div className={styles.errorState}>
-              <span className={styles.errorText}>{error}</span>
+          {wsConnectionState === "error_never_connected" && (
+            <ErrorDisplay
+              variant="connection-error"
+              title="Workspace unavailable"
+              description="Could not connect to workspace. The server may be starting up."
+              onRetry={retryNow}
+              isRetrying={isLoading}
+              retryLabel={
+                retryCountdown != null
+                  ? `Retry in ${retryCountdown}s`
+                  : "Retry now"
+              }
+            />
+          )}
+
+          {wsConnectionState === "error_lost_connection" && (
+            <div className={styles.staleBanner}>
+              <span>Connection lost — showing last known state</span>
               <button
                 type="button"
+                onClick={retryNow}
                 className={styles.retryButton}
-                onClick={refetch}
               >
-                Retry
+                {retryCountdown != null
+                  ? `Retry in ${retryCountdown}s`
+                  : "Retry now"}
               </button>
             </div>
           )}
@@ -554,7 +581,7 @@ export function WorkspaceTree({
 
           {repos.length > 0 && (
             <div
-              className={styles.repoList}
+              className={`${styles.repoList}${wsConnectionState === "error_lost_connection" ? ` ${styles.staleOverlay}` : ""}`}
               role="radiogroup"
               aria-label="Workspace selection"
             >
@@ -668,6 +695,14 @@ export function WorkspaceTree({
           {isDisconnected ? "!" : totalActiveCount}
         </div>
       )}
+
+      {isCollapsed &&
+        (wsConnectionState === "error_never_connected" ||
+          wsConnectionState === "error_lost_connection") && (
+          <div className={styles.errorBadge} title="Workspace connection error">
+            !
+          </div>
+        )}
 
       <WorkspaceContextMenu
         isOpen={contextMenu !== null}

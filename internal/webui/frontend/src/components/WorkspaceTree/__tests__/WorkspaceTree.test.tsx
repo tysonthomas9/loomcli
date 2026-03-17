@@ -26,6 +26,14 @@ const defaultReposReturn = {
   isLoading: false,
   error: null as string | null,
   refetch: vi.fn(),
+  connectionState: "connected" as
+    | "loading"
+    | "connected"
+    | "error_never_connected"
+    | "error_lost_connection",
+  retryCountdown: null as number | null,
+  retryNow: vi.fn(),
+  hasEverConnected: false,
 };
 
 const defaultAgentContext = {
@@ -346,24 +354,26 @@ describe("WorkspaceTree", () => {
   });
 
   describe("error state", () => {
-    it("shows error message and retry button", () => {
-      const mockRefetch = vi.fn();
+    it("shows error display and retry button for error_never_connected", () => {
+      const mockRetryNow = vi.fn();
       reposOverride = {
         repos: [],
         isLoading: false,
         error: "Network error",
-        refetch: mockRefetch,
+        connectionState: "error_never_connected",
+        retryCountdown: null,
+        retryNow: mockRetryNow,
       };
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      expect(screen.getByText("Network error")).toBeInTheDocument();
+      expect(screen.getByTestId("error-display")).toBeInTheDocument();
 
       const retryButton = screen.getByRole("button", { name: /retry/i });
       expect(retryButton).toBeInTheDocument();
 
       fireEvent.click(retryButton);
-      expect(mockRefetch).toHaveBeenCalledTimes(1);
+      expect(mockRetryNow).toHaveBeenCalledTimes(1);
     });
   });
 

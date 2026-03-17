@@ -615,6 +615,48 @@
   background: var(--color-warning, #f59e0b);
 }
 
+/* Error badge for collapsed sidebar */
+.errorBadge {
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: var(--color-error);
+  color: white;
+  border-radius: 50%;
+  font-size: 0.625rem;
+  font-weight: 700;
+}
+
+/* Stale data overlay (lost-connection with preserved data) */
+.staleOverlay {
+  opacity: 0.6;
+  pointer-events: auto;
+}
+
+/* Warning banner above stale repo list */
+.staleBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: color-mix(
+    in srgb,
+    var(--color-warning, #eab308) 10%,
+    transparent
+  );
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--color-warning, #eab308) 25%, transparent);
+  font-size: 0.75rem;
+  color: var(--color-warning, #eab308);
+}
+
 /* Empty state */
 .emptyState {
   padding: 1rem 1.25rem;
