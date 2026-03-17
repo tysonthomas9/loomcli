@@ -12,6 +12,16 @@ type daemonStatus struct {
 	PID    int    `json:"pid"`
 }
 
+// EnsureIssueBackendRunning dispatches to the appropriate backend daemon.
+// For fleet-db, the server lifecycle is managed by daemon_cmd.go,
+// so this is a no-op. For beads, it delegates to EnsureBdDaemonRunning.
+func EnsureIssueBackendRunning(timeout time.Duration) (bool, error) {
+	if isFleetDBActive() {
+		return false, nil
+	}
+	return EnsureBdDaemonRunning(timeout)
+}
+
 // EnsureBdDaemonRunning checks if the bd daemon is running and starts it if not.
 // Returns (true, nil) if we started the daemon, (false, nil) if it was already running,
 // or (false, err) if the daemon could not be started or did not become ready in time.

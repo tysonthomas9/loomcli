@@ -512,3 +512,132 @@ func TestCheckLoomDaemon(t *testing.T) {
 		}
 	})
 }
+
+func TestCheckIssueBackend(t *testing.T) {
+	t.Run("fleetdb active", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+
+		result := checkIssueBackend()
+		if result.Name != "issue_backend" {
+			t.Errorf("expected name 'issue_backend', got %q", result.Name)
+		}
+		if result.Status != StatusPass {
+			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "fleet-db") {
+			t.Errorf("expected summary to contain 'fleet-db', got %q", result.Summary)
+		}
+	})
+
+	t.Run("beads active", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+
+		result := checkIssueBackend()
+		if result.Name != "issue_backend" {
+			t.Errorf("expected name 'issue_backend', got %q", result.Name)
+		}
+		if result.Status != StatusPass {
+			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "beads") {
+			t.Errorf("expected summary to contain 'beads', got %q", result.Summary)
+		}
+	})
+
+	t.Run("empty env var falls through to default beads", func(t *testing.T) {
+		// Empty string is treated as unset — falls through to config/defaults.
+		t.Setenv("LOOM_FLEETDB_ENABLED", "")
+
+		result := checkIssueBackend()
+		if !strings.Contains(result.Summary, "beads") {
+			t.Errorf("expected summary to contain 'beads', got %q", result.Summary)
+		}
+	})
+}
+
+func TestCheckFleetDB(t *testing.T) {
+	t.Run("autostart with no redis URL passes", func(t *testing.T) {
+		cfg := FleetDBServerConfig{
+			AutoStart: true,
+			RedisURL:  "",
+			Workspace: "test-ws",
+		}
+		result := reportFleetDBConfig(cfg)
+		if result.Name != "fleetdb" {
+			t.Errorf("expected name 'fleetdb', got %q", result.Name)
+		}
+		if result.Status != StatusPass {
+			t.Errorf("expected pass, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "miniredis auto-start") {
+			t.Errorf("expected summary to mention 'miniredis auto-start', got %q", result.Summary)
+		}
+		if !strings.Contains(result.Summary, "test-ws") {
+			t.Errorf("expected summary to contain workspace name, got %q", result.Summary)
+		}
+	})
+
+	t.Run("no redis URL and no autostart fails", func(t *testing.T) {
+		cfg := FleetDBServerConfig{
+			AutoStart: false,
+			RedisURL:  "",
+			Workspace: "default",
+		}
+		result := reportFleetDBConfig(cfg)
+		if result.Name != "fleetdb" {
+			t.Errorf("expected name 'fleetdb', got %q", result.Name)
+		}
+		if result.Status != StatusFail {
+			t.Errorf("expected fail, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "no Redis URL configured") {
+			t.Errorf("expected summary to mention 'no Redis URL configured', got %q", result.Summary)
+		}
+		if result.Detail == "" {
+			t.Error("expected non-empty detail with remediation advice")
+		}
+	})
+
+	t.Run("redis URL set but unreachable fails", func(t *testing.T) {
+		cfg := FleetDBServerConfig{
+			AutoStart: false,
+			RedisURL:  "redis://localhost:19999", // unlikely to be running
+			Workspace: "default",
+		}
+		result := reportFleetDBConfig(cfg)
+		if result.Name != "fleetdb" {
+			t.Errorf("expected name 'fleetdb', got %q", result.Name)
+		}
+		if result.Status != StatusFail {
+			t.Errorf("expected fail for unreachable Redis, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Summary, "not reachable") {
+			t.Errorf("expected summary to contain 'not reachable', got %q", result.Summary)
+		}
+	})
+}
+
+func TestCheckFleetDB_Integration(t *testing.T) {
+	t.Run("checkFleetDB with no config falls back to defaults", func(t *testing.T) {
+		// Use a temp dir so LoadDaemonConfig fails (no loom.yaml)
+		dir := t.TempDir()
+		origDir, _ := os.Getwd()
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chdir(origDir) }()
+
+		t.Setenv("LOOM_CONFIG_DIR", dir)
+		defer ResetBeadsDirCache()
+
+		result := checkFleetDB()
+		if result.Name != "fleetdb" {
+			t.Errorf("expected name 'fleetdb', got %q", result.Name)
+		}
+		// With no config, defaults are AutoStart=false and RedisURL="",
+		// so this should fail.
+		if result.Status != StatusFail {
+			t.Errorf("expected fail with default config (no redis, no autostart), got %v: %s", result.Status, result.Summary)
+		}
+	})
+}

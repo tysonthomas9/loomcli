@@ -98,22 +98,14 @@ func init() {
 type checkFunc func() CheckResult
 
 func runDoctor(cmd *cobra.Command, args []string) error {
-	checks := []checkFunc{
-		checkGit,
-		checkGitRepo,
-		checkTmux,
-		checkBdCLI,
-		checkBdDaemon,
-		checkBdSocket,
-		checkBackendCLI,
-		checkBeadsInit,
-		checkProjectConfig,
-		checkGlobalConfig,
-		checkWorktrees,
-		checkStaleLocks,
-		checkLoomDaemon,
-		checkRedis,
+	checks := []checkFunc{checkGit, checkGitRepo, checkTmux, checkIssueBackend}
+	if isFleetDBActive() {
+		checks = append(checks, checkFleetDB)
+	} else {
+		checks = append(checks, checkBdCLI, checkBdDaemon, checkBdSocket, checkBeadsInit)
 	}
+	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
+		checkWorktrees, checkStaleLocks, checkLoomDaemon, checkRedis)
 
 	var results []CheckResult
 	for _, check := range checks {

@@ -163,28 +163,28 @@ func runServe(cmd *cobra.Command, args []string) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
-	// Auto-start bd daemon if needed (unless --no-daemon)
+	// Auto-start issue backend if needed (unless --no-daemon)
 	var daemonWeStarted bool
 	if !serveNoDaemon {
-		started, err := EnsureBdDaemonRunning(5 * time.Second)
+		started, err := EnsureIssueBackendRunning(5 * time.Second)
 		if err != nil {
-			log.Printf("Warning: failed to auto-start bd daemon: %v", err)
-			log.Printf("Some API endpoints may return incomplete data. Run 'bd daemon start' manually.")
+			log.Printf("Warning: failed to auto-start issue backend: %v", err)
+			log.Printf("Some API endpoints may return incomplete data.")
 		} else if started {
 			daemonWeStarted = true
-			log.Printf("Auto-started bd daemon")
+			log.Printf("Auto-started issue backend daemon")
 		} else {
-			log.Printf("bd daemon already running")
+			log.Printf("Issue backend daemon already running")
 		}
 	}
 
 	// Ensure daemon cleanup on any exit path (including os.Exit in error handlers)
 	if daemonWeStarted {
 		defer func() {
-			log.Printf("Stopping bd daemon (we started it)...")
+			log.Printf("Stopping issue backend daemon...")
 			result := execCommand(GetBeadsDir(), "bd", "daemon", "stop")
 			if result.Err != nil {
-				log.Printf("Warning: failed to stop bd daemon: %v", result.Err)
+				log.Printf("Warning: failed to stop issue backend daemon: %v", result.Err)
 			}
 		}()
 	}

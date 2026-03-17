@@ -196,3 +196,93 @@ func TestIsDaemonRunning(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureIssueBackendRunning(t *testing.T) {
+	t.Run("fleetdb returns false nil immediately", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+
+		started, err := EnsureIssueBackendRunning(100 * time.Millisecond)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if started {
+			t.Error("expected started=false for fleet-db backend")
+		}
+	})
+
+	t.Run("fleetdb does not call execCommand", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "true")
+
+		oldExec := execCommand
+		defer func() { execCommand = oldExec }()
+
+		execCommand = func(dir, name string, args ...string) CommandResult {
+			t.Fatalf("execCommand should not be called for fleet-db backend: %s %v", name, args)
+			return CommandResult{}
+		}
+
+		_, err := EnsureIssueBackendRunning(100 * time.Millisecond)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("beads delegates to EnsureBdDaemonRunning", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+
+		oldExec := execCommand
+		defer func() { execCommand = oldExec }()
+
+		// Mock: daemon already running
+		execCommand = func(dir, name string, args ...string) CommandResult {
+			if len(args) >= 2 && args[1] == "status" {
+				return CommandResult{
+					Stdout: `{"status":"running","pid":9876}`,
+				}
+			}
+			t.Fatalf("unexpected command: %s %v", name, args)
+			return CommandResult{}
+		}
+
+		started, err := EnsureIssueBackendRunning(100 * time.Millisecond)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if started {
+			t.Error("expected started=false when daemon already running")
+		}
+	})
+
+	t.Run("beads with daemon not running delegates start", func(t *testing.T) {
+		t.Setenv("LOOM_FLEETDB_ENABLED", "false")
+
+		oldExec := execCommand
+		defer func() { execCommand = oldExec }()
+
+		var statusCalls atomic.Int32
+		execCommand = func(dir, name string, args ...string) CommandResult {
+			if len(args) >= 2 && args[1] == "status" {
+				n := statusCalls.Add(1)
+				if n <= 1 {
+					return CommandResult{Err: fmt.Errorf("not running")}
+				}
+				return CommandResult{
+					Stdout: `{"status":"running","pid":5678}`,
+				}
+			}
+			if len(args) >= 2 && args[1] == "start" {
+				return CommandResult{}
+			}
+			t.Fatalf("unexpected command: %s %v", name, args)
+			return CommandResult{}
+		}
+
+		started, err := EnsureIssueBackendRunning(2 * time.Second)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !started {
+			t.Error("expected started=true when we started the daemon via beads path")
+		}
+	})
+}
