@@ -1085,4 +1085,98 @@ describe("IssueDetailPanel", () => {
       expect(screen.queryByTestId("close-tab-details")).not.toBeInTheDocument();
     });
   });
+
+  describe("PR links via IssueHeader", () => {
+    it("passes PR props to IssueHeader when issue has PR external_ref", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: "https://github.com/owner/repo/pull/42",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByTestId("header-pr-view-link")).toBeInTheDocument();
+      expect(screen.getByTestId("header-pr-merge-link")).toBeInTheDocument();
+      expect(screen.getByTestId("header-pr-view-link")).toHaveTextContent(
+        "↗ #42",
+      );
+      expect(screen.getByTestId("header-pr-merge-link")).toHaveTextContent(
+        "→ merge #42",
+      );
+    });
+
+    it("does not pass PR props when external_ref is null", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: null,
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(
+        screen.queryByTestId("header-pr-view-link"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-pr-merge-link"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not pass PR props when external_ref is undefined", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: undefined,
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(
+        screen.queryByTestId("header-pr-view-link"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-pr-merge-link"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not pass PR props when external_ref is a non-PR URL", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: "JIRA-123",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(
+        screen.queryByTestId("header-pr-view-link"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-pr-merge-link"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("extracts PR number correctly from /pull/42 URL", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: "https://github.com/owner/repo/pull/42",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      const viewLink = screen.getByTestId("header-pr-view-link");
+      expect(viewLink).toHaveTextContent("↗ #42");
+      expect(viewLink).toHaveAttribute(
+        "href",
+        "https://github.com/owner/repo/pull/42",
+      );
+    });
+
+    it("extracts PR number correctly from /pulls/123 URL", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: "https://github.com/owner/repo/pulls/123",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      const viewLink = screen.getByTestId("header-pr-view-link");
+      expect(viewLink).toHaveTextContent("↗ #123");
+      expect(viewLink).toHaveAttribute(
+        "href",
+        "https://github.com/owner/repo/pulls/123",
+      );
+    });
+  });
 });

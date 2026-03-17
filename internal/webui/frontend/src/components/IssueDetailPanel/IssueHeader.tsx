@@ -46,6 +46,10 @@ export interface IssueHeaderProps {
   onCopyLink?: () => void;
   /** Callback when move button is clicked */
   onMove?: () => void;
+  /** Full PR URL (e.g., https://github.com/owner/repo/pull/42) */
+  prUrl?: string;
+  /** Extracted PR number (e.g., "42") */
+  prNumber?: string;
   /** Enable sticky mode styling */
   sticky?: boolean;
   /** Additional CSS class name */
@@ -81,6 +85,8 @@ export function IssueHeader({
   onPriorityClick,
   onCopyLink,
   onMove,
+  prUrl,
+  prNumber,
   sticky,
   className,
 }: IssueHeaderProps): JSX.Element {
@@ -125,6 +131,32 @@ export function IssueHeader({
           >
             {priorityInfo.short}
           </button>
+        )}
+        {prUrl && prNumber && (
+          <>
+            <a
+              className={styles.prViewLink}
+              href={prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`View pull request #${prNumber}`}
+              data-testid="header-pr-view-link"
+              onClick={(e) => e.stopPropagation()}
+            >
+              ↗ #{prNumber}
+            </a>
+            <a
+              className={styles.prMergeLink}
+              href={prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Merge pull request #${prNumber}`}
+              data-testid="header-pr-merge-link"
+              onClick={(e) => e.stopPropagation()}
+            >
+              → merge #{prNumber}
+            </a>
+          </>
         )}
         {onCopyLink && (
           <button

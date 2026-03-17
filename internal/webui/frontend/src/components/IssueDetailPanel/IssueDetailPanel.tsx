@@ -38,7 +38,7 @@ import type {
   Event,
 } from "@/types";
 import type { Status } from "@/types/status";
-import { getReviewType } from "@/utils/issueCategory";
+import { getReviewType, isPRUrl } from "@/utils/issueCategory";
 
 import type { ConnectionState } from "@/components/TerminalView";
 
@@ -920,6 +920,13 @@ function DefaultContent({
   const openBlockerCount =
     dependencies?.filter((d) => d.status !== "closed").length ?? 0;
 
+  // Extract PR URL and number from external_ref for header links
+  const prNumber =
+    issue.external_ref && isPRUrl(issue.external_ref)
+      ? issue.external_ref.match(/\/pulls?\/(\d+)/)?.[1]
+      : undefined;
+  const prProps = prNumber ? { prUrl: issue.external_ref!, prNumber } : {};
+
   // Auto-collapse logic for Notes (collapse if long, but keep expanded for review items)
   const shouldCollapseNotes =
     issue.notes &&
@@ -940,6 +947,7 @@ function DefaultContent({
           showPriority={true}
           {...(onCopyLink !== undefined && { onCopyLink })}
           {...(canMove && { onMove: () => setShowMoveDialog(true) })}
+          {...prProps}
           sticky={true}
         />
 

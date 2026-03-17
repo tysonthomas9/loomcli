@@ -110,6 +110,48 @@
   color: var(--color-text-muted);
 }
 
+/* PR view link */
+.prViewLink {
+  font-size: 11px;
+  font-family: var(--font-family-mono);
+  color: var(--color-primary);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.prViewLink:hover {
+  background-color: var(--color-primary-bg);
+  text-decoration: underline;
+}
+
+.prViewLink:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* PR merge link */
+.prMergeLink {
+  font-size: 11px;
+  font-family: var(--font-family-mono);
+  color: var(--color-success);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.prMergeLink:hover {
+  background-color: var(--color-success-bg);
+  text-decoration: underline;
+}
+
+.prMergeLink:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .copyLinkButton {
   margin-left: auto;
   width: 28px;
