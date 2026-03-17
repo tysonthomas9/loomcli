@@ -892,12 +892,13 @@ func TestCollectStatistics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			mock := &MockIssueTracker{
+				RunCommandFunc: func(dir string, args ...string) (string, error) {
+					return tt.bdOutput, tt.bdErr
+				},
 			}
+			setDefaultTracker(mock)
+			defer resetDefaultTracker()
 
 			stats := collectStatistics()
 
@@ -998,12 +999,13 @@ func TestCollectSyncStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			mock := &MockIssueTracker{
+				RunCommandFunc: func(dir string, args ...string) (string, error) {
+					return tt.bdOutput, tt.bdErr
+				},
 			}
+			setDefaultTracker(mock)
+			defer resetDefaultTracker()
 
 			syncInfo := collectSyncStatus(tt.agents)
 
@@ -1209,30 +1211,31 @@ func TestCollectTaskStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				if len(args) > 0 && args[0] == "ready" {
-					return CommandResult{Stdout: tt.readyOutput}
-				}
-				if len(args) > 1 && args[0] == "list" && args[1] == "--status=in_progress" {
-					return CommandResult{Stdout: tt.inProgressOutput}
-				}
-				if len(args) > 1 && args[0] == "list" && args[1] == "--status=review" {
-					return CommandResult{Stdout: tt.needReviewOutput}
-				}
-				if len(args) > 1 && args[0] == "list" && args[1] == "--status=closed" {
-					if tt.closedOutput != "" {
-						return CommandResult{Stdout: tt.closedOutput}
+			mock := &MockIssueTracker{
+				RunCommandFunc: func(dir string, args ...string) (string, error) {
+					if len(args) > 0 && args[0] == "ready" {
+						return tt.readyOutput, nil
 					}
-					return CommandResult{Stdout: "[]"}
-				}
-				if len(args) > 0 && args[0] == "blocked" {
-					return CommandResult{Stdout: tt.blockedOutput}
-				}
-				return CommandResult{}
+					if len(args) > 1 && args[0] == "list" && args[1] == "--status=in_progress" {
+						return tt.inProgressOutput, nil
+					}
+					if len(args) > 1 && args[0] == "list" && args[1] == "--status=review" {
+						return tt.needReviewOutput, nil
+					}
+					if len(args) > 1 && args[0] == "list" && args[1] == "--status=closed" {
+						if tt.closedOutput != "" {
+							return tt.closedOutput, nil
+						}
+						return "[]", nil
+					}
+					if len(args) > 0 && args[0] == "blocked" {
+						return tt.blockedOutput, nil
+					}
+					return "", nil
+				},
 			}
+			setDefaultTracker(mock)
+			defer resetDefaultTracker()
 
 			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks := collectTaskStatus(100)
 

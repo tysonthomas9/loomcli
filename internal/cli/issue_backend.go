@@ -89,7 +89,14 @@ func defaultTracker() IssueTracker {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	if trackerInst == nil {
-		trackerInst = defaultDeps.Tracker
+		if t := defaultDeps.Tracker; t != nil {
+			trackerInst = t
+		} else {
+			// Fallback: don't cache nil — return an ephemeral backend so
+			// callers never get a nil pointer even if defaultDeps.Tracker
+			// was not set (e.g. partial test fixtures).
+			return newBdBackend(defaultBDRunner{}, GetBeadsDir())
+		}
 	}
 	return trackerInst
 }
