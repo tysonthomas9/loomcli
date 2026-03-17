@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -881,66 +883,59 @@ func TestGetTaskStatus(t *testing.T) {
 	tests := []struct {
 		name       string
 		taskID     string
-		bdResponse string
-		bdError    error
+		issue      *BdIssue
+		issueErr   error
 		wantStatus string
 	}{
 		{
 			name:       "closed task",
 			taskID:     "bd-123",
-			bdResponse: `[{"title":"Test Task","status":"closed"}]`,
+			issue:      &BdIssue{ID: "bd-123", Status: "closed"},
 			wantStatus: "closed",
 		},
 		{
-			name:       "need review task",
+			name:       "review task maps to needs_review",
 			taskID:     "bd-456",
-			bdResponse: `[{"title":"Design Feature","status":"review"}]`,
+			issue:      &BdIssue{ID: "bd-456", Status: "review"},
 			wantStatus: "needs_review",
 		},
 		{
 			name:       "open task",
 			taskID:     "bd-789",
-			bdResponse: `[{"title":"Test Task","status":"open"}]`,
+			issue:      &BdIssue{ID: "bd-789", Status: "open"},
 			wantStatus: "open",
 		},
 		{
 			name:       "in progress task",
 			taskID:     "bd-101",
-			bdResponse: `[{"title":"Working on feature","status":"in_progress"}]`,
+			issue:      &BdIssue{ID: "bd-101", Status: "in_progress"},
 			wantStatus: "in_progress",
 		},
 		{
-			name:       "bd command fails",
+			name:       "GetIssue returns error",
 			taskID:     "bd-error",
-			bdResponse: "",
-			bdError:    os.ErrNotExist,
+			issue:      nil,
+			issueErr:   errors.New("not found"),
 			wantStatus: "",
 		},
 		{
-			name:       "invalid JSON response",
-			taskID:     "bd-invalid",
-			bdResponse: `{invalid json}`,
-			wantStatus: "",
-		},
-		{
-			name:       "empty array response",
+			name:       "GetIssue returns nil issue",
 			taskID:     "bd-empty",
-			bdResponse: `[]`,
+			issue:      nil,
+			issueErr:   nil,
 			wantStatus: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := NewCommandMock(t, []CommandStub{
-				{
-					Name:   "bd",
-					Args:   []string{"show", tt.taskID, "--json"},
-					Stdout: tt.bdResponse,
-					Err:    tt.bdError,
+			mock := &MockIssueTracker{
+				GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+					return tt.issue, tt.issueErr
 				},
-			})
-			mock.Install()
+			}
+			setDefaultTracker(mock)
+			t.Cleanup(func() { setDefaultTracker(nil) })
 
 			status := getTaskStatus(tt.taskID)
 			if status != tt.wantStatus {
@@ -951,39 +946,37 @@ func TestGetTaskStatus(t *testing.T) {
 }
 
 func TestGetTaskStatus_ReviewStatus(t *testing.T) {
-	// Test that review status is properly detected
 	tests := []struct {
 		name       string
-		status     string
+		rawStatus  string
 		wantStatus string
 	}{
 		{
-			name:       "review status",
-			status:     "review",
+			name:       "review status maps to needs_review",
+			rawStatus:  "review",
 			wantStatus: "needs_review",
 		},
 		{
-			name:       "open status",
-			status:     "open",
+			name:       "open status unchanged",
+			rawStatus:  "open",
 			wantStatus: "open",
 		},
 		{
-			name:       "in_progress status",
-			status:     "in_progress",
+			name:       "in_progress status unchanged",
+			rawStatus:  "in_progress",
 			wantStatus: "in_progress",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bdResponse := `[{"title":"Test Feature","status":"` + tt.status + `"}]`
-			mock := NewCommandMock(t, []CommandStub{
-				{
-					Name:   "bd",
-					Stdout: bdResponse,
+			mock := &MockIssueTracker{
+				GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+					return &BdIssue{ID: id, Status: tt.rawStatus}, nil
 				},
-			})
-			mock.Install()
+			}
+			setDefaultTracker(mock)
+			t.Cleanup(func() { setDefaultTracker(nil) })
 
 			status := getTaskStatus("bd-test")
 			if status != tt.wantStatus {

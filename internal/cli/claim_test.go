@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -29,12 +30,14 @@ func TestRunClaim_Success(t *testing.T) {
 	lockData, _ := json.Marshal(lockInfo)
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
-	// Mock bd show command - verify it receives the worktree dir (tmpDir), not "."
-	taskJSON := `[{"id": "bd-123", "title": "Test Task Title"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: tmpDir, Name: "bd", Args: []string{"show", "bd-123", "--json"}, Stdout: taskJSON},
-	})
-	mock.Install()
+	// Mock IssueTracker for getTaskTitle
+	mockTracker := &MockIssueTracker{
+		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+			return &BdIssue{ID: id, Title: "Test Task Title"}, nil
+		},
+	}
+	setDefaultTracker(mockTracker)
+	t.Cleanup(func() { setDefaultTracker(nil) })
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -75,7 +78,7 @@ func TestRunClaim_Success(t *testing.T) {
 }
 
 func TestRunClaim_NoTitle(t *testing.T) {
-	// When bd show returns error, claim should still work but without title
+	// When GetIssue returns error, claim should still work but without title
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
 	// Set LOOM_EVENTS_DIR to avoid git rev-parse call in emitTaskClaimedEvent
@@ -93,11 +96,14 @@ func TestRunClaim_NoTitle(t *testing.T) {
 	lockData, _ := json.Marshal(lockInfo)
 	os.WriteFile(filepath.Join(tmpDir, LockFileName), lockData, 0644)
 
-	// Mock bd show command with error - verify it receives the worktree dir (tmpDir)
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: tmpDir, Name: "bd", Args: []string{"show", "bd-456", "--json"}, Err: errors.New("bd error")},
-	})
-	mock.Install()
+	// Mock IssueTracker returning error
+	mockTracker := &MockIssueTracker{
+		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+			return nil, errors.New("bd error")
+		},
+	}
+	setDefaultTracker(mockTracker)
+	t.Cleanup(func() { setDefaultTracker(nil) })
 
 	// Capture stdout
 	oldStdout := os.Stdout
@@ -122,72 +128,63 @@ func TestRunClaim_NoTitle(t *testing.T) {
 }
 
 func TestGetTaskTitle_Success(t *testing.T) {
-	taskJSON := `[{"id": "bd-789", "title": "My Task Title"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: ".", Name: "bd", Args: []string{"show", "bd-789", "--json"}, Stdout: taskJSON},
-	})
-	mock.Install()
+	mock := &MockIssueTracker{
+		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+			return &BdIssue{ID: id, Title: "My Task Title"}, nil
+		},
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(nil) })
 
-	title := getTaskTitle(".", "bd-789")
+	title := getTaskTitle("bd-789")
 	if title != "My Task Title" {
 		t.Errorf("expected 'My Task Title', got %q", title)
 	}
 }
 
 func TestGetTaskTitle_BdError(t *testing.T) {
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: ".", Name: "bd", Args: []string{"show", "bd-error", "--json"}, Err: errors.New("bd error")},
-	})
-	mock.Install()
+	mock := &MockIssueTracker{
+		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+			return nil, errors.New("bd error")
+		},
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(nil) })
 
-	title := getTaskTitle(".", "bd-error")
+	title := getTaskTitle("bd-error")
 	if title != "" {
 		t.Errorf("expected empty string on error, got %q", title)
 	}
 }
 
-func TestGetTaskTitle_InvalidJSON(t *testing.T) {
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: ".", Name: "bd", Args: []string{"show", "bd-bad", "--json"}, Stdout: "not valid json"},
-	})
-	mock.Install()
+func TestGetTaskTitle_NilIssue(t *testing.T) {
+	mock := &MockIssueTracker{
+		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+			return nil, nil
+		},
+	}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(nil) })
 
-	title := getTaskTitle(".", "bd-bad")
+	title := getTaskTitle("bd-empty")
 	if title != "" {
-		t.Errorf("expected empty string on invalid JSON, got %q", title)
+		t.Errorf("expected empty string on nil issue, got %q", title)
 	}
 }
 
-func TestGetTaskTitle_EmptyArray(t *testing.T) {
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: ".", Name: "bd", Args: []string{"show", "bd-empty", "--json"}, Stdout: "[]"},
-	})
-	mock.Install()
-
-	title := getTaskTitle(".", "bd-empty")
-	if title != "" {
-		t.Errorf("expected empty string on empty array, got %q", title)
+func TestGetTaskTitle_PassesCorrectID(t *testing.T) {
+	var capturedID string
+	mock := &MockIssueTracker{
+		GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+			capturedID = id
+			return &BdIssue{ID: id, Title: "Test"}, nil
+		},
 	}
-}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { setDefaultTracker(nil) })
 
-func TestGetTaskTitle_UsesProvidedDir(t *testing.T) {
-	taskJSON := `[{"id": "bd-123", "title": "Dir Test"}]`
-	mock := NewCommandMock(t, []CommandStub{
-		{Dir: "/some/specific/path", Name: "bd", Args: []string{"show", "bd-123", "--json"}, Stdout: taskJSON},
-	})
-	mock.Install()
-
-	title := getTaskTitle("/some/specific/path", "bd-123")
-	if title != "Dir Test" {
-		t.Errorf("expected 'Dir Test', got %q", title)
-	}
-
-	// Verify the mock recorded the correct directory
-	calls := mock.Calls()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(calls))
-	}
-	if calls[0].Dir != "/some/specific/path" {
-		t.Errorf("expected dir '/some/specific/path', got %q", calls[0].Dir)
+	getTaskTitle("bd-123")
+	if capturedID != "bd-123" {
+		t.Errorf("expected GetIssue called with 'bd-123', got %q", capturedID)
 	}
 }

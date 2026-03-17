@@ -2329,37 +2329,37 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 	tests := []struct {
 		name         string
 		lockCommand  string // "plan" or "task"
-		taskStatus   string // return from getTaskStatus mock
+		rawStatus    string // raw status from GetIssue (before getTaskStatus mapping)
 		expectPrefix string
 	}{
 		{
 			name:         "planning_agent_task_needs_review_becomes_review",
 			lockCommand:  "plan",
-			taskStatus:   "needs_review",
+			rawStatus:    "review", // getTaskStatus maps "review" → "needs_review"
 			expectPrefix: "review:",
 		},
 		{
 			name:         "working_agent_task_needs_review_stays_working",
 			lockCommand:  "task",
-			taskStatus:   "needs_review",
+			rawStatus:    "review",
 			expectPrefix: "working:",
 		},
 		{
 			name:         "planning_agent_task_closed_becomes_done",
 			lockCommand:  "plan",
-			taskStatus:   "closed",
+			rawStatus:    "closed",
 			expectPrefix: "done:",
 		},
 		{
 			name:         "working_agent_task_closed_becomes_done",
 			lockCommand:  "task",
-			taskStatus:   "closed",
+			rawStatus:    "closed",
 			expectPrefix: "done:",
 		},
 		{
 			name:         "planning_agent_task_in_progress_keeps_planning",
 			lockCommand:  "plan",
-			taskStatus:   "in_progress",
+			rawStatus:    "in_progress",
 			expectPrefix: "planning:",
 		},
 	}
@@ -2396,6 +2396,15 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			lockData, _ := json.Marshal(lockInfo)
 			os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644)
 
+			// Mock IssueTracker for getTaskStatus
+			mockTracker := &MockIssueTracker{
+				GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+					return &BdIssue{ID: id, Title: "Test Task", Status: tt.rawStatus}, nil
+				},
+			}
+			setDefaultTracker(mockTracker)
+			t.Cleanup(func() { setDefaultTracker(nil) })
+
 			oldExec := execCommand
 			t.Cleanup(func() { execCommand = oldExec })
 
@@ -2408,13 +2417,6 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 				}
 				if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 					return CommandResult{Stdout: "0\t0"}
-				}
-				// Mock bd show for getTaskStatus
-				if name == "bd" && len(args) > 0 && args[0] == "show" {
-					return CommandResult{Stdout: mustJSON([]struct {
-						Title  string `json:"title"`
-						Status string `json:"status"`
-					}{{Title: "Test Task", Status: tt.taskStatus}})}
 				}
 				return CommandResult{}
 			}
