@@ -315,6 +315,7 @@ function App() {
     error: detailError,
     fetchIssue,
     clearIssue,
+    updateIssueDetails,
   } = useIssueDetail();
 
   // Previous view state for issue-detail back navigation
@@ -1124,6 +1125,7 @@ function App() {
             onClose={handlePanelClose}
             onApprove={handleApprove}
             onReject={handleReject}
+            onIssueUpdate={updateIssueDetails}
             onCopyLink={handleCopyLink}
             onNavigateToIssue={handleIssueClick}
           />

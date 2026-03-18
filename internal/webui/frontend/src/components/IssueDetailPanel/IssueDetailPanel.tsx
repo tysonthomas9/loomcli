@@ -159,6 +159,8 @@ export interface IssueDetailPanelProps {
   onApprove?: (issue: Issue) => void | Promise<void>;
   /** Callback when reject is submitted with comment (only for review items) */
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
+  /** Callback when issue is updated (e.g., status, title, priority changed) */
+  onIssueUpdate?: (issue: Issue) => void;
   /** Callback when copy-link button is clicked */
   onCopyLink?: () => void;
   /** Callback when a dependency/dependent issue is clicked for navigation */
@@ -1452,6 +1454,7 @@ export function IssueDetailPanel({
   children,
   onApprove,
   onReject,
+  onIssueUpdate,
   onCopyLink,
   onNavigateToIssue,
 }: IssueDetailPanelProps): JSX.Element {
@@ -1492,6 +1495,7 @@ export function IssueDetailPanel({
       onClose={onClose}
       {...(onApprove !== undefined && { onApprove })}
       {...(onReject !== undefined && { onReject })}
+      {...(onIssueUpdate !== undefined && { onIssueUpdate })}
       {...(onCopyLink !== undefined && { onCopyLink })}
       {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
     />
