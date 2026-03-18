@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -361,5 +362,95 @@ func TestRepoConfig_ResolveAbsPath_EmptyWorkspace(t *testing.T) {
 	want := filepath.Join("", "repos/myrepo")
 	if got != want {
 		t.Errorf("ResolveAbsPath(%q) = %q, want %q", "", got, want)
+	}
+}
+
+// captureStderr redirects os.Stderr to a pipe, runs fn, and returns
+// whatever was written to stderr as a string.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	os.Stderr = w
+
+	fn()
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stderr: %v", err)
+	}
+	return string(out)
+}
+
+func TestLoadConfig_VersionWarningDedup(t *testing.T) {
+	// Reset the once guard so this test starts clean.
+	resetConfigVersionWarnOnce()
+	t.Cleanup(resetConfigVersionWarnOnce)
+
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	// Write a version-0 config (version field omitted defaults to 0,
+	// which is below CurrentConfigVersion=1).
+	yamlData := `workspaces:
+  ws:
+    path: /tmp/ws
+    repos:
+      - name: myrepo
+        path: /tmp/ws/myrepo
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	const warnSubstr = "Run 'loom config migrate' to upgrade"
+
+	// First call: warning should appear.
+	stderr1 := captureStderr(t, func() {
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() #1 error = %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("LoadConfig() #1 returned nil")
+		}
+	})
+	if count := strings.Count(stderr1, warnSubstr); count != 1 {
+		t.Errorf("first LoadConfig(): want exactly 1 warning, got %d; stderr = %q", count, stderr1)
+	}
+
+	// Second call: warning should be suppressed by sync.Once.
+	stderr2 := captureStderr(t, func() {
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() #2 error = %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("LoadConfig() #2 returned nil")
+		}
+	})
+	if strings.Contains(stderr2, warnSubstr) {
+		t.Errorf("second LoadConfig(): want no warning, got stderr = %q", stderr2)
+	}
+
+	// Reset the guard and call again: warning should reappear.
+	resetConfigVersionWarnOnce()
+	stderr3 := captureStderr(t, func() {
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() #3 error = %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("LoadConfig() #3 returned nil")
+		}
+	})
+	if count := strings.Count(stderr3, warnSubstr); count != 1 {
+		t.Errorf("after reset, LoadConfig(): want exactly 1 warning, got %d; stderr = %q", count, stderr3)
 	}
 }

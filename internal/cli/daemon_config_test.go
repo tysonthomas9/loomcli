@@ -1412,3 +1412,66 @@ func TestValidateAgentRepos_NoRepoField(t *testing.T) {
 		t.Errorf("validateAgentRepos() error = %v, want nil (no repo field set)", err)
 	}
 }
+
+func TestLoadProjectFile_VersionWarningDedup(t *testing.T) {
+	// Reset the once guard so this test starts clean.
+	resetProjectConfigVersionWarnOnce()
+	t.Cleanup(resetProjectConfigVersionWarnOnce)
+
+	dir := t.TempDir()
+
+	// Write a version-0 project config (version field omitted defaults to 0,
+	// which is below CurrentConfigVersion=1).
+	yamlContent := `agents:
+  - worktree: falcon
+    role: plan
+`
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	const warnSubstr = "Run 'loom config migrate' to upgrade"
+
+	// First call: warning should appear.
+	stderr1 := captureStderr(t, func() {
+		pf, err := LoadProjectFile(dir)
+		if err != nil {
+			t.Fatalf("LoadProjectFile() #1 error = %v", err)
+		}
+		if pf == nil {
+			t.Fatal("LoadProjectFile() #1 returned nil")
+		}
+	})
+	if count := strings.Count(stderr1, warnSubstr); count != 1 {
+		t.Errorf("first LoadProjectFile(): want exactly 1 warning, got %d; stderr = %q", count, stderr1)
+	}
+
+	// Second call: warning should be suppressed by sync.Once.
+	stderr2 := captureStderr(t, func() {
+		pf, err := LoadProjectFile(dir)
+		if err != nil {
+			t.Fatalf("LoadProjectFile() #2 error = %v", err)
+		}
+		if pf == nil {
+			t.Fatal("LoadProjectFile() #2 returned nil")
+		}
+	})
+	if strings.Contains(stderr2, warnSubstr) {
+		t.Errorf("second LoadProjectFile(): want no warning, got stderr = %q", stderr2)
+	}
+
+	// Reset the guard and call again: warning should reappear.
+	resetProjectConfigVersionWarnOnce()
+	stderr3 := captureStderr(t, func() {
+		pf, err := LoadProjectFile(dir)
+		if err != nil {
+			t.Fatalf("LoadProjectFile() #3 error = %v", err)
+		}
+		if pf == nil {
+			t.Fatal("LoadProjectFile() #3 returned nil")
+		}
+	})
+	if count := strings.Count(stderr3, warnSubstr); count != 1 {
+		t.Errorf("after reset, LoadProjectFile(): want exactly 1 warning, got %d; stderr = %q", count, stderr3)
+	}
+}

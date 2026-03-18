@@ -4,9 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
+
+var configVersionWarnOnce sync.Once
+
+func resetConfigVersionWarnOnce() {
+	configVersionWarnOnce = sync.Once{}
+}
 
 // LoomConfig is the top-level configuration from ~/.loom/config.yaml
 type LoomConfig struct {
@@ -124,7 +131,9 @@ func LoadConfig() (*LoomConfig, error) {
 	}
 
 	if cfg.Version < CurrentConfigVersion {
-		fmt.Fprintf(os.Stderr, "Warning: config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, cfg.Version, CurrentConfigVersion)
+		configVersionWarnOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "Warning: config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, cfg.Version, CurrentConfigVersion)
+		})
 	}
 
 	// Run comprehensive validation (warnings only — don't block on path checks)

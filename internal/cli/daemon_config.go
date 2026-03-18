@@ -5,10 +5,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"text/template"
 
 	"gopkg.in/yaml.v3"
 )
+
+var projectConfigVersionWarnOnce sync.Once
+
+func resetProjectConfigVersionWarnOnce() {
+	projectConfigVersionWarnOnce = sync.Once{}
+}
 
 // DaemonSettings holds daemon-specific config fields.
 type DaemonSettings struct {
@@ -142,7 +149,9 @@ func LoadProjectFile(dir string) (*ProjectFile, error) {
 		return nil, fmt.Errorf("parsing project file %s: %w", path, err)
 	}
 	if pf.Version < CurrentConfigVersion {
-		fmt.Fprintf(os.Stderr, "Warning: project config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, pf.Version, CurrentConfigVersion)
+		projectConfigVersionWarnOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "Warning: project config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, pf.Version, CurrentConfigVersion)
+		})
 	}
 	return &pf, nil
 }
