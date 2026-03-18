@@ -187,14 +187,25 @@ function wsQuery(workspace?: string): string {
 
 /**
  * List all tab metadata from GET /api/terminal/tabs.
+ * Returns an empty array when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
  */
 export async function listTabMetadata(
   workspace?: string,
 ): Promise<TabMetadata[]> {
-  const response = await get<ApiResult<TabMetadata[]>>(
-    `/api/terminal/tabs${wsQuery(workspace)}`,
-  );
-  return unwrap(response);
+  try {
+    const response = await get<ApiResult<TabMetadata[]>>(
+      `/api/terminal/tabs${wsQuery(workspace)}`,
+    );
+    return unwrap(response);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 503)
+    ) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 /**
@@ -274,12 +285,23 @@ export async function scheduleSessionKill(sessionName: string): Promise<void> {
 /**
  * List sessions grouped by issue ID from GET /api/terminal/sessions/by-issue.
  * Returns a map of issue_id → session_name[].
+ * Returns an empty map when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
  */
 export async function listSessionsByIssue(): Promise<Record<string, string[]>> {
-  const response = await get<ApiResult<Record<string, string[]>>>(
-    "/api/terminal/sessions/by-issue",
-  );
-  return unwrap(response);
+  try {
+    const response = await get<ApiResult<Record<string, string[]>>>(
+      "/api/terminal/sessions/by-issue",
+    );
+    return unwrap(response);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 503)
+    ) {
+      return {};
+    }
+    throw error;
+  }
 }
 
 /**

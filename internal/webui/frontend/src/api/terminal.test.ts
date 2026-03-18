@@ -178,6 +178,36 @@ describe("terminal API", () => {
 
       await expect(listTabMetadata()).rejects.toThrow(ApiError);
     });
+
+    it("returns empty array on 404 ApiError (tab metadata disabled)", async () => {
+      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
+
+      const result = await listTabMetadata();
+
+      expect(result).toEqual([]);
+    });
+
+    it("returns empty array on 503 ApiError (Redis unavailable)", async () => {
+      mockGet.mockRejectedValue(new ApiError(503, "Service Unavailable"));
+
+      const result = await listTabMetadata();
+
+      expect(result).toEqual([]);
+    });
+
+    it("re-throws non-404/503 ApiError", async () => {
+      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+
+      await expect(listTabMetadata()).rejects.toThrow(
+        "API Error: 500 Internal Server Error",
+      );
+    });
+
+    it("re-throws non-ApiError errors", async () => {
+      mockGet.mockRejectedValue(new Error("network failure"));
+
+      await expect(listTabMetadata()).rejects.toThrow("network failure");
+    });
   });
 
   // ============= getTabMetadata =============

@@ -1829,3 +1829,30 @@ func TestSetupRoutes_LoomProxy_NotRegisteredWhenURLInvalid(t *testing.T) {
 		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
 	}
 }
+
+// --- Tab metadata route conditional registration tests ---
+
+// TestSetupRoutes_TabMetadataReturns404WhenStoreNil verifies that GET /api/terminal/tabs
+// returns a 404 JSON response (not SPA HTML) when tabMetaStore is nil.
+// When Redis is not configured the tab metadata routes are not registered,
+// so the request falls through to the SPA catch-all which rejects /api/* with 404 JSON.
+func TestSetupRoutes_TabMetadataReturns404WhenStoreNil(t *testing.T) {
+	mux := http.NewServeMux()
+	// All nil params — tabMetaStore (param 21) is nil, so tab metadata routes are not registered.
+	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/tabs", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	// Route is not registered; SPA catch-all rejects /api/* with 404 JSON
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected /api/terminal/tabs to return %d when tabMetaStore is nil, got %d",
+			http.StatusNotFound, rr.Code)
+	}
+
+	ct := rr.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+}
