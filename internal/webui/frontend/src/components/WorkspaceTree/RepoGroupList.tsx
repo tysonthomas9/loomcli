@@ -6,6 +6,7 @@
 import type { ConnectionState } from "@/api/sse";
 import type { LoomAgentStatus } from "@/types";
 import { AgentCard } from "@/components/AgentCard";
+import type { WorkspaceHealthSummary } from "@/utils/workspaceHealth";
 
 import { ConnectionIndicator } from "./ConnectionIndicator";
 import styles from "./WorkspaceTree.module.css";
@@ -29,6 +30,8 @@ export interface RepoGroupListProps {
   connectionState?: ConnectionState | undefined;
   /** Timestamp when disconnect began */
   disconnectedSince?: number | null | undefined;
+  /** Health summary per repo for status dot coloring */
+  repoHealthMap?: Map<string, WorkspaceHealthSummary>;
 }
 
 export function RepoGroupList({
@@ -43,6 +46,7 @@ export function RepoGroupList({
   agentTasks,
   connectionState,
   disconnectedSince,
+  repoHealthMap,
 }: RepoGroupListProps): JSX.Element {
   const isDisconnected =
     connectionState !== undefined &&
@@ -54,9 +58,28 @@ export function RepoGroupList({
       {repos.map((repo) => {
         const repoAgentList = repoAgents.get(repo.name) ?? [];
         const agentCount = repoAgentList.length;
-        const isActive = agentCount > 0;
+        const hasAgents = agentCount > 0;
         const isSelected = activeRepoName === repo.name;
         const isRepoCollapsed = !!repoCollapseState[repo.name];
+        const health = repoHealthMap?.get(repo.name);
+        const healthColor = health?.healthColor ?? "green";
+        const activeAgentCount = health?.activeCount ?? 0;
+        const errorAgentCount = health?.errorCount ?? 0;
+
+        // Build tooltip: include health stats when agents exist
+        const tooltipParts = [repo.path];
+        if (hasAgents) {
+          tooltipParts.push(
+            `Agents: ${agentCount} | Active: ${activeAgentCount} | Errors: ${errorAgentCount}`,
+          );
+        }
+        const tooltip = tooltipParts.join("\n");
+
+        // Agent count label: "active/total" when active > 0, else just total
+        const agentCountLabel =
+          activeAgentCount > 0
+            ? `${activeAgentCount}/${agentCount}`
+            : `${agentCount}`;
 
         return (
           <div key={repo.name} className={styles.repoGroup}>
@@ -64,7 +87,7 @@ export function RepoGroupList({
               type="button"
               className={styles.repoGroupHeader}
               onClick={() => onWorkspaceSelect?.(repo.name)}
-              title={repo.path}
+              title={tooltip}
               role="radio"
               aria-checked={isSelected}
             >
@@ -88,11 +111,15 @@ export function RepoGroupList({
               </span>
               <span className={styles.repoName}>{repo.name}</span>
               <span className={styles.repoMeta}>
-                {isActive &&
+                {hasAgents &&
                   (connectionState === undefined ||
                     connectionState === "connected") && (
-                    <span className={styles.agentCount} data-active={isActive}>
-                      {agentCount}
+                    <span
+                      className={styles.agentCount}
+                      data-has-agents="true"
+                      data-health={healthColor}
+                    >
+                      {agentCountLabel}
                     </span>
                   )}
                 {isDisconnected ? (
@@ -101,7 +128,11 @@ export function RepoGroupList({
                     disconnectedSince={disconnectedSince!}
                   />
                 ) : (
-                  <span className={styles.statusDot} data-active={isActive} />
+                  <span
+                    className={styles.statusDot}
+                    data-health={healthColor}
+                    data-has-agents={hasAgents}
+                  />
                 )}
               </span>
               <span

@@ -144,9 +144,20 @@
   color: var(--color-text-secondary);
 }
 
-.agentCount[data-active="true"] {
-  background: var(--color-status-working);
+.agentCount[data-has-agents="true"] {
   color: white;
+}
+
+.agentCount[data-health="green"] {
+  background: var(--color-success);
+}
+
+.agentCount[data-health="yellow"] {
+  background: var(--color-status-working);
+}
+
+.agentCount[data-health="red"] {
+  background: var(--color-status-error);
 }
 
 .statusDot {
@@ -157,9 +168,31 @@
   opacity: 0.4;
 }
 
-.statusDot[data-active="true"] {
-  background: var(--color-success);
+.statusDot[data-has-agents="true"] {
   opacity: 1;
+}
+
+.statusDot[data-health="green"] {
+  background: var(--color-success);
+}
+
+.statusDot[data-health="yellow"] {
+  background: var(--color-warning);
+}
+
+.statusDot[data-health="red"] {
+  background: var(--color-status-error);
+  animation: healthPulse 2s ease-in-out infinite;
+}
+
+@keyframes healthPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .collapsedBadge {
@@ -610,7 +643,16 @@
   color: var(--color-text-tertiary);
 }
 
-/* Collapsed badge in disconnected state */
+/* Collapsed badge health-based colors */
+.collapsedBadge[data-health="green"] {
+  background: var(--color-success);
+}
+
+.collapsedBadge[data-health="red"] {
+  background: var(--color-status-error);
+}
+
+/* Collapsed badge in disconnected state (overrides health color) */
 .collapsedBadge[data-disconnected="true"] {
   background: var(--color-warning, #f59e0b);
 }

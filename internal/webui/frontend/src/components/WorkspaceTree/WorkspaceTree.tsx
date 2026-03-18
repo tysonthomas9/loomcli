@@ -31,6 +31,11 @@ import type { WorkspaceSummary } from "@/api/workspace";
 import type { ConnectionState } from "@/api/sse";
 import type { LoomAgentStatus } from "@/types";
 import { useWorkspaceRepos, useAgentContext, useToast } from "@/hooks";
+import {
+  computeRepoHealth,
+  worstHealthColor,
+  type WorkspaceHealthSummary,
+} from "@/utils/workspaceHealth";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 
@@ -424,15 +429,37 @@ export function WorkspaceTree({
     return { repoAgents: grouped, unassignedAgents: unassigned };
   }, [repos, agents]);
 
-  // Count total active agents across workspace repos
-  const totalActiveCount = useMemo(() => {
-    let count = 0;
-    for (const [, agentList] of repoAgents) {
-      count += agentList.length;
+  // Compute health summary per repo
+  const repoHealthMap = useMemo(() => {
+    const map = new Map<string, WorkspaceHealthSummary>();
+    for (const repo of repos) {
+      const agentList = repoAgents.get(repo.name) ?? [];
+      map.set(repo.name, computeRepoHealth(agentList));
     }
-    count += unassignedAgents.length;
-    return count;
-  }, [repoAgents, unassignedAgents]);
+    return map;
+  }, [repos, repoAgents]);
+
+  // Derive total active count and worst health color across all repos
+  const { totalActiveCount, worstHealth } = useMemo(() => {
+    const colors: Array<"green" | "yellow" | "red"> = [];
+    for (const [, health] of repoHealthMap) {
+      colors.push(health.healthColor);
+    }
+    // Include unassigned agents in totals
+    if (unassignedAgents.length > 0) {
+      const unassignedHealth = computeRepoHealth(unassignedAgents);
+      colors.push(unassignedHealth.healthColor);
+    }
+    const totalCount =
+      Array.from(repoHealthMap.values()).reduce(
+        (sum, h) => sum + h.totalAgents,
+        0,
+      ) + unassignedAgents.length;
+    return {
+      totalActiveCount: totalCount,
+      worstHealth: worstHealthColor(colors),
+    };
+  }, [repoHealthMap, unassignedAgents]);
 
   const isDisconnected =
     connectionState !== undefined &&
@@ -633,7 +660,8 @@ export function WorkspaceTree({
                 </span>
                 <span
                   className={styles.agentCount}
-                  data-active={totalActiveCount > 0}
+                  data-has-agents={totalActiveCount > 0 ? "true" : undefined}
+                  data-health={totalActiveCount > 0 ? worstHealth : undefined}
                 >
                   {totalActiveCount}
                 </span>
@@ -651,6 +679,7 @@ export function WorkspaceTree({
                 agentTasks={agentTasks}
                 connectionState={connectionState}
                 disconnectedSince={disconnectedSince}
+                repoHealthMap={repoHealthMap}
               />
             </div>
           )}
@@ -682,6 +711,7 @@ export function WorkspaceTree({
         <div
           className={styles.collapsedBadge}
           data-disconnected={isDisconnected}
+          data-health={worstHealth}
           title={
             connectionLost
               ? "Connection lost"
@@ -689,7 +719,7 @@ export function WorkspaceTree({
                 ? "Reconnecting..."
                 : isDisconnected
                   ? "Disconnected"
-                  : `${totalActiveCount} active agent(s)`
+                  : `${totalActiveCount} agent(s)`
           }
         >
           {isDisconnected ? "!" : totalActiveCount}
