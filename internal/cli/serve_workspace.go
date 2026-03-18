@@ -191,6 +191,7 @@ func buildWorkspaceInfo() (*webui.WorkspaceData, error) {
 			Active:    name == wsName,
 			RepoCount: len(w.Repos),
 			IsDefault: name == cfg.DefaultWorkspace,
+			Backend:   w.Backend,
 		})
 	}
 	sortWorkspaceSummaries(summaries, cfg.WorkspaceOrder)

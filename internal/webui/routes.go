@@ -57,6 +57,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	mux.HandleFunc("PUT /api/workspace/order", handleWorkspaceReorder(workspaceConfigFn))
 	mux.HandleFunc("PUT /api/workspace/default", handleSetDefaultWorkspace(setDefaultWsFn, workspaceConfigFn))
 	mux.HandleFunc("DELETE /api/workspace/default", handleClearDefaultWorkspace(clearDefaultWsFn, workspaceConfigFn))
+	mux.HandleFunc("PATCH /api/workspace/{name}/config/backend", handleWorkspaceBackendPatch(workspaceConfigFn))
 
 	// Backend health endpoint
 	if backendOps != nil {

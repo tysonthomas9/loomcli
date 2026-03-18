@@ -29,6 +29,7 @@ export interface WorkspaceSummary {
   active: boolean;
   repo_count: number;
   is_default: boolean;
+  backend?: string;
 }
 
 export interface WorkspaceData {

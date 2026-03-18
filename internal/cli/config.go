@@ -27,8 +27,9 @@ type LoomConfig struct {
 
 // WorkspaceConfig defines a named workspace containing multiple repos
 type WorkspaceConfig struct {
-	Path  string       `yaml:"path" json:"path"`   // Directory path for this workspace
-	Repos []RepoConfig `yaml:"repos" json:"repos"` // Repositories in this workspace
+	Path    string       `yaml:"path" json:"path"`                           // Directory path for this workspace
+	Backend string       `yaml:"backend,omitempty" json:"backend,omitempty"` // AI backend override for this workspace
+	Repos   []RepoConfig `yaml:"repos" json:"repos"`                         // Repositories in this workspace
 }
 
 // RepoConfig defines a single repository within a workspace

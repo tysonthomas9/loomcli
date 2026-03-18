@@ -85,6 +85,7 @@ type WorkspaceSummary struct {
 	Active    bool   `json:"active"`
 	RepoCount int    `json:"repo_count"`
 	IsDefault bool   `json:"is_default"`
+	Backend   string `json:"backend,omitempty"`
 }
 
 // WorkspaceRepo represents a repository within a workspace.
