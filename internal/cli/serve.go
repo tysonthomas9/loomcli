@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -279,6 +280,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				SetDefaultWorkspaceFn:   setDefaultWorkspace,
 				ClearDefaultWorkspaceFn: clearDefaultWorkspace,
 				BackendOps:              backendOps,
+				Logger:                  slog.Default(),
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true

@@ -85,7 +85,7 @@ Examples:
 	// Override PersistentPreRunE: doctor must run even when the backend
 	// binary is missing (that is one of the things it diagnoses).
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return nil
+		return InitLogger(logFormat, logOutput)
 	},
 }
 

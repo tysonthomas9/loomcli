@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -63,6 +64,7 @@ type ServerConfig struct {
 	ClearDefaultWorkspaceFn func() error                   // Clear default workspace in config; nil = feature disabled
 	BackendOps              BackendOps                     // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines      int                            // Maximum lines per scrollback buffer (0 = default 10000)
+	Logger                  *slog.Logger                   // Structured logger (optional; nil falls back to slog.Default())
 }
 
 // WorkspaceData represents the full workspace topology returned by the API.
