@@ -443,11 +443,10 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	// Create HTTP server
+	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	// Pass allowed origins for WebSocket origin validation.
-	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, config.BackendOps, sessionHistoryStore)
+	clientErrLimiter := setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, config.BackendOps, sessionHistoryStore)
+	defer clientErrLimiter.stop()
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.

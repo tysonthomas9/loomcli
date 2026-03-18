@@ -74,6 +74,11 @@ func isPublicRoute(method, path string) bool {
 		return true
 	}
 
+	// Client error reporting is public so errors during auth bootstrap are captured
+	if method == http.MethodPost && path == "/api/client-errors" {
+		return true
+	}
+
 	if method != http.MethodGet {
 		return false
 	}
