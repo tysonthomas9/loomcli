@@ -86,8 +86,8 @@ func TestHandleGetBackendConfig_WithProjectBackend(t *testing.T) {
 	if resp.Data.Source != "project" {
 		t.Errorf("expected source project, got %s", resp.Data.Source)
 	}
-	if len(resp.Data.Available) != 4 {
-		t.Errorf("expected 4 available backends (including shell), got %d", len(resp.Data.Available))
+	if len(resp.Data.Available) != 6 {
+		t.Errorf("expected 6 available backends (including shell), got %d", len(resp.Data.Available))
 	}
 }
 
@@ -425,9 +425,9 @@ func TestHandleGetBackendConfig_AvailableIncludesShell(t *testing.T) {
 		t.Fatalf("expected success, got error: %s", resp.Error)
 	}
 
-	// Available should include shell as the 4th item
-	if len(resp.Data.Available) != 4 {
-		t.Errorf("expected 4 available backends, got %d: %v", len(resp.Data.Available), resp.Data.Available)
+	// Available should include shell as the last item
+	if len(resp.Data.Available) != 6 {
+		t.Errorf("expected 6 available backends, got %d: %v", len(resp.Data.Available), resp.Data.Available)
 	}
 
 	found := false

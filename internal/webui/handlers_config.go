@@ -35,7 +35,7 @@ func attachCommandForSession(session string) string {
 }
 
 // validBackends is the list of supported AI backend names.
-var validBackends = []string{"claude", "codex", "opencode"}
+var validBackends = []string{"claude", "codex", "opencode", "gemini", "cursor"}
 
 // BackendConfigResponse wraps the backend config data for JSON response.
 type BackendConfigResponse struct {
@@ -201,7 +201,7 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 		}
 
 		if !isValidBackend(req.Backend) {
-			respondJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: fmt.Sprintf("invalid backend %q; valid options: claude, codex, opencode", req.Backend)})
+			respondJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: fmt.Sprintf("invalid backend %q; valid options: %s", req.Backend, strings.Join(validBackends, ", "))})
 			return
 		}
 

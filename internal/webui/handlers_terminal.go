@@ -137,7 +137,7 @@ func handleTerminalRestartWithPool(manager *TerminalManager, configPool configCo
 					if !isValidBackend(b) {
 						respondJSON(w, http.StatusBadRequest, map[string]interface{}{
 							"success": false,
-							"error":   fmt.Sprintf("invalid backend %q; valid: claude, codex, opencode", b),
+							"error":   fmt.Sprintf("invalid backend %q; valid: %s", b, strings.Join(validBackends, ", ")),
 						})
 						return
 					}

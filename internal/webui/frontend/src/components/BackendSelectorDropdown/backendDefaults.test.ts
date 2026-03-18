@@ -8,10 +8,13 @@ import { toBackendInfo, KNOWN_BACKEND_DEFAULTS } from "./backendDefaults";
 
 describe("backendDefaults", () => {
   describe("KNOWN_BACKEND_DEFAULTS", () => {
-    it("has defaults for claude, codex, opencode, and shell", () => {
+    it("has defaults for claude, codex, opencode, gemini, cursor, browser, and shell", () => {
       expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("claude");
       expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("codex");
       expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("opencode");
+      expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("gemini");
+      expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("cursor");
+      expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("browser");
       expect(KNOWN_BACKEND_DEFAULTS).toHaveProperty("shell");
     });
 

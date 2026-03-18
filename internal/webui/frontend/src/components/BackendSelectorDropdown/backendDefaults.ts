@@ -39,6 +39,21 @@ export const KNOWN_BACKEND_DEFAULTS: Record<string, BackendDefaults> = {
     provider: "Open Source",
     brandColor: "#6366f1",
   },
+  gemini: {
+    displayName: "Gemini",
+    provider: "Google",
+    brandColor: "#8e24aa",
+  },
+  cursor: {
+    displayName: "Cursor",
+    provider: "Anysphere",
+    brandColor: "#00e5ff",
+  },
+  browser: {
+    displayName: "Browser",
+    provider: "System",
+    brandColor: "#f59e0b",
+  },
   shell: {
     displayName: "Terminal",
     provider: "System",
