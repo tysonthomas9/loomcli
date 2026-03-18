@@ -15,7 +15,7 @@ type mockGitOps struct {
 	pushFunc               func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error)
 	pullFunc               func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error)
 	createPRFunc           func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error)
-	resetFunc              func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error)
+	resetFunc              func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error)
 	statusFunc             func(worktreePath, targetBranch string) (*GitStatusResult, error)
 	getCurrentBranchFunc   func(worktreePath string) (string, error)
 	checkGhInstalledFunc   func() error
@@ -51,9 +51,9 @@ func (m *mockGitOps) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 	return &GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 }
 
-func (m *mockGitOps) Reset(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+func (m *mockGitOps) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 	if m.resetFunc != nil {
-		return m.resetFunc(worktreePath, worktreeName, targetBranch, force)
+		return m.resetFunc(worktreePath, worktreeName, targetBranch, force, push)
 	}
 	return &GitResetResult{Success: true, Message: "reset done"}, nil
 }
@@ -744,7 +744,7 @@ func TestGitPR_OperationError(t *testing.T) {
 
 func TestGitReset_Success(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		return &GitResetResult{Success: true, Message: "reset to main", PreviousBranch: "loomcli-test-agent"}, nil
 	}
 	handler := handleGitReset(ops)
@@ -770,7 +770,7 @@ func TestGitReset_Success(t *testing.T) {
 
 func TestGitReset_CustomBranch(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		if targetBranch != "develop" {
 			t.Errorf("targetBranch = %q, want %q", targetBranch, "develop")
 		}
@@ -792,7 +792,7 @@ func TestGitReset_CustomBranch(t *testing.T) {
 
 func TestGitReset_ForceFlag(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		if !force {
 			t.Error("expected force to be true")
 		}
@@ -814,7 +814,7 @@ func TestGitReset_ForceFlag(t *testing.T) {
 
 func TestGitReset_Locked(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		return nil, &GitResetLockedError{
 			AgentName: "test-agent",
 			PID:       12345,
@@ -857,7 +857,7 @@ func TestGitReset_Locked(t *testing.T) {
 
 func TestGitReset_OperationError(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		return nil, errors.New("reset failed: dirty worktree")
 	}
 	handler := handleGitReset(ops)

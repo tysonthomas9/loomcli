@@ -13,6 +13,7 @@ import (
 var (
 	resetAll   bool
 	resetForce bool
+	resetPush  bool
 )
 
 var resetCmd = &cobra.Command{
@@ -27,7 +28,7 @@ WARNING: This discards ALL local changes!
 This command will:
   1. Discard all local changes (git reset --hard, git clean -fd)
   2. Reset to the target branch (origin/branch)
-  3. Force push the worktree branch to match
+  3. Force push only if --push is specified (local-only by default)
 
 In workspace mode, --all resets all repos in the workspace. Each repo
 resets to its own configured integration branch (DefaultBranch) unless
@@ -39,18 +40,21 @@ Arguments:
 
 Flags:
   -a, --all      Reset all worktrees
+  -p, --push     Force-push to remote after resetting locally
   -f, --force    Skip confirmation prompt, override lock protection,
                  and allow force-push to protected branches (main/master)
 
 Safety:
-  Force-pushing to main/master is blocked by default.
-  Use --force to override this protection.
+  By default, only local state is reset. The remote branch is NOT updated.
+  Use --push to force-push the reset to origin.
+  Force-pushing to main/master requires both --push and --force.
 
 Examples:
-  loom reset falcon                        # Reset falcon to integration branch
-  loom reset falcon main                   # Reset falcon to main
-  loom reset --all                         # Reset all worktrees to their integration branches
-  loom reset --all --force                 # Reset all worktrees (no confirmation)`,
+  loom reset falcon                        # Reset falcon locally (no push)
+  loom reset falcon main                   # Reset falcon to main (local only)
+  loom reset falcon --push                 # Reset falcon and force-push to origin
+  loom reset --all                         # Reset all worktrees locally
+  loom reset --all --push                  # Reset all worktrees and force-push`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if resetAll {
 			if len(args) > 1 {
@@ -68,6 +72,7 @@ Examples:
 
 func init() {
 	resetCmd.Flags().BoolVarP(&resetAll, "all", "a", false, "Reset all worktrees")
+	resetCmd.Flags().BoolVarP(&resetPush, "push", "p", false, "Force-push to remote after resetting locally")
 	resetCmd.Flags().BoolVarP(&resetForce, "force", "f", false, "Skip confirmation and allow force-push to protected branches (main/master)")
 	rootCmd.AddCommand(resetCmd)
 }
@@ -253,24 +258,29 @@ func resetWorktree(worktreeName, targetBranch string, askConfirm bool) bool {
 		return false
 	}
 
-	// Refuse to force-push protected branches unless --force was used
-	if isProtectedBranch(currentBranch) && !resetForce {
-		fmt.Fprintf(os.Stderr, "Error: refusing to force-push to protected branch '%s'.\n", currentBranch)
-		fmt.Fprintf(os.Stderr, "Use --force to override this protection.\n")
-		return false
-	}
-	if isProtectedBranch(currentBranch) && resetForce {
-		fmt.Fprintf(os.Stderr, "Warning: force-pushing to protected branch '%s'!\n", currentBranch)
-	}
+	if resetPush {
+		// Refuse to force-push protected branches unless --force was used
+		if isProtectedBranch(currentBranch) && !resetForce {
+			fmt.Fprintf(os.Stderr, "Error: refusing to force-push to protected branch '%s'.\n", currentBranch)
+			fmt.Fprintf(os.Stderr, "Use --force to override this protection.\n")
+			return false
+		}
+		if isProtectedBranch(currentBranch) && resetForce {
+			fmt.Fprintf(os.Stderr, "Warning: force-pushing to protected branch '%s'!\n", currentBranch)
+		}
 
-	// Force push
-	if err := GitPushForce(worktreePath, currentBranch); err != nil {
-		fmt.Fprintf(os.Stderr, "Error force pushing: %v\n", err)
-		return false
-	}
+		// Force push
+		if err := GitPushForce(worktreePath, currentBranch); err != nil {
+			fmt.Fprintf(os.Stderr, "Error force pushing: %v\n", err)
+			return false
+		}
 
-	fmt.Printf("✓ Reset complete: %s is now at origin/%s\n", worktreeName, targetBranch)
-	fmt.Printf("  Branch: %s (force pushed)\n", currentBranch)
+		fmt.Printf("✓ Reset complete: %s is now at origin/%s\n", worktreeName, targetBranch)
+		fmt.Printf("  Branch: %s (force pushed)\n", currentBranch)
+	} else {
+		fmt.Printf("✓ Reset complete: %s is now at origin/%s\n", worktreeName, targetBranch)
+		fmt.Printf("  Remote branch not updated. Use --push to force-push to origin.\n")
+	}
 	return true
 }
 

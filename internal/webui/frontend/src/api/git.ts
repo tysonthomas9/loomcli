@@ -49,6 +49,7 @@ export interface GitResetResult {
   success: boolean;
   message: string;
   previous_branch?: string;
+  pushed: boolean;
 }
 
 export interface GitResetLockedResponse {
@@ -137,10 +138,11 @@ export async function gitReset(
   agentName: string,
   branch?: string,
   force?: boolean,
+  push?: boolean,
 ): Promise<GitResetResult> {
   return post<GitResetResult>(
     agentGitUrl(agentName, "reset"),
-    { branch, force },
+    { branch, force, push },
     {
       timeout: GIT_ACTION_TIMEOUT,
     },

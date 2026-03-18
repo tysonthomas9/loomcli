@@ -316,6 +316,7 @@ func handleGitPR(ops GitOps) http.HandlerFunc {
 type gitResetRequest struct {
 	Branch string `json:"branch"`
 	Force  bool   `json:"force"`
+	Push   bool   `json:"push"`
 }
 
 type lockedResponse struct {
@@ -354,7 +355,7 @@ func handleGitReset(ops GitOps) http.HandlerFunc {
 			return
 		}
 
-		result, err := ops.Reset(wt.Path, wt.Name, target, req.Force)
+		result, err := ops.Reset(wt.Path, wt.Name, target, req.Force, req.Push)
 		if err != nil {
 			var lockedErr *GitResetLockedError
 			if errors.As(err, &lockedErr) {

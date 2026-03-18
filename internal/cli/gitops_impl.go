@@ -88,8 +88,8 @@ func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 	}, nil
 }
 
-func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, force bool) (*webui.GitResetResult, error) {
-	result, err := ResetWorktreeResult(worktreePath, worktreeName, targetBranch, force)
+func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*webui.GitResetResult, error) {
+	result, err := ResetWorktreeResult(worktreePath, worktreeName, targetBranch, force, push)
 	if err != nil {
 		var lockedErr *LockedError
 		if isLockedError(err, &lockedErr) {
@@ -106,6 +106,7 @@ func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, forc
 		Success:        result.Success,
 		Message:        result.Message,
 		PreviousBranch: result.PreviousBranch,
+		Pushed:         result.Pushed,
 	}, nil
 }
 

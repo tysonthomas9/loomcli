@@ -17,7 +17,8 @@ type GitOps interface {
 	CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error)
 
 	// Reset hard-resets a worktree to a target branch.
-	Reset(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error)
+	// If push is true, force-pushes the branch to origin after resetting.
+	Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error)
 
 	// Status returns comprehensive git status for a worktree.
 	Status(worktreePath, targetBranch string) (*GitStatusResult, error)
@@ -75,6 +76,7 @@ type GitResetResult struct {
 	Success        bool   `json:"success"`
 	Message        string `json:"message"`
 	PreviousBranch string `json:"previous_branch,omitempty"`
+	Pushed         bool   `json:"pushed"`
 }
 
 // GitResetLockedError indicates a worktree is locked by an active agent.
