@@ -5,7 +5,10 @@
 
 .overlay {
   position: fixed;
-  inset: 0;
+  top: var(--unified-header-height);
+  left: var(--nav-rail-width);
+  right: 0;
+  bottom: 0;
   z-index: var(--z-overlay);
   background-color: rgba(0, 0, 0, 0);
   visibility: hidden;
@@ -38,6 +41,10 @@
 }
 
 @media (width <= 520px) {
+  .overlay {
+    left: 0;
+  }
+
   .panel {
     width: 100%;
   }
@@ -797,6 +804,10 @@
 /* ============= Responsive: Mobile overlay & touch targets ============= */
 
 @media (width <= 768px) {
+  .overlay {
+    left: 0;
+  }
+
   .panel {
     width: 100%;
     bottom: var(--nav-bottom-height);
