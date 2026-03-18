@@ -61,6 +61,7 @@ type ServerConfig struct {
 	WorkspaceDeleteFn       func(name string) error        // Workspace deletion function; nil = deletion unavailable
 	SetDefaultWorkspaceFn   func(name string) error        // Set default workspace in config; nil = feature disabled
 	ClearDefaultWorkspaceFn func() error                   // Clear default workspace in config; nil = feature disabled
+	WorkspaceCreateFn       WorkspaceCreateFn              // Workspace creation function; nil = creation unavailable
 	BackendOps              BackendOps                     // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines      int                            // Maximum lines per scrollback buffer (0 = default 10000)
 	Logger                  *slog.Logger                   // Structured logger (optional; nil falls back to slog.Default())
@@ -441,7 +442,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter := setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, config.BackendOps, sessionHistoryStore)
+	clientErrLimiter := setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, config.WorkspaceCreateFn, config.BackendOps, sessionHistoryStore)
 	defer clientErrLimiter.stop()
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux

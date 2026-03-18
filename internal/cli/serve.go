@@ -279,6 +279,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				WorkspaceDeleteFn:       deleteWorkspace,
 				SetDefaultWorkspaceFn:   setDefaultWorkspace,
 				ClearDefaultWorkspaceFn: clearDefaultWorkspace,
+				WorkspaceCreateFn:       createWorkspace,
 				BackendOps:              backendOps,
 				Logger:                  slog.Default(),
 			}

@@ -3,7 +3,7 @@
  * Interfaces with GET /api/workspace endpoint.
  */
 
-import { get, patch, put, del, ApiError } from "./client";
+import { get, post, patch, put, del, ApiError } from "./client";
 
 // ============= Types =============
 
@@ -207,6 +207,36 @@ export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
   cacheGeneration++;
   if (response.data) {
     workspaceCache = response.data;
+  }
+  fetchPromise = null;
+  return workspaceCache ?? (await refreshWorkspace());
+}
+
+// ============= Workspace Creation =============
+
+export interface CreateWorkspaceRequest {
+  name: string;
+  type: "empty" | "clone" | "template";
+  repos?: string[];
+  clone_url?: string;
+  branch?: string;
+  path?: string;
+}
+
+/**
+ * Create a new workspace. On success, invalidates the cache and returns refreshed data.
+ */
+export async function createWorkspace(
+  req: CreateWorkspaceRequest,
+): Promise<WorkspaceData> {
+  const response = await post<ApiResult<WorkspaceData>>(
+    "/api/workspace/create",
+    req,
+  );
+  const data = unwrap(response);
+  cacheGeneration++;
+  if (data) {
+    workspaceCache = data;
   }
   fetchPromise = null;
   return workspaceCache ?? (await refreshWorkspace());

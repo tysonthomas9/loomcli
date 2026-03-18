@@ -47,6 +47,7 @@ import {
   ThemeToggle,
   KeyboardCheatsheet,
   WorkspaceSwitcher,
+  CreateWorkspaceModal,
 } from "@/components";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
 import type { BlockedInfo } from "@/components/KanbanBoard";
@@ -146,6 +147,7 @@ function App() {
     selectAll,
     selectRepos,
     sourceReposFilter,
+    refetch: refetchWorkspace,
   } = useWorkspaceContext();
 
   // Workspace URL param sync (deep linking for workspace selection)
@@ -355,6 +357,9 @@ function App() {
 
   // Workspace quick-switcher state (Cmd/Ctrl+K in multi-repo mode)
   const [isWorkspaceSwitcherOpen, setIsWorkspaceSwitcherOpen] = useState(false);
+
+  // Create workspace modal state
+  const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
 
   // Assignee prompt state for Ready → In Progress drag
   const { recentAssignees, addRecentAssignee } = useRecentAssignees();
@@ -820,7 +825,7 @@ function App() {
         onWorkspaceSelect={handleWorkspaceSelect}
         onAgentClick={handleAgentClick}
         agentTasks={agentTasks}
-        onAddClick={() => setActiveView("settings")}
+        onAddClick={() => setShowCreateWorkspace(true)}
         connectionState={connectionState}
         connectionLost={isConnectionLost}
         disconnectedSince={staleBannerDisconnectedSince}
@@ -1185,6 +1190,14 @@ function App() {
           onClose={() => setIsWorkspaceSwitcherOpen(false)}
         />
       )}
+      <CreateWorkspaceModal
+        isOpen={showCreateWorkspace}
+        onClose={() => setShowCreateWorkspace(false)}
+        onSuccess={() => {
+          refetchWorkspace();
+          setShowCreateWorkspace(false);
+        }}
+      />
     </KeyboardShortcutProvider>
   );
 }
