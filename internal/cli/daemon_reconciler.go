@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -21,7 +21,7 @@ import (
 func (d *Daemon) configReconciler() {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Printf("[daemon] Failed to create config watcher, falling back to polling: %v", err)
+		slog.Warn("failed to create config watcher, falling back to polling", "err", err)
 		d.configPollingFallback()
 		return
 	}
@@ -51,7 +51,7 @@ func (d *Daemon) configReconciler() {
 			if !isConfigFileEvent(event) {
 				continue
 			}
-			log.Printf("[daemon] Config file change detected: %s (%s)", event.Name, event.Op)
+			slog.Info("config file change detected", "file", event.Name, "op", event.Op)
 
 			// Debounce: reset 500ms timer on each event
 			debounceMu.Lock()
@@ -69,7 +69,7 @@ func (d *Daemon) configReconciler() {
 			if !ok {
 				return
 			}
-			log.Printf("[daemon] Config watcher error: %v", err)
+			slog.Warn("config watcher error", "err", err)
 		}
 	}
 }
@@ -81,15 +81,15 @@ func (d *Daemon) watchConfigDirs(watcher *fsnotify.Watcher) {
 	globalConfigDir := GetConfigDir()
 
 	if err := watcher.Add(projectConfigDir); err != nil {
-		log.Printf("[daemon] Failed to watch project dir %s: %v", projectConfigDir, err)
+		slog.Warn("failed to watch project dir", "path", projectConfigDir, "err", err)
 	}
 	if globalConfigDir != "" && globalConfigDir != projectConfigDir {
 		if err := watcher.Add(globalConfigDir); err != nil {
-			log.Printf("[daemon] Failed to watch global config dir %s: %v", globalConfigDir, err)
+			slog.Warn("failed to watch global config dir", "path", globalConfigDir, "err", err)
 		}
 	}
 
-	log.Printf("[daemon] Config watcher started (project: %s, global: %s)", projectConfigDir, globalConfigDir)
+	slog.Info("config watcher started", "project_dir", projectConfigDir, "global_dir", globalConfigDir)
 }
 
 // isConfigFileEvent returns true if the fsnotify event is for a config file we care about.
@@ -123,7 +123,7 @@ func (d *Daemon) reloadAndReconcile() {
 	// Load config outside the lock — this does file I/O, env expansion, secret resolution.
 	newConfig, err := LoadDaemonConfig(d.projectDir)
 	if err != nil {
-		log.Printf("[daemon] Config reload failed (keeping current config): %v", err)
+		slog.Warn("config reload failed, keeping current config", "err", err)
 		if evt, err := events.NewEvent(events.ConfigReloaded, "", "", "", events.ConfigReloadedData{
 			Error: err.Error(),
 		}); err == nil {
@@ -150,7 +150,7 @@ func (d *Daemon) reloadAndReconcile() {
 		d.config = newConfig
 		d.configHash = newHash
 		d.reconcileMu.Unlock()
-		log.Printf("[daemon] Config reloaded (no agent changes)")
+		slog.Info("config reloaded, no agent changes")
 		return
 	}
 
@@ -163,30 +163,29 @@ func (d *Daemon) reloadAndReconcile() {
 	// (drainAgent waits for superviseAgent goroutine to exit).
 	d.reconcileMu.Unlock()
 
-	log.Printf("[daemon] Config changed: %d added, %d removed, %d modified agents",
-		len(added), len(removed), len(modified))
+	slog.Info("config changed", "added", len(added), "removed", len(removed), "modified", len(modified))
 
 	// Drain removed and modified agents
 	for _, entry := range removed {
 		if err := d.drainAgent(entry.Worktree); err != nil {
-			log.Printf("[daemon] Failed to drain removed agent %s: %v", entry.Worktree, err)
+			slog.Error("failed to drain removed agent", "worktree", entry.Worktree, "err", err)
 		}
 	}
 	for _, entry := range modified {
 		if err := d.drainAgent(entry.Worktree); err != nil {
-			log.Printf("[daemon] Failed to drain modified agent %s: %v", entry.Worktree, err)
+			slog.Error("failed to drain modified agent", "worktree", entry.Worktree, "err", err)
 		}
 	}
 
 	// Add new and modified agents
 	for _, entry := range added {
 		if err := d.addAgent(entry); err != nil {
-			log.Printf("[daemon] Failed to add agent %s: %v", entry.Worktree, err)
+			slog.Error("failed to add agent", "worktree", entry.Worktree, "err", err)
 		}
 	}
 	for _, entry := range modified {
 		if err := d.addAgent(entry); err != nil {
-			log.Printf("[daemon] Failed to re-add modified agent %s: %v", entry.Worktree, err)
+			slog.Error("failed to re-add modified agent", "worktree", entry.Worktree, "err", err)
 		}
 	}
 

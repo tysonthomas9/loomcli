@@ -2,7 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 )
 
 // drainAgent gracefully stops a single agent by name and removes it from the agents slice.
@@ -45,7 +45,7 @@ func (d *Daemon) drainAgent(name string) error {
 	}
 	d.agentsMu.Unlock()
 
-	log.Printf("[daemon] Agent %s: drained and removed", name)
+	slog.Info("agent drained and removed", "worktree", name)
 	return nil
 }
 
@@ -105,6 +105,6 @@ func (d *Daemon) addAgent(entry AgentEntry) error {
 		d.superviseAgent(ap)
 	}()
 
-	log.Printf("[daemon] Agent %s: added and started (role: %s)", entry.Worktree, entry.Role)
+	slog.Info("agent added and started", "worktree", entry.Worktree, "role", entry.Role)
 	return nil
 }

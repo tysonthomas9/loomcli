@@ -2,7 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
@@ -139,7 +139,7 @@ func (d *Daemon) emitEvent(evt events.Event) {
 		return
 	}
 	if err := d.eventBus.Emit(evt); err != nil {
-		log.Printf("[daemon] Failed to emit %s event: %v", evt.Type, err)
+		slog.Warn("failed to emit event", "event_type", evt.Type, "err", err)
 	}
 }
 
@@ -215,24 +215,24 @@ func (d *Daemon) resetWorktreeBranches() {
 	for _, ap := range snapshot {
 		current, err := GetCurrentBranch(ap.worktreePath)
 		if err != nil {
-			log.Printf("[daemon] Warning: failed to get branch for %s: %v", ap.entry.Worktree, err)
+			slog.Warn("failed to get branch", "worktree", ap.entry.Worktree, "err", err)
 			continue
 		}
 		defaultBranch := ap.entry.Worktree
 		if current == defaultBranch {
 			continue
 		}
-		log.Printf("[daemon] Resetting worktree %s from %s to %s", ap.entry.Worktree, current, defaultBranch)
+		slog.Info("resetting worktree branch", "worktree", ap.entry.Worktree, "from", current, "to", defaultBranch)
 		// Create WIP commit if dirty
 		clean, _ := IsCleanWorkingTree(ap.worktreePath)
 		if !clean {
 			msg := fmt.Sprintf("WIP: daemon startup reset from %s", current)
 			if err := commitWIP(ap.worktreePath, msg); err != nil {
-				log.Printf("[daemon] Warning: WIP commit failed for %s: %v", ap.entry.Worktree, err)
+				slog.Warn("WIP commit failed", "worktree", ap.entry.Worktree, "err", err)
 			}
 		}
 		if err := GitCheckout(ap.worktreePath, defaultBranch); err != nil {
-			log.Printf("[daemon] Warning: failed to reset worktree %s to %s: %v", ap.entry.Worktree, defaultBranch, err)
+			slog.Warn("failed to reset worktree", "worktree", ap.entry.Worktree, "branch", defaultBranch, "err", err)
 		}
 	}
 }
@@ -312,36 +312,36 @@ func (d *Daemon) Stop() {
 // superviseAgent is the main loop for a single agent (runs in goroutine).
 func (d *Daemon) superviseAgent(ap *AgentProcess) {
 	defer d.epicAssigner.ReleaseWorktree(ap.entry.Worktree)
-	log.Printf("[daemon] Starting supervisor for agent %s (role: %s)", ap.entry.Worktree, ap.entry.Role)
+	slog.Info("starting agent supervisor", "worktree", ap.entry.Worktree, "role", ap.entry.Role)
 
 	for {
 		// Check shutdown or per-agent stop before each cycle
 		select {
 		case <-d.shutdown:
-			log.Printf("[daemon] Agent %s: shutdown signal received", ap.entry.Worktree)
+			slog.Info("shutdown signal received", "worktree", ap.entry.Worktree)
 			return
 		case <-ap.stopCh:
-			log.Printf("[daemon] Agent %s: stop signal received", ap.entry.Worktree)
+			slog.Info("stop signal received", "worktree", ap.entry.Worktree)
 			return
 		default:
 		}
 
 		// Acquire concurrency slot for this role (blocks if at limit)
 		if !d.concurrency.Acquire(ap.entry.Role) {
-			log.Printf("[daemon] Agent %s: concurrency tracker closed, exiting", ap.entry.Worktree)
+			slog.Info("concurrency tracker closed, exiting", "worktree", ap.entry.Worktree)
 			return
 		}
 
 		// 1. Pre-flight recovery
 		if err := d.recoverAgent(ap, 0); err != nil {
-			log.Printf("[daemon] Agent %s: pre-flight recovery failed: %v", ap.entry.Worktree, err)
+			slog.Warn("pre-flight recovery failed", "worktree", ap.entry.Worktree, "err", err)
 			// Continue with caution - spawn may still work
 		}
 
 		// 1.5. Assign epic to worktree (if available)
 		epicID, err := d.epicAssigner.AssignWorktree(ap.entry.Worktree)
 		if err != nil {
-			log.Printf("[daemon] Agent %s: epic assignment failed (falling back to non-epic mode): %v", ap.entry.Worktree, err)
+			slog.Warn("epic assignment failed, falling back to non-epic mode", "worktree", ap.entry.Worktree, "err", err)
 			epicID = ""
 		}
 		ap.mu.Lock()
@@ -360,9 +360,9 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		if epicID != "" {
 			targetBranch = epicBranchName(epicID)
 		}
-		log.Printf("[daemon] Agent %s: ensuring branch %s", ap.entry.Worktree, targetBranch)
+		slog.Info("ensuring branch", "worktree", ap.entry.Worktree, "branch", targetBranch)
 		if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, ap.resolveRemote(), ap.resolveRemoteBranch()); err != nil {
-			log.Printf("[daemon] Agent %s: branch setup failed: %v", ap.entry.Worktree, err)
+			slog.Warn("branch setup failed", "worktree", ap.entry.Worktree, "err", err)
 			d.concurrency.Release(ap.entry.Role)
 			if !d.handleRestartAfterError(ap) {
 				return
@@ -372,7 +372,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 3. Spawn subprocess
 		if err := d.spawnAgent(ap); err != nil {
-			log.Printf("[daemon] Agent %s: spawn failed: %v", ap.entry.Worktree, err)
+			slog.Warn("spawn failed", "worktree", ap.entry.Worktree, "err", err)
 			d.concurrency.Release(ap.entry.Role)
 			if !d.handleRestartAfterError(ap) {
 				return
@@ -391,7 +391,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 5. Post-mortem recovery (exit-code-aware)
 		if err := d.recoverAgent(ap, exitCode); err != nil {
-			log.Printf("[daemon] Agent %s: post-mortem recovery failed: %v", ap.entry.Worktree, err)
+			slog.Warn("post-mortem recovery failed", "worktree", ap.entry.Worktree, "err", err)
 			// Non-fatal, continue with restart logic
 		}
 
@@ -401,7 +401,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		ap.mu.Unlock()
 		if currentEpicID != "" {
 			if err := EnsureEpicPR(ap.worktreePath, currentEpicID, d.eventBus); err != nil {
-				log.Printf("[daemon] Agent %s: PR creation failed: %v", ap.entry.Worktree, err)
+				slog.Warn("PR creation failed", "worktree", ap.entry.Worktree, "err", err)
 				// Non-fatal — don't block restart
 			}
 		}
@@ -414,31 +414,30 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 6. Epic exhaustion check and reassignment
 		if err := d.handleEpicTransition(ap); err != nil {
-			log.Printf("[daemon] Agent %s: epic transition failed: %v", ap.entry.Worktree, err)
+			slog.Warn("epic transition failed", "worktree", ap.entry.Worktree, "err", err)
 			// Non-fatal: agent will respawn in current mode
 		}
 
 		// 7. Check shutdown or per-agent stop after subprocess exit
 		select {
 		case <-d.shutdown:
-			log.Printf("[daemon] Agent %s: shutdown signal received after exit", ap.entry.Worktree)
+			slog.Info("shutdown signal received after exit", "worktree", ap.entry.Worktree)
 			return
 		case <-ap.stopCh:
-			log.Printf("[daemon] Agent %s: stop signal received after exit", ap.entry.Worktree)
+			slog.Info("stop signal received after exit", "worktree", ap.entry.Worktree)
 			return
 		default:
 		}
 
 		// 7.5. Check for backend failover (before restart decision)
 		if d.tryFallbackBackend(ap) {
-			log.Printf("[daemon] Agent %s: backend failover triggered, retrying with %s",
-				ap.entry.Worktree, d.getEffectiveBackend(ap))
+			slog.Info("backend failover triggered", "worktree", ap.entry.Worktree, "backend", d.getEffectiveBackend(ap))
 			continue
 		}
 
 		// 8. Restart decision
 		if !d.shouldRestart(ap) {
-			log.Printf("[daemon] Agent %s: max restarts exceeded, stopping supervisor", ap.entry.Worktree)
+			slog.Warn("max restarts exceeded, stopping supervisor", "worktree", ap.entry.Worktree)
 			return
 		}
 
@@ -447,7 +446,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		ap.mu.Lock()
 		count := ap.restartCount
 		ap.mu.Unlock()
-		log.Printf("[daemon] Agent %s: waiting %v before restart (attempt %d)", ap.entry.Worktree, backoff, count)
+		slog.Info("waiting before restart", "worktree", ap.entry.Worktree, "backoff", backoff, "attempt", count)
 
 		// Emit agent_restarted event
 		if evt, err := events.NewEvent(events.AgentRestarted, ap.entry.Worktree, ap.entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
@@ -458,10 +457,10 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		case <-time.After(backoff):
 			// Backoff complete, continue to next iteration
 		case <-d.shutdown:
-			log.Printf("[daemon] Agent %s: shutdown during backoff", ap.entry.Worktree)
+			slog.Info("shutdown during backoff", "worktree", ap.entry.Worktree)
 			return
 		case <-ap.stopCh:
-			log.Printf("[daemon] Agent %s: stop signal during backoff", ap.entry.Worktree)
+			slog.Info("stop signal during backoff", "worktree", ap.entry.Worktree)
 			return
 		}
 	}

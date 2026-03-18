@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -169,29 +168,27 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	}
 
 	// Log configuration
-	log.Printf("Starting loomcli web UI server")
-	log.Printf("Port: %d", config.Port)
-	log.Printf("Connection pool size: %d", config.PoolSize)
+	slog.Info("starting web UI server", "port", config.Port, "pool_size", config.PoolSize, "bind_address", config.BindAddress)
 	if config.SocketPath != "" {
-		log.Printf("Daemon socket: %s", config.SocketPath)
+		slog.Info("daemon socket configured", "socket", config.SocketPath)
 	} else {
-		log.Printf("Daemon socket: auto-detect")
+		slog.Info("daemon socket: auto-detect")
 	}
 	if corsConfig.Enabled {
-		log.Printf("CORS enabled for origins: %v", corsConfig.AllowedOrigins)
+		slog.Info("CORS enabled", "origins", corsConfig.AllowedOrigins)
 	}
 	if config.HSTSEnabled {
-		log.Printf("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
+		slog.Info("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
 	}
 	if config.DevMode {
 		dir := config.DevFrontendDir
 		if dir == "" {
 			dir = "internal/webui/frontend/dist"
 		}
-		log.Printf("Dev mode: serving frontend from %s", dir)
+		slog.Info("dev mode enabled", "frontend_dir", dir)
 	}
 	if config.FleetEnabled {
-		log.Printf("Fleet routes enabled")
+		slog.Info("fleet routes enabled")
 	}
 
 	// Find an available port (auto-fallback if requested port is in use)
@@ -200,7 +197,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		return fmt.Errorf("could not find available port: %w", err)
 	}
 	if actualPort != config.Port {
-		log.Printf("Port %d in use, using port %d instead", config.Port, actualPort)
+		slog.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", actualPort)
 	}
 
 	// Initialize daemon connection pool
@@ -215,15 +212,15 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		// Auto-discover daemon from current directory
 		cwd, err := getCwd()
 		if err != nil {
-			log.Printf("Warning: failed to get current directory: %v", err)
+			slog.Warn("failed to get current directory", "err", err)
 		} else {
 			rawPool, poolErr = daemon.NewConnectionPoolAutoDiscover(cwd, config.PoolSize)
 		}
 	}
 
 	if poolErr != nil {
-		log.Printf("Warning: failed to initialize daemon connection pool: %v", poolErr)
-		log.Printf("The web UI will start but API endpoints may not work until a daemon is available")
+		slog.Warn("failed to initialize daemon connection pool", "err", poolErr)
+		slog.Info("web UI will start but API endpoints may not work until daemon is available")
 	} else {
 		// Wrap pool with circuit breaker for resilience
 		breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
@@ -232,11 +229,11 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			HalfOpenMaxProbes: 1,
 			ShouldTrip:        daemon.DaemonShouldTrip,
 			OnStateChange: func(from, to circuitbreaker.State) {
-				log.Printf("Circuit breaker state change: %s -> %s", from, to)
+				slog.Info("circuit breaker state change", "component", "circuit_breaker", "from", from, "to", to)
 			},
 		})
 		pool = daemon.NewProtectedPool(rawPool, breaker)
-		log.Printf("Daemon connection pool initialized with circuit breaker")
+		slog.Info("daemon connection pool initialized with circuit breaker")
 
 		// Test the connection
 		func() {
@@ -244,11 +241,11 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			defer cancel()
 			client, err := pool.Get(testCtx)
 			if err != nil {
-				log.Printf("Warning: daemon not available at startup: %v", err)
-				log.Printf("API endpoints will attempt to connect when called")
+				slog.Warn("daemon not available at startup", "err", err)
+				slog.Info("API endpoints will attempt to connect when called")
 			} else {
 				pool.Put(client)
-				log.Printf("Daemon connection verified")
+				slog.Info("daemon connection verified")
 			}
 		}()
 	}
@@ -264,22 +261,22 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		subscriber = NewDaemonSubscriber(pool, hub)
 		subscriber.Start()
 		getMutationsSince = subscriber.GetMutationsSince
-		log.Printf("Daemon subscriber started")
+		slog.Info("daemon subscriber started")
 	}
 
 	// Initialize terminal manager for WebSocket terminal sessions
 	var termMgr *TerminalManager
 	if termMgr, err = NewTerminalManager(config.TerminalCmd, fmt.Sprintf("%d", actualPort), config.MaxTerminalSessions); err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {
-			log.Printf("Warning: tmux not found, terminal feature disabled")
+			slog.Warn("tmux not found, terminal feature disabled")
 		} else {
-			log.Printf("Warning: failed to initialize terminal manager: %v", err)
+			slog.Warn("failed to initialize terminal manager", "err", err)
 		}
 	} else {
 		if config.ScrollbackMaxLines > 0 {
 			termMgr.SetScrollbackMaxLines(config.ScrollbackMaxLines)
 		}
-		log.Printf("Terminal manager initialized (default command: %s)", config.TerminalCmd)
+		slog.Info("terminal manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
 	}
 
 	// Wire session history callback (deferred until sessionHistoryStore is initialized below).
@@ -307,7 +304,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 				scrollbackPath = ""
 			}
 			if err := store.Complete(context.Background(), issueID, sessionName, scrollbackPath); err != nil {
-				log.Printf("Warning: failed to complete session history for %s: %v", sessionName, err)
+				slog.Warn("failed to complete session history", "session", sessionName, "err", err)
 			}
 		})
 	}
@@ -318,8 +315,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		var authErr error
 		termAuth, authErr = newTerminalAuth()
 		if authErr != nil {
-			log.Printf("Warning: failed to initialize terminal auth: %v", authErr)
-			log.Printf("Terminal feature disabled (cannot ensure authenticated access)")
+			slog.Warn("failed to initialize terminal auth, terminal feature disabled", "err", authErr)
 			termMgr = nil
 		}
 	}
@@ -331,17 +327,17 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		var err error
 		fleetStore, err = fleet.NewStore(*config.FleetRedis, nil)
 		if err != nil {
-			log.Printf("Warning: failed to initialize fleet store: %v", err)
+			slog.Warn("failed to initialize fleet store", "component", "fleet", "err", err)
 		} else {
 			// Use pre-provisioned key if available, otherwise generate ephemeral key
 			var jwtKey []byte
 			if len(config.FleetJWTKey) > 0 {
 				jwtKey = config.FleetJWTKey
-				log.Printf("Using pre-provisioned JWT signing key")
+				slog.Info("using pre-provisioned JWT signing key", "component", "fleet")
 			} else {
 				jwtKey = make([]byte, 32)
 				if _, err := rand.Read(jwtKey); err != nil {
-					log.Printf("Warning: failed to generate JWT signing key: %v", err)
+					slog.Warn("failed to generate JWT signing key", "component", "fleet", "err", err)
 					_ = fleetStore.Close()
 					fleetStore = nil
 				}
@@ -351,7 +347,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 					SigningKey: jwtKey,
 					Expiry:     time.Hour,
 				}
-				log.Printf("Fleet store initialized (Redis: %s)", config.FleetRedis.Address)
+				slog.Info("fleet store initialized", "component", "fleet", "redis_address", config.FleetRedis.Address)
 			}
 		}
 	}
@@ -364,7 +360,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	if fleetStore != nil {
 		timeoutEnforcer = fleet.NewTimeoutEnforcer(fleetStore, fleet.DefaultTimeoutConfig(), nil)
 		timeoutEnforcer.Start()
-		log.Printf("Fleet timeout enforcer started (30min task timeout)")
+		slog.Info("fleet timeout enforcer started", "component", "fleet", "task_timeout", "30m")
 	}
 
 	// Initialize fleet claim metrics
@@ -385,10 +381,10 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			fleetRegCfg.RateLimiter = NewFleetRateLimiter(rlClient, 10, time.Minute)
 			defer func() { _ = fleetRegCfg.RateLimiter.Close() }()
 		}
-		log.Printf("Fleet API key authentication enabled")
+		slog.Info("fleet API key authentication enabled", "component", "fleet")
 	} else if fleetStore != nil && config.FleetAPIKey == "" {
-		log.Printf("Warning: fleet store configured but no fleet API key set (LOOM_FLEET_API_KEY)")
-		log.Printf("Fleet registration endpoint will return 503 until a fleet API key is configured")
+		slog.Warn("fleet store configured but no fleet API key set", "component", "fleet", "env_var", "LOOM_FLEET_API_KEY")
+		slog.Warn("fleet registration endpoint will return 503 until fleet API key is configured", "component", "fleet")
 	}
 
 	var tabMetaStore *tabmeta.Store
@@ -396,7 +392,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		tmClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
 		tabMetaStore = tabmeta.NewStore(tmClient, nil)
 		defer func() { _ = tabMetaStore.Close() }()
-		log.Printf("Tab metadata store initialized (Redis: %s)", config.FleetRedis.Address)
+		slog.Info("tab metadata store initialized", "redis_address", config.FleetRedis.Address)
 		_ = tabMetaStore.MigrateLegacyKeys(ctx, DefaultWorkspace) // best-effort migration
 	}
 
@@ -406,7 +402,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		itClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
 		issueTabStore = issuetabs.NewStore(itClient, nil)
 		defer func() { _ = issueTabStore.Close() }()
-		log.Printf("Issue tab store initialized (Redis: %s)", config.FleetRedis.Address)
+		slog.Info("issue tab store initialized", "redis_address", config.FleetRedis.Address)
 	}
 
 	// Initialize session history store for terminal session audit trail
@@ -416,7 +412,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		sessionHistoryStore = sessionhistory.NewStore(shClient, nil)
 		defer func() { _ = sessionHistoryStore.Close() }()
 		sessionHistoryStoreRef = sessionHistoryStore
-		log.Printf("Session history store initialized (Redis: %s)", config.FleetRedis.Address)
+		slog.Info("session history store initialized", "redis_address", config.FleetRedis.Address)
 	}
 
 	// Load or generate API key for authentication
@@ -430,14 +426,13 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 				var err error
 				apiKey, err = LoadOrCreateAPIKey(keyPath)
 				if err != nil {
-					log.Printf("Warning: failed to load/create API key: %v", err)
-					log.Printf("Authentication will be disabled")
+					slog.Warn("failed to load/create API key, authentication disabled", "component", "auth", "err", err)
 					config.AuthEnabled = false
 				} else {
-					log.Printf("API key loaded from %s", keyPath)
+					slog.Info("API key loaded", "component", "auth", "path", keyPath)
 				}
 			} else {
-				log.Printf("Warning: cannot determine API key path, authentication disabled")
+				slog.Warn("cannot determine API key path, authentication disabled", "component", "auth")
 				config.AuthEnabled = false
 			}
 		}
@@ -480,7 +475,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// Start server in a goroutine using the pre-acquired listener
 	serverErr := make(chan error, 1)
 	go func() {
-		log.Printf("Listening on http://%s:%d", config.BindAddress, actualPort)
+		slog.Info("server listening", "address", config.BindAddress, "port", actualPort)
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			serverErr <- fmt.Errorf("server error: %w", err)
 		}
@@ -496,7 +491,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	log.Println("Shutting down server...")
+	slog.Info("shutting down server")
 
 	// Cancel the server-wide shutdown context so in-flight handlers' r.Context().Done()
 	// fires immediately, causing them to abort quickly (e.g., pool.Get(r.Context()) fails fast).
@@ -510,14 +505,14 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	if err := server.Shutdown(drainCtx); err != nil {
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
-	log.Println("Server stopped")
+	slog.Info("server stopped")
 
 	// Stop components in reverse-initialization order now that no handlers are running.
 
 	// Stop fleet timeout enforcer
 	if timeoutEnforcer != nil {
 		timeoutEnforcer.Stop()
-		log.Printf("Fleet timeout enforcer stopped")
+		slog.Info("fleet timeout enforcer stopped", "component", "fleet")
 	}
 
 	// Stop rate limiter cleanup goroutine
@@ -531,30 +526,30 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// Stop terminal manager (kill tmux sessions and close PTYs)
 	if termMgr != nil {
 		if err := termMgr.Shutdown(); err != nil {
-			log.Printf("Warning: error shutting down terminal manager: %v", err)
+			slog.Warn("error shutting down terminal manager", "component", "terminal", "err", err)
 		} else {
-			log.Printf("Terminal manager stopped")
+			slog.Info("terminal manager stopped", "component", "terminal")
 		}
 	}
 
 	// Stop daemon subscriber (no more handlers need it)
 	if subscriber != nil {
 		subscriber.Stop()
-		log.Printf("Daemon subscriber stopped")
+		slog.Info("daemon subscriber stopped")
 	}
 
 	// Stop SSE hub (all SSE handlers have exited)
 	if hub != nil {
 		hub.Stop()
-		log.Printf("SSE hub stopped")
+		slog.Info("SSE hub stopped")
 	}
 
 	// Close daemon connection pool last (subscriber/hub may have used it)
 	if pool != nil {
 		if err := pool.Close(); err != nil {
-			log.Printf("Warning: error closing connection pool: %v", err)
+			slog.Warn("error closing connection pool", "err", err)
 		} else {
-			log.Printf("Daemon connection pool closed")
+			slog.Info("daemon connection pool closed")
 		}
 	}
 

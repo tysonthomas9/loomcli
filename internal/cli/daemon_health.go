@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"syscall"
 	"time"
@@ -24,14 +24,14 @@ func (d *Daemon) stopAgent(ap *AgentProcess) {
 		return
 	}
 
-	log.Printf("[daemon] Agent %s: sending SIGTERM to process group %d", ap.entry.Worktree, pid)
+	slog.Info("sending signal to process group", "worktree", ap.entry.Worktree, "signal", "SIGTERM", "pid", pid)
 
 	// Send SIGTERM to the entire process group (negative PID)
 	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
 		// Process group may have already exited; try the process directly
-		log.Printf("[daemon] Agent %s: SIGTERM to process group failed: %v (trying process directly)", ap.entry.Worktree, err)
+		slog.Warn("SIGTERM to process group failed, trying process directly", "worktree", ap.entry.Worktree, "err", err)
 		if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
-			log.Printf("[daemon] Agent %s: SIGTERM failed (process may have exited): %v", ap.entry.Worktree, err)
+			slog.Warn("SIGTERM failed, process may have exited", "worktree", ap.entry.Worktree, "err", err)
 			return
 		}
 	}
@@ -46,13 +46,13 @@ func (d *Daemon) stopAgent(ap *AgentProcess) {
 
 		if currentPID == 0 {
 			// Process has exited (waitForAgent cleared the pid)
-			log.Printf("[daemon] Agent %s: process exited gracefully", ap.entry.Worktree)
+			slog.Info("process exited gracefully", "worktree", ap.entry.Worktree)
 			return
 		}
 
 		// Also check if process is still running via OS
 		if !lockfile.IsProcessRunning(pid) {
-			log.Printf("[daemon] Agent %s: process exited gracefully", ap.entry.Worktree)
+			slog.Info("process exited gracefully", "worktree", ap.entry.Worktree)
 			return
 		}
 
@@ -65,7 +65,7 @@ func (d *Daemon) stopAgent(ap *AgentProcess) {
 	ap.mu.Unlock()
 
 	if stillRunning {
-		log.Printf("[daemon] Agent %s: sending SIGKILL to process group %d", ap.entry.Worktree, pid)
+		slog.Warn("sending SIGKILL to process group", "worktree", ap.entry.Worktree, "pid", pid)
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
 	}
 }
@@ -113,7 +113,7 @@ func (d *Daemon) checkAgentHealth() {
 		// Check if PID is alive
 		if !lockfile.IsProcessRunning(pid) {
 			// Process died unexpectedly - superviseAgent will detect via cmd.Wait()
-			log.Printf("[daemon] Agent %s (PID %d) is not running", worktreeName, pid)
+			slog.Warn("agent is not running", "worktree", worktreeName, "pid", pid)
 		} else {
 			healthyAgents++
 		}
@@ -121,7 +121,7 @@ func (d *Daemon) checkAgentHealth() {
 		// Check lock file for stale state
 		lockInfo, isRunning, err := CheckLock(worktreePath)
 		if err == nil && lockInfo != nil && !isRunning {
-			log.Printf("[daemon] Stale lock detected for agent %s", worktreeName)
+			slog.Warn("stale lock detected", "worktree", worktreeName)
 		}
 
 		// Watchdog: kill agent if no log output for outputTimeout seconds
@@ -135,8 +135,8 @@ func (d *Daemon) checkAgentHealth() {
 				silent := time.Since(lastOutput)
 				threshold := time.Duration(outputTimeout) * time.Second
 				if silent > threshold {
-					log.Printf("[daemon] Agent %s: no output for %v (threshold %ds), killing hung process",
-						worktreeName, silent.Truncate(time.Second), outputTimeout)
+					slog.Error("killing hung process, no output detected",
+						"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second), "threshold_sec", outputTimeout)
 					d.stopAgent(ap)
 				}
 			}
