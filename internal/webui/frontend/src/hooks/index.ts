@@ -179,6 +179,9 @@ export type {
   UseWorkspaceParamReturn,
 } from "./useWorkspaceParam";
 
+export { useSearchScope } from "./useSearchScope";
+export type { UseSearchScopeReturn } from "./useSearchScope";
+
 export { useVirtualList } from "./useVirtualList";
 export type {
   UseVirtualListOptions,

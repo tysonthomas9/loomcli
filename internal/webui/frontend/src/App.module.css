@@ -31,8 +31,18 @@
 }
 
 .searchWrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   width: min(460px, 42vw);
   flex-shrink: 0;
+  min-width: 0;
+}
+
+/* SearchInput should fill remaining space when scope chip is present */
+.searchWrapper > :last-child {
+  flex: 1;
+  min-width: 0;
 }
 
 .filtersWrapper {

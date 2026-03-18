@@ -31,6 +31,8 @@ export interface UseIssueFilterOptions {
   labels?: string[];
   /** Filter by labels (any must match) */
   labelsAny?: string[];
+  /** Filter by repo names (issue.repo must be in list) */
+  repos?: string[];
 }
 
 /**
@@ -156,6 +158,13 @@ function matchesFilters(issue: Issue, options: UseIssueFilterOptions): boolean {
     }
   }
 
+  // Repo filter
+  if (options.repos !== undefined && options.repos.length > 0) {
+    if (!issue.repo || !options.repos.includes(issue.repo)) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -191,6 +200,9 @@ function getActiveFilters(options: UseIssueFilterOptions): string[] {
   }
   if (options.labelsAny !== undefined && options.labelsAny.length > 0) {
     active.push("labelsAny");
+  }
+  if (options.repos !== undefined && options.repos.length > 0) {
+    active.push("repos");
   }
 
   return active;

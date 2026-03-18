@@ -34,6 +34,7 @@ import {
   FilterBar,
   MoreFiltersMenu,
   SearchInput,
+  SearchScopeIndicator,
   IssueDetailPanel,
   IssueDetailView,
   AgentDetailPanel,
@@ -67,6 +68,7 @@ import {
   useWorkspaceContext,
   useWorkspaceState,
   useWorkspaceParam,
+  useSearchScope,
   useDaemonHealth,
   usePanelManager,
   KeyboardShortcutProvider,
@@ -161,6 +163,10 @@ function App() {
     [selectedRepoNames],
   );
 
+  // Search scope (workspace-scoped search indicator)
+  const { scopeName: searchScopeName, clearScope: handleScopeClear } =
+    useSearchScope();
+
   // Scroll position cache for restoring scroll on back navigation
   const scrollPositionCache = useRef<Map<string, number>>(new Map());
 
@@ -234,6 +240,7 @@ function App() {
   if (filters.priority !== undefined) filterOptions.priority = filters.priority;
   if (filters.type !== undefined) filterOptions.issueType = filters.type;
   if (filters.labels !== undefined) filterOptions.labels = filters.labels;
+  if (sourceReposFilter !== undefined) filterOptions.repos = sourceReposFilter;
 
   const { filteredIssues } = useIssueFilter(issues, filterOptions);
 
@@ -740,12 +747,22 @@ function App() {
   const headerNavigation = (
     <div className={styles.headerControls}>
       <div className={styles.searchWrapper}>
+        {searchScopeName && (
+          <SearchScopeIndicator
+            scopeName={searchScopeName}
+            onClear={handleScopeClear}
+          />
+        )}
         <SearchInput
           ref={searchInputRef as RefObject<HTMLInputElement>}
           value={searchValue}
           onChange={setSearchValue}
           onClear={handleSearchClear}
-          placeholder="Search tasks..."
+          placeholder={
+            searchScopeName
+              ? `Search in ${searchScopeName}...`
+              : "Search tasks..."
+          }
           size="md"
         />
       </div>

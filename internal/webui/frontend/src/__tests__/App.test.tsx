@@ -359,6 +359,10 @@ vi.mock("@/hooks", () => ({
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
   useWorkspaceParam: vi.fn(() => [null, vi.fn()]),
+  useSearchScope: vi.fn(() => ({
+    scopeName: undefined,
+    clearScope: vi.fn(),
+  })),
   useDaemonHealth: vi.fn(() => ({
     isDaemonAvailable: true,
     isChecking: false,
