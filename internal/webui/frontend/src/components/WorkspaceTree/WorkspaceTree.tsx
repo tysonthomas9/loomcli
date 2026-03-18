@@ -44,7 +44,9 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 
+import { ActiveAllToggle, type ActiveFilter } from "./ActiveAllToggle";
 import { RepoGroupList } from "./RepoGroupList";
+import { SidebarStatusBar } from "./SidebarStatusBar";
 import { SortableWorkspaceEntry } from "./SortableWorkspaceEntry";
 import styles from "./WorkspaceTree.module.css";
 import { WorkspaceContextMenu } from "./WorkspaceContextMenu";
@@ -75,9 +77,12 @@ export interface WorkspaceTreeProps {
   disconnectedSince?: number | null;
   /** Callback for retry button in daemon prompt */
   onRetryConnection?: () => void;
+  /** Callback when the active/all filter changes (for downstream consumers) */
+  onFilterChange?: (filter: ActiveFilter) => void;
 }
 
 const COLLAPSE_STORAGE_KEY = "workspace-tree-collapsed";
+const ACTIVE_FILTER_STORAGE_KEY = "workspace-tree-active-filter";
 
 /**
  * WorkspaceTree displays a collapsible sidebar with repo navigation.
@@ -97,6 +102,7 @@ export function WorkspaceTree({
   connectionLost,
   disconnectedSince,
   onRetryConnection,
+  onFilterChange,
 }: WorkspaceTreeProps): JSX.Element {
   // Load initial collapsed state from localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -107,6 +113,33 @@ export function WorkspaceTree({
       return defaultCollapsed;
     }
   });
+
+  // Active/All filter state persisted to localStorage
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>(() => {
+    try {
+      const stored = localStorage.getItem(ACTIVE_FILTER_STORAGE_KEY);
+      return stored === "all" ? "all" : "active";
+    } catch {
+      return "active";
+    }
+  });
+
+  const handleFilterChange = useCallback(
+    (filter: ActiveFilter) => {
+      setActiveFilter(filter);
+      onFilterChange?.(filter);
+    },
+    [onFilterChange],
+  );
+
+  // Persist activeFilter state
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_FILTER_STORAGE_KEY, activeFilter);
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [activeFilter]);
 
   const {
     workspace,
@@ -547,6 +580,16 @@ export function WorkspaceTree({
                 +
               </span>
             )}
+            <span
+              className={styles.headerToggleWrapper}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <ActiveAllToggle
+                value={activeFilter}
+                onChange={handleFilterChange}
+              />
+            </span>
           </>
         )}
         <span className={styles.toggleIcon}>{isCollapsed ? ">" : "<"}</span>
@@ -721,6 +764,8 @@ export function WorkspaceTree({
           )}
         </div>
       )}
+
+      {!isCollapsed && <SidebarStatusBar agents={agents} />}
 
       {!isCollapsed && connectionLost && (
         <div className={styles.daemonPrompt} role="alert">

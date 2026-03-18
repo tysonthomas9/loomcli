@@ -499,6 +499,11 @@
   cursor: grabbing;
 }
 
+/* Active/All toggle wrapper in header */
+.headerToggleWrapper {
+  margin-left: 0.25rem;
+}
+
 /* Add button in header */
 .addButton {
   background: transparent;
