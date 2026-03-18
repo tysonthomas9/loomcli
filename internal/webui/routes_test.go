@@ -618,23 +618,19 @@ func TestSetupRoutes_TerminalEndpointNotRegisteredWithNilManager(t *testing.T) {
 	mux := http.NewServeMux()
 	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil) // nil termManager
 
-	// Request to terminal endpoint should fall through to frontend handler
-	// (the SPA catch-all) since the route is not registered
+	// Request to terminal endpoint should return 404 JSON since the route is not
+	// registered and the SPA catch-all rejects /api/* paths
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	// When termManager is nil, the route is not registered, so the request
-	// falls through to the frontend handler "/" which returns 200 with index.html
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected /api/terminal/ws to fall through to frontend with status %d when termManager is nil, got %d",
-			http.StatusOK, rr.Code)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected /api/terminal/ws to return 404 when termManager is nil, got %d", rr.Code)
 	}
 
-	// Verify it's serving HTML (the SPA index.html), not JSON
 	ct := rr.Header().Get("Content-Type")
-	if ct != "text/html; charset=utf-8" {
-		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
 	}
 }
 
@@ -737,28 +733,26 @@ func TestSetupRoutes_StatsEndpoint(t *testing.T) {
 	}
 }
 
-// TestSetupRoutes_StatsEndpointPOSTFallsThrough tests that POST to stats falls through to frontend.
+// TestSetupRoutes_StatsEndpointPOSTFallsThrough tests that POST to stats returns 404 JSON.
 // Note: Go 1.22's pattern matching means "GET /api/stats" only matches GET requests.
 // A POST to /api/stats doesn't match that route, so it falls through to the
-// catch-all frontend handler "/" which returns index.html (200 OK).
+// catch-all frontend handler which rejects /api/* paths with 404 JSON.
 func TestSetupRoutes_StatsEndpointPOSTFallsThrough(t *testing.T) {
 	mux := http.NewServeMux()
 	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	// POST to GET-only endpoint falls through to frontend handler
+	// POST to GET-only endpoint falls through to frontend handler which rejects /api/* paths
 	req := httptest.NewRequest(http.MethodPost, "/api/stats", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	// The frontend handler (SPA routing) catches unmatched routes and returns 200 with index.html
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected POST /api/stats to fall through to frontend handler with status %d, got %d", http.StatusOK, rr.Code)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected POST /api/stats to return 404, got %d", rr.Code)
 	}
 
-	// Verify it's serving HTML (the SPA index.html), not JSON
 	ct := rr.Header().Get("Content-Type")
-	if ct != "text/html; charset=utf-8" {
-		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
 	}
 }
 
@@ -960,23 +954,19 @@ func TestSetupRoutes_FleetEndpointsNotRegisteredWhenDisabled(t *testing.T) {
 	mux := http.NewServeMux()
 	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil) // fleetEnabled=false
 
-	// Request to fleet endpoint should fall through to frontend handler
-	// (the SPA catch-all) since the route is not registered
+	// Request to fleet endpoint should return 404 JSON since the route is not
+	// registered and the SPA catch-all rejects /api/* paths
 	req := httptest.NewRequest(http.MethodPost, "/api/fleet/claim", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	// When fleetEnabled is false, the route is not registered, so the request
-	// falls through to the frontend handler "/" which returns 200 with index.html
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected /api/fleet/claim to fall through to frontend with status %d when fleetEnabled is false, got %d",
-			http.StatusOK, rr.Code)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected /api/fleet/claim to return 404 when fleetEnabled is false, got %d", rr.Code)
 	}
 
-	// Verify it's serving HTML (the SPA index.html), not JSON
 	ct := rr.Header().Get("Content-Type")
-	if ct != "text/html; charset=utf-8" {
-		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
 	}
 }
 
@@ -1423,15 +1413,14 @@ func TestSetupRoutes_SSEEndpointNotRegisteredWhenHubNil(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	// With nil hub, the SSE route is not registered; request falls through to frontend
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected /api/events to fall through to frontend with status %d, got %d",
-			http.StatusOK, rr.Code)
+	// With nil hub, the SSE route is not registered; SPA catch-all rejects /api/* with 404 JSON
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected /api/events to return 404, got %d", rr.Code)
 	}
 
 	ct := rr.Header().Get("Content-Type")
-	if ct != "text/html; charset=utf-8" {
-		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
 	}
 }
 
@@ -1560,15 +1549,14 @@ func TestSetupRoutes_TerminalTokenNotRegisteredWithoutAuth(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	// Route is not registered (termAuth is nil); falls through to frontend
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected /api/terminal/token to fall through to frontend with status %d, got %d",
-			http.StatusOK, rr.Code)
+	// Route is not registered (termAuth is nil); SPA catch-all rejects /api/* with 404 JSON
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected /api/terminal/token to return 404, got %d", rr.Code)
 	}
 
 	ct := rr.Header().Get("Content-Type")
-	if ct != "text/html; charset=utf-8" {
-		t.Logf("Content-Type: %q (may vary based on file detection)", ct)
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
 	}
 }
 
@@ -1648,15 +1636,19 @@ func TestSetupRoutes_IssueEndpoints_MethodRestrictions(t *testing.T) {
 			mux.ServeHTTP(rr, req)
 
 			ct := rr.Header().Get("Content-Type")
-			isHTML := ct == "text/html; charset=utf-8"
 
-			if tt.expectRoute && isHTML {
-				t.Errorf("%s %s: expected route handler, but fell through to frontend (HTML)",
-					tt.method, tt.path)
-			}
-			if !tt.expectRoute && !isHTML {
-				t.Errorf("%s %s: expected to fall through to frontend (HTML), got Content-Type %q",
-					tt.method, tt.path, ct)
+			if tt.expectRoute {
+				// Route should be handled by a registered handler (returns JSON, not 404)
+				if rr.Code == http.StatusNotFound && ct == "application/json" {
+					t.Errorf("%s %s: expected route handler, but got 404 JSON (unregistered API path)",
+						tt.method, tt.path)
+				}
+			} else {
+				// Unregistered /api/* paths should return 404 JSON
+				if rr.Code != http.StatusNotFound {
+					t.Errorf("%s %s: expected 404 for unregistered API path, got %d",
+						tt.method, tt.path, rr.Code)
+				}
 			}
 		})
 	}
@@ -1701,15 +1693,18 @@ func TestSetupRoutes_DependencyEndpoints_MethodRestrictions(t *testing.T) {
 			mux.ServeHTTP(rr, req)
 
 			ct := rr.Header().Get("Content-Type")
-			isHTML := ct == "text/html; charset=utf-8"
 
-			if tt.expectRoute && isHTML {
-				t.Errorf("%s %s: expected route handler, but fell through to frontend (HTML)",
-					tt.method, tt.path)
-			}
-			if !tt.expectRoute && !isHTML {
-				t.Errorf("%s %s: expected to fall through to frontend (HTML), got Content-Type %q",
-					tt.method, tt.path, ct)
+			if tt.expectRoute {
+				if rr.Code == http.StatusNotFound && ct == "application/json" {
+					t.Errorf("%s %s: expected route handler, but got 404 JSON (unregistered API path)",
+						tt.method, tt.path)
+				}
+			} else {
+				// Unregistered /api/* paths should return 404 JSON
+				if rr.Code != http.StatusNotFound {
+					t.Errorf("%s %s: expected 404 for unregistered API path, got %d",
+						tt.method, tt.path, rr.Code)
+				}
 			}
 		})
 	}
@@ -1744,16 +1739,20 @@ func TestSetupRoutes_FleetEndpoints_AllRoutes(t *testing.T) {
 		})
 	}
 
-	// GET on POST-only fleet routes should fall through to frontend
+	// GET on POST-only fleet routes should return 404 JSON (unregistered API paths)
 	for _, path := range postRoutes {
 		t.Run("GET "+path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			rr := httptest.NewRecorder()
 			mux.ServeHTTP(rr, req)
 
+			if rr.Code != http.StatusNotFound {
+				t.Errorf("GET %s: expected 404 for unregistered API path, got %d", path, rr.Code)
+			}
+
 			ct := rr.Header().Get("Content-Type")
-			if ct != "text/html; charset=utf-8" {
-				t.Errorf("GET %s: expected to fall through to frontend, got Content-Type %q", path, ct)
+			if ct != "application/json" {
+				t.Errorf("GET %s: Content-Type = %q, want %q", path, ct, "application/json")
 			}
 		})
 	}
@@ -1820,9 +1819,13 @@ func TestSetupRoutes_LoomProxy_NotRegisteredWhenURLInvalid(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	// With nil proxy, the route falls through to frontend handler
+	// With nil proxy, the route falls through to SPA catch-all which rejects /api/* with 404 JSON
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected /api/loom/status to return 404, got %d", rr.Code)
+	}
+
 	ct := rr.Header().Get("Content-Type")
-	if ct != "text/html; charset=utf-8" {
-		t.Errorf("expected /api/loom/status to fall through to frontend, got Content-Type %q", ct)
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
 	}
 }

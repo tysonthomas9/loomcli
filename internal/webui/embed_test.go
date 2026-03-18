@@ -650,6 +650,114 @@ func TestSetupRoutes_DevMode(t *testing.T) {
 	}
 }
 
+func TestFrontendHandler_APIPathReturns404(t *testing.T) {
+	handler := frontendHandler()
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "simple api path", path: "/api/nonexistent"},
+		{name: "nested api path", path: "/api/some/deep/path"},
+		{name: "api auth token", path: "/api/auth/token"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+			}
+
+			contentType := w.Header().Get("Content-Type")
+			if contentType != "application/json" {
+				t.Errorf("Content-Type = %q, want %q", contentType, "application/json")
+			}
+
+			var response map[string]string
+			if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if response["error"] != "not found" {
+				t.Errorf("error = %q, want %q", response["error"], "not found")
+			}
+		})
+	}
+}
+
+func TestDevFrontendHandler_APIPathReturns404(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!DOCTYPE html><html></html>"), 0644); err != nil {
+		t.Fatalf("failed to write index.html: %v", err)
+	}
+
+	handler := devFrontendHandler(dir)
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "simple api path", path: "/api/nonexistent"},
+		{name: "nested api path", path: "/api/some/deep/path"},
+		{name: "api auth token", path: "/api/auth/token"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+			}
+
+			contentType := w.Header().Get("Content-Type")
+			if contentType != "application/json" {
+				t.Errorf("Content-Type = %q, want %q", contentType, "application/json")
+			}
+
+			var response map[string]string
+			if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if response["error"] != "not found" {
+				t.Errorf("error = %q, want %q", response["error"], "not found")
+			}
+		})
+	}
+}
+
+func TestFrontendHandler_NonAPIPathStillServesHTML(t *testing.T) {
+	handler := frontendHandler()
+
+	// These paths should NOT be intercepted by the API guard
+	paths := []string{"/dashboard", "/issues/123", "/settings", "/apidocs"}
+
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+			}
+
+			body := w.Body.String()
+			if !strings.Contains(body, "<!DOCTYPE html>") {
+				t.Errorf("expected HTML content for %s, got: %s", p, body[:min(100, len(body))])
+			}
+		})
+	}
+}
+
 // min returns the smaller of two integers
 func min(a, b int) int {
 	if a < b {
