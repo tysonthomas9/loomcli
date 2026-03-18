@@ -45,6 +45,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 
 import { ActiveAllToggle, type ActiveFilter } from "./ActiveAllToggle";
+import { EpicTaskTree } from "./EpicTaskTree";
 import { RepoGroupList } from "./RepoGroupList";
 import { SidebarStatusBar } from "./SidebarStatusBar";
 import { SortableWorkspaceEntry } from "./SortableWorkspaceEntry";
@@ -760,6 +761,13 @@ export function WorkspaceTree({
                 disconnectedSince={disconnectedSince}
                 repoHealthMap={repoHealthMap}
               />
+              {workspace?.name && (
+                <EpicTaskTree
+                  workspaceName={workspace.name}
+                  activeFilter={activeFilter}
+                  sourceRepos={repos.map((r) => r.name)}
+                />
+              )}
             </div>
           )}
         </div>

@@ -107,6 +107,12 @@ vi.mock("@/hooks", () => ({
     setDefaultWorkspace: vi.fn(),
   }),
   useToast: () => ({ showToast: vi.fn() }),
+  useIssueDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
   useRegisterEscapeLayer: vi.fn(),
   useKeyboardShortcuts: vi.fn(() => ({
     isCheatsheetOpen: false,
@@ -123,6 +129,16 @@ vi.mock("@/hooks", () => ({
   LAYER_AGENT_PANEL: 20,
   LAYER_ISSUE_PANEL: 10,
   LAYER_TERMINAL_SEARCH: 5,
+}));
+
+vi.mock("@/hooks/useWorkspaceTree", () => ({
+  useWorkspaceTree: () => ({
+    epics: [],
+    orphanTasks: [],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -1,3 +1,11 @@
 export { WorkspaceTree } from "./WorkspaceTree";
 export type { WorkspaceTreeProps } from "./WorkspaceTree";
 export type { ActiveFilter } from "./ActiveAllToggle";
+export { EpicTaskTree } from "./EpicTaskTree";
+export type { EpicTaskTreeProps } from "./EpicTaskTree";
+export { EpicRow } from "./EpicRow";
+export type { EpicRowProps } from "./EpicRow";
+export { TaskRow } from "./TaskRow";
+export type { TaskRowProps } from "./TaskRow";
+export { TalkToLeadEntry } from "./TalkToLeadEntry";
+export type { TalkToLeadEntryProps } from "./TalkToLeadEntry";
