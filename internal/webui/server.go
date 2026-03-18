@@ -458,7 +458,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	authMiddleware := NewAuthMiddleware(AuthConfig{APIKey: apiKey, Enabled: config.AuthEnabled})
 	securityMiddleware := NewSecurityHeadersMiddleware(SecurityConfig{HSTSEnabled: config.HSTSEnabled})
 	rl, rateLimitMiddleware := NewRateLimitMiddleware(DefaultRateLimitConfig())
-	handler := h2c.NewHandler(rateLimitMiddleware(securityMiddleware(authMiddleware(corsMiddleware(mux)))), &http2.Server{})
+	handler := h2c.NewHandler(NewRequestLogMiddleware(config.Logger)(rateLimitMiddleware(securityMiddleware(authMiddleware(corsMiddleware(mux))))), &http2.Server{})
 
 	// Create a shutdown context that all request contexts will derive from.
 	// When canceled, in-flight handlers' r.Context().Done() fires, causing
