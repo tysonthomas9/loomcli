@@ -21,6 +21,7 @@ type mockGitOps struct {
 	checkGhInstalledFunc   func() error
 	setRepoDefaultFunc     func(repoName, branch string) error
 	listAgentWorktreesFunc func() ([]AgentWorktree, error)
+	diffStatFunc           func(worktreePath, fromRef string) DiffStatResult
 }
 
 func (m *mockGitOps) ResolveAgentWorktree(name string) (*AgentWorktree, error) {
@@ -91,6 +92,13 @@ func (m *mockGitOps) ListAgentWorktrees() ([]AgentWorktree, error) {
 		return m.listAgentWorktreesFunc()
 	}
 	return nil, nil
+}
+
+func (m *mockGitOps) DiffStat(worktreePath, fromRef string) DiffStatResult {
+	if m.diffStatFunc != nil {
+		return m.diffStatFunc(worktreePath, fromRef)
+	}
+	return DiffStatResult{}
 }
 
 // testWorktree returns a standard AgentWorktree used across tests.

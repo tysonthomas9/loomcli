@@ -87,6 +87,12 @@ export type { UseIssueDetailReturn } from "./useIssueDetail";
 export { useIssueSearch } from "./useIssueSearch";
 export type { UseIssueSearchReturn } from "./useIssueSearch";
 
+export { useIssueDiffStat } from "./useIssueDiffStat";
+export type {
+  UseIssueDiffStatOptions,
+  UseIssueDiffStatReturn,
+} from "./useIssueDiffStat";
+
 export { useAgents } from "./useAgents";
 export type { UseAgentsOptions, UseAgentsResult } from "./useAgents";
 

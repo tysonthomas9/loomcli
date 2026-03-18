@@ -34,6 +34,9 @@ type GitOps interface {
 
 	// ListAgentWorktrees returns all agent worktrees.
 	ListAgentWorktrees() ([]AgentWorktree, error)
+
+	// DiffStat returns line-level diff statistics for a worktree vs a base ref.
+	DiffStat(worktreePath, fromRef string) DiffStatResult
 }
 
 // AgentWorktree contains resolved worktree info for an agent.
@@ -89,6 +92,13 @@ type GitResetLockedError struct {
 
 func (e *GitResetLockedError) Error() string {
 	return "agent locked"
+}
+
+// DiffStatResult contains line-level diff statistics for a worktree.
+type DiffStatResult struct {
+	FilesChanged int
+	LinesAdded   int
+	LinesRemoved int
 }
 
 // GitStatusResult contains comprehensive git status for a worktree.

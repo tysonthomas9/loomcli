@@ -175,6 +175,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("POST /api/agents/{name}/git/reset", handleGitReset(gitOps))
 		mux.HandleFunc("GET /api/agents/{name}/git/status", handleGitStatus(gitOps))
 		mux.HandleFunc("PATCH /api/agents/{name}/git/target", handleGitTargetUpdate(gitOps))
+		mux.HandleFunc("GET /api/issues/{id}/git/diff-stat", handleGetIssueDiffStat(pool, gitOps))
 	}
 
 	// File operation endpoints for worktrees

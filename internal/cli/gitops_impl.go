@@ -176,6 +176,15 @@ func (g *GitOpsImpl) ListAgentWorktrees() ([]webui.AgentWorktree, error) {
 	return result, nil
 }
 
+func (g *GitOpsImpl) DiffStat(worktreePath, fromRef string) webui.DiffStatResult {
+	stats := ComputeDiffStats(worktreePath, fromRef)
+	return webui.DiffStatResult{
+		FilesChanged: stats.FilesChanged,
+		LinesAdded:   stats.LinesAdded,
+		LinesRemoved: stats.LinesRemoved,
+	}
+}
+
 // isLockedError checks if err is a LockedError and extracts it.
 func isLockedError(err error, target **LockedError) bool {
 	le, ok := err.(*LockedError)
