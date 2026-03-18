@@ -135,19 +135,21 @@ export function TerminalView({
   const [tabUnread, setTabUnread] = useState<Map<string, boolean>>(
     () => new Map(),
   );
-  const [dismissedWelcome, setDismissedWelcome] = useState<Set<string>>(() => {
-    const set = new Set<string>();
+  const [dismissedWelcome, setDismissedWelcome] = useState<boolean>(() => {
     try {
+      if (localStorage.getItem("terminal-onboarding-dismissed") === "1") return true;
+      // Backward compat: migrate old per-backend keys
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key?.startsWith("terminal-welcome-dismissed-")) {
-          set.add(key.slice("terminal-welcome-dismissed-".length));
+          localStorage.setItem("terminal-onboarding-dismissed", "1");
+          return true;
         }
       }
     } catch {
       // localStorage unavailable — show banners every session
     }
-    return set;
+    return false;
   });
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const instanceRefs = useRef<Map<string, TerminalInstanceHandle>>(new Map());
@@ -714,15 +716,10 @@ export function TerminalView({
     backendName: config?.backend ?? "unknown",
   });
 
-  const handleDismissWelcome = useCallback((backendName: string) => {
-    setDismissedWelcome((prev) => {
-      if (prev.has(backendName)) return prev;
-      const next = new Set(prev);
-      next.add(backendName);
-      return next;
-    });
+  const handleDismissWelcome = useCallback(() => {
+    setDismissedWelcome(true);
     try {
-      localStorage.setItem(`terminal-welcome-dismissed-${backendName}`, "1");
+      localStorage.setItem("terminal-onboarding-dismissed", "1");
     } catch {
       // localStorage unavailable
     }
@@ -809,8 +806,7 @@ export function TerminalView({
             />
           </>
         )}
-        {tabHasConnected.get(tab.id) &&
-          !dismissedWelcome.has(tab.backendName) && (
+        {tabHasConnected.get(tab.id) && !dismissedWelcome && (
             <WelcomeBanner
               backendName={tab.backendName}
               isActive={
@@ -818,10 +814,10 @@ export function TerminalView({
                   ? tab.id === rightPaneTabId
                   : tab.id === activeTabId
               }
-              onDismiss={() => handleDismissWelcome(tab.backendName)}
+              onDismiss={handleDismissWelcome}
               onExampleClick={(text) => {
                 instanceRefs.current.get(tab.id)?.pasteText(text);
-                handleDismissWelcome(tab.backendName);
+                handleDismissWelcome();
               }}
             />
           )}

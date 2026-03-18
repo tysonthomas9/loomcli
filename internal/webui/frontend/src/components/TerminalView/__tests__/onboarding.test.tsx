@@ -390,3 +390,120 @@ describe("HelpPopover", () => {
     });
   });
 });
+
+/**
+ * Unit tests for the global onboarding dismissal logic in TerminalView.
+ *
+ * TerminalView is too complex to render in isolation, so we test the
+ * localStorage-based logic directly — the same code paths used by the
+ * useState initializer and handleDismissWelcome callback.
+ */
+describe("Global onboarding dismissal (localStorage)", () => {
+  const GLOBAL_KEY = "terminal-onboarding-dismissed";
+  const OLD_KEY_PREFIX = "terminal-welcome-dismissed-";
+
+  /**
+   * Mirrors the useState initializer in TerminalView (lines 138-153).
+   * Returns what `dismissedWelcome` would be set to on mount.
+   */
+  function computeInitialDismissed(): boolean {
+    try {
+      if (localStorage.getItem(GLOBAL_KEY) === "1") return true;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith(OLD_KEY_PREFIX)) {
+          localStorage.setItem(GLOBAL_KEY, "1");
+          return true;
+        }
+      }
+    } catch {
+      // localStorage unavailable — show banners every session
+    }
+    return false;
+  }
+
+  /**
+   * Mirrors the handleDismissWelcome callback in TerminalView (lines 719-726).
+   */
+  function handleDismissWelcome(): void {
+    try {
+      localStorage.setItem(GLOBAL_KEY, "1");
+    } catch {
+      // localStorage unavailable
+    }
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("fresh user: no localStorage keys → dismissedWelcome is false", () => {
+    const result = computeInitialDismissed();
+    expect(result).toBe(false);
+  });
+
+  it("returning user: terminal-onboarding-dismissed=1 → dismissedWelcome is true", () => {
+    localStorage.setItem(GLOBAL_KEY, "1");
+
+    const result = computeInitialDismissed();
+    expect(result).toBe(true);
+  });
+
+  it("migration: old per-backend key exists → treated as dismissed, global key written", () => {
+    localStorage.setItem(`${OLD_KEY_PREFIX}claude`, "1");
+
+    const result = computeInitialDismissed();
+    expect(result).toBe(true);
+    expect(localStorage.getItem(GLOBAL_KEY)).toBe("1");
+  });
+
+  it("migration works with any old backend key", () => {
+    localStorage.setItem(`${OLD_KEY_PREFIX}codex`, "1");
+
+    const result = computeInitialDismissed();
+    expect(result).toBe(true);
+    expect(localStorage.getItem(GLOBAL_KEY)).toBe("1");
+  });
+
+  it("dismiss writes the global key to localStorage", () => {
+    expect(localStorage.getItem(GLOBAL_KEY)).toBeNull();
+
+    handleDismissWelcome();
+
+    expect(localStorage.getItem(GLOBAL_KEY)).toBe("1");
+  });
+
+  it("after dismiss, subsequent initializations see dismissed=true", () => {
+    // First visit: not dismissed
+    expect(computeInitialDismissed()).toBe(false);
+
+    // User dismisses
+    handleDismissWelcome();
+
+    // Next mount sees the global key
+    expect(computeInitialDismissed()).toBe(true);
+  });
+
+  it("global dismissal: dismissing on one backend suppresses for all backends", () => {
+    // Simulate dismissing while using "claude" backend
+    handleDismissWelcome();
+
+    // Now check: a different backend ("codex") should also see dismissed
+    // The logic does not check backendName at all — it is purely global
+    expect(computeInitialDismissed()).toBe(true);
+
+    // No per-backend keys were written — only the global key exists
+    expect(localStorage.getItem(`${OLD_KEY_PREFIX}claude`)).toBeNull();
+    expect(localStorage.getItem(`${OLD_KEY_PREFIX}codex`)).toBeNull();
+    expect(localStorage.getItem(GLOBAL_KEY)).toBe("1");
+  });
+
+  it("ignores unrelated localStorage keys during migration scan", () => {
+    localStorage.setItem("some-other-key", "value");
+    localStorage.setItem("terminal-other-setting", "true");
+
+    const result = computeInitialDismissed();
+    expect(result).toBe(false);
+    expect(localStorage.getItem(GLOBAL_KEY)).toBeNull();
+  });
+});
