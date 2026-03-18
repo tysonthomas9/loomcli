@@ -12,6 +12,7 @@ import styles from "./WorkspaceTree.module.css";
 
 export interface SortableWorkspaceEntryProps {
   ws: WorkspaceSummary;
+  isDefault: boolean;
   isEditing: boolean;
   draftName: string;
   isSaving: boolean;
@@ -28,6 +29,7 @@ export interface SortableWorkspaceEntryProps {
 
 export function SortableWorkspaceEntry({
   ws,
+  isDefault,
   isEditing,
   draftName,
   isSaving,
@@ -145,7 +147,15 @@ export function SortableWorkspaceEntry({
           )}
         </div>
       ) : (
-        <span className={styles.workspaceEntryName}>{ws.name}</span>
+        <span className={styles.workspaceEntryName}>
+          {ws.name}
+          {isDefault && (
+            <span className={styles.defaultStar} title="Default workspace">
+              {" "}
+              &#9733;
+            </span>
+          )}
+        </span>
       )}
       <span className={styles.workspaceEntryMeta}>
         <span className={styles.workspaceRepoCount}>{ws.repo_count}</span>

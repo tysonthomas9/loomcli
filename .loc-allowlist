@@ -18,5 +18,5 @@
 517 internal/webui/handlers_issues_write.go
 635 internal/webui/terminal.go
 540 internal/webui/handlers_terminal.go
-565 internal/webui/server.go
+566 internal/webui/server.go
 506 internal/cli/daemon.go

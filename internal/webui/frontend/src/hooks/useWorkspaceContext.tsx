@@ -16,6 +16,11 @@ import {
 } from "react";
 
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
+import {
+  setDefaultWorkspace as setDefaultWorkspaceApi,
+  clearDefaultWorkspace as clearDefaultWorkspaceApi,
+  refreshWorkspace,
+} from "@/api/workspace";
 
 import { useWorkspace as useWorkspaceData } from "./useWorkspace";
 import type { UseWorkspaceReturn } from "./useWorkspace";
@@ -23,6 +28,7 @@ import type { UseWorkspaceReturn } from "./useWorkspace";
 // localStorage keys
 const LS_ACTIVE_WORKSPACE = "loom-active-workspace";
 const LS_SELECTED_REPOS = "loom-selected-repos";
+const LS_DEFAULT_WORKSPACE = "loom-default-workspace";
 
 /**
  * Safe localStorage getter.
@@ -62,6 +68,11 @@ export interface WorkspaceContextValue extends UseWorkspaceReturn {
   activeWorkspaceName: string | null;
   /** Switch workspace (future multi-workspace) */
   setActiveWorkspace: (name: string) => void;
+
+  /** Name of the default workspace, null if none set */
+  defaultWorkspaceName: string | null;
+  /** Set or clear the default workspace (null = clear) */
+  setDefaultWorkspace: (name: string | null) => Promise<void>;
 
   /** Selected repo names. Empty Set = "all repos" */
   selectedRepoNames: Set<string>;
@@ -125,10 +136,15 @@ export function WorkspaceProvider({
 }: WorkspaceProviderProps): JSX.Element {
   const workspaceResult = useWorkspaceData({ pollInterval: 60000 });
 
-  // Workspace-level selection
+  // Workspace-level selection (fall back to default workspace if no active one stored)
   const [activeWorkspaceName, setActiveWorkspaceNameRaw] = useState<
     string | null
-  >(() => lsGet(LS_ACTIVE_WORKSPACE));
+  >(() => lsGet(LS_ACTIVE_WORKSPACE) ?? lsGet(LS_DEFAULT_WORKSPACE));
+
+  // Default workspace state (fast-path from localStorage, synced from server)
+  const [defaultWorkspaceName, setDefaultWorkspaceNameRaw] = useState<
+    string | null
+  >(() => lsGet(LS_DEFAULT_WORKSPACE));
 
   // Repo-level selection
   const [selectedRepoNames, setSelectedRepoNames] = useState<Set<string>>(() =>
@@ -183,11 +199,45 @@ export function WorkspaceProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoNamesKey]);
 
+  // Sync default workspace from server response
+  useEffect(() => {
+    const serverDefault = workspaceResult.workspace?.default_workspace;
+    if (serverDefault !== undefined) {
+      setDefaultWorkspaceNameRaw(serverDefault || null);
+      lsSet(LS_DEFAULT_WORKSPACE, serverDefault || "");
+    }
+  }, [workspaceResult.workspace]);
+
   // Workspace selection action
   const setActiveWorkspace = useCallback((name: string) => {
     setActiveWorkspaceNameRaw(name);
     lsSet(LS_ACTIVE_WORKSPACE, name);
   }, []);
+
+  // Set or clear the default workspace with optimistic update
+  const setDefaultWorkspace = useCallback(
+    async (name: string | null) => {
+      const previous = defaultWorkspaceName;
+      // Optimistic update
+      setDefaultWorkspaceNameRaw(name);
+      lsSet(LS_DEFAULT_WORKSPACE, name ?? "");
+      try {
+        if (name) {
+          await setDefaultWorkspaceApi(name);
+        } else {
+          await clearDefaultWorkspaceApi();
+        }
+        await refreshWorkspace();
+      } catch (err) {
+        // Roll back on failure
+        setDefaultWorkspaceNameRaw(previous);
+        lsSet(LS_DEFAULT_WORKSPACE, previous ?? "");
+        // Re-throw so callers can show error UI
+        throw err;
+      }
+    },
+    [defaultWorkspaceName],
+  );
 
   // Repo selection actions
   const selectRepos = useCallback((names: string[]) => {
@@ -272,6 +322,8 @@ export function WorkspaceProvider({
       getAgentByName,
       activeWorkspaceName,
       setActiveWorkspace,
+      defaultWorkspaceName,
+      setDefaultWorkspace,
       selectedRepoNames,
       activeRepos,
       activeRepoNames,
@@ -289,6 +341,8 @@ export function WorkspaceProvider({
       getAgentByName,
       activeWorkspaceName,
       setActiveWorkspace,
+      defaultWorkspaceName,
+      setDefaultWorkspace,
       selectedRepoNames,
       activeRepos,
       activeRepoNames,
@@ -322,6 +376,8 @@ const NO_WORKSPACE_CONTEXT: WorkspaceContextValue = {
   getAgentByName: () => undefined,
   activeWorkspaceName: null,
   setActiveWorkspace: () => {},
+  defaultWorkspaceName: null,
+  setDefaultWorkspace: () => Promise.resolve(),
   selectedRepoNames: new Set<string>(),
   activeRepos: [],
   activeRepoNames: [],

@@ -30,7 +30,12 @@ import {
 import type { WorkspaceSummary } from "@/api/workspace";
 import type { ConnectionState } from "@/api/sse";
 import type { LoomAgentStatus } from "@/types";
-import { useWorkspaceRepos, useAgentContext, useToast } from "@/hooks";
+import {
+  useWorkspaceRepos,
+  useAgentContext,
+  useToast,
+  useWorkspaceContext,
+} from "@/hooks";
 import {
   computeRepoHealth,
   worstHealthColor,
@@ -115,6 +120,7 @@ export function WorkspaceTree({
   } = useWorkspaceRepos();
   const { agents } = useAgentContext();
   const { showToast } = useToast();
+  const { defaultWorkspaceName, setDefaultWorkspace } = useWorkspaceContext();
 
   // Workspace delete state
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -377,6 +383,25 @@ export function WorkspaceTree({
     };
   }, []);
 
+  // Default workspace handlers
+  const handleSetDefault = useCallback(() => {
+    if (contextMenu) {
+      setDefaultWorkspace(contextMenu.workspaceName).catch((err: unknown) => {
+        const message =
+          err instanceof Error ? err.message : "Failed to set default";
+        showToast(message, { type: "error" });
+      });
+    }
+  }, [contextMenu, setDefaultWorkspace, showToast]);
+
+  const handleClearDefault = useCallback(() => {
+    setDefaultWorkspace(null).catch((err: unknown) => {
+      const message =
+        err instanceof Error ? err.message : "Failed to clear default";
+      showToast(message, { type: "error" });
+    });
+  }, [setDefaultWorkspace, showToast]);
+
   // Workspace summaries from the data
   const workspaces: WorkspaceSummary[] = workspace?.workspaces ?? [];
 
@@ -488,7 +513,17 @@ export function WorkspaceTree({
       >
         {!isCollapsed && (
           <>
-            <span className={styles.toggleText}>Workspace</span>
+            <span className={styles.toggleText}>
+              Workspace
+              {defaultWorkspaceName && (
+                <span
+                  className={styles.defaultStar}
+                  title={`Default: ${defaultWorkspaceName}`}
+                >
+                  &#9733;
+                </span>
+              )}
+            </span>
             <span className={styles.sectionCount}>{repos.length}</span>
             {onAddClick && (
               <span
@@ -580,6 +615,7 @@ export function WorkspaceTree({
                       <SortableWorkspaceEntry
                         key={ws.name}
                         ws={ws}
+                        isDefault={ws.name === defaultWorkspaceName}
                         isEditing={editingWorkspace === ws.name}
                         draftName={draftName}
                         isSaving={isSaving}
@@ -740,6 +776,12 @@ export function WorkspaceTree({
         onRename={handleStartRename}
         onRemove={handleStartRemove}
         onClose={handleCloseContextMenu}
+        isDefault={
+          contextMenu != null &&
+          contextMenu.workspaceName === defaultWorkspaceName
+        }
+        onSetDefault={handleSetDefault}
+        onClearDefault={handleClearDefault}
       />
 
       <ConfirmDialog

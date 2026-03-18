@@ -28,6 +28,7 @@ export interface WorkspaceSummary {
   path: string;
   active: boolean;
   repo_count: number;
+  is_default: boolean;
 }
 
 export interface WorkspaceData {
@@ -38,6 +39,7 @@ export interface WorkspaceData {
   agents: WorkspaceAgentInfo[];
   workspaces: WorkspaceSummary[];
   workspace_order?: string[];
+  default_workspace: string;
 }
 
 // ============= Response Types =============
@@ -170,6 +172,43 @@ export async function reorderWorkspaces(
   workspaceCache = data;
   fetchPromise = null;
   return data;
+}
+
+/**
+ * Set the default workspace. On success, invalidates cache and returns refreshed data.
+ */
+export async function setDefaultWorkspace(
+  name: string,
+): Promise<WorkspaceData> {
+  const response = await put<ApiResult<WorkspaceData>>(
+    "/api/workspace/default",
+    { name },
+  );
+  const data = unwrap(response);
+  cacheGeneration++;
+  if (data) {
+    workspaceCache = data;
+  }
+  fetchPromise = null;
+  return workspaceCache ?? (await refreshWorkspace());
+}
+
+/**
+ * Clear the default workspace. On success, invalidates cache and returns refreshed data.
+ */
+export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
+  const response = await del<ApiResult<WorkspaceData>>(
+    "/api/workspace/default",
+  );
+  if (!response.success) {
+    throw new ApiError(0, response.error);
+  }
+  cacheGeneration++;
+  if (response.data) {
+    workspaceCache = response.data;
+  }
+  fetchPromise = null;
+  return workspaceCache ?? (await refreshWorkspace());
 }
 
 /**

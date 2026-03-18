@@ -35,43 +35,46 @@ const (
 
 // ServerConfig holds configuration for the web UI server.
 type ServerConfig struct {
-	Port                int
-	BindAddress         string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
-	SocketPath          string
-	PoolSize            int
-	CORSEnabled         bool
-	CORSOrigins         []string
-	ShutdownTimeout     time.Duration
-	MaxPortAttempts     int
-	TerminalCmd         string
-	MaxTerminalSessions int  // Maximum concurrent terminal connections (0 = default 20)
-	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
-	FleetRedis          *fleet.RedisConfig
-	FleetJWTKey         []byte                         // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
-	FleetAPIKey         string                         // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	APIKey              string                         `json:"-"` // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
-	AuthEnabled         bool                           // Whether API authentication is enabled (default: true)
-	HSTSEnabled         bool                           // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
-	LoomServerURL       string                         // Default target URL for the loom API proxy (set by 'loom serve')
-	DevMode             bool                           // Serve frontend from disk instead of embedded FS
-	DevFrontendDir      string                         // Directory to serve in dev mode (default: internal/webui/frontend/dist)
-	GitOps              GitOps                         // Git operations interface (optional; nil disables git endpoints)
-	FileOps             FileOps                        // File operations interface (optional; nil disables file endpoints)
-	WorkspaceConfigFn   func() (*WorkspaceData, error) // Workspace topology supplier; nil = single-repo mode
-	WorkspaceDeleteFn   func(name string) error        // Workspace deletion function; nil = deletion unavailable
-	BackendOps          BackendOps                     // Backend health operations interface (optional; nil disables backend health endpoint)
-	ScrollbackMaxLines  int                            // Maximum lines per scrollback buffer (0 = default 10000)
+	Port                    int
+	BindAddress             string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
+	SocketPath              string
+	PoolSize                int
+	CORSEnabled             bool
+	CORSOrigins             []string
+	ShutdownTimeout         time.Duration
+	MaxPortAttempts         int
+	TerminalCmd             string
+	MaxTerminalSessions     int  // Maximum concurrent terminal connections (0 = default 20)
+	FleetEnabled            bool // Register fleet API routes (requires Redis coordination)
+	FleetRedis              *fleet.RedisConfig
+	FleetJWTKey             []byte                         // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey             string                         // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
+	APIKey                  string                         `json:"-"` // Pre-shared API key for WebUI auth (if empty and AuthEnabled, auto-generate)
+	AuthEnabled             bool                           // Whether API authentication is enabled (default: true)
+	HSTSEnabled             bool                           // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	LoomServerURL           string                         // Default target URL for the loom API proxy (set by 'loom serve')
+	DevMode                 bool                           // Serve frontend from disk instead of embedded FS
+	DevFrontendDir          string                         // Directory to serve in dev mode (default: internal/webui/frontend/dist)
+	GitOps                  GitOps                         // Git operations interface (optional; nil disables git endpoints)
+	FileOps                 FileOps                        // File operations interface (optional; nil disables file endpoints)
+	WorkspaceConfigFn       func() (*WorkspaceData, error) // Workspace topology supplier; nil = single-repo mode
+	WorkspaceDeleteFn       func(name string) error        // Workspace deletion function; nil = deletion unavailable
+	SetDefaultWorkspaceFn   func(name string) error        // Set default workspace in config; nil = feature disabled
+	ClearDefaultWorkspaceFn func() error                   // Clear default workspace in config; nil = feature disabled
+	BackendOps              BackendOps                     // Backend health operations interface (optional; nil disables backend health endpoint)
+	ScrollbackMaxLines      int                            // Maximum lines per scrollback buffer (0 = default 10000)
 }
 
 // WorkspaceData represents the full workspace topology returned by the API.
 type WorkspaceData struct {
-	Name           string               `json:"name"`
-	Path           string               `json:"path"`
-	Repos          []WorkspaceRepo      `json:"repos"`
-	Groups         []string             `json:"groups"`
-	Agents         []WorkspaceAgentInfo `json:"agents"`
-	Workspaces     []WorkspaceSummary   `json:"workspaces"`
-	WorkspaceOrder []string             `json:"workspace_order,omitempty"`
+	Name             string               `json:"name"`
+	Path             string               `json:"path"`
+	Repos            []WorkspaceRepo      `json:"repos"`
+	Groups           []string             `json:"groups"`
+	Agents           []WorkspaceAgentInfo `json:"agents"`
+	Workspaces       []WorkspaceSummary   `json:"workspaces"`
+	WorkspaceOrder   []string             `json:"workspace_order,omitempty"`
+	DefaultWorkspace string               `json:"default_workspace"`
 }
 
 // WorkspaceSummary provides a lightweight summary of a configured workspace.
@@ -80,6 +83,7 @@ type WorkspaceSummary struct {
 	Path      string `json:"path"`
 	Active    bool   `json:"active"`
 	RepoCount int    `json:"repo_count"`
+	IsDefault bool   `json:"is_default"`
 }
 
 // WorkspaceRepo represents a repository within a workspace.
@@ -441,7 +445,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	mux := http.NewServeMux()
 	// Pass allowed origins for WebSocket origin validation.
 	// When CORS is disabled, nil origins means only same-origin connections are accepted.
-	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.BackendOps, sessionHistoryStore)
+	setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, config.BackendOps, sessionHistoryStore)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.

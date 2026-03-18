@@ -69,6 +69,50 @@ func deleteWorkspace(name string) error {
 	return nil
 }
 
+// setDefaultWorkspace sets the default workspace in config.
+// Returns an error if the workspace is not found.
+func setDefaultWorkspace(name string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg == nil || len(cfg.Workspaces) == 0 {
+		return fmt.Errorf("workspace %q not found", name)
+	}
+	if _, ok := cfg.Workspaces[name]; !ok {
+		return fmt.Errorf("workspace %q not found", name)
+	}
+	cfg.DefaultWorkspace = name
+	if err := SaveConfig(cfg); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	return nil
+}
+
+// clearDefaultWorkspace clears the default workspace, reverting to first-workspace behavior.
+func clearDefaultWorkspace() error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg == nil {
+		return nil
+	}
+	cfg.DefaultWorkspace = ""
+	if len(cfg.Workspaces) > 0 {
+		names := make([]string, 0, len(cfg.Workspaces))
+		for n := range cfg.Workspaces {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		cfg.DefaultWorkspace = names[0]
+	}
+	if err := SaveConfig(cfg); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	return nil
+}
+
 // buildWorkspaceInfo loads workspace topology from config and daemon config.
 // Returns nil when no workspaces are configured (single-repo mode).
 func buildWorkspaceInfo() (*webui.WorkspaceData, error) {
@@ -146,18 +190,20 @@ func buildWorkspaceInfo() (*webui.WorkspaceData, error) {
 			Path:      w.Path,
 			Active:    name == wsName,
 			RepoCount: len(w.Repos),
+			IsDefault: name == cfg.DefaultWorkspace,
 		})
 	}
 	sortWorkspaceSummaries(summaries, cfg.WorkspaceOrder)
 
 	return &webui.WorkspaceData{
-		Name:           wsName,
-		Path:           ws.Path,
-		Repos:          repos,
-		Groups:         groups,
-		Agents:         agents,
-		Workspaces:     summaries,
-		WorkspaceOrder: cfg.WorkspaceOrder,
+		Name:             wsName,
+		Path:             ws.Path,
+		Repos:            repos,
+		Groups:           groups,
+		Agents:           agents,
+		Workspaces:       summaries,
+		WorkspaceOrder:   cfg.WorkspaceOrder,
+		DefaultWorkspace: cfg.DefaultWorkspace,
 	}, nil
 }
 

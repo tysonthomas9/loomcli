@@ -25,6 +25,12 @@ export interface WorkspaceContextMenuProps {
   onRemove: () => void;
   /** Callback to close the menu */
   onClose: () => void;
+  /** Whether the target workspace is the default */
+  isDefault?: boolean;
+  /** Callback when Set as default is selected */
+  onSetDefault?: () => void;
+  /** Callback when Clear default is selected */
+  onClearDefault?: () => void;
 }
 
 export function WorkspaceContextMenu({
@@ -33,6 +39,9 @@ export function WorkspaceContextMenu({
   onRename,
   onRemove,
   onClose,
+  isDefault,
+  onSetDefault,
+  onClearDefault,
 }: WorkspaceContextMenuProps): JSX.Element | null {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -109,6 +118,25 @@ export function WorkspaceContextMenu({
     [handleRemoveClick],
   );
 
+  const handleDefaultClick = useCallback(() => {
+    if (isDefault) {
+      onClearDefault?.();
+    } else {
+      onSetDefault?.();
+    }
+    onClose();
+  }, [isDefault, onSetDefault, onClearDefault, onClose]);
+
+  const handleDefaultKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handleDefaultClick();
+      }
+    },
+    [handleDefaultClick],
+  );
+
   if (!isOpen) return null;
 
   return (
@@ -144,6 +172,34 @@ export function WorkspaceContextMenu({
         </svg>
         Rename
       </button>
+      {(onSetDefault || onClearDefault) && (
+        <button
+          type="button"
+          className={styles.menuItem}
+          onClick={handleDefaultClick}
+          onKeyDown={handleDefaultKeyDown}
+          role="menuitem"
+          data-testid="workspace-context-menu-default"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            className={styles.menuItemIcon}
+          >
+            <path
+              d="M7 1L8.76 4.56L12.73 5.14L9.87 7.94L10.52 11.89L7 10.04L3.48 11.89L4.13 7.94L1.27 5.14L5.24 4.56L7 1Z"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill={isDefault ? "currentColor" : "none"}
+            />
+          </svg>
+          {isDefault ? "Clear default" : "Set as default"}
+        </button>
+      )}
       <button
         type="button"
         className={`${styles.menuItem} ${styles.dangerItem}`}

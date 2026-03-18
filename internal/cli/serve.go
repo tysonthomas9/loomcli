@@ -258,25 +258,27 @@ func runServe(cmd *cobra.Command, args []string) {
 		go func() {
 			gitOps := NewGitOps()
 			cfg := webui.ServerConfig{
-				Port:              serveWebUIPort,
-				BindAddress:       serveBindAddr,
-				SocketPath:        serveWebUISocket,
-				LoomServerURL:     fmt.Sprintf("http://localhost:%d", servePort),
-				TerminalCmd:       terminalCmd,
-				FleetEnabled:      serveRedisAddr != "",
-				FleetRedis:        fleetRedisConfig,
-				FleetJWTKey:       fleetJWTKey,
-				FleetAPIKey:       serveFleetAPIKey,
-				APIKey:            serveAPIKey,
-				AuthEnabled:       serveAuth,
-				HSTSEnabled:       serveHSTS,
-				DevMode:           serveDev,
-				DevFrontendDir:    serveDevFrontDir,
-				GitOps:            gitOps,
-				FileOps:           gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
-				WorkspaceConfigFn: buildWorkspaceInfo,
-				WorkspaceDeleteFn: deleteWorkspace,
-				BackendOps:        backendOps,
+				Port:                    serveWebUIPort,
+				BindAddress:             serveBindAddr,
+				SocketPath:              serveWebUISocket,
+				LoomServerURL:           fmt.Sprintf("http://localhost:%d", servePort),
+				TerminalCmd:             terminalCmd,
+				FleetEnabled:            serveRedisAddr != "",
+				FleetRedis:              fleetRedisConfig,
+				FleetJWTKey:             fleetJWTKey,
+				FleetAPIKey:             serveFleetAPIKey,
+				APIKey:                  serveAPIKey,
+				AuthEnabled:             serveAuth,
+				HSTSEnabled:             serveHSTS,
+				DevMode:                 serveDev,
+				DevFrontendDir:          serveDevFrontDir,
+				GitOps:                  gitOps,
+				FileOps:                 gitOps, // GitOpsImpl satisfies FileOps (same ResolveAgentWorktree)
+				WorkspaceConfigFn:       buildWorkspaceInfo,
+				WorkspaceDeleteFn:       deleteWorkspace,
+				SetDefaultWorkspaceFn:   setDefaultWorkspace,
+				ClearDefaultWorkspaceFn: clearDefaultWorkspace,
+				BackendOps:              backendOps,
 			}
 			if serveCorsOrigin != "" {
 				cfg.CORSEnabled = true
