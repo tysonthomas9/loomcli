@@ -442,8 +442,9 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter := setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, config.WorkspaceCreateFn, config.BackendOps, sessionHistoryStore)
+	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, config.WorkspaceCreateFn, config.BackendOps, sessionHistoryStore)
 	defer clientErrLimiter.stop()
+	defer cspLimiter.stop()
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.

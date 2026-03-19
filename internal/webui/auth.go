@@ -79,6 +79,11 @@ func isPublicRoute(method, path string) bool {
 		return true
 	}
 
+	// CSP violation reports are sent by browsers automatically without auth headers
+	if method == http.MethodPost && path == "/api/csp-report" {
+		return true
+	}
+
 	if method != http.MethodGet {
 		return false
 	}
