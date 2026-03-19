@@ -6,6 +6,7 @@ import { migrateLocalStorage } from "@/utils/migrateLocalStorage";
 import { initAuth, getAuthState } from "@/api";
 import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { initErrorReporter, reportError } from "@/api/errorReporter";
 import {
   ToastProvider,
   AgentProvider,
@@ -22,6 +23,9 @@ import {
 // Run localStorage migration before anything reads storage.
 // ES imports are hoisted, so this executes after all imports but before any React rendering.
 migrateLocalStorage();
+
+// Install global error handlers early, before auth/render initialization.
+initErrorReporter();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -77,7 +81,13 @@ initAuth()
   .finally(() => {
     createRoot(rootElement).render(
       <StrictMode>
-        <ErrorBoundary>
+        <ErrorBoundary
+          onError={(error, errorInfo) => {
+            reportError("react-error", error, {
+              componentStack: errorInfo.componentStack ?? undefined,
+            });
+          }}
+        >
           <ToastProvider>
             <WorkspaceProvider>
               <AgentProvider>

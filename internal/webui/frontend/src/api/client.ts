@@ -233,6 +233,21 @@ async function fetchApi<T>(
         }
       }
 
+      // Report 5xx errors (but not errors about the error endpoint itself)
+      if (response.status >= 500 && path !== "/api/client-errors") {
+        import("@/api/errorReporter")
+          .then(({ reportError }) => {
+            reportError(
+              "api-error",
+              `${response.status} ${response.statusText}`,
+              {
+                url: path,
+              },
+            );
+          })
+          .catch(() => {}); // silent - error reporting must never throw
+      }
+
       let errorBody: unknown;
       const responseText = await response.text();
       try {
