@@ -16,13 +16,32 @@ import type { Issue } from "@/types";
 
 import { EpicRow } from "../EpicRow";
 
-// Mock useIssueDiffStat since TaskRow (rendered as child) uses it.
+// Mock hooks used by EpicRow and its children.
 vi.mock("@/hooks", () => ({
   useIssueDiffStat: vi.fn(() => ({
     data: null,
     isLoading: false,
     error: null,
     refetch: vi.fn(),
+  })),
+}));
+
+vi.mock("@/hooks/useToast", () => ({
+  useToast: vi.fn(() => ({
+    showToast: vi.fn(),
+    dismissToast: vi.fn(),
+    toasts: [],
+  })),
+}));
+
+vi.mock("@/hooks/useInlineCreate", () => ({
+  useInlineCreate: vi.fn(() => ({
+    isAdding: false,
+    isSubmitting: false,
+    error: null,
+    startAdding: vi.fn(),
+    cancelAdding: vi.fn(),
+    submitTitle: vi.fn(),
   })),
 }));
 
@@ -189,13 +208,12 @@ describe("EpicRow", () => {
     expect(screen.getByLabelText("Expand epic")).toBeInTheDocument();
   });
 
-  it("does not render children section when tasks array is empty", () => {
-    const { container } = render(
+  it("renders add task button when tasks array is empty and expanded", () => {
+    render(
       <EpicRow epic={epic} tasks={[]} isCollapsed={false} onToggle={vi.fn()} />,
     );
-    // epicChildren div should not be present when no tasks
-    const childrenDiv = container.querySelector("[class*='epicChildren']");
-    expect(childrenDiv).not.toBeInTheDocument();
+    // Even with no tasks, the "+ Add task" button should be visible
+    expect(screen.getByText("+ Add task")).toBeInTheDocument();
   });
 
   it("sets button title to epic title", () => {

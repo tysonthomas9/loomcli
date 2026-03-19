@@ -4,10 +4,15 @@
  */
 
 import type React from "react";
+import { useCallback } from "react";
 
 import type { Issue } from "@/types";
+import { createWorkspaceTask } from "@/api/workspace";
+import { useToast } from "@/hooks/useToast";
+import { useInlineCreate } from "@/hooks/useInlineCreate";
 
 import { TaskRow, type TaskRowProps } from "./TaskRow";
+import { InlineAddInput } from "./InlineAddInput";
 import styles from "./EpicTaskTree.module.css";
 
 export interface EpicRowProps {
@@ -38,6 +43,8 @@ export interface EpicRowProps {
   taskRenameInputRef?: React.RefObject<HTMLInputElement | null> | undefined;
   taskRenameError?: string | null | undefined;
   taskIsSaving?: boolean | undefined;
+  /** Called after a task is successfully created inline. */
+  onTaskCreated?: (() => void) | undefined;
 }
 
 /** Map epic status to a CSS data-status value. */
@@ -79,7 +86,25 @@ export function EpicRow({
   taskRenameError,
   isSaving,
   taskIsSaving,
+  onTaskCreated,
 }: EpicRowProps): JSX.Element {
+  const { showToast } = useToast();
+
+  const handleCreateTask = useCallback(
+    (title: string) => createWorkspaceTask(epic.id, title),
+    [epic.id],
+  );
+
+  const addTask = useInlineCreate({
+    createFn: handleCreateTask,
+    onSuccess: (issue) => {
+      showToast(`Task ${issue.id} created`, { type: "success" });
+      onTaskCreated?.();
+    },
+    onError: (msg) => {
+      showToast(msg, { type: "error" });
+    },
+  });
   const handleOverflowClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onOverflowClick?.(e, epic.id);
@@ -203,11 +228,30 @@ export function EpicRow({
           &rsaquo;
         </span>
       </div>
-      {!isCollapsed && tasks.length > 0 && (
+      {!isCollapsed && (
         <div className={styles.epicChildren}>
           {tasks.map((task) => (
             <TaskRow key={task.id} task={task} {...buildTaskProps(task)} />
           ))}
+          {addTask.isAdding ? (
+            <InlineAddInput
+              placeholder="New task name"
+              onSubmit={addTask.submitTitle}
+              onCancel={addTask.cancelAdding}
+              isSubmitting={addTask.isSubmitting}
+              error={addTask.error}
+              className={styles.inlineAddInputTask}
+            />
+          ) : (
+            <button
+              type="button"
+              className={styles.addButtonTask}
+              onClick={addTask.startAdding}
+              data-testid={`add-task-${epic.id}`}
+            >
+              + Add task
+            </button>
+          )}
         </div>
       )}
     </div>

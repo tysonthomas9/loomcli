@@ -96,6 +96,12 @@ export type {
 export { useWorkspaceTree } from "./useWorkspaceTree";
 export type { EpicWithTasks, UseWorkspaceTreeReturn } from "./useWorkspaceTree";
 
+export { useInlineCreate } from "./useInlineCreate";
+export type {
+  UseInlineCreateOptions,
+  UseInlineCreateReturn,
+} from "./useInlineCreate";
+
 export { useAgents } from "./useAgents";
 export type { UseAgentsOptions, UseAgentsResult } from "./useAgents";
 

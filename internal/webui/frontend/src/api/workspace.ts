@@ -4,6 +4,8 @@
  */
 
 import { get, post, patch, put, del, ApiError } from "./client";
+import { createIssue } from "./issues";
+import type { Issue } from "@/types";
 
 // ============= Types =============
 
@@ -248,4 +250,36 @@ export async function createWorkspace(
  */
 export function getCachedWorkspace(): WorkspaceData | null {
   return workspaceCache;
+}
+
+// ============= Workspace Issue Helpers =============
+
+/**
+ * Create a task under an epic with sensible defaults.
+ */
+export async function createWorkspaceTask(
+  epicId: string,
+  title: string,
+): Promise<Issue> {
+  return createIssue({
+    title,
+    issue_type: "task",
+    priority: 3,
+    parent: epicId,
+  });
+}
+
+/**
+ * Create an epic with sensible defaults.
+ * Note: workspace association via source_repos is handled at the backend level.
+ */
+export async function createWorkspaceEpic(
+  _workspaceName: string,
+  title: string,
+): Promise<Issue> {
+  return createIssue({
+    title,
+    issue_type: "epic",
+    priority: 2,
+  });
 }

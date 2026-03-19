@@ -7,14 +7,17 @@ import type React from "react";
 import { useState, useCallback, useRef } from "react";
 
 import { updateIssue, closeIssue } from "@/api/issues";
+import { createWorkspaceEpic } from "@/api/workspace";
 import { useWorkspaceTree } from "@/hooks/useWorkspaceTree";
 import { useToast } from "@/hooks/useToast";
+import { useInlineCreate } from "@/hooks/useInlineCreate";
 
 import { TalkToLeadEntry } from "./TalkToLeadEntry";
 import { EpicRow } from "./EpicRow";
 import { TaskRow } from "./TaskRow";
 import { EpicContextMenu } from "./EpicContextMenu";
 import { TaskContextMenu } from "./TaskContextMenu";
+import { InlineAddInput } from "./InlineAddInput";
 import styles from "./EpicTaskTree.module.css";
 
 const COLLAPSE_STORAGE_PREFIX = "workspace-tree-epic-collapsed";
@@ -108,6 +111,22 @@ export function EpicTaskTree({
   const [renameError, setRenameError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleCreateEpic = useCallback(
+    (title: string) => createWorkspaceEpic(workspaceName, title),
+    [workspaceName],
+  );
+
+  const addEpic = useInlineCreate({
+    createFn: handleCreateEpic,
+    onSuccess: (issue) => {
+      showToast(`Epic ${issue.id} created`, { type: "success" });
+      refetch();
+    },
+    onError: (msg) => {
+      showToast(msg, { type: "error" });
+    },
+  });
 
   const handleOverflowClick = useCallback(
     (e: React.MouseEvent, type: "epic" | "task", id: string, title: string) => {
@@ -328,8 +347,29 @@ export function EpicTaskTree({
           }
           taskRenameError={editingType === "task" ? renameError : undefined}
           taskIsSaving={editingType === "task" ? isSaving : undefined}
+          onTaskCreated={refetch}
         />
       ))}
+
+      {/* Inline add epic */}
+      {addEpic.isAdding ? (
+        <InlineAddInput
+          placeholder="New epic name"
+          onSubmit={addEpic.submitTitle}
+          onCancel={addEpic.cancelAdding}
+          isSubmitting={addEpic.isSubmitting}
+          error={addEpic.error}
+        />
+      ) : (
+        <button
+          type="button"
+          className={styles.addButton}
+          onClick={addEpic.startAdding}
+          data-testid="add-epic"
+        >
+          + Add epic
+        </button>
+      )}
 
       {orphanTasks.length > 0 && (
         <div className={styles.epicGroup}>

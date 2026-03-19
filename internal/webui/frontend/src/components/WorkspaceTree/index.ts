@@ -13,3 +13,5 @@ export { EpicContextMenu } from "./EpicContextMenu";
 export type { EpicContextMenuProps } from "./EpicContextMenu";
 export { TaskContextMenu } from "./TaskContextMenu";
 export type { TaskContextMenuProps } from "./TaskContextMenu";
+export { InlineAddInput } from "./InlineAddInput";
+export type { InlineAddInputProps } from "./InlineAddInput";
