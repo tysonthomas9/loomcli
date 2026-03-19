@@ -9,3 +9,7 @@ export { TaskRow } from "./TaskRow";
 export type { TaskRowProps } from "./TaskRow";
 export { TalkToLeadEntry } from "./TalkToLeadEntry";
 export type { TalkToLeadEntryProps } from "./TalkToLeadEntry";
+export { EpicContextMenu } from "./EpicContextMenu";
+export type { EpicContextMenuProps } from "./EpicContextMenu";
+export { TaskContextMenu } from "./TaskContextMenu";
+export type { TaskContextMenuProps } from "./TaskContextMenu";

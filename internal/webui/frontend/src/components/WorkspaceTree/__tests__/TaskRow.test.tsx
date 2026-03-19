@@ -79,16 +79,17 @@ describe("TaskRow", () => {
     const { container } = render(
       <TaskRow task={makeTask()} isSelected={true} />,
     );
-    const button = container.querySelector("button");
-    expect(button?.className).toContain("taskRowSelected");
+    // taskRowSelected is on the outer div wrapper
+    const wrapper = container.firstElementChild;
+    expect(wrapper?.className).toContain("taskRowSelected");
   });
 
   it("does not apply selected class when isSelected is false", () => {
     const { container } = render(
       <TaskRow task={makeTask()} isSelected={false} />,
     );
-    const button = container.querySelector("button");
-    expect(button?.className).not.toContain("taskRowSelected");
+    const wrapper = container.firstElementChild;
+    expect(wrapper?.className).not.toContain("taskRowSelected");
   });
 
   it("calls onSelect with task id on click", () => {

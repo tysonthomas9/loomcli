@@ -222,13 +222,16 @@ describe("EpicRow", () => {
         onSelect={onSelect}
       />,
     );
-    // Task One should have the selected class
+    // Task One's wrapper div should have the selected class
     const taskOneButton = screen.getByTitle("Task One");
-    expect(taskOneButton.className).toContain("taskRowSelected");
+    // The outer div is the parent of the button
+    const taskOneWrapper = taskOneButton.parentElement;
+    expect(taskOneWrapper?.className).toContain("taskRowSelected");
 
     // Task Two should not have the selected class
     const taskTwoButton = screen.getByTitle("Task Two");
-    expect(taskTwoButton.className).not.toContain("taskRowSelected");
+    const taskTwoWrapper = taskTwoButton.parentElement;
+    expect(taskTwoWrapper?.className).not.toContain("taskRowSelected");
 
     // Click Task Two should call onSelect
     fireEvent.click(taskTwoButton);

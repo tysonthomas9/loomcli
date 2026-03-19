@@ -30,13 +30,19 @@ vi.mock("@/hooks/useWorkspaceTree", () => ({
   })),
 }));
 
-// Mock useIssueDiffStat since TaskRow (rendered inside) uses it.
+// Mock useIssueDiffStat and useToast since TaskRow and EpicTaskTree use them.
 vi.mock("@/hooks", () => ({
   useIssueDiffStat: vi.fn(() => ({
     data: null,
     isLoading: false,
     error: null,
     refetch: vi.fn(),
+  })),
+}));
+
+vi.mock("@/hooks/useToast", () => ({
+  useToast: vi.fn(() => ({
+    showToast: vi.fn(),
   })),
 }));
 
