@@ -3,16 +3,30 @@ package cli
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// shortTempSocket creates a short socket path under /tmp to stay within the
+// Unix socket path length limit (107 chars on macOS). t.TempDir() paths on
+// macOS are too long (e.g. /private/var/folders/.../TestName.../001/).
+func shortTempSocket(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "loom-fdb-*")
+	if err != nil {
+		t.Fatalf("failed to create short temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return filepath.Join(dir, "t.sock")
+}
+
 // newTestFleetDBServer creates a FleetDBServer with auto-start miniredis and
 // in-memory storage for testing. It registers a cleanup to stop the server.
 func newTestFleetDBServer(t *testing.T) *FleetDBServer {
 	t.Helper()
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := shortTempSocket(t)
 	srv, err := NewFleetDBServer(FleetDBServerConfig{
 		AutoStart:  true,
 		Workspace:  "test-workspace",
@@ -26,7 +40,7 @@ func newTestFleetDBServer(t *testing.T) *FleetDBServer {
 }
 
 func TestFleetDBServer_AutoStartMiniredis(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := shortTempSocket(t)
 	srv, err := NewFleetDBServer(FleetDBServerConfig{
 		AutoStart:  true,
 		RedisURL:   "",
@@ -68,7 +82,7 @@ func TestFleetDBServer_InMemoryStorage(t *testing.T) {
 }
 
 func TestFleetDBServer_StopIdempotent(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := shortTempSocket(t)
 	srv, err := NewFleetDBServer(FleetDBServerConfig{
 		AutoStart:  true,
 		Workspace:  "test-workspace",
@@ -168,7 +182,7 @@ func TestFleetDBServer_ConfigValidation(t *testing.T) {
 		// We verify this by creating a server with empty workspace — if it starts
 		// successfully, the default was applied (the server would fail if workspace
 		// were truly empty since it's passed to beads.NewServer).
-		socketPath := filepath.Join(t.TempDir(), "test.sock")
+		socketPath := shortTempSocket(t)
 		srv, err := NewFleetDBServer(FleetDBServerConfig{
 			AutoStart:  true,
 			Workspace:  "",
@@ -182,7 +196,7 @@ func TestFleetDBServer_ConfigValidation(t *testing.T) {
 }
 
 func TestFleetDBServer_NoRedis(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := shortTempSocket(t)
 	srv, err := NewFleetDBServer(FleetDBServerConfig{
 		AutoStart:  false,
 		RedisURL:   "",

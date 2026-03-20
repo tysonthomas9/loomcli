@@ -186,6 +186,9 @@ func TestInitBeads_AlreadyInitialized(t *testing.T) {
 }
 
 func TestInitBeads_Initialize(t *testing.T) {
+	ResetBeadsDirCache()
+	defer ResetBeadsDirCache()
+
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	defer os.Chdir(origDir)
@@ -757,6 +760,9 @@ func TestShowSummary_EmptyNames(t *testing.T) {
 // --- Additional coverage tests ---
 
 func TestInitBeads_Failure(t *testing.T) {
+	ResetBeadsDirCache()
+	defer ResetBeadsDirCache()
+
 	origDir, _ := os.Getwd()
 	defer os.Chdir(origDir)
 
