@@ -21,7 +21,10 @@ import {
   clearDefaultWorkspace as clearDefaultWorkspaceApi,
   refreshWorkspace,
 } from "@/api/workspace";
-import { setActiveWorkspace as setActiveWorkspaceClient, getActiveWorkspace } from "@/api/client";
+import {
+  setActiveWorkspace as setActiveWorkspaceClient,
+  getActiveWorkspace,
+} from "@/api/client";
 
 import { useWorkspace as useWorkspaceData } from "./useWorkspace";
 import type { UseWorkspaceReturn } from "./useWorkspace";

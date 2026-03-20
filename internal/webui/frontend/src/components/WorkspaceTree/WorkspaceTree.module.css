@@ -354,7 +354,11 @@
 }
 
 .workspaceEntryActive {
-  background: color-mix(in srgb, var(--color-primary, #6366f1) 10%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--color-primary, #6366f1) 10%,
+    transparent
+  );
   border-left: 3px solid var(--color-primary, #6366f1);
   padding-left: calc(1rem - 3px);
 }

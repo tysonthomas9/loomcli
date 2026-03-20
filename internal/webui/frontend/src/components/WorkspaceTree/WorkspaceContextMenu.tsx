@@ -182,8 +182,12 @@ export function WorkspaceContextMenu({
           onClick={handleDefaultClick}
           onKeyDown={handleDefaultKeyDown}
           role="menuitem"
-          aria-label={isDefault ? "Clear default workspace" : "Set as default workspace"}
-          title={isDefault ? "Clear default workspace" : "Set as default workspace"}
+          aria-label={
+            isDefault ? "Clear default workspace" : "Set as default workspace"
+          }
+          title={
+            isDefault ? "Clear default workspace" : "Set as default workspace"
+          }
           data-testid="workspace-context-menu-default"
         >
           <svg

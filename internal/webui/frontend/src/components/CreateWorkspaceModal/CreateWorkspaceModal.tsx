@@ -174,7 +174,18 @@ export function CreateWorkspaceModal({
         setIsSubmitting(false);
       }
     },
-    [canSubmit, name, type, cloneUrls, urlInput, repos, repoInput, path, onSuccess, onClose],
+    [
+      canSubmit,
+      name,
+      type,
+      cloneUrls,
+      urlInput,
+      repos,
+      repoInput,
+      path,
+      onSuccess,
+      onClose,
+    ],
   );
 
   if (!isOpen) return null;

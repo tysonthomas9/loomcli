@@ -300,7 +300,11 @@ async function fetchApi<T>(
     clearTimeoutCleanup();
     if (error instanceof ApiError) {
       // Dispatch daemon-unavailable for 503 (Service Unavailable)
-      if (error.status === 503 && typeof window !== "undefined" && !isPageUnloading) {
+      if (
+        error.status === 503 &&
+        typeof window !== "undefined" &&
+        !isPageUnloading
+      ) {
         window.dispatchEvent(new CustomEvent("daemon-unavailable"));
       }
       throw error;

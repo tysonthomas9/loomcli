@@ -1732,7 +1732,10 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({ mode: "kanban", workspaceName: null });
+      expect(useIssues).toHaveBeenCalledWith({
+        mode: "kanban",
+        workspaceName: null,
+      });
     });
 
     it('calls useIssues with mode: "ready" when activeView is "table"', () => {
@@ -1742,7 +1745,10 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({ mode: "ready", workspaceName: null });
+      expect(useIssues).toHaveBeenCalledWith({
+        mode: "ready",
+        workspaceName: null,
+      });
     });
 
     it('calls useIssues with mode: "graph" when activeView is "graph"', () => {
@@ -1752,7 +1758,10 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({ mode: "graph", workspaceName: null });
+      expect(useIssues).toHaveBeenCalledWith({
+        mode: "graph",
+        workspaceName: null,
+      });
     });
 
     it("refetches issues when view changes from kanban to graph", () => {
@@ -1766,7 +1775,10 @@ describe("App", () => {
       const { rerender } = render(<App />);
 
       // Verify initial call with mode: 'kanban'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: "kanban", workspaceName: null });
+      expect(useIssues).toHaveBeenLastCalledWith({
+        mode: "kanban",
+        workspaceName: null,
+      });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();
@@ -1777,7 +1789,10 @@ describe("App", () => {
       rerender(<App />);
 
       // Verify useIssues is called with mode: 'graph' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: "graph", workspaceName: null });
+      expect(useIssues).toHaveBeenLastCalledWith({
+        mode: "graph",
+        workspaceName: null,
+      });
     });
 
     it("refetches issues when view changes from graph to kanban", () => {
@@ -1791,7 +1806,10 @@ describe("App", () => {
       const { rerender } = render(<App />);
 
       // Verify initial call with mode: 'graph'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: "graph", workspaceName: null });
+      expect(useIssues).toHaveBeenLastCalledWith({
+        mode: "graph",
+        workspaceName: null,
+      });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();
@@ -1802,7 +1820,10 @@ describe("App", () => {
       rerender(<App />);
 
       // Verify useIssues is called with mode: 'kanban' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: "kanban", workspaceName: null });
+      expect(useIssues).toHaveBeenLastCalledWith({
+        mode: "kanban",
+        workspaceName: null,
+      });
     });
 
     it("refetches issues when view changes from graph to table", () => {
@@ -1816,7 +1837,10 @@ describe("App", () => {
       const { rerender } = render(<App />);
 
       // Verify initial call with mode: 'graph'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: "graph", workspaceName: null });
+      expect(useIssues).toHaveBeenLastCalledWith({
+        mode: "graph",
+        workspaceName: null,
+      });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();
@@ -1827,7 +1851,10 @@ describe("App", () => {
       rerender(<App />);
 
       // Verify useIssues is called with mode: 'ready' after view change
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: "ready", workspaceName: null });
+      expect(useIssues).toHaveBeenLastCalledWith({
+        mode: "ready",
+        workspaceName: null,
+      });
     });
 
     it("switches from kanban mode to ready mode when view changes from kanban to table", () => {
@@ -1841,7 +1868,10 @@ describe("App", () => {
       const { rerender } = render(<App />);
 
       // Verify initial call with mode: 'kanban'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: "kanban", workspaceName: null });
+      expect(useIssues).toHaveBeenLastCalledWith({
+        mode: "kanban",
+        workspaceName: null,
+      });
 
       // Clear mock to track the next call
       vi.mocked(useIssues).mockClear();
@@ -1852,7 +1882,10 @@ describe("App", () => {
       rerender(<App />);
 
       // Verify useIssues is still called with mode: 'ready'
-      expect(useIssues).toHaveBeenLastCalledWith({ mode: "ready", workspaceName: null });
+      expect(useIssues).toHaveBeenLastCalledWith({
+        mode: "ready",
+        workspaceName: null,
+      });
     });
 
     it("useViewState is called before useIssues to determine fetch mode", () => {
@@ -1887,7 +1920,10 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(useIssues).toHaveBeenCalledWith({ mode: "ready", workspaceName: null });
+      expect(useIssues).toHaveBeenCalledWith({
+        mode: "ready",
+        workspaceName: null,
+      });
     });
   });
 

@@ -137,7 +137,8 @@ export function TerminalView({
   );
   const [dismissedWelcome, setDismissedWelcome] = useState<boolean>(() => {
     try {
-      if (localStorage.getItem("terminal-onboarding-dismissed") === "1") return true;
+      if (localStorage.getItem("terminal-onboarding-dismissed") === "1")
+        return true;
       // Backward compat: migrate old per-backend keys
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
@@ -819,20 +820,20 @@ export function TerminalView({
           </>
         )}
         {tabHasConnected.get(tab.id) && !dismissedWelcome && (
-            <WelcomeBanner
-              backendName={tab.backendName}
-              isActive={
-                pane === "right"
-                  ? tab.id === rightPaneTabId
-                  : tab.id === activeTabId
-              }
-              onDismiss={handleDismissWelcome}
-              onExampleClick={(text) => {
-                instanceRefs.current.get(tab.id)?.pasteText(text);
-                handleDismissWelcome();
-              }}
-            />
-          )}
+          <WelcomeBanner
+            backendName={tab.backendName}
+            isActive={
+              pane === "right"
+                ? tab.id === rightPaneTabId
+                : tab.id === activeTabId
+            }
+            onDismiss={handleDismissWelcome}
+            onExampleClick={(text) => {
+              instanceRefs.current.get(tab.id)?.pasteText(text);
+              handleDismissWelcome();
+            }}
+          />
+        )}
         <NotesBar
           notes={
             tabMetadata.find((m) => m.session_name === tab.sessionName)

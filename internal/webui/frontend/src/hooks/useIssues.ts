@@ -219,7 +219,11 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       // Gate: only process mutations for the active workspace
       // Allow mutations without workspace_id (legacy/single-workspace mode)
       const activeWs = workspaceNameRef.current;
-      if (activeWs && mutation.workspace_id && mutation.workspace_id !== activeWs) {
+      if (
+        activeWs &&
+        mutation.workspace_id &&
+        mutation.workspace_id !== activeWs
+      ) {
         if (process.env.NODE_ENV === "development") {
           console.debug(
             "[useIssues] Gated mutation for different workspace:",

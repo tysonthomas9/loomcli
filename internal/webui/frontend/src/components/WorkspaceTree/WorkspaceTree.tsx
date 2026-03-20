@@ -161,9 +161,15 @@ export function WorkspaceTree({
     retryCountdown,
     retryNow,
   } = useWorkspaceRepos();
-  const { agents: fleetAgents, agentTasks: contextAgentTasks } = useAgentContext();
+  const { agents: fleetAgents, agentTasks: contextAgentTasks } =
+    useAgentContext();
   const { showToast } = useToast();
-  const { activeWorkspaceName, defaultWorkspaceName, setDefaultWorkspace, agents: workspaceConfigAgents } = useWorkspaceContext();
+  const {
+    activeWorkspaceName,
+    defaultWorkspaceName,
+    setDefaultWorkspace,
+    agents: workspaceConfigAgents,
+  } = useWorkspaceContext();
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
@@ -668,9 +674,12 @@ export function WorkspaceTree({
             </div>
           )}
 
-          {!isLoading && !error && repos.length === 0 && agents.length === 0 && (
-            <div className={styles.emptyState}>No repos in workspace</div>
-          )}
+          {!isLoading &&
+            !error &&
+            repos.length === 0 &&
+            agents.length === 0 && (
+              <div className={styles.emptyState}>No repos in workspace</div>
+            )}
 
           {/* Agent list section — always visible when agents exist */}
           {agents.length > 0 && (
@@ -684,7 +693,10 @@ export function WorkspaceTree({
                   <AgentCard
                     key={agent.name}
                     agent={agent}
-                    taskTitle={agentTasks?.[agent.name]?.title ?? contextAgentTasks?.[agent.name]?.title}
+                    taskTitle={
+                      agentTasks?.[agent.name]?.title ??
+                      contextAgentTasks?.[agent.name]?.title
+                    }
                     {...(onAgentClick
                       ? { onClick: () => onAgentClick(agent.name) }
                       : {})}
@@ -720,7 +732,9 @@ export function WorkspaceTree({
                         isSaving={isSaving}
                         renameError={renameError}
                         renameInputRef={renameInputRef}
-                        {...(onWorkspaceSwitch ? { onClick: onWorkspaceSwitch } : {})}
+                        {...(onWorkspaceSwitch
+                          ? { onClick: onWorkspaceSwitch }
+                          : {})}
                         onDraftChange={setDraftName}
                         onSaveRename={handleSaveRename}
                         onRenameKeyDown={handleRenameKeyDown}
@@ -828,9 +842,7 @@ export function WorkspaceTree({
           )}
 
           {/* Work Queue section — shows issue counts scoped to active workspace */}
-          {workQueueCounts && (
-            <WorkQueueSection counts={workQueueCounts} />
-          )}
+          {workQueueCounts && <WorkQueueSection counts={workQueueCounts} />}
 
           {/* + New Workspace button at the bottom of the tree */}
           {onAddClick && (

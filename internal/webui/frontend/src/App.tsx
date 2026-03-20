@@ -1256,8 +1256,12 @@ function App() {
           // before the delayed window.location.replace() fires.
           try {
             localStorage.setItem("loom-active-workspace", createdName);
-          } catch { /* ignore */ }
-          const url = new URL(window.location.origin + window.location.pathname);
+          } catch {
+            /* ignore */
+          }
+          const url = new URL(
+            window.location.origin + window.location.pathname,
+          );
           url.searchParams.set("_ws", createdName);
           window.location.replace(url.toString());
         }}

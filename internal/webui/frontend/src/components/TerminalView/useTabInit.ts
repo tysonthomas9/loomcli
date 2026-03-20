@@ -77,7 +77,8 @@ export function useTabInit(args: TabInitArgs) {
       // Workspace prefix for session names: namespace tmux sessions per workspace
       // to prevent cross-workspace session leakage. The prefix is omitted from
       // display labels for cleaner UI.
-      const wsPrefix = workspace && workspace !== "default" ? `${workspace}--` : "";
+      const wsPrefix =
+        workspace && workspace !== "default" ? `${workspace}--` : "";
 
       const newTabs: TabState[] = backends.map((backend) => {
         const label = `lead-${backend}-1`;
@@ -92,9 +93,7 @@ export function useTabInit(args: TabInitArgs) {
       });
       setTabs(newTabs);
 
-      const claudeTab = newTabs.find((t) =>
-        t.label.startsWith("lead-claude-"),
-      );
+      const claudeTab = newTabs.find((t) => t.label.startsWith("lead-claude-"));
       setActiveTabId(claudeTab?.id ?? newTabs[0]?.id ?? "");
 
       newTabs.forEach((tab, i) => {
