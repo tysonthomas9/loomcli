@@ -174,6 +174,55 @@ func createWorkspace(ctx context.Context, req webui.WorkspaceCreateRequest) erro
 	}
 }
 
+type resolvedRepo struct {
+	path string
+	name string
+}
+
+// resolveRepoPaths validates and resolves a list of repo paths, checking that
+// each exists, is a directory, contains a .git directory, and has a unique name.
+func resolveRepoPaths(repoPaths []string) ([]resolvedRepo, error) {
+	var resolved []resolvedRepo
+	seenNames := make(map[string]string)
+
+	for _, rp := range repoPaths {
+		rp = strings.TrimSpace(rp)
+		if rp == "" {
+			continue
+		}
+
+		absPath, err := filepath.Abs(rp)
+		if err != nil {
+			return nil, fmt.Errorf("cannot resolve path %q: %w", rp, err)
+		}
+
+		info, err := os.Stat(absPath)
+		if err != nil {
+			return nil, fmt.Errorf("repo path does not exist: %s", absPath)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("repo path is not a directory: %s", absPath)
+		}
+
+		gitDir := filepath.Join(absPath, ".git")
+		if _, err := os.Stat(gitDir); err != nil {
+			return nil, fmt.Errorf("not a git repository: %s", absPath)
+		}
+
+		baseName := filepath.Base(absPath)
+		if prev, exists := seenNames[baseName]; exists {
+			return nil, fmt.Errorf("duplicate repo name %q from paths %s and %s", baseName, prev, absPath)
+		}
+		seenNames[baseName] = absPath
+		resolved = append(resolved, resolvedRepo{path: absPath, name: baseName})
+	}
+
+	if len(resolved) == 0 {
+		return nil, fmt.Errorf("no valid repos specified")
+	}
+	return resolved, nil
+}
+
 // createEmptyWorkspace creates worktrees from existing repos.
 func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, branch string, repoPaths []string) error {
 	// Security: ensure path is under allowed base directory
@@ -186,47 +235,9 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 		return fmt.Errorf("workspace path must be under %s", allowedBase)
 	}
 
-	type resolvedRepo struct {
-		path string
-		name string
-	}
-	var resolved []resolvedRepo
-	seenNames := make(map[string]string)
-
-	for _, rp := range repoPaths {
-		rp = strings.TrimSpace(rp)
-		if rp == "" {
-			continue
-		}
-
-		absPath, err := filepath.Abs(rp)
-		if err != nil {
-			return fmt.Errorf("cannot resolve path %q: %w", rp, err)
-		}
-
-		info, err := os.Stat(absPath)
-		if err != nil {
-			return fmt.Errorf("repo path does not exist: %s", absPath)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("repo path is not a directory: %s", absPath)
-		}
-
-		gitDir := filepath.Join(absPath, ".git")
-		if _, err := os.Stat(gitDir); err != nil {
-			return fmt.Errorf("not a git repository: %s", absPath)
-		}
-
-		baseName := filepath.Base(absPath)
-		if prev, exists := seenNames[baseName]; exists {
-			return fmt.Errorf("duplicate repo name %q from paths %s and %s", baseName, prev, absPath)
-		}
-		seenNames[baseName] = absPath
-		resolved = append(resolved, resolvedRepo{path: absPath, name: baseName})
-	}
-
-	if len(resolved) == 0 {
-		return fmt.Errorf("no valid repos specified")
+	resolved, err := resolveRepoPaths(repoPaths)
+	if err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
