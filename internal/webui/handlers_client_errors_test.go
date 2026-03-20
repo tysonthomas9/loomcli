@@ -197,8 +197,9 @@ func TestClientErrorLimiter_Cleanup(t *testing.T) {
 		t.Fatal("expected entry to exist after allow()")
 	}
 
-	// Wait for TTL to expire then cleanup to run
-	time.Sleep(2 * time.Second)
+	// Wait for TTL (1s) to expire and cleanup (500ms interval) to run.
+	// Use 3s to avoid flakiness under CI load.
+	time.Sleep(3 * time.Second)
 
 	if _, ok := limiter.clients.Load("1.2.3.4"); ok {
 		t.Error("expected entry to be evicted after TTL")
