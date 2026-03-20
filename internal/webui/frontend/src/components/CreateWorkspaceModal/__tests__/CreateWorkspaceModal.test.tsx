@@ -93,8 +93,8 @@ describe("CreateWorkspaceModal", () => {
       expect(screen.getByTestId("create-workspace-path")).toBeInTheDocument();
       expect(screen.getByLabelText("Location")).toBeInTheDocument();
 
-      // Type radios
-      expect(screen.getByLabelText("Empty")).toBeInTheDocument();
+      // Type radios (Empty is now "Local Repos")
+      expect(screen.getByLabelText("Local Repos")).toBeInTheDocument();
       expect(screen.getByLabelText("Clone")).toBeInTheDocument();
       expect(screen.getByLabelText("Template")).toBeInTheDocument();
 
@@ -125,7 +125,7 @@ describe("CreateWorkspaceModal", () => {
   });
 
   describe("clone URL field", () => {
-    it("does not show clone URL field when type is empty", () => {
+    it("does not show clone URL field when type is Local Repos", () => {
       render(
         <CreateWorkspaceModal
           isOpen={true}
@@ -133,13 +133,16 @@ describe("CreateWorkspaceModal", () => {
           onSuccess={onSuccess}
         />,
       );
+
+      // Default type is "clone", switch to "Local Repos" (empty)
+      fireEvent.click(screen.getByLabelText("Local Repos"));
 
       expect(
         screen.queryByTestId("create-workspace-clone-url"),
       ).not.toBeInTheDocument();
     });
 
-    it("shows clone URL field when type is clone", () => {
+    it("shows clone URL field when type is clone (default)", () => {
       render(
         <CreateWorkspaceModal
           isOpen={true}
@@ -148,12 +151,11 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByLabelText("Clone"));
-
+      // Clone is the default type, so clone URL field should be visible
       expect(
         screen.getByTestId("create-workspace-clone-url"),
       ).toBeInTheDocument();
-      expect(screen.getByLabelText("Repository URL")).toBeInTheDocument();
+      expect(screen.getByLabelText("Repository URLs")).toBeInTheDocument();
     });
   });
 
@@ -170,7 +172,7 @@ describe("CreateWorkspaceModal", () => {
       expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
     });
 
-    it("submit button is enabled when name is filled", () => {
+    it("submit button is enabled when name and clone URL are filled", () => {
       render(
         <CreateWorkspaceModal
           isOpen={true}
@@ -179,8 +181,12 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
+      // Default type is clone, so both name and URL are needed
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "my-workspace" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
       });
 
       expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
@@ -241,8 +247,12 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
+      // Default type is clone, need name + URL to enable submit
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "my-workspace" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
       });
       fireEvent.click(screen.getByTestId("create-workspace-submit"));
 
@@ -271,23 +281,30 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
+      // Switch to "Local Repos" (empty) type so name alone is sufficient
+      fireEvent.click(screen.getByLabelText("Local Repos"));
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "test-ws" },
+      });
+      // Need to add a repo path for empty type
+      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
+        target: { value: "/path/to/repo" },
       });
       fireEvent.click(screen.getByTestId("create-workspace-submit"));
 
       await waitFor(() => {
-        expect(onSuccess).toHaveBeenCalledWith(MOCK_WORKSPACE_DATA);
+        expect(onSuccess).toHaveBeenCalledWith(MOCK_WORKSPACE_DATA, "test-ws");
       });
       expect(onClose).toHaveBeenCalledTimes(1);
 
       expect(mockCreateWorkspace).toHaveBeenCalledWith({
         name: "test-ws",
         type: "empty",
+        repos: ["/path/to/repo"],
       });
     });
 
-    it("sends clone_url when type is clone", async () => {
+    it("sends clone_urls when type is clone", async () => {
       mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
 
       render(
@@ -298,10 +315,10 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
+      // Clone is the default type
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "cloned-ws" },
       });
-      fireEvent.click(screen.getByLabelText("Clone"));
       fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
         target: { value: "https://github.com/example/repo.git" },
       });
@@ -311,7 +328,7 @@ describe("CreateWorkspaceModal", () => {
         expect(mockCreateWorkspace).toHaveBeenCalledWith({
           name: "cloned-ws",
           type: "clone",
-          clone_url: "https://github.com/example/repo.git",
+          clone_urls: ["https://github.com/example/repo.git"],
         });
       });
     });
@@ -327,8 +344,12 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
+      // Clone is the default type, provide URL + path
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "my-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
       });
       fireEvent.change(screen.getByTestId("create-workspace-path"), {
         target: { value: "/custom/path" },
@@ -338,7 +359,8 @@ describe("CreateWorkspaceModal", () => {
       await waitFor(() => {
         expect(mockCreateWorkspace).toHaveBeenCalledWith({
           name: "my-ws",
-          type: "empty",
+          type: "clone",
+          clone_urls: ["https://github.com/example/repo"],
           path: "/custom/path",
         });
       });
@@ -355,8 +377,12 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
+      // Default type is clone, provide URL
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "fail-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
       });
       fireEvent.click(screen.getByTestId("create-workspace-submit"));
 
@@ -386,8 +412,12 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
+      // Default type is clone, provide URL
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "dup-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
       });
       fireEvent.click(screen.getByTestId("create-workspace-submit"));
 
@@ -454,17 +484,15 @@ describe("CreateWorkspaceModal", () => {
         />,
       );
 
-      // Fill in form fields
+      // Fill in form fields (default type is clone)
       fireEvent.change(screen.getByTestId("create-workspace-name"), {
         target: { value: "dirty-ws" },
       });
       fireEvent.change(screen.getByTestId("create-workspace-path"), {
         target: { value: "/some/path" },
       });
-      fireEvent.click(screen.getByLabelText("Clone"));
-      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
-        target: { value: "https://github.com/example/repo" },
-      });
+      // Switch to Local Repos to test reset back to Clone
+      fireEvent.click(screen.getByLabelText("Local Repos"));
 
       // Close the modal
       rerender(
@@ -487,12 +515,13 @@ describe("CreateWorkspaceModal", () => {
       // All fields should be reset
       expect(screen.getByTestId("create-workspace-name")).toHaveValue("");
       expect(screen.getByTestId("create-workspace-path")).toHaveValue("");
-      expect(screen.getByLabelText("Empty")).toBeChecked();
-      expect(screen.getByLabelText("Clone")).not.toBeChecked();
-      // Clone URL field should not be visible since type reset to "empty"
+      // Default type resets to "clone"
+      expect(screen.getByLabelText("Clone")).toBeChecked();
+      expect(screen.getByLabelText("Local Repos")).not.toBeChecked();
+      // Clone URL field should be visible since type reset to "clone"
       expect(
-        screen.queryByTestId("create-workspace-clone-url"),
-      ).not.toBeInTheDocument();
+        screen.getByTestId("create-workspace-clone-url"),
+      ).toBeInTheDocument();
     });
   });
 });

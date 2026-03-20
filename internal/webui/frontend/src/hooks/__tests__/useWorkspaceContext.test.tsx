@@ -402,8 +402,9 @@ describe("useWorkspaceContext", () => {
       localStorage.clear();
     });
 
-    it("updates activeWorkspaceName", () => {
+    it("persists workspace name to localStorage on setActiveWorkspace", () => {
       setupMockWorkspace();
+      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
@@ -413,7 +414,14 @@ describe("useWorkspaceContext", () => {
         result.current.setActiveWorkspace("new-workspace");
       });
 
-      expect(result.current.activeWorkspaceName).toBe("new-workspace");
+      // setActiveWorkspace now persists to localStorage and triggers page reload
+      // rather than updating React state directly
+      expect(setItemSpy).toHaveBeenCalledWith(
+        "loom-active-workspace",
+        "new-workspace",
+      );
+
+      setItemSpy.mockRestore();
     });
 
     it("persists to localStorage", () => {
@@ -720,14 +728,15 @@ describe("useWorkspaceContext", () => {
       expect(result.current.isMultiRepo).toBe(false);
     });
 
-    it("is false when 1 repo", () => {
+    it("is true when 1 repo", () => {
       setupMockWorkspace({ repos: [createMockRepo({ name: "api" })] });
 
       const { result } = renderHook(() => useWorkspaceContext(), {
         wrapper,
       });
 
-      expect(result.current.isMultiRepo).toBe(false);
+      // isMultiRepo is true when workspace has 1+ repos (changed from 2+)
+      expect(result.current.isMultiRepo).toBe(true);
     });
 
     it("is true when 2+ repos", () => {

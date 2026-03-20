@@ -111,8 +111,8 @@ describe("useBackends", () => {
     it("maps an unknown backend with sensible fallback defaults", async () => {
       mockFetchBackends.mockResolvedValueOnce([
         createMockHealthData({
-          name: "gemini",
-          display_name: "Gemini Pro",
+          name: "mystery-backend",
+          display_name: "Mystery Backend",
           available: false,
         }),
       ]);
@@ -123,9 +123,9 @@ describe("useBackends", () => {
 
       expect(result.current.backends).toHaveLength(1);
       const backend = result.current.backends[0];
-      expect(backend.name).toBe("gemini");
+      expect(backend.name).toBe("mystery-backend");
       // display_name from API should be used via apiData.displayName
-      expect(backend.displayName).toBe("Gemini Pro");
+      expect(backend.displayName).toBe("Mystery Backend");
       expect(backend.available).toBe(false);
       // Unknown backend falls back to defaults
       expect(backend.provider).toBe("Unknown");

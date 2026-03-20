@@ -2955,7 +2955,7 @@ describe("App", () => {
   });
 
   describe("sidebar isMultiRepo guard", () => {
-    it("does not render WorkspaceTree sidebar when isMultiRepo is false and activeView is workspace", () => {
+    it("always renders WorkspaceTree sidebar regardless of isMultiRepo", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: null,
         repos: [],
@@ -2969,6 +2969,8 @@ describe("App", () => {
         getAgentByName: vi.fn(),
         activeWorkspaceName: null,
         setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
         selectedRepoNames: new Set<string>(),
         activeRepos: [],
         activeRepoNames: [],
@@ -2985,12 +2987,8 @@ describe("App", () => {
 
       render(<App />);
 
-      // WorkspaceTree renders an aria-label with "workspace tree" text
-      expect(
-        screen.queryByLabelText(/workspace tree/i),
-      ).not.toBeInTheDocument();
-      // AgentsSidebar should be shown instead (rendered with collapsible=false, shows "Agents" text)
-      expect(screen.getByText("Agents")).toBeInTheDocument();
+      // WorkspaceTree is always rendered now (sidebar always shows WorkspaceTree)
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
     it("renders WorkspaceTree sidebar when isMultiRepo is true and activeView is workspace", () => {
@@ -3007,6 +3005,8 @@ describe("App", () => {
         getAgentByName: vi.fn(),
         activeWorkspaceName: "my-workspace",
         setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
         selectedRepoNames: new Set<string>(),
         activeRepos: [],
         activeRepoNames: [],
@@ -3027,7 +3027,7 @@ describe("App", () => {
       expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
-    it("renders AgentsSidebar when isMultiRepo is true but activeView is not workspace", () => {
+    it("renders WorkspaceTree sidebar even when activeView is not workspace", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: { name: "my-workspace" },
         repos: [],
@@ -3041,6 +3041,8 @@ describe("App", () => {
         getAgentByName: vi.fn(),
         activeWorkspaceName: "my-workspace",
         setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
         selectedRepoNames: new Set<string>(),
         activeRepos: [],
         activeRepoNames: [],
@@ -3057,14 +3059,11 @@ describe("App", () => {
 
       render(<App />);
 
-      // AgentsSidebar should be shown, not WorkspaceTree
-      expect(
-        screen.queryByLabelText(/workspace tree/i),
-      ).not.toBeInTheDocument();
-      expect(screen.getByText("Agents")).toBeInTheDocument();
+      // WorkspaceTree is always shown now, regardless of activeView
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
-    it("renders AgentsSidebar during loading when isMultiRepo is false and activeView is workspace", () => {
+    it("renders WorkspaceTree sidebar during loading when isMultiRepo is false", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: null,
         repos: [],
@@ -3078,6 +3077,8 @@ describe("App", () => {
         getAgentByName: vi.fn(),
         activeWorkspaceName: null,
         setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
         selectedRepoNames: new Set<string>(),
         activeRepos: [],
         activeRepoNames: [],
@@ -3094,10 +3095,8 @@ describe("App", () => {
 
       render(<App />);
 
-      // In loading state, single-repo should still show AgentsSidebar, not WorkspaceTree
-      expect(
-        screen.queryByLabelText(/workspace tree/i),
-      ).not.toBeInTheDocument();
+      // WorkspaceTree is always shown, even during loading
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
     it("renders WorkspaceTree during loading when isMultiRepo is true and activeView is workspace", () => {
@@ -3134,7 +3133,7 @@ describe("App", () => {
       expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
-    it("renders AgentsSidebar during error when isMultiRepo is false and activeView is workspace", () => {
+    it("renders WorkspaceTree sidebar during error when isMultiRepo is false", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: null,
         repos: [],
@@ -3148,6 +3147,8 @@ describe("App", () => {
         getAgentByName: vi.fn(),
         activeWorkspaceName: null,
         setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
         selectedRepoNames: new Set<string>(),
         activeRepos: [],
         activeRepoNames: [],
@@ -3167,10 +3168,8 @@ describe("App", () => {
 
       render(<App />);
 
-      // In error state, single-repo should still show AgentsSidebar
-      expect(
-        screen.queryByLabelText(/workspace tree/i),
-      ).not.toBeInTheDocument();
+      // WorkspaceTree is always shown, even during error
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
   });
 

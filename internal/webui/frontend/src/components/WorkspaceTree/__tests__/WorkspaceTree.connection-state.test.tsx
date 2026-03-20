@@ -91,8 +91,10 @@ vi.mock("@/hooks", () => ({
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
   useAgentContext: () => ({ ...defaultAgentContext, ...agentOverride }),
   useWorkspaceContext: () => ({
+    activeWorkspaceName: null,
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
+    agents: [],
   }),
   useToast: () => ({ showToast: vi.fn() }),
   useIssueDiffStat: () => ({

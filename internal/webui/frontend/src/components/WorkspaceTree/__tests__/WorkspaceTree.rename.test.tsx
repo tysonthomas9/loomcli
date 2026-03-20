@@ -103,8 +103,10 @@ vi.mock("@/hooks", () => ({
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
   useAgentContext: () => ({ ...defaultAgentContext, ...agentOverride }),
   useWorkspaceContext: () => ({
+    activeWorkspaceName: null,
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
+    agents: [],
   }),
   useToast: () => ({ showToast: vi.fn() }),
   useIssueDiffStat: () => ({
@@ -188,7 +190,10 @@ describe("WorkspaceTree – workspace entries and rename", () => {
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      expect(screen.getByText("Workspaces")).toBeInTheDocument();
+      // "Workspaces" appears in toggle header + workspace section header
+      expect(screen.getAllByText("Workspaces").length).toBeGreaterThanOrEqual(
+        1,
+      );
       expect(screen.getByText("workspace-a")).toBeInTheDocument();
       expect(screen.getByText("workspace-b")).toBeInTheDocument();
     });
@@ -210,7 +215,8 @@ describe("WorkspaceTree – workspace entries and rename", () => {
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
+      // The toggle header still says "Workspaces" but the workspace section header should not appear
+      // The workspace entry name "only-one" should not be rendered as a workspace entry
       expect(screen.queryByText("only-one")).not.toBeInTheDocument();
     });
 
