@@ -13,12 +13,13 @@ import (
 
 // WorkspaceCreateRequest is the JSON body for POST /api/workspace/create.
 type WorkspaceCreateRequest struct {
-	Name     string   `json:"name"`
-	Type     string   `json:"type"`      // "empty", "clone", "template"
-	Repos    []string `json:"repos"`     // repo paths (for empty type)
-	CloneURL string   `json:"clone_url"` // git URL (for clone type)
-	Branch   string   `json:"branch"`    // optional branch name
-	Path     string   `json:"path"`      // optional workspace directory override
+	Name      string   `json:"name"`
+	Type      string   `json:"type"`       // "empty", "clone", "template"
+	Repos     []string `json:"repos"`      // repo paths (for empty type)
+	CloneURL  string   `json:"clone_url"`  // single git URL (backward compat)
+	CloneURLs []string `json:"clone_urls"` // multiple git URLs (for clone type)
+	Branch    string   `json:"branch"`     // optional branch name
+	Path      string   `json:"path"`       // optional workspace directory override
 }
 
 // WorkspaceCreateFn is the function signature for creating a workspace.
@@ -48,11 +49,17 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) (int, string) {
 			return http.StatusBadRequest, "repos is required for empty workspace type"
 		}
 	case "clone":
-		if req.CloneURL == "" {
-			return http.StatusBadRequest, "clone_url is required for clone workspace type"
+		// Normalize: merge single clone_url into clone_urls
+		if req.CloneURL != "" && len(req.CloneURLs) == 0 {
+			req.CloneURLs = []string{req.CloneURL}
 		}
-		if !cloneURLPattern.MatchString(req.CloneURL) {
-			return http.StatusBadRequest, "clone_url must start with https:// or git@"
+		if len(req.CloneURLs) == 0 {
+			return http.StatusBadRequest, "at least one clone URL is required for clone workspace type"
+		}
+		for _, u := range req.CloneURLs {
+			if !cloneURLPattern.MatchString(u) {
+				return http.StatusBadRequest, fmt.Sprintf("clone URL must start with https:// or git@: %s", u)
+			}
 		}
 	case "template":
 		return http.StatusNotImplemented, "template workspace type is not yet supported"

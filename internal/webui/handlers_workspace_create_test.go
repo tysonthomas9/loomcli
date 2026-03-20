@@ -267,7 +267,7 @@ func TestHandleWorkspaceCreate_URLValidation(t *testing.T) {
 			if resp.Success {
 				t.Fatal("expected failure")
 			}
-			if !strings.Contains(resp.Error, "clone_url must start with") {
+			if !strings.Contains(resp.Error, "clone URL must start with") {
 				t.Errorf("expected URL validation error, got: %s", resp.Error)
 			}
 		})
@@ -300,12 +300,12 @@ func TestHandleWorkspaceCreate_MissingRequiredFields(t *testing.T) {
 		{
 			name:      "clone type missing clone_url",
 			body:      `{"name":"ws","type":"clone"}`,
-			wantError: "clone_url is required",
+			wantError: "at least one clone URL is required",
 		},
 		{
 			name:      "clone type empty clone_url",
 			body:      `{"name":"ws","type":"clone","clone_url":""}`,
-			wantError: "clone_url is required",
+			wantError: "at least one clone URL is required",
 		},
 	}
 
@@ -663,13 +663,13 @@ func TestValidateWorkspaceCreateRequest(t *testing.T) {
 			name:       "clone type no url",
 			req:        WorkspaceCreateRequest{Name: "ws", Type: "clone"},
 			wantStatus: http.StatusBadRequest,
-			wantError:  "clone_url is required",
+			wantError:  "at least one clone URL is required",
 		},
 		{
 			name:       "clone type invalid url",
 			req:        WorkspaceCreateRequest{Name: "ws", Type: "clone", CloneURL: "http://example.com/repo"},
 			wantStatus: http.StatusBadRequest,
-			wantError:  "clone_url must start with",
+			wantError:  "clone URL must start with",
 		},
 	}
 

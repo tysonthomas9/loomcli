@@ -12,12 +12,14 @@ import styles from "./WorkspaceTree.module.css";
 
 export interface SortableWorkspaceEntryProps {
   ws: WorkspaceSummary;
+  isActive: boolean;
   isDefault: boolean;
   isEditing: boolean;
   draftName: string;
   isSaving: boolean;
   renameError: string | null;
   renameInputRef: React.RefObject<HTMLInputElement | null>;
+  onClick?: (name: string) => void;
   onDraftChange: (value: string) => void;
   onSaveRename: () => void;
   onRenameKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -29,12 +31,14 @@ export interface SortableWorkspaceEntryProps {
 
 export function SortableWorkspaceEntry({
   ws,
+  isActive,
   isDefault,
   isEditing,
   draftName,
   isSaving,
   renameError,
   renameInputRef,
+  onClick,
   onDraftChange,
   onSaveRename,
   onRenameKeyDown,
@@ -70,15 +74,31 @@ export function SortableWorkspaceEntry({
     }
   };
 
+  const handleClick = () => {
+    if (!isEditing && onClick) {
+      onClick(ws.name);
+    }
+  };
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={styles.workspaceEntry}
+      className={`${styles.workspaceEntry}${isActive ? ` ${styles.workspaceEntryActive}` : ""}`}
       data-active={ws.active}
+      data-current={isActive}
       data-dragging={isDragging}
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
       onContextMenu={(e) => onContextMenu(e, ws.name)}
-      onKeyDown={handleKeyDown}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleClick();
+        }
+        handleKeyDown(e);
+      }}
     >
       <span
         className={styles.dragHandle}
@@ -147,7 +167,23 @@ export function SortableWorkspaceEntry({
           )}
         </div>
       ) : (
-        <span className={styles.workspaceEntryName}>
+        <a
+          className={styles.workspaceEntryName}
+          href={`/?_ws=${encodeURIComponent(ws.name)}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // Route through the onClick handler (setActiveWorkspace) so
+            // the workspace switch uses a single code path with proper
+            // API header sync and clean URL construction, instead of
+            // relying on default <a> navigation which can race with
+            // React URL-sync effects.
+            if (onClick) {
+              onClick(ws.name);
+            }
+          }}
+          aria-label={`Switch to workspace ${ws.name}`}
+        >
           {ws.name}
           {isDefault && (
             <span className={styles.defaultStar} title="Default workspace">
@@ -155,7 +191,7 @@ export function SortableWorkspaceEntry({
               &#9733;
             </span>
           )}
-        </span>
+        </a>
       )}
       <span className={styles.workspaceEntryMeta}>
         <span className={styles.workspaceRepoCount}>{ws.repo_count}</span>

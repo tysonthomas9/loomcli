@@ -3,7 +3,22 @@
  * Provides a simpler push model compared to WebSocket with built-in browser reconnection.
  */
 
-import { getAuthToken, getAuthState, initAuth } from "./client";
+import {
+  getAuthToken,
+  getAuthState,
+  getActiveWorkspace,
+  initAuth,
+} from "./client";
+
+// Track page unload to suppress false-positive SSE errors during workspace switching.
+// Without this, rapid page navigation causes the EventSource to fire error events
+// that trigger stale data banners and reconnection UI.
+let isPageUnloading = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", () => {
+    isPageUnloading = true;
+  });
+}
 
 // Connection states for real-time event streaming
 export type ConnectionState =
@@ -41,6 +56,7 @@ export interface MutationPayload {
   parent_id?: string;
   step_count?: number;
   source_repo?: string;
+  workspace_id?: string;
 }
 
 /**
@@ -226,6 +242,13 @@ export class BeadsSSEClient {
       return;
     }
 
+    // Suppress errors during page navigation — in-flight EventSource
+    // connections are aborted by the browser, firing spurious error events
+    // that would otherwise trigger false reconnect attempts and stale banners.
+    if (isPageUnloading) {
+      return;
+    }
+
     // EventSource has three readyStates: CONNECTING(0), OPEN(1), CLOSED(2)
     // Browser automatically retries on error, so we track attempts
     if (
@@ -296,6 +319,11 @@ export function getSSEUrl(since?: number, sourceRepos?: string[]): string {
   const token = getAuthToken();
   if (token) {
     params.set("token", token);
+  }
+  // EventSource doesn't support custom headers, so pass workspace as query param
+  const workspace = getActiveWorkspace();
+  if (workspace) {
+    params.set("workspace", workspace);
   }
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;

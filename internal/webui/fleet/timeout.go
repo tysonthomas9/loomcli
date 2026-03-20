@@ -18,6 +18,14 @@ const (
 	claimTimesKey = keyPrefix + "tasks:claim_times"
 )
 
+// wsClaimTimesKey returns a workspace-scoped claim times sorted set key.
+func (s *Store) wsClaimTimesKey() string {
+	if s.workspaceID != "" {
+		return keyPrefix + s.workspaceID + ":tasks:claim_times"
+	}
+	return claimTimesKey
+}
+
 // TimedOutTask contains info about a task that exceeded the timeout.
 type TimedOutTask struct {
 	TaskID    string
@@ -28,7 +36,7 @@ type TimedOutTask struct {
 // RecordClaimTime records the claim timestamp for a task in the sorted set.
 func (s *Store) RecordClaimTime(ctx context.Context, taskID string) error {
 	score := float64(time.Now().Unix())
-	return s.client.ZAdd(ctx, claimTimesKey, redis.Z{
+	return s.client.ZAdd(ctx, s.wsClaimTimesKey(), redis.Z{
 		Score:  score,
 		Member: taskID,
 	}).Err()
@@ -36,7 +44,7 @@ func (s *Store) RecordClaimTime(ctx context.Context, taskID string) error {
 
 // ClearClaimTime removes the claim timestamp for a task from the sorted set.
 func (s *Store) ClearClaimTime(ctx context.Context, taskID string) error {
-	return s.client.ZRem(ctx, claimTimesKey, taskID).Err()
+	return s.client.ZRem(ctx, s.wsClaimTimesKey(), taskID).Err()
 }
 
 // FindTimedOutTasks returns tasks whose claim time exceeds the given timeout.
@@ -44,7 +52,7 @@ func (s *Store) FindTimedOutTasks(ctx context.Context, timeout time.Duration) ([
 	cutoff := time.Now().Add(-timeout)
 
 	// Get all tasks claimed before the cutoff
-	results, err := s.client.ZRangeByScoreWithScores(ctx, claimTimesKey, &redis.ZRangeBy{
+	results, err := s.client.ZRangeByScoreWithScores(ctx, s.wsClaimTimesKey(), &redis.ZRangeBy{
 		Min: "-inf",
 		Max: strconv.FormatInt(cutoff.Unix(), 10),
 	}).Result()
@@ -64,10 +72,10 @@ func (s *Store) FindTimedOutTasks(ctx context.Context, timeout time.Duration) ([
 		}
 
 		// Look up the worker that owns this claim
-		workerID, err := s.client.Get(ctx, claimedTaskKey(taskID)).Result()
+		workerID, err := s.client.Get(ctx, s.wsClaimedTaskKey(taskID)).Result()
 		if err == redis.Nil {
 			// Claim key expired but sorted set entry remains — clean it up
-			if err := s.client.ZRem(ctx, claimTimesKey, taskID).Err(); err != nil {
+			if err := s.client.ZRem(ctx, s.wsClaimTimesKey(), taskID).Err(); err != nil {
 				s.logger.Warn("failed to clean up orphaned claim time", "task_id", taskID, "error", err)
 			}
 			continue

@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
@@ -161,7 +163,12 @@ func createWorkspace(ctx context.Context, req webui.WorkspaceCreateRequest) erro
 	case "empty":
 		return createEmptyWorkspace(ctx, cfg, req.Name, wsDir, branch, req.Repos)
 	case "clone":
-		return createCloneWorkspace(ctx, cfg, req.Name, wsDir, req.CloneURL)
+		// Normalize: merge single clone_url into clone_urls
+		cloneURLs := req.CloneURLs
+		if len(cloneURLs) == 0 && req.CloneURL != "" {
+			cloneURLs = []string{req.CloneURL}
+		}
+		return createCloneWorkspace(ctx, cfg, req.Name, wsDir, cloneURLs)
 	default:
 		return fmt.Errorf("unsupported workspace type: %s", req.Type)
 	}
@@ -169,6 +176,16 @@ func createWorkspace(ctx context.Context, req webui.WorkspaceCreateRequest) erro
 
 // createEmptyWorkspace creates worktrees from existing repos.
 func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, branch string, repoPaths []string) error {
+	// Security: ensure path is under allowed base directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	allowedBase := filepath.Join(homeDir, ".loom", "workspaces")
+	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
+		return fmt.Errorf("workspace path must be under %s", allowedBase)
+	}
+
 	type resolvedRepo struct {
 		path string
 		name string
@@ -249,6 +266,16 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	// bd init (best-effort)
 	_ = execCommand(wsDir, "bd", "init")
 
+	// Write default loom.yaml with agents (best-effort; non-fatal)
+	if err := writeLoomYaml(wsDir); err != nil {
+		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
+	}
+
+	// Start bd daemon for the workspace (best-effort; non-fatal)
+	if err := ensureDaemonForWorkspace(wsDir, 10*time.Second); err != nil {
+		slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+	}
+
 	cfg.Workspaces[wsName] = WorkspaceConfig{Path: wsDir, Repos: repos}
 	if len(cfg.Workspaces) == 1 {
 		cfg.DefaultWorkspace = wsName
@@ -261,27 +288,89 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	return nil
 }
 
-// createCloneWorkspace clones a repo and creates a workspace from it.
-func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, cloneURL string) error {
+// repoNameFromURL derives a directory name from a git clone URL.
+// e.g. "https://github.com/foo/bar.git" → "bar"
+func repoNameFromURL(cloneURL string) string {
+	// Strip trailing .git
+	u := strings.TrimSuffix(cloneURL, ".git")
+	// Strip trailing slashes
+	u = strings.TrimRight(u, "/")
+	// Take the last path segment
+	if idx := strings.LastIndex(u, "/"); idx >= 0 {
+		u = u[idx+1:]
+	}
+	// For SSH URLs like git@github.com:foo/bar
+	if idx := strings.LastIndex(u, ":"); idx >= 0 {
+		u = u[idx+1:]
+	}
+	if u == "" {
+		return "repo"
+	}
+	return u
+}
+
+// createCloneWorkspace clones one or more repos and creates a workspace from them.
+func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir string, cloneURLs []string) error {
+	// Security: ensure path is under allowed base directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	allowedBase := filepath.Join(homeDir, ".loom", "workspaces")
+	if !strings.HasPrefix(wsDir, allowedBase+string(filepath.Separator)) && wsDir != allowedBase {
+		return fmt.Errorf("workspace path must be under %s", allowedBase)
+	}
+
 	if err := os.MkdirAll(wsDir, 0755); err != nil {
 		return fmt.Errorf("cannot create workspace directory: %w", err)
 	}
 
 	cleanupDir := func() { _ = os.RemoveAll(wsDir) }
 
-	// Clone into the workspace directory
-	clonePath := filepath.Join(wsDir, "repo")
-	cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, clonePath) //nolint:gosec // URL validated by handler
-	if output, err := cmd.CombinedOutput(); err != nil {
-		cleanupDir()
-		return fmt.Errorf("git clone failed: %s", strings.TrimSpace(string(output)))
-	}
+	var repos []RepoConfig
+	seenNames := make(map[string]bool)
 
-	repoName := filepath.Base(clonePath)
-	repos := []RepoConfig{{Name: repoName, Path: clonePath}}
+	for _, cloneURL := range cloneURLs {
+		if ctx.Err() != nil {
+			cleanupDir()
+			return ctx.Err()
+		}
+
+		repoName := repoNameFromURL(cloneURL)
+		// Deduplicate names
+		if seenNames[repoName] {
+			for i := 2; ; i++ {
+				candidate := fmt.Sprintf("%s-%d", repoName, i)
+				if !seenNames[candidate] {
+					repoName = candidate
+					break
+				}
+			}
+		}
+		seenNames[repoName] = true
+
+		clonePath := filepath.Join(wsDir, repoName)
+		cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, clonePath) //nolint:gosec // URL validated by handler
+		if output, err := cmd.CombinedOutput(); err != nil {
+			cleanupDir()
+			return fmt.Errorf("git clone failed for %s: %s", cloneURL, strings.TrimSpace(string(output)))
+		}
+
+		repos = append(repos, RepoConfig{Name: repoName, Path: clonePath})
+	}
 
 	// bd init (best-effort)
 	_ = execCommand(wsDir, "bd", "init")
+
+	// Write default loom.yaml with agents (best-effort; non-fatal)
+	if err := writeLoomYaml(wsDir); err != nil {
+		slog.Warn("failed to write loom.yaml for workspace", "workspace", wsName, "err", err)
+	}
+
+	// Start bd daemon for the workspace (best-effort; non-fatal)
+	if err := ensureDaemonForWorkspace(wsDir, 10*time.Second); err != nil {
+		slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
+	}
 
 	cfg.Workspaces[wsName] = WorkspaceConfig{Path: wsDir, Repos: repos}
 	if len(cfg.Workspaces) == 1 {
@@ -295,127 +384,6 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, c
 	return nil
 }
 
-// buildWorkspaceInfo loads workspace topology from config and daemon config.
-// Returns nil when no workspaces are configured (single-repo mode).
-func buildWorkspaceInfo() (*webui.WorkspaceData, error) {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return nil, err
-	}
-	if cfg == nil || len(cfg.Workspaces) == 0 {
-		return nil, nil
-	}
-
-	// Find the active workspace (use default or first available)
-	wsName := cfg.DefaultWorkspace
-	ws, ok := cfg.Workspaces[wsName]
-	if !ok {
-		// Fall back to first workspace
-		for name, w := range cfg.Workspaces {
-			wsName = name
-			ws = w
-			break
-		}
-	}
-
-	groupSet := make(map[string]bool)
-	repos := make([]webui.WorkspaceRepo, 0, len(ws.Repos))
-	for _, r := range ws.Repos {
-		db := r.DefaultBranch
-		if db == "" {
-			db = "main"
-		}
-		remote := r.Remote
-		if remote == "" {
-			remote = "origin"
-		}
-		repos = append(repos, webui.WorkspaceRepo{
-			Name:          r.Name,
-			Path:          r.Path,
-			DefaultBranch: db,
-			Remote:        remote,
-			SourceRepoID:  r.SourceRepoID,
-			Groups:        r.Groups,
-		})
-		for _, g := range r.Groups {
-			groupSet[g] = true
-		}
-	}
-
-	// Convert group set to sorted slice
-	groups := make([]string, 0, len(groupSet))
-	for g := range groupSet {
-		groups = append(groups, g)
-	}
-	sort.Strings(groups)
-
-	// Collect agent assignments from daemon config
-	var agents []webui.WorkspaceAgentInfo
-	dc, dcErr := LoadDaemonConfig(".")
-	if dcErr == nil && dc != nil {
-		for _, a := range dc.Agents {
-			name := filepath.Base(a.Worktree)
-			agents = append(agents, webui.WorkspaceAgentInfo{
-				Name:       name,
-				Repos:      a.Repos,
-				RepoGroups: a.RepoGroups,
-				CrossRepo:  a.CrossRepo,
-			})
-		}
-	}
-
-	// Build lightweight summaries for all configured workspaces
-	summaries := make([]webui.WorkspaceSummary, 0, len(cfg.Workspaces))
-	for name, w := range cfg.Workspaces {
-		summaries = append(summaries, webui.WorkspaceSummary{
-			Name:      name,
-			Path:      w.Path,
-			Active:    name == wsName,
-			RepoCount: len(w.Repos),
-			IsDefault: name == cfg.DefaultWorkspace,
-			Backend:   w.Backend,
-		})
-	}
-	sortWorkspaceSummaries(summaries, cfg.WorkspaceOrder)
-
-	return &webui.WorkspaceData{
-		Name:             wsName,
-		Path:             ws.Path,
-		Repos:            repos,
-		Groups:           groups,
-		Agents:           agents,
-		Workspaces:       summaries,
-		WorkspaceOrder:   cfg.WorkspaceOrder,
-		DefaultWorkspace: cfg.DefaultWorkspace,
-	}, nil
-}
-
-// sortWorkspaceSummaries sorts workspace summaries using custom order if provided,
-// falling back to alphabetical sort. Items in the order list come first (in order),
-// followed by unlisted items sorted alphabetically.
-func sortWorkspaceSummaries(summaries []webui.WorkspaceSummary, order []string) {
-	if len(order) > 0 {
-		orderIndex := make(map[string]int, len(order))
-		for i, name := range order {
-			orderIndex[name] = i
-		}
-		sort.SliceStable(summaries, func(i, j int) bool {
-			oi, okI := orderIndex[summaries[i].Name]
-			oj, okJ := orderIndex[summaries[j].Name]
-			if okI && okJ {
-				return oi < oj
-			}
-			if okI {
-				return true
-			}
-			if okJ {
-				return false
-			}
-			return summaries[i].Name < summaries[j].Name
-		})
-	} else {
-		sort.Slice(summaries, func(i, j int) bool {
-			return summaries[i].Name < summaries[j].Name
-		})
-	}
-}
+// ensureCurrentProjectRegistered adds the current working directory as a
+// workspace in the global config if it isn't already registered. This ensures
+// buildWorkspaceInfo and buildWorkspaceInfoForName are in serve_workspace_info.go

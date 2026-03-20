@@ -132,7 +132,8 @@ describe("getNextDuplicateName", () => {
 describe("generateTabName (shell backend)", () => {
   it('generates "lead-shell-1" when no existing shell tabs', () => {
     const result = generateTabName("shell", []);
-    expect(result).toBe("lead-shell-1");
+    expect(result.sessionName).toBe("lead-shell-1");
+    expect(result.label).toBe("lead-shell-1");
   });
 
   it('generates "lead-shell-2" when lead-shell-1 exists', () => {
@@ -140,7 +141,7 @@ describe("generateTabName (shell backend)", () => {
       makeTab({ sessionName: "lead-shell-1", label: "Terminal" }),
     ];
     const result = generateTabName("shell", existing);
-    expect(result).toBe("lead-shell-2");
+    expect(result.sessionName).toBe("lead-shell-2");
   });
 
   it("increments correctly with multiple shell tabs", () => {
@@ -149,7 +150,7 @@ describe("generateTabName (shell backend)", () => {
       makeTab({ sessionName: "lead-shell-3", label: "Terminal (3)" }),
     ];
     const result = generateTabName("shell", existing);
-    expect(result).toBe("lead-shell-4");
+    expect(result.sessionName).toBe("lead-shell-4");
   });
 
   it("ignores non-shell tabs when counting", () => {
@@ -158,7 +159,19 @@ describe("generateTabName (shell backend)", () => {
       makeTab({ sessionName: "lead-shell-1", label: "Terminal" }),
     ];
     const result = generateTabName("shell", existing);
-    expect(result).toBe("lead-shell-2");
+    expect(result.sessionName).toBe("lead-shell-2");
+  });
+
+  it("prefixes session name with workspace", () => {
+    const result = generateTabName("claude", [], "my-workspace");
+    expect(result.sessionName).toBe("my-workspace--lead-claude-1");
+    expect(result.label).toBe("lead-claude-1");
+  });
+
+  it("does not prefix for default workspace", () => {
+    const result = generateTabName("claude", [], "default");
+    expect(result.sessionName).toBe("lead-claude-1");
+    expect(result.label).toBe("lead-claude-1");
   });
 });
 

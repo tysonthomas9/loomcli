@@ -221,6 +221,7 @@ export interface CreateWorkspaceRequest {
   type: "empty" | "clone" | "template";
   repos?: string[];
   clone_url?: string;
+  clone_urls?: string[];
   branch?: string;
   path?: string;
 }

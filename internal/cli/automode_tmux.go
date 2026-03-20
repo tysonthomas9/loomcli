@@ -152,7 +152,7 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		}
 
 		// Check if agent actually claimed a task
-		if agentClaimedTask(opts.WorktreePath) {
+		if agentClaimedTask(opts.WorktreePath, opts.AgentName, opts.LockBridge) {
 			taskCount++
 			consecutiveNoProgress = 0
 			fmt.Printf("[Session #%d] Completed, cycling...\n", taskCount)

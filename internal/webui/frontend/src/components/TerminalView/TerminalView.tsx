@@ -220,6 +220,7 @@ export function TerminalView({
     setTabs,
     setActiveTabId,
     initializedRef,
+    workspace,
   });
 
   // Apply server-restored active tab after initialization (only if restore completed before user interaction)
@@ -374,7 +375,8 @@ export function TerminalView({
         e.key === "Escape" &&
         !isSearchOpen &&
         !isSessionPromptOpen &&
-        pendingPasteText === null
+        pendingPasteText === null &&
+        dismissedWelcome
       ) {
         e.preventDefault();
         onEscape?.();
@@ -448,6 +450,7 @@ export function TerminalView({
     pendingPasteText,
     onEscape,
     announce,
+    dismissedWelcome,
   ]);
 
   // The tab targeted by search: in split mode, use the focused pane's tab
@@ -584,24 +587,24 @@ export function TerminalView({
   const handleBackendSelect = useCallback(
     (backend: string) => {
       setIsSessionPromptOpen(false);
-      const name = generateTabName(backend, tabs);
+      const { sessionName, label } = generateTabName(backend, tabs, workspace);
       // Pre-create tmux session for shell tabs (WS handler also detects lead-shell-* as fallback)
       if (backend === "shell")
-        spawnTerminalSession(name, backend).catch(() => {});
+        spawnTerminalSession(sessionName, backend).catch(() => {});
       setTabs((prev) => [
         ...prev,
         {
-          id: name,
-          label: name,
-          sessionName: name,
+          id: sessionName,
+          label,
+          sessionName,
           connectionState: "disconnected" as const,
           backendName: backend,
         },
       ]);
-      setActiveTabId(name);
-      announce(`New tab ${name} created`);
+      setActiveTabId(sessionName);
+      announce(`New tab ${label} created`);
     },
-    [tabs, announce],
+    [tabs, workspace, announce],
   );
 
   const handleSessionPromptCancel = useCallback(() => {
@@ -724,6 +727,15 @@ export function TerminalView({
       // localStorage unavailable
     }
   }, []);
+
+  // Auto-dismiss the welcome banner if terminal sessions already exist.
+  // This prevents the popup from blocking the terminal on first visit when
+  // sessions are already running from a previous page load.
+  useEffect(() => {
+    if (!dismissedWelcome && !metaLoading && tabMetadata.length > 0) {
+      handleDismissWelcome();
+    }
+  }, [dismissedWelcome, metaLoading, tabMetadata.length, handleDismissWelcome]);
 
   const handleToggleHelp = useCallback(() => {
     setIsHelpOpen((prev) => !prev);

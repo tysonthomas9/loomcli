@@ -21,6 +21,7 @@ import {
   clearDefaultWorkspace as clearDefaultWorkspaceApi,
   refreshWorkspace,
 } from "@/api/workspace";
+import { setActiveWorkspace as setActiveWorkspaceClient, getActiveWorkspace } from "@/api/client";
 
 import { useWorkspace as useWorkspaceData } from "./useWorkspace";
 import type { UseWorkspaceReturn } from "./useWorkspace";
@@ -134,12 +135,30 @@ function readStoredRepoSelection(): Set<string> {
 export function WorkspaceProvider({
   children,
 }: WorkspaceProviderProps): JSX.Element {
-  const workspaceResult = useWorkspaceData({ pollInterval: 60000 });
-
-  // Workspace-level selection (fall back to default workspace if no active one stored)
+  // Set the API client workspace header synchronously during initialization,
+  // BEFORE useWorkspaceData fires its initial fetch. This ensures the first
+  // /api/workspace request uses the correct Workspace header.
+  // Priority: URL ?_ws param > localStorage > default workspace
   const [activeWorkspaceName, setActiveWorkspaceNameRaw] = useState<
     string | null
-  >(() => lsGet(LS_ACTIVE_WORKSPACE) ?? lsGet(LS_DEFAULT_WORKSPACE));
+  >(() => {
+    // Check for workspace switch via URL param (set by setActiveWorkspace)
+    const urlWS = new URLSearchParams(window.location.search).get("_ws");
+    if (urlWS) {
+      // Persist to localStorage and clean up the URL param
+      lsSet(LS_ACTIVE_WORKSPACE, urlWS);
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("_ws");
+      window.history.replaceState(null, "", cleanUrl.toString());
+      setActiveWorkspaceClient(urlWS);
+      return urlWS;
+    }
+    const stored = lsGet(LS_ACTIVE_WORKSPACE) ?? lsGet(LS_DEFAULT_WORKSPACE);
+    if (stored) setActiveWorkspaceClient(stored);
+    return stored;
+  });
+
+  const workspaceResult = useWorkspaceData({ pollInterval: 60000 });
 
   // Default workspace state (fast-path from localStorage, synced from server)
   const [defaultWorkspaceName, setDefaultWorkspaceNameRaw] = useState<
@@ -164,6 +183,12 @@ export function WorkspaceProvider({
       });
     }
   }, [workspaceResult.workspace]);
+
+  // Sync active workspace ID to the API client module so all fetchApi calls
+  // include the Workspace header for multi-workspace routing.
+  useEffect(() => {
+    setActiveWorkspaceClient(activeWorkspaceName);
+  }, [activeWorkspaceName]);
 
   // Stable key for repo list — avoids re-running cleanup on every poll tick
   const repoNamesKey = useMemo(
@@ -208,10 +233,23 @@ export function WorkspaceProvider({
     }
   }, [workspaceResult.workspace]);
 
-  // Workspace selection action
+  // Workspace selection action — updates localStorage, sets the API client
+  // header, and forces a full page reload to ensure all subsystems (issues,
+  // agents, SSE connections) use the new workspace context.
   const setActiveWorkspace = useCallback((name: string) => {
-    setActiveWorkspaceNameRaw(name);
+    // Skip no-op switches
+    if (name === getActiveWorkspace()) return;
     lsSet(LS_ACTIVE_WORKSPACE, name);
+    // Synchronously update the API client header
+    setActiveWorkspaceClient(name);
+    // Force full page reload with workspace param in URL.
+    // Using setTimeout(0) to escape React's synthetic event handling
+    // which may prevent synchronous navigation.
+    setTimeout(() => {
+      const url = new URL(window.location.origin + window.location.pathname);
+      url.searchParams.set("_ws", name);
+      window.location.replace(url.toString());
+    }, 0);
   }, []);
 
   // Set or clear the default workspace with optimistic update
@@ -286,7 +324,7 @@ export function WorkspaceProvider({
   }, [isAllSelected, activeRepos]);
 
   const isMultiRepo = useMemo(
-    () => workspaceResult.repos.length >= 2,
+    () => workspaceResult.repos.length >= 1,
     [workspaceResult.repos],
   );
 

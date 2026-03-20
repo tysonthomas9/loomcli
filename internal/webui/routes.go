@@ -17,7 +17,7 @@ import (
 
 // setupRoutes configures all HTTP routes for the server.
 // allowedOrigins is the list of allowed CORS origins for WebSocket validation.
-func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store) (*clientErrorLimiter, *cspReportLimiter) { //nolint:funlen // route registration function
+func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent, termManager *TerminalManager, termAuth *terminalAuth, fleetStore *fleet.Store, tokenCfg *TokenConfig, apiKey string, authEnabled bool, allowedOrigins []string, fleetRegCfg *FleetRegisterConfig, timeoutEnforcer *fleet.TimeoutEnforcer, claimMetrics *fleet.ClaimMetrics, fleetEnabled bool, devMode bool, devFrontendDir string, loomServerURL string, gitOps GitOps, fileOps FileOps, tabMetaStore *tabmeta.Store, issueTabStore *issuetabs.Store, workspaceConfigFn func() (*WorkspaceData, error), workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn, backendOps BackendOps, sessionHistoryStore *sessionhistory.Store) (*clientErrorLimiter, *cspReportLimiter) { //nolint:funlen // route registration function
 	// Health check endpoint for load balancers and monitoring
 	mux.HandleFunc("GET /health", handleHealth(pool))
 
@@ -41,8 +41,8 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("GET /api/auth/token", handleAuthTokenDisabled())
 	}
 
-	// Stats endpoint for project statistics
-	mux.HandleFunc("GET /api/stats", handleStats(pool))
+	// Stats endpoint for project statistics (workspace-aware when multiPool available)
+	mux.HandleFunc("GET /api/stats", handleStats(pool)) // Keep using main pool for now
 
 	// SSE hub metrics endpoint
 	mux.HandleFunc("GET /api/metrics", handleMetrics(hub, timeoutEnforcer, claimMetrics))
@@ -69,20 +69,8 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		mux.HandleFunc("GET /api/backends", handleGetBackendsHealth(backendOps))
 	}
 
-	// Issue endpoints
-	mux.HandleFunc("GET /api/issues/{id}", handleGetIssue(pool))
-	mux.HandleFunc("GET /api/issues", handleListIssues(pool))
-	mux.HandleFunc("POST /api/issues", handleCreateIssue(pool))
-	mux.HandleFunc("PATCH /api/issues/{id}", handlePatchIssue(pool))
-	mux.HandleFunc("POST /api/issues/{id}/close", handleCloseIssue(pool))
-	mux.HandleFunc("POST /api/issues/{id}/move", handleMoveIssue(pool, workspaceConfigFn))
-	mux.HandleFunc("DELETE /api/issues/{id}", handleDeleteIssue(pool))
-	mux.HandleFunc("POST /api/issues/{id}/comments", handleAddComment(pool))
-	mux.HandleFunc("GET /api/issues/{id}/events", handleGetIssueEvents(pool))
-
-	// Dependency management endpoints
-	mux.HandleFunc("POST /api/issues/{id}/dependencies", handleAddDependency(pool))
-	mux.HandleFunc("DELETE /api/issues/{id}/dependencies/{depId}", handleRemoveDependency(pool))
+	// Issue + dependency endpoints with optional workspace middleware
+	registerIssueRoutes(mux, pool, multiPool, workspaceConfigFn)
 
 	// Fleet endpoints for worker registration, task acquisition, and completion
 	// Only registered when fleet coordination (Redis) is configured.
@@ -103,14 +91,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 		}
 	}
 
-	// Ready endpoint for issues ready to work on
-	mux.HandleFunc("GET /api/ready", handleReady(pool))
-
-	// Blocked endpoint for issues with blocking dependencies
-	mux.HandleFunc("GET /api/blocked", handleBlocked(pool))
-
-	// Graph endpoint for dependency visualization
-	mux.HandleFunc("GET /api/issues/graph", handleGraph(pool))
+	// Ready, blocked, and graph endpoints are registered in registerIssueRoutes
 
 	// Server-Sent Events endpoint for real-time push notifications
 	if hub != nil {
@@ -200,6 +181,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	mux.HandleFunc("GET /api/tasks/{id}/logs", handleListTaskPhases())
 	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}", handleGetTaskLog())
 
+	// Workspace management and workspace-scoped API routes
+	if multiPool != nil {
+		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn)
+	}
+
 	// Static file serving with SPA routing (must be last - catches all paths)
 	if devMode {
 		mux.Handle("/", devFrontendHandler(devFrontendDir))
@@ -208,4 +194,85 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, hub *SSEHub, getMutations
 	}
 
 	return clientErrLimiter, cspLimiter
+}
+
+// registerIssueRoutes sets up issue and dependency endpoints with optional workspace middleware.
+func registerIssueRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error)) {
+	var issuePool daemon.Pool = pool
+	defaultWSID := ""
+	if multiPool != nil {
+		issuePool = multiPool
+		if workspaceConfigFn != nil {
+			if wsData, err := workspaceConfigFn(); err == nil && wsData != nil {
+				defaultWSID = wsData.Name
+			}
+		}
+		if defaultWSID == "" {
+			wsIDs := multiPool.WorkspaceIDs()
+			if len(wsIDs) > 0 {
+				defaultWSID = wsIDs[0]
+			}
+		}
+	}
+	wrapWS := func(h http.HandlerFunc) http.Handler {
+		if multiPool != nil {
+			return OptionalWorkspaceMiddleware(defaultWSID, h)
+		}
+		return h
+	}
+	mux.Handle("GET /api/issues/{id}", wrapWS(handleGetIssue(issuePool)))
+	mux.Handle("GET /api/issues", wrapWS(handleListIssues(issuePool)))
+	mux.Handle("POST /api/issues", wrapWS(handleCreateIssue(issuePool)))
+	mux.Handle("PATCH /api/issues/{id}", wrapWS(handlePatchIssue(issuePool)))
+	mux.Handle("POST /api/issues/{id}/close", wrapWS(handleCloseIssue(issuePool)))
+	mux.Handle("POST /api/issues/{id}/move", wrapWS(handleMoveIssue(issuePool, workspaceConfigFn)))
+	mux.Handle("DELETE /api/issues/{id}", wrapWS(handleDeleteIssue(issuePool)))
+	mux.Handle("POST /api/issues/{id}/comments", wrapWS(handleAddComment(issuePool)))
+	mux.Handle("GET /api/issues/{id}/events", wrapWS(handleGetIssueEvents(issuePool)))
+	mux.Handle("POST /api/issues/{id}/dependencies", wrapWS(handleAddDependency(issuePool)))
+	mux.Handle("DELETE /api/issues/{id}/dependencies/{depId}", wrapWS(handleRemoveDependency(issuePool)))
+	mux.Handle("GET /api/ready", wrapWS(handleReady(issuePool)))
+	mux.Handle("GET /api/blocked", wrapWS(handleBlocked(issuePool)))
+	mux.Handle("GET /api/issues/graph", wrapWS(handleGraph(issuePool)))
+}
+
+// registerWorkspaceRoutes sets up workspace listing and workspace-scoped API routes.
+func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error)) {
+	// Workspace listing (not workspace-scoped themselves)
+	mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(multiPool, workspaceConfigFn))
+	mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(multiPool, workspaceConfigFn))
+
+	// Workspace-scoped API routes via a sub-mux with WorkspaceMiddleware.
+	// The middleware injects the workspace ID into the context so that
+	// multiPool.Get(ctx) routes to the correct per-workspace pool.
+	wsMux := http.NewServeMux()
+
+	// Issue endpoints
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", handleGetIssue(multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues", handleListIssues(multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues", handleCreateIssue(multiPool))
+	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/issues/{id}", handlePatchIssue(multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/close", handleCloseIssue(multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/move", handleMoveIssue(multiPool, workspaceConfigFn))
+	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", handleDeleteIssue(multiPool))
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", handleAddComment(multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", handleGetIssueEvents(multiPool))
+
+	// Dependency management
+	wsMux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", handleAddDependency(multiPool))
+	wsMux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", handleRemoveDependency(multiPool))
+
+	// Stats, ready, blocked, graph
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/stats", handleStats(multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/ready", handleReady(multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/blocked", handleBlocked(multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/graph", handleGraph(multiPool))
+
+	// Daemon status and config
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", handleDaemonStatus(multiPool))
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfig(multiPool))
+	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handlePatchBackendConfig(multiPool))
+
+	// Apply WorkspaceMiddleware to all workspace-scoped routes
+	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsMux))
 }

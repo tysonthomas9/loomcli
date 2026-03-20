@@ -153,6 +153,8 @@ export function WorkspaceContextMenu({
         onClick={handleRenameClick}
         onKeyDown={handleKeyDown}
         role="menuitem"
+        aria-label="Rename workspace"
+        title="Rename workspace"
         data-testid="workspace-context-menu-rename"
       >
         <svg
@@ -161,6 +163,7 @@ export function WorkspaceContextMenu({
           viewBox="0 0 14 14"
           fill="none"
           className={styles.menuItemIcon}
+          aria-hidden="true"
         >
           <path
             d="M10.5 1.5L12.5 3.5L4 12H2V10L10.5 1.5Z"
@@ -170,7 +173,7 @@ export function WorkspaceContextMenu({
             strokeLinejoin="round"
           />
         </svg>
-        Rename
+        <span>Rename</span>
       </button>
       {(onSetDefault || onClearDefault) && (
         <button
@@ -179,6 +182,8 @@ export function WorkspaceContextMenu({
           onClick={handleDefaultClick}
           onKeyDown={handleDefaultKeyDown}
           role="menuitem"
+          aria-label={isDefault ? "Clear default workspace" : "Set as default workspace"}
+          title={isDefault ? "Clear default workspace" : "Set as default workspace"}
           data-testid="workspace-context-menu-default"
         >
           <svg
@@ -187,6 +192,7 @@ export function WorkspaceContextMenu({
             viewBox="0 0 14 14"
             fill="none"
             className={styles.menuItemIcon}
+            aria-hidden="true"
           >
             <path
               d="M7 1L8.76 4.56L12.73 5.14L9.87 7.94L10.52 11.89L7 10.04L3.48 11.89L4.13 7.94L1.27 5.14L5.24 4.56L7 1Z"
@@ -197,7 +203,7 @@ export function WorkspaceContextMenu({
               fill={isDefault ? "currentColor" : "none"}
             />
           </svg>
-          {isDefault ? "Clear default" : "Set as default"}
+          <span>{isDefault ? "Clear default" : "Set as default"}</span>
         </button>
       )}
       <button
@@ -206,6 +212,8 @@ export function WorkspaceContextMenu({
         onClick={handleRemoveClick}
         onKeyDown={handleRemoveKeyDown}
         role="menuitem"
+        aria-label="Remove workspace"
+        title="Remove workspace"
         data-testid="workspace-context-menu-remove"
       >
         <svg
@@ -214,6 +222,7 @@ export function WorkspaceContextMenu({
           viewBox="0 0 14 14"
           fill="none"
           className={styles.menuItemIcon}
+          aria-hidden="true"
         >
           <path
             d="M2 3.5H12M5.5 6V10.5M8.5 6V10.5M3 3.5L3.5 11.5C3.5 12.05 3.95 12.5 4.5 12.5H9.5C10.05 12.5 10.5 12.05 10.5 11.5L11 3.5M5 3.5V2C5 1.45 5.45 1 6 1H8C8.55 1 9 1.45 9 2V3.5"
@@ -223,7 +232,7 @@ export function WorkspaceContextMenu({
             strokeLinejoin="round"
           />
         </svg>
-        Remove
+        <span>Remove</span>
       </button>
     </div>
   );

@@ -35,17 +35,18 @@ func init() {
 
 // MutationPayload represents mutation data sent to clients.
 type MutationPayload struct {
-	Type       string `json:"type"` // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_session_change
-	IssueID    string `json:"issue_id"`
-	Title      string `json:"title,omitempty"`
-	Assignee   string `json:"assignee,omitempty"`
-	Actor      string `json:"actor,omitempty"`
-	Timestamp  string `json:"timestamp"`
-	OldStatus  string `json:"old_status,omitempty"`  // For status events
-	NewStatus  string `json:"new_status,omitempty"`  // For status events
-	ParentID   string `json:"parent_id,omitempty"`   // For bonded events
-	StepCount  int    `json:"step_count,omitempty"`  // For bonded events
-	SourceRepo string `json:"source_repo,omitempty"` // Source repository for multi-repo filtering
+	Type        string `json:"type"` // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_session_change
+	IssueID     string `json:"issue_id"`
+	Title       string `json:"title,omitempty"`
+	Assignee    string `json:"assignee,omitempty"`
+	Actor       string `json:"actor,omitempty"`
+	Timestamp   string `json:"timestamp"`
+	OldStatus   string `json:"old_status,omitempty"`   // For status events
+	NewStatus   string `json:"new_status,omitempty"`   // For status events
+	ParentID    string `json:"parent_id,omitempty"`    // For bonded events
+	StepCount   int    `json:"step_count,omitempty"`   // For bonded events
+	SourceRepo  string `json:"source_repo,omitempty"`  // Source repository for multi-repo filtering
+	WorkspaceID string `json:"workspace_id,omitempty"` // Workspace ID for multi-workspace filtering
 }
 
 // SSEHub manages connected SSE clients and broadcasts mutations to them.

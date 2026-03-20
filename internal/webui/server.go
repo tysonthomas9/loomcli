@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -65,46 +66,6 @@ type ServerConfig struct {
 	BackendOps              BackendOps                     // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines      int                            // Maximum lines per scrollback buffer (0 = default 10000)
 	Logger                  *slog.Logger                   // Structured logger (optional; nil falls back to slog.Default())
-}
-
-// WorkspaceData represents the full workspace topology returned by the API.
-type WorkspaceData struct {
-	Name             string               `json:"name"`
-	Path             string               `json:"path"`
-	Repos            []WorkspaceRepo      `json:"repos"`
-	Groups           []string             `json:"groups"`
-	Agents           []WorkspaceAgentInfo `json:"agents"`
-	Workspaces       []WorkspaceSummary   `json:"workspaces"`
-	WorkspaceOrder   []string             `json:"workspace_order,omitempty"`
-	DefaultWorkspace string               `json:"default_workspace"`
-}
-
-// WorkspaceSummary provides a lightweight summary of a configured workspace.
-type WorkspaceSummary struct {
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	Active    bool   `json:"active"`
-	RepoCount int    `json:"repo_count"`
-	IsDefault bool   `json:"is_default"`
-	Backend   string `json:"backend,omitempty"`
-}
-
-// WorkspaceRepo represents a repository within a workspace.
-type WorkspaceRepo struct {
-	Name          string   `json:"name"`
-	Path          string   `json:"path"`
-	DefaultBranch string   `json:"default_branch"`
-	Remote        string   `json:"remote"`
-	SourceRepoID  string   `json:"source_repo_id,omitempty"`
-	Groups        []string `json:"groups"`
-}
-
-// WorkspaceAgentInfo represents an agent's repo/group assignments.
-type WorkspaceAgentInfo struct {
-	Name       string   `json:"name"`
-	Repos      []string `json:"repos"`
-	RepoGroups []string `json:"repo_groups"`
-	CrossRepo  bool     `json:"cross_repo"`
 }
 
 // DefaultConfig returns a ServerConfig with sensible defaults.
@@ -202,7 +163,20 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		slog.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", actualPort)
 	}
 
-	// Initialize daemon connection pool
+	// Initialize MultiPool for workspace-aware connection routing.
+	// The MultiPool implements daemon.Pool and dispatches Get calls to the
+	// correct per-workspace ConnectionPool based on the workspace ID in context.
+	multiPool := daemon.NewMultiPool(WorkspaceFromContext, config.PoolSize)
+
+	// Initialize the initial workspace connection pool (current project).
+	// The workspace ID must match the current working directory's name because
+	// the daemon pool connects to the local daemon socket. Using the default
+	// workspace from config here would be wrong when a different workspace is
+	// the default (e.g., after creating a second workspace).
+	initialWorkspaceID := "default"
+	if cwd, err := os.Getwd(); err == nil {
+		initialWorkspaceID = filepath.Base(cwd)
+	}
 	var rawPool *daemon.ConnectionPool
 	var pool daemon.Pool // may be ProtectedPool or raw ConnectionPool
 	var poolErr error
@@ -237,6 +211,13 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		pool = daemon.NewProtectedPool(rawPool, breaker)
 		slog.Info("daemon connection pool initialized with circuit breaker")
 
+		// Register the initial workspace in the MultiPool
+		if err := multiPool.Register(initialWorkspaceID, pool); err != nil {
+			slog.Warn("failed to register initial workspace in MultiPool", "err", err)
+		} else {
+			slog.Info("registered initial workspace in MultiPool", "workspace", initialWorkspaceID)
+		}
+
 		// Test the connection
 		func() {
 			testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -256,19 +237,26 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	hub := NewSSEHub()
 	go hub.Run()
 
-	// Create daemon subscriber to bridge mutations from daemon to SSE clients
-	var subscriber *DaemonSubscriber
+	// Create multi-workspace subscriber to bridge mutations from per-workspace
+	// daemons to SSE clients. Each workspace gets its own DaemonSubscriber
+	// goroutine that tags mutations with the workspace ID.
+	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, config.Logger)
 	var getMutationsSince func(since int64) []rpc.MutationEvent
 	if pool != nil {
-		subscriber = NewDaemonSubscriber(pool, hub)
-		subscriber.Start()
-		getMutationsSince = subscriber.GetMutationsSince
-		slog.Info("daemon subscriber started")
+		if err := multiSub.AddWorkspace(initialWorkspaceID); err != nil {
+			slog.Warn("failed to add initial workspace subscriber", "workspace", initialWorkspaceID, "err", err)
+		} else {
+			slog.Info("workspace subscriber started", "workspace", initialWorkspaceID)
+		}
+		getMutationsSince = multiSub.GetMutationsSince
 	}
 
-	// Initialize terminal manager for WebSocket terminal sessions
+	// Initialize terminal manager for WebSocket terminal sessions.
+	// Include the workspace ID in the session prefix to prevent same-name agents
+	// across workspaces from sharing tmux sessions.
+	termSessionPrefix := fmt.Sprintf("%d-%s", actualPort, initialWorkspaceID)
 	var termMgr *TerminalManager
-	if termMgr, err = NewTerminalManager(config.TerminalCmd, fmt.Sprintf("%d", actualPort), config.MaxTerminalSessions); err != nil {
+	if termMgr, err = NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {
 			slog.Warn("tmux not found, terminal feature disabled")
 		} else {
@@ -327,7 +315,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	var tokenCfg *TokenConfig
 	if config.FleetRedis != nil {
 		var err error
-		fleetStore, err = fleet.NewStore(*config.FleetRedis, nil)
+		fleetStore, err = fleet.NewStoreForWorkspace(*config.FleetRedis, initialWorkspaceID, nil)
 		if err != nil {
 			slog.Warn("failed to initialize fleet store", "component", "fleet", "err", err)
 		} else {
@@ -440,11 +428,15 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
+	wrappedCreateFn := wrapWorkspaceCreateFn(config.WorkspaceCreateFn, multiPool, multiSub, config.PoolSize)
+
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, config.WorkspaceCreateFn, config.BackendOps, sessionHistoryStore)
+	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore)
 	defer clientErrLimiter.stop()
 	defer cspLimiter.stop()
+
+	registerWorkerAPIRoutes(mux, config.WorkspaceConfigFn)
 
 	// Wrap with middleware chain: rate-limit -> security -> auth -> CORS -> mux
 	// Rate limiting is outermost to reject floods before spending CPU on other middleware.
@@ -535,10 +527,10 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	// Stop daemon subscriber (no more handlers need it)
-	if subscriber != nil {
-		subscriber.Stop()
-		slog.Info("daemon subscriber stopped")
+	// Stop multi-workspace subscriber (no more handlers need it)
+	if multiSub != nil {
+		multiSub.Stop()
+		slog.Info("multi-workspace subscriber stopped")
 	}
 
 	// Stop SSE hub (all SSE handlers have exited)
@@ -547,12 +539,12 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		slog.Info("SSE hub stopped")
 	}
 
-	// Close daemon connection pool last (subscriber/hub may have used it)
-	if pool != nil {
-		if err := pool.Close(); err != nil {
-			slog.Warn("error closing connection pool", "err", err)
+	// Close MultiPool (closes all per-workspace pools including the initial one)
+	if multiPool != nil {
+		if err := multiPool.Close(); err != nil {
+			slog.Warn("error closing multi-pool", "err", err)
 		} else {
-			slog.Info("daemon connection pool closed")
+			slog.Info("multi-pool closed")
 		}
 	}
 

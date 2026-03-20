@@ -33,12 +33,17 @@ export interface TabState {
 
 /**
  * Extract backend name from a session name.
- * Parses `lead-{backend}-{n}` pattern; falls back to defaultBackend.
+ * Parses `lead-{backend}-{n}` or `{workspace}--lead-{backend}-{n}` pattern;
+ * falls back to defaultBackend.
  */
 export function getBackendFromSessionName(
   sessionName: string,
   defaultBackend?: string,
 ): string {
+  // Match workspace-prefixed: {workspace}--lead-{backend}-{n}
+  const prefixedMatch = sessionName.match(/^.+--lead-(.+)-\d+$/);
+  if (prefixedMatch?.[1]) return prefixedMatch[1];
+  // Match unprefixed: lead-{backend}-{n}
   const match = sessionName.match(/^lead-(.+)-\d+$/);
   if (match?.[1]) return match[1];
   return defaultBackend ?? "unknown";
@@ -46,23 +51,37 @@ export function getBackendFromSessionName(
 
 /**
  * Generate an auto-incremented tab name for a given backend.
- * Returns `lead-{backend}-{n}` where n is max existing number + 1.
+ * Returns `{wsPrefix}lead-{backend}-{n}` where n is max existing number + 1.
+ * The wsPrefix namespaces tmux sessions per workspace to prevent leakage.
  */
 export function generateTabName(
   backend: string,
   existingTabs: TabState[],
-): string {
+  workspace?: string,
+): { sessionName: string; label: string } {
+  const wsPrefix = workspace && workspace !== "default" ? `${workspace}--` : "";
   const prefix = `lead-${backend}-`;
+  const fullPrefix = `${wsPrefix}${prefix}`;
   let max = 0;
   for (const tab of existingTabs) {
-    if (tab.sessionName.startsWith(prefix)) {
+    // Match both prefixed and unprefixed names within this workspace's tabs
+    if (tab.sessionName.startsWith(fullPrefix)) {
+      const num = parseInt(tab.sessionName.slice(fullPrefix.length), 10);
+      if (!isNaN(num) && num > max) {
+        max = num;
+      }
+    } else if (tab.sessionName.startsWith(prefix)) {
       const num = parseInt(tab.sessionName.slice(prefix.length), 10);
       if (!isNaN(num) && num > max) {
         max = num;
       }
     }
   }
-  return `${prefix}${max + 1}`;
+  const n = max + 1;
+  return {
+    sessionName: `${fullPrefix}${n}`,
+    label: `${prefix}${n}`,
+  };
 }
 
 /**

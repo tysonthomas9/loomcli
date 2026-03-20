@@ -38,7 +38,6 @@ import {
   IssueDetailPanel,
   IssueDetailView,
   AgentDetailPanel,
-  AgentsSidebar,
   WorkspaceTree,
   AssigneePrompt,
   BulkActionToolbar,
@@ -141,13 +140,14 @@ function App() {
   // Workspace context for breadcrumb, single-repo guard, and workspace selection
   const {
     workspace,
+    activeWorkspaceName,
+    setActiveWorkspace,
     isMultiRepo,
     repos: workspaceRepos,
     selectedRepoNames,
     selectAll,
     selectRepos,
     sourceReposFilter,
-    refetch: refetchWorkspace,
   } = useWorkspaceContext();
 
   // Workspace URL param sync (deep linking for workspace selection)
@@ -212,6 +212,7 @@ function App() {
           ? "kanban"
           : "ready",
     sourceRepos: sourceReposFilter,
+    workspaceName: activeWorkspaceName,
   });
 
   // Filter state with URL synchronization
@@ -280,6 +281,46 @@ function App() {
     }
     return map;
   }, [activeView, issues, blockedIssuesData]);
+
+  // Compute Work Queue counts from workspace-scoped issues for sidebar display
+  const workQueueCounts = useMemo(() => {
+    let backlog = 0;
+    let open = 0;
+    let blocked = 0;
+    let inProgress = 0;
+    let needsReview = 0;
+    let done = 0;
+    for (const issue of issues) {
+      switch (issue.status) {
+        case "deferred":
+          backlog++;
+          break;
+        case "open":
+        case undefined:
+          if (issue.is_blocked) {
+            blocked++;
+          } else {
+            open++;
+          }
+          break;
+        case "blocked":
+          blocked++;
+          break;
+        case "in_progress":
+          inProgress++;
+          break;
+        case "review":
+          needsReview++;
+          break;
+        case "closed":
+          done++;
+          break;
+        default:
+          break;
+      }
+    }
+    return { backlog, open, blocked, inProgress, needsReview, done };
+  }, [issues]);
 
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
@@ -385,6 +426,8 @@ function App() {
   }, [activeView]);
 
   // Redirect away from workspace view in single-repo mode (e.g. stale URL bookmark)
+  // Note: In multi-repo mode, the sidebar always shows the workspace tree,
+  // so this only guards against stale URL bookmarks in single-repo setups.
   useEffect(() => {
     if (!isMultiRepo && activeView === "workspace") {
       setActiveView("kanban");
@@ -694,6 +737,19 @@ function App() {
     ],
   );
 
+  // Handle workspace entry click to switch to a different workspace.
+  // Updates the active workspace (header, cache, re-fetch) and re-fetches issues.
+  const handleWorkspaceSwitch = useCallback(
+    (workspaceName: string) => {
+      if (workspaceName === activeWorkspaceName) return;
+      // Close any open panels
+      closeAllPanels();
+      // Update the active workspace (triggers page reload with new workspace)
+      setActiveWorkspace(workspaceName);
+    },
+    [activeWorkspaceName, closeAllPanels, setActiveWorkspace],
+  );
+
   // Handle Talk to Lead button click
   const handleTalkToLeadClick = useCallback(() => {
     setActiveView("terminal");
@@ -817,30 +873,27 @@ function App() {
     </div>
   );
 
-  // Sidebar: WorkspaceTree (multi-repo workspace view) or AgentsSidebar
-  const sidebarContent =
-    activeView === "workspace" && isMultiRepo ? (
-      <WorkspaceTree
-        activeRepoName={activeRepoName}
-        onWorkspaceSelect={handleWorkspaceSelect}
-        onAgentClick={handleAgentClick}
-        agentTasks={agentTasks}
-        onAddClick={() => setShowCreateWorkspace(true)}
-        connectionState={connectionState}
-        connectionLost={isConnectionLost}
-        disconnectedSince={staleBannerDisconnectedSince}
-        onRetryConnection={staleBannerRetry}
-      />
-    ) : (
-      <AgentsSidebar
-        onAgentClick={handleAgentClick}
-        defaultCollapsed={false}
-        collapsible={false}
-      />
-    );
+  // Sidebar: always show WorkspaceTree with agents nested inside.
+  // The tree includes agent list per workspace plus "+ New Workspace" button.
+  const sidebarContent = (
+    <WorkspaceTree
+      activeRepoName={activeRepoName}
+      onWorkspaceSelect={handleWorkspaceSelect}
+      onWorkspaceSwitch={handleWorkspaceSwitch}
+      onAgentClick={handleAgentClick}
+      agentTasks={agentTasks}
+      onAddClick={() => setShowCreateWorkspace(true)}
+      connectionState={connectionState}
+      connectionLost={isConnectionLost}
+      disconnectedSince={staleBannerDisconnectedSince}
+      onRetryConnection={staleBannerRetry}
+      workQueueCounts={workQueueCounts}
+    />
+  );
 
-  // Loading state: show skeleton columns
-  if (isLoading) {
+  // Loading state: show skeleton columns (only for issue-based views;
+  // terminal and other independent views render without waiting for issues)
+  if (isLoading && activeView !== "terminal" && activeView !== "settings") {
     return (
       <>
         <AppLayout
@@ -893,8 +946,10 @@ function App() {
     );
   }
 
-  // Error state: show error display with retry
-  if (error && !isLoading) {
+  // Error state: show error display with retry (only for issue-based views;
+  // terminal, settings, and other independent views should still render)
+  const issueBasedViews = new Set(["kanban", "table", "graph", "issue-detail"]);
+  if (error && !isLoading && issueBasedViews.has(activeView)) {
     return (
       <>
         <AppLayout
@@ -1193,9 +1248,18 @@ function App() {
       <CreateWorkspaceModal
         isOpen={showCreateWorkspace}
         onClose={() => setShowCreateWorkspace(false)}
-        onSuccess={() => {
-          refetchWorkspace();
+        onSuccess={(_data, createdName) => {
           setShowCreateWorkspace(false);
+          // Navigate directly to the new workspace's Kanban view.
+          // Bypass setActiveWorkspace's setTimeout(0) to avoid a race
+          // where React effects re-sync a stale view param into the URL
+          // before the delayed window.location.replace() fires.
+          try {
+            localStorage.setItem("loom-active-workspace", createdName);
+          } catch { /* ignore */ }
+          const url = new URL(window.location.origin + window.location.pathname);
+          url.searchParams.set("_ws", createdName);
+          window.location.replace(url.toString());
         }}
       />
     </KeyboardShortcutProvider>

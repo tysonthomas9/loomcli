@@ -4,6 +4,34 @@ const DEFAULT_TIMEOUT = 30000;
 // Auth token stored in memory (not localStorage) for XSS safety
 let authToken: string | null = null;
 
+// Active workspace ID — set by useWorkspaceContext, read by fetchApi
+let activeWorkspace: string | null = null;
+
+// Track whether the page is being navigated away from.
+// Suppresses false-positive daemon-unavailable events caused by
+// aborted in-flight requests during workspace switching (page reload).
+let isPageUnloading = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", () => {
+    isPageUnloading = true;
+  });
+}
+
+/**
+ * Set the active workspace ID. Called by useWorkspaceContext when the
+ * workspace changes. All subsequent API requests will include a Workspace header.
+ */
+export function setActiveWorkspace(wsID: string | null): void {
+  activeWorkspace = wsID;
+}
+
+/**
+ * Get the current active workspace ID.
+ */
+export function getActiveWorkspace(): string | null {
+  return activeWorkspace;
+}
+
 // Auth state tracking
 export type AuthState =
   | "initializing"
@@ -208,6 +236,11 @@ async function fetchApi<T>(
       headers["Authorization"] = `Bearer ${authToken}`;
     }
 
+    // Inject active workspace header for multi-workspace routing
+    if (activeWorkspace && !headers["Workspace"]) {
+      headers["Workspace"] = activeWorkspace;
+    }
+
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
     }
@@ -267,7 +300,7 @@ async function fetchApi<T>(
     clearTimeoutCleanup();
     if (error instanceof ApiError) {
       // Dispatch daemon-unavailable for 503 (Service Unavailable)
-      if (error.status === 503 && typeof window !== "undefined") {
+      if (error.status === 503 && typeof window !== "undefined" && !isPageUnloading) {
         window.dispatchEvent(new CustomEvent("daemon-unavailable"));
       }
       throw error;
@@ -279,8 +312,10 @@ async function fetchApi<T>(
       // User-provided signal was aborted - re-throw as-is
       throw error;
     }
-    // Network error (status 0) — daemon likely unreachable
-    if (typeof window !== "undefined") {
+    // Network error (status 0) — daemon likely unreachable.
+    // Suppress during page navigation to avoid false-positive daemon-unavailable
+    // events from in-flight requests aborted by workspace switching (page reload).
+    if (typeof window !== "undefined" && !isPageUnloading) {
       window.dispatchEvent(new CustomEvent("daemon-unavailable"));
     }
     throw new ApiError(0, "Network error", error);

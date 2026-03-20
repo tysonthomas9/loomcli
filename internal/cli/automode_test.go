@@ -1082,7 +1082,7 @@ func TestAgentClaimedTask_WithTaskID(t *testing.T) {
 		t.Fatalf("UpdateLockTask failed: %v", err)
 	}
 
-	if !agentClaimedTask(tmpDir) {
+	if !agentClaimedTask(tmpDir, "", nil) {
 		t.Error("agentClaimedTask() = false, want true when TaskID is set")
 	}
 }
@@ -1097,7 +1097,7 @@ func TestAgentClaimedTask_WithoutTaskID(t *testing.T) {
 	defer ReleaseLock(tmpDir)
 
 	// No task set — TaskID is empty
-	if agentClaimedTask(tmpDir) {
+	if agentClaimedTask(tmpDir, "", nil) {
 		t.Error("agentClaimedTask() = true, want false when TaskID is empty")
 	}
 }
@@ -1106,7 +1106,7 @@ func TestAgentClaimedTask_NoLockFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// No lock file — daemon never ran or failed before writing lock. No progress.
-	if agentClaimedTask(tmpDir) {
+	if agentClaimedTask(tmpDir, "", nil) {
 		t.Error("agentClaimedTask() = true, want false when lock file doesn't exist (no progress)")
 	}
 }
@@ -1124,7 +1124,7 @@ func TestAgentClaimedTask_AfterClear(t *testing.T) {
 	UpdateLockTask(tmpDir, "bd-123", "Test Task")
 	ClearLockTaskID(tmpDir)
 
-	if agentClaimedTask(tmpDir) {
+	if agentClaimedTask(tmpDir, "", nil) {
 		t.Error("agentClaimedTask() = true, want false after ClearLockTaskID")
 	}
 }
@@ -1142,13 +1142,13 @@ func TestAgentClaimedTask_ClearThenReclaim(t *testing.T) {
 	UpdateLockTask(tmpDir, "bd-old", "Old Task")
 	ClearLockTaskID(tmpDir)
 
-	if agentClaimedTask(tmpDir) {
+	if agentClaimedTask(tmpDir, "", nil) {
 		t.Error("after clear: agentClaimedTask() should be false")
 	}
 
 	UpdateLockTask(tmpDir, "bd-new", "New Task")
 
-	if !agentClaimedTask(tmpDir) {
+	if !agentClaimedTask(tmpDir, "", nil) {
 		t.Error("after reclaim: agentClaimedTask() should be true")
 	}
 
@@ -1183,7 +1183,7 @@ func TestTmuxCycle_DaemonExitsWithoutClaimingTask(t *testing.T) {
 	// Lock file remains on disk.
 
 	// Parent checks if task was claimed
-	if agentClaimedTask(tmpDir) {
+	if agentClaimedTask(tmpDir, "", nil) {
 		t.Error("agentClaimedTask() = true, want false when daemon didn't claim a task")
 	}
 
@@ -1218,7 +1218,7 @@ func TestTmuxCycle_DaemonClaimsTask(t *testing.T) {
 	// Daemon exits — lock stays (no defer ReleaseLock)
 
 	// Parent checks if task was claimed
-	if !agentClaimedTask(tmpDir) {
+	if !agentClaimedTask(tmpDir, "", nil) {
 		t.Error("agentClaimedTask() = false, want true when daemon claimed a task")
 	}
 
@@ -1233,7 +1233,7 @@ func TestTmuxCycle_DaemonClaimsTask(t *testing.T) {
 	}
 
 	// Fresh lock has empty TaskID
-	if agentClaimedTask(tmpDir) {
+	if agentClaimedTask(tmpDir, "", nil) {
 		t.Error("Fresh lock should have empty TaskID")
 	}
 
@@ -1261,7 +1261,7 @@ func TestTmuxCycle_ConsecutiveNoProgress(t *testing.T) {
 		// Lock stays on disk (no defer ReleaseLock)
 
 		// Parent checks progress
-		if agentClaimedTask(tmpDir) {
+		if agentClaimedTask(tmpDir, "", nil) {
 			t.Errorf("Cycle %d: agentClaimedTask() = true, want false", cycle)
 		} else {
 			consecutiveNoProgress++
@@ -1288,7 +1288,7 @@ func TestTmuxCycle_DaemonCrashesBeforeAcquiringLock(t *testing.T) {
 	// Daemon crashes before AcquireLock — no lock file created
 
 	// Parent checks progress — lock file doesn't exist
-	if agentClaimedTask(tmpDir) {
+	if agentClaimedTask(tmpDir, "", nil) {
 		t.Error("agentClaimedTask() = true, want false when daemon crashed before acquiring lock")
 	}
 }

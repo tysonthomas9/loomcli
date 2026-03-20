@@ -41,6 +41,7 @@ import {
   worstHealthColor,
   type WorkspaceHealthSummary,
 } from "@/utils/workspaceHealth";
+import { AgentCard } from "@/components/AgentCard";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 
@@ -49,6 +50,8 @@ import { EpicTaskTree } from "./EpicTaskTree";
 import { RepoGroupList } from "./RepoGroupList";
 import { SidebarStatusBar } from "./SidebarStatusBar";
 import { SortableWorkspaceEntry } from "./SortableWorkspaceEntry";
+import { WorkQueueSection } from "./WorkQueueSection";
+import type { WorkQueueCounts } from "./WorkQueueSection";
 import styles from "./WorkspaceTree.module.css";
 import { WorkspaceContextMenu } from "./WorkspaceContextMenu";
 
@@ -64,6 +67,8 @@ export interface WorkspaceTreeProps {
   activeRepoName?: string | null | undefined;
   /** Callback when a workspace/repo is selected. null = "All Workspaces" */
   onWorkspaceSelect?: (repoName: string | null) => void;
+  /** Callback when a workspace entry is clicked to switch to it */
+  onWorkspaceSwitch?: (workspaceName: string) => void;
   /** Callback when an agent card is clicked */
   onAgentClick?: (agentName: string) => void;
   /** Map of agent name to task info for display in AgentCards */
@@ -80,6 +85,8 @@ export interface WorkspaceTreeProps {
   onRetryConnection?: () => void;
   /** Callback when the active/all filter changes (for downstream consumers) */
   onFilterChange?: (filter: ActiveFilter) => void;
+  /** Work Queue counts derived from workspace-scoped issues */
+  workQueueCounts?: WorkQueueCounts;
 }
 
 const COLLAPSE_STORAGE_KEY = "workspace-tree-collapsed";
@@ -93,9 +100,10 @@ const REPO_COLLAPSE_STORAGE_KEY = "workspace-tree-repo-collapsed";
 
 export function WorkspaceTree({
   className,
-  defaultCollapsed = true,
+  defaultCollapsed = false,
   activeRepoName,
   onWorkspaceSelect,
+  onWorkspaceSwitch,
   onAgentClick,
   agentTasks,
   onAddClick,
@@ -104,6 +112,7 @@ export function WorkspaceTree({
   disconnectedSince,
   onRetryConnection,
   onFilterChange,
+  workQueueCounts,
 }: WorkspaceTreeProps): JSX.Element {
   // Load initial collapsed state from localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -152,9 +161,32 @@ export function WorkspaceTree({
     retryCountdown,
     retryNow,
   } = useWorkspaceRepos();
-  const { agents } = useAgentContext();
+  const { agents: fleetAgents, agentTasks: contextAgentTasks } = useAgentContext();
   const { showToast } = useToast();
-  const { defaultWorkspaceName, setDefaultWorkspace } = useWorkspaceContext();
+  const { activeWorkspaceName, defaultWorkspaceName, setDefaultWorkspace, agents: workspaceConfigAgents } = useWorkspaceContext();
+
+  // Merge fleet agents with workspace config agents.
+  // Config agents that aren't yet running appear as "configured" placeholders.
+  const agents = useMemo(() => {
+    if (workspaceConfigAgents.length === 0) return fleetAgents;
+    const fleetNames = new Set(fleetAgents.map((a) => a.name));
+    const configPlaceholders: typeof fleetAgents = workspaceConfigAgents
+      .filter((ca) => !fleetNames.has(ca.name))
+      .map((ca) => {
+        const entry: (typeof fleetAgents)[number] = {
+          name: ca.name,
+          branch: "",
+          status: "configured",
+          ahead: 0,
+          behind: 0,
+          workspace: workspace?.name ?? "",
+          cross_repo: ca.cross_repo,
+        };
+        if (ca.repos?.[0]) entry.repo = ca.repos[0];
+        return entry;
+      });
+    return [...fleetAgents, ...configPlaceholders];
+  }, [fleetAgents, workspaceConfigAgents, workspace?.name]);
 
   // Workspace delete state
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -548,7 +580,7 @@ export function WorkspaceTree({
         {!isCollapsed && (
           <>
             <span className={styles.toggleText}>
-              Workspace
+              Workspaces
               {defaultWorkspaceName && (
                 <span
                   className={styles.defaultStar}
@@ -558,7 +590,7 @@ export function WorkspaceTree({
                 </span>
               )}
             </span>
-            <span className={styles.sectionCount}>{repos.length}</span>
+            <span className={styles.sectionCount}>{workspaces.length}</span>
             {onAddClick && (
               <span
                 role="button"
@@ -578,7 +610,7 @@ export function WorkspaceTree({
                 aria-label="Add workspace"
                 title="Add workspace"
               >
-                +
+                + Add
               </span>
             )}
             <span
@@ -636,8 +668,30 @@ export function WorkspaceTree({
             </div>
           )}
 
-          {!isLoading && !error && repos.length === 0 && (
+          {!isLoading && !error && repos.length === 0 && agents.length === 0 && (
             <div className={styles.emptyState}>No repos in workspace</div>
+          )}
+
+          {/* Agent list section — always visible when agents exist */}
+          {agents.length > 0 && (
+            <div className={styles.agentSection}>
+              <div className={styles.agentSectionHeader}>
+                Agents
+                <span className={styles.sectionCount}>{agents.length}</span>
+              </div>
+              <div className={styles.agentSectionList}>
+                {agents.map((agent) => (
+                  <AgentCard
+                    key={agent.name}
+                    agent={agent}
+                    taskTitle={agentTasks?.[agent.name]?.title ?? contextAgentTasks?.[agent.name]?.title}
+                    {...(onAgentClick
+                      ? { onClick: () => onAgentClick(agent.name) }
+                      : {})}
+                  />
+                ))}
+              </div>
+            </div>
           )}
 
           {workspaces.length > 1 && (
@@ -659,12 +713,14 @@ export function WorkspaceTree({
                       <SortableWorkspaceEntry
                         key={ws.name}
                         ws={ws}
+                        isActive={ws.name === activeWorkspaceName}
                         isDefault={ws.name === defaultWorkspaceName}
                         isEditing={editingWorkspace === ws.name}
                         draftName={draftName}
                         isSaving={isSaving}
                         renameError={renameError}
                         renameInputRef={renameInputRef}
+                        {...(onWorkspaceSwitch ? { onClick: onWorkspaceSwitch } : {})}
                         onDraftChange={setDraftName}
                         onSaveRename={handleSaveRename}
                         onRenameKeyDown={handleRenameKeyDown}
@@ -769,6 +825,22 @@ export function WorkspaceTree({
                 />
               )}
             </div>
+          )}
+
+          {/* Work Queue section — shows issue counts scoped to active workspace */}
+          {workQueueCounts && (
+            <WorkQueueSection counts={workQueueCounts} />
+          )}
+
+          {/* + New Workspace button at the bottom of the tree */}
+          {onAddClick && (
+            <button
+              type="button"
+              className={styles.newWorkspaceButton}
+              onClick={onAddClick}
+            >
+              + New Workspace
+            </button>
           )}
         </div>
       )}

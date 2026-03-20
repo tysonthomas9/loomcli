@@ -50,6 +50,8 @@ export interface UseIssuesOptions {
   subscribeOnConnect?: boolean;
   /** Source repo filter — when set, refetch uses source_repos and SSE reconnects with updated URL */
   sourceRepos?: string[] | undefined;
+  /** Active workspace name — triggers re-fetch when workspace changes (header set automatically by fetchApi) */
+  workspaceName?: string | null;
 }
 
 /**
@@ -129,6 +131,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     autoFetch = true,
     autoConnect = true,
     sourceRepos,
+    workspaceName,
     // Note: subscribeOnConnect is deprecated with SSE - connection equals subscription
   } = options;
 
@@ -200,10 +203,32 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     sourceReposRef.current = sourceRepos;
   }, [sourceRepos]);
 
+  // Track active workspace for workspace-level SSE filtering
+  const workspaceNameRef = useRef(workspaceName);
+  useEffect(() => {
+    workspaceNameRef.current = workspaceName;
+  }, [workspaceName]);
+
   const gatedHandleMutation = useCallback(
     (mutation: MutationPayload) => {
       // Gate: buffer mutations for issues in optimistic state
       if (!filterMutation(mutation)) {
+        return;
+      }
+
+      // Gate: only process mutations for the active workspace
+      // Allow mutations without workspace_id (legacy/single-workspace mode)
+      const activeWs = workspaceNameRef.current;
+      if (activeWs && mutation.workspace_id && mutation.workspace_id !== activeWs) {
+        if (process.env.NODE_ENV === "development") {
+          console.debug(
+            "[useIssues] Gated mutation for different workspace:",
+            mutation.workspace_id,
+            "active:",
+            activeWs,
+            mutation.issue_id,
+          );
+        }
         return;
       }
 
@@ -346,7 +371,10 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       fetchingRef.current = false;
       deletedDuringFetchRef.current.clear();
     }
-  }, [filter, mode, graphFilter, sourceRepos]);
+    // workspaceName is intentionally in deps: triggers re-fetch when workspace changes
+    // (the Workspace header is set at module level, not used directly in the callback)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, mode, graphFilter, sourceRepos, workspaceName]);
 
   // Keep refetchRef in sync with the latest refetch callback
   refetchRef.current = refetch;

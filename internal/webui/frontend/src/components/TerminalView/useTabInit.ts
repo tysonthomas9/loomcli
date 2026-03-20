@@ -15,6 +15,8 @@ interface TabInitArgs {
   setTabs: React.Dispatch<React.SetStateAction<TabState[]>>;
   setActiveTabId: React.Dispatch<React.SetStateAction<string>>;
   initializedRef: MutableRefObject<boolean>;
+  /** Active workspace name, used to namespace auto-generated session names */
+  workspace?: string;
 }
 
 export function useTabInit(args: TabInitArgs) {
@@ -27,6 +29,7 @@ export function useTabInit(args: TabInitArgs) {
     setTabs,
     setActiveTabId,
     initializedRef,
+    workspace,
   } = args;
 
   useEffect(() => {
@@ -71,12 +74,18 @@ export function useTabInit(args: TabInitArgs) {
         return;
       }
 
+      // Workspace prefix for session names: namespace tmux sessions per workspace
+      // to prevent cross-workspace session leakage. The prefix is omitted from
+      // display labels for cleaner UI.
+      const wsPrefix = workspace && workspace !== "default" ? `${workspace}--` : "";
+
       const newTabs: TabState[] = backends.map((backend) => {
-        const name = `lead-${backend}-1`;
+        const label = `lead-${backend}-1`;
+        const sessionName = `${wsPrefix}lead-${backend}-1`;
         return {
-          id: name,
-          label: name,
-          sessionName: name,
+          id: sessionName,
+          label,
+          sessionName,
           connectionState: "disconnected" as ConnectionState,
           backendName: backend,
         };
@@ -84,7 +93,7 @@ export function useTabInit(args: TabInitArgs) {
       setTabs(newTabs);
 
       const claudeTab = newTabs.find((t) =>
-        t.sessionName.startsWith("lead-claude-"),
+        t.label.startsWith("lead-claude-"),
       );
       setActiveTabId(claudeTab?.id ?? newTabs[0]?.id ?? "");
 
@@ -97,5 +106,5 @@ export function useTabInit(args: TabInitArgs) {
         );
       });
     }
-  }, [tabMetadata, metaLoading, config, configLoading, createTab]);
+  }, [tabMetadata, metaLoading, config, configLoading, createTab, workspace]);
 }

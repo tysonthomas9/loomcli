@@ -45,8 +45,9 @@ export function useWorkspaceTree(
   const { issues, isLoading, error, refetch } = useIssues({
     mode: "kanban",
     sourceRepos,
+    workspaceName: _workspaceName,
     autoFetch: sourceRepos !== undefined && sourceRepos.length > 0,
-    autoConnect: sourceRepos !== undefined && sourceRepos.length > 0,
+    autoConnect: false, // sidebar tree uses parent's SSE connection, no redundant EventSource
   });
 
   // Partition issues into epics and tasks by issue_type.
