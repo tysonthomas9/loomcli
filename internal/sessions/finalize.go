@@ -12,39 +12,39 @@ import (
 
 // Finalize completes a session by setting final metadata, writing it to disk,
 // and appending the finalized SessionRecord to index.jsonl.
-func (sess *Session) Finalize(opts FinalizeOptions) error {
+func (s *Session) Finalize(opts FinalizeOptions) error {
 	now := time.Now().UTC()
 
 	// Set task and outcome fields.
-	sess.Meta.TaskID = opts.TaskID
-	sess.Meta.ExitCode = opts.ExitCode
+	s.Meta.TaskID = opts.TaskID
+	s.Meta.ExitCode = opts.ExitCode
 	if opts.ExitCode == 0 {
-		sess.Meta.Status = StatusCompleted
+		s.Meta.Status = StatusCompleted
 	} else {
-		sess.Meta.Status = StatusFailed
+		s.Meta.Status = StatusFailed
 	}
-	sess.Meta.EndedAt = &now
-	sess.Meta.DurationS = now.Sub(sess.Meta.StartedAt).Seconds()
+	s.Meta.EndedAt = &now
+	s.Meta.DurationS = now.Sub(s.Meta.StartedAt).Seconds()
 
 	// Set diff stats.
-	sess.Meta.FilesChanged = opts.DiffStats.FilesChanged
-	sess.Meta.LinesAdded = opts.DiffStats.LinesAdded
-	sess.Meta.LinesRemoved = opts.DiffStats.LinesRemoved
-	sess.Meta.FilesTouched = opts.FilesTouched
+	s.Meta.FilesChanged = opts.DiffStats.FilesChanged
+	s.Meta.LinesAdded = opts.DiffStats.LinesAdded
+	s.Meta.LinesRemoved = opts.DiffStats.LinesRemoved
+	s.Meta.FilesTouched = opts.FilesTouched
 
 	// Set token usage fields from opts if provided.
-	sess.Meta.InputTokens = opts.InputTokens
-	sess.Meta.OutputTokens = opts.OutputTokens
-	sess.Meta.CacheReadTokens = opts.CacheReadTokens
-	sess.Meta.CacheWriteTokens = opts.CacheWriteTokens
-	sess.Meta.EstimatedCostUSD = opts.EstimatedCostUSD
+	s.Meta.InputTokens = opts.InputTokens
+	s.Meta.OutputTokens = opts.OutputTokens
+	s.Meta.CacheReadTokens = opts.CacheReadTokens
+	s.Meta.CacheWriteTokens = opts.CacheWriteTokens
+	s.Meta.EstimatedCostUSD = opts.EstimatedCostUSD
 
 	// Set error context.
-	sess.Meta.ErrorClass = opts.ErrorClass
+	s.Meta.ErrorClass = opts.ErrorClass
 
 	// Write final metadata.json atomically.
-	sessDir := filepath.Join(sess.store.dir, sess.Meta.SessionID)
-	if err := writeMetadataAtomic(sessDir, sess.Meta); err != nil {
+	sessDir := filepath.Join(s.store.dir, s.Meta.SessionID)
+	if err := writeMetadataAtomic(sessDir, s.Meta); err != nil {
 		return fmt.Errorf("write metadata.json: %w", err)
 	}
 
@@ -58,7 +58,7 @@ func (sess *Session) Finalize(opts FinalizeOptions) error {
 	}
 
 	// Append finalized record to index.jsonl.
-	if err := sess.store.appendIndex(sess.Meta.SessionRecord); err != nil {
+	if err := s.store.appendIndex(s.Meta.SessionRecord); err != nil {
 		return fmt.Errorf("append index: %w", err)
 	}
 

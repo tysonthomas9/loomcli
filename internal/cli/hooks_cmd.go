@@ -110,7 +110,7 @@ var hooksInstallCmd = &cobra.Command{
 		if err := InstallClaudeHooks(absPath); err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Hooks installed in %s\n", absPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Hooks installed in %s\n", absPath)
 		return nil
 	},
 }
@@ -132,7 +132,7 @@ var hooksUninstallCmd = &cobra.Command{
 		if err := UninstallClaudeHooks(absPath); err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Hooks uninstalled from %s\n", absPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Hooks uninstalled from %s\n", absPath)
 		return nil
 	},
 }
@@ -156,12 +156,12 @@ var hooksStatusCmd = &cobra.Command{
 			return err
 		}
 		if !installed {
-			fmt.Fprintf(cmd.OutOrStdout(), "Hooks not installed in %s\n", absPath)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Hooks not installed in %s\n", absPath)
 			return nil
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Hooks installed in %s\n", absPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Hooks installed in %s\n", absPath)
 		for _, h := range hooks {
-			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", h)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", h)
 		}
 		return nil
 	},
