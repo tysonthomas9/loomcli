@@ -5,11 +5,56 @@
 
 /* ============= Container ============= */
 
+.outerContainer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .container {
   display: flex;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+/* ============= Cost Summary Bar ============= */
+
+.costSummary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+  flex-shrink: 0;
+}
+
+.summaryItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.summaryLabel {
+  color: var(--color-text-tertiary);
+}
+
+.summaryValue {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.activeBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background-color: rgba(250, 204, 21, 0.15);
+  color: #ca8a04;
 }
 
 /* ============= Empty / Loading States ============= */
