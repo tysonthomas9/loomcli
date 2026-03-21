@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useState, useCallback, useEffect } from "react";
 
 import { ApiError } from "@/api/client";
-import { gitPushAll } from "@/api/git";
+import { gitPush, gitPushAll } from "@/api/git";
 import { ConfirmDialog, ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useAgentContext, useRepoFilter } from "@/hooks";
 import type {
@@ -112,6 +112,15 @@ export function AgentsSidebar({
   const [pushError, setPushError] = useState<string | null>(null);
   const [showPushConfirm, setShowPushConfirm] = useState(false);
 
+  // Push details list (expandable per-agent push)
+  const [isPushListExpanded, setIsPushListExpanded] = useState(false);
+  const [pushingAgents, setPushingAgents] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [agentPushErrors, setAgentPushErrors] = useState<
+    Record<string, string>
+  >({});
+
   const {
     agents,
     tasks,
@@ -157,6 +166,40 @@ export function AgentsSidebar({
     mql.addEventListener("change", onChange);
     return () => mql.removeEventListener("change", onChange);
   }, []);
+
+  // Auto-collapse push list and clear stale state when no agents need push
+  useEffect(() => {
+    if (sync.git_needs_push === 0) {
+      setIsPushListExpanded(false);
+      setAgentPushErrors({});
+      setPushingAgents({});
+    }
+  }, [sync.git_needs_push]);
+
+  const anyAgentPushing = Object.values(pushingAgents).some(Boolean);
+
+  const handleAgentPush = useCallback(
+    async (agentName: string) => {
+      setPushingAgents((prev) => ({ ...prev, [agentName]: true }));
+      setAgentPushErrors((prev) => {
+        const next = { ...prev };
+        delete next[agentName];
+        return next;
+      });
+      try {
+        await gitPush(agentName);
+      } catch (err) {
+        setAgentPushErrors((prev) => ({
+          ...prev,
+          [agentName]:
+            err instanceof ApiError ? err.statusText : "Push failed",
+        }));
+      } finally {
+        setPushingAgents((prev) => ({ ...prev, [agentName]: false }));
+      }
+    },
+    [],
+  );
 
   const handleToggle = useCallback(() => {
     if (!collapsible) return;
@@ -357,24 +400,81 @@ export function AgentsSidebar({
                   {sync.git_needs_push > 0 && (
                     <>
                       <div className={styles.syncBanner}>
-                        <span
-                          className={styles.syncBannerText}
-                          title={buildSyncTooltip(
-                            sync.git_push_details,
-                            "ahead",
-                          )}
-                        >
-                          {sync.git_needs_push} need push
-                        </span>
+                        {sync.git_push_details &&
+                        sync.git_push_details.length > 0 ? (
+                          <button
+                            type="button"
+                            className={styles.syncBannerText}
+                            onClick={() => setIsPushListExpanded((prev) => !prev)}
+                            aria-expanded={isPushListExpanded}
+                            aria-label={`${isPushListExpanded ? "Collapse" : "Expand"} push details`}
+                            title={buildSyncTooltip(
+                              sync.git_push_details,
+                              "ahead",
+                            )}
+                          >
+                            <span className={styles.syncBannerToggle}>
+                              {isPushListExpanded ? "v" : ">"}
+                            </span>
+                            {sync.git_needs_push} need push
+                          </button>
+                        ) : (
+                          <span
+                            className={styles.syncBannerTextStatic}
+                            title={buildSyncTooltip(
+                              sync.git_push_details,
+                              "ahead",
+                            )}
+                          >
+                            {sync.git_needs_push} need push
+                          </span>
+                        )}
                         <button
                           type="button"
                           className={styles.pushButton}
                           onClick={() => setShowPushConfirm(true)}
-                          disabled={isPushing}
+                          disabled={isPushing || anyAgentPushing}
                         >
                           {isPushing ? "Pushing..." : "Push All"}
                         </button>
                       </div>
+                      {isPushListExpanded &&
+                        sync.git_push_details &&
+                        sync.git_push_details.length > 0 && (
+                          <div className={styles.pushDetailsList}>
+                            {sync.git_push_details.map((detail) => (
+                              <div
+                                key={detail.name}
+                                className={styles.pushDetailRow}
+                              >
+                                <span className={styles.pushDetailName}>
+                                  {detail.name}
+                                </span>
+                                <span className={styles.pushDetailCount}>
+                                  {detail.count} commit
+                                  {detail.count !== 1 ? "s" : ""}
+                                </span>
+                                <button
+                                  type="button"
+                                  className={styles.pushDetailButton}
+                                  onClick={() => handleAgentPush(detail.name)}
+                                  disabled={
+                                    pushingAgents[detail.name] || isPushing
+                                  }
+                                >
+                                  {pushingAgents[detail.name]
+                                    ? "Pushing..."
+                                    : "Push"}
+                                </button>
+                                {agentPushErrors[detail.name] && (
+                                  <span className={styles.pushDetailError}>
+                                    {agentPushErrors[detail.name]}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       {pushError && (
                         <div className={styles.pushError}>{pushError}</div>
                       )}
