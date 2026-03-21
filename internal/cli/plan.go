@@ -10,6 +10,7 @@ import (
 var (
 	planAutoMode    bool
 	planDaemonMode  bool // Hidden: for internal tmux session use
+	planSandboxMode bool
 	planInterval    int
 	planMaxTasks    int
 	planIdleTimeout int
@@ -40,13 +41,15 @@ Flags:
   -i, --interval      Polling interval in seconds when no tasks (default: 30)
   -m, --max-tasks     Maximum tasks to process before exiting (0 = unlimited)
   -t, --idle-timeout  Exit after N minutes with no available tasks (0 = none)
+      --sandbox       Run the agent inside an OpenShell sandbox
 
 Examples:
   loom plan falcon              # Run in falcon worktree/workspace (single task)
   loom plan                     # Run in current directory
   loom plan falcon --auto       # Continuous mode until Ctrl+C
   loom plan falcon -a -m 5      # Process up to 5 tasks
-  loom plan falcon -a -t 30     # Exit after 30 min idle`,
+  loom plan falcon -a -t 30     # Exit after 30 min idle
+  loom plan falcon --sandbox    # Run in an OpenShell sandbox`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runPlan,
 }
@@ -55,6 +58,7 @@ func init() {
 	planCmd.Flags().BoolVarP(&planAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
 	planCmd.Flags().BoolVar(&planDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
 	_ = planCmd.Flags().MarkHidden("daemon-mode")
+	planCmd.Flags().BoolVar(&planSandboxMode, "sandbox", false, "Run the agent inside an OpenShell sandbox")
 	planCmd.Flags().IntVarP(&planInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	planCmd.Flags().IntVarP(&planMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	planCmd.Flags().IntVarP(&planIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
@@ -77,6 +81,24 @@ func runPlan(cmd *cobra.Command, args []string) {
 
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
+
+	// SANDBOX MODE: Run the agent inside an OpenShell sandbox
+	if planSandboxMode {
+		if planAutoMode {
+			fmt.Fprintf(os.Stderr, "Error: --sandbox and --auto are mutually exclusive\n")
+			os.Exit(1)
+		}
+		if err := runSandboxOneshot(SandboxOneshotConfig{
+			AgentType:    "plan",
+			AgentName:    agentName,
+			WorktreePath: worktreePath,
+			ParentID:     planParentID,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// DAEMON MODE: Called by tmux session, run single task
 	// Daemon manages its own lock (parent doesn't hold lock in tmux mode)
