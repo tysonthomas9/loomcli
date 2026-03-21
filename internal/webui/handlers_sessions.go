@@ -27,7 +27,15 @@ type SessionListResponse struct {
 // SessionListData contains the task ID and its sessions.
 type SessionListData struct {
 	TaskID   string                   `json:"task_id"`
-	Sessions []sessions.SessionRecord `json:"sessions"`
+	Sessions []SessionListItem `json:"sessions"`
+}
+
+// SessionListItem wraps a SessionRecord with computed display fields.
+type SessionListItem struct {
+	sessions.SessionRecord
+	IsActive      bool `json:"is_active"`
+	HasTranscript bool `json:"has_transcript"`
+	HasDiff       bool `json:"has_diff"`
 }
 
 // SessionDetailResponse is the JSON envelope for a single session's metadata.
@@ -97,16 +105,28 @@ func handleListTaskSessions(sessStore *sessions.Store) http.HandlerFunc {
 			return
 		}
 
-		// Ensure empty array instead of null in JSON output.
-		if records == nil {
-			records = []sessions.SessionRecord{}
+		// Build list items with computed fields.
+		items := make([]SessionListItem, 0, len(records))
+		for _, rec := range records {
+			item := SessionListItem{
+				SessionRecord: rec,
+				IsActive:      rec.Status == sessions.StatusRunning,
+			}
+			// Check if transcript and diff files exist.
+			if _, err := sessStore.LoadTranscript(rec.SessionID); err == nil {
+				item.HasTranscript = true
+			}
+			if _, err := sessStore.ReadDiff(rec.SessionID); err == nil {
+				item.HasDiff = true
+			}
+			items = append(items, item)
 		}
 
 		respondJSON(w, http.StatusOK, SessionListResponse{
 			Success: true,
 			Data: &SessionListData{
 				TaskID:   taskID,
-				Sessions: records,
+				Sessions: items,
 			},
 		})
 	}

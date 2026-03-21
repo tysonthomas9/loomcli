@@ -78,6 +78,7 @@ type CreateOptions struct {
 	AgentName  string `json:"agent_name"`
 	Backend    string `json:"backend"`
 	EpicID     string `json:"epic_id,omitempty"`
+	Phase      string `json:"phase,omitempty"` // "planning" or "implementation"
 	Prompt     string `json:"prompt,omitempty"`
 	AttemptNum int    `json:"attempt_num"`
 }

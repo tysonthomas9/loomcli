@@ -112,9 +112,9 @@ func runTask(cmd *cobra.Command, args []string) {
 				Backend:   ResolveBackendName(),
 				EpicID:    taskParentID,
 				Prompt:    prompt,
+				Phase:     "implementation",
 			})
 			if sess != nil {
-				sess.Meta.Phase = "implementation"
 				SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
 			}
 		}
@@ -240,9 +240,9 @@ func runTask(cmd *cobra.Command, args []string) {
 			Backend:   ResolveBackendName(),
 			EpicID:    taskParentID,
 			Prompt:    prompt,
+			Phase:     "implementation",
 		})
 		if sess != nil {
-			sess.Meta.Phase = "implementation"
 			SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
 		}
 	}

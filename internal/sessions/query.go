@@ -49,7 +49,20 @@ func (s *Store) Query(f Filter) ([]SessionRecord, error) {
 	if err := scanner.Err(); err != nil {
 		return records, fmt.Errorf("read index file: %w", err)
 	}
-	return records, nil
+
+	// Deduplicate by SessionID — keep the last-seen record per ID.
+	// Finalized records are appended after running records, so last wins.
+	seen := make(map[string]int, len(records))
+	deduped := make([]SessionRecord, 0, len(records))
+	for _, rec := range records {
+		if idx, ok := seen[rec.SessionID]; ok {
+			deduped[idx] = rec // overwrite with later (finalized) version
+		} else {
+			seen[rec.SessionID] = len(deduped)
+			deduped = append(deduped, rec)
+		}
+	}
+	return deduped, nil
 }
 
 // SessionsByTask is a convenience wrapper that returns all sessions for a task.
