@@ -142,6 +142,24 @@ func (s *Store) ReadPrompt(sessionID string) (string, error) {
 	return string(data), nil
 }
 
+// ReadDiff reads and returns the diff.patch content from
+// sessions/<sessionID>/diff.patch.
+// Returns os.ErrNotExist (wrapped) when no diff.patch exists for the session.
+func (s *Store) ReadDiff(sessionID string) (string, error) {
+	if err := validateSessionID(sessionID); err != nil {
+		return "", err
+	}
+
+	diffPath := filepath.Join(s.dir, sessionID, "diff.patch")
+
+	// #nosec G304 — sessionID validated above
+	data, err := os.ReadFile(diffPath)
+	if err != nil {
+		return "", fmt.Errorf("read diff.patch: %w", err)
+	}
+	return string(data), nil
+}
+
 // validateSessionID rejects IDs containing path separators or traversal attempts.
 func validateSessionID(sessionID string) error {
 	if sessionID == "" {
