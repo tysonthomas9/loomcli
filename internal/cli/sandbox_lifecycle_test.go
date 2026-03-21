@@ -180,7 +180,7 @@ esac
 	// will exec "sh -c <script>" — the script does git clone etc. which will
 	// fail in test context. That's fine — the shell will exit quickly, but the
 	// mock is what we're testing.  Let's spawn manually with a known name and
-	// use exec.Command directly to test Kill's delete call.
+	// use the strategy's Kill method to test delete call.
 
 	// Pre-set the sandbox name to something known.
 	sandboxName := "loom-falcon-killtest"
@@ -254,7 +254,7 @@ func TestSandboxMock_CleanupCallsDelete(t *testing.T) {
 // TestSandboxMock_SpawnFailure verifies that when the openshell binary exits
 // non-zero immediately (before Start returns), Spawn propagates the error.
 // We simulate this with a script that does exit 1 immediately — but note that
-// exec.Command.Start() only fails if the binary cannot be executed at all.
+// The subprocess Start call only fails if the binary cannot be executed at all.
 // So we test with a non-existent binary path instead.
 // ---------------------------------------------------------------------------
 func TestSandboxMock_SpawnFailure(t *testing.T) {

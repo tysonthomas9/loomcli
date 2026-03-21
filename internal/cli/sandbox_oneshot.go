@@ -9,6 +9,24 @@ import (
 	"time"
 )
 
+// handleSandboxMode validates flags and runs a one-shot sandbox agent.
+// Called from runTask and runPlan when --sandbox is set.
+func handleSandboxMode(agentType, agentName, worktreePath, parentID string, autoMode bool) {
+	if autoMode {
+		fmt.Fprintf(os.Stderr, "Error: --sandbox and --auto are mutually exclusive\n")
+		os.Exit(1)
+	}
+	if err := runSandboxOneshot(SandboxOneshotConfig{
+		AgentType:    agentType,
+		AgentName:    agentName,
+		WorktreePath: worktreePath,
+		ParentID:     parentID,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 // SandboxOneshotConfig holds settings for a one-shot sandbox execution
 // triggered by the --sandbox flag on loom task / loom plan commands.
 type SandboxOneshotConfig struct {
@@ -48,7 +66,7 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) error {
 
 	// 5. Push the branch so the sandbox can clone it
 	fmt.Printf("[sandbox] Pushing branch %s to origin...\n", branch)
-	pushCmd := exec.Command("git", "push", "origin",
+	pushCmd := exec.Command("git", "push", "origin", //nolint:gosec // branch from worktree name
 		fmt.Sprintf("%s:%s", branch, branch), "--force-with-lease")
 	pushCmd.Dir = cfg.WorktreePath
 	pushCmd.Stdout = os.Stdout
@@ -79,7 +97,7 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) error {
 	args := buildOneshotCreateArgs(strategy, sandboxName, branch, cfg, repoURL)
 
 	// 9. Run the sandbox (interactive, with inherited stdio)
-	cmd := exec.Command("openshell", args...)
+	cmd := exec.Command("openshell", args...) //nolint:gosec // args built by buildOneshotCreateArgs
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -100,7 +118,7 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) error {
 
 	// 11. Fetch changes back
 	fmt.Printf("[sandbox] Fetching changes from origin/%s...\n", branch)
-	fetchCmd := exec.Command("git", "fetch", "origin", branch)
+	fetchCmd := exec.Command("git", "fetch", "origin", branch) //nolint:gosec // branch from worktree name
 	fetchCmd.Dir = projectDir
 	fetchCmd.Stdout = os.Stdout
 	fetchCmd.Stderr = os.Stderr
@@ -109,7 +127,7 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) error {
 	}
 
 	// Fast-forward merge the worktree branch
-	mergeCmd := exec.Command("git", "-C", cfg.WorktreePath, "merge",
+	mergeCmd := exec.Command("git", "-C", cfg.WorktreePath, "merge", //nolint:gosec // branch from worktree name
 		"--ff-only", fmt.Sprintf("origin/%s", branch))
 	mergeCmd.Stdout = os.Stdout
 	mergeCmd.Stderr = os.Stderr
@@ -189,7 +207,7 @@ func buildOneshotCreateArgs(strategy *SandboxStrategy, sandboxName, branch strin
 		uploadPath := loomBin
 		if filepath.Base(loomBin) != "loom" {
 			tmpLoom := filepath.Join(os.TempDir(), "loom")
-			if data, err := os.ReadFile(loomBin); err == nil {
+			if data, err := os.ReadFile(loomBin); err == nil { //nolint:gosec // loomBin from os.Executable()
 				if err := os.WriteFile(tmpLoom, data, 0755); err == nil {
 					uploadPath = tmpLoom
 				}

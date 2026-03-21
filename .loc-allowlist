@@ -19,4 +19,4 @@
 635 internal/webui/terminal.go
 540 internal/webui/handlers_terminal.go
 568 internal/webui/server.go
-506 internal/cli/daemon.go
+509 internal/cli/daemon.go

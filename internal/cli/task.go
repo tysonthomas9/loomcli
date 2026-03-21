@@ -67,36 +67,19 @@ func init() {
 }
 
 func runTask(cmd *cobra.Command, args []string) {
-	// Resolve worktree/workspace path
 	var argName string
 	if len(args) > 0 {
 		argName = args[0]
 	}
-
 	target, err := ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	worktreePath, agentName := target.WorkDir, target.AgentName
 
-	worktreePath := target.WorkDir
-	agentName := target.AgentName
-
-	// SANDBOX MODE: Run the agent inside an OpenShell sandbox
 	if taskSandboxMode {
-		if taskAutoMode {
-			fmt.Fprintf(os.Stderr, "Error: --sandbox and --auto are mutually exclusive\n")
-			os.Exit(1)
-		}
-		if err := runSandboxOneshot(SandboxOneshotConfig{
-			AgentType:    "task",
-			AgentName:    agentName,
-			WorktreePath: worktreePath,
-			ParentID:     taskParentID,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
+		handleSandboxMode("task", agentName, worktreePath, taskParentID, taskAutoMode)
 		return
 	}
 
@@ -176,8 +159,7 @@ func runTask(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	if !available {
-		fmt.Println("No tasks available for implementation.")
-		fmt.Println("Tasks must be: open status, has design, no needs-revision label, not epics")
+		fmt.Println("No tasks available for implementation.\nTasks must be: open status, has design, no needs-revision label, not epics")
 		return
 	}
 

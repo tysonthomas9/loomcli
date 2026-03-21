@@ -1,13 +1,13 @@
 package cli
 
 import (
+	"log/slog"
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
-	"log/slog"
-	"time"
 )
 
 // ExecutionStrategy abstracts how an agent subprocess is launched and terminated.
@@ -43,7 +43,7 @@ func (s *DirectStrategy) Name() string {
 // Spawn starts the agent subprocess locally using exec.Command.
 // It returns the started exec.Cmd; the caller assigns ap.cmd and ap.pid.
 func (s *DirectStrategy) Spawn(ap *AgentProcess, loomArgs []string, env []string, logFile *os.File) (*exec.Cmd, error) {
-	cmd := exec.Command("loom", loomArgs...)
+	cmd := exec.Command("loom", loomArgs...) //nolint:gosec // args are constructed internally by buildLoomArgs
 	cmd.Dir = ap.worktreePath
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

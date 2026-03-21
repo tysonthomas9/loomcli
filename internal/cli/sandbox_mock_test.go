@@ -12,7 +12,7 @@ import (
 // to a file and simulates basic openshell subcommands.  It returns the path
 // to the script and the log file it writes to.
 //
-// Supported behaviour:
+// Supported behavior:
 //   - Every call appends its arguments (space-separated) as a line in logFile.
 //   - "sandbox create ... -- <cmd>": extracts and execs the trailing command.
 //   - "sandbox delete ...": exits 0 (or OPENSHELL_MOCK_EXIT if set).

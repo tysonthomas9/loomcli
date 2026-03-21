@@ -52,7 +52,7 @@ func (s *SandboxStrategy) Spawn(ap *AgentProcess, loomArgs []string, env []strin
 	// Build the openshell sandbox create arguments
 	args := s.buildCreateArgs(ap, sandboxName)
 
-	cmd := exec.Command(s.openshellCmd(), args...)
+	cmd := exec.Command(s.openshellCmd(), args...) //nolint:gosec // args built by buildCreateArgs with shellQuote
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if logFile != nil {
 		cmd.Stdout = logFile
@@ -101,7 +101,7 @@ func (s *SandboxStrategy) Cleanup(ap *AgentProcess) error {
 	branch := ap.entry.Worktree
 
 	// 1. Fetch changes the agent pushed from inside the sandbox
-	fetchCmd := exec.Command("git", "fetch", "origin", branch)
+	fetchCmd := exec.Command("git", "fetch", "origin", branch) //nolint:gosec // branch from worktree name
 	fetchCmd.Dir = s.projectDir
 	if out, err := fetchCmd.CombinedOutput(); err != nil {
 		log.Printf("[sandbox] %s: git fetch failed: %s: %v", ap.entry.Worktree, string(out), err)
@@ -109,7 +109,7 @@ func (s *SandboxStrategy) Cleanup(ap *AgentProcess) error {
 	}
 
 	// 2. Fast-forward merge the worktree branch
-	mergeCmd := exec.Command("git", "-C", ap.worktreePath, "merge",
+	mergeCmd := exec.Command("git", "-C", ap.worktreePath, "merge", //nolint:gosec // branch from worktree name
 		"--ff-only", fmt.Sprintf("origin/%s", branch))
 	if out, err := mergeCmd.CombinedOutput(); err != nil {
 		log.Printf("[sandbox] %s: git merge failed (may need manual resolution): %s: %v",
@@ -135,7 +135,7 @@ func (s *SandboxStrategy) buildCreateArgs(ap *AgentProcess, name string) []strin
 		uploadPath := loomBin
 		if filepath.Base(loomBin) != "loom" {
 			tmpLoom := filepath.Join(os.TempDir(), "loom")
-			if data, err := os.ReadFile(loomBin); err == nil {
+			if data, err := os.ReadFile(loomBin); err == nil { //nolint:gosec // loomBin is from os.Executable()
 				if err := os.WriteFile(tmpLoom, data, 0755); err == nil {
 					uploadPath = tmpLoom
 				}
@@ -248,7 +248,7 @@ func (s *SandboxStrategy) deleteSandbox(name string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, s.openshellCmd(), "sandbox", "delete", name)
+	cmd := exec.CommandContext(ctx, s.openshellCmd(), "sandbox", "delete", name) //nolint:gosec // name is internally generated
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("[sandbox] delete %s: %s: %v", name, string(out), err)
 	}

@@ -67,36 +67,19 @@ func init() {
 }
 
 func runPlan(cmd *cobra.Command, args []string) {
-	// Resolve worktree/workspace path
 	var argName string
 	if len(args) > 0 {
 		argName = args[0]
 	}
-
 	target, err := ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	worktreePath, agentName := target.WorkDir, target.AgentName
 
-	worktreePath := target.WorkDir
-	agentName := target.AgentName
-
-	// SANDBOX MODE: Run the agent inside an OpenShell sandbox
 	if planSandboxMode {
-		if planAutoMode {
-			fmt.Fprintf(os.Stderr, "Error: --sandbox and --auto are mutually exclusive\n")
-			os.Exit(1)
-		}
-		if err := runSandboxOneshot(SandboxOneshotConfig{
-			AgentType:    "plan",
-			AgentName:    agentName,
-			WorktreePath: worktreePath,
-			ParentID:     planParentID,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
+		handleSandboxMode("plan", agentName, worktreePath, planParentID, planAutoMode)
 		return
 	}
 
