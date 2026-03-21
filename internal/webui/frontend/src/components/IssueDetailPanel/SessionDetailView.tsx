@@ -77,6 +77,22 @@ export function SessionDetailView({
         )}
       </div>
 
+      {/* Files touched */}
+      {session.files_touched && session.files_touched.length > 0 && (
+        <details className={styles.filesTouchedSection}>
+          <summary className={styles.filesTouchedSummary}>
+            Files Touched ({session.files_touched.length})
+          </summary>
+          <ul className={styles.filesTouchedList}>
+            {session.files_touched.map((path) => (
+              <li key={path} className={styles.fileTouchedItem} title={path}>
+                {path}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
       {/* Inner tab bar */}
       <div className={styles.innerTabBar}>
         <button
