@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 
+import { CodeMirrorEditor } from "@/components/CodeMirrorEditor/CodeMirrorEditor";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useSessionDiff } from "@/hooks/useSessionDiff";
 import type { SessionRecord } from "@/types/session";
@@ -167,7 +168,14 @@ export function SessionDetailView({
             </div>
           )}
           {!diffLoading && !diffError && diff && (
-            <pre className={styles.diffPre}>{diff}</pre>
+            <div className={styles.diffCodeMirror}>
+              <CodeMirrorEditor
+                value={diff}
+                language="diff"
+                readOnly
+                hideLineNumbers
+              />
+            </div>
           )}
           {!diffLoading && !diffError && !diff && (
             <div className={styles.diffEmpty}>No diff available</div>

@@ -403,8 +403,15 @@
 
 .diffContainer {
   flex: 1;
-  overflow: auto;
-  padding: 12px 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.diffCodeMirror {
+  flex: 1;
+  min-height: 0;
 }
 
 .diffPre {
