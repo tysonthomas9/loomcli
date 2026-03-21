@@ -84,10 +84,21 @@ type CreateOptions struct {
 
 // FinalizeOptions holds parameters for closing a session.
 type FinalizeOptions struct {
-	TaskID       string   `json:"task_id"`
-	ExitCode     int      `json:"exit_code"`
+	TaskID       string    `json:"task_id"`
+	ExitCode     int       `json:"exit_code"`
 	DiffStats    DiffStats `json:"diff_stats"`
-	FilesTouched []string `json:"files_touched,omitempty"`
+	FilesTouched []string  `json:"files_touched,omitempty"`
+	DiffPatch    string    `json:"diff_patch,omitempty"` // raw diff to write to diff.patch
+
+	// Token usage (optional — populated from usage.Collector if available)
+	InputTokens      int64   `json:"input_tokens,omitempty"`
+	OutputTokens     int64   `json:"output_tokens,omitempty"`
+	CacheReadTokens  int64   `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64   `json:"cache_write_tokens,omitempty"`
+	EstimatedCostUSD float64 `json:"estimated_cost_usd,omitempty"`
+
+	// Error context
+	ErrorClass string `json:"error_class,omitempty"`
 }
 
 // DiffStats summarizes the git diff for a session.
