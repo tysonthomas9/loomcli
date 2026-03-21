@@ -47,6 +47,9 @@ mkdir -p "$E2E_WORKSPACE"
 echo "[e2e] Created isolated workspace: $E2E_WORKSPACE"
 
 # --- 4. Start bd daemon in isolated workspace ---
+# Override HOME so loom/bd never reads the user's global ~/.loom/config.yaml,
+# which may reference workspaces (e.g. "loomcli") not registered in the e2e pool.
+export HOME="$E2E_WORKSPACE"
 (cd "$E2E_WORKSPACE" && bd daemon start)
 DAEMON_STARTED=1
 
