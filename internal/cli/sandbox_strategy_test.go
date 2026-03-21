@@ -49,16 +49,16 @@ func TestSandboxStrategy_BuildCreateArgs(t *testing.T) {
 			t.Errorf("expected --name flag, got args: %v", args)
 		}
 
-		// Verify --upload flag (contains :/sandbox/bin/loom)
+		// Verify --upload flag (destination is /sandbox/bin directory)
 		hasUpload := false
 		for i, a := range args {
-			if a == "--upload" && i+1 < len(args) && strings.Contains(args[i+1], ":/sandbox/bin/loom") {
+			if a == "--upload" && i+1 < len(args) && strings.Contains(args[i+1], ":/sandbox/bin") {
 				hasUpload = true
 				break
 			}
 		}
 		if !hasUpload {
-			t.Errorf("expected --upload with :/sandbox/bin/loom, got args: %v", args)
+			t.Errorf("expected --upload with :/sandbox/bin, got args: %v", args)
 		}
 
 		// Verify --provider flags
@@ -72,16 +72,13 @@ func TestSandboxStrategy_BuildCreateArgs(t *testing.T) {
 			t.Errorf("expected 2 --provider flags, got %d in args: %v", providerCount, args)
 		}
 
-		// Verify --policy flag present (ensurePolicyFile for "open" creates a file)
-		hasPolicy := false
+		// Verify --policy flag is NOT present for "open" network
+		// (we skip --policy for "open" to use default sandbox network access)
 		for _, a := range args {
 			if a == "--policy" {
-				hasPolicy = true
+				t.Errorf("expected no --policy flag for 'open' network, got args: %v", args)
 				break
 			}
-		}
-		if !hasPolicy {
-			t.Errorf("expected --policy flag, got args: %v", args)
 		}
 
 		// Verify --no-tty
