@@ -2,3 +2,6 @@
 # Format: <ceiling> <repo-relative-path>
 # Files may shrink but never grow past their recorded ceiling.
 # Remove entries as files are refactored below threshold.
+#
+# NOTE: No new entries allowed. All files must stay under 500 LOC.
+# Split large files into logical sub-files instead of adding them here.
