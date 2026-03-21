@@ -19,6 +19,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
 	"github.com/tysonthomas9/loomcli/internal/kv"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
@@ -348,6 +349,20 @@ func runServe(cmd *cobra.Command, args []string) {
 	} else {
 		usageStoreInstance = usageStore
 	}
+
+	// Purge old sessions in background (non-blocking)
+	go func() {
+		sessStore, err := sessions.NewStore(GetBeadsDir())
+		if err != nil {
+			return
+		}
+		count, err := sessStore.PurgeOlderThan(30 * 24 * time.Hour)
+		if err != nil {
+			log.Printf("[serve] session purge error: %v", err)
+		} else if count > 0 {
+			log.Printf("[serve] purged %d old sessions", count)
+		}
+	}()
 
 	// Set up the loom API server
 	mux := http.NewServeMux()
