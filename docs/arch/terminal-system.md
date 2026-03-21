@@ -481,6 +481,7 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 | GET | `/api/terminal/ws` | WebSocket upgrade for xterm.js relay |
 | POST | `/api/terminal/spawn` | Pre-create tmux session for shell tabs |
 | POST | `/api/terminal/restart` | Kill + recreate tmux session |
+| POST | `/api/terminal/kill` | Kill terminal session |
 
 ### Tab Metadata
 
@@ -503,6 +504,7 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 | GET | `/api/terminal/sessions/{session}/scrollback-info` | Scrollback line counts |
 | GET | `/api/terminal/sessions/{session}/export` | ANSI-stripped scrollback download |
 | GET | `/api/terminal/session-status` | Check if session alive / pane dead |
+| GET | `/api/terminal/sessions/by-issue` | List sessions linked to an issue |
 
 ### UI State
 
