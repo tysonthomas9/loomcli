@@ -62,7 +62,47 @@ func (s *Store) Query(f Filter) ([]SessionRecord, error) {
 			deduped = append(deduped, rec)
 		}
 	}
+	// Staleness detection pass: auto-heal orphaned running sessions.
+	for i, rec := range deduped {
+		if !isStale(rec) {
+			continue
+		}
+		ended := rec.StartedAt.Add(StaleSessionThreshold)
+		rec.Status = StatusAborted
+		rec.EndedAt = &ended
+		rec.DurationS = ended.Sub(rec.StartedAt).Seconds()
+		deduped[i] = rec
+		s.healStaleSession(rec)
+	}
+
+	// Re-filter if a status filter was set, because healed records
+	// may no longer match (e.g., filter for "running" but record is now "aborted").
+	if f.Status != "" {
+		filtered := deduped[:0]
+		for _, rec := range deduped {
+			if rec.Status == f.Status {
+				filtered = append(filtered, rec)
+			}
+		}
+		deduped = filtered
+	}
+
 	return deduped, nil
+}
+
+// healStaleSession persists the healed (aborted) session record to disk.
+// It writes both metadata.json and appends to index.jsonl so future queries
+// see the corrected status without re-healing.
+func (s *Store) healStaleSession(rec SessionRecord) {
+	sessDir := filepath.Join(s.dir, rec.SessionID)
+	meta := SessionMetadata{SessionRecord: rec}
+	if err := writeMetadataAtomic(sessDir, meta); err != nil {
+		log.Printf("[sessions] heal stale %s: write metadata: %v", rec.SessionID, err)
+		return
+	}
+	if err := s.appendIndex(rec); err != nil {
+		log.Printf("[sessions] heal stale %s: append index: %v", rec.SessionID, err)
+	}
 }
 
 // SessionsByTask is a convenience wrapper that returns all sessions for a task.
