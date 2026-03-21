@@ -35,7 +35,11 @@ func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error {
 		return nil
 	}
 
-	entry := mapEventToEntry(event)
+	entry, ok := mapEventToEntry(event)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "loom hook: unhandled event type %v, skipping\n", event.Type)
+		return nil
+	}
 
 	if err := store.AppendTranscript(sessionID, entry); err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to append transcript: %v\n", err)
@@ -47,7 +51,9 @@ func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error {
 
 // mapEventToEntry converts a backend-agnostic HookEvent into a
 // TranscriptEntry suitable for writing to transcript.jsonl.
-func mapEventToEntry(event *HookEvent) sessions.TranscriptEntry {
+// mapEventToEntry converts a backend-agnostic HookEvent into a TranscriptEntry.
+// Returns false if the event type is unrecognized (caller should skip).
+func mapEventToEntry(event *HookEvent) (sessions.TranscriptEntry, bool) {
 	entry := sessions.TranscriptEntry{
 		Timestamp: time.Now().UTC(),
 	}
@@ -72,7 +78,10 @@ func mapEventToEntry(event *HookEvent) sessions.TranscriptEntry {
 		entry.Role = "system"
 		entry.Type = "session_end"
 		entry.Content = "Session ended"
+
+	default:
+		return entry, false
 	}
 
-	return entry
+	return entry, true
 }
