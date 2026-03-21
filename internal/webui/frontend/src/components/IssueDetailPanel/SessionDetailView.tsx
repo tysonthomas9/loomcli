@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 
-import { CodeMirrorEditor } from "@/components/CodeMirrorEditor/CodeMirrorEditor";
+import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useSessionTranscript } from "@/hooks/useSessionTranscript";
 import { useSessionDiff } from "@/hooks/useSessionDiff";
 import type { SessionRecord } from "@/types/session";
