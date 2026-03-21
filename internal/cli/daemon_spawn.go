@@ -128,6 +128,14 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 	// (configSnapshot acquires d.reconcileMu.RLock).
 	cfg := d.configSnapshot()
 
+	// For sandbox agents, push the worktree branch before creating the sandbox.
+	// The sandbox will clone this branch, so it must be available on the remote.
+	if _, isSandbox := ap.strategy.(*SandboxStrategy); isSandbox {
+		if err := d.pushWorktreeBranch(ap); err != nil {
+			return fmt.Errorf("pre-spawn push failed (sandbox requires remote branch): %w", err)
+		}
+	}
+
 	ap.mu.Lock()
 
 	// Set up log files if log directory is configured
@@ -257,4 +265,19 @@ func (d *Daemon) waitForAgent(ap *AgentProcess) int {
 // reset on clean exit when the task status is already terminal).
 func (d *Daemon) recoverAgent(ap *AgentProcess, exitCode int) error {
 	return RecoverWorktree(ap.worktreePath, ap.entry.Worktree, exitCode)
+}
+
+// pushWorktreeBranch pushes the agent's worktree branch to the remote.
+// This is called before sandbox creation so the sandbox can clone the branch.
+// Uses --force-with-lease for safety (fails if remote has unexpected changes).
+func (d *Daemon) pushWorktreeBranch(ap *AgentProcess) error {
+	branch := ap.entry.Worktree
+	cmd := exec.Command("git", "push", "origin",
+		fmt.Sprintf("%s:%s", branch, branch), "--force-with-lease")
+	cmd.Dir = d.projectDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git push %s: %s: %w", branch, string(out), err)
+	}
+	return nil
 }

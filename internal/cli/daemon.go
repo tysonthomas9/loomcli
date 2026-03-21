@@ -43,7 +43,7 @@ type AgentProcess struct {
 	done     chan struct{} // closed when superviseAgent goroutine exits
 	stopOnce sync.Once     // prevents double-close of stopCh
 
-	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx
+	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx, sandboxName
 }
 
 // resolveRemote returns the git remote name for this agent.

@@ -489,18 +489,19 @@ func resolveRepoURL(projectDir string) string {
 }
 
 // resolveStrategy returns the ExecutionStrategy for an agent based on config.
-// When execution is "sandbox", it merges daemon-level and agent-level sandbox config.
-// NOTE: SandboxStrategy is not yet implemented (Phase 3). For now, sandbox agents
-// fall back to DirectStrategy with a log warning.
+// When execution is "sandbox", it merges daemon-level and agent-level sandbox config
+// and returns a SandboxStrategy that shells out to the openshell CLI.
 func resolveStrategy(agent AgentEntry, daemonSandbox *SandboxConfig, projectDir string) ExecutionStrategy {
 	if agent.Execution != "sandbox" {
 		return &DirectStrategy{}
 	}
-	// TODO(phase3): Return &SandboxStrategy{} once implemented.
-	// Merge daemon-level + agent-level sandbox config for future use.
-	_ = mergeSandboxConfig(daemonSandbox, agent.Sandbox)
-	_ = resolveRepoURL(projectDir)
-	return &DirectStrategy{}
+	merged := mergeSandboxConfig(daemonSandbox, agent.Sandbox)
+	repoURL := resolveRepoURL(projectDir)
+	return &SandboxStrategy{
+		cfg:        merged,
+		projectDir: projectDir,
+		repoURL:    repoURL,
+	}
 }
 
 func intPtr(v int) *int    { return &v }
