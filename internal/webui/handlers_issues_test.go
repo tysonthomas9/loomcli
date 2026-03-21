@@ -530,11 +530,11 @@ func TestHandleListIssues_ParseListParams_Filters(t *testing.T) {
 
 func TestHandleListIssues_ParseKanbanParams(t *testing.T) {
 	tests := []struct {
-		name           string
-		url            string
-		wantBlocked    bool
-		wantExclude    []string
-		wantErr        bool
+		name        string
+		url         string
+		wantBlocked bool
+		wantExclude []string
+		wantErr     bool
 	}{
 		{
 			name:        "no params",
@@ -638,10 +638,10 @@ func TestHandleListIssues_GetUnclosedBlockerRefs(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		deps     []*types.Dependency
-		wantLen  int
-		wantIDs  []string
+		name    string
+		deps    []*types.Dependency
+		wantLen int
+		wantIDs []string
 	}{
 		{
 			name:    "no dependencies",
