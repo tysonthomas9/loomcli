@@ -205,9 +205,7 @@ describe("CollapsibleSection", () => {
 
   describe("edge cases", () => {
     it("renders with empty children", () => {
-      render(
-        <CollapsibleSection title="Empty">{null}</CollapsibleSection>,
-      );
+      render(<CollapsibleSection title="Empty">{null}</CollapsibleSection>);
       expect(screen.getByText("Empty")).toBeInTheDocument();
     });
 

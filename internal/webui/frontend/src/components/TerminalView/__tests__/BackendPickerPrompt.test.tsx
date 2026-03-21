@@ -42,9 +42,17 @@ vi.mock("@/hooks", () => ({
 // Mock KNOWN_BACKEND_DEFAULTS
 vi.mock("@/components/BackendSelectorDropdown", () => ({
   KNOWN_BACKEND_DEFAULTS: {
-    claude: { displayName: "Claude", provider: "Anthropic", brandColor: "#d4a574" },
+    claude: {
+      displayName: "Claude",
+      provider: "Anthropic",
+      brandColor: "#d4a574",
+    },
     codex: { displayName: "Codex", provider: "OpenAI", brandColor: "#10a37f" },
-    opencode: { displayName: "OpenCode", provider: "Open Source", brandColor: "#6366f1" },
+    opencode: {
+      displayName: "OpenCode",
+      provider: "Open Source",
+      brandColor: "#6366f1",
+    },
   },
 }));
 
@@ -77,9 +85,7 @@ describe("BackendPickerPrompt", () => {
     it("renders the title 'New Terminal Session'", () => {
       render(<BackendPickerPrompt {...defaultProps} />);
 
-      expect(
-        screen.getByText("New Terminal Session"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("New Terminal Session")).toBeInTheDocument();
     });
 
     it("renders the subtitle", () => {
@@ -165,22 +171,14 @@ describe("BackendPickerPrompt", () => {
 
   describe("loading state", () => {
     it("shows loading text when isLoading is true", () => {
-      render(
-        <BackendPickerPrompt {...defaultProps} isLoading={true} />,
-      );
+      render(<BackendPickerPrompt {...defaultProps} isLoading={true} />);
 
-      expect(
-        screen.getByTestId("backend-picker-loading"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText("Loading backends..."),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("backend-picker-loading")).toBeInTheDocument();
+      expect(screen.getByText("Loading backends...")).toBeInTheDocument();
     });
 
     it("does NOT render select when loading", () => {
-      render(
-        <BackendPickerPrompt {...defaultProps} isLoading={true} />,
-      );
+      render(<BackendPickerPrompt {...defaultProps} isLoading={true} />);
 
       expect(
         screen.queryByTestId("backend-picker-select"),
@@ -188,40 +186,22 @@ describe("BackendPickerPrompt", () => {
     });
 
     it("Create button is disabled when loading", () => {
-      render(
-        <BackendPickerPrompt {...defaultProps} isLoading={true} />,
-      );
+      render(<BackendPickerPrompt {...defaultProps} isLoading={true} />);
 
-      expect(
-        screen.getByTestId("backend-picker-create-button"),
-      ).toBeDisabled();
+      expect(screen.getByTestId("backend-picker-create-button")).toBeDisabled();
     });
   });
 
   describe("empty state", () => {
     it("shows empty text when no backends are available", () => {
-      render(
-        <BackendPickerPrompt
-          {...defaultProps}
-          availableBackends={[]}
-        />,
-      );
+      render(<BackendPickerPrompt {...defaultProps} availableBackends={[]} />);
 
-      expect(
-        screen.getByTestId("backend-picker-empty"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText("No backends available"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("backend-picker-empty")).toBeInTheDocument();
+      expect(screen.getByText("No backends available")).toBeInTheDocument();
     });
 
     it("does NOT render select when empty", () => {
-      render(
-        <BackendPickerPrompt
-          {...defaultProps}
-          availableBackends={[]}
-        />,
-      );
+      render(<BackendPickerPrompt {...defaultProps} availableBackends={[]} />);
 
       expect(
         screen.queryByTestId("backend-picker-select"),
@@ -229,25 +209,16 @@ describe("BackendPickerPrompt", () => {
     });
 
     it("Create button is disabled when empty", () => {
-      render(
-        <BackendPickerPrompt
-          {...defaultProps}
-          availableBackends={[]}
-        />,
-      );
+      render(<BackendPickerPrompt {...defaultProps} availableBackends={[]} />);
 
-      expect(
-        screen.getByTestId("backend-picker-create-button"),
-      ).toBeDisabled();
+      expect(screen.getByTestId("backend-picker-create-button")).toBeDisabled();
     });
   });
 
   describe("form submission", () => {
     it("calls onSelect with selected backend on submit", () => {
       const onSelect = vi.fn();
-      render(
-        <BackendPickerPrompt {...defaultProps} onSelect={onSelect} />,
-      );
+      render(<BackendPickerPrompt {...defaultProps} onSelect={onSelect} />);
 
       fireEvent.submit(
         screen.getByTestId("backend-picker-create-button").closest("form")!,
@@ -258,9 +229,7 @@ describe("BackendPickerPrompt", () => {
 
     it("calls onSelect with changed backend after selection change", () => {
       const onSelect = vi.fn();
-      render(
-        <BackendPickerPrompt {...defaultProps} onSelect={onSelect} />,
-      );
+      render(<BackendPickerPrompt {...defaultProps} onSelect={onSelect} />);
 
       fireEvent.change(screen.getByTestId("backend-picker-select"), {
         target: { value: "codex" },
@@ -276,18 +245,14 @@ describe("BackendPickerPrompt", () => {
     it("Create button is enabled with available backends", () => {
       render(<BackendPickerPrompt {...defaultProps} />);
 
-      expect(
-        screen.getByTestId("backend-picker-create-button"),
-      ).toBeEnabled();
+      expect(screen.getByTestId("backend-picker-create-button")).toBeEnabled();
     });
   });
 
   describe("cancel", () => {
     it("calls onCancel when Cancel button is clicked", () => {
       const onCancel = vi.fn();
-      render(
-        <BackendPickerPrompt {...defaultProps} onCancel={onCancel} />,
-      );
+      render(<BackendPickerPrompt {...defaultProps} onCancel={onCancel} />);
 
       fireEvent.click(screen.getByTestId("backend-picker-cancel-button"));
 
@@ -305,10 +270,7 @@ describe("BackendPickerPrompt", () => {
     it('modal has aria-modal="true"', () => {
       render(<BackendPickerPrompt {...defaultProps} />);
 
-      expect(screen.getByRole("dialog")).toHaveAttribute(
-        "aria-modal",
-        "true",
-      );
+      expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
     });
 
     it("modal has aria-labelledby pointing to the title", () => {
@@ -329,9 +291,7 @@ describe("BackendPickerPrompt", () => {
 
   describe("reopen behavior", () => {
     it("resets selected to first backend when reopened", () => {
-      const { rerender } = render(
-        <BackendPickerPrompt {...defaultProps} />,
-      );
+      const { rerender } = render(<BackendPickerPrompt {...defaultProps} />);
 
       fireEvent.change(screen.getByTestId("backend-picker-select"), {
         target: { value: "codex" },
@@ -340,9 +300,7 @@ describe("BackendPickerPrompt", () => {
       rerender(<BackendPickerPrompt {...defaultProps} isOpen={false} />);
       rerender(<BackendPickerPrompt {...defaultProps} isOpen={true} />);
 
-      expect(screen.getByTestId("backend-picker-select")).toHaveValue(
-        "claude",
-      );
+      expect(screen.getByTestId("backend-picker-select")).toHaveValue("claude");
     });
   });
 });

@@ -129,27 +129,21 @@ describe("DiffFileRow", () => {
 
   it("calls onToggleExpand when row is clicked", () => {
     const onToggleExpand = vi.fn();
-    render(
-      <DiffFileRow {...defaultProps} onToggleExpand={onToggleExpand} />,
-    );
+    render(<DiffFileRow {...defaultProps} onToggleExpand={onToggleExpand} />);
     fireEvent.click(screen.getByRole("button"));
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
 
   it("calls onToggleExpand on Enter key", () => {
     const onToggleExpand = vi.fn();
-    render(
-      <DiffFileRow {...defaultProps} onToggleExpand={onToggleExpand} />,
-    );
+    render(<DiffFileRow {...defaultProps} onToggleExpand={onToggleExpand} />);
     fireEvent.keyDown(screen.getByRole("button"), { key: "Enter" });
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
 
   it("calls onToggleExpand on Space key", () => {
     const onToggleExpand = vi.fn();
-    render(
-      <DiffFileRow {...defaultProps} onToggleExpand={onToggleExpand} />,
-    );
+    render(<DiffFileRow {...defaultProps} onToggleExpand={onToggleExpand} />);
     fireEvent.keyDown(screen.getByRole("button"), { key: " " });
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
@@ -172,9 +166,7 @@ describe("DiffFileRow", () => {
 
   it("calls onToggleViewed when checkbox is changed", () => {
     const onToggleViewed = vi.fn();
-    render(
-      <DiffFileRow {...defaultProps} onToggleViewed={onToggleViewed} />,
-    );
+    render(<DiffFileRow {...defaultProps} onToggleViewed={onToggleViewed} />);
     const checkbox = screen.getByRole("checkbox");
     fireEvent.click(checkbox);
     expect(onToggleViewed).toHaveBeenCalledTimes(1);

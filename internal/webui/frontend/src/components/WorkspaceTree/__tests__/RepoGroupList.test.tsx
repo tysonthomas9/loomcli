@@ -107,7 +107,10 @@ describe("RepoGroupList", () => {
       render(<RepoGroupList {...props} />);
 
       const radio = screen.getByRole("radio");
-      expect(radio).toHaveAttribute("title", expect.stringContaining("/home/repos/api"));
+      expect(radio).toHaveAttribute(
+        "title",
+        expect.stringContaining("/home/repos/api"),
+      );
     });
   });
 
@@ -470,7 +473,9 @@ describe("RepoGroupList", () => {
       const { container } = render(<RepoGroupList {...props} />);
 
       expect(screen.getByText("api")).toBeInTheDocument();
-      expect(container.querySelector('[data-has-agents="false"]')).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-has-agents="false"]'),
+      ).toBeInTheDocument();
     });
 
     it("renders multiple repos with mixed states", () => {

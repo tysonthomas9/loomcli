@@ -17,9 +17,7 @@ import { WorkQueueSection } from "../WorkQueueSection";
 
 const STORAGE_KEY = "workspace-tree-work-queue-expanded";
 
-function makeCounts(
-  overrides: Partial<WorkQueueCounts> = {},
-): WorkQueueCounts {
+function makeCounts(overrides: Partial<WorkQueueCounts> = {}): WorkQueueCounts {
   return {
     backlog: 0,
     open: 0,
@@ -45,9 +43,7 @@ describe("WorkQueueSection", () => {
     });
 
     it("is expanded by default", () => {
-      render(
-        <WorkQueueSection counts={makeCounts({ backlog: 5, open: 3 })} />,
-      );
+      render(<WorkQueueSection counts={makeCounts({ backlog: 5, open: 3 })} />);
 
       expect(screen.getByText("Backlog")).toBeInTheDocument();
       expect(screen.getByText("Open")).toBeInTheDocument();
@@ -87,9 +83,7 @@ describe("WorkQueueSection", () => {
 
   describe("collapse/expand toggle", () => {
     it("collapses content when header is clicked", () => {
-      render(
-        <WorkQueueSection counts={makeCounts({ backlog: 5 })} />,
-      );
+      render(<WorkQueueSection counts={makeCounts({ backlog: 5 })} />);
 
       expect(screen.getByText("Backlog")).toBeInTheDocument();
 
@@ -99,9 +93,7 @@ describe("WorkQueueSection", () => {
     });
 
     it("expands content when collapsed header is clicked again", () => {
-      render(
-        <WorkQueueSection counts={makeCounts({ backlog: 5 })} />,
-      );
+      render(<WorkQueueSection counts={makeCounts({ backlog: 5 })} />);
 
       // Collapse
       fireEvent.click(screen.getByText("Work Queue"));
@@ -113,9 +105,7 @@ describe("WorkQueueSection", () => {
     });
 
     it("toggles on Enter key press", () => {
-      render(
-        <WorkQueueSection counts={makeCounts({ open: 2 })} />,
-      );
+      render(<WorkQueueSection counts={makeCounts({ open: 2 })} />);
 
       const header = screen.getByRole("button");
       fireEvent.keyDown(header, { key: "Enter" });
@@ -123,9 +113,7 @@ describe("WorkQueueSection", () => {
     });
 
     it("does not toggle on other key presses", () => {
-      render(
-        <WorkQueueSection counts={makeCounts({ open: 2 })} />,
-      );
+      render(<WorkQueueSection counts={makeCounts({ open: 2 })} />);
 
       const header = screen.getByRole("button");
       fireEvent.keyDown(header, { key: "a" });
@@ -169,18 +157,14 @@ describe("WorkQueueSection", () => {
     it("reads initial state from localStorage", () => {
       localStorage.setItem(STORAGE_KEY, "false");
 
-      render(
-        <WorkQueueSection counts={makeCounts({ backlog: 5 })} />,
-      );
+      render(<WorkQueueSection counts={makeCounts({ backlog: 5 })} />);
 
       // Should start collapsed
       expect(screen.queryByText("Backlog")).not.toBeInTheDocument();
     });
 
     it("defaults to expanded when localStorage value is missing", () => {
-      render(
-        <WorkQueueSection counts={makeCounts({ backlog: 5 })} />,
-      );
+      render(<WorkQueueSection counts={makeCounts({ backlog: 5 })} />);
 
       expect(screen.getByText("Backlog")).toBeInTheDocument();
     });
@@ -192,9 +176,7 @@ describe("WorkQueueSection", () => {
         <WorkQueueSection counts={makeCounts({ backlog: 3 })} />,
       );
 
-      const backlogCount = container.querySelector(
-        '[data-highlight="true"]',
-      );
+      const backlogCount = container.querySelector('[data-highlight="true"]');
       expect(backlogCount).toBeInTheDocument();
     });
 
@@ -203,15 +185,13 @@ describe("WorkQueueSection", () => {
         <WorkQueueSection counts={makeCounts({ backlog: 0 })} />,
       );
 
-      const counts = container.querySelectorAll(
-        '[data-highlight="false"]',
-      );
+      const counts = container.querySelectorAll('[data-highlight="false"]');
       // backlog, open, inProgress, needsReview should all be false (0 values)
       expect(counts.length).toBeGreaterThanOrEqual(1);
     });
 
     it("blocked and done counts do not have data-highlight attribute", () => {
-      const { container } = render(
+      render(
         <WorkQueueSection counts={makeCounts({ blocked: 5, done: 10 })} />,
       );
 
@@ -220,10 +200,12 @@ describe("WorkQueueSection", () => {
       const doneLabel = screen.getByText("Done");
 
       // Get sibling count spans
-      const blockedCount =
-        blockedLabel.parentElement?.querySelector('[class*="queueCount"]');
-      const doneCount =
-        doneLabel.parentElement?.querySelector('[class*="queueCount"]');
+      const blockedCount = blockedLabel.parentElement?.querySelector(
+        '[class*="queueCount"]',
+      );
+      const doneCount = doneLabel.parentElement?.querySelector(
+        '[class*="queueCount"]',
+      );
 
       // These should NOT have data-highlight
       expect(blockedCount).not.toHaveAttribute("data-highlight");

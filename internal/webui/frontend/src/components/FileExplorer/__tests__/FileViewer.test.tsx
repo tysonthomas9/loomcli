@@ -66,11 +66,7 @@ describe("FileViewer", () => {
 
   it("displays full file path in header", () => {
     render(
-      <FileViewer
-        {...defaultProps}
-        isOpen={true}
-        path="src/internal/api.go"
-      />,
+      <FileViewer {...defaultProps} isOpen={true} path="src/internal/api.go" />,
     );
     expect(screen.getByText("src/internal/api.go")).toBeInTheDocument();
   });
@@ -113,9 +109,7 @@ describe("FileViewer", () => {
         fileData={binaryData}
       />,
     );
-    expect(
-      screen.getByText(/Binary file.*cannot display/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Binary file.*cannot display/)).toBeInTheDocument();
   });
 
   it("renders CodeMirrorEditor for text files", async () => {

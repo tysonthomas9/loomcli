@@ -29,9 +29,7 @@ describe("HelpPopover", () => {
     it("renders popover when isOpen is true", () => {
       render(<HelpPopover isOpen={true} onClose={vi.fn()} />);
 
-      expect(
-        screen.getByTestId("terminal-help-popover"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("terminal-help-popover")).toBeInTheDocument();
     });
 
     it("returns null when isOpen is false", () => {
@@ -144,10 +142,7 @@ describe("HelpPopover", () => {
     it('has aria-modal="true"', () => {
       render(<HelpPopover isOpen={true} onClose={vi.fn()} />);
 
-      expect(screen.getByRole("dialog")).toHaveAttribute(
-        "aria-modal",
-        "true",
-      );
+      expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
     });
 
     it("has tabIndex=-1 for programmatic focus", () => {
@@ -172,9 +167,7 @@ describe("HelpPopover", () => {
 
       rerender(<HelpPopover isOpen={true} onClose={vi.fn()} />);
 
-      expect(
-        screen.getByTestId("terminal-help-popover"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("terminal-help-popover")).toBeInTheDocument();
     });
 
     it("disappears when isOpen changes from true to false", () => {
@@ -182,9 +175,7 @@ describe("HelpPopover", () => {
         <HelpPopover isOpen={true} onClose={vi.fn()} />,
       );
 
-      expect(
-        screen.getByTestId("terminal-help-popover"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("terminal-help-popover")).toBeInTheDocument();
 
       rerender(<HelpPopover isOpen={false} onClose={vi.fn()} />);
 

@@ -167,9 +167,7 @@ describe("sessions API", () => {
       const result = await getSession("bd-123", "s1");
 
       expect(result).toEqual(session);
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/tasks/bd-123/sessions/s1",
-      );
+      expect(mockGet).toHaveBeenCalledWith("/api/tasks/bd-123/sessions/s1");
     });
 
     it("returns null when data is null", async () => {
@@ -269,9 +267,9 @@ describe("sessions API", () => {
     it("throws on non-404 errors", async () => {
       mockGet.mockRejectedValueOnce(new ApiError(500, "Internal Server Error"));
 
-      await expect(
-        getSessionTranscript("bd-123", "s1"),
-      ).rejects.toThrow("API Error: 500 Internal Server Error");
+      await expect(getSessionTranscript("bd-123", "s1")).rejects.toThrow(
+        "API Error: 500 Internal Server Error",
+      );
     });
 
     it("URL-encodes both IDs", async () => {
@@ -362,9 +360,7 @@ describe("sessions API", () => {
       await getSessionDiff("task/id", "session/id");
 
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toBe(
-        "/api/tasks/task%2Fid/sessions/session%2Fid/diff",
-      );
+      expect(url).toBe("/api/tasks/task%2Fid/sessions/session%2Fid/diff");
     });
   });
 });

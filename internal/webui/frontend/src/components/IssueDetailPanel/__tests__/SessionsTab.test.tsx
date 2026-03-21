@@ -156,9 +156,7 @@ describe("SessionsTab", () => {
       });
       render(<SessionsTab taskId="task-1" />);
       expect(screen.getByTestId("sessions-empty")).toBeInTheDocument();
-      expect(
-        screen.getByText("No sessions recorded yet"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("No sessions recorded yet")).toBeInTheDocument();
     });
   });
 
@@ -172,9 +170,7 @@ describe("SessionsTab", () => {
       });
       render(<SessionsTab taskId="task-1" />);
       expect(screen.getByTestId("sessions-tab")).toBeInTheDocument();
-      expect(
-        screen.getByTestId("session-timeline-mock"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("session-timeline-mock")).toBeInTheDocument();
       expect(
         screen.getByText("Select a session to view details"),
       ).toBeInTheDocument();

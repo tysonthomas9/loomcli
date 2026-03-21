@@ -140,9 +140,7 @@ describe("useSessionTranscript", () => {
     it("polls every 3s when isActive is true", async () => {
       mockGetTranscript.mockResolvedValueOnce([createMockEntry()]);
 
-      renderHook(() =>
-        useSessionTranscript("task-1", "sess-1", true),
-      );
+      renderHook(() => useSessionTranscript("task-1", "sess-1", true));
 
       await flushPromises();
       expect(mockGetTranscript).toHaveBeenCalledTimes(1);
@@ -163,9 +161,7 @@ describe("useSessionTranscript", () => {
     it("does not poll when isActive is false", async () => {
       mockGetTranscript.mockResolvedValueOnce([createMockEntry()]);
 
-      renderHook(() =>
-        useSessionTranscript("task-1", "sess-1", false),
-      );
+      renderHook(() => useSessionTranscript("task-1", "sess-1", false));
 
       await flushPromises();
       expect(mockGetTranscript).toHaveBeenCalledTimes(1);
@@ -313,7 +309,12 @@ describe("useSessionTranscript", () => {
           taskId: string | null;
           sessionId: string | null;
         }) => useSessionTranscript(taskId, sessionId, false),
-        { initialProps: { taskId: "task-1" as string | null, sessionId: "sess-1" as string | null } },
+        {
+          initialProps: {
+            taskId: "task-1" as string | null,
+            sessionId: "sess-1" as string | null,
+          },
+        },
       );
 
       await flushPromises();

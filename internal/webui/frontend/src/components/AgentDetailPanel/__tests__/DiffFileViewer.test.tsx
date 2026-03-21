@@ -50,12 +50,9 @@ describe("parsePatch", () => {
   });
 
   it("tracks line numbers correctly", () => {
-    const patch = [
-      "@@ -5,3 +10,3 @@",
-      " context",
-      "-deleted",
-      "+added",
-    ].join("\n");
+    const patch = ["@@ -5,3 +10,3 @@", " context", "-deleted", "+added"].join(
+      "\n",
+    );
 
     const result = parsePatch(patch);
     const lines = result.hunks[0].lines;
@@ -186,21 +183,13 @@ describe("DiffFileViewer", () => {
     expect(lineNumbers[0].textContent).toBe("5");
     expect(lineNumbers[1].textContent).toBe("5");
     // Deletion line at oldNum=6 renders one filled and one empty span
-    const delLineNumbers = container.querySelectorAll(
-      '[data-type="del"] span',
-    );
+    const delLineNumbers = container.querySelectorAll('[data-type="del"] span');
     expect(delLineNumbers[0].textContent).toBe("6");
     expect(delLineNumbers[1].textContent).toBe("");
   });
 
   it("prioritizes loading over error", () => {
-    render(
-      <DiffFileViewer
-        patch={null}
-        isLoading={true}
-        error="Some error"
-      />,
-    );
+    render(<DiffFileViewer patch={null} isLoading={true} error="Some error" />);
     expect(screen.getByText(/Loading diff/)).toBeInTheDocument();
     expect(screen.queryByText("Some error")).not.toBeInTheDocument();
   });

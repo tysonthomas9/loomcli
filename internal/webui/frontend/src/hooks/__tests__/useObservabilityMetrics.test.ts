@@ -109,9 +109,7 @@ describe("useObservabilityMetrics", () => {
     it("polls at configured interval", async () => {
       mockFetch.mockResolvedValueOnce(createMockMetrics());
 
-      renderHook(() =>
-        useObservabilityMetrics({ pollInterval: 5000 }),
-      );
+      renderHook(() => useObservabilityMetrics({ pollInterval: 5000 }));
 
       await flushPromises();
       expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -131,9 +129,7 @@ describe("useObservabilityMetrics", () => {
     it("does not poll when pollInterval is 0", async () => {
       mockFetch.mockResolvedValueOnce(createMockMetrics());
 
-      renderHook(() =>
-        useObservabilityMetrics({ pollInterval: 0 }),
-      );
+      renderHook(() => useObservabilityMetrics({ pollInterval: 0 }));
 
       await flushPromises();
       expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -267,9 +263,7 @@ describe("useObservabilityMetrics", () => {
 
   describe("refetch", () => {
     it("manually triggers a refetch", async () => {
-      mockFetch.mockResolvedValueOnce(
-        createMockMetrics({ error_rate_pct: 5 }),
-      );
+      mockFetch.mockResolvedValueOnce(createMockMetrics({ error_rate_pct: 5 }));
 
       const { result } = renderHook(() =>
         useObservabilityMetrics({ pollInterval: 0 }),
@@ -278,9 +272,7 @@ describe("useObservabilityMetrics", () => {
       await flushPromises();
       expect(result.current.metrics?.error_rate_pct).toBe(5);
 
-      mockFetch.mockResolvedValueOnce(
-        createMockMetrics({ error_rate_pct: 1 }),
-      );
+      mockFetch.mockResolvedValueOnce(createMockMetrics({ error_rate_pct: 1 }));
 
       await act(async () => {
         await result.current.refetch();
@@ -329,9 +321,7 @@ describe("useObservabilityMetrics", () => {
           }),
       );
 
-      const { result, unmount } = renderHook(() =>
-        useObservabilityMetrics(),
-      );
+      const { result, unmount } = renderHook(() => useObservabilityMetrics());
 
       unmount();
 

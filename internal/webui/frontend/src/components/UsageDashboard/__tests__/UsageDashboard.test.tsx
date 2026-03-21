@@ -21,9 +21,7 @@ const mockUseUsage = vi.mocked(useUsage);
 
 // ---- Helpers ----
 
-function makeUsageData(
-  overrides: Partial<UsageResponse> = {},
-): UsageResponse {
+function makeUsageData(overrides: Partial<UsageResponse> = {}): UsageResponse {
   return {
     total_input_tokens: 50000,
     total_output_tokens: 30000,
@@ -32,8 +30,20 @@ function makeUsageData(
     total_cost: 12.5,
     session_count: 5,
     by_agent: [
-      { name: "alpha", sessions: 3, input_tokens: 30000, output_tokens: 20000, total_cost: 8.0 },
-      { name: "beta", sessions: 2, input_tokens: 20000, output_tokens: 10000, total_cost: 4.5 },
+      {
+        name: "alpha",
+        sessions: 3,
+        input_tokens: 30000,
+        output_tokens: 20000,
+        total_cost: 8.0,
+      },
+      {
+        name: "beta",
+        sessions: 2,
+        input_tokens: 20000,
+        output_tokens: 10000,
+        total_cost: 4.5,
+      },
     ],
     by_backend: [
       { name: "anthropic", sessions: 4, total_cost: 10.0 },
@@ -106,9 +116,7 @@ describe("UsageDashboard", () => {
     } as ReturnType<typeof useUsage>);
 
     render(<UsageDashboard />);
-    expect(
-      screen.getByText(/No usage data found/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/No usage data found/)).toBeInTheDocument();
   });
 
   it("renders empty state when data is null", () => {
@@ -120,9 +128,7 @@ describe("UsageDashboard", () => {
     } as ReturnType<typeof useUsage>);
 
     render(<UsageDashboard />);
-    expect(
-      screen.getByText(/No usage data found/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/No usage data found/)).toBeInTheDocument();
   });
 
   it("renders summary cards with correct values", () => {
@@ -253,7 +259,13 @@ describe("UsageDashboard", () => {
     mockUseUsage.mockReturnValue({
       data: makeUsageData({
         by_agent: [
-          { name: "solo", sessions: 5, input_tokens: 50000, output_tokens: 30000, total_cost: 12.5 },
+          {
+            name: "solo",
+            sessions: 5,
+            input_tokens: 50000,
+            output_tokens: 30000,
+            total_cost: 12.5,
+          },
         ],
       }),
       isLoading: false,

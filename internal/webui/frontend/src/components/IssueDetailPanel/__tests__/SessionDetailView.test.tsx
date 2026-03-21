@@ -95,80 +95,60 @@ describe("SessionDetailView", () => {
 
   describe("metadata summary", () => {
     it("renders the detail view container", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByTestId("session-detail-view")).toBeInTheDocument();
     });
 
     it("displays model when present", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("Model:")).toBeInTheDocument();
       expect(screen.getByText("opus-4")).toBeInTheDocument();
     });
 
     it("does not display model when absent", () => {
       const session = createSession({ model: undefined });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.queryByText("Model:")).not.toBeInTheDocument();
     });
 
     it("displays exit code 0 as success", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("Exit:")).toBeInTheDocument();
       expect(screen.getByText("0 (success)")).toBeInTheDocument();
     });
 
     it("displays non-zero exit code as number", () => {
       const session = createSession({ exit_code: 1 });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.getByText("1")).toBeInTheDocument();
     });
 
     it("displays files changed when > 0", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("Files:")).toBeInTheDocument();
       expect(screen.getByText("3")).toBeInTheDocument();
     });
 
     it("does not display files when files_changed is 0", () => {
       const session = createSession({ files_changed: 0 });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.queryByText("Files:")).not.toBeInTheDocument();
     });
 
     it("displays lines added and removed", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("+50 -10")).toBeInTheDocument();
     });
 
     it("does not display lines when both are 0", () => {
       const session = createSession({ lines_added: 0, lines_removed: 0 });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.queryByText(/\+0 -0/)).not.toBeInTheDocument();
     });
 
     it("displays lines when only added > 0", () => {
       const session = createSession({ lines_added: 10, lines_removed: 0 });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.getByText("+10 -0")).toBeInTheDocument();
     });
   });
@@ -178,25 +158,19 @@ describe("SessionDetailView", () => {
       const session = createSession({
         files_touched: ["src/foo.ts", "src/bar.ts"],
       });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.getByText("Files Touched (2)")).toBeInTheDocument();
     });
 
     it("does not show files touched when empty", () => {
       const session = createSession({ files_touched: [] });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.queryByText(/Files Touched/)).not.toBeInTheDocument();
     });
 
     it("does not show files touched when undefined", () => {
       const session = createSession({ files_touched: undefined });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.queryByText(/Files Touched/)).not.toBeInTheDocument();
     });
 
@@ -204,9 +178,7 @@ describe("SessionDetailView", () => {
       const session = createSession({
         files_touched: ["src/a.ts", "src/b.ts"],
       });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.getByText("src/a.ts")).toBeInTheDocument();
       expect(screen.getByText("src/b.ts")).toBeInTheDocument();
     });
@@ -214,47 +186,33 @@ describe("SessionDetailView", () => {
 
   describe("inner tab bar", () => {
     it("shows Transcript and Diff tab buttons", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(
         screen.getByTestId("session-inner-tab-transcript"),
       ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("session-inner-tab-diff"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("session-inner-tab-diff")).toBeInTheDocument();
     });
 
     it("defaults to transcript tab active", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       const transcriptTab = screen.getByTestId("session-inner-tab-transcript");
       expect(transcriptTab.className).toContain("activeInnerTab");
     });
 
     it("disables diff tab when has_diff is false", () => {
       const session = createSession({ has_diff: false });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.getByTestId("session-inner-tab-diff")).toBeDisabled();
     });
 
     it("enables diff tab when has_diff is true", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
-      expect(
-        screen.getByTestId("session-inner-tab-diff"),
-      ).not.toBeDisabled();
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(screen.getByTestId("session-inner-tab-diff")).not.toBeDisabled();
     });
 
     it("sets title on diff tab based on has_diff", () => {
       const session = createSession({ has_diff: false });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(screen.getByTestId("session-inner-tab-diff")).toHaveAttribute(
         "title",
         "No diff available",
@@ -262,9 +220,7 @@ describe("SessionDetailView", () => {
     });
 
     it("switches to diff tab on click", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
       expect(screen.getByTestId("session-diff")).toBeInTheDocument();
       expect(
@@ -273,9 +229,7 @@ describe("SessionDetailView", () => {
     });
 
     it("switches back to transcript tab on click", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       // Switch to diff
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
       // Switch back to transcript
@@ -292,9 +246,7 @@ describe("SessionDetailView", () => {
         isLoading: true,
         error: null,
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("Loading transcript...")).toBeInTheDocument();
     });
 
@@ -304,18 +256,14 @@ describe("SessionDetailView", () => {
         isLoading: false,
         error: new Error("Network error"),
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(
         screen.getByText("Failed to load transcript: Network error"),
       ).toBeInTheDocument();
     });
 
     it("shows empty state when no entries and not loading", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("No transcript entries")).toBeInTheDocument();
     });
 
@@ -333,9 +281,7 @@ describe("SessionDetailView", () => {
         isLoading: false,
         error: null,
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("Hello")).toBeInTheDocument();
       expect(screen.getByText("Hi there")).toBeInTheDocument();
     });
@@ -349,9 +295,7 @@ describe("SessionDetailView", () => {
         isLoading: false,
         error: null,
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("user")).toBeInTheDocument();
     });
 
@@ -370,9 +314,7 @@ describe("SessionDetailView", () => {
         isLoading: false,
         error: null,
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("Tool: Read")).toBeInTheDocument();
     });
 
@@ -392,24 +334,18 @@ describe("SessionDetailView", () => {
         isLoading: false,
         error: null,
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("ls -la")).toBeInTheDocument();
     });
 
     it("does not show loading text when entries exist during loading", () => {
-      const entries = [
-        createTranscriptEntry({ seq: 1, content: "existing" }),
-      ];
+      const entries = [createTranscriptEntry({ seq: 1, content: "existing" })];
       mockUseSessionTranscript.mockReturnValue({
         entries,
         isLoading: true,
         error: null,
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(
         screen.queryByText("Loading transcript..."),
       ).not.toBeInTheDocument();
@@ -424,9 +360,7 @@ describe("SessionDetailView", () => {
         isLoading: true,
         error: null,
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
       expect(screen.getByText("Loading diff...")).toBeInTheDocument();
     });
@@ -437,9 +371,7 @@ describe("SessionDetailView", () => {
         isLoading: false,
         error: new Error("Diff fetch failed"),
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
       expect(
         screen.getByText("Failed to load diff: Diff fetch failed"),
@@ -452,9 +384,7 @@ describe("SessionDetailView", () => {
         isLoading: false,
         error: null,
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
       expect(screen.getByTestId("codemirror-editor")).toBeInTheDocument();
     });
@@ -465,9 +395,7 @@ describe("SessionDetailView", () => {
         isLoading: false,
         error: null,
       });
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       fireEvent.click(screen.getByTestId("session-inner-tab-diff"));
       expect(screen.getByText("No diff available")).toBeInTheDocument();
     });
@@ -475,9 +403,7 @@ describe("SessionDetailView", () => {
 
   describe("hook invocations", () => {
     it("passes correct args to useSessionTranscript", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(mockUseSessionTranscript).toHaveBeenCalledWith(
         "task-1",
         "sess-1",
@@ -487,9 +413,7 @@ describe("SessionDetailView", () => {
 
     it("passes is_active=true to useSessionTranscript for active sessions", () => {
       const session = createSession({ is_active: true });
-      render(
-        <SessionDetailView taskId="task-1" session={session} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={session} />);
       expect(mockUseSessionTranscript).toHaveBeenCalledWith(
         "task-1",
         "sess-1",
@@ -498,9 +422,7 @@ describe("SessionDetailView", () => {
     });
 
     it("passes enabled=false to useSessionDiff when on transcript tab", () => {
-      render(
-        <SessionDetailView taskId="task-1" session={defaultSession} />,
-      );
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       // On transcript tab, diff should NOT be fetched (enabled = innerTab === "diff" && has_diff)
       // Since innerTab defaults to "transcript", enabled should be false
       expect(mockUseSessionDiff).toHaveBeenCalledWith(

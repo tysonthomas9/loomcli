@@ -67,9 +67,7 @@ describe("SessionNamePrompt", () => {
     it("renders the title 'New Terminal Session'", () => {
       render(<SessionNamePrompt {...defaultProps} />);
 
-      expect(
-        screen.getByText("New Terminal Session"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("New Terminal Session")).toBeInTheDocument();
     });
 
     it("renders the subtitle", () => {
@@ -83,9 +81,7 @@ describe("SessionNamePrompt", () => {
     it("renders the input field", () => {
       render(<SessionNamePrompt {...defaultProps} />);
 
-      expect(
-        screen.getByTestId("session-name-input"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("session-name-input")).toBeInTheDocument();
     });
 
     it("renders Cancel and Create buttons", () => {
@@ -113,17 +109,19 @@ describe("SessionNamePrompt", () => {
     it("sets aria-hidden=false when isOpen is true", () => {
       render(<SessionNamePrompt {...defaultProps} isOpen={true} />);
 
-      expect(
-        screen.getByTestId("session-name-prompt-overlay"),
-      ).toHaveAttribute("aria-hidden", "false");
+      expect(screen.getByTestId("session-name-prompt-overlay")).toHaveAttribute(
+        "aria-hidden",
+        "false",
+      );
     });
 
     it("sets aria-hidden=true when isOpen is false", () => {
       render(<SessionNamePrompt {...defaultProps} isOpen={false} />);
 
-      expect(
-        screen.getByTestId("session-name-prompt-overlay"),
-      ).toHaveAttribute("aria-hidden", "true");
+      expect(screen.getByTestId("session-name-prompt-overlay")).toHaveAttribute(
+        "aria-hidden",
+        "true",
+      );
     });
   });
 
@@ -131,9 +129,7 @@ describe("SessionNamePrompt", () => {
     it("Create button is disabled when input is empty", () => {
       render(<SessionNamePrompt {...defaultProps} />);
 
-      expect(
-        screen.getByTestId("session-name-confirm-button"),
-      ).toBeDisabled();
+      expect(screen.getByTestId("session-name-confirm-button")).toBeDisabled();
     });
 
     it("Create button is enabled with valid input", () => {
@@ -143,9 +139,7 @@ describe("SessionNamePrompt", () => {
         target: { value: "my-session" },
       });
 
-      expect(
-        screen.getByTestId("session-name-confirm-button"),
-      ).toBeEnabled();
+      expect(screen.getByTestId("session-name-confirm-button")).toBeEnabled();
     });
 
     it("shows error for invalid characters", () => {
@@ -176,9 +170,7 @@ describe("SessionNamePrompt", () => {
       });
 
       expect(screen.getByTestId("session-name-error")).toBeInTheDocument();
-      expect(
-        screen.getByText("Session already exists"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Session already exists")).toBeInTheDocument();
     });
 
     it("Create button is disabled for invalid characters", () => {
@@ -188,26 +180,17 @@ describe("SessionNamePrompt", () => {
         target: { value: "has spaces" },
       });
 
-      expect(
-        screen.getByTestId("session-name-confirm-button"),
-      ).toBeDisabled();
+      expect(screen.getByTestId("session-name-confirm-button")).toBeDisabled();
     });
 
     it("Create button is disabled for duplicate name", () => {
-      render(
-        <SessionNamePrompt
-          {...defaultProps}
-          existingNames={["taken"]}
-        />,
-      );
+      render(<SessionNamePrompt {...defaultProps} existingNames={["taken"]} />);
 
       fireEvent.change(screen.getByTestId("session-name-input"), {
         target: { value: "taken" },
       });
 
-      expect(
-        screen.getByTestId("session-name-confirm-button"),
-      ).toBeDisabled();
+      expect(screen.getByTestId("session-name-confirm-button")).toBeDisabled();
     });
 
     it("no error shown when input is empty", () => {
@@ -228,18 +211,14 @@ describe("SessionNamePrompt", () => {
       expect(
         screen.queryByTestId("session-name-error"),
       ).not.toBeInTheDocument();
-      expect(
-        screen.getByTestId("session-name-confirm-button"),
-      ).toBeEnabled();
+      expect(screen.getByTestId("session-name-confirm-button")).toBeEnabled();
     });
   });
 
   describe("form submission", () => {
     it("calls onConfirm with trimmed name on form submit", () => {
       const onConfirm = vi.fn();
-      render(
-        <SessionNamePrompt {...defaultProps} onConfirm={onConfirm} />,
-      );
+      render(<SessionNamePrompt {...defaultProps} onConfirm={onConfirm} />);
 
       fireEvent.change(screen.getByTestId("session-name-input"), {
         target: { value: "  my-session  " },
@@ -254,9 +233,7 @@ describe("SessionNamePrompt", () => {
 
     it("does NOT call onConfirm when input has invalid characters", () => {
       const onConfirm = vi.fn();
-      render(
-        <SessionNamePrompt {...defaultProps} onConfirm={onConfirm} />,
-      );
+      render(<SessionNamePrompt {...defaultProps} onConfirm={onConfirm} />);
 
       fireEvent.change(screen.getByTestId("session-name-input"), {
         target: { value: "bad name!" },
@@ -292,9 +269,7 @@ describe("SessionNamePrompt", () => {
 
     it("does NOT call onConfirm when input is empty", () => {
       const onConfirm = vi.fn();
-      render(
-        <SessionNamePrompt {...defaultProps} onConfirm={onConfirm} />,
-      );
+      render(<SessionNamePrompt {...defaultProps} onConfirm={onConfirm} />);
 
       fireEvent.submit(
         screen.getByTestId("session-name-confirm-button").closest("form")!,
@@ -307,9 +282,7 @@ describe("SessionNamePrompt", () => {
   describe("cancel", () => {
     it("calls onCancel when Cancel button is clicked", () => {
       const onCancel = vi.fn();
-      render(
-        <SessionNamePrompt {...defaultProps} onCancel={onCancel} />,
-      );
+      render(<SessionNamePrompt {...defaultProps} onCancel={onCancel} />);
 
       fireEvent.click(screen.getByTestId("session-name-cancel-button"));
 
@@ -327,10 +300,7 @@ describe("SessionNamePrompt", () => {
     it('modal has aria-modal="true"', () => {
       render(<SessionNamePrompt {...defaultProps} />);
 
-      expect(screen.getByRole("dialog")).toHaveAttribute(
-        "aria-modal",
-        "true",
-      );
+      expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
     });
 
     it("modal has aria-labelledby pointing to the title", () => {

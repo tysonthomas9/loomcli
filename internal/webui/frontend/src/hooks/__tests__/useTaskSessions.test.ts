@@ -21,9 +21,7 @@ vi.mock("@/api/sessions", () => ({
 
 const mockGetSessions = vi.mocked(getTaskSessions);
 
-function createMockSession(
-  overrides?: Partial<SessionRecord>,
-): SessionRecord {
+function createMockSession(overrides?: Partial<SessionRecord>): SessionRecord {
   return {
     id: "session-1",
     agent_name: "ember",
@@ -97,9 +95,7 @@ describe("useTaskSessions", () => {
     });
 
     it("resets sessions and refetches when taskId changes", async () => {
-      mockGetSessions.mockResolvedValueOnce([
-        createMockSession({ id: "s1" }),
-      ]);
+      mockGetSessions.mockResolvedValueOnce([createMockSession({ id: "s1" })]);
 
       const { result, rerender } = renderHook(
         ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
@@ -121,9 +117,7 @@ describe("useTaskSessions", () => {
     });
 
     it("clears sessions when taskId changes to null", async () => {
-      mockGetSessions.mockResolvedValueOnce([
-        createMockSession({ id: "s1" }),
-      ]);
+      mockGetSessions.mockResolvedValueOnce([createMockSession({ id: "s1" })]);
 
       const { result, rerender } = renderHook(
         ({ taskId }: { taskId: string | null }) => useTaskSessions(taskId),
@@ -206,9 +200,7 @@ describe("useTaskSessions", () => {
 
   describe("refetch", () => {
     it("manually triggers a refetch", async () => {
-      mockGetSessions.mockResolvedValueOnce([
-        createMockSession({ id: "s1" }),
-      ]);
+      mockGetSessions.mockResolvedValueOnce([createMockSession({ id: "s1" })]);
 
       const { result } = renderHook(() => useTaskSessions("task-1"));
 
@@ -256,9 +248,7 @@ describe("useTaskSessions", () => {
           }),
       );
 
-      const { result, unmount } = renderHook(() =>
-        useTaskSessions("task-1"),
-      );
+      const { result, unmount } = renderHook(() => useTaskSessions("task-1"));
 
       unmount();
 

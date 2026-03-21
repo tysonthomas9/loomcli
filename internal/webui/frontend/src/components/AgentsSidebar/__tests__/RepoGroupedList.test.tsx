@@ -38,10 +38,7 @@ vi.mock("../../AgentCard", () => ({
 
 // Mock groupAgentsByRepo from AgentsSidebar
 vi.mock("../AgentsSidebar", () => ({
-  groupAgentsByRepo: (
-    agents: LoomAgentStatus[],
-    selectedRepos: string[],
-  ) => {
+  groupAgentsByRepo: (agents: LoomAgentStatus[], selectedRepos: string[]) => {
     const grouped = new Map<string, LoomAgentStatus[]>();
     const other: LoomAgentStatus[] = [];
 
@@ -229,9 +226,7 @@ describe("RepoGroupedList", () => {
 
       fireEvent.click(screen.getByText("api"));
 
-      expect(
-        screen.queryByTestId("agent-card-falcon"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-card-falcon")).not.toBeInTheDocument();
       expect(screen.getByTestId("agent-card-nova")).toBeInTheDocument();
     });
 
@@ -251,9 +246,7 @@ describe("RepoGroupedList", () => {
 
       // Collapse
       fireEvent.click(screen.getByText("api"));
-      expect(
-        screen.queryByTestId("agent-card-falcon"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-card-falcon")).not.toBeInTheDocument();
 
       // Expand
       fireEvent.click(screen.getByText("api"));
@@ -275,9 +268,7 @@ describe("RepoGroupedList", () => {
       );
 
       fireEvent.click(screen.getByText("Other"));
-      expect(
-        screen.queryByTestId("agent-card-orphan"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-card-orphan")).not.toBeInTheDocument();
     });
 
     it("toggles on Enter key press", () => {
@@ -297,9 +288,7 @@ describe("RepoGroupedList", () => {
       const apiHeader = screen.getByText("api").closest('[role="button"]')!;
       fireEvent.keyDown(apiHeader, { key: "Enter" });
 
-      expect(
-        screen.queryByTestId("agent-card-falcon"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-card-falcon")).not.toBeInTheDocument();
     });
 
     it("shows > when collapsed and v when expanded", () => {
@@ -368,9 +357,7 @@ describe("RepoGroupedList", () => {
         />,
       );
 
-      expect(
-        screen.queryByTestId("agent-card-falcon"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-card-falcon")).not.toBeInTheDocument();
       expect(screen.getByTestId("agent-card-nova")).toBeInTheDocument();
     });
 
@@ -404,7 +391,12 @@ describe("RepoGroupedList", () => {
           agents={agents}
           selectedRepos={["api"]}
           agentTasks={{
-            falcon: { id: "t1", title: "Fix login", priority: 1, status: "open" },
+            falcon: {
+              id: "t1",
+              title: "Fix login",
+              priority: 1,
+              status: "open",
+            },
           }}
         />,
       );
@@ -451,11 +443,7 @@ describe("RepoGroupedList", () => {
   describe("edge cases", () => {
     it("renders empty repo groups when no agents match", () => {
       render(
-        <RepoGroupedList
-          agents={[]}
-          selectedRepos={["api"]}
-          agentTasks={{}}
-        />,
+        <RepoGroupedList agents={[]} selectedRepos={["api"]} agentTasks={{}} />,
       );
 
       // Group header should still appear
@@ -467,11 +455,7 @@ describe("RepoGroupedList", () => {
       const agents = [makeAgent("falcon", { repo: "api" })];
 
       render(
-        <RepoGroupedList
-          agents={agents}
-          selectedRepos={[]}
-          agentTasks={{}}
-        />,
+        <RepoGroupedList agents={agents} selectedRepos={[]} agentTasks={{}} />,
       );
 
       // All agents go to Other

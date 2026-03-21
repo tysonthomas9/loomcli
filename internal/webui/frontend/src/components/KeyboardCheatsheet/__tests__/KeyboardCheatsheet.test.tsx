@@ -110,7 +110,9 @@ describe("KeyboardCheatsheet", () => {
     } as ReturnType<typeof useKeyboardShortcuts>);
 
     render(<KeyboardCheatsheet />);
-    expect(screen.getByText("Close panel / modal / dropdown")).toBeInTheDocument();
+    expect(
+      screen.getByText("Close panel / modal / dropdown"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Focus search")).toBeInTheDocument();
     expect(screen.getByText("Toggle this cheatsheet")).toBeInTheDocument();
   });
@@ -141,7 +143,10 @@ describe("KeyboardCheatsheet", () => {
     // The backdrop is the parent of the dialog. mouseDown on it should close.
     const dialog = screen.getByRole("dialog");
     const backdrop = dialog.parentElement!;
-    fireEvent.mouseDown(backdrop, { target: backdrop, currentTarget: backdrop });
+    fireEvent.mouseDown(backdrop, {
+      target: backdrop,
+      currentTarget: backdrop,
+    });
     expect(mockCloseCheatsheet).toHaveBeenCalledTimes(1);
   });
 

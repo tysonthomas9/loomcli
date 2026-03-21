@@ -24,10 +24,7 @@ vi.mock("@/api/sessionHistory", () => ({
   getSessionScrollback: vi.fn(),
 }));
 
-import {
-  listSessionHistory,
-  getSessionScrollback,
-} from "@/api/sessionHistory";
+import { listSessionHistory, getSessionScrollback } from "@/api/sessionHistory";
 
 const mockListSessionHistory = vi.mocked(listSessionHistory);
 const mockGetSessionScrollback = vi.mocked(getSessionScrollback);
@@ -164,10 +161,7 @@ describe("SessionHistorySection", () => {
         createRecord({ status: "active", session_name: "nova-sess" }),
       ]);
       render(
-        <SessionHistorySection
-          issueId="issue-1"
-          onJumpToSession={onJump}
-        />,
+        <SessionHistorySection issueId="issue-1" onJumpToSession={onJump} />,
       );
       await waitFor(() => {
         expect(screen.getByText("Jump to tab")).toBeInTheDocument();
@@ -180,10 +174,7 @@ describe("SessionHistorySection", () => {
         createRecord({ status: "active", session_name: "nova-sess" }),
       ]);
       render(
-        <SessionHistorySection
-          issueId="issue-1"
-          onJumpToSession={onJump}
-        />,
+        <SessionHistorySection issueId="issue-1" onJumpToSession={onJump} />,
       );
       await waitFor(() => {
         expect(screen.getByText("Jump to tab")).toBeInTheDocument();
@@ -210,15 +201,10 @@ describe("SessionHistorySection", () => {
         createRecord({ status: "completed" }),
       ]);
       render(
-        <SessionHistorySection
-          issueId="issue-1"
-          onJumpToSession={onJump}
-        />,
+        <SessionHistorySection issueId="issue-1" onJumpToSession={onJump} />,
       );
       await waitFor(() => {
-        const indicator = document.querySelector(
-          '[data-status="completed"]',
-        );
+        const indicator = document.querySelector('[data-status="completed"]');
         expect(indicator).toBeInTheDocument();
       });
       expect(screen.queryByText("Jump to tab")).not.toBeInTheDocument();
@@ -245,14 +231,10 @@ describe("SessionHistorySection", () => {
       ]);
       render(<SessionHistorySection issueId="issue-1" />);
       await waitFor(() => {
-        const indicator = document.querySelector(
-          '[data-status="completed"]',
-        );
+        const indicator = document.querySelector('[data-status="completed"]');
         expect(indicator).toBeInTheDocument();
       });
-      expect(
-        screen.queryByText("View scrollback"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText("View scrollback")).not.toBeInTheDocument();
     });
 
     it('does not show "View scrollback" for active sessions', async () => {
@@ -320,9 +302,7 @@ describe("SessionHistorySection", () => {
       });
 
       await waitFor(() => {
-        expect(
-          screen.getByText("Terminal output here"),
-        ).toBeInTheDocument();
+        expect(screen.getByText("Terminal output here")).toBeInTheDocument();
       });
     });
 
@@ -418,9 +398,7 @@ describe("SessionHistorySection", () => {
   describe("issueId changes", () => {
     it("refetches when issueId changes", async () => {
       mockListSessionHistory.mockResolvedValue([]);
-      const { rerender } = render(
-        <SessionHistorySection issueId="issue-1" />,
-      );
+      const { rerender } = render(<SessionHistorySection issueId="issue-1" />);
       await waitFor(() => {
         expect(mockListSessionHistory).toHaveBeenCalledWith("issue-1");
       });

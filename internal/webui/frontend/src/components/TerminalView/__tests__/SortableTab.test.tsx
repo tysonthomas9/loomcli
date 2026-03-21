@@ -84,19 +84,13 @@ describe("SortableTab", () => {
     it("has aria-selected=true when isActive is true", () => {
       render(<SortableTab {...defaultProps} isActive={true} />);
 
-      expect(screen.getByRole("tab")).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(screen.getByRole("tab")).toHaveAttribute("aria-selected", "true");
     });
 
     it("has aria-selected=false when isActive is false", () => {
       render(<SortableTab {...defaultProps} isActive={false} />);
 
-      expect(screen.getByRole("tab")).toHaveAttribute(
-        "aria-selected",
-        "false",
-      );
+      expect(screen.getByRole("tab")).toHaveAttribute("aria-selected", "false");
     });
 
     it("has tabIndex=0 when isActive is true", () => {
@@ -147,9 +141,7 @@ describe("SortableTab", () => {
 
     it("calls onContextMenu on right-click", () => {
       const onContextMenu = vi.fn();
-      render(
-        <SortableTab {...defaultProps} onContextMenu={onContextMenu} />,
-      );
+      render(<SortableTab {...defaultProps} onContextMenu={onContextMenu} />);
 
       fireEvent.contextMenu(screen.getByTestId("sortable-tab-1"));
 
@@ -158,9 +150,7 @@ describe("SortableTab", () => {
 
     it("calls onKeyDown on key press", () => {
       const onKeyDown = vi.fn();
-      render(
-        <SortableTab {...defaultProps} onKeyDown={onKeyDown} />,
-      );
+      render(<SortableTab {...defaultProps} onKeyDown={onKeyDown} />);
 
       fireEvent.keyDown(screen.getByTestId("sortable-tab-1"), {
         key: "Enter",
@@ -174,9 +164,7 @@ describe("SortableTab", () => {
     it("includes base className", () => {
       render(<SortableTab {...defaultProps} className="myTab" />);
 
-      expect(screen.getByTestId("sortable-tab-1").className).toContain(
-        "myTab",
-      );
+      expect(screen.getByTestId("sortable-tab-1").className).toContain("myTab");
     });
 
     it("includes pinned class when isPinned is true", () => {
@@ -205,9 +193,7 @@ describe("SortableTab", () => {
 
       render(<SortableTab {...defaultProps} />);
 
-      expect(screen.getByTestId("sortable-tab-1").style.opacity).toBe(
-        "0.5",
-      );
+      expect(screen.getByTestId("sortable-tab-1").style.opacity).toBe("0.5");
     });
 
     it("applies full opacity when not dragging", () => {

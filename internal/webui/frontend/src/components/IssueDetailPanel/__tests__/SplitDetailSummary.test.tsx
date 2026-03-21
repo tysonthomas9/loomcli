@@ -10,7 +10,13 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Issue, Priority, IssueType, LoomAgentStatus, LoomTaskInfo } from "@/types";
+import type {
+  Issue,
+  Priority,
+  IssueType,
+  LoomAgentStatus,
+  LoomTaskInfo,
+} from "@/types";
 
 import { SplitDetailSummary } from "../SplitDetailSummary";
 
@@ -26,10 +32,7 @@ vi.mock("../EditableDescription", () => ({
   }) => (
     <div data-testid="editable-description">
       <span>{description ?? "No description"}</span>
-      <button
-        data-testid="save-description"
-        onClick={() => onSave("new desc")}
-      >
+      <button data-testid="save-description" onClick={() => onSave("new desc")}>
         Save
       </button>
     </div>
@@ -145,49 +148,37 @@ describe("SplitDetailSummary", () => {
     it("renders description section", () => {
       render(<SplitDetailSummary {...defaultProps} />);
       expect(screen.getByText("Description")).toBeInTheDocument();
-      expect(
-        screen.getByTestId("editable-description"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("editable-description")).toBeInTheDocument();
     });
 
     it("renders editable description with issue description", () => {
       const issue = createIssue({ description: "My description" });
-      render(
-        <SplitDetailSummary {...defaultProps} issue={issue} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
       expect(screen.getByText("My description")).toBeInTheDocument();
     });
 
     it("passes correct priority to PriorityDropdown", () => {
       const issue = createIssue({ priority: 1 });
-      render(
-        <SplitDetailSummary {...defaultProps} issue={issue} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
       expect(screen.getByText("Priority: 1")).toBeInTheDocument();
     });
 
     it("passes correct type to TypeDropdown", () => {
       const issue = createIssue({ issue_type: "bug" });
-      render(
-        <SplitDetailSummary {...defaultProps} issue={issue} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
       expect(screen.getByText("Type: bug")).toBeInTheDocument();
     });
 
     it("passes correct assignee to AssigneeDropdown", () => {
       const issue = createIssue({ assignee: "falcon" });
-      render(
-        <SplitDetailSummary {...defaultProps} issue={issue} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
       expect(screen.getByText("Assignee: falcon")).toBeInTheDocument();
     });
   });
 
   describe("saving states", () => {
     it("passes isSavingPriority to PriorityDropdown", () => {
-      render(
-        <SplitDetailSummary {...defaultProps} isSavingPriority={true} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} isSavingPriority={true} />);
       expect(screen.getByTestId("priority-dropdown")).toHaveAttribute(
         "data-saving",
         "true",
@@ -195,9 +186,7 @@ describe("SplitDetailSummary", () => {
     });
 
     it("passes isSavingType to TypeDropdown", () => {
-      render(
-        <SplitDetailSummary {...defaultProps} isSavingType={true} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} isSavingType={true} />);
       expect(screen.getByTestId("type-dropdown")).toHaveAttribute(
         "data-saving",
         "true",
@@ -205,9 +194,7 @@ describe("SplitDetailSummary", () => {
     });
 
     it("passes isSavingAssignee to AssigneeDropdown", () => {
-      render(
-        <SplitDetailSummary {...defaultProps} isSavingAssignee={true} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} isSavingAssignee={true} />);
       expect(screen.getByTestId("assignee-dropdown")).toHaveAttribute(
         "data-saving",
         "true",
@@ -234,27 +221,17 @@ describe("SplitDetailSummary", () => {
   describe("design panel", () => {
     it("renders design panel when issue has design field", () => {
       const issue = createIssue({ design: "Some design content" });
-      render(
-        <SplitDetailSummary {...defaultProps} issue={issue} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
       expect(screen.getByTestId("design-section")).toBeInTheDocument();
       expect(screen.getByTestId("design-panel")).toBeInTheDocument();
-      expect(
-        screen.getByText("Some design content"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Some design content")).toBeInTheDocument();
     });
 
     it("does not render design panel when design is absent", () => {
       const issue = createIssue({ design: undefined });
-      render(
-        <SplitDetailSummary {...defaultProps} issue={issue} />,
-      );
-      expect(
-        screen.queryByTestId("design-section"),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByTestId("design-panel"),
-      ).not.toBeInTheDocument();
+      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
+      expect(screen.queryByTestId("design-section")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("design-panel")).not.toBeInTheDocument();
     });
 
     it("uses two-column layout when design exists", () => {
@@ -287,10 +264,7 @@ describe("SplitDetailSummary", () => {
       const onIssueUpdate = vi.fn();
 
       render(
-        <SplitDetailSummary
-          {...defaultProps}
-          onIssueUpdate={onIssueUpdate}
-        />,
+        <SplitDetailSummary {...defaultProps} onIssueUpdate={onIssueUpdate} />,
       );
 
       fireEvent.click(screen.getByTestId("save-description"));
@@ -311,10 +285,7 @@ describe("SplitDetailSummary", () => {
       mockUpdateIssue.mockResolvedValue(updatedIssue);
 
       render(
-        <SplitDetailSummary
-          {...defaultProps}
-          onIssueUpdate={undefined}
-        />,
+        <SplitDetailSummary {...defaultProps} onIssueUpdate={undefined} />,
       );
 
       fireEvent.click(screen.getByTestId("save-description"));
@@ -330,17 +301,13 @@ describe("SplitDetailSummary", () => {
   describe("edge cases", () => {
     it("renders with empty assignee", () => {
       const issue = createIssue({ assignee: "" });
-      render(
-        <SplitDetailSummary {...defaultProps} issue={issue} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
       expect(screen.getByText("Assignee:")).toBeInTheDocument();
     });
 
     it("renders with undefined description", () => {
       const issue = createIssue({ description: undefined });
-      render(
-        <SplitDetailSummary {...defaultProps} issue={issue} />,
-      );
+      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
       expect(screen.getByText("No description")).toBeInTheDocument();
     });
   });

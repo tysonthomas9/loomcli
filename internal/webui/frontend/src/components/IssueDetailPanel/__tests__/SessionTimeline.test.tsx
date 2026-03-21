@@ -58,9 +58,7 @@ describe("SessionTimeline", () => {
       render(
         <SessionTimeline {...defaultProps} isLoading={true} sessions={[]} />,
       );
-      expect(
-        screen.queryByTestId("session-timeline"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("session-timeline")).not.toBeInTheDocument();
       // Skeleton rows should be present (3 divs)
       const container = document.querySelector('[class*="timeline"]');
       expect(container).toBeInTheDocument();
@@ -87,9 +85,7 @@ describe("SessionTimeline", () => {
         createSession({ id: "s2", agent_name: "falcon" }),
         createSession({ id: "s3", agent_name: "eagle" }),
       ];
-      render(
-        <SessionTimeline {...defaultProps} sessions={sessions} />,
-      );
+      render(<SessionTimeline {...defaultProps} sessions={sessions} />);
       expect(screen.getByTestId("session-row-s1")).toBeInTheDocument();
       expect(screen.getByTestId("session-row-s2")).toBeInTheDocument();
       expect(screen.getByTestId("session-row-s3")).toBeInTheDocument();
@@ -97,9 +93,7 @@ describe("SessionTimeline", () => {
 
     it("renders the timeline container with correct testid", () => {
       const sessions = [createSession()];
-      render(
-        <SessionTimeline {...defaultProps} sessions={sessions} />,
-      );
+      render(<SessionTimeline {...defaultProps} sessions={sessions} />);
       expect(screen.getByTestId("session-timeline")).toBeInTheDocument();
     });
   });
@@ -123,9 +117,7 @@ describe("SessionTimeline", () => {
           started_at: "2026-01-19T10:00:00Z",
         }),
       ];
-      render(
-        <SessionTimeline {...defaultProps} sessions={sessions} />,
-      );
+      render(<SessionTimeline {...defaultProps} sessions={sessions} />);
       const rows = screen.getAllByRole("button");
       // Newest first
       expect(rows[0]).toHaveAttribute("data-testid", "session-row-newest");
@@ -140,9 +132,7 @@ describe("SessionTimeline", () => {
       ];
       const originalOrder = sessions.map((s) => s.id);
 
-      render(
-        <SessionTimeline {...defaultProps} sessions={sessions} />,
-      );
+      render(<SessionTimeline {...defaultProps} sessions={sessions} />);
 
       // Original array should be unchanged
       expect(sessions.map((s) => s.id)).toEqual(originalOrder);
@@ -205,11 +195,7 @@ describe("SessionTimeline", () => {
   describe("empty state", () => {
     it("renders empty timeline when no sessions and not loading", () => {
       render(
-        <SessionTimeline
-          {...defaultProps}
-          sessions={[]}
-          isLoading={false}
-        />,
+        <SessionTimeline {...defaultProps} sessions={[]} isLoading={false} />,
       );
       const timeline = screen.getByTestId("session-timeline");
       expect(timeline).toBeInTheDocument();

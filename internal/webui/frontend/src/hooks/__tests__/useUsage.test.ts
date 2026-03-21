@@ -87,9 +87,7 @@ describe("useUsage", () => {
     });
 
     it("does not fetch when disabled", async () => {
-      const { result } = renderHook(() =>
-        useUsage({ enabled: false }),
-      );
+      const { result } = renderHook(() => useUsage({ enabled: false }));
 
       await flushPromises();
 
@@ -201,9 +199,7 @@ describe("useUsage", () => {
     it("clears error on subsequent successful fetch", async () => {
       mockFetchUsage.mockRejectedValueOnce(new Error("Server down"));
 
-      const { result } = renderHook(() =>
-        useUsage({ pollInterval: 1000 }),
-      );
+      const { result } = renderHook(() => useUsage({ pollInterval: 1000 }));
 
       await flushPromises();
       expect(result.current.error).not.toBeNull();
@@ -223,14 +219,18 @@ describe("useUsage", () => {
 
   describe("refetch", () => {
     it("manually triggers a refetch", async () => {
-      mockFetchUsage.mockResolvedValueOnce(createMockUsage({ total_cost: 1.0 }));
+      mockFetchUsage.mockResolvedValueOnce(
+        createMockUsage({ total_cost: 1.0 }),
+      );
 
       const { result } = renderHook(() => useUsage({ pollInterval: 0 }));
 
       await flushPromises();
       expect(result.current.data?.total_cost).toBe(1.0);
 
-      mockFetchUsage.mockResolvedValueOnce(createMockUsage({ total_cost: 2.0 }));
+      mockFetchUsage.mockResolvedValueOnce(
+        createMockUsage({ total_cost: 2.0 }),
+      );
 
       await act(async () => {
         await result.current.refetch();
@@ -245,9 +245,7 @@ describe("useUsage", () => {
     it("clears polling interval on unmount", async () => {
       mockFetchUsage.mockResolvedValueOnce(createMockUsage());
 
-      const { unmount } = renderHook(() =>
-        useUsage({ pollInterval: 1000 }),
-      );
+      const { unmount } = renderHook(() => useUsage({ pollInterval: 1000 }));
 
       await flushPromises();
 

@@ -59,9 +59,7 @@ describe("TerminalHeader", () => {
         />,
       );
 
-      expect(screen.getByTestId("terminal-header")).toHaveTextContent(
-        "Claude",
-      );
+      expect(screen.getByTestId("terminal-header")).toHaveTextContent("Claude");
     });
 
     it("shows 'Codex' label for codex backend", () => {
@@ -73,9 +71,7 @@ describe("TerminalHeader", () => {
         />,
       );
 
-      expect(screen.getByTestId("terminal-header")).toHaveTextContent(
-        "Codex",
-      );
+      expect(screen.getByTestId("terminal-header")).toHaveTextContent("Codex");
     });
 
     it("shows 'OpenCode' label for opencode backend", () => {
@@ -372,9 +368,7 @@ describe("TerminalHeader", () => {
       );
 
       expect(screen.getByTestId("git-actions")).toBeInTheDocument();
-      expect(
-        screen.getByTestId("action-review-changes"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("action-review-changes")).toBeInTheDocument();
       expect(screen.getByTestId("action-merge")).toBeInTheDocument();
     });
 

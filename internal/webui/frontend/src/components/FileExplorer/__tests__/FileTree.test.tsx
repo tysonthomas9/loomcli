@@ -69,7 +69,9 @@ describe("FileTree", () => {
     const treeData = new Map<string, FileEntry[]>([
       ["", [makeFileEntry("pkg", true)]],
     ]);
-    render(<FileTree {...defaultProps} treeData={treeData} onToggle={onToggle} />);
+    render(
+      <FileTree {...defaultProps} treeData={treeData} onToggle={onToggle} />,
+    );
     fireEvent.click(screen.getByLabelText("pkg"));
     expect(onToggle).toHaveBeenCalledWith("pkg");
   });
@@ -80,7 +82,11 @@ describe("FileTree", () => {
       ["", [makeFileEntry("go.mod")]],
     ]);
     render(
-      <FileTree {...defaultProps} treeData={treeData} onSelectFile={onSelectFile} />,
+      <FileTree
+        {...defaultProps}
+        treeData={treeData}
+        onSelectFile={onSelectFile}
+      />,
     );
     fireEvent.click(screen.getByLabelText("go.mod"));
     expect(onSelectFile).toHaveBeenCalledWith("go.mod");
@@ -92,7 +98,9 @@ describe("FileTree", () => {
       ["src", [makeFileEntry("app.go"), makeFileEntry("util.go")]],
     ]);
     const expanded = new Set(["src"]);
-    render(<FileTree {...defaultProps} treeData={treeData} expanded={expanded} />);
+    render(
+      <FileTree {...defaultProps} treeData={treeData} expanded={expanded} />,
+    );
     expect(screen.getByLabelText("app.go")).toBeInTheDocument();
     expect(screen.getByLabelText("util.go")).toBeInTheDocument();
   });
@@ -114,7 +122,9 @@ describe("FileTree", () => {
       <FileTree {...defaultProps} treeData={treeData} selectedPath="main.go" />,
     );
     expect(screen.getByLabelText("main.go")).toHaveAttribute("data-selected");
-    expect(screen.getByLabelText("other.go")).not.toHaveAttribute("data-selected");
+    expect(screen.getByLabelText("other.go")).not.toHaveAttribute(
+      "data-selected",
+    );
   });
 
   it("shows 'No files found' when root entries are empty and no filter", () => {
@@ -157,7 +167,11 @@ describe("FileTree", () => {
       ["", [makeFileEntry("main.go")]],
     ]);
     render(
-      <FileTree {...defaultProps} treeData={treeData} filterText="nonexistent" />,
+      <FileTree
+        {...defaultProps}
+        treeData={treeData}
+        filterText="nonexistent"
+      />,
     );
     expect(screen.getByText(/No matches for/)).toBeInTheDocument();
   });

@@ -71,9 +71,7 @@ describe("WelcomeBanner", () => {
     it("renders Codex-specific description", () => {
       render(<WelcomeBanner {...defaultProps} backendName="codex" />);
 
-      expect(
-        screen.getByText(/Codex is OpenAI/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/Codex is OpenAI/)).toBeInTheDocument();
     });
 
     it("renders Claude-specific example prompts", () => {
@@ -100,35 +98,25 @@ describe("WelcomeBanner", () => {
 
   describe("rendering with unknown backend", () => {
     it("renders fallback description for unknown backend", () => {
-      render(
-        <WelcomeBanner {...defaultProps} backendName="unknown-backend" />,
-      );
+      render(<WelcomeBanner {...defaultProps} backendName="unknown-backend" />);
 
-      expect(
-        screen.getByText(/An AI coding assistant/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/An AI coding assistant/)).toBeInTheDocument();
     });
 
     it("renders fallback example prompts for unknown backend", () => {
-      render(
-        <WelcomeBanner {...defaultProps} backendName="custom" />,
-      );
+      render(<WelcomeBanner {...defaultProps} backendName="custom" />);
 
       expect(
         screen.getByText("Explain what this file does"),
       ).toBeInTheDocument();
-      expect(
-        screen.getByText("Help me debug this error"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Help me debug this error")).toBeInTheDocument();
       expect(
         screen.getByText("Write a unit test for this function"),
       ).toBeInTheDocument();
     });
 
     it("capitalizes the first letter of unknown backend name in heading", () => {
-      render(
-        <WelcomeBanner {...defaultProps} backendName="mybot" />,
-      );
+      render(<WelcomeBanner {...defaultProps} backendName="mybot" />);
 
       expect(screen.getByText("Welcome to Mybot")).toBeInTheDocument();
     });
@@ -138,9 +126,7 @@ describe("WelcomeBanner", () => {
     it("renders close button", () => {
       render(<WelcomeBanner {...defaultProps} />);
 
-      expect(
-        screen.getByTestId("welcome-banner-close"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("welcome-banner-close")).toBeInTheDocument();
     });
 
     it("calls onDismiss when close button is clicked", () => {
@@ -256,9 +242,7 @@ describe("WelcomeBanner", () => {
     it("renders dismiss hint", () => {
       render(<WelcomeBanner {...defaultProps} />);
 
-      expect(
-        screen.getByText(/Press any key or click/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/Press any key or click/)).toBeInTheDocument();
     });
   });
 

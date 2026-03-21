@@ -78,7 +78,14 @@ describe("useTerminalMetadata", () => {
     });
 
     it("fetches tabs on mount and updates state", async () => {
-      const tabs = [createMockTab(), createMockTab({ session_name: "sess-2", label: "Tab 2", sort_order: 1 })];
+      const tabs = [
+        createMockTab(),
+        createMockTab({
+          session_name: "sess-2",
+          label: "Tab 2",
+          sort_order: 1,
+        }),
+      ];
       mockList.mockResolvedValueOnce(tabs);
 
       const { result } = renderHook(() => useTerminalMetadata());
@@ -128,7 +135,9 @@ describe("useTerminalMetadata", () => {
   describe("createTab", () => {
     it("optimistically adds tab then calls putTabMetadata", async () => {
       mockList.mockResolvedValueOnce([]);
-      mockPut.mockResolvedValueOnce(createMockTab({ session_name: "new-sess" }));
+      mockPut.mockResolvedValueOnce(
+        createMockTab({ session_name: "new-sess" }),
+      );
 
       const { result } = renderHook(() => useTerminalMetadata());
       await flushPromises();
@@ -176,7 +185,11 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].label).toBe("Renamed");
-      expect(mockPatch).toHaveBeenCalledWith("sess-1", { label: "Renamed" }, undefined);
+      expect(mockPatch).toHaveBeenCalledWith(
+        "sess-1",
+        { label: "Renamed" },
+        undefined,
+      );
     });
 
     it("rolls back label on error and sets error state", async () => {
@@ -195,7 +208,11 @@ describe("useTerminalMetadata", () => {
 
       // Verify error was set and API was called
       expect(result.current.error?.message).toBe("Patch failed");
-      expect(mockPatch).toHaveBeenCalledWith("sess-1", { label: "Renamed" }, undefined);
+      expect(mockPatch).toHaveBeenCalledWith(
+        "sess-1",
+        { label: "Renamed" },
+        undefined,
+      );
     });
   });
 
@@ -212,7 +229,11 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].notes).toBe("my notes");
-      expect(mockPatch).toHaveBeenCalledWith("sess-1", { notes: "my notes" }, undefined);
+      expect(mockPatch).toHaveBeenCalledWith(
+        "sess-1",
+        { notes: "my notes" },
+        undefined,
+      );
     });
   });
 
@@ -229,7 +250,11 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].pinned).toBe(true);
-      expect(mockPatch).toHaveBeenCalledWith("sess-1", { pinned: true }, undefined);
+      expect(mockPatch).toHaveBeenCalledWith(
+        "sess-1",
+        { pinned: true },
+        undefined,
+      );
     });
   });
 
@@ -330,7 +355,11 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].issue_id).toBe("PROJ-1");
-      expect(mockPatch).toHaveBeenCalledWith("sess-1", { issue_id: "PROJ-1" }, undefined);
+      expect(mockPatch).toHaveBeenCalledWith(
+        "sess-1",
+        { issue_id: "PROJ-1" },
+        undefined,
+      );
     });
 
     it("optimistically removes issue_id on unlink", async () => {
@@ -345,7 +374,11 @@ describe("useTerminalMetadata", () => {
       });
 
       expect(result.current.tabs[0].issue_id).toBeUndefined();
-      expect(mockPatch).toHaveBeenCalledWith("sess-1", { issue_id: "" }, undefined);
+      expect(mockPatch).toHaveBeenCalledWith(
+        "sess-1",
+        { issue_id: "" },
+        undefined,
+      );
     });
   });
 

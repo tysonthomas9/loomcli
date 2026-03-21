@@ -65,9 +65,7 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "dev" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       expect(screen.getByTestId("agent-card-falcon")).toBeInTheDocument();
       expect(screen.getByTestId("agent-card-nova")).toBeInTheDocument();
@@ -81,9 +79,7 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       expect(screen.getByTestId("agent-card-falcon")).toBeInTheDocument();
       expect(screen.getByTestId("agent-card-nova")).toBeInTheDocument();
@@ -92,9 +88,7 @@ describe("WorkspaceGroupedList", () => {
     it("renders flat list when only one agent exists", () => {
       const agents = [makeAgent("falcon", { workspace: "dev" })];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       expect(screen.getByTestId("agent-card-falcon")).toBeInTheDocument();
     });
@@ -107,9 +101,7 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "web" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       expect(screen.getByText("api")).toBeInTheDocument();
       expect(screen.getByText("web")).toBeInTheDocument();
@@ -122,9 +114,7 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("ember", { workspace: "web" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       expect(screen.getByText("2")).toBeInTheDocument(); // api group
       expect(screen.getByText("1")).toBeInTheDocument(); // web group
@@ -137,9 +127,7 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("ember", { workspace: "alpha" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       const buttons = screen.getAllByRole("button");
       const headerTexts = buttons.map((b) => b.textContent);
@@ -161,9 +149,7 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "web" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       expect(screen.getByTestId("agent-card-falcon")).toBeInTheDocument();
       expect(screen.getByTestId("agent-card-nova")).toBeInTheDocument();
@@ -177,16 +163,12 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "web" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       // Click the api workspace header to collapse it
       fireEvent.click(screen.getByText("api"));
 
-      expect(
-        screen.queryByTestId("agent-card-falcon"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-card-falcon")).not.toBeInTheDocument();
       // web group should still be visible
       expect(screen.getByTestId("agent-card-nova")).toBeInTheDocument();
     });
@@ -197,15 +179,11 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "web" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       // Collapse
       fireEvent.click(screen.getByText("api"));
-      expect(
-        screen.queryByTestId("agent-card-falcon"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-card-falcon")).not.toBeInTheDocument();
 
       // Expand
       fireEvent.click(screen.getByText("api"));
@@ -220,9 +198,7 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "web" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       fireEvent.click(screen.getByText("api"));
 
@@ -243,14 +219,10 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "web" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       // api group should be collapsed
-      expect(
-        screen.queryByTestId("agent-card-falcon"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-card-falcon")).not.toBeInTheDocument();
       // web group should be visible
       expect(screen.getByTestId("agent-card-nova")).toBeInTheDocument();
     });
@@ -264,9 +236,7 @@ describe("WorkspaceGroupedList", () => {
       ];
 
       // Should not throw
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       expect(screen.getByTestId("agent-card-falcon")).toBeInTheDocument();
     });
@@ -282,7 +252,9 @@ describe("WorkspaceGroupedList", () => {
       render(
         <WorkspaceGroupedList
           agents={agents}
-          agentTasks={{ falcon: { id: "t1", title: "Fix bug", priority: 1, status: "open" } }}
+          agentTasks={{
+            falcon: { id: "t1", title: "Fix bug", priority: 1, status: "open" },
+          }}
         />,
       );
 
@@ -317,9 +289,7 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "web" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       // Click should not throw - just verifying no error occurs
       fireEvent.click(screen.getByTestId("agent-card-falcon"));
@@ -341,9 +311,7 @@ describe("WorkspaceGroupedList", () => {
         makeAgent("nova", { workspace: "web" }),
       ];
 
-      render(
-        <WorkspaceGroupedList agents={agents} agentTasks={{}} />,
-      );
+      render(<WorkspaceGroupedList agents={agents} agentTasks={{}} />);
 
       expect(screen.getByText("(default)")).toBeInTheDocument();
       expect(screen.getByText("web")).toBeInTheDocument();

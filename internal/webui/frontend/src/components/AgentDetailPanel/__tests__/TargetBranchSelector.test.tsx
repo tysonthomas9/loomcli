@@ -44,16 +44,12 @@ describe("TargetBranchSelector", () => {
 
   describe("Workspace mode (not editing)", () => {
     it("displays the current target branch name", () => {
-      render(
-        <TargetBranchSelector {...defaultProps} isWorkspace={true} />,
-      );
+      render(<TargetBranchSelector {...defaultProps} isWorkspace={true} />);
       expect(screen.getByText("main")).toBeInTheDocument();
     });
 
     it("shows Change button", () => {
-      render(
-        <TargetBranchSelector {...defaultProps} isWorkspace={true} />,
-      );
+      render(<TargetBranchSelector {...defaultProps} isWorkspace={true} />);
       expect(screen.getByText("Change")).toBeInTheDocument();
     });
 
@@ -69,18 +65,14 @@ describe("TargetBranchSelector", () => {
     });
 
     it("enters edit mode when Change is clicked", () => {
-      render(
-        <TargetBranchSelector {...defaultProps} isWorkspace={true} />,
-      );
+      render(<TargetBranchSelector {...defaultProps} isWorkspace={true} />);
       fireEvent.click(screen.getByText("Change"));
       expect(screen.getByRole("textbox")).toBeInTheDocument();
     });
   });
 
   describe("Edit mode", () => {
-    function renderInEditMode(
-      overrides: Partial<typeof defaultProps> = {},
-    ) {
+    function renderInEditMode(overrides: Partial<typeof defaultProps> = {}) {
       const props = { ...defaultProps, isWorkspace: true, ...overrides };
       const result = render(<TargetBranchSelector {...props} />);
       fireEvent.click(screen.getByText("Change"));

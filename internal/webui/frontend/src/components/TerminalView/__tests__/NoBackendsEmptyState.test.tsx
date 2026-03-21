@@ -28,17 +28,13 @@ describe("NoBackendsEmptyState", () => {
     it("renders the container with correct testid", () => {
       render(<NoBackendsEmptyState />);
 
-      expect(
-        screen.getByTestId("no-backends-empty-state"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("no-backends-empty-state")).toBeInTheDocument();
     });
 
     it("renders the heading text", () => {
       render(<NoBackendsEmptyState />);
 
-      expect(
-        screen.getByText("No backends configured"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("No backends configured")).toBeInTheDocument();
     });
 
     it("renders the description text", () => {
@@ -62,9 +58,7 @@ describe("NoBackendsEmptyState", () => {
     it("renders 'Go to Settings' button when onGoToSettings is provided", () => {
       render(<NoBackendsEmptyState onGoToSettings={vi.fn()} />);
 
-      expect(
-        screen.getByTestId("go-to-settings-button"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("go-to-settings-button")).toBeInTheDocument();
       expect(screen.getByText("Go to Settings")).toBeInTheDocument();
     });
 

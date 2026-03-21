@@ -128,9 +128,7 @@ describe("SortableWorkspaceEntry", () => {
     });
 
     it("shows default star when isDefault is true", () => {
-      render(
-        <SortableWorkspaceEntry {...defaultProps({ isDefault: true })} />,
-      );
+      render(<SortableWorkspaceEntry {...defaultProps({ isDefault: true })} />);
 
       const star = screen.getByTitle("Default workspace");
       expect(star).toBeInTheDocument();
@@ -239,9 +237,7 @@ describe("SortableWorkspaceEntry", () => {
 
     it("handles undefined onMoveUp gracefully", () => {
       const { container } = render(
-        <SortableWorkspaceEntry
-          {...defaultProps({ onMoveUp: undefined })}
-        />,
+        <SortableWorkspaceEntry {...defaultProps({ onMoveUp: undefined })} />,
       );
 
       // Should not throw
@@ -385,9 +381,7 @@ describe("SortableWorkspaceEntry", () => {
 
     it("calls onOverflowClick when overflow button is clicked", () => {
       const onOverflowClick = vi.fn();
-      render(
-        <SortableWorkspaceEntry {...defaultProps({ onOverflowClick })} />,
-      );
+      render(<SortableWorkspaceEntry {...defaultProps({ onOverflowClick })} />);
 
       fireEvent.click(screen.getByTestId("workspace-overflow-dev"));
       expect(onOverflowClick).toHaveBeenCalled();
@@ -410,9 +404,7 @@ describe("SortableWorkspaceEntry", () => {
     it("renders drag handle with correct aria-label", () => {
       render(<SortableWorkspaceEntry {...defaultProps()} />);
 
-      expect(
-        screen.getByLabelText("Drag to reorder dev"),
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Drag to reorder dev")).toBeInTheDocument();
     });
   });
 
