@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -1055,6 +1056,121 @@ agents:
 	}
 }
 
+func TestLoadProjectFile_WithReposAndRepoGroups(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `agents:
+  - worktree: falcon
+    role: plan
+    repos: [backend, frontend]
+    repo_groups: [infra, data]
+    cross_repo: true
+  - worktree: nova
+    role: task
+`
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	pf, err := LoadProjectFile(dir)
+	if err != nil {
+		t.Fatalf("LoadProjectFile() error = %v", err)
+	}
+	if pf == nil {
+		t.Fatal("LoadProjectFile() returned nil")
+	}
+	if len(pf.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(pf.Agents))
+	}
+
+	a0 := pf.Agents[0]
+	if !reflect.DeepEqual(a0.Repos, []string{"backend", "frontend"}) {
+		t.Errorf("agents[0].Repos = %v, want [backend frontend]", a0.Repos)
+	}
+	if !reflect.DeepEqual(a0.RepoGroups, []string{"infra", "data"}) {
+		t.Errorf("agents[0].RepoGroups = %v, want [infra data]", a0.RepoGroups)
+	}
+	if !a0.CrossRepo {
+		t.Error("agents[0].CrossRepo = false, want true")
+	}
+
+	// Agent without new fields should have zero values
+	a1 := pf.Agents[1]
+	if a1.Repos != nil {
+		t.Errorf("agents[1].Repos = %v, want nil", a1.Repos)
+	}
+	if a1.RepoGroups != nil {
+		t.Errorf("agents[1].RepoGroups = %v, want nil", a1.RepoGroups)
+	}
+	if a1.CrossRepo {
+		t.Error("agents[1].CrossRepo = true, want false")
+	}
+}
+
+func TestAgentEntry_ReposRepoGroups_YAMLRoundtrip(t *testing.T) {
+	original := AgentEntry{
+		Worktree:   "falcon",
+		Role:       "plan",
+		Repos:      []string{"backend", "frontend"},
+		RepoGroups: []string{"infra"},
+		CrossRepo:  true,
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Verify YAML contains the new fields
+	yamlStr := string(data)
+	if !strings.Contains(yamlStr, "repos:") {
+		t.Errorf("marshaled YAML does not contain 'repos:': %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "repo_groups:") {
+		t.Errorf("marshaled YAML does not contain 'repo_groups:': %s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "cross_repo: true") {
+		t.Errorf("marshaled YAML does not contain 'cross_repo: true': %s", yamlStr)
+	}
+
+	var decoded AgentEntry
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if !reflect.DeepEqual(decoded.Repos, original.Repos) {
+		t.Errorf("Repos = %v, want %v", decoded.Repos, original.Repos)
+	}
+	if !reflect.DeepEqual(decoded.RepoGroups, original.RepoGroups) {
+		t.Errorf("RepoGroups = %v, want %v", decoded.RepoGroups, original.RepoGroups)
+	}
+	if decoded.CrossRepo != original.CrossRepo {
+		t.Errorf("CrossRepo = %v, want %v", decoded.CrossRepo, original.CrossRepo)
+	}
+}
+
+func TestAgentEntry_ReposRepoGroups_OmittedWhenEmpty(t *testing.T) {
+	original := AgentEntry{
+		Worktree: "nova",
+		Role:     "task",
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	yamlStr := string(data)
+	if strings.Contains(yamlStr, "repos:") {
+		t.Errorf("marshaled YAML contains 'repos:' but should be omitted: %s", yamlStr)
+	}
+	if strings.Contains(yamlStr, "repo_groups:") {
+		t.Errorf("marshaled YAML contains 'repo_groups:' but should be omitted: %s", yamlStr)
+	}
+	if strings.Contains(yamlStr, "cross_repo:") {
+		t.Errorf("marshaled YAML contains 'cross_repo:' but should be omitted: %s", yamlStr)
+	}
+}
+
 func TestLoadProjectFile_BackwardCompatibility(t *testing.T) {
 	dir := t.TempDir()
 	// Config using only original fields — no new fields present
@@ -1116,4 +1232,364 @@ agents:
 	if pf.Agents[0].PathPatterns != nil {
 		t.Errorf("Agent PathPatterns = %v, want nil", pf.Agents[0].PathPatterns)
 	}
+}
+
+func TestAgentEntry_RepoField_YAMLRoundtrip(t *testing.T) {
+	original := AgentEntry{
+		Worktree: "falcon",
+		Role:     "plan",
+		Repo:     "myrepo",
+		Auto:     true,
+		Backend:  "anthropic",
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Verify the YAML contains "repo: myrepo"
+	if !strings.Contains(string(data), "repo: myrepo") {
+		t.Errorf("marshaled YAML does not contain 'repo: myrepo': %s", string(data))
+	}
+
+	var decoded AgentEntry
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded.Worktree != original.Worktree {
+		t.Errorf("Worktree = %q, want %q", decoded.Worktree, original.Worktree)
+	}
+	if decoded.Role != original.Role {
+		t.Errorf("Role = %q, want %q", decoded.Role, original.Role)
+	}
+	if decoded.Repo != original.Repo {
+		t.Errorf("Repo = %q, want %q", decoded.Repo, original.Repo)
+	}
+	if decoded.Auto != original.Auto {
+		t.Errorf("Auto = %v, want %v", decoded.Auto, original.Auto)
+	}
+	if decoded.Backend != original.Backend {
+		t.Errorf("Backend = %q, want %q", decoded.Backend, original.Backend)
+	}
+}
+
+func TestAgentEntry_RepoField_OmittedWhenEmpty(t *testing.T) {
+	original := AgentEntry{
+		Worktree: "nova",
+		Role:     "task",
+	}
+
+	data, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	// Repo field should be omitted when empty (omitempty)
+	if strings.Contains(string(data), "repo:") {
+		t.Errorf("marshaled YAML contains 'repo:' but should be omitted: %s", string(data))
+	}
+
+	var decoded AgentEntry
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.Repo != "" {
+		t.Errorf("Repo = %q, want empty", decoded.Repo)
+	}
+}
+
+func TestLoadProjectFile_WithRepoField(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `agents:
+  - worktree: falcon
+    role: plan
+    repo: myrepo
+    auto: true
+  - worktree: nova
+    role: task
+`
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	pf, err := LoadProjectFile(dir)
+	if err != nil {
+		t.Fatalf("LoadProjectFile() error = %v", err)
+	}
+	if pf == nil {
+		t.Fatal("LoadProjectFile() returned nil")
+	}
+	if len(pf.Agents) != 2 {
+		t.Fatalf("len(Agents) = %d, want 2", len(pf.Agents))
+	}
+	if pf.Agents[0].Repo != "myrepo" {
+		t.Errorf("agents[0].Repo = %q, want %q", pf.Agents[0].Repo, "myrepo")
+	}
+	if pf.Agents[1].Repo != "" {
+		t.Errorf("agents[1].Repo = %q, want empty", pf.Agents[1].Repo)
+	}
+}
+
+// writeWorkspaceConfig writes a config.yaml with a workspace containing repos into configDir.
+func writeWorkspaceConfig(t *testing.T, configDir string, repos []RepoConfig) {
+	t.Helper()
+	reposYAML := ""
+	for _, r := range repos {
+		reposYAML += "      - name: " + r.Name + "\n"
+		reposYAML += "        path: " + r.Path + "\n"
+	}
+	cfgYAML := "version: 2\nworkspaces:\n  ws:\n    path: /tmp/ws\n    repos:\n" + reposYAML
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(cfgYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateAgentRepos_UnknownRepo(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	writeWorkspaceConfig(t, configDir, []RepoConfig{
+		{Name: "backend", Path: "/tmp/ws/backend"},
+		{Name: "frontend", Path: "/tmp/ws/frontend"},
+	})
+
+	agents := []AgentEntry{
+		{Worktree: "falcon", Role: "plan", Repo: "nonexistent"},
+	}
+	err := validateAgentRepos(agents)
+	if err == nil {
+		t.Fatal("validateAgentRepos() error = nil, want error for unknown repo")
+	}
+	if !strings.Contains(err.Error(), "not found in workspace") {
+		t.Errorf("error = %q, want contains 'not found in workspace'", err.Error())
+	}
+}
+
+func TestValidateAgentRepos_ValidRepo(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	writeWorkspaceConfig(t, configDir, []RepoConfig{
+		{Name: "backend", Path: "/tmp/ws/backend"},
+		{Name: "frontend", Path: "/tmp/ws/frontend"},
+	})
+
+	agents := []AgentEntry{
+		{Worktree: "falcon", Role: "plan", Repo: "backend"},
+	}
+	err := validateAgentRepos(agents)
+	if err != nil {
+		t.Errorf("validateAgentRepos() error = %v, want nil", err)
+	}
+}
+
+func TestValidateAgentRepos_NoWorkspace(t *testing.T) {
+	// No config file → no workspace → should warn but not error
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	agents := []AgentEntry{
+		{Worktree: "falcon", Role: "plan", Repo: "somerepo"},
+	}
+	err := validateAgentRepos(agents)
+	if err != nil {
+		t.Errorf("validateAgentRepos() error = %v, want nil (no workspace configured)", err)
+	}
+}
+
+func TestValidateAgentRepos_NoRepoField(t *testing.T) {
+	// Agents with no Repo field set — should return nil regardless of workspace config
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	writeWorkspaceConfig(t, configDir, []RepoConfig{
+		{Name: "backend", Path: "/tmp/ws/backend"},
+	})
+
+	agents := []AgentEntry{
+		{Worktree: "falcon", Role: "plan"},
+		{Worktree: "nova", Role: "task"},
+	}
+	err := validateAgentRepos(agents)
+	if err != nil {
+		t.Errorf("validateAgentRepos() error = %v, want nil (no repo field set)", err)
+	}
+}
+
+func TestLoadProjectFile_VersionWarningDedup(t *testing.T) {
+	// Reset the once guard so this test starts clean.
+	resetProjectConfigVersionWarnOnce()
+	t.Cleanup(resetProjectConfigVersionWarnOnce)
+
+	dir := t.TempDir()
+
+	// Write a version-0 project config (version field omitted defaults to 0,
+	// which is below CurrentConfigVersion=1).
+	yamlContent := `agents:
+  - worktree: falcon
+    role: plan
+`
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	const warnSubstr = "Run 'loom config migrate' to upgrade"
+
+	// First call: warning should appear.
+	stderr1 := captureStderr(t, func() {
+		pf, err := LoadProjectFile(dir)
+		if err != nil {
+			t.Fatalf("LoadProjectFile() #1 error = %v", err)
+		}
+		if pf == nil {
+			t.Fatal("LoadProjectFile() #1 returned nil")
+		}
+	})
+	if count := strings.Count(stderr1, warnSubstr); count != 1 {
+		t.Errorf("first LoadProjectFile(): want exactly 1 warning, got %d; stderr = %q", count, stderr1)
+	}
+
+	// Second call: warning should be suppressed by sync.Once.
+	stderr2 := captureStderr(t, func() {
+		pf, err := LoadProjectFile(dir)
+		if err != nil {
+			t.Fatalf("LoadProjectFile() #2 error = %v", err)
+		}
+		if pf == nil {
+			t.Fatal("LoadProjectFile() #2 returned nil")
+		}
+	})
+	if strings.Contains(stderr2, warnSubstr) {
+		t.Errorf("second LoadProjectFile(): want no warning, got stderr = %q", stderr2)
+	}
+
+	// Reset the guard and call again: warning should reappear.
+	resetProjectConfigVersionWarnOnce()
+	stderr3 := captureStderr(t, func() {
+		pf, err := LoadProjectFile(dir)
+		if err != nil {
+			t.Fatalf("LoadProjectFile() #3 error = %v", err)
+		}
+		if pf == nil {
+			t.Fatal("LoadProjectFile() #3 returned nil")
+		}
+	})
+	if count := strings.Count(stderr3, warnSubstr); count != 1 {
+		t.Errorf("after reset, LoadProjectFile(): want exactly 1 warning, got %d; stderr = %q", count, stderr3)
+	}
+}
+
+func TestGetStartupTimeout(t *testing.T) {
+	fallback := 30 * time.Second
+
+	t.Run("nil receiver returns fallback", func(t *testing.T) {
+		var d *DaemonSettings
+		got := d.GetStartupTimeout(fallback)
+		if got != fallback {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, fallback)
+		}
+	})
+
+	t.Run("nil StartupTimeout returns fallback", func(t *testing.T) {
+		d := &DaemonSettings{StartupTimeout: nil}
+		got := d.GetStartupTimeout(fallback)
+		if got != fallback {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, fallback)
+		}
+	})
+
+	t.Run("zero value returns fallback", func(t *testing.T) {
+		zero := 0
+		d := &DaemonSettings{StartupTimeout: &zero}
+		got := d.GetStartupTimeout(fallback)
+		if got != fallback {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, fallback)
+		}
+	})
+
+	t.Run("negative value returns fallback", func(t *testing.T) {
+		neg := -5
+		d := &DaemonSettings{StartupTimeout: &neg}
+		got := d.GetStartupTimeout(fallback)
+		if got != fallback {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, fallback)
+		}
+	})
+
+	t.Run("positive value returns correct duration", func(t *testing.T) {
+		val := 60
+		d := &DaemonSettings{StartupTimeout: &val}
+		got := d.GetStartupTimeout(fallback)
+		want := 60 * time.Second
+		if got != want {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("positive value with different fallback", func(t *testing.T) {
+		val := 10
+		d := &DaemonSettings{StartupTimeout: &val}
+		got := d.GetStartupTimeout(5 * time.Second)
+		want := 10 * time.Second
+		if got != want {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestOverlayDaemonSettings_StartupTimeout(t *testing.T) {
+	t.Run("src StartupTimeout overrides dst", func(t *testing.T) {
+		dstVal := 30
+		srcVal := 60
+		dst := &DaemonSettings{StartupTimeout: &dstVal}
+		src := &DaemonSettings{StartupTimeout: &srcVal}
+
+		overlayDaemonSettings(dst, src)
+
+		if dst.StartupTimeout == nil {
+			t.Fatal("StartupTimeout should not be nil after overlay")
+		}
+		if *dst.StartupTimeout != 60 {
+			t.Errorf("StartupTimeout = %d, want 60", *dst.StartupTimeout)
+		}
+	})
+
+	t.Run("nil src StartupTimeout preserves dst", func(t *testing.T) {
+		dstVal := 30
+		dst := &DaemonSettings{StartupTimeout: &dstVal}
+		src := &DaemonSettings{StartupTimeout: nil}
+
+		overlayDaemonSettings(dst, src)
+
+		if dst.StartupTimeout == nil {
+			t.Fatal("StartupTimeout should not be nil after overlay with nil src")
+		}
+		if *dst.StartupTimeout != 30 {
+			t.Errorf("StartupTimeout = %d, want 30", *dst.StartupTimeout)
+		}
+	})
+
+	t.Run("src StartupTimeout sets previously nil dst", func(t *testing.T) {
+		srcVal := 45
+		dst := &DaemonSettings{StartupTimeout: nil}
+		src := &DaemonSettings{StartupTimeout: &srcVal}
+
+		overlayDaemonSettings(dst, src)
+
+		if dst.StartupTimeout == nil {
+			t.Fatal("StartupTimeout should be set after overlay")
+		}
+		if *dst.StartupTimeout != 45 {
+			t.Errorf("StartupTimeout = %d, want 45", *dst.StartupTimeout)
+		}
+	})
+
+	t.Run("both nil remains nil", func(t *testing.T) {
+		dst := &DaemonSettings{StartupTimeout: nil}
+		src := &DaemonSettings{StartupTimeout: nil}
+
+		overlayDaemonSettings(dst, src)
+
+		if dst.StartupTimeout != nil {
+			t.Errorf("StartupTimeout should remain nil, got %d", *dst.StartupTimeout)
+		}
+	})
 }

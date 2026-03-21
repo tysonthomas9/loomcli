@@ -6,7 +6,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
 import { getIssue } from "@/api/issues";
-import type { IssueDetails } from "@/types";
+import type { Issue, IssueDetails } from "@/types";
 
 /**
  * Return type for the useIssueDetail hook.
@@ -22,6 +22,8 @@ export interface UseIssueDetailReturn {
   fetchIssue: (id: string) => Promise<void>;
   /** Clear the current issue details */
   clearIssue: () => void;
+  /** Merge updated Issue fields into the current IssueDetails state */
+  updateIssueDetails: (updated: Issue) => void;
 }
 
 /**
@@ -114,11 +116,35 @@ export function useIssueDetail(): UseIssueDetailReturn {
     setIsLoading(false);
   }, []);
 
+  const updateIssueDetails = useCallback((updated: Issue) => {
+    setIssueDetails((prev) => {
+      if (!prev) return prev;
+      // Build a partial update from defined fields only (respects exactOptionalPropertyTypes)
+      const patch: Partial<IssueDetails> = {
+        title: updated.title,
+        priority: updated.priority,
+        updated_at: updated.updated_at,
+      };
+      if (updated.status !== undefined) patch.status = updated.status;
+      if (updated.issue_type !== undefined)
+        patch.issue_type = updated.issue_type;
+      if (updated.assignee !== undefined) patch.assignee = updated.assignee;
+      if (updated.owner !== undefined) patch.owner = updated.owner;
+      if (updated.description !== undefined)
+        patch.description = updated.description;
+      if (updated.design !== undefined) patch.design = updated.design;
+      if (updated.notes !== undefined) patch.notes = updated.notes;
+      if (updated.labels !== undefined) patch.labels = updated.labels;
+      return { ...prev, ...patch };
+    });
+  }, []);
+
   return {
     issueDetails,
     isLoading,
     error,
     fetchIssue,
     clearIssue,
+    updateIssueDetails,
   };
 }

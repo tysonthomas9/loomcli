@@ -56,8 +56,9 @@ describe("KanbanBoard", () => {
   });
 
   describe("rendering", () => {
-    it("renders default 6-column kanban layout (Backlog, Open, Blocked, In Progress, Needs Review, Done)", () => {
-      render(<KanbanBoard issues={[]} />);
+    it("renders default 6-column kanban layout (Backlog, Open, Blocked, In Progress, Review, Done)", () => {
+      const issues = [createMockIssue({ status: "open" })];
+      render(<KanbanBoard issues={issues} />);
 
       // Check for new default columns
       expect(
@@ -71,13 +72,14 @@ describe("KanbanBoard", () => {
         screen.getByRole("heading", { name: "In Progress" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole("heading", { name: "Needs Review" }),
+        screen.getByRole("heading", { name: "Review" }),
       ).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Done" })).toBeInTheDocument();
     });
 
     it("renders legacy 3-column layout with statuses prop", () => {
-      render(<KanbanBoard issues={[]} statuses={LEGACY_STATUSES} />);
+      const issues = [createMockIssue({ status: "open" })];
+      render(<KanbanBoard issues={issues} statuses={LEGACY_STATUSES} />);
 
       // Check for legacy columns
       expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
@@ -91,8 +93,9 @@ describe("KanbanBoard", () => {
 
     it("renders custom status columns", () => {
       const customStatuses: Status[] = ["blocked", "deferred", "open"];
+      const issues = [createMockIssue({ status: "open" })];
 
-      render(<KanbanBoard issues={[]} statuses={customStatuses} />);
+      render(<KanbanBoard issues={issues} statuses={customStatuses} />);
 
       expect(
         screen.getByRole("heading", { name: "Blocked" }),
@@ -202,8 +205,9 @@ describe("KanbanBoard", () => {
 
   describe("props", () => {
     it("custom className is applied", () => {
+      const issues = [createMockIssue({ status: "open" })];
       const { container } = render(
-        <KanbanBoard issues={[]} className="custom-board-class" />,
+        <KanbanBoard issues={issues} className="custom-board-class" />,
       );
 
       const board = container.firstChild as HTMLElement;
@@ -245,8 +249,9 @@ describe("KanbanBoard", () => {
 
     it("custom statuses override defaults", () => {
       const customStatuses: Status[] = ["custom_status"];
+      const issues = [createMockIssue({ status: "custom_status" as Status })];
 
-      render(<KanbanBoard issues={[]} statuses={customStatuses} />);
+      render(<KanbanBoard issues={issues} statuses={customStatuses} />);
 
       expect(
         screen.getByRole("heading", { name: "Custom Status" }),
@@ -278,8 +283,9 @@ describe("KanbanBoard", () => {
 
   describe("DndContext", () => {
     it("DndContext provider wraps columns", () => {
+      const issues = [createMockIssue({ status: "open" })];
       const { container } = render(
-        <KanbanBoard issues={[]} statuses={LEGACY_STATUSES} />,
+        <KanbanBoard issues={issues} statuses={LEGACY_STATUSES} />,
       );
 
       // The board div should exist and contain columns
@@ -357,38 +363,28 @@ describe("KanbanBoard", () => {
   });
 
   describe("edge cases", () => {
-    it("empty issues array renders columns with 0 count", () => {
+    it("empty issues array renders EmptyWorkspaceBoard", () => {
       render(<KanbanBoard issues={[]} statuses={LEGACY_STATUSES} />);
 
-      // All columns should show 0 count
-      const openColumn = screen.getByRole("region", { name: "Open issues" });
-      expect(within(openColumn).getByLabelText("0 issues")).toBeInTheDocument();
-
-      const progressColumn = screen.getByRole("region", {
-        name: "In Progress issues",
-      });
+      // Should show the board-level empty state instead of empty columns
+      expect(screen.getByTestId("empty-workspace-board")).toBeInTheDocument();
       expect(
-        within(progressColumn).getByLabelText("0 issues"),
-      ).toBeInTheDocument();
-
-      const closedColumn = screen.getByRole("region", {
-        name: "Closed issues",
-      });
-      expect(
-        within(closedColumn).getByLabelText("0 issues"),
+        screen.getByRole("heading", { name: "No issues yet" }),
       ).toBeInTheDocument();
     });
 
-    it("renders EmptyColumn in empty status columns", () => {
-      render(<KanbanBoard issues={[]} statuses={LEGACY_STATUSES} />);
+    it("renders EmptyColumn in empty status columns when other columns have issues", () => {
+      const issues = [createMockIssue({ status: "open" })];
+      render(<KanbanBoard issues={issues} statuses={LEGACY_STATUSES} />);
 
-      // Each empty column should show EmptyColumn with appropriate message
-      expect(screen.getByText("No open issues")).toBeInTheDocument();
+      // Open column should NOT show EmptyColumn (it has an issue)
+      expect(screen.queryByText("No open issues")).not.toBeInTheDocument();
+      // Other columns should show EmptyColumn
       expect(screen.getByText("No issues in progress")).toBeInTheDocument();
       expect(screen.getByText("No closed issues")).toBeInTheDocument();
     });
 
-    it("renders EmptyColumn when filter results in empty column", () => {
+    it("renders EmptyWorkspaceBoard with filter message when filter results in zero issues", () => {
       const issues = [
         createMockIssue({
           id: "open-1",
@@ -413,10 +409,11 @@ describe("KanbanBoard", () => {
         />,
       );
 
-      // All columns should be empty due to filter (no features)
-      expect(screen.getByText("No open issues")).toBeInTheDocument();
-      expect(screen.getByText("No issues in progress")).toBeInTheDocument();
-      expect(screen.getByText("No closed issues")).toBeInTheDocument();
+      // Should show filter-aware empty state
+      expect(screen.getByTestId("empty-workspace-board")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "No issues match your filters" }),
+      ).toBeInTheDocument();
     });
 
     it("shows EmptyColumn only in columns without issues", () => {
@@ -569,9 +566,10 @@ describe("KanbanBoard", () => {
   describe("column ordering", () => {
     it("columns are rendered in statuses array order", () => {
       const orderedStatuses: Status[] = ["closed", "in_progress", "open"];
+      const issues = [createMockIssue({ status: "open" })];
 
       const { container } = render(
-        <KanbanBoard issues={[]} statuses={orderedStatuses} />,
+        <KanbanBoard issues={issues} statuses={orderedStatuses} />,
       );
 
       const columns = container.querySelectorAll("section");
@@ -627,8 +625,9 @@ describe("KanbanBoard", () => {
   describe("droppable zones", () => {
     it("each column has a droppable zone with matching status id", () => {
       const statuses: Status[] = ["open", "in_progress", "closed", "blocked"];
+      const issues = [createMockIssue({ status: "open" })];
 
-      render(<KanbanBoard issues={[]} statuses={statuses} />);
+      render(<KanbanBoard issues={issues} statuses={statuses} />);
 
       statuses.forEach((status) => {
         const droppable = document.querySelector(
@@ -639,7 +638,8 @@ describe("KanbanBoard", () => {
     });
 
     it('droppable zones have role="list"', () => {
-      render(<KanbanBoard issues={[]} statuses={LEGACY_STATUSES} />);
+      const issues = [createMockIssue({ status: "open" })];
+      render(<KanbanBoard issues={issues} statuses={LEGACY_STATUSES} />);
 
       const lists = screen.getAllByRole("list");
       expect(lists).toHaveLength(3); // Three legacy columns
@@ -702,7 +702,8 @@ describe("KanbanBoard", () => {
 
   describe("CSS class application", () => {
     it("board has base CSS class", () => {
-      const { container } = render(<KanbanBoard issues={[]} />);
+      const issues = [createMockIssue({ status: "open" })];
+      const { container } = render(<KanbanBoard issues={issues} />);
 
       const board = container.firstChild as HTMLElement;
       // CSS module will add the class
@@ -710,8 +711,9 @@ describe("KanbanBoard", () => {
     });
 
     it("board combines base and custom CSS classes", () => {
+      const issues = [createMockIssue({ status: "open" })];
       const { container } = render(
-        <KanbanBoard issues={[]} className="my-custom-class" />,
+        <KanbanBoard issues={issues} className="my-custom-class" />,
       );
 
       const board = container.firstChild as HTMLElement;
@@ -1459,44 +1461,96 @@ describe("KanbanBoard", () => {
       expect(articles).toHaveLength(10);
     });
 
-    it('shows "Show all" button when Done column has more than 10 items', () => {
+    it('shows "Load more" button when Done column has more than 10 items', () => {
       const issues = createClosedIssues(15);
 
       render(<KanbanBoard issues={issues} />);
 
       expect(
-        screen.getByRole("button", { name: "Show all 15" }),
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
       ).toBeInTheDocument();
     });
 
-    it('clicking "Show all" displays all closed issues', () => {
+    it('clicking "Load more" shows next batch of closed issues', () => {
       const issues = createClosedIssues(15);
 
       render(<KanbanBoard issues={issues} />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Show all 15" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
+      );
 
       const doneColumn = screen.getByRole("region", { name: "Done issues" });
       const articles = within(doneColumn).getAllByRole("article");
       expect(articles).toHaveLength(15);
     });
 
-    it('after clicking "Show all", button text changes to "Show recent"', () => {
+    it('after loading all items, button text changes to "Show recent"', () => {
       const issues = createClosedIssues(15);
 
       render(<KanbanBoard issues={issues} />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Show all 15" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
+      );
 
       expect(
         screen.getByRole("button", { name: "Show recent" }),
       ).toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: /Show all/ }),
+        screen.queryByRole("button", { name: /Load .* more/ }),
       ).not.toBeInTheDocument();
     });
 
-    it('shows all items when 10 or fewer closed issues (no "Show all" button)', () => {
+    it('"Load more" button shows correct remaining count', () => {
+      const issues = createClosedIssues(25);
+
+      render(<KanbanBoard issues={issues} />);
+
+      const doneColumn = screen.getByRole("region", { name: "Done issues" });
+      expect(within(doneColumn).getAllByRole("article")).toHaveLength(10);
+
+      // Remaining is 15, which is less than batch size 50
+      expect(
+        screen.getByRole("button", { name: "Load 15 more · 25 total" }),
+      ).toBeInTheDocument();
+
+      // Click to load all remaining
+      fireEvent.click(
+        screen.getByRole("button", { name: "Load 15 more · 25 total" }),
+      );
+      expect(within(doneColumn).getAllByRole("article")).toHaveLength(25);
+
+      // Now should show "Show recent"
+      expect(
+        screen.getByRole("button", { name: "Show recent" }),
+      ).toBeInTheDocument();
+    });
+
+    it('"Show recent" resets to default limit', () => {
+      const issues = createClosedIssues(15);
+
+      render(<KanbanBoard issues={issues} />);
+
+      // Load all
+      fireEvent.click(
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
+      );
+
+      const doneColumn = screen.getByRole("region", { name: "Done issues" });
+      expect(within(doneColumn).getAllByRole("article")).toHaveLength(15);
+
+      // Reset
+      fireEvent.click(screen.getByRole("button", { name: "Show recent" }));
+      expect(within(doneColumn).getAllByRole("article")).toHaveLength(10);
+
+      // Load more button should be back
+      expect(
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
+      ).toBeInTheDocument();
+    });
+
+    it('shows all items when 10 or fewer closed issues (no "Load more" button)', () => {
       const issues = createClosedIssues(8);
 
       render(<KanbanBoard issues={issues} />);
@@ -1505,7 +1559,7 @@ describe("KanbanBoard", () => {
       const articles = within(doneColumn).getAllByRole("article");
       expect(articles).toHaveLength(8);
       expect(
-        screen.queryByRole("button", { name: /Show all/ }),
+        screen.queryByRole("button", { name: /Load .* more/ }),
       ).not.toBeInTheDocument();
     });
 

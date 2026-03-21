@@ -7,6 +7,8 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo } from "react";
 
 import { BlockedBadge } from "@/components/BlockedBadge";
+import { HighlightText } from "@/components/HighlightText";
+import { useSearchTerm } from "@/contexts/SearchTermContext";
 import type { IssueNode as IssueNodeType } from "@/types";
 import { formatIssueId } from "@/utils/formatIssueId";
 
@@ -37,6 +39,7 @@ function IssueNodeComponent({
   sourcePosition,
   targetPosition,
 }: IssueNodeProps): JSX.Element {
+  const searchTerm = useSearchTerm();
   const {
     title,
     priority,
@@ -82,7 +85,9 @@ function IssueNodeComponent({
       )}
 
       <header className={styles.header}>
-        <span className={styles.id}>{displayId}</span>
+        <span className={styles.id} title={issue.id}>
+          {displayId}
+        </span>
         {issueType && (
           <span className={styles.typeBadge} data-type={issueType}>
             {issueType}
@@ -97,7 +102,9 @@ function IssueNodeComponent({
         </span>
       </header>
 
-      <h3 className={styles.title}>{displayTitle}</h3>
+      <h3 className={styles.title}>
+        <HighlightText text={displayTitle} searchTerm={searchTerm} />
+      </h3>
 
       <footer className={styles.footer}>
         <span className={styles.depCount} title="Dependencies">

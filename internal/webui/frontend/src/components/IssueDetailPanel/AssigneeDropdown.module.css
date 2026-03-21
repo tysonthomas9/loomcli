@@ -1,6 +1,6 @@
 /**
  * AssigneeDropdown component styles.
- * Custom dropdown with text input following PriorityDropdown/TypeDropdown patterns.
+ * Custom dropdown with text input, agent list, and recent assignees.
  */
 
 .assigneeDropdown {
@@ -87,13 +87,15 @@
   top: 100%;
   left: 0;
   z-index: var(--z-dropdown, 100);
-  min-width: 200px;
+  min-width: 220px;
   margin-top: var(--space-1, 4px);
   padding: var(--space-1, 4px);
   background-color: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 /* Input row */
@@ -144,6 +146,99 @@
   cursor: not-allowed;
 }
 
+/* Section header (Agents, People) */
+.sectionHeader {
+  display: block;
+  padding: 4px 8px;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Agents section */
+.agentSection {
+  padding: 4px 0;
+  border-top: 1px solid var(--color-border);
+  margin-top: 4px;
+}
+
+.agentItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.agentItem:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.agentItemBusy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.agentStatusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.agentStatusDot[data-status="available"] {
+  background-color: var(--color-success);
+}
+
+.agentStatusDot[data-status="warning"] {
+  background-color: var(--color-warning);
+}
+
+.agentStatusDot[data-status="busy"] {
+  background-color: var(--color-text-muted);
+}
+
+.agentName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentStatusLabel {
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.noResults {
+  display: block;
+  padding: 6px 10px;
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 /* Recent assignees section */
 .recentSection {
   padding: 4px 0;
@@ -151,6 +246,7 @@
   margin-top: 4px;
 }
 
+/* Legacy label - kept for backward compat */
 .recentLabel {
   display: block;
   padding: 4px 8px;
@@ -196,6 +292,55 @@
 
 .unassignButton:hover {
   background-color: var(--color-bg-secondary);
+}
+
+/* Confirmation dialog for agent reassignment */
+.confirmOverlay {
+  padding: 8px;
+}
+
+.confirmText {
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  margin: 0 0 8px 0;
+  line-height: 1.4;
+}
+
+.confirmActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.confirmCancel {
+  padding: 4px 10px;
+  font-size: var(--font-xs);
+  color: var(--color-text-secondary);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.confirmCancel:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.confirmProceed {
+  padding: 4px 10px;
+  font-size: var(--font-xs);
+  color: var(--color-text);
+  background-color: var(--color-warning);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 500;
+  transition: opacity var(--transition-fast);
+}
+
+.confirmProceed:hover {
+  opacity: 0.85;
 }
 
 /* Saving indicator */

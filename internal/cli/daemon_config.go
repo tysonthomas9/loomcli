@@ -5,22 +5,40 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"text/template"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
+var projectConfigVersionWarnOnce sync.Once
+
+func resetProjectConfigVersionWarnOnce() {
+	projectConfigVersionWarnOnce = sync.Once{}
+}
+
 // DaemonSettings holds daemon-specific config fields.
 type DaemonSettings struct {
-	PIDFile       string            `yaml:"pid_file,omitempty"`
-	LogDir        string            `yaml:"log_dir,omitempty"`
-	EventsDir     string            `yaml:"events_dir,omitempty"`
-	RestartPolicy RestartPolicy     `yaml:"restart_policy,omitempty"`
-	MaxAgents     *int              `yaml:"max_agents,omitempty"`
-	RedisURL      string            `yaml:"redis_url,omitempty"`
-	APIKey        string            `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
-	JWTKey        string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
-	OTel          *OTelDaemonConfig `yaml:"otel,omitempty"`
+	PIDFile        string            `yaml:"pid_file,omitempty"`
+	LogDir         string            `yaml:"log_dir,omitempty"`
+	EventsDir      string            `yaml:"events_dir,omitempty"`
+	RestartPolicy  RestartPolicy     `yaml:"restart_policy,omitempty"`
+	MaxAgents      *int              `yaml:"max_agents,omitempty"`
+	RedisURL       string            `yaml:"redis_url,omitempty"`        // stale-detector/serve Redis — NOT used by fleet-db (see FleetDBSettings.RedisURL)
+	APIKey         string            `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	JWTKey         string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	OTel           *OTelDaemonConfig `yaml:"otel,omitempty"`
+	FleetDB        *FleetDBSettings  `yaml:"fleetdb,omitempty"`         // fleet-db backend config (separate from RedisURL above)
+	StartupTimeout *int              `yaml:"startup_timeout,omitempty"` // seconds; how long to wait for daemon readiness (default 30)
+}
+
+// GetStartupTimeout returns the configured startup timeout or the given fallback.
+func (d *DaemonSettings) GetStartupTimeout(fallback time.Duration) time.Duration {
+	if d == nil || d.StartupTimeout == nil || *d.StartupTimeout <= 0 {
+		return fallback
+	}
+	return time.Duration(*d.StartupTimeout) * time.Second
 }
 
 // OTelDaemonConfig holds OpenTelemetry export configuration for the daemon.
@@ -66,13 +84,26 @@ type RoleConfig struct {
 }
 
 // AgentEntry defines a single agent assignment.
+//
+// Multi-repo routing fields:
+//
+//	repos: ["backend", "frontend"]         # explicit repo names this agent handles
+//	repo_groups: ["infra", "data"]         # bind to groups defined in RepoConfig
+//	cross_repo: true                       # agent can pick up tasks spanning repos
+//
+// An agent with neither repos nor repo_groups can work on any repo (backward compatible).
 type AgentEntry struct {
 	Worktree         string   `yaml:"worktree"`
 	Role             string   `yaml:"role"`
+	Repo             string   `yaml:"repo,omitempty"`
 	Auto             bool     `yaml:"auto,omitempty"`
 	Backend          string   `yaml:"backend,omitempty"`
 	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
 	PathPatterns     []string `yaml:"path_patterns,omitempty"`
+	SourceRepos      []string `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
+	Repos            []string `yaml:"repos,omitempty"`
+	RepoGroups       []string `yaml:"repo_groups,omitempty"`
+	CrossRepo        bool     `yaml:"cross_repo,omitempty"`
 }
 
 // ProjectFile represents the project-local loom.yaml.
@@ -128,7 +159,9 @@ func LoadProjectFile(dir string) (*ProjectFile, error) {
 		return nil, fmt.Errorf("parsing project file %s: %w", path, err)
 	}
 	if pf.Version < CurrentConfigVersion {
-		fmt.Fprintf(os.Stderr, "Warning: project config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, pf.Version, CurrentConfigVersion)
+		projectConfigVersionWarnOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "Warning: project config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, pf.Version, CurrentConfigVersion)
+		})
 	}
 	return &pf, nil
 }
@@ -197,6 +230,11 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		return nil, err
 	}
 
+	// Validate repo references against workspace config
+	if err := validateAgentRepos(dc.Agents); err != nil {
+		return nil, err
+	}
+
 	// Run comprehensive validation
 	if vr := ValidateProjectConfig(dc, projectDir); vr.HasErrors() {
 		return nil, fmt.Errorf("%s", vr.FormatIssues())
@@ -229,6 +267,79 @@ func validateAgents(agents []AgentEntry, maxAgents *int) error {
 	return nil
 }
 
+// validateAgentRepos checks that agent Repo fields reference valid repos in the workspace config.
+// In workspace mode, unknown repo names are hard errors. Outside workspace mode, Repo fields
+// trigger a warning but are not blocking.
+func validateAgentRepos(agents []AgentEntry) error {
+	// Check if any agent uses Repo
+	hasRepo := false
+	for _, a := range agents {
+		if a.Repo != "" {
+			hasRepo = true
+			break
+		}
+	}
+	if !hasRepo {
+		return nil
+	}
+
+	ws, err := ResolveActiveWorkspace()
+	if err != nil {
+		return fmt.Errorf("validating agent repos: %w", err)
+	}
+
+	if ws == nil {
+		// Not in workspace mode — warn but don't fail
+		fmt.Fprintf(os.Stderr, "Warning: agent(s) declare repo but no workspace is configured; repo field will be ignored\n")
+		return nil
+	}
+
+	// Build set of valid repo names
+	repoNames := make(map[string]bool, len(ws.Repos))
+	for _, r := range ws.Repos {
+		repoNames[r.Name] = true
+	}
+
+	for i, a := range agents {
+		if a.Repo == "" {
+			continue
+		}
+		if !repoNames[a.Repo] {
+			available := make([]string, 0, len(ws.Repos))
+			for _, r := range ws.Repos {
+				available = append(available, r.Name)
+			}
+			return fmt.Errorf("agent[%d]: repo %q not found in workspace; available repos: %v", i, a.Repo, available)
+		}
+	}
+	return nil
+}
+
+// resolveRepoPath looks up a repo by name in the active workspace config and returns
+// its absolute path. Returns an error if the repo is not found or the path doesn't exist.
+func resolveRepoPath(repoName string) (string, error) {
+	ws, err := ResolveActiveWorkspace()
+	if err != nil {
+		return "", fmt.Errorf("resolving workspace: %w", err)
+	}
+	if ws == nil {
+		return "", fmt.Errorf("no active workspace configured")
+	}
+
+	for _, repo := range ws.Repos {
+		if repo.Name == repoName {
+			absPath := repo.ResolveAbsPath(ws.Path)
+			if info, err := os.Stat(absPath); err != nil {
+				return "", fmt.Errorf("repo path %q does not exist: %w", absPath, err)
+			} else if !info.IsDir() {
+				return "", fmt.Errorf("repo path %q is not a directory", absPath)
+			}
+			return absPath, nil
+		}
+	}
+	return "", fmt.Errorf("repo %q not found in workspace", repoName)
+}
+
 // overlayDaemonSettings applies explicitly-set values from src onto dst.
 func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	if src.PIDFile != "" {
@@ -240,36 +351,7 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	if src.EventsDir != "" {
 		dst.EventsDir = src.EventsDir
 	}
-	if src.RestartPolicy.MaxRetries != nil {
-		dst.RestartPolicy.MaxRetries = src.RestartPolicy.MaxRetries
-	}
-	if src.RestartPolicy.BackoffInitial != nil {
-		dst.RestartPolicy.BackoffInitial = src.RestartPolicy.BackoffInitial
-	}
-	if src.RestartPolicy.BackoffMax != nil {
-		dst.RestartPolicy.BackoffMax = src.RestartPolicy.BackoffMax
-	}
-	if src.RestartPolicy.OutputTimeout != nil {
-		dst.RestartPolicy.OutputTimeout = src.RestartPolicy.OutputTimeout
-	}
-	if src.RestartPolicy.RateLimitBackoff != nil {
-		dst.RestartPolicy.RateLimitBackoff = src.RestartPolicy.RateLimitBackoff
-	}
-	if src.RestartPolicy.RateLimitMaxWait != nil {
-		dst.RestartPolicy.RateLimitMaxWait = src.RestartPolicy.RateLimitMaxWait
-	}
-	if src.RestartPolicy.RateLimitNoCount != nil {
-		dst.RestartPolicy.RateLimitNoCount = src.RestartPolicy.RateLimitNoCount
-	}
-	if src.RestartPolicy.TimeoutBackoff != nil {
-		dst.RestartPolicy.TimeoutBackoff = src.RestartPolicy.TimeoutBackoff
-	}
-	if src.RestartPolicy.NoWorkBackoff != nil {
-		dst.RestartPolicy.NoWorkBackoff = src.RestartPolicy.NoWorkBackoff
-	}
-	if src.RestartPolicy.IdlePollInterval != nil {
-		dst.RestartPolicy.IdlePollInterval = src.RestartPolicy.IdlePollInterval
-	}
+	overlayRestartPolicy(&dst.RestartPolicy, &src.RestartPolicy)
 	if src.MaxAgents != nil {
 		dst.MaxAgents = src.MaxAgents
 	}
@@ -287,6 +369,48 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 			dst.OTel = &OTelDaemonConfig{}
 		}
 		overlayOTelConfig(dst.OTel, src.OTel)
+	}
+	if src.FleetDB != nil {
+		if dst.FleetDB == nil {
+			dst.FleetDB = &FleetDBSettings{}
+		}
+		overlayFleetDBSettings(dst.FleetDB, src.FleetDB)
+	}
+	if src.StartupTimeout != nil {
+		dst.StartupTimeout = src.StartupTimeout
+	}
+}
+
+func overlayRestartPolicy(dst, src *RestartPolicy) {
+	if src.MaxRetries != nil {
+		dst.MaxRetries = src.MaxRetries
+	}
+	if src.BackoffInitial != nil {
+		dst.BackoffInitial = src.BackoffInitial
+	}
+	if src.BackoffMax != nil {
+		dst.BackoffMax = src.BackoffMax
+	}
+	if src.OutputTimeout != nil {
+		dst.OutputTimeout = src.OutputTimeout
+	}
+	if src.RateLimitBackoff != nil {
+		dst.RateLimitBackoff = src.RateLimitBackoff
+	}
+	if src.RateLimitMaxWait != nil {
+		dst.RateLimitMaxWait = src.RateLimitMaxWait
+	}
+	if src.RateLimitNoCount != nil {
+		dst.RateLimitNoCount = src.RateLimitNoCount
+	}
+	if src.TimeoutBackoff != nil {
+		dst.TimeoutBackoff = src.TimeoutBackoff
+	}
+	if src.NoWorkBackoff != nil {
+		dst.NoWorkBackoff = src.NoWorkBackoff
+	}
+	if src.IdlePollInterval != nil {
+		dst.IdlePollInterval = src.IdlePollInterval
 	}
 }
 

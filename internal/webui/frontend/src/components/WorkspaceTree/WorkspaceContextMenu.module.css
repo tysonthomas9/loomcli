@@ -1,0 +1,55 @@
+/**
+ * WorkspaceContextMenu styles.
+ * Positioned popover for workspace actions.
+ */
+
+.menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 160px;
+  padding: 4px 0;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--color-text-primary);
+  text-align: left;
+  white-space: nowrap;
+  transition: background-color 0.15s ease;
+}
+
+.menuItem:hover {
+  background: var(--color-bg-hover);
+}
+
+.menuItem:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.menuItemIcon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+.dangerItem {
+  color: var(--color-error, #e53935);
+}
+
+.dangerItem .menuItemIcon {
+  color: var(--color-error, #e53935);
+}

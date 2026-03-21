@@ -147,7 +147,7 @@ func TestResolveAgentTarget_WorkspaceMode_WorkspaceName(t *testing.T) {
 	defaultResolver = nil
 	defer func() { defaultResolver = old }()
 
-	target, err := ResolveAgentTarget("myws")
+	target, err := ResolveAgentTarget("myws", "")
 	if err != nil {
 		t.Fatalf("ResolveAgentTarget: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestResolveAgentTarget_WorkspaceMode_RepoName(t *testing.T) {
 	defaultResolver = nil
 	defer func() { defaultResolver = old }()
 
-	target, err := ResolveAgentTarget("repo1")
+	target, err := ResolveAgentTarget("repo1", "")
 	if err != nil {
 		t.Fatalf("ResolveAgentTarget: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestResolveAgentTarget_WorkspaceMode_NoArg(t *testing.T) {
 	defaultResolver = nil
 	defer func() { defaultResolver = old }()
 
-	target, err := ResolveAgentTarget("")
+	target, err := ResolveAgentTarget("", "")
 	if err != nil {
 		t.Fatalf("ResolveAgentTarget: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestResolveAgentTarget_WorkspaceMode_InvalidName(t *testing.T) {
 	defaultResolver = nil
 	defer func() { defaultResolver = old }()
 
-	_, err := ResolveAgentTarget("nonexistent")
+	_, err := ResolveAgentTarget("nonexistent", "")
 	if err == nil {
 		t.Fatal("expected error for invalid name")
 	}
@@ -280,7 +280,7 @@ func TestResolveAgentTarget_LegacyMode_WorktreeName(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	target, err := ResolveAgentTarget("falcon")
+	target, err := ResolveAgentTarget("falcon", "")
 	if err != nil {
 		t.Fatalf("ResolveAgentTarget: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestResolveAgentTarget_LegacyMode_NoArg(t *testing.T) {
 	defer os.Chdir(origDir)
 	os.Chdir(tmpDir)
 
-	target, err := ResolveAgentTarget("")
+	target, err := ResolveAgentTarget("", "")
 	if err != nil {
 		t.Fatalf("ResolveAgentTarget: %v", err)
 	}
@@ -317,6 +317,308 @@ func TestResolveAgentTarget_LegacyMode_NoArg(t *testing.T) {
 	expectedName := filepath.Base(tmpDir)
 	if target.AgentName != expectedName {
 		t.Errorf("expected AgentName=%q, got %q", expectedName, target.AgentName)
+	}
+}
+
+// ---------- ResolveAgentTarget per-repo routing ----------
+
+func TestResolveAgentTarget_WorkspaceMode_WithRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "myrepo")
+	createGitRepo(t, repoPath)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  tmpDir,
+				Repos: []RepoConfig{{Name: "myrepo", Path: repoPath}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	target, err := ResolveAgentTarget("myagent", "myrepo")
+	if err != nil {
+		t.Fatalf("ResolveAgentTarget: %v", err)
+	}
+	expectedDir := filepath.Join(tmpDir, "worktrees", "myrepo", "myagent")
+	if target.WorkDir != expectedDir {
+		t.Errorf("expected WorkDir=%s, got %s", expectedDir, target.WorkDir)
+	}
+	if target.AgentName != "myagent" {
+		t.Errorf("expected AgentName='myagent', got %q", target.AgentName)
+	}
+	if target.Repo != "myrepo" {
+		t.Errorf("expected Repo='myrepo', got %q", target.Repo)
+	}
+	// Verify worktree was created on disk
+	gitFile := filepath.Join(expectedDir, ".git")
+	if _, err := os.Stat(gitFile); os.IsNotExist(err) {
+		t.Errorf("expected worktree .git file at %s", gitFile)
+	}
+}
+
+func TestResolveAgentTarget_WorkspaceMode_WithRepo_AlreadyExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "myrepo")
+	createGitRepo(t, repoPath)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  tmpDir,
+				Repos: []RepoConfig{{Name: "myrepo", Path: repoPath}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	// First call creates
+	_, err := ResolveAgentTarget("myagent", "myrepo")
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	// Second call should succeed (idempotent)
+	target, err := ResolveAgentTarget("myagent", "myrepo")
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	expectedDir := filepath.Join(tmpDir, "worktrees", "myrepo", "myagent")
+	if target.WorkDir != expectedDir {
+		t.Errorf("expected WorkDir=%s, got %s", expectedDir, target.WorkDir)
+	}
+}
+
+func TestResolveAgentTarget_WorkspaceMode_EmptyRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "repo1")
+	createGitRepo(t, repoPath)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  tmpDir,
+				Repos: []RepoConfig{{Name: "repo1", Path: repoPath}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	target, err := ResolveAgentTarget("", "")
+	if err != nil {
+		t.Fatalf("ResolveAgentTarget: %v", err)
+	}
+	// With empty repo, should fall through to workspace root
+	if target.WorkDir != tmpDir {
+		t.Errorf("expected WorkDir=%s (workspace root), got %s", tmpDir, target.WorkDir)
+	}
+	if target.Repo != "" {
+		t.Errorf("expected Repo='', got %q", target.Repo)
+	}
+}
+
+func TestResolveAgentTarget_WorkspaceMode_UnknownRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "repo1")
+	createGitRepo(t, repoPath)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  tmpDir,
+				Repos: []RepoConfig{{Name: "repo1", Path: repoPath}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	_, err := ResolveAgentTarget("myagent", "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for unknown repo")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("expected error to mention 'nonexistent', got: %v", err)
+	}
+}
+
+func TestResolveAgentTarget_WorkspaceMode_AbsPathIgnoresRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "repo1")
+	createGitRepo(t, repoPath)
+
+	absTarget := filepath.Join(tmpDir, "custom")
+	os.MkdirAll(absTarget, 0755)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  tmpDir,
+				Repos: []RepoConfig{{Name: "repo1", Path: repoPath}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	// Absolute path takes priority, repo is ignored
+	target, err := ResolveAgentTarget(absTarget, "repo1")
+	if err != nil {
+		t.Fatalf("ResolveAgentTarget: %v", err)
+	}
+	if target.WorkDir != absTarget {
+		t.Errorf("expected WorkDir=%s, got %s", absTarget, target.WorkDir)
+	}
+}
+
+func TestResolveAgentTarget_LegacyMode_RepoError(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	_, err := ResolveAgentTarget("myagent", "somerepo")
+	if err == nil {
+		t.Fatal("expected error for repo in legacy mode")
+	}
+	if !strings.Contains(err.Error(), "workspace mode") {
+		t.Errorf("expected error to mention workspace mode, got: %v", err)
+	}
+}
+
+func TestEnsureRepoWorktree_Creates(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "repo")
+	createGitRepo(t, repoPath)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "repo", "agent1")
+	err := ensureRepoWorktree(repoPath, wtPath, "agent1")
+	if err != nil {
+		t.Fatalf("ensureRepoWorktree: %v", err)
+	}
+	gitFile := filepath.Join(wtPath, ".git")
+	if _, err := os.Stat(gitFile); os.IsNotExist(err) {
+		t.Errorf("expected .git file at %s", gitFile)
+	}
+}
+
+func TestEnsureRepoWorktree_Idempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "repo")
+	createGitRepo(t, repoPath)
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "repo", "agent1")
+	// First call
+	if err := ensureRepoWorktree(repoPath, wtPath, "agent1"); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	// Second call should succeed
+	if err := ensureRepoWorktree(repoPath, wtPath, "agent1"); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+}
+
+func TestEnsureRepoWorktree_BranchExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "repo")
+	createGitRepo(t, repoPath)
+
+	// Create branch first
+	RunGitCommand(repoPath, "branch", "agent1")
+
+	wtPath := filepath.Join(tmpDir, "worktrees", "repo", "agent1")
+	err := ensureRepoWorktree(repoPath, wtPath, "agent1")
+	if err != nil {
+		t.Fatalf("ensureRepoWorktree with existing branch: %v", err)
+	}
+	gitFile := filepath.Join(wtPath, ".git")
+	if _, err := os.Stat(gitFile); os.IsNotExist(err) {
+		t.Errorf("expected .git file at %s", gitFile)
+	}
+}
+
+func TestResolveAgentTarget_WorkspaceMode_MultipleAgentsSameRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	repoPath := filepath.Join(tmpDir, "myrepo")
+	createGitRepo(t, repoPath)
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "myws",
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {
+				Path:  tmpDir,
+				Repos: []RepoConfig{{Name: "myrepo", Path: repoPath}},
+			},
+		},
+	}
+	setupWorkspaceConfig(t, cfg)
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	// Two different agents targeting the same repo
+	t1, err := ResolveAgentTarget("agent1", "myrepo")
+	if err != nil {
+		t.Fatalf("agent1: %v", err)
+	}
+	t2, err := ResolveAgentTarget("agent2", "myrepo")
+	if err != nil {
+		t.Fatalf("agent2: %v", err)
+	}
+	// Each should get a different worktree directory
+	if t1.WorkDir == t2.WorkDir {
+		t.Errorf("expected different WorkDir for different agents, both got %s", t1.WorkDir)
+	}
+	expected1 := filepath.Join(tmpDir, "worktrees", "myrepo", "agent1")
+	expected2 := filepath.Join(tmpDir, "worktrees", "myrepo", "agent2")
+	if t1.WorkDir != expected1 {
+		t.Errorf("agent1 WorkDir: expected %s, got %s", expected1, t1.WorkDir)
+	}
+	if t2.WorkDir != expected2 {
+		t.Errorf("agent2 WorkDir: expected %s, got %s", expected2, t2.WorkDir)
 	}
 }
 

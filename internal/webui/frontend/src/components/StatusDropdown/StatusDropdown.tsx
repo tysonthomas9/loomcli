@@ -5,6 +5,7 @@
 
 import { useCallback } from "react";
 
+import { useAnnounce } from "@/hooks/useAnnounce";
 import { formatStatusLabel } from "@/utils/statusFormat";
 import type { Status, KnownStatus } from "@/types/status";
 import { USER_SELECTABLE_STATUSES } from "@/types/status";
@@ -59,15 +60,18 @@ export function StatusDropdown({
   isSaving,
   className,
 }: StatusDropdownProps): JSX.Element {
+  const { announce } = useAnnounce();
+
   const handleChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const newStatus = event.target.value as Status;
       // Skip if same status selected
       if (newStatus !== status) {
         onStatusChange(newStatus);
+        announce(`Status changed to ${formatStatusLabel(newStatus)}`);
       }
     },
-    [status, onStatusChange],
+    [status, onStatusChange, announce],
   );
 
   const isDisabled = disabled || isSaving;

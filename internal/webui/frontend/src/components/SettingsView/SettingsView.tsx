@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
+import type { ViewMode } from "@/components/ViewSwitcher";
 import { useBackendConfig } from "@/hooks/useBackendConfig";
 import {
   useTerminalFont,
@@ -21,11 +22,22 @@ import styles from "./SettingsView.module.css";
 
 export interface SettingsViewProps {
   className?: string;
+  onNavigate?: (view: ViewMode) => void;
 }
 
-export function SettingsView({ className }: SettingsViewProps): JSX.Element {
-  const { config, isLoading, error, isSaving, updateBackend, refetch } =
-    useBackendConfig();
+export function SettingsView({
+  className,
+  onNavigate,
+}: SettingsViewProps): JSX.Element {
+  const {
+    config,
+    isLoading,
+    error,
+    isSaving,
+    isCached,
+    updateBackend,
+    refetch,
+  } = useBackendConfig();
   const { showToast } = useToast();
   const [selectedBackend, setSelectedBackend] = useState<string | null>(null);
 
@@ -101,7 +113,6 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
     if (ok) {
       setSelectedBackend(null);
       showToast("Backend updated successfully", { type: "success" });
-      window.dispatchEvent(new CustomEvent("terminal-backend-changed"));
     } else {
       showToast("Failed to update backend", { type: "error" });
     }
@@ -114,7 +125,14 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
       {/* Project Default Backend */}
       <div className={styles.panel}>
         <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>Project Default Backend</h3>
+          <h3 className={styles.panelTitle}>
+            Project Default Backend
+            {isCached && (
+              <span className={styles.cachedBadge} data-testid="cached-badge">
+                (cached)
+              </span>
+            )}
+          </h3>
         </div>
         <div className={styles.panelContent}>
           <div className={styles.formGroup}>
@@ -149,7 +167,7 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
             <button
               type="button"
               className={styles.saveButton}
-              disabled={!hasChanges || isSaving}
+              disabled={!hasChanges || isSaving || isCached}
               onClick={handleSave}
               data-testid="save-button"
             >
@@ -270,6 +288,28 @@ export function SettingsView({ className }: SettingsViewProps): JSX.Element {
           </div>
         </div>
       </div>
+
+      {/* Observability Navigation */}
+      {onNavigate && (
+        <div className={styles.panel} data-testid="observability-nav-panel">
+          <div className={styles.panelHeader}>
+            <h3 className={styles.panelTitle}>Observability</h3>
+          </div>
+          <div className={styles.panelContent}>
+            <p className={styles.description}>
+              View system metrics and agent activity.
+            </p>
+            <button
+              type="button"
+              className={styles.navButton}
+              onClick={() => onNavigate("observability")}
+              data-testid="observability-nav-button"
+            >
+              Open Observability
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

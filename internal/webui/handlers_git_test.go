@@ -15,12 +15,17 @@ type mockGitOps struct {
 	pushFunc               func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error)
 	pullFunc               func(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error)
 	createPRFunc           func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error)
-	resetFunc              func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error)
+	resetFunc              func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error)
 	statusFunc             func(worktreePath, targetBranch string) (*GitStatusResult, error)
 	getCurrentBranchFunc   func(worktreePath string) (string, error)
 	checkGhInstalledFunc   func() error
 	setRepoDefaultFunc     func(repoName, branch string) error
 	listAgentWorktreesFunc func() ([]AgentWorktree, error)
+	diffStatFunc           func(worktreePath, fromRef string) DiffStatResult
+	resolveMergeBaseFunc   func(worktreePath, branch string) (string, error)
+	diffCommitsFunc        func(worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error)
+	diffFilesFunc          func(worktreePath, from, to string) ([]DiffFileResult, error)
+	diffFilePatchFunc      func(worktreePath, from, to, path string) (*DiffFilePatchResult, error)
 }
 
 func (m *mockGitOps) ResolveAgentWorktree(name string) (*AgentWorktree, error) {
@@ -51,9 +56,9 @@ func (m *mockGitOps) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 	return &GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 }
 
-func (m *mockGitOps) Reset(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+func (m *mockGitOps) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 	if m.resetFunc != nil {
-		return m.resetFunc(worktreePath, worktreeName, targetBranch, force)
+		return m.resetFunc(worktreePath, worktreeName, targetBranch, force, push)
 	}
 	return &GitResetResult{Success: true, Message: "reset done"}, nil
 }
@@ -91,6 +96,41 @@ func (m *mockGitOps) ListAgentWorktrees() ([]AgentWorktree, error) {
 		return m.listAgentWorktreesFunc()
 	}
 	return nil, nil
+}
+
+func (m *mockGitOps) DiffStat(worktreePath, fromRef string) DiffStatResult {
+	if m.diffStatFunc != nil {
+		return m.diffStatFunc(worktreePath, fromRef)
+	}
+	return DiffStatResult{}
+}
+
+func (m *mockGitOps) ResolveMergeBase(worktreePath, branch string) (string, error) {
+	if m.resolveMergeBaseFunc != nil {
+		return m.resolveMergeBaseFunc(worktreePath, branch)
+	}
+	return "abc123", nil
+}
+
+func (m *mockGitOps) DiffCommits(worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error) {
+	if m.diffCommitsFunc != nil {
+		return m.diffCommitsFunc(worktreePath, mergeBase, limit)
+	}
+	return []DiffCommitResult{}, nil
+}
+
+func (m *mockGitOps) DiffFiles(worktreePath, from, to string) ([]DiffFileResult, error) {
+	if m.diffFilesFunc != nil {
+		return m.diffFilesFunc(worktreePath, from, to)
+	}
+	return []DiffFileResult{}, nil
+}
+
+func (m *mockGitOps) DiffFilePatch(worktreePath, from, to, path string) (*DiffFilePatchResult, error) {
+	if m.diffFilePatchFunc != nil {
+		return m.diffFilePatchFunc(worktreePath, from, to, path)
+	}
+	return &DiffFilePatchResult{}, nil
 }
 
 // testWorktree returns a standard AgentWorktree used across tests.
@@ -744,7 +784,7 @@ func TestGitPR_OperationError(t *testing.T) {
 
 func TestGitReset_Success(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		return &GitResetResult{Success: true, Message: "reset to main", PreviousBranch: "loomcli-test-agent"}, nil
 	}
 	handler := handleGitReset(ops)
@@ -770,7 +810,7 @@ func TestGitReset_Success(t *testing.T) {
 
 func TestGitReset_CustomBranch(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		if targetBranch != "develop" {
 			t.Errorf("targetBranch = %q, want %q", targetBranch, "develop")
 		}
@@ -792,7 +832,7 @@ func TestGitReset_CustomBranch(t *testing.T) {
 
 func TestGitReset_ForceFlag(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		if !force {
 			t.Error("expected force to be true")
 		}
@@ -814,7 +854,7 @@ func TestGitReset_ForceFlag(t *testing.T) {
 
 func TestGitReset_Locked(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		return nil, &GitResetLockedError{
 			AgentName: "test-agent",
 			PID:       12345,
@@ -857,7 +897,7 @@ func TestGitReset_Locked(t *testing.T) {
 
 func TestGitReset_OperationError(t *testing.T) {
 	ops := resolveOK()
-	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force bool) (*GitResetResult, error) {
+	ops.resetFunc = func(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error) {
 		return nil, errors.New("reset failed: dirty worktree")
 	}
 	handler := handleGitReset(ops)

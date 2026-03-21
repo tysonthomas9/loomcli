@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 
-const STORAGE_KEY = "beads-recent-assignees";
+const STORAGE_KEY = "cortex:recent-assignees";
 const MAX_RECENT = 5;
 
 /**

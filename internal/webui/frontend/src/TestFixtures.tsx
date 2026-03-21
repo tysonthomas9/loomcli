@@ -237,6 +237,42 @@ export function ToastTestFixture(): JSX.Element {
         </button>
       </div>
 
+      <div
+        style={{
+          display: "flex",
+          gap: "8px",
+          flexWrap: "wrap",
+          marginBottom: "1rem",
+        }}
+      >
+        <button
+          data-testid="trigger-undo-toast"
+          onClick={() =>
+            showToast("Item deleted", {
+              type: "warning",
+              onUndo: () => {
+                showToast("Undo successful", { type: "success" });
+              },
+            })
+          }
+          style={{ padding: "8px 16px", cursor: "pointer" }}
+        >
+          Toast with Undo
+        </button>
+
+        <button
+          data-testid="trigger-rapid-errors"
+          onClick={() => {
+            showToast("Connection failed", { type: "error" });
+            showToast("Connection failed", { type: "error" });
+            showToast("Connection failed", { type: "error" });
+          }}
+          style={{ padding: "8px 16px", cursor: "pointer" }}
+        >
+          Rapid Errors (x3)
+        </button>
+      </div>
+
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
         <button
           data-testid="dismiss-all"

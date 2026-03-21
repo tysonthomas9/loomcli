@@ -206,7 +206,7 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 		}
 
 		// Parse query parameters
-		status, includeClosed := parseGraphParams(r)
+		status, includeClosed, sourceRepos := parseGraphParams(r)
 
 		// Validate status parameter
 		validStatuses := map[string]bool{"all": true, "open": true, "closed": true}
@@ -238,7 +238,9 @@ func handleGraphWithPool(pool graphConnectionGetter) http.HandlerFunc {
 		defer pool.Put(client)
 
 		// Build GetGraphData args based on status filter
-		graphArgs := &rpc.GetGraphDataArgs{}
+		graphArgs := &rpc.GetGraphDataArgs{
+			SourceRepos: sourceRepos,
+		}
 		if status == "open" {
 			graphArgs.ExcludeStatus = []string{"closed", "tombstone"}
 		} else if status == "closed" {
@@ -337,7 +339,7 @@ func parseBlockedParams(r *http.Request) (*rpc.BlockedArgs, error) {
 }
 
 // parseGraphParams parses query parameters for the graph endpoint.
-func parseGraphParams(r *http.Request) (status string, includeClosed bool) {
+func parseGraphParams(r *http.Request) (status string, includeClosed bool, sourceRepos []string) {
 	q := r.URL.Query()
 	status = q.Get("status")
 	if status == "" {
@@ -345,5 +347,6 @@ func parseGraphParams(r *http.Request) (status string, includeClosed bool) {
 	}
 	includeClosedStr := q.Get("include_closed")
 	includeClosed = includeClosedStr != "false" // Default true
-	return status, includeClosed
+	sourceRepos = parseArrayParam(q, "source_repos")
+	return status, includeClosed, sourceRepos
 }

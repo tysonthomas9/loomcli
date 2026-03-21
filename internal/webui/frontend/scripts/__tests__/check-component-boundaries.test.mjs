@@ -289,7 +289,7 @@ describe("scanAll", () => {
 describe("ALLOWLIST", () => {
   it("is an array of { source, target } entries", () => {
     expect(Array.isArray(ALLOWLIST)).toBe(true);
-    expect(ALLOWLIST.length).toBe(4);
+    expect(ALLOWLIST.length).toBe(7);
     for (const entry of ALLOWLIST) {
       expect(entry).toHaveProperty("source");
       expect(entry).toHaveProperty("target");

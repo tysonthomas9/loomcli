@@ -5,6 +5,8 @@
 
 import type { ReactNode } from "react";
 
+import { LiveRegion } from "@/components/LiveRegion/LiveRegion";
+
 import styles from "./AppLayout.module.css";
 
 /**
@@ -22,7 +24,7 @@ export interface AppLayoutProps {
   /** Optional element to render in the left sidebar */
   sidebar?: ReactNode;
   /** Application title displayed in header (defaults to "Beads") */
-  title?: string;
+  title?: ReactNode;
   /** Additional CSS class name */
   className?: string;
 }
@@ -47,6 +49,7 @@ export function AppLayout({
 
   return (
     <div className={rootClassName}>
+      <LiveRegion />
       <a href="#main-content" className={styles.skipLink}>
         Skip to main content
       </a>

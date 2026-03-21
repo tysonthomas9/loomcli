@@ -103,6 +103,9 @@ export interface Issue {
   source_formula?: string;
   source_location?: string;
 
+  /** Repository that owns this issue (multi-repo workspaces) */
+  repo?: string;
+
   // Agent Identity Fields
   hook_bead?: string;
   role_bead?: string;

@@ -2,19 +2,43 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import "@/styles/index.css";
+import { migrateLocalStorage } from "@/utils/migrateLocalStorage";
 import { initAuth, getAuthState } from "@/api";
 import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { ToastProvider, AgentProvider } from "@/hooks";
+import { initErrorReporter, reportError } from "@/api/errorReporter";
+import {
+  ToastProvider,
+  AgentProvider,
+  WorkspaceProvider,
+  useIssueSessionMap,
+} from "@/hooks";
+import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
 import {
   IssueDetailPanelFixture,
   ErrorTriggerFixture,
   ToastTestFixture,
 } from "@/TestFixtures";
 
+// Run localStorage migration before anything reads storage.
+// ES imports are hoisted, so this executes after all imports but before any React rendering.
+migrateLocalStorage();
+
+// Install global error handlers early, before auth/render initialization.
+initErrorReporter();
+
 const rootElement = document.getElementById("root");
 if (!rootElement) {
   throw new Error("Failed to find root element");
+}
+
+function IssueSessionWrapper({ children }: { children: React.ReactNode }) {
+  const issueSessionMap = useIssueSessionMap();
+  return (
+    <IssueSessionProvider value={issueSessionMap}>
+      {children}
+    </IssueSessionProvider>
+  );
 }
 
 // Simple path-based routing for test fixtures (development only)
@@ -57,9 +81,19 @@ initAuth()
   .finally(() => {
     createRoot(rootElement).render(
       <StrictMode>
-        <ErrorBoundary>
+        <ErrorBoundary
+          onError={(error, errorInfo) => {
+            reportError("react-error", error, {
+              componentStack: errorInfo.componentStack ?? undefined,
+            });
+          }}
+        >
           <ToastProvider>
-            <AgentProvider>{getComponent()}</AgentProvider>
+            <WorkspaceProvider>
+              <AgentProvider>
+                <IssueSessionWrapper>{getComponent()}</IssueSessionWrapper>
+              </AgentProvider>
+            </WorkspaceProvider>
           </ToastProvider>
         </ErrorBoundary>
       </StrictMode>,

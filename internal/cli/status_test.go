@@ -828,3 +828,142 @@ func TestDaemonAgentStateStructs(t *testing.T) {
 		t.Errorf("Agents[1].Status = %q, want %q", state.Agents[1].Status, "idle")
 	}
 }
+
+// ============================================================================
+// Repo Field Tests
+// ============================================================================
+
+func TestLoadDaemonManagedAgents_WithRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	result := collectDaemonStatusForDirHelper(t, tmpDir, []DaemonAgentStateEntry{
+		{Worktree: "falcon", Status: "running", Role: "task", Repo: "github.com/org/repo-a"},
+		{Worktree: "nova", Status: "idle", Role: "plan", Repo: "github.com/org/repo-b"},
+		{Worktree: "spark", Status: "running"},
+	})
+
+	if result == nil {
+		t.Fatal("loadDaemonManagedAgents() returned nil, want non-nil map")
+	}
+	if result["falcon"].Repo != "github.com/org/repo-a" {
+		t.Errorf("result[falcon].Repo = %q, want %q", result["falcon"].Repo, "github.com/org/repo-a")
+	}
+	if result["nova"].Repo != "github.com/org/repo-b" {
+		t.Errorf("result[nova].Repo = %q, want %q", result["nova"].Repo, "github.com/org/repo-b")
+	}
+	if result["spark"].Repo != "" {
+		t.Errorf("result[spark].Repo = %q, want empty string", result["spark"].Repo)
+	}
+}
+
+func TestAgentStatusRepoJSONOmitempty(t *testing.T) {
+	// When Repo is set, it should appear in JSON
+	agent := AgentStatus{
+		Name:   "falcon",
+		Branch: "falcon",
+		Status: "ready",
+		Repo:   "github.com/org/repo-a",
+	}
+
+	data, err := json.Marshal(agent)
+	if err != nil {
+		t.Fatalf("failed to marshal AgentStatus: %v", err)
+	}
+
+	jsonStr := string(data)
+	if !strings.Contains(jsonStr, `"repo":"github.com/org/repo-a"`) {
+		t.Errorf("expected repo in JSON, got: %s", jsonStr)
+	}
+
+	// When Repo is empty, it should be omitted (omitempty)
+	agentNoRepo := AgentStatus{
+		Name:   "nova",
+		Branch: "nova",
+		Status: "ready",
+	}
+
+	data, err = json.Marshal(agentNoRepo)
+	if err != nil {
+		t.Fatalf("failed to marshal AgentStatus: %v", err)
+	}
+
+	jsonStr = string(data)
+	if strings.Contains(jsonStr, "repo") {
+		t.Errorf("repo should be omitted when empty (omitempty), got: %s", jsonStr)
+	}
+}
+
+func TestDaemonAgentStateEntryRepoJSONRoundTrip(t *testing.T) {
+	jsonData := `{
+		"pid": 12345,
+		"agents": [
+			{"worktree": "falcon", "status": "running", "role": "task", "repo": "github.com/org/repo-a"},
+			{"worktree": "nova", "status": "idle"}
+		]
+	}`
+
+	var state DaemonAgentState
+	if err := json.Unmarshal([]byte(jsonData), &state); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if state.Agents[0].Repo != "github.com/org/repo-a" {
+		t.Errorf("Agents[0].Repo = %q, want %q", state.Agents[0].Repo, "github.com/org/repo-a")
+	}
+	if state.Agents[1].Repo != "" {
+		t.Errorf("Agents[1].Repo = %q, want empty string", state.Agents[1].Repo)
+	}
+
+	// Re-marshal and verify omitempty behavior
+	reData, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("failed to re-marshal: %v", err)
+	}
+	reStr := string(reData)
+	if !strings.Contains(reStr, `"repo":"github.com/org/repo-a"`) {
+		t.Errorf("expected repo for falcon in re-marshaled JSON, got: %s", reStr)
+	}
+	// nova has no repo, so repo should not appear for it; check via unmarshal into raw
+	var reState DaemonAgentState
+	if err := json.Unmarshal(reData, &reState); err != nil {
+		t.Fatalf("failed to unmarshal re-marshaled data: %v", err)
+	}
+	if reState.Agents[1].Repo != "" {
+		t.Errorf("re-marshaled Agents[1].Repo = %q, want empty", reState.Agents[1].Repo)
+	}
+}
+
+func TestBuildStatusDataIncludesRepo(t *testing.T) {
+	daemon := DaemonInfo{}
+	mon := &MonitorData{
+		Timestamp: time.Now(),
+		Agents: []AgentStatus{
+			{Name: "falcon", Status: "working: task-1 (5m)", Repo: "github.com/org/repo-a"},
+			{Name: "nova", Status: "ready"},
+		},
+	}
+
+	data := buildStatusData(daemon, mon)
+
+	if len(data.Worktrees.List) < 2 {
+		t.Fatalf("expected 2 worktrees, got %d", len(data.Worktrees.List))
+	}
+
+	// Verify the worktree items are populated (repo is on AgentStatus, not WorktreeStatusItem,
+	// so we verify the AgentStatus struct itself carries it through JSON serialization)
+	b, err := json.Marshal(mon.Agents[0])
+	if err != nil {
+		t.Fatalf("failed to marshal agent: %v", err)
+	}
+	if !strings.Contains(string(b), `"repo":"github.com/org/repo-a"`) {
+		t.Errorf("expected repo in agent JSON, got: %s", string(b))
+	}
+
+	b, err = json.Marshal(mon.Agents[1])
+	if err != nil {
+		t.Fatalf("failed to marshal agent: %v", err)
+	}
+	if strings.Contains(string(b), `"repo"`) {
+		t.Errorf("repo should be omitted for agent without repo, got: %s", string(b))
+	}
+}

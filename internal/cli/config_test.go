@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -252,5 +253,204 @@ func TestRepoConfigDefaults(t *testing.T) {
 	}
 	if repo.Remote != "" {
 		t.Errorf("Remote = %q, want empty (omitempty)", repo.Remote)
+	}
+}
+
+func TestRepoConfig_ResolveAbsPath_Relative(t *testing.T) {
+	rc := RepoConfig{Path: "repos/myrepo"}
+	got := rc.ResolveAbsPath("/workspace")
+	want := "/workspace/repos/myrepo"
+	if got != want {
+		t.Errorf("ResolveAbsPath(%q) = %q, want %q", "/workspace", got, want)
+	}
+}
+
+func TestRepoConfig_ResolveAbsPath_Absolute(t *testing.T) {
+	rc := RepoConfig{Path: "/abs/myrepo"}
+	got := rc.ResolveAbsPath("/workspace")
+	want := "/abs/myrepo"
+	if got != want {
+		t.Errorf("ResolveAbsPath(%q) = %q, want %q", "/workspace", got, want)
+	}
+}
+
+func TestRepoConfigGroupsParsing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	yamlData := `workspaces:
+  ws:
+    path: /tmp/ws
+    repos:
+      - name: myrepo
+        path: /tmp/ws/myrepo
+        groups:
+          - backend
+          - infra
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	repo := cfg.Workspaces["ws"].Repos[0]
+	if len(repo.Groups) != 2 {
+		t.Fatalf("len(Groups) = %d, want 2", len(repo.Groups))
+	}
+	if repo.Groups[0] != "backend" || repo.Groups[1] != "infra" {
+		t.Errorf("Groups = %v, want [backend infra]", repo.Groups)
+	}
+}
+
+func TestRepoConfigSourceRepoIDDefaulting(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	yamlData := `workspaces:
+  ws:
+    path: /tmp/ws
+    repos:
+      - name: myrepo
+        path: /tmp/ws/myrepo
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	repo := cfg.Workspaces["ws"].Repos[0]
+	if repo.SourceRepoID != "myrepo" {
+		t.Errorf("SourceRepoID = %q, want %q (defaulted from Name)", repo.SourceRepoID, "myrepo")
+	}
+}
+
+func TestRepoConfigSourceRepoIDExplicit(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	yamlData := `workspaces:
+  ws:
+    path: /tmp/ws
+    repos:
+      - name: myrepo
+        path: /tmp/ws/myrepo
+        source_repo_id: custom-id
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	repo := cfg.Workspaces["ws"].Repos[0]
+	if repo.SourceRepoID != "custom-id" {
+		t.Errorf("SourceRepoID = %q, want %q (explicit value preserved)", repo.SourceRepoID, "custom-id")
+	}
+}
+
+func TestRepoConfig_ResolveAbsPath_EmptyWorkspace(t *testing.T) {
+	rc := RepoConfig{Path: "repos/myrepo"}
+	got := rc.ResolveAbsPath("")
+	want := filepath.Join("", "repos/myrepo")
+	if got != want {
+		t.Errorf("ResolveAbsPath(%q) = %q, want %q", "", got, want)
+	}
+}
+
+// captureStderr redirects os.Stderr to a pipe, runs fn, and returns
+// whatever was written to stderr as a string.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	os.Stderr = w
+
+	fn()
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stderr: %v", err)
+	}
+	return string(out)
+}
+
+func TestLoadConfig_VersionWarningDedup(t *testing.T) {
+	// Reset the once guard so this test starts clean.
+	resetConfigVersionWarnOnce()
+	t.Cleanup(resetConfigVersionWarnOnce)
+
+	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir)
+
+	// Write a version-0 config (version field omitted defaults to 0,
+	// which is below CurrentConfigVersion=1).
+	yamlData := `workspaces:
+  ws:
+    path: /tmp/ws
+    repos:
+      - name: myrepo
+        path: /tmp/ws/myrepo
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	const warnSubstr = "Run 'loom config migrate' to upgrade"
+
+	// First call: warning should appear.
+	stderr1 := captureStderr(t, func() {
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() #1 error = %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("LoadConfig() #1 returned nil")
+		}
+	})
+	if count := strings.Count(stderr1, warnSubstr); count != 1 {
+		t.Errorf("first LoadConfig(): want exactly 1 warning, got %d; stderr = %q", count, stderr1)
+	}
+
+	// Second call: warning should be suppressed by sync.Once.
+	stderr2 := captureStderr(t, func() {
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() #2 error = %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("LoadConfig() #2 returned nil")
+		}
+	})
+	if strings.Contains(stderr2, warnSubstr) {
+		t.Errorf("second LoadConfig(): want no warning, got stderr = %q", stderr2)
+	}
+
+	// Reset the guard and call again: warning should reappear.
+	resetConfigVersionWarnOnce()
+	stderr3 := captureStderr(t, func() {
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("LoadConfig() #3 error = %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("LoadConfig() #3 returned nil")
+		}
+	})
+	if count := strings.Count(stderr3, warnSubstr); count != 1 {
+		t.Errorf("after reset, LoadConfig(): want exactly 1 warning, got %d; stderr = %q", count, stderr3)
 	}
 }

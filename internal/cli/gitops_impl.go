@@ -88,8 +88,8 @@ func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 	}, nil
 }
 
-func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, force bool) (*webui.GitResetResult, error) {
-	result, err := ResetWorktreeResult(worktreePath, worktreeName, targetBranch, force)
+func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*webui.GitResetResult, error) {
+	result, err := ResetWorktreeResult(worktreePath, worktreeName, targetBranch, force, push)
 	if err != nil {
 		var lockedErr *LockedError
 		if isLockedError(err, &lockedErr) {
@@ -106,6 +106,7 @@ func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, forc
 		Success:        result.Success,
 		Message:        result.Message,
 		PreviousBranch: result.PreviousBranch,
+		Pushed:         result.Pushed,
 	}, nil
 }
 
@@ -173,6 +174,31 @@ func (g *GitOpsImpl) ListAgentWorktrees() ([]webui.AgentWorktree, error) {
 		result = append(result, aw)
 	}
 	return result, nil
+}
+
+func (g *GitOpsImpl) DiffStat(worktreePath, fromRef string) webui.DiffStatResult {
+	stats := ComputeDiffStats(worktreePath, fromRef)
+	return webui.DiffStatResult{
+		FilesChanged: stats.FilesChanged,
+		LinesAdded:   stats.LinesAdded,
+		LinesRemoved: stats.LinesRemoved,
+	}
+}
+
+func (g *GitOpsImpl) ResolveMergeBase(worktreePath, branch string) (string, error) {
+	return ResolveMergeBase(worktreePath, branch)
+}
+
+func (g *GitOpsImpl) DiffCommits(worktreePath, mergeBase string, limit int) ([]webui.DiffCommitResult, error) {
+	return DiffCommits(worktreePath, mergeBase, limit)
+}
+
+func (g *GitOpsImpl) DiffFiles(worktreePath, from, to string) ([]webui.DiffFileResult, error) {
+	return DiffFiles(worktreePath, from, to)
+}
+
+func (g *GitOpsImpl) DiffFilePatch(worktreePath, from, to, path string) (*webui.DiffFilePatchResult, error) {
+	return DiffFilePatch(worktreePath, from, to, path)
 }
 
 // isLockedError checks if err is a LockedError and extracts it.

@@ -40,6 +40,7 @@ type AgentStatus struct {
 	Ahead         int            `json:"ahead"`                    // commits ahead of integration branch
 	Behind        int            `json:"behind"`                   // commits behind integration branch
 	Role          string         `json:"role,omitempty"`           // role from daemon config (e.g., "plan", "task")
+	Repo          string         `json:"repo,omitempty"`           // repository this agent is assigned to (multi-repo)
 	Workspace     string         `json:"workspace"`                // workspace name (empty in legacy mode)
 	DaemonManaged bool           `json:"daemon_managed,omitempty"` // true if under daemon supervision
 	Commits       []CommitDetail `json:"commits,omitempty"`        // recent commits ahead of integration branch
@@ -113,6 +114,7 @@ type BdIssue struct {
 	Assignee     string       `json:"assignee"`
 	Labels       []string     `json:"labels"`
 	Dependencies []Dependency `json:"dependencies"`
+	SourceRepo   string       `json:"source_repo,omitempty"`
 }
 
 // BdStats represents output from bd stats --json
@@ -141,10 +143,12 @@ type DaemonAgentStateEntry struct {
 	Worktree string `json:"worktree"`
 	Status   string `json:"status"`
 	Role     string `json:"role"`
+	Repo     string `json:"repo,omitempty"`
 }
 
 // DaemonAgentInfo carries daemon supervision metadata for a worktree.
 type DaemonAgentInfo struct {
 	Managed bool
 	Role    string
+	Repo    string
 }

@@ -807,4 +807,106 @@ describe("getSSEUrl", () => {
 
     expect(url).toBe(`${window.location.origin}/api/events?since=0`);
   });
+
+  it("appends source_repos param when sourceRepos is provided", () => {
+    const url = getSSEUrl(undefined, ["repo-a", "repo-b"]);
+
+    expect(url).toContain("source_repos=repo-a%2Crepo-b");
+  });
+
+  it("omits source_repos param when sourceRepos is empty", () => {
+    const url = getSSEUrl(undefined, []);
+
+    expect(url).not.toContain("source_repos");
+  });
+
+  it("omits source_repos param when sourceRepos is undefined", () => {
+    const url = getSSEUrl(undefined, undefined);
+
+    expect(url).not.toContain("source_repos");
+  });
+
+  it("includes both since and source_repos when both are provided", () => {
+    const url = getSSEUrl(1706011200000, ["repo-a"]);
+
+    expect(url).toContain("since=1706011200000");
+    expect(url).toContain("source_repos=repo-a");
+  });
+});
+
+describe("BeadsSSEClient sourceRepos support", () => {
+  let originalEventSource: typeof EventSource;
+
+  beforeEach(() => {
+    originalEventSource = global.EventSource;
+    global.EventSource = MockEventSource as unknown as typeof EventSource;
+    MockEventSource.reset();
+  });
+
+  afterEach(() => {
+    global.EventSource = originalEventSource;
+    vi.restoreAllMocks();
+  });
+
+  it("connect() passes sourceRepos to URL", () => {
+    const client = new BeadsSSEClient();
+
+    client.connect(undefined, ["repo-a", "repo-b"]);
+
+    expect(MockEventSource.lastInstance?.url).toContain(
+      "source_repos=repo-a%2Crepo-b",
+    );
+  });
+
+  it("connect() without sourceRepos omits source_repos from URL", () => {
+    const client = new BeadsSSEClient();
+
+    client.connect();
+
+    expect(MockEventSource.lastInstance?.url).not.toContain("source_repos");
+  });
+
+  it("connect() with both since and sourceRepos includes both in URL", () => {
+    const client = new BeadsSSEClient();
+
+    client.connect(1706011200000, ["repo-x"]);
+
+    expect(MockEventSource.lastInstance?.url).toContain("since=1706011200000");
+    expect(MockEventSource.lastInstance?.url).toContain("source_repos=repo-x");
+  });
+
+  it("retryNow() uses stored sourceRepos from last connect()", () => {
+    const client = new BeadsSSEClient();
+
+    client.connect(undefined, ["repo-a", "repo-b"]);
+    MockEventSource.lastInstance?.simulateOpen();
+
+    // Trigger reconnecting state
+    MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+    expect(client.getState()).toBe("reconnecting");
+
+    client.retryNow();
+
+    // New connection should use stored sourceRepos
+    expect(MockEventSource.instances.length).toBe(2);
+    expect(MockEventSource.lastInstance?.url).toContain(
+      "source_repos=repo-a%2Crepo-b",
+    );
+  });
+
+  it("retryNow() without sourceRepos omits source_repos from URL", () => {
+    const client = new BeadsSSEClient();
+
+    client.connect();
+    MockEventSource.lastInstance?.simulateOpen();
+
+    // Trigger reconnecting state
+    MockEventSource.lastInstance?.simulateError(MockEventSource.CONNECTING);
+    expect(client.getState()).toBe("reconnecting");
+
+    client.retryNow();
+
+    expect(MockEventSource.instances.length).toBe(2);
+    expect(MockEventSource.lastInstance?.url).not.toContain("source_repos");
+  });
 });

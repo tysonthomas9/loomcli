@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -78,40 +79,29 @@ type epicChild struct {
 	Status string
 }
 
-// getEpicInfo queries bd for epic details including child tasks.
+// getEpicInfo queries the issue tracker for epic details including child tasks.
 func getEpicInfo(epicID string) (*epicPRInfo, error) {
-	result := execCommand(GetBeadsDir(), "bd", "show", epicID, "--json")
-	if result.Err != nil {
-		return nil, fmt.Errorf("bd show failed: %w", result.Err)
+	tracker := defaultTracker()
+	ctx := context.Background()
+
+	// Get the epic's own data
+	epic, err := tracker.GetIssue(ctx, epicID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get epic %s: %w", epicID, err)
 	}
 
-	// bd show --json returns an array
-	var issues []struct {
-		ID         string `json:"id"`
-		Title      string `json:"title"`
-		Dependents []struct {
-			ID     string `json:"id"`
-			Title  string `json:"title"`
-			Status string `json:"status"`
-		} `json:"dependents"`
-	}
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse epic info: %w", err)
-	}
-	if len(issues) == 0 {
-		return nil, fmt.Errorf("no results for epic %s", epicID)
+	// Get child tasks
+	children, err := tracker.List(ctx, ListOpts{ParentID: epicID, Limit: 0})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list children of epic %s: %w", epicID, err)
 	}
 
-	epic := issues[0]
-	info := &epicPRInfo{
-		Title: epic.Title,
-		ID:    epic.ID,
-	}
-	for _, dep := range epic.Dependents {
+	info := &epicPRInfo{Title: epic.Title, ID: epic.ID}
+	for _, child := range children {
 		info.Children = append(info.Children, epicChild{
-			ID:     dep.ID,
-			Title:  dep.Title,
-			Status: dep.Status,
+			ID:     child.ID,
+			Title:  child.Title,
+			Status: child.Status,
 		})
 	}
 	return info, nil
@@ -166,9 +156,9 @@ func createEpicPR(dir, epicID, branch string, info *epicPRInfo) (string, error) 
 
 // storeExternalRef saves the PR URL in the epic's external_ref field.
 func storeExternalRef(epicID, prURL string) error {
-	result := execCommand(GetBeadsDir(), "bd", "update", epicID, "--external-ref", prURL)
-	if result.Err != nil {
-		return fmt.Errorf("bd update external-ref failed: %w", result.Err)
+	tracker := defaultTracker()
+	if err := tracker.UpdateExternalRef(context.Background(), epicID, prURL); err != nil {
+		return fmt.Errorf("failed to update external-ref for %s: %w", epicID, err)
 	}
 	return nil
 }

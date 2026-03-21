@@ -177,7 +177,7 @@ func TestHasUnclosedBlockers(t *testing.T) {
 		{"empty deps", []Dependency{}, nil, false},
 		{"only parent-child deps", []Dependency{
 			{Type: "parent-child", DependsOnID: "B-1"},
-		}, map[string]bool{"B-1": true}, true},
+		}, map[string]bool{"B-1": true}, false},
 		{"blocks dep with unclosed blocker", []Dependency{
 			{Type: "blocks", DependsOnID: "B-1"},
 		}, map[string]bool{"B-1": true}, true},
@@ -194,7 +194,7 @@ func TestHasUnclosedBlockers(t *testing.T) {
 		{"blocks dep resolved but parent-child still open", []Dependency{
 			{Type: "parent-child", DependsOnID: "B-1"},
 			{Type: "blocks", DependsOnID: "B-2"},
-		}, map[string]bool{"B-1": true}, true},
+		}, map[string]bool{"B-1": true}, false},
 		{"conditional-blocks dep unclosed", []Dependency{
 			{Type: "conditional-blocks", DependsOnID: "B-1"},
 		}, map[string]bool{"B-1": true}, true},
@@ -214,20 +214,20 @@ func TestHasUnclosedBlockers(t *testing.T) {
 	}
 }
 
-func TestAffectsReadyWork(t *testing.T) {
-	blocking := []string{"blocks", "parent-child", "conditional-blocks", "waits-for"}
+func TestIsDirectBlocker(t *testing.T) {
+	blocking := []string{"blocks", "conditional-blocks", "waits-for"}
 	for _, typ := range blocking {
-		if !affectsReadyWork(typ) {
-			t.Errorf("affectsReadyWork(%q) = false, want true", typ)
+		if !isDirectBlocker(typ) {
+			t.Errorf("isDirectBlocker(%q) = false, want true", typ)
 		}
 	}
-	nonBlocking := []string{"related", "discovered-from", "replies-to",
+	nonBlocking := []string{"parent-child", "related", "discovered-from", "replies-to",
 		"relates-to", "duplicates", "supersedes", "authored-by",
 		"assigned-to", "approved-by", "attests", "tracks", "until",
 		"caused-by", "validates", "delegated-from", ""}
 	for _, typ := range nonBlocking {
-		if affectsReadyWork(typ) {
-			t.Errorf("affectsReadyWork(%q) = true, want false", typ)
+		if isDirectBlocker(typ) {
+			t.Errorf("isDirectBlocker(%q) = true, want false", typ)
 		}
 	}
 }

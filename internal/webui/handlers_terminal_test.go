@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"nhooyr.io/websocket"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 func TestNewTerminalManager_NoTmux(t *testing.T) {
@@ -36,7 +38,7 @@ func TestNewTerminalManager_NoTmux(t *testing.T) {
 // TestHandleTerminalWS_NilManagerWithSession tests nil manager with session param returns 503.
 // The nil manager check happens before parameter validation.
 func TestHandleTerminalWS_NilManagerWithSession(t *testing.T) {
-	handler := handleTerminalWS(nil, nil, nil)
+	handler := handleTerminalWS(nil, nil, nil, "", nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	w := httptest.NewRecorder()
@@ -50,7 +52,7 @@ func TestHandleTerminalWS_NilManagerWithSession(t *testing.T) {
 
 // TestHandleTerminalWS_NilManager tests that nil manager returns 503.
 func TestHandleTerminalWS_NilManager(t *testing.T) {
-	handler := handleTerminalWS(nil, nil, nil)
+	handler := handleTerminalWS(nil, nil, nil, "", nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=test", nil)
 	w := httptest.NewRecorder()
@@ -92,7 +94,7 @@ func TestHandleTerminalWS_MissingSessionWithManager(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, nil, nil)
+	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
 	// Create request without session parameter
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws", nil)
@@ -129,7 +131,7 @@ func TestHandleTerminalWS_InvalidSessionName(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, nil, nil)
+	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -182,7 +184,7 @@ func TestHandleTerminalWS_ValidSessionNames(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, nil, nil)
+	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -233,7 +235,7 @@ func TestHandleTerminalWS_WebSocketUpgrade(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, nil, nil)
+	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
 	// Create a test server for WebSocket testing
 	server := httptest.NewServer(handler)
@@ -279,7 +281,7 @@ func TestHandleTerminalWS_CommandParameterIgnored(t *testing.T) {
 	// Use "bash" as the known defaultCmd so we can verify it later.
 	defaultCmd := "bash"
 	manager.SetDefaultCommand(defaultCmd)
-	handler := handleTerminalWS(manager, nil, nil)
+	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -1191,7 +1193,7 @@ func TestTerminalWebSocket_E2E(t *testing.T) {
 	}
 	defer manager.Shutdown()
 
-	handler := handleTerminalWS(manager, nil, nil)
+	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -1416,7 +1418,7 @@ func TestHandleTerminalWS_MaxSessionsReached(t *testing.T) {
 		t.Fatalf("Attach() error: %v", err)
 	}
 
-	handler := handleTerminalWS(manager, nil, nil)
+	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
 
 	// Send a plain HTTP request — it should be rejected before WebSocket upgrade.
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session=another", nil)
@@ -1640,6 +1642,313 @@ func TestHandleTerminalRestart_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// TestHandleTerminalRestart_ShellSession tests that restarting a lead-shell-*
+// session returns backend:"shell" and does not read loom.yaml or update defaultCommand.
+func TestHandleTerminalRestart_ShellSession(t *testing.T) {
+	manager, err := NewTerminalManager("claude", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte("backend: codex\n"), 0644)
+
+	pool := newMockConfigPool(dir)
+	handler := handleTerminalRestartWithPool(manager, pool, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-1", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != true {
+		t.Errorf("expected success to be true, got %v", resp["success"])
+	}
+	if resp["backend"] != "shell" {
+		t.Errorf("expected backend %q, got %q", "shell", resp["backend"])
+	}
+
+	// Verify manager's default command was NOT changed (should still be the original)
+	if got := manager.DefaultCommand(); got != "claude" {
+		t.Errorf("expected manager default command to remain %q, got %q", "claude", got)
+	}
+}
+
+// TestHandleTerminalRestart_ShellSession_NilPool tests that restarting a
+// lead-shell-* session works even when configPool is nil.
+func TestHandleTerminalRestart_ShellSession_NilPool(t *testing.T) {
+	manager, err := NewTerminalManager("claude", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	handler := handleTerminalRestartWithPool(manager, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/terminal/restart?session=lead-shell-3", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != true {
+		t.Errorf("expected success to be true, got %v", resp["success"])
+	}
+	if resp["backend"] != "shell" {
+		t.Errorf("expected backend %q, got %q", "shell", resp["backend"])
+	}
+}
+
+// TestHandleTerminalWS_SSEBroadcastOnIssueSession verifies that when a WebSocket
+// connects to a session that has issue_id metadata, the handler broadcasts a
+// terminal_session_change SSE event to the hub.
+func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("skipping in CI: tmux PTY lifecycle is unreliable in GitHub Actions")
+	}
+	manager, err := NewTerminalManager("bash", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	store, hub := setupTabMetaTest(t)
+
+	// Pre-populate metadata for the session with an issue_id.
+	ctx := context.Background()
+	now := time.Now().UTC()
+	err = store.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "issue-PROJ-42",
+		Workspace:   DefaultWorkspace,
+		Label:       "issue-PROJ-42",
+		IssueID:     "PROJ-42",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("failed to set tab metadata: %v", err)
+	}
+
+	// Register an SSE client on the hub to capture broadcast events.
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	defer hub.UnregisterClient(client)
+
+	// Give hub.Run() a moment to process registration.
+	time.Sleep(50 * time.Millisecond)
+
+	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[4:] + "?session=issue-PROJ-42"
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer dialCancel()
+
+	conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial WebSocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	// Wait for the SSE broadcast to arrive.
+	select {
+	case mutation := <-client.send:
+		if mutation.Type != "terminal_session_change" {
+			t.Errorf("expected type %q, got %q", "terminal_session_change", mutation.Type)
+		}
+		if mutation.IssueID != "PROJ-42" {
+			t.Errorf("expected issue_id %q, got %q", "PROJ-42", mutation.IssueID)
+		}
+		if mutation.Timestamp == "" {
+			t.Error("expected non-empty timestamp")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for SSE broadcast")
+	}
+}
+
+// TestHandleTerminalWS_NoSSEBroadcastWithoutIssueID verifies that when a
+// WebSocket connects to a session without issue_id metadata, no SSE event
+// is broadcast.
+func TestHandleTerminalWS_NoSSEBroadcastWithoutIssueID(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("skipping in CI: tmux PTY lifecycle is unreliable in GitHub Actions")
+	}
+	manager, err := NewTerminalManager("bash", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	store, hub := setupTabMetaTest(t)
+
+	// Pre-populate metadata WITHOUT an issue_id.
+	ctx := context.Background()
+	now := time.Now().UTC()
+	err = store.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "plain-session",
+		Workspace:   DefaultWorkspace,
+		Label:       "plain-session",
+		IssueID:     "",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("failed to set tab metadata: %v", err)
+	}
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	defer hub.UnregisterClient(client)
+
+	time.Sleep(50 * time.Millisecond)
+
+	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[4:] + "?session=plain-session"
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer dialCancel()
+
+	conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial WebSocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	// No SSE event should arrive within a reasonable timeout.
+	select {
+	case mutation := <-client.send:
+		t.Errorf("unexpected SSE broadcast: type=%q issue_id=%q", mutation.Type, mutation.IssueID)
+	case <-time.After(500 * time.Millisecond):
+		// Success: no broadcast was sent.
+	}
+}
+
+// TestHandleTerminalWS_NoSSEBroadcastWithNilStoreAndHub verifies that
+// handleTerminalWS works normally when tabMetaStore and hub are nil
+// (no SSE broadcast attempted).
+func TestHandleTerminalWS_NoSSEBroadcastWithNilStoreAndHub(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("skipping in CI: tmux PTY lifecycle is unreliable in GitHub Actions")
+	}
+	manager, err := NewTerminalManager("bash", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	// Pass nil for both tabMetaStore and hub — should not panic.
+	handler := handleTerminalWS(manager, nil, nil, "", nil, nil, nil)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[4:] + "?session=no-sse-test"
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer dialCancel()
+
+	conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial WebSocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	// Connection established without panic — test passes.
+	t.Log("WebSocket connection established successfully with nil tabMetaStore and hub")
+}
+
+// TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound verifies that when
+// tabMetaStore.Get returns nil (no metadata), no SSE event is broadcast.
+func TestHandleTerminalWS_NoSSEBroadcastWhenMetadataNotFound(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("skipping in CI: tmux PTY lifecycle is unreliable in GitHub Actions")
+	}
+	manager, err := NewTerminalManager("bash", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	store, hub := setupTabMetaTest(t)
+	// Do NOT populate metadata for the session — store.Get will return nil.
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	defer hub.UnregisterClient(client)
+
+	time.Sleep(50 * time.Millisecond)
+
+	handler := handleTerminalWS(manager, nil, nil, "", nil, store, hub)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[4:] + "?session=unknown-session"
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer dialCancel()
+
+	conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial WebSocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	// No SSE event should arrive.
+	select {
+	case mutation := <-client.send:
+		t.Errorf("unexpected SSE broadcast: type=%q issue_id=%q", mutation.Type, mutation.IssueID)
+	case <-time.After(500 * time.Millisecond):
+		// Success: no broadcast was sent.
+	}
+}
+
 // TestHandleTerminalWS_OriginValidation tests WebSocket origin validation
 // using OriginPatterns set by the allowedOrigins parameter.
 func TestHandleTerminalWS_OriginValidation(t *testing.T) {
@@ -1691,7 +2000,7 @@ func TestHandleTerminalWS_OriginValidation(t *testing.T) {
 			}
 			defer manager.Shutdown()
 
-			handler := handleTerminalWS(manager, nil, tt.allowedOrigins)
+			handler := handleTerminalWS(manager, nil, tt.allowedOrigins, "", nil, nil, nil)
 			server := httptest.NewServer(handler)
 			defer server.Close()
 

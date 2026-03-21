@@ -77,14 +77,14 @@ test.describe("Toast Notifications", () => {
       })
 
       expect(position.position).toBe("fixed")
-      // Bottom and right should be small values (spacing from edge)
-      expect(parseInt(position.bottom)).toBeLessThan(50)
+      // Bottom should be offset above the FAB, right should be near the edge
+      expect(parseInt(position.bottom)).toBeGreaterThan(50)
       expect(parseInt(position.right)).toBeLessThan(50)
     })
   })
 
   test.describe("Auto-dismiss", () => {
-    test("toast auto-dismisses after 5 seconds", async ({ page }) => {
+    test("success toast auto-dismisses after 3 seconds", async ({ page }) => {
       await page.goto(TOAST_FIXTURE)
 
       await page.getByTestId("trigger-success-toast").click()
@@ -92,8 +92,8 @@ test.describe("Toast Notifications", () => {
       const toast = page.getByTestId("toast-success")
       await expect(toast).toBeVisible()
 
-      // Wait slightly more than 5 seconds
-      await page.waitForTimeout(5500)
+      // Wait slightly more than 3 seconds
+      await page.waitForTimeout(3500)
 
       // Toast should be gone
       await expect(toast).not.toBeVisible()
@@ -155,7 +155,7 @@ test.describe("Toast Notifications", () => {
       await page.getByTestId("trigger-success-toast").click()
 
       // Find dismiss button within toast
-      const dismissBtn = page.getByTestId("toast-success").getByRole("button")
+      const dismissBtn = page.getByTestId("toast-success").getByRole("button", { name: "Dismiss notification" })
       await expect(dismissBtn).toHaveAttribute("aria-label", "Dismiss notification")
     })
 
@@ -195,17 +195,17 @@ test.describe("Toast Notifications", () => {
       await expect(page.getByTestId("toast-warning")).toBeVisible()
     })
 
-    test("maximum 5 toasts visible (oldest removed when exceeded)", async ({ page }) => {
+    test("maximum 3 toasts visible (oldest removed when exceeded)", async ({ page }) => {
       await page.goto(TOAST_FIXTURE)
 
-      // Trigger 6 toasts
-      for (let i = 0; i < 6; i++) {
-        await page.getByTestId("trigger-info-toast").click()
-        await page.waitForTimeout(100) // Small delay between triggers
-      }
+      // Trigger 4 toasts with different messages to avoid coalescing
+      await page.getByTestId("trigger-success-toast").click()
+      await page.getByTestId("trigger-error-toast").click()
+      await page.getByTestId("trigger-warning-toast").click()
+      await page.getByTestId("trigger-info-toast").click()
 
-      // Should only see 5 toasts (maxToasts default is 5)
-      await expect(page.getByTestId("toast-count")).toHaveText("5")
+      // Should only see 3 toasts (maxToasts default is 3)
+      await expect(page.getByTestId("toast-count")).toHaveText("3")
     })
 
     test("toasts stack newest at bottom", async ({ page }) => {
@@ -289,6 +289,40 @@ test.describe("Toast Notifications", () => {
 
       const container = page.getByTestId("toast-container")
       await expect(container).toHaveAttribute("aria-label", "Notifications")
+    })
+  })
+
+  test.describe("Undo", () => {
+    test("undo button appears on toast with onUndo callback", async ({ page }) => {
+      await page.goto(TOAST_FIXTURE)
+
+      await page.getByTestId("trigger-undo-toast").click()
+
+      const undoBtn = page.getByRole("button", { name: "Undo action" })
+      await expect(undoBtn).toBeVisible()
+    })
+
+    test("clicking undo dismisses toast", async ({ page }) => {
+      await page.goto(TOAST_FIXTURE)
+
+      await page.getByTestId("trigger-undo-toast").click()
+
+      const undoBtn = page.getByRole("button", { name: "Undo action" })
+      await undoBtn.click()
+
+      // Original toast dismissed, undo success toast should appear
+      await expect(page.getByText("Undo successful")).toBeVisible()
+    })
+  })
+
+  test.describe("Coalescing", () => {
+    test("rapid duplicate errors are coalesced into one toast", async ({ page }) => {
+      await page.goto(TOAST_FIXTURE)
+
+      await page.getByTestId("trigger-rapid-errors").click()
+
+      // Should only see 1 toast despite 3 rapid identical errors
+      await expect(page.getByTestId("toast-count")).toHaveText("1")
     })
   })
 

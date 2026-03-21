@@ -102,14 +102,20 @@ export interface LoomAgentStatus {
   behind: number;
   /** Role from daemon config (e.g., "plan", "task") */
   role?: string;
+  /** Workspace name from daemon config (empty string in legacy/single-repo mode) */
+  workspace?: string;
+  /** Repository this agent is assigned to (multi-repo workspaces) */
+  repo?: string;
+  /** Whether agent works across multiple repos */
+  cross_repo?: boolean;
   /** Recent commits ahead of integration branch */
   commits?: LoomCommitDetail[];
   /** Uncommitted file changes */
   changes?: LoomFileChange[];
-  /** Worktree filesystem path */
-  worktree_path?: string;
-  /** Workspace path (alias) */
+  /** Absolute path to the agent's working directory */
   path?: string;
+  /** Absolute path to the agent's worktree */
+  worktree_path?: string;
 }
 
 /**

@@ -11,37 +11,49 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { useTheme } from "../useTheme";
 
-const STORAGE_KEY = "theme-preference";
+const STORAGE_KEY = "cortex:theme";
 
 // Helper to create a mock matchMedia with controllable listeners
 function createMockMatchMedia(prefersDark: boolean) {
   const listeners: Array<(e: MediaQueryListEvent) => void> = [];
 
-  const mql = {
-    matches: prefersDark,
-    media: "(prefers-color-scheme: dark)",
-    addEventListener: vi.fn(
-      (event: string, handler: (e: MediaQueryListEvent) => void) => {
-        if (event === "change") {
-          listeners.push(handler);
-        }
-      },
-    ),
-    removeEventListener: vi.fn(
-      (event: string, handler: (e: MediaQueryListEvent) => void) => {
-        if (event === "change") {
-          const idx = listeners.indexOf(handler);
-          if (idx >= 0) listeners.splice(idx, 1);
-        }
-      },
-    ),
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  };
+  function makeMql(query: string) {
+    const isDarkQuery = query.includes("dark");
+    const isLightQuery = query.includes("light");
+    return {
+      matches: isDarkQuery ? prefersDark : isLightQuery ? !prefersDark : false,
+      media: query,
+      addEventListener: vi.fn(
+        (event: string, handler: (e: MediaQueryListEvent) => void) => {
+          if (event === "change") {
+            listeners.push(handler);
+          }
+        },
+      ),
+      removeEventListener: vi.fn(
+        (event: string, handler: (e: MediaQueryListEvent) => void) => {
+          if (event === "change") {
+            const idx = listeners.indexOf(handler);
+            if (idx >= 0) listeners.splice(idx, 1);
+          }
+        },
+      ),
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    };
+  }
 
-  const matchMediaMock = vi.fn().mockReturnValue(mql);
+  // Cache results so the same MQL instance is returned for the same query
+  const cache = new Map<string, ReturnType<typeof makeMql>>();
+  const matchMediaMock = vi.fn((query: string) => {
+    if (!cache.has(query)) cache.set(query, makeMql(query));
+    return cache.get(query)!;
+  });
+
+  // Pre-create the dark MQL and expose it for assertions
+  const mql = matchMediaMock("(prefers-color-scheme: dark)");
 
   return { matchMediaMock, mql, listeners };
 }

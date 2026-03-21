@@ -8,16 +8,16 @@ import { useState, useCallback, useEffect } from "react";
 
 export type Theme = "light" | "dark";
 
-const STORAGE_KEY = "theme-preference";
+const STORAGE_KEY = "cortex:theme";
 
 function getOSTheme(): Theme {
-  if (
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-color-scheme: dark)").matches
-  ) {
-    return "dark";
+  if (typeof window !== "undefined") {
+    if (window.matchMedia("(prefers-color-scheme: dark)").matches)
+      return "dark";
+    if (window.matchMedia("(prefers-color-scheme: light)").matches)
+      return "light";
   }
-  return "light";
+  return "dark";
 }
 
 function getStoredTheme(): Theme | null {

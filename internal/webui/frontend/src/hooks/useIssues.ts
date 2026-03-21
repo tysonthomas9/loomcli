@@ -8,7 +8,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
-import type { ConnectionState, GraphFilter } from "@/api";
+import type { ConnectionState, GraphFilter, MutationPayload } from "@/api";
 import {
   getReadyIssues,
   getKanbanIssues,
@@ -18,12 +18,19 @@ import {
 import type { Issue, WorkFilter, Status } from "@/types";
 
 import { useMutationHandler } from "./useMutationHandler";
+import { useOptimisticUpdate } from "./useOptimisticUpdate";
 import { useSSE } from "./useSSE";
 import { useToast } from "./useToast";
 
 // Threshold for triggering a full refetch after reconnection
 // If we had this many consecutive reconnect attempts, assume we may have missed events
 const TOO_FAR_BEHIND_THRESHOLD = 3;
+
+// Max reconnect attempts before showing "Connection lost" with manual retry
+const MAX_RECONNECT_ATTEMPTS = 10;
+
+// Delay before showing stale data banner (ms)
+const STALE_BANNER_DELAY_MS = 5000;
 
 /**
  * Options for the useIssues hook.
@@ -41,6 +48,10 @@ export interface UseIssuesOptions {
   autoConnect?: boolean;
   /** Subscribe to mutations on connect (default: true) */
   subscribeOnConnect?: boolean;
+  /** Source repo filter — when set, refetch uses source_repos and SSE reconnects with updated URL */
+  sourceRepos?: string[] | undefined;
+  /** Active workspace name — triggers re-fetch when workspace changes (header set automatically by fetchApi) */
+  workspaceName?: string | null;
 }
 
 /**
@@ -73,6 +84,14 @@ export interface UseIssuesReturn {
   mutationCount: number;
   /** Immediately retry SSE connection */
   retryConnection: () => void;
+  /** True when disconnected >5s — data may be stale */
+  showStaleBanner: boolean;
+  /** True when reconnection failed after max attempts */
+  connectionLost: boolean;
+  /** Timestamp (ms) when disconnection started, null if connected */
+  disconnectedSince: number | null;
+  /** Set of issue IDs currently in optimistic state (pending API confirmation) */
+  pendingIds: Set<string>;
 }
 
 /**
@@ -111,6 +130,8 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     graphFilter,
     autoFetch = true,
     autoConnect = true,
+    sourceRepos,
+    workspaceName,
     // Note: subscribeOnConnect is deprecated with SSE - connection equals subscription
   } = options;
 
@@ -153,6 +174,93 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     },
   });
 
+  // Stale data banner state: shown when disconnected >5 seconds
+  const [showStaleBanner, setShowStaleBanner] = useState(false);
+  const [connectionLost, setConnectionLost] = useState(false);
+  const [disconnectedSince, setDisconnectedSince] = useState<number | null>(
+    null,
+  );
+  const staleBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const mutationCountAtDisconnectRef = useRef<number>(0);
+
+  // Toast for user notifications
+  const { showToast } = useToast();
+
+  // Optimistic update lifecycle management
+  const { startOptimistic, pendingIds, filterMutation } = useOptimisticUpdate({
+    setIssuesMap,
+    handleMutation,
+    showToast,
+    mountedRef,
+  });
+
+  // Client-side mutation gate: discard SSE mutations for repos not in active filter
+  // Also gates mutations for issues in optimistic state (buffers them for later replay)
+  const sourceReposRef = useRef(sourceRepos);
+  useEffect(() => {
+    sourceReposRef.current = sourceRepos;
+  }, [sourceRepos]);
+
+  // Track active workspace for workspace-level SSE filtering
+  const workspaceNameRef = useRef(workspaceName);
+  useEffect(() => {
+    workspaceNameRef.current = workspaceName;
+  }, [workspaceName]);
+
+  const gatedHandleMutation = useCallback(
+    (mutation: MutationPayload) => {
+      // Gate: buffer mutations for issues in optimistic state
+      if (!filterMutation(mutation)) {
+        return;
+      }
+
+      // Gate: only process mutations for the active workspace
+      // Allow mutations without workspace_id (legacy/single-workspace mode)
+      const activeWs = workspaceNameRef.current;
+      if (
+        activeWs &&
+        mutation.workspace_id &&
+        mutation.workspace_id !== activeWs
+      ) {
+        if (process.env.NODE_ENV === "development") {
+          console.debug(
+            "[useIssues] Gated mutation for different workspace:",
+            mutation.workspace_id,
+            "active:",
+            activeWs,
+            mutation.issue_id,
+          );
+        }
+        return;
+      }
+
+      const activeRepos = sourceReposRef.current;
+      // If no filter is active (empty or undefined), allow all mutations
+      if (!activeRepos || activeRepos.length === 0) {
+        handleMutation(mutation);
+        return;
+      }
+      // Allow mutations without source_repo (legacy/unknown origin)
+      if (!mutation.source_repo) {
+        handleMutation(mutation);
+        return;
+      }
+      // Gate: only process mutations for selected repos
+      if (activeRepos.includes(mutation.source_repo)) {
+        handleMutation(mutation);
+      } else if (process.env.NODE_ENV === "development") {
+        console.debug(
+          "[useIssues] Gated mutation for unselected repo:",
+          mutation.source_repo,
+          mutation.issue_id,
+        );
+      }
+    },
+    [handleMutation, filterMutation],
+  );
+
   // SSE setup - connection equals subscription (no separate subscribe message)
   // The 'since' parameter is passed on connect for catch-up events
   const {
@@ -166,11 +274,9 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     autoConnect,
     since:
       fetchTimestampRef.current > 0 ? fetchTimestampRef.current : undefined,
-    onMutation: handleMutation,
+    onMutation: gatedHandleMutation,
+    sourceRepos,
   });
-
-  // Toast for user notifications
-  const { showToast } = useToast();
 
   // Track previous state for detecting reconnection
   const prevStateRef = useRef<ConnectionState>("disconnected");
@@ -187,13 +293,21 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     deletedDuringFetchRef.current.clear();
 
     try {
+      // Build effective filters with source_repos when active
+      const effectiveFilter: WorkFilter | undefined = sourceRepos?.length
+        ? { ...filter, source_repos: sourceRepos }
+        : filter;
+      const effectiveGraphFilter: GraphFilter | undefined = sourceRepos?.length
+        ? { ...graphFilter, source_repos: sourceRepos }
+        : graphFilter;
+
       let data: Issue[];
       if (mode === "kanban") {
-        data = await getKanbanIssues(filter);
+        data = await getKanbanIssues(effectiveFilter);
       } else if (mode === "graph") {
-        data = await fetchGraphIssues(graphFilter);
+        data = await fetchGraphIssues(effectiveGraphFilter);
       } else {
-        data = await getReadyIssues(filter);
+        data = await getReadyIssues(effectiveFilter);
       }
       if (!mountedRef.current) return;
 
@@ -261,7 +375,10 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
       fetchingRef.current = false;
       deletedDuringFetchRef.current.clear();
     }
-  }, [filter, mode, graphFilter]);
+    // workspaceName is intentionally in deps: triggers re-fetch when workspace changes
+    // (the Workspace header is set at module level, not used directly in the callback)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, mode, graphFilter, sourceRepos, workspaceName]);
 
   // Keep refetchRef in sync with the latest refetch callback
   refetchRef.current = refetch;
@@ -278,15 +395,43 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     if (reconnectAttempts > maxReconnectAttemptsRef.current) {
       maxReconnectAttemptsRef.current = reconnectAttempts;
     }
+    // Connection lost detection: exceeded max reconnect attempts
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      setConnectionLost(true);
+    }
   }, [reconnectAttempts]);
 
-  // Too-far-behind detection: refetch when recovering from prolonged disconnection
+  // Stale banner timer + too-far-behind detection + change count toast
   useEffect(() => {
     const prevState = prevStateRef.current;
     prevStateRef.current = connectionState;
 
-    // Detect transition from reconnecting → connected
+    // Transition to reconnecting: start 5s timer for stale banner
+    if (connectionState === "reconnecting" && prevState !== "reconnecting") {
+      const now = Date.now();
+      setDisconnectedSince(now);
+      mutationCountAtDisconnectRef.current = mutationCount;
+
+      // Clear any existing timer
+      if (staleBannerTimerRef.current) {
+        clearTimeout(staleBannerTimerRef.current);
+      }
+      staleBannerTimerRef.current = setTimeout(() => {
+        setShowStaleBanner(true);
+      }, STALE_BANNER_DELAY_MS);
+    }
+
+    // Transition to connected from reconnecting
     if (prevState === "reconnecting" && connectionState === "connected") {
+      // Clear stale banner timer and state
+      if (staleBannerTimerRef.current) {
+        clearTimeout(staleBannerTimerRef.current);
+        staleBannerTimerRef.current = null;
+      }
+      setShowStaleBanner(false);
+      setConnectionLost(false);
+      setDisconnectedSince(null);
+
       // If we had multiple reconnect attempts, assume we may have missed events
       if (maxReconnectAttemptsRef.current >= TOO_FAR_BEHIND_THRESHOLD) {
         if (process.env.NODE_ENV === "development") {
@@ -301,21 +446,47 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
           duration: 3000,
         });
         void refetch();
+      } else {
+        // Show change count toast (only when not doing a full refetch)
+        const changeCount =
+          mutationCount - mutationCountAtDisconnectRef.current;
+        if (changeCount > 0) {
+          showToast(
+            `Connection restored. ${changeCount} change${changeCount !== 1 ? "s" : ""} synced.`,
+            { type: "info", duration: 3000 },
+          );
+        } else {
+          showToast("Connection restored.", {
+            type: "info",
+            duration: 3000,
+          });
+        }
       }
       // Reset max attempts counter after successful reconnection
       maxReconnectAttemptsRef.current = 0;
     }
-  }, [connectionState, showToast, refetch]);
+
+    // Transition to disconnected: clear timer
+    if (connectionState === "disconnected" && prevState === "reconnecting") {
+      if (staleBannerTimerRef.current) {
+        clearTimeout(staleBannerTimerRef.current);
+        staleBannerTimerRef.current = null;
+      }
+    }
+  }, [connectionState, showToast, refetch, mutationCount]);
 
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (staleBannerTimerRef.current) {
+        clearTimeout(staleBannerTimerRef.current);
+      }
     };
   }, []);
 
-  // Optimistic status update
+  // Optimistic status update with SSE mutation buffering and rollback
   const updateIssueStatus = useCallback(
     async (issueId: string, newStatus: Status) => {
       const existingIssue = issuesMap.get(issueId);
@@ -323,7 +494,13 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
         throw new Error(`Issue ${issueId} not found`);
       }
 
-      // Optimistic update
+      // Start optimistic tracking (returns null if issue already has pending update)
+      const handle = startOptimistic(issueId, existingIssue);
+      if (!handle) {
+        throw new Error(`Issue ${issueId} already has a pending update`);
+      }
+
+      // Optimistic update — apply new status immediately
       const optimisticIssue: Issue = {
         ...existingIssue,
         status: newStatus,
@@ -335,19 +512,21 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
 
       try {
         await apiUpdateIssue(issueId, { status: newStatus });
+        // Confirm: clear optimistic state, flush buffered SSE mutations
+        handle.confirm();
       } catch (err) {
-        // Rollback on failure using functional update to only restore this single issue,
-        // preserving any SSE mutations that arrived during the API call
-        if (!mountedRef.current) return;
-        setIssuesMap((currentMap) => {
-          const newMap = new Map(currentMap);
-          newMap.set(issueId, existingIssue);
-          return newMap;
-        });
+        // Rollback: restore snapshot, flush buffered SSE mutations, show toast
+        if (!mountedRef.current) {
+          handle.rollback();
+          return;
+        }
+        const message =
+          err instanceof Error ? err.message : "Failed to update status";
+        handle.rollback(message);
         throw err;
       }
     },
-    [issuesMap],
+    [issuesMap, startOptimistic],
   );
 
   // Get single issue by ID
@@ -373,5 +552,9 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     getIssue,
     mutationCount,
     retryConnection: retryNow,
+    showStaleBanner,
+    connectionLost,
+    disconnectedSince,
+    pendingIds,
   };
 }

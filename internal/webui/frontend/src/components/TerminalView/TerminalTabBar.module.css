@@ -7,8 +7,8 @@
   display: flex;
   align-items: center;
   height: 36px;
-  background-color: #252526;
-  border-bottom: 1px solid #333;
+  background-color: var(--terminal-surface);
+  border-bottom: 1px solid var(--terminal-border);
   font-family: var(--font-family-base);
 }
 
@@ -31,9 +31,9 @@
   padding: 0 12px;
   height: 100%;
   border: none;
-  border-right: 1px solid #333;
+  border-right: 1px solid var(--terminal-border);
   background: transparent;
-  color: #ccc;
+  color: var(--terminal-text);
   cursor: pointer;
   font-family: var(--font-family-base);
   font-size: var(--font-size-xs);
@@ -43,7 +43,7 @@
 }
 
 .tab:hover {
-  background-color: #2d2d2d;
+  background-color: var(--terminal-surface-hover);
 }
 
 .tab:focus {
@@ -56,8 +56,8 @@
 }
 
 .tab.active {
-  background-color: #1e1e1e;
-  color: #fff;
+  background-color: var(--terminal-tab-active);
+  color: var(--terminal-text-bright);
 }
 
 /* ============= Status Dot ============= */
@@ -71,16 +71,36 @@
 }
 
 .statusDot[data-status="connected"] {
-  background-color: var(--color-success, #22c55e);
+  background-color: var(--brand-color, var(--color-success, #22c55e));
 }
 
 .statusDot[data-status="connecting"] {
-  background-color: var(--color-warning, #f59e0b);
+  background-color: var(--brand-color, var(--color-warning, #f59e0b));
   animation: pulse 1.5s ease-in-out infinite;
 }
 
 .statusDot[data-status="disconnected"] {
-  background-color: #666;
+  background-color: var(--brand-color, var(--terminal-text-muted));
+  opacity: 0.35;
+}
+
+.statusDot[data-status="error"] {
+  background-color: var(--color-danger, #ef4444);
+  box-shadow: 0 0 4px var(--color-danger, #ef4444);
+}
+
+.statusDot[data-status="crashed"] {
+  background-color: var(--color-danger, #ef4444);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusDot[data-status="connecting"] {
+    animation: none;
+  }
+
+  .statusDot[data-status="error"] {
+    box-shadow: none;
+  }
 }
 
 @keyframes pulse {
@@ -90,6 +110,33 @@
   }
   50% {
     opacity: 0.4;
+  }
+}
+
+/* ============= Unread Dot ============= */
+
+.unreadDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-info, #3b82f6);
+  flex-shrink: 0;
+  animation: unreadPulse 2s ease-in-out infinite;
+}
+
+@keyframes unreadPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unreadDot {
+    animation: none;
   }
 }
 
@@ -104,10 +151,10 @@
 /* ============= Rename Input ============= */
 
 .tabLabelInput {
-  background: #1e1e1e;
+  background: var(--terminal-bg);
   border: 1px solid var(--color-primary);
   border-radius: var(--radius-sm, 2px);
-  color: #fff;
+  color: var(--terminal-text-bright);
   font-family: var(--font-family-base);
   font-size: var(--font-size-xs);
   padding: 1px 4px;
@@ -126,7 +173,7 @@
 .closeButton {
   background: none;
   border: none;
-  color: #888;
+  color: var(--terminal-text-muted);
   font-size: 12px;
   padding: 2px 4px;
   cursor: pointer;
@@ -143,7 +190,7 @@
 
 .closeButton:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--terminal-text-bright);
 }
 
 /* ============= Action Buttons ============= */
@@ -156,15 +203,15 @@
   height: 100%;
   background: none;
   border: none;
-  border-left: 1px solid #333;
-  color: #aaa;
+  border-left: 1px solid var(--terminal-border);
+  color: var(--terminal-text-muted);
   cursor: pointer;
   font-size: 16px;
 }
 
 .actionButton:hover {
-  background-color: #2d2d2d;
-  color: #fff;
+  background-color: var(--terminal-surface-hover);
+  color: var(--terminal-text-bright);
 }
 
 .actionButton:focus {
@@ -174,4 +221,182 @@
 .actionButton:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
+}
+
+.actionButton:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.actionButton:disabled:hover {
+  background-color: transparent;
+  color: var(--terminal-text-muted);
+}
+
+.actionButton[aria-pressed="true"] {
+  background-color: var(--terminal-tab-active, #3c3c3c);
+  color: var(--terminal-text-bright, #fff);
+}
+
+/* ============= Scroll Buttons ============= */
+
+.scrollButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 100%;
+  background: none;
+  border: none;
+  color: var(--terminal-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition:
+    background-color 150ms,
+    color 150ms;
+}
+
+.scrollButton:hover {
+  background-color: var(--terminal-surface-hover);
+  color: var(--terminal-text-bright);
+}
+
+.scrollButtonLeft {
+  border-right: 1px solid var(--terminal-border);
+}
+
+.scrollButtonRight {
+  border-left: 1px solid var(--terminal-border);
+}
+
+.scrollButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* ============= Context Menu ============= */
+
+.contextMenu {
+  position: fixed;
+  background-color: var(--terminal-surface-hover);
+  border: 1px solid var(--terminal-scrollbar-thumb);
+  border-radius: var(--radius-sm, 4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  min-width: 140px;
+  padding: 4px 0;
+}
+
+.contextMenuItem {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--terminal-text);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.contextMenuItem:hover:not(:disabled) {
+  background-color: var(--terminal-surface-hover);
+  color: var(--terminal-text-bright);
+}
+
+.contextMenuItem:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.contextMenuItemDisabled {
+  color: var(--terminal-text-muted);
+  cursor: default;
+  pointer-events: none;
+}
+
+.contextMenuDivider {
+  height: 1px;
+  background-color: var(--terminal-border);
+  margin: 4px 0;
+}
+
+/* ============= Pin Icon ============= */
+
+.pinIcon {
+  display: flex;
+  align-items: center;
+  color: var(--terminal-text-muted);
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.tab.pinned {
+  border-left: 2px solid var(--color-primary, #3b82f6);
+}
+
+/* ============= Pin Divider ============= */
+
+.pinDivider {
+  width: 2px;
+  height: 60%;
+  align-self: center;
+  background-color: var(--color-primary, #3b82f6);
+  opacity: 0.4;
+  flex-shrink: 0;
+  margin: 0 1px;
+}
+
+/* ============= Drag States ============= */
+
+.tab.dragging {
+  opacity: 0.5;
+}
+
+.dragOverlay {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  cursor: grabbing;
+}
+
+/* ============= Responsive: Mobile (768px) ============= */
+
+@media (width <= 768px) {
+  .tabList {
+    position: relative;
+  }
+
+  .tabList::after {
+    content: "";
+    position: sticky;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    flex-shrink: 0;
+    background: linear-gradient(to left, var(--terminal-surface), transparent);
+    pointer-events: none;
+  }
+
+  .tab {
+    min-height: var(--touch-target-min);
+  }
+
+  .closeButton {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    padding: 14px;
+  }
+
+  .actionButton {
+    min-width: var(--touch-target-min);
+  }
+
+  .contextMenuItem {
+    min-height: var(--touch-target-min);
+    display: flex;
+    align-items: center;
+  }
 }

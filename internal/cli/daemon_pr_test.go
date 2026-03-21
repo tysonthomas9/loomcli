@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"testing"
 )
@@ -123,20 +124,17 @@ func TestGetOpenPRForBranch_CommandFails(t *testing.T) {
 }
 
 func TestGetEpicInfo_WithChildren(t *testing.T) {
-	jsonOutput := `[{
-		"id": "loomcli-mzr",
-		"title": "Daemon-Managed Epic Branches",
-		"dependents": [
-			{"id": "loomcli-mzr.1", "title": "Epic assignment logic", "status": "closed"},
-			{"id": "loomcli-mzr.2", "title": "Branch creation", "status": "closed"},
-			{"id": "loomcli-mzr.5", "title": "Auto-create PR", "status": "in_progress"}
-		]
-	}]`
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"show", "loomcli-mzr", "--json"}, Stdout: jsonOutput},
-	})
-	cmdMock.Install()
+	mock := NewMockTracker()
+	mock.GetIssueResult = &BdIssue{ID: "loomcli-mzr", Title: "Daemon-Managed Epic Branches"}
+	mock.ListResult = []BdIssue{
+		{ID: "loomcli-mzr.1", Title: "Epic assignment logic", Status: "closed"},
+		{ID: "loomcli-mzr.2", Title: "Branch creation", Status: "closed"},
+		{ID: "loomcli-mzr.5", Title: "Auto-create PR", Status: "in_progress"},
+	}
+	setDefaultTracker(mock)
 
 	info, err := getEpicInfo("loomcli-mzr")
 	if err != nil {
@@ -160,16 +158,13 @@ func TestGetEpicInfo_WithChildren(t *testing.T) {
 }
 
 func TestGetEpicInfo_NoChildren(t *testing.T) {
-	jsonOutput := `[{
-		"id": "loomcli-xyz",
-		"title": "Empty Epic",
-		"dependents": []
-	}]`
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"show", "loomcli-xyz", "--json"}, Stdout: jsonOutput},
-	})
-	cmdMock.Install()
+	mock := NewMockTracker()
+	mock.GetIssueResult = &BdIssue{ID: "loomcli-xyz", Title: "Empty Epic"}
+	mock.ListResult = []BdIssue{}
+	setDefaultTracker(mock)
 
 	info, err := getEpicInfo("loomcli-xyz")
 	if err != nil {
@@ -183,15 +178,32 @@ func TestGetEpicInfo_NoChildren(t *testing.T) {
 	}
 }
 
-func TestGetEpicInfo_CommandFails(t *testing.T) {
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"show", "loomcli-mzr", "--json"}, Err: fmt.Errorf("bd failed")},
-	})
-	cmdMock.Install()
+func TestGetEpicInfo_GetIssueFails(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	mock.GetIssueErr = fmt.Errorf("bd failed")
+	setDefaultTracker(mock)
 
 	_, err := getEpicInfo("loomcli-mzr")
 	if err == nil {
-		t.Fatal("expected error when command fails")
+		t.Fatal("expected error when GetIssue fails")
+	}
+}
+
+func TestGetEpicInfo_ListChildrenFails(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	mock.GetIssueResult = &BdIssue{ID: "loomcli-mzr", Title: "Test Epic"}
+	mock.ListErr = fmt.Errorf("list failed")
+	setDefaultTracker(mock)
+
+	_, err := getEpicInfo("loomcli-mzr")
+	if err == nil {
+		t.Fatal("expected error when List fails")
 	}
 }
 
@@ -349,23 +361,28 @@ func TestCreateEpicPR_CommandFails(t *testing.T) {
 }
 
 func TestStoreExternalRef_Success(t *testing.T) {
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Args: []string{"update", "loomcli-mzr", "--external-ref", "https://github.com/org/repo/pull/42"},
-			Stdout: "Updated"},
-	})
-	cmdMock.Install()
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	setDefaultTracker(mock)
 
 	err := storeExternalRef("loomcli-mzr", "https://github.com/org/repo/pull/42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !mock.Called("UpdateExternalRef") {
+		t.Error("expected UpdateExternalRef to be called")
+	}
 }
 
 func TestStoreExternalRef_CommandFails(t *testing.T) {
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "bd", Err: fmt.Errorf("bd failed")},
-	})
-	cmdMock.Install()
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	mock.UpdateExternalRefErr = fmt.Errorf("bd failed")
+	setDefaultTracker(mock)
 
 	err := storeExternalRef("loomcli-mzr", "https://example.com")
 	if err == nil {
@@ -375,15 +392,16 @@ func TestStoreExternalRef_CommandFails(t *testing.T) {
 
 func TestEnsureEpicPR_FullFlow(t *testing.T) {
 	stubGhAvailable(t, true)
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	epicJSON := `[{
-		"id": "loomcli-mzr",
-		"title": "Test Epic",
-		"dependents": [
-			{"id": "task-1", "title": "First", "status": "closed"},
-			{"id": "task-2", "title": "Second", "status": "open"}
-		]
-	}]`
+	mock := NewMockTracker()
+	mock.GetIssueResult = &BdIssue{ID: "loomcli-mzr", Title: "Test Epic"}
+	mock.ListResult = []BdIssue{
+		{ID: "task-1", Title: "First", Status: "closed"},
+		{ID: "task-2", Title: "Second", Status: "open"},
+	}
+	setDefaultTracker(mock)
 
 	cmdMock := NewCommandMock(t, []CommandStub{
 		// remoteBranchPushed
@@ -392,20 +410,20 @@ func TestEnsureEpicPR_FullFlow(t *testing.T) {
 		// getOpenPRForBranch - no existing PR
 		{Name: "gh", Args: []string{"pr", "list", "--head", "epic/loomcli-mzr", "--state", "open", "--json", "url", "--limit", "1"},
 			Stdout: "[]"},
-		// getEpicInfo
-		{Name: "bd", Args: []string{"show", "loomcli-mzr", "--json"},
-			Stdout: epicJSON},
 		// createEpicPR
 		{Name: "gh", Stdout: "https://github.com/org/repo/pull/99\n"},
-		// storeExternalRef
-		{Name: "bd", Args: []string{"update", "loomcli-mzr", "--external-ref", "https://github.com/org/repo/pull/99"},
-			Stdout: "Updated"},
 	})
 	cmdMock.Install()
 
 	err := EnsureEpicPR("/repo", "loomcli-mzr", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !mock.Called("GetIssue") {
+		t.Error("expected GetIssue to be called")
+	}
+	if !mock.Called("UpdateExternalRef") {
+		t.Error("expected UpdateExternalRef to be called")
 	}
 }
 
@@ -440,6 +458,11 @@ func TestEnsureEpicPR_BranchNotPushed(t *testing.T) {
 
 func TestEnsureEpicPR_PRAlreadyExists(t *testing.T) {
 	stubGhAvailable(t, true)
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	mock := NewMockTracker()
+	setDefaultTracker(mock)
 
 	cmdMock := NewCommandMock(t, []CommandStub{
 		// remoteBranchPushed
@@ -448,9 +471,6 @@ func TestEnsureEpicPR_PRAlreadyExists(t *testing.T) {
 		// getOpenPRForBranch - PR exists
 		{Name: "gh", Args: []string{"pr", "list", "--head", "epic/loomcli-mzr", "--state", "open", "--json", "url", "--limit", "1"},
 			Stdout: `[{"url":"https://github.com/org/repo/pull/42"}]`},
-		// storeExternalRef (ensures ref is stored even if PR already exists)
-		{Name: "bd", Args: []string{"update", "loomcli-mzr", "--external-ref", "https://github.com/org/repo/pull/42"},
-			Stdout: "Updated"},
 	})
 	cmdMock.Install()
 
@@ -458,16 +478,20 @@ func TestEnsureEpicPR_PRAlreadyExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !mock.Called("UpdateExternalRef") {
+		t.Error("expected UpdateExternalRef to be called to store existing PR URL")
+	}
 }
 
 func TestEnsureEpicPR_MergedPR_CreatesNew(t *testing.T) {
 	stubGhAvailable(t, true)
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	epicJSON := `[{
-		"id": "loomcli-mzr",
-		"title": "Test Epic",
-		"dependents": []
-	}]`
+	mock := NewMockTracker()
+	mock.GetIssueResult = &BdIssue{ID: "loomcli-mzr", Title: "Test Epic"}
+	mock.ListResult = []BdIssue{}
+	setDefaultTracker(mock)
 
 	cmdMock := NewCommandMock(t, []CommandStub{
 		// remoteBranchPushed
@@ -476,14 +500,8 @@ func TestEnsureEpicPR_MergedPR_CreatesNew(t *testing.T) {
 		// getOpenPRForBranch - no open PR (old one was merged)
 		{Name: "gh", Args: []string{"pr", "list", "--head", "epic/loomcli-mzr", "--state", "open", "--json", "url", "--limit", "1"},
 			Stdout: "[]"},
-		// getEpicInfo
-		{Name: "bd", Args: []string{"show", "loomcli-mzr", "--json"},
-			Stdout: epicJSON},
 		// createEpicPR - creates new PR
 		{Name: "gh", Stdout: "https://github.com/org/repo/pull/100\n"},
-		// storeExternalRef with new URL
-		{Name: "bd", Args: []string{"update", "loomcli-mzr", "--external-ref", "https://github.com/org/repo/pull/100"},
-			Stdout: "Updated"},
 	})
 	cmdMock.Install()
 
@@ -495,20 +513,19 @@ func TestEnsureEpicPR_MergedPR_CreatesNew(t *testing.T) {
 
 func TestEnsureEpicPR_PRCreateFails_ReturnsError(t *testing.T) {
 	stubGhAvailable(t, true)
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
 
-	epicJSON := `[{
-		"id": "loomcli-mzr",
-		"title": "Test Epic",
-		"dependents": []
-	}]`
+	mock := NewMockTracker()
+	mock.GetIssueResult = &BdIssue{ID: "loomcli-mzr", Title: "Test Epic"}
+	mock.ListResult = []BdIssue{}
+	setDefaultTracker(mock)
 
 	cmdMock := NewCommandMock(t, []CommandStub{
 		// remoteBranchPushed
 		{Name: "git", Stdout: "abc123\trefs/heads/epic/loomcli-mzr\n"},
 		// getOpenPRForBranch - no PR
 		{Name: "gh", Stdout: "[]"},
-		// getEpicInfo
-		{Name: "bd", Stdout: epicJSON},
 		// createEpicPR - fails (rate limited)
 		{Name: "gh", Err: fmt.Errorf("rate limited")},
 	})
@@ -520,5 +537,30 @@ func TestEnsureEpicPR_PRCreateFails_ReturnsError(t *testing.T) {
 	}
 	if !containsSubstring([]string{err.Error()}, "failed to create PR") {
 		t.Errorf("error should mention PR creation, got: %v", err)
+	}
+}
+
+func TestGetEpicInfo_VerifiesListOpts(t *testing.T) {
+	resetDefaultTracker()
+	t.Cleanup(resetDefaultTracker)
+
+	var capturedOpts ListOpts
+	mock := NewMockTracker()
+	mock.GetIssueResult = &BdIssue{ID: "epic-123", Title: "Test"}
+	mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
+	}
+	setDefaultTracker(mock)
+
+	_, err := getEpicInfo("epic-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedOpts.ParentID != "epic-123" {
+		t.Errorf("ListOpts.ParentID = %q, want 'epic-123'", capturedOpts.ParentID)
+	}
+	if capturedOpts.Limit != 0 {
+		t.Errorf("ListOpts.Limit = %d, want 0 (no limit)", capturedOpts.Limit)
 	}
 }

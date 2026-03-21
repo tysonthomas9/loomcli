@@ -96,6 +96,9 @@ const NO_AGENT_CONTEXT: AgentContextValue = {
   lastUpdated: null,
   refetch: async () => {},
   retryNow: () => {},
+  showStaleBanner: false,
+  connectionLost: false,
+  disconnectedSince: null,
   getAgentByName: () => undefined,
 };
 

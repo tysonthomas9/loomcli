@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -761,6 +762,41 @@ func TestDependencyTypeAffectsReadyWork(t *testing.T) {
 		t.Run(string(tt.depType), func(t *testing.T) {
 			if got := tt.depType.AffectsReadyWork(); got != tt.affects {
 				t.Errorf("DependencyType(%q).AffectsReadyWork() = %v, want %v", tt.depType, got, tt.affects)
+			}
+		})
+	}
+}
+
+func TestDependencyTypeIsDirectBlocker(t *testing.T) {
+	tests := []struct {
+		depType       DependencyType
+		directBlocker bool
+	}{
+		{DepBlocks, true},
+		{DepParentChild, false},
+		{DepConditionalBlocks, true},
+		{DepWaitsFor, true},
+		{DepRelated, false},
+		{DepDiscoveredFrom, false},
+		{DepRepliesTo, false},
+		{DepRelatesTo, false},
+		{DepDuplicates, false},
+		{DepSupersedes, false},
+		{DepAuthoredBy, false},
+		{DepAssignedTo, false},
+		{DepApprovedBy, false},
+		{DepAttests, false},
+		{DepTracks, false},
+		{DepUntil, false},
+		{DepCausedBy, false},
+		{DepValidates, false},
+		{DependencyType("custom-type"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.depType), func(t *testing.T) {
+			if got := tt.depType.IsDirectBlocker(); got != tt.directBlocker {
+				t.Errorf("DependencyType(%q).IsDirectBlocker() = %v, want %v", tt.depType, got, tt.directBlocker)
 			}
 		})
 	}
@@ -1813,6 +1849,101 @@ func TestIssueDetailsJSONStructure(t *testing.T) {
 			if !exists {
 				t.Errorf("Field %q should be present after roundtrip", field)
 			}
+		}
+	})
+}
+
+func TestIssueSourceRepoJSONSerialization(t *testing.T) {
+	t.Parallel()
+
+	t.Run("marshal with SourceRepo set includes source_repo", func(t *testing.T) {
+		issue := Issue{
+			ID:         "test-1",
+			Title:      "Test issue",
+			Status:     StatusOpen,
+			Priority:   2,
+			IssueType:  TypeTask,
+			SourceRepo: "github.com/org/repo",
+		}
+
+		data, err := json.Marshal(issue)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal to map failed: %v", err)
+		}
+
+		val, exists := raw["source_repo"]
+		if !exists {
+			t.Fatal("expected source_repo key in JSON output, but it was missing")
+		}
+
+		var repo string
+		if err := json.Unmarshal(val, &repo); err != nil {
+			t.Fatalf("Unmarshal source_repo value failed: %v", err)
+		}
+		if repo != "github.com/org/repo" {
+			t.Errorf("source_repo = %q, want %q", repo, "github.com/org/repo")
+		}
+	})
+
+	t.Run("marshal with empty SourceRepo omits source_repo", func(t *testing.T) {
+		issue := Issue{
+			ID:        "test-2",
+			Title:     "Test issue",
+			Status:    StatusOpen,
+			Priority:  2,
+			IssueType: TypeTask,
+		}
+
+		data, err := json.Marshal(issue)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		if strings.Contains(string(data), "source_repo") {
+			t.Errorf("expected source_repo to be omitted from JSON, but got: %s", data)
+		}
+	})
+
+	t.Run("unmarshal JSON with source_repo populates field", func(t *testing.T) {
+		input := `{"id":"test-3","title":"Test issue","status":"open","priority":2,"issue_type":"task","source_repo":"github.com/other/repo"}`
+
+		var issue Issue
+		if err := json.Unmarshal([]byte(input), &issue); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+
+		if issue.SourceRepo != "github.com/other/repo" {
+			t.Errorf("SourceRepo = %q, want %q", issue.SourceRepo, "github.com/other/repo")
+		}
+	})
+
+	t.Run("round-trip preserves SourceRepo", func(t *testing.T) {
+		original := Issue{
+			ID:         "test-4",
+			Title:      "Round-trip test",
+			Status:     StatusOpen,
+			Priority:   1,
+			IssueType:  TypeTask,
+			SourceRepo: "github.com/round/trip",
+		}
+
+		data, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		var decoded Issue
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+
+		if decoded.SourceRepo != original.SourceRepo {
+			t.Errorf("SourceRepo after round-trip = %q, want %q", decoded.SourceRepo, original.SourceRepo)
 		}
 	})
 }

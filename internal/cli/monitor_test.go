@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -695,67 +696,13 @@ func TestClosedTaskDoesNotOverrideNewTask(t *testing.T) {
 // Data Collection Function Tests
 // ===========================================================================
 
-func TestRunBdCommand(t *testing.T) {
-	tests := []struct {
-		name       string
-		args       []string
-		stdout     string
-		stderr     string
-		err        error
-		wantOutput string
-		wantErr    bool
-	}{
-		{
-			name:       "success with stdout",
-			args:       []string{"stats", "--json"},
-			stdout:     `{"summary":{"total_issues":10}}`,
-			wantOutput: `{"summary":{"total_issues":10}}`,
-			wantErr:    false,
-		},
-		{
-			name:    "command fails",
-			args:    []string{"invalid", "command"},
-			err:     fmt.Errorf("command failed"),
-			wantErr: true,
-		},
-		{
-			name:       "empty output",
-			args:       []string{"list"},
-			stdout:     "",
-			wantOutput: "",
-			wantErr:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				if name != "bd" {
-					t.Errorf("expected 'bd' command, got %q", name)
-				}
-				return CommandResult{Stdout: tt.stdout, Stderr: tt.stderr, Err: tt.err}
-			}
-
-			output, err := runBdCommand(tt.args...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("runBdCommand() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if output != tt.wantOutput {
-				t.Errorf("runBdCommand() = %q, want %q", output, tt.wantOutput)
-			}
-		})
-	}
-}
+// TestRunBdCommand removed: runBdCommand was deleted as part of typed IssueTracker migration.
 
 func TestCollectStatistics(t *testing.T) {
 	tests := []struct {
 		name           string
-		bdOutput       string
-		bdErr          error
+		statsResult    *BdStats
+		statsErr       error
 		wantOpen       int
 		wantClosed     int
 		wantTotal      int
@@ -766,141 +713,131 @@ func TestCollectStatistics(t *testing.T) {
 		wantBlocked    int
 	}{
 		{
-			name:       "normal case with valid JSON",
-			bdOutput:   `{"summary":{"total_issues":10,"open_issues":3,"closed_issues":7}}`,
-			wantOpen:   3,
-			wantClosed: 7,
-			wantTotal:  10,
-			wantCompl:  70.0,
-			// Remaining = 10 - 7 = 3 (total_issues already excludes tombstones)
+			name: "normal case",
+			statsResult: &BdStats{Summary: struct {
+				TotalIssues      int `json:"total_issues"`
+				OpenIssues       int `json:"open_issues"`
+				ClosedIssues     int `json:"closed_issues"`
+				InProgressIssues int `json:"in_progress_issues"`
+				BlockedIssues    int `json:"blocked_issues"`
+				DeferredIssues   int `json:"deferred_issues"`
+				TombstoneIssues  int `json:"tombstone_issues"`
+				PinnedIssues     int `json:"pinned_issues"`
+			}{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7}},
+			wantOpen: 3, wantClosed: 7, wantTotal: 10, wantCompl: 70.0,
 			wantRemaining: 3,
-			// Review = 10 - 3 - 0 - 7 - 0 - 0 - 0 = 0
-			wantReview:     0,
-			wantInProgress: 0,
-			wantBlocked:    0,
 		},
 		{
-			name:           "empty stats (no issues)",
-			bdOutput:       `{"summary":{"total_issues":0,"open_issues":0,"closed_issues":0}}`,
-			wantOpen:       0,
-			wantClosed:     0,
-			wantTotal:      0,
-			wantCompl:      0,
-			wantRemaining:  0,
-			wantInProgress: 0,
-			wantReview:     0,
-			wantBlocked:    0,
+			name: "empty stats (no issues)",
+			statsResult: &BdStats{Summary: struct {
+				TotalIssues      int `json:"total_issues"`
+				OpenIssues       int `json:"open_issues"`
+				ClosedIssues     int `json:"closed_issues"`
+				InProgressIssues int `json:"in_progress_issues"`
+				BlockedIssues    int `json:"blocked_issues"`
+				DeferredIssues   int `json:"deferred_issues"`
+				TombstoneIssues  int `json:"tombstone_issues"`
+				PinnedIssues     int `json:"pinned_issues"`
+			}{}},
 		},
 		{
-			name:           "command failure returns zero values",
-			bdErr:          fmt.Errorf("command failed"),
-			wantOpen:       0,
-			wantClosed:     0,
-			wantTotal:      0,
-			wantCompl:      0,
-			wantRemaining:  0,
-			wantInProgress: 0,
-			wantReview:     0,
-			wantBlocked:    0,
+			name:     "Stats() returns error",
+			statsErr: fmt.Errorf("command failed"),
 		},
 		{
-			name:           "invalid JSON returns zero values",
-			bdOutput:       `not valid json`,
-			wantOpen:       0,
-			wantClosed:     0,
-			wantTotal:      0,
-			wantCompl:      0,
-			wantRemaining:  0,
-			wantInProgress: 0,
-			wantReview:     0,
-			wantBlocked:    0,
+			name:        "Stats() returns nil result",
+			statsResult: nil,
 		},
 		{
-			name:       "all closed (100% completion)",
-			bdOutput:   `{"summary":{"total_issues":5,"open_issues":0,"closed_issues":5}}`,
-			wantOpen:   0,
-			wantClosed: 5,
-			wantTotal:  5,
-			wantCompl:  100.0,
-			// Remaining = 5 - 5 = 0
-			wantRemaining:  0,
-			wantInProgress: 0,
-			wantReview:     0,
-			wantBlocked:    0,
+			name: "all closed (100% completion)",
+			statsResult: &BdStats{Summary: struct {
+				TotalIssues      int `json:"total_issues"`
+				OpenIssues       int `json:"open_issues"`
+				ClosedIssues     int `json:"closed_issues"`
+				InProgressIssues int `json:"in_progress_issues"`
+				BlockedIssues    int `json:"blocked_issues"`
+				DeferredIssues   int `json:"deferred_issues"`
+				TombstoneIssues  int `json:"tombstone_issues"`
+				PinnedIssues     int `json:"pinned_issues"`
+			}{TotalIssues: 5, ClosedIssues: 5}},
+			wantClosed: 5, wantTotal: 5, wantCompl: 100.0,
 		},
 		{
 			name: "all bd stats fields populated",
-			// total=20, open=10, in_progress=2, closed=5, blocked=1, deferred=0, tombstone=0, pinned=0
-			bdOutput:   `{"summary":{"total_issues":20,"open_issues":10,"in_progress_issues":2,"closed_issues":5,"blocked_issues":1,"deferred_issues":0,"tombstone_issues":0,"pinned_issues":0}}`,
-			wantOpen:   10,
-			wantClosed: 5,
-			wantTotal:  20,
-			wantCompl:  25.0,
-			// Remaining = 20 - 5 = 15 (total_issues already excludes tombstones)
-			wantRemaining:  15,
-			wantInProgress: 2,
-			wantBlocked:    1,
+			statsResult: &BdStats{Summary: struct {
+				TotalIssues      int `json:"total_issues"`
+				OpenIssues       int `json:"open_issues"`
+				ClosedIssues     int `json:"closed_issues"`
+				InProgressIssues int `json:"in_progress_issues"`
+				BlockedIssues    int `json:"blocked_issues"`
+				DeferredIssues   int `json:"deferred_issues"`
+				TombstoneIssues  int `json:"tombstone_issues"`
+				PinnedIssues     int `json:"pinned_issues"`
+			}{TotalIssues: 20, OpenIssues: 10, InProgressIssues: 2, ClosedIssues: 5, BlockedIssues: 1}},
+			wantOpen: 10, wantClosed: 5, wantTotal: 20, wantCompl: 25.0,
+			wantRemaining: 15, wantInProgress: 2, wantBlocked: 1,
 			// Review = 20 - 10 - 2 - 5 - 1 - 0 - 0 = 2
 			wantReview: 2,
 		},
 		{
 			name: "negative review clamped to zero",
-			// total=10, open=5, in_progress=3, closed=3, blocked=2, deferred=0, tombstone=0, pinned=0
-			// Review = 10 - 5 - 3 - 3 - 2 - 0 - 0 - 0 = -3 -> clamped to 0
-			bdOutput:   `{"summary":{"total_issues":10,"open_issues":5,"in_progress_issues":3,"closed_issues":3,"blocked_issues":2,"deferred_issues":0,"tombstone_issues":0,"pinned_issues":0}}`,
-			wantOpen:   5,
-			wantClosed: 3,
-			wantTotal:  10,
-			wantCompl:  30.0,
-			// Remaining = 10 - 3 = 7
-			wantRemaining:  7,
-			wantInProgress: 3,
-			wantBlocked:    2,
-			wantReview:     0, // clamped
+			statsResult: &BdStats{Summary: struct {
+				TotalIssues      int `json:"total_issues"`
+				OpenIssues       int `json:"open_issues"`
+				ClosedIssues     int `json:"closed_issues"`
+				InProgressIssues int `json:"in_progress_issues"`
+				BlockedIssues    int `json:"blocked_issues"`
+				DeferredIssues   int `json:"deferred_issues"`
+				TombstoneIssues  int `json:"tombstone_issues"`
+				PinnedIssues     int `json:"pinned_issues"`
+			}{TotalIssues: 10, OpenIssues: 5, InProgressIssues: 3, ClosedIssues: 3, BlockedIssues: 2}},
+			wantOpen: 5, wantClosed: 3, wantTotal: 10, wantCompl: 30.0,
+			wantRemaining: 7, wantInProgress: 3, wantBlocked: 2,
+			wantReview: 0, // clamped from -3
 		},
 		{
 			name: "negative remaining clamped to zero",
-			// total=5, open=0, closed=6 (closed > total, edge case)
-			// Remaining = 5 - 6 = -1 -> clamped to 0
-			// Note: total_issues already excludes tombstones, so tombstone_issues is not subtracted
-			bdOutput:   `{"summary":{"total_issues":5,"open_issues":0,"in_progress_issues":0,"closed_issues":6,"blocked_issues":0,"deferred_issues":0,"tombstone_issues":1,"pinned_issues":0}}`,
-			wantOpen:   0,
-			wantClosed: 6,
-			wantTotal:  5,
-			wantCompl:  120.0, // 6/5 * 100
-			// Remaining = 5 - 6 = -1 -> clamped to 0
-			wantRemaining:  0,
-			wantInProgress: 0,
-			wantBlocked:    0,
-			// Review = 5 - 0 - 0 - 6 - 0 - 0 - 0 = -1 -> clamped to 0
-			wantReview: 0,
+			statsResult: &BdStats{Summary: struct {
+				TotalIssues      int `json:"total_issues"`
+				OpenIssues       int `json:"open_issues"`
+				ClosedIssues     int `json:"closed_issues"`
+				InProgressIssues int `json:"in_progress_issues"`
+				BlockedIssues    int `json:"blocked_issues"`
+				DeferredIssues   int `json:"deferred_issues"`
+				TombstoneIssues  int `json:"tombstone_issues"`
+				PinnedIssues     int `json:"pinned_issues"`
+			}{TotalIssues: 5, ClosedIssues: 6, TombstoneIssues: 1}},
+			wantClosed: 6, wantTotal: 5, wantCompl: 120.0,
+			wantRemaining: 0, // clamped from -1
+			wantReview:    0, // clamped
 		},
 		{
 			name: "review computed with deferred and pinned",
-			// total=30, open=10, in_progress=3, closed=8, blocked=2, deferred=2, tombstone=1, pinned=1
-			// Note: total_issues already excludes tombstones, so tombstone_issues is not subtracted
+			statsResult: &BdStats{Summary: struct {
+				TotalIssues      int `json:"total_issues"`
+				OpenIssues       int `json:"open_issues"`
+				ClosedIssues     int `json:"closed_issues"`
+				InProgressIssues int `json:"in_progress_issues"`
+				BlockedIssues    int `json:"blocked_issues"`
+				DeferredIssues   int `json:"deferred_issues"`
+				TombstoneIssues  int `json:"tombstone_issues"`
+				PinnedIssues     int `json:"pinned_issues"`
+			}{TotalIssues: 30, OpenIssues: 10, InProgressIssues: 3, ClosedIssues: 8, BlockedIssues: 2, DeferredIssues: 2, TombstoneIssues: 1, PinnedIssues: 1}},
+			wantOpen: 10, wantClosed: 8, wantTotal: 30,
+			wantCompl:     float64(8) / float64(30) * 100,
+			wantRemaining: 22, wantInProgress: 3, wantBlocked: 2,
 			// Review = 30 - 10 - 3 - 8 - 2 - 2 - 1 = 4
-			bdOutput:   `{"summary":{"total_issues":30,"open_issues":10,"in_progress_issues":3,"closed_issues":8,"blocked_issues":2,"deferred_issues":2,"tombstone_issues":1,"pinned_issues":1}}`,
-			wantOpen:   10,
-			wantClosed: 8,
-			wantTotal:  30,
-			wantCompl:  float64(8) / float64(30) * 100,
-			// Remaining = 30 - 8 = 22
-			wantRemaining:  22,
-			wantInProgress: 3,
-			wantBlocked:    2,
-			wantReview:     4,
+			wantReview: 4,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
-			}
+			mock := NewMockTracker()
+			mock.StatsResult = tt.statsResult
+			mock.StatsErr = tt.statsErr
+			setDefaultTracker(mock)
+			defer resetDefaultTracker()
 
 			stats := collectStatistics()
 
@@ -935,65 +872,42 @@ func TestCollectStatistics(t *testing.T) {
 func TestCollectSyncStatus(t *testing.T) {
 	tests := []struct {
 		name          string
-		bdOutput      string
-		bdErr         error
 		agents        []AgentStatus
-		wantDBSynced  bool
 		wantNeedsPush int
 		wantNeedsPull int
 	}{
 		{
-			name:         "synced state (no errors in output)",
-			bdOutput:     "Database synced successfully",
-			wantDBSynced: true,
+			name:          "no agents",
+			agents:        nil,
+			wantNeedsPush: 0,
+			wantNeedsPull: 0,
 		},
 		{
-			name:         "unsynced state (error in output)",
-			bdOutput:     "error: sync failed",
-			wantDBSynced: false,
-		},
-		{
-			name:         "unsynced state (failed in output)",
-			bdOutput:     "failed to connect",
-			wantDBSynced: false,
-		},
-		{
-			name:         "command failure",
-			bdErr:        fmt.Errorf("command failed"),
-			wantDBSynced: false, // DBError will be set
-		},
-		{
-			name:     "count git push needs from agents",
-			bdOutput: "ok",
+			name: "count git push needs from agents",
 			agents: []AgentStatus{
 				{Name: "falcon", Ahead: 3, Behind: 0},
 				{Name: "nova", Ahead: 1, Behind: 0},
 				{Name: "spark", Ahead: 0, Behind: 0},
 			},
-			wantDBSynced:  true,
 			wantNeedsPush: 2,
 			wantNeedsPull: 0,
 		},
 		{
-			name:     "count git pull needs from agents",
-			bdOutput: "ok",
+			name: "count git pull needs from agents",
 			agents: []AgentStatus{
 				{Name: "falcon", Ahead: 0, Behind: 2},
 				{Name: "nova", Ahead: 0, Behind: 1},
 			},
-			wantDBSynced:  true,
 			wantNeedsPush: 0,
 			wantNeedsPull: 2,
 		},
 		{
-			name:     "mixed push and pull needs",
-			bdOutput: "ok",
+			name: "mixed push and pull needs",
 			agents: []AgentStatus{
 				{Name: "falcon", Ahead: 3, Behind: 1},
 				{Name: "nova", Ahead: 0, Behind: 2},
 				{Name: "spark", Ahead: 1, Behind: 0},
 			},
-			wantDBSynced:  true,
 			wantNeedsPush: 2,
 			wantNeedsPull: 2,
 		},
@@ -1001,23 +915,15 @@ func TestCollectSyncStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
+			// completeSyncStatus computes git push/pull counts from agent data.
+			// collectSyncBdStatus uses execCommand directly and is tested via integration.
+			info := completeSyncStatus(SyncInfo{}, tt.agents)
 
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				return CommandResult{Stdout: tt.bdOutput, Err: tt.bdErr}
+			if info.GitNeedsPush != tt.wantNeedsPush {
+				t.Errorf("GitNeedsPush = %d, want %d", info.GitNeedsPush, tt.wantNeedsPush)
 			}
-
-			syncInfo := collectSyncStatus(tt.agents)
-
-			if syncInfo.DBSynced != tt.wantDBSynced {
-				t.Errorf("DBSynced = %v, want %v", syncInfo.DBSynced, tt.wantDBSynced)
-			}
-			if syncInfo.GitNeedsPush != tt.wantNeedsPush {
-				t.Errorf("GitNeedsPush = %d, want %d", syncInfo.GitNeedsPush, tt.wantNeedsPush)
-			}
-			if syncInfo.GitNeedsPull != tt.wantNeedsPull {
-				t.Errorf("GitNeedsPull = %d, want %d", syncInfo.GitNeedsPull, tt.wantNeedsPull)
+			if info.GitNeedsPull != tt.wantNeedsPull {
+				t.Errorf("GitNeedsPull = %d, want %d", info.GitNeedsPull, tt.wantNeedsPull)
 			}
 		})
 	}
@@ -1026,11 +932,16 @@ func TestCollectSyncStatus(t *testing.T) {
 func TestCollectTaskStatus(t *testing.T) {
 	tests := []struct {
 		name                    string
-		readyOutput             string
-		inProgressOutput        string
-		needReviewOutput        string
-		blockedOutput           string
-		closedOutput            string
+		readyIssues             []BdIssue
+		readyErr                error
+		inProgressIssues        []BdIssue
+		inProgressErr           error
+		reviewIssues            []BdIssue
+		reviewErr               error
+		backlogIssues           []BdIssue
+		backlogErr              error
+		closedIssues            []BdIssue
+		closedErr               error
 		wantNeedsPlanning       int
 		wantReadyToImplement    int
 		wantInProgress          int
@@ -1046,82 +957,61 @@ func TestCollectTaskStatus(t *testing.T) {
 	}{
 		{
 			name: "tasks with design go to ReadyToImplement",
-			readyOutput: mustJSON([]BdIssue{
+			readyIssues: []BdIssue{
 				{ID: "T-1", Title: "Task with design", Status: "open", Design: "## Design\nSome plan"},
-			}),
-			inProgressOutput:        "[]",
-			needReviewOutput:        "[]",
-			blockedOutput:           "[]",
+			},
 			wantReadyToImplement:    1,
 			wantReadyToImplementLen: 1,
 		},
 		{
 			name: "tasks without design go to NeedsPlanning",
-			readyOutput: mustJSON([]BdIssue{
+			readyIssues: []BdIssue{
 				{ID: "T-1", Title: "Task without design", Status: "open", Design: ""},
-			}),
-			inProgressOutput:     "[]",
-			needReviewOutput:     "[]",
-			blockedOutput:        "[]",
+			},
 			wantNeedsPlanning:    1,
 			wantNeedsPlanningLen: 1,
 		},
 		{
-			name:        "tasks with review status go to NeedReview",
-			readyOutput: "[]",
-			needReviewOutput: mustJSON([]BdIssue{
+			name: "tasks with review status go to NeedReview",
+			reviewIssues: []BdIssue{
 				{ID: "T-1", Title: "Review this task", Status: "review"},
-			}),
-			inProgressOutput:   "[]",
-			blockedOutput:      "[]",
+			},
 			wantNeedReview:     1,
 			wantReviewTasksLen: 1,
 		},
 		{
-			name:        "in_progress tasks populate InProgressTasks and agentTasks",
-			readyOutput: "[]",
-			inProgressOutput: mustJSON([]BdIssue{
+			name: "in_progress tasks populate InProgressTasks and agentTasks",
+			inProgressIssues: []BdIssue{
 				{ID: "T-1", Title: "In progress task", Status: "in_progress", Assignee: "falcon"},
-			}),
-			needReviewOutput:       "[]",
-			blockedOutput:          "[]",
+			},
 			wantInProgress:         1,
 			wantInProgressTasksLen: 1,
 			wantAgentTasksLen:      1,
 		},
 		{
-			name:        "blocked tasks from bd blocked",
-			readyOutput: "[]",
-			blockedOutput: mustJSON([]BdIssue{
+			name: "blocked tasks from bd blocked",
+			backlogIssues: []BdIssue{
 				{ID: "T-1", Title: "Blocked task", Status: "blocked"},
 				{ID: "T-2", Title: "Another blocked", Status: "blocked"},
-			}),
-			inProgressOutput:    "[]",
-			needReviewOutput:    "[]",
+			},
 			wantBacklog:         2,
 			wantBacklogTasksLen: 2,
 		},
 		{
 			name: "epics are skipped",
-			readyOutput: mustJSON([]BdIssue{
+			readyIssues: []BdIssue{
 				{ID: "E-1", Title: "Epic task", Status: "open", IssueType: "epic", Design: ""},
 				{ID: "T-1", Title: "Regular task", Status: "open", Design: ""},
-			}),
-			inProgressOutput:     "[]",
-			needReviewOutput:     "[]",
-			blockedOutput:        "[]",
+			},
 			wantNeedsPlanning:    1, // Only the regular task
 			wantNeedsPlanningLen: 1,
 		},
 		{
 			name: "needs-revision label tasks go to NeedsPlanning",
-			readyOutput: mustJSON([]BdIssue{
+			readyIssues: []BdIssue{
 				{ID: "T-1", Title: "Task needing revision", Status: "open", Design: "existing plan", Labels: []string{"needs-revision"}},
 				{ID: "T-2", Title: "Regular task with design", Status: "open", Design: "plan"},
-			}),
-			inProgressOutput:        "[]",
-			needReviewOutput:        "[]",
-			blockedOutput:           "[]",
+			},
 			wantNeedsPlanning:       1, // Task with needs-revision label
 			wantNeedsPlanningLen:    1,
 			wantReadyToImplement:    1, // Regular task with design
@@ -1129,19 +1019,16 @@ func TestCollectTaskStatus(t *testing.T) {
 		},
 		{
 			name: "in_progress tasks skipped in ready output",
-			readyOutput: mustJSON([]BdIssue{
+			readyIssues: []BdIssue{
 				{ID: "T-1", Title: "In progress skip", Status: "in_progress", Design: ""},
 				{ID: "T-2", Title: "Regular task", Status: "open", Design: ""},
-			}),
-			inProgressOutput:     "[]",
-			needReviewOutput:     "[]",
-			blockedOutput:        "[]",
+			},
 			wantNeedsPlanning:    1, // Only the open task
 			wantNeedsPlanningLen: 1,
 		},
 		{
 			name: "top 5 limit for NeedsPlanning",
-			readyOutput: mustJSON([]BdIssue{
+			readyIssues: []BdIssue{
 				{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
 				{ID: "T-2", Title: "Task 2", Status: "open", Design: ""},
 				{ID: "T-3", Title: "Task 3", Status: "open", Design: ""},
@@ -1149,61 +1036,42 @@ func TestCollectTaskStatus(t *testing.T) {
 				{ID: "T-5", Title: "Task 5", Status: "open", Design: ""},
 				{ID: "T-6", Title: "Task 6", Status: "open", Design: ""},
 				{ID: "T-7", Title: "Task 7", Status: "open", Design: ""},
-			}),
-			inProgressOutput:     "[]",
-			needReviewOutput:     "[]",
-			blockedOutput:        "[]",
+			},
 			wantNeedsPlanning:    7, // Count is 7
 			wantNeedsPlanningLen: 5, // But only 5 stored
 		},
 		{
 			name: "top 5 limit for ReadyToImplement",
-			readyOutput: mustJSON([]BdIssue{
+			readyIssues: []BdIssue{
 				{ID: "T-1", Title: "Task 1", Status: "open", Design: "plan"},
 				{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
 				{ID: "T-3", Title: "Task 3", Status: "open", Design: "plan"},
 				{ID: "T-4", Title: "Task 4", Status: "open", Design: "plan"},
 				{ID: "T-5", Title: "Task 5", Status: "open", Design: "plan"},
 				{ID: "T-6", Title: "Task 6", Status: "open", Design: "plan"},
-			}),
-			inProgressOutput:        "[]",
-			needReviewOutput:        "[]",
-			blockedOutput:           "[]",
+			},
 			wantReadyToImplement:    6, // Count is 6
 			wantReadyToImplementLen: 5, // But only 5 stored
 		},
 		{
-			name:             "closed tasks are collected",
-			readyOutput:      "[]",
-			inProgressOutput: "[]",
-			needReviewOutput: "[]",
-			blockedOutput:    "[]",
-			closedOutput: mustJSON([]BdIssue{
+			name: "closed tasks are collected",
+			closedIssues: []BdIssue{
 				{ID: "T-1", Title: "Done task", Status: "closed", Priority: 2},
 				{ID: "T-2", Title: "Also done", Status: "closed", Priority: 3},
-			}),
+			},
 			wantClosedTasksLen: 2,
 		},
 		{
-			name:                 "JSON parsing error handled gracefully",
-			readyOutput:          "not valid json",
-			inProgressOutput:     "also invalid",
-			needReviewOutput:     "[]",
-			blockedOutput:        "[]",
-			wantNeedsPlanning:    0,
-			wantReadyToImplement: 0,
-			wantInProgress:       0,
+			name:     "Ready() error handled gracefully",
+			readyErr: fmt.Errorf("command failed"),
 		},
 		{
-			name:        "multiple agents with tasks",
-			readyOutput: "[]",
-			inProgressOutput: mustJSON([]BdIssue{
+			name: "multiple agents with tasks",
+			inProgressIssues: []BdIssue{
 				{ID: "T-1", Title: "Task 1", Status: "in_progress", Assignee: "falcon"},
 				{ID: "T-2", Title: "Task 2", Status: "in_progress", Assignee: "nova"},
 				{ID: "T-3", Title: "Task 3", Status: "in_progress", Assignee: ""},
-			}),
-			needReviewOutput:       "[]",
-			blockedOutput:          "[]",
+			},
 			wantInProgress:         3,
 			wantInProgressTasksLen: 3,
 			wantAgentTasksLen:      2, // Only tasks with assignees
@@ -1212,30 +1080,24 @@ func TestCollectTaskStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldExec := execCommand
-			defer func() { execCommand = oldExec }()
-
-			execCommand = func(dir, name string, args ...string) CommandResult {
-				if len(args) > 0 && args[0] == "ready" {
-					return CommandResult{Stdout: tt.readyOutput}
+			mock := NewMockTracker()
+			mock.ReadyResult = tt.readyIssues
+			mock.ReadyErr = tt.readyErr
+			mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
+				switch opts.Status {
+				case "in_progress":
+					return tt.inProgressIssues, tt.inProgressErr
+				case "review":
+					return tt.reviewIssues, tt.reviewErr
+				case "closed":
+					return tt.closedIssues, tt.closedErr
 				}
-				if len(args) > 1 && args[0] == "list" && args[1] == "--status=in_progress" {
-					return CommandResult{Stdout: tt.inProgressOutput}
-				}
-				if len(args) > 1 && args[0] == "list" && args[1] == "--status=review" {
-					return CommandResult{Stdout: tt.needReviewOutput}
-				}
-				if len(args) > 1 && args[0] == "list" && args[1] == "--status=closed" {
-					if tt.closedOutput != "" {
-						return CommandResult{Stdout: tt.closedOutput}
-					}
-					return CommandResult{Stdout: "[]"}
-				}
-				if len(args) > 0 && args[0] == "blocked" {
-					return CommandResult{Stdout: tt.blockedOutput}
-				}
-				return CommandResult{}
+				return nil, nil
 			}
+			mock.BlockedResult = tt.backlogIssues
+			mock.BlockedErr = tt.backlogErr
+			setDefaultTracker(mock)
+			defer resetDefaultTracker()
 
 			summary, needsPlanningTasks, readyToImplementTasks, reviewTasks, inProgressTasks, backlogTasks, closedTasks, agentTasks := collectTaskStatus(100)
 
@@ -1280,32 +1142,26 @@ func TestCollectTaskStatus(t *testing.T) {
 }
 
 func TestCollectTaskStatusReadyCommandArgs(t *testing.T) {
-	// This test verifies that the "ready" command is called with the passed readyLimit
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
-	var capturedArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		if len(args) > 0 && args[0] == "ready" {
-			capturedArgs = args
-			// Return minimal valid JSON
-			return CommandResult{Stdout: "[]"}
-		}
-		// Return empty for other commands (list, blocked, etc.)
-		return CommandResult{Stdout: "[]"}
+	// This test verifies that Ready() is called with the passed readyLimit
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
+	mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
+		return nil, nil
+	}
+	setDefaultTracker(mock)
+	defer resetDefaultTracker()
 
 	collectTaskStatus(100)
 
-	// Verify the ready command was called with correct args
-	expectedArgs := []string{"ready", "--json", "--limit", "100"}
-	if len(capturedArgs) != len(expectedArgs) {
-		t.Errorf("ready command called with %d args, want %d. Got: %v", len(capturedArgs), len(expectedArgs), capturedArgs)
+	if !mock.Called("Ready") {
+		t.Fatal("Ready() was not called")
 	}
-	for i, expected := range expectedArgs {
-		if i >= len(capturedArgs) || capturedArgs[i] != expected {
-			t.Errorf("ready command arg[%d] = %q, want %q. Full args: %v", i, capturedArgs[i], expected, capturedArgs)
-		}
+	if capturedOpts.Limit != 100 {
+		t.Errorf("Ready() called with Limit=%d, want 100", capturedOpts.Limit)
 	}
 }
 
@@ -1606,28 +1462,26 @@ func TestCollectMonitorData(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: mustJSON([]BdIssue{
-					{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
-					{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
-				})}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				return CommandResult{Stdout: `{"summary":{"total_issues":10,"open_issues":3,"closed_issues":7}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: "[]"}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.ReadyResult = []BdIssue{
+		{ID: "T-1", Title: "Task 1", Status: "open", Design: ""},
+		{ID: "T-2", Title: "Task 2", Status: "open", Design: "plan"},
+	}
+	mock.StatsResult = &BdStats{Summary: struct {
+		TotalIssues      int `json:"total_issues"`
+		OpenIssues       int `json:"open_issues"`
+		ClosedIssues     int `json:"closed_issues"`
+		InProgressIssues int `json:"in_progress_issues"`
+		BlockedIssues    int `json:"blocked_issues"`
+		DeferredIssues   int `json:"deferred_issues"`
+		TombstoneIssues  int `json:"tombstone_issues"`
+		PinnedIssues     int `json:"pinned_issues"`
+	}{TotalIssues: 10, OpenIssues: 3, ClosedIssues: 7}}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { resetDefaultTracker() })
 
 	data := collectMonitorData(100, "")
 
@@ -1701,25 +1555,22 @@ func TestCollectMonitorDataExported(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: "[]"}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				return CommandResult{Stdout: `{"summary":{"total_issues":5,"open_issues":2,"closed_issues":3}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: "[]"}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.StatsResult = &BdStats{Summary: struct {
+		TotalIssues      int `json:"total_issues"`
+		OpenIssues       int `json:"open_issues"`
+		ClosedIssues     int `json:"closed_issues"`
+		InProgressIssues int `json:"in_progress_issues"`
+		BlockedIssues    int `json:"blocked_issues"`
+		DeferredIssues   int `json:"deferred_issues"`
+		TombstoneIssues  int `json:"tombstone_issues"`
+		PinnedIssues     int `json:"pinned_issues"`
+	}{TotalIssues: 5, OpenIssues: 2, ClosedIssues: 3}}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { resetDefaultTracker() })
 
 	data := CollectMonitorData("")
 	if data == nil {
@@ -1807,22 +1658,6 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })
 
-	// T-BLOCKER is unclosed (in ready output), so T-BLOCKED-READY has an unclosed blocker.
-	// T-BD-BLOCKED comes from bd blocked output.
-	// Both should count toward Backlog, giving Backlog=2.
-	readyIssues := []BdIssue{
-		{ID: "T-BLOCKER", Title: "Open blocker", Status: "open", Design: "plan"},
-		{ID: "T-BLOCKED-READY", Title: "Blocked in ready", Status: "open", Design: "plan",
-			Dependencies: []Dependency{{IssueID: "T-BLOCKED-READY", DependsOnID: "T-BLOCKER", Type: "blocks"}}},
-		{ID: "T-NORMAL", Title: "Normal task", Status: "open", Design: "plan"},
-	}
-	blockedIssues := []BdIssue{
-		{ID: "T-BD-BLOCKED", Title: "Blocked by bd", Status: "open"},
-	}
-
-	readyJSON, _ := json.Marshal(readyIssues)
-	blockedJSON, _ := json.Marshal(blockedIssues)
-
 	execCommand = func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "agent1"}
@@ -1833,25 +1668,34 @@ func TestBacklogAccumulatesReadyWithBlockersAndBlocked(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: string(readyJSON)}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				return CommandResult{Stdout: `{"summary":{"total_issues":20,"open_issues":10,"closed_issues":5}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: string(blockedJSON)}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	// T-BLOCKER is unclosed (in ready output), so T-BLOCKED-READY has an unclosed blocker.
+	// T-BD-BLOCKED comes from bd blocked output.
+	// Both should count toward Backlog, giving Backlog=2.
+	mock := NewMockTracker()
+	mock.ReadyResult = []BdIssue{
+		{ID: "T-BLOCKER", Title: "Open blocker", Status: "open", Design: "plan"},
+		{ID: "T-BLOCKED-READY", Title: "Blocked in ready", Status: "open", Design: "plan",
+			Dependencies: []Dependency{{IssueID: "T-BLOCKED-READY", DependsOnID: "T-BLOCKER", Type: "blocks"}}},
+		{ID: "T-NORMAL", Title: "Normal task", Status: "open", Design: "plan"},
+	}
+	mock.BlockedResult = []BdIssue{
+		{ID: "T-BD-BLOCKED", Title: "Blocked by bd", Status: "open"},
+	}
+	mock.StatsResult = &BdStats{Summary: struct {
+		TotalIssues      int `json:"total_issues"`
+		OpenIssues       int `json:"open_issues"`
+		ClosedIssues     int `json:"closed_issues"`
+		InProgressIssues int `json:"in_progress_issues"`
+		BlockedIssues    int `json:"blocked_issues"`
+		DeferredIssues   int `json:"deferred_issues"`
+		TombstoneIssues  int `json:"tombstone_issues"`
+		PinnedIssues     int `json:"pinned_issues"`
+	}{TotalIssues: 20, OpenIssues: 10, ClosedIssues: 5}}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { resetDefaultTracker() })
 
 	data := collectMonitorData(100, "")
 
@@ -1897,14 +1741,6 @@ func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })
 
-	readyIssues := []BdIssue{
-		{ID: "T-1", Title: "Normal task", Status: "open", Design: "plan"},
-		{ID: "T-EPIC", Title: "Epic task", Status: "open", IssueType: "epic"},
-		{ID: "T-2", Title: "Needs planning", Status: "open", Design: ""},
-	}
-
-	readyJSON, _ := json.Marshal(readyIssues)
-
 	execCommand = func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "agent1"}
@@ -1915,25 +1751,27 @@ func TestEpicsExcludedFromWorkQueueAndStats(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: string(readyJSON)}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				return CommandResult{Stdout: `{"summary":{"total_issues":10,"open_issues":5,"closed_issues":3}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: "[]"}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.ReadyResult = []BdIssue{
+		{ID: "T-1", Title: "Normal task", Status: "open", Design: "plan"},
+		{ID: "T-EPIC", Title: "Epic task", Status: "open", IssueType: "epic"},
+		{ID: "T-2", Title: "Needs planning", Status: "open", Design: ""},
+	}
+	mock.StatsResult = &BdStats{Summary: struct {
+		TotalIssues      int `json:"total_issues"`
+		OpenIssues       int `json:"open_issues"`
+		ClosedIssues     int `json:"closed_issues"`
+		InProgressIssues int `json:"in_progress_issues"`
+		BlockedIssues    int `json:"blocked_issues"`
+		DeferredIssues   int `json:"deferred_issues"`
+		TombstoneIssues  int `json:"tombstone_issues"`
+		PinnedIssues     int `json:"pinned_issues"`
+	}{TotalIssues: 10, OpenIssues: 5, ClosedIssues: 3}}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { resetDefaultTracker() })
 
 	data := collectMonitorData(100, "")
 
@@ -1984,26 +1822,6 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 	oldExec := execCommand
 	t.Cleanup(func() { execCommand = oldExec })
 
-	readyIssues := []BdIssue{
-		{ID: "T-1", Title: "Plan me", Status: "open", Design: ""},
-		{ID: "T-2", Title: "Implement me", Status: "open", Design: "plan"},
-	}
-	inProgressIssues := []BdIssue{
-		{ID: "T-3", Title: "Active work", Status: "in_progress", Assignee: "agent1"},
-	}
-	reviewIssues := []BdIssue{
-		{ID: "T-4", Title: "Review me", Status: "review"},
-		{ID: "T-5", Title: "Review me too", Status: "review"},
-	}
-	blockedIssues := []BdIssue{
-		{ID: "T-6", Title: "Blocked task", Status: "open"},
-	}
-
-	readyJSON, _ := json.Marshal(readyIssues)
-	inProgressJSON, _ := json.Marshal(inProgressIssues)
-	reviewJSON, _ := json.Marshal(reviewIssues)
-	blockedJSON, _ := json.Marshal(blockedIssues)
-
 	execCommand = func(dir, name string, args ...string) CommandResult {
 		if name == "git" && len(args) > 0 && args[0] == "branch" {
 			return CommandResult{Stdout: "agent1"}
@@ -2014,38 +1832,46 @@ func TestRemainingDerivedFromWorkQueue(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			if len(args) > 0 && args[0] == "ready" {
-				return CommandResult{Stdout: string(readyJSON)}
-			}
-			if len(args) > 0 && args[0] == "stats" {
-				// bd stats says 50 total, 40 closed — but Remaining should come from work queue, not subtraction
-				return CommandResult{Stdout: `{"summary":{"total_issues":50,"open_issues":8,"closed_issues":40}}`}
-			}
-			if len(args) > 0 && args[0] == "sync" {
-				return CommandResult{Stdout: "synced"}
-			}
-			if len(args) > 0 && args[0] == "blocked" {
-				return CommandResult{Stdout: string(blockedJSON)}
-			}
-			if len(args) > 1 && args[0] == "list" {
-				// Match the specific status queries
-				for _, arg := range args {
-					if arg == "--status=in_progress" {
-						return CommandResult{Stdout: string(inProgressJSON)}
-					}
-					if arg == "--status=review" {
-						return CommandResult{Stdout: string(reviewJSON)}
-					}
-					if arg == "--status=closed" {
-						return CommandResult{Stdout: "[]"}
-					}
-				}
-				return CommandResult{Stdout: "[]"}
-			}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	mock.ReadyResult = []BdIssue{
+		{ID: "T-1", Title: "Plan me", Status: "open", Design: ""},
+		{ID: "T-2", Title: "Implement me", Status: "open", Design: "plan"},
+	}
+	mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
+		switch opts.Status {
+		case "in_progress":
+			return []BdIssue{
+				{ID: "T-3", Title: "Active work", Status: "in_progress", Assignee: "agent1"},
+			}, nil
+		case "review":
+			return []BdIssue{
+				{ID: "T-4", Title: "Review me", Status: "review"},
+				{ID: "T-5", Title: "Review me too", Status: "review"},
+			}, nil
+		case "closed":
+			return nil, nil
+		}
+		return nil, nil
+	}
+	mock.BlockedResult = []BdIssue{
+		{ID: "T-6", Title: "Blocked task", Status: "open"},
+	}
+	// bd stats says 50 total, 40 closed — but Remaining should come from work queue, not subtraction
+	mock.StatsResult = &BdStats{Summary: struct {
+		TotalIssues      int `json:"total_issues"`
+		OpenIssues       int `json:"open_issues"`
+		ClosedIssues     int `json:"closed_issues"`
+		InProgressIssues int `json:"in_progress_issues"`
+		BlockedIssues    int `json:"blocked_issues"`
+		DeferredIssues   int `json:"deferred_issues"`
+		TombstoneIssues  int `json:"tombstone_issues"`
+		PinnedIssues     int `json:"pinned_issues"`
+	}{TotalIssues: 50, OpenIssues: 8, ClosedIssues: 40}}
+	setDefaultTracker(mock)
+	t.Cleanup(func() { resetDefaultTracker() })
 
 	data := collectMonitorData(100, "")
 
@@ -2114,11 +1940,12 @@ func TestRunMonitorOneShot(t *testing.T) {
 		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 			return CommandResult{Stdout: "0\t0"}
 		}
-		if name == "bd" {
-			return CommandResult{Stdout: "[]"}
-		}
 		return CommandResult{}
 	}
+
+	mock := NewMockTracker()
+	setDefaultTracker(mock)
+	t.Cleanup(func() { resetDefaultTracker() })
 
 	// Save and set monitorNoWatch
 	oldNoWatch := monitorNoWatch
@@ -2452,37 +2279,37 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 	tests := []struct {
 		name         string
 		lockCommand  string // "plan" or "task"
-		taskStatus   string // return from getTaskStatus mock
+		rawStatus    string // raw status from GetIssue (before getTaskStatus mapping)
 		expectPrefix string
 	}{
 		{
 			name:         "planning_agent_task_needs_review_becomes_review",
 			lockCommand:  "plan",
-			taskStatus:   "needs_review",
+			rawStatus:    "review", // getTaskStatus maps "review" → "needs_review"
 			expectPrefix: "review:",
 		},
 		{
 			name:         "working_agent_task_needs_review_stays_working",
 			lockCommand:  "task",
-			taskStatus:   "needs_review",
+			rawStatus:    "review",
 			expectPrefix: "working:",
 		},
 		{
 			name:         "planning_agent_task_closed_becomes_done",
 			lockCommand:  "plan",
-			taskStatus:   "closed",
+			rawStatus:    "closed",
 			expectPrefix: "done:",
 		},
 		{
 			name:         "working_agent_task_closed_becomes_done",
 			lockCommand:  "task",
-			taskStatus:   "closed",
+			rawStatus:    "closed",
 			expectPrefix: "done:",
 		},
 		{
 			name:         "planning_agent_task_in_progress_keeps_planning",
 			lockCommand:  "plan",
-			taskStatus:   "in_progress",
+			rawStatus:    "in_progress",
 			expectPrefix: "planning:",
 		},
 	}
@@ -2519,6 +2346,15 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 			lockData, _ := json.Marshal(lockInfo)
 			os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644)
 
+			// Mock IssueTracker for getTaskStatus
+			mockTracker := &MockIssueTracker{
+				GetIssueFunc: func(ctx context.Context, id string) (*BdIssue, error) {
+					return &BdIssue{ID: id, Title: "Test Task", Status: tt.rawStatus}, nil
+				},
+			}
+			setDefaultTracker(mockTracker)
+			t.Cleanup(func() { setDefaultTracker(nil) })
+
 			oldExec := execCommand
 			t.Cleanup(func() { execCommand = oldExec })
 
@@ -2531,13 +2367,6 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 				}
 				if name == "git" && len(args) > 0 && args[0] == "rev-list" {
 					return CommandResult{Stdout: "0\t0"}
-				}
-				// Mock bd show for getTaskStatus
-				if name == "bd" && len(args) > 0 && args[0] == "show" {
-					return CommandResult{Stdout: mustJSON([]struct {
-						Title  string `json:"title"`
-						Status string `json:"status"`
-					}{{Title: "Test Task", Status: tt.taskStatus}})}
 				}
 				return CommandResult{}
 			}
@@ -2983,65 +2812,50 @@ func TestRenderDashboardWithDaemonManagedAgents(t *testing.T) {
 }
 
 // TestCollectTaskStatusReadyLimitParam verifies that collectTaskStatus passes
-// the readyLimit parameter through to the bd ready command. The existing
+// the readyLimit parameter through to Ready(). The existing
 // TestCollectTaskStatusReadyCommandArgs tests limit=100 (monitor default);
 // this test covers limit=50 (serve default).
 func TestCollectTaskStatusReadyLimitParam(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
-	var capturedReadyArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		if len(args) > 0 && args[0] == "ready" {
-			capturedReadyArgs = args
-			return CommandResult{Stdout: "[]"}
-		}
-		return CommandResult{Stdout: "[]"}
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return nil, nil
 	}
+	mock.ListFunc = func(_ context.Context, opts ListOpts) ([]BdIssue, error) {
+		return nil, nil
+	}
+	setDefaultTracker(mock)
+	defer resetDefaultTracker()
 
 	collectTaskStatus(50)
 
-	expectedArgs := []string{"ready", "--json", "--limit", "50"}
-	if len(capturedReadyArgs) != len(expectedArgs) {
-		t.Fatalf("ready command called with %d args, want %d. Got: %v", len(capturedReadyArgs), len(expectedArgs), capturedReadyArgs)
-	}
-	for i, expected := range expectedArgs {
-		if capturedReadyArgs[i] != expected {
-			t.Errorf("ready command arg[%d] = %q, want %q. Full args: %v", i, capturedReadyArgs[i], expected, capturedReadyArgs)
-		}
+	if capturedOpts.Limit != 50 {
+		t.Errorf("Ready() called with Limit=%d, want 50", capturedOpts.Limit)
 	}
 }
 
 // TestCollectReadyTasksByPriorityReadyLimitParam verifies that
-// collectReadyTasksByPriority passes the readyLimit parameter through to the
-// bd ready command (limit=50, matching the serve use case).
+// collectReadyTasksByPriority passes the readyLimit parameter through to
+// Ready() (limit=50, matching the serve use case).
 func TestCollectReadyTasksByPriorityReadyLimitParam(t *testing.T) {
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-
-	var capturedReadyArgs []string
-	execCommand = func(dir, name string, args ...string) CommandResult {
-		if len(args) > 0 && args[0] == "ready" {
-			capturedReadyArgs = args
-			return CommandResult{Stdout: mustJSON([]BdIssue{
-				{ID: "T-1", Title: "P1 task", Status: "open", Priority: 1, Design: "plan"},
-				{ID: "T-2", Title: "P2 task", Status: "open", Priority: 2, Design: ""},
-			})}
-		}
-		return CommandResult{Stdout: "[]"}
+	mock := NewMockTracker()
+	var capturedOpts ReadyOpts
+	mock.ReadyFunc = func(_ context.Context, opts ReadyOpts) ([]BdIssue, error) {
+		capturedOpts = opts
+		return []BdIssue{
+			{ID: "T-1", Title: "P1 task", Status: "open", Priority: 1, Design: "plan"},
+			{ID: "T-2", Title: "P2 task", Status: "open", Priority: 2, Design: ""},
+		}, nil
 	}
+	setDefaultTracker(mock)
+	defer resetDefaultTracker()
 
 	counts := collectReadyTasksByPriority(50)
 
-	// Verify the ready command was called with --limit 50
-	expectedArgs := []string{"ready", "--json", "--limit", "50"}
-	if len(capturedReadyArgs) != len(expectedArgs) {
-		t.Fatalf("ready command called with %d args, want %d. Got: %v", len(capturedReadyArgs), len(expectedArgs), capturedReadyArgs)
-	}
-	for i, expected := range expectedArgs {
-		if capturedReadyArgs[i] != expected {
-			t.Errorf("ready command arg[%d] = %q, want %q. Full args: %v", i, capturedReadyArgs[i], expected, capturedReadyArgs)
-		}
+	// Verify Ready() was called with Limit=50
+	if capturedOpts.Limit != 50 {
+		t.Errorf("Ready() called with Limit=%d, want 50", capturedOpts.Limit)
 	}
 
 	// Also verify the function correctly counted by priority

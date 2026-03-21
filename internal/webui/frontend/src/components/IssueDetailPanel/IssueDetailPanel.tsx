@@ -5,10 +5,28 @@
  * and markdown rendering for design field.
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 
-import { updateIssue, addDependency, removeDependency } from "@/api";
-import { useAgentTerminalLogs } from "@/hooks";
+import {
+  updateIssue,
+  addDependency,
+  removeDependency,
+  getIssueEvents,
+  moveIssue,
+} from "@/api";
+import { deleteTabMetadata, scheduleSessionKill } from "@/api/terminal";
+import type { IssueTab } from "@/api/issueTabs";
+import {
+  useAgentTerminalLogs,
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  LAYER_ISSUE_PANEL,
+} from "@/hooks";
+import { useAgentContext } from "@/hooks/useAgentContext";
+import { useWorkspace } from "@/hooks/useWorkspace";
+import { useWorkspaceRepos } from "@/hooks/useWorkspaceRepos";
+import { useIssueTabPersistence } from "@/hooks/useIssueTabPersistence";
 import type {
   Issue,
   IssueDetails,
@@ -17,82 +35,40 @@ import type {
   IssueType,
   DependencyType,
   Comment,
+  Event,
 } from "@/types";
 import type { Status } from "@/types/status";
-import { getReviewType } from "@/utils/issueCategory";
+import { getReviewType, isPRUrl } from "@/utils/issueCategory";
 
+import type { ConnectionState } from "@/components/TerminalView";
+
+import { ActivityLog } from "./ActivityLog";
+import { AgentStatusBadge } from "./AgentStatusBadge";
 import { AssigneeDropdown } from "./AssigneeDropdown";
+import { OwnerDropdown } from "./OwnerDropdown";
+import { StartWorkButton } from "./StartWorkButton";
 import { CommentForm } from "./CommentForm";
-import { CommentsSection } from "./CommentsSection";
 import { DependencySection } from "./DependencySection";
+import { LabelEditor } from "./LabelEditor";
 import { EditableDescription } from "./EditableDescription";
 import { IssueHeader } from "./IssueHeader";
+import { DesignPanel } from "./DesignPanel";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { PriorityDropdown } from "./PriorityDropdown";
 import { RejectCommentForm } from "./RejectCommentForm";
+import { RepoDropdown } from "./RepoDropdown";
 import { TypeDropdown } from "./TypeDropdown";
+import { ConfirmDialog } from "../ConfirmDialog";
+import { MoveIssueDialog } from "./MoveIssueDialog";
+import { SplitDetailSummary } from "./SplitDetailSummary";
+import { EmbeddedTerminal } from "../EmbeddedTerminal";
+import { ResizeDivider } from "./ResizeDivider";
 import { ErrorToast } from "../ErrorToast";
 import { LogViewer } from "../LogViewer";
+import { useSplitRatio } from "@/hooks/useSplitRatio";
+import { CollapsibleSection } from "./CollapsibleSection";
+import { SessionHistorySection } from "./SessionHistorySection";
 import styles from "./IssueDetailPanel.module.css";
-
-/**
- * Props for CollapsibleSection.
- */
-interface CollapsibleSectionProps {
-  title: string;
-  count?: number;
-  defaultExpanded?: boolean;
-  children: React.ReactNode;
-  testId?: string;
-}
-
-/**
- * Collapsible section with chevron indicator.
- */
-function CollapsibleSection({
-  title,
-  count,
-  defaultExpanded = true,
-  children,
-  testId,
-}: CollapsibleSectionProps): JSX.Element {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-
-  return (
-    <section className={styles.collapsibleSection} data-testid={testId}>
-      <button
-        type="button"
-        className={styles.collapsibleHeader}
-        onClick={() => setIsExpanded(!isExpanded)}
-        aria-expanded={isExpanded}
-      >
-        <span className={styles.collapsibleTitle}>
-          {title}
-          {count !== undefined && (
-            <span className={styles.collapsibleCount}>({count})</span>
-          )}
-        </span>
-        <svg
-          className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ""}`}
-          viewBox="0 0 16 16"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M6 4l4 4-4 4"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
-      {isExpanded && (
-        <div className={styles.collapsibleContent}>{children}</div>
-      )}
-    </section>
-  );
-}
 
 /**
  * Blocking banner component - shows when issue is in blocked state with open dependencies.
@@ -183,6 +159,12 @@ export interface IssueDetailPanelProps {
   onApprove?: (issue: Issue) => void | Promise<void>;
   /** Callback when reject is submitted with comment (only for review items) */
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
+  /** Callback when issue is updated (e.g., status, title, priority changed) */
+  onIssueUpdate?: (issue: Issue) => void;
+  /** Callback when copy-link button is clicked */
+  onCopyLink?: () => void;
+  /** Callback when a dependency/dependent issue is clicked for navigation */
+  onNavigateToIssue?: (issue: Issue) => void;
 }
 
 /**
@@ -200,12 +182,52 @@ function isIssueDetails(issue: Issue | IssueDetails): issue is IssueDetails {
 }
 
 /**
- * Render a dependency/dependent issue link.
+ * Get the CSS class for a dependency status dot.
  */
-function renderDependencyItem(dep: IssueWithDependencyMetadata): JSX.Element {
+function getDependentStatusDotClass(status: string | undefined): string {
+  switch (status) {
+    case "closed":
+      return styles.statusDotClosed ?? "";
+    case "in_progress":
+      return styles.statusDotInProgress ?? "";
+    case "blocked":
+      return styles.statusDotBlocked ?? "";
+    default:
+      return styles.statusDotOpen ?? "";
+  }
+}
+
+/**
+ * Render a dependency/dependent issue as a clickable chip.
+ */
+function renderDependencyChip(
+  dep: IssueWithDependencyMetadata,
+  onNavigateToIssue?: (issue: Issue) => void,
+): JSX.Element {
   const statusClass = dep.status === "closed" ? styles.dependencyClosed : "";
+  const isClickable = !!onNavigateToIssue;
   return (
-    <li key={dep.id} className={`${styles.dependencyItem} ${statusClass}`}>
+    <li
+      key={dep.id}
+      className={`${styles.dependencyChip} ${statusClass} ${isClickable ? styles.clickableChip : ""}`}
+      onClick={isClickable ? () => onNavigateToIssue(dep) : undefined}
+      role={isClickable ? "button" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={
+        isClickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onNavigateToIssue(dep);
+              }
+            }
+          : undefined
+      }
+    >
+      <span
+        className={`${styles.statusDot} ${getDependentStatusDotClass(dep.status)}`}
+        aria-label={dep.status ?? "open"}
+      />
       <span className={styles.dependencyId}>{dep.id}</span>
       <span className={styles.dependencyTitle}>{dep.title}</span>
       {dep.dependency_type && (
@@ -231,7 +253,37 @@ interface DefaultContentProps {
   onApprove?: (issue: Issue) => void | Promise<void>;
   /** Callback when reject is submitted with comment */
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
+  /** Callback when copy-link button is clicked */
+  onCopyLink?: () => void;
+  /** Callback when a dependency/dependent issue is clicked for navigation */
+  onNavigateToIssue?: (issue: Issue) => void;
 }
+
+/**
+ * Tab model for dynamic tab management.
+ */
+interface DetailTabMetadata {
+  sessionName?: string | undefined;
+  backend?: string | undefined;
+  agentName?: string | null | undefined;
+  worktreePath?: string | undefined;
+}
+
+interface DetailTab {
+  id: string;
+  type: "details" | "logs" | "terminal";
+  label: string;
+  closable: boolean;
+  metadata?: DetailTabMetadata | undefined;
+  connectionState?: ConnectionState | undefined;
+}
+
+const DETAILS_TAB: DetailTab = {
+  id: "details",
+  type: "details",
+  label: "Details",
+  closable: false,
+};
 
 /**
  * Default content renderer for issue details.
@@ -246,21 +298,153 @@ function DefaultContent({
   onIssueUpdate,
   onApprove,
   onReject,
+  onCopyLink,
+  onNavigateToIssue,
 }: DefaultContentProps): JSX.Element {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [isSavingPriority, setIsSavingPriority] = useState(false);
   const [isSavingType, setIsSavingType] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
+  const [isSavingOwner, setIsSavingOwner] = useState(false);
+  const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
+  const [showMoveDialog, setShowMoveDialog] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
-  // Tab state
-  type TabType = "details" | "logs";
-  const [activeTab, setActiveTab] = useState<TabType>("details");
+  // Split view state for terminal tabs
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const { ratio, applyDelta, resetRatio, isMaximized, toggleMaximize } =
+    useSplitRatio();
+
+  // Workspace data for move dialog
+  const { workspace } = useWorkspace();
+  const workspaces = workspace?.workspaces ?? [];
+  const currentWorkspace = workspace?.name ?? "";
+  const canMove = workspaces.length > 1 && issue?.status !== "closed";
+
+  // Workspace repos for repo assignment
+  const { repos } = useWorkspaceRepos();
+
+  const currentRepo = useMemo(() => {
+    const repoLabel = issue?.labels?.find((l) => l.startsWith("repo:"));
+    return repoLabel ? repoLabel.slice(5) : null;
+  }, [issue?.labels]);
+
+  // Tab persistence hook - loads/saves tab state to Redis
+  const issueId = issue?.id ?? "";
+  const {
+    savedState: persistedTabState,
+    isLoading: isLoadingPersistedTabs,
+    saveTabs: persistTabs,
+  } = useIssueTabPersistence(issueId);
+
+  // Tab state - managed tab array with dynamic add/remove
+  const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB]);
+  const [activeTabId, setActiveTabId] = useState("details");
+  const [showAddTabDropdown, setShowAddTabDropdown] = useState(false);
+  const addTabRef = useRef<HTMLDivElement>(null);
+  // Track whether we've already restored tabs from persistence for this issue
+  const restoredIssueIdRef = useRef<string | null>(null);
+
+  const addTab = useCallback(
+    (type: "logs" | "terminal", metadata?: DetailTabMetadata) => {
+      setTabs((prev) => {
+        // For logs, prevent duplicates
+        if (type === "logs") {
+          const existing = prev.find((t) => t.type === type);
+          if (existing) {
+            setActiveTabId(existing.id);
+            return prev;
+          }
+        }
+        const id =
+          type === "terminal"
+            ? `terminal-${metadata?.sessionName ?? Date.now()}`
+            : type;
+        const label =
+          type === "logs"
+            ? "Logs"
+            : type === "terminal"
+              ? `Terminal (${metadata?.backend ?? "shell"})`
+              : type;
+        const newTab: DetailTab = {
+          id,
+          type,
+          label,
+          closable: true,
+          metadata,
+        };
+        setActiveTabId(newTab.id);
+        return [...prev, newTab];
+      });
+      setShowAddTabDropdown(false);
+    },
+    [],
+  );
+
+  // Pending close confirmation state
+  const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
+    null,
+  );
+
+  // Close a tab: remove from state, clean up backend resources
+  const closeTab = useCallback(
+    (id: string) => {
+      // Find the tab before updating state to extract metadata for cleanup
+      const tab = tabs.find((t) => t.id === id);
+
+      // Fire-and-forget backend cleanup for terminal tabs
+      if (tab?.type === "terminal" && tab.metadata?.sessionName) {
+        const sessionName = tab.metadata.sessionName;
+        deleteTabMetadata(sessionName).catch(() => {});
+        scheduleSessionKill(sessionName).catch(() => {});
+      }
+
+      setTabs((prev) => prev.filter((t) => t.id !== id));
+      setActiveTabId((prev) => (prev === id ? "details" : prev));
+    },
+    [tabs],
+  );
+
+  // Handle tab close: confirm if terminal has active connection
+  const handleTabClose = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab || !tab.closable) return;
+
+      if (tab.type === "terminal" && tab.connectionState === "connected") {
+        setPendingCloseTabId(tabId);
+        return;
+      }
+
+      closeTab(tabId);
+    },
+    [tabs, closeTab],
+  );
+
+  // Track connectionState changes from EmbeddedTerminal
+  const handleConnectionStateChange = useCallback(
+    (tabId: string, state: ConnectionState) => {
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === tabId ? { ...t, connectionState: state } : t,
+        ),
+      );
+    },
+    [],
+  );
+
+  // Agent data for StartWorkButton (shared context, no duplicate polling)
+  const {
+    agents,
+    agentTasks,
+    isConnected: isLoomConnected,
+  } = useAgentContext();
 
   // Agent-based log connection
   const agentName = issue?.assignee || null;
@@ -280,20 +464,120 @@ function DefaultContent({
     isLoadingMore,
   } = useAgentTerminalLogs({
     agentName,
-    enabled: isOpen && activeTab === "logs" && hasAgent,
+    enabled: isOpen && activeTabId === "logs" && hasAgent,
   });
 
-  // Reset tab when issue changes
+  // Reset tabs when issue changes
   useEffect(() => {
-    setActiveTab("details");
+    restoredIssueIdRef.current = null;
+    setTabs([DETAILS_TAB]);
+    setActiveTabId("details");
   }, [issue?.id]);
 
-  // Reset tab when agent removed while on logs tab
+  // Restore tabs from persisted state once loaded
   useEffect(() => {
-    if (activeTab === "logs" && !hasAgent) {
-      setActiveTab("details");
+    if (
+      !persistedTabState ||
+      isLoadingPersistedTabs ||
+      !issue?.id ||
+      restoredIssueIdRef.current === issue.id
+    ) {
+      return;
     }
-  }, [activeTab, hasAgent]);
+    restoredIssueIdRef.current = issue.id;
+
+    const validTypes = new Set(["details", "logs", "terminal"]);
+    const restoredTabs: DetailTab[] = persistedTabState.tabs
+      .filter((t) => validTypes.has(t.type))
+      .map((t) => ({
+        id: t.id,
+        type: t.type as DetailTab["type"],
+        label: t.label,
+        closable: t.type !== "details",
+        metadata:
+          t.type === "terminal" && t.session_name
+            ? { sessionName: t.session_name }
+            : undefined,
+        connectionState:
+          t.type === "terminal"
+            ? ("disconnected" as ConnectionState)
+            : undefined,
+      }));
+
+    // Ensure details tab is always present
+    if (!restoredTabs.some((t) => t.id === "details")) {
+      restoredTabs.unshift(DETAILS_TAB);
+    }
+
+    if (restoredTabs.length > 0) {
+      setTabs(restoredTabs);
+      const activeId = persistedTabState.active_tab_id;
+      if (restoredTabs.some((t) => t.id === activeId)) {
+        setActiveTabId(activeId);
+      }
+    }
+  }, [persistedTabState, isLoadingPersistedTabs, issue?.id]);
+
+  // Persist tab state on changes (debounced via hook)
+  useEffect(() => {
+    // Don't persist while still loading persisted state or before restoration
+    if (
+      isLoadingPersistedTabs ||
+      !issue?.id ||
+      restoredIssueIdRef.current !== issue.id
+    ) {
+      return;
+    }
+    // Only persist if there's something beyond the default single details tab
+    const isDefault =
+      tabs.length === 1 &&
+      tabs[0]?.id === "details" &&
+      activeTabId === "details";
+    if (isDefault) return;
+
+    const tabsToSave: IssueTab[] = tabs.map((t, i) => {
+      const tab: IssueTab = {
+        id: t.id,
+        type: t.type,
+        label: t.label,
+        sort_order: i,
+      };
+      if (t.metadata?.sessionName) {
+        tab.session_name = t.metadata.sessionName;
+      }
+      return tab;
+    });
+    persistTabs(tabsToSave, activeTabId);
+  }, [tabs, activeTabId, issue?.id, isLoadingPersistedTabs, persistTabs]);
+
+  // Reset to details when agent removed while on logs tab
+  useEffect(() => {
+    if (activeTabId === "logs" && !hasAgent) {
+      setTabs([DETAILS_TAB]);
+      setActiveTabId("details");
+    }
+  }, [activeTabId, hasAgent]);
+
+  // Close add-tab dropdown on outside click
+  useEffect(() => {
+    if (!showAddTabDropdown) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (addTabRef.current && !addTabRef.current.contains(e.target as Node)) {
+        setShowAddTabDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [showAddTabDropdown]);
+
+  // Close add-tab dropdown on Escape — handled via onKeyDown on the dropdown
+  // element with stopPropagation to prevent the global handler from also firing.
+  const handleAddTabKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setShowAddTabDropdown(false);
+    }
+  }, []);
 
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);
@@ -301,6 +585,9 @@ function DefaultContent({
   const [localComments, setLocalComments] = useState<Comment[] | undefined>(
     initialComments,
   );
+
+  // Local state for events (activity log)
+  const [events, setEvents] = useState<Event[]>([]);
 
   // Sync local comments when issue changes (e.g., different issue selected)
   useEffect(() => {
@@ -310,6 +597,27 @@ function DefaultContent({
       setLocalComments(undefined);
     }
   }, [issue]);
+
+  // Fetch events when issue changes
+  const eventIssueId = issue?.id;
+  useEffect(() => {
+    if (!eventIssueId) {
+      setEvents([]);
+      return;
+    }
+    let cancelled = false;
+    getIssueEvents(eventIssueId).then(
+      (data) => {
+        if (!cancelled) setEvents(data ?? []);
+      },
+      () => {
+        if (!cancelled) setEvents([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [eventIssueId]);
 
   // Handler for when a new comment is added
   const handleCommentAdded = useCallback((newComment: Comment) => {
@@ -405,6 +713,60 @@ function DefaultContent({
     [issue, onIssueUpdate],
   );
 
+  const handleOwnerSave = useCallback(
+    async (newOwner: string) => {
+      if (!issue) return;
+
+      setIsSavingOwner(true);
+      try {
+        const updatedIssue = await updateIssue(issue.id, {
+          owner: newOwner,
+        });
+        onIssueUpdate?.(updatedIssue);
+      } finally {
+        setIsSavingOwner(false);
+      }
+    },
+    [issue, onIssueUpdate],
+  );
+
+  const handleRepoSave = useCallback(
+    async (newRepo: string | null) => {
+      if (!issue) return;
+
+      setIsSavingRepo(true);
+      try {
+        const currentLabels = issue.labels ?? [];
+        const repoLabelsToRemove = currentLabels.filter((l) =>
+          l.startsWith("repo:"),
+        );
+        const updatedIssue = await updateIssue(issue.id, {
+          ...(repoLabelsToRemove.length > 0
+            ? { remove_labels: repoLabelsToRemove }
+            : {}),
+          ...(newRepo ? { add_labels: [`repo:${newRepo}`] } : {}),
+        });
+        onIssueUpdate?.(updatedIssue);
+      } finally {
+        setIsSavingRepo(false);
+      }
+    },
+    [issue, onIssueUpdate],
+  );
+
+  const handleStartWork = useCallback(
+    async (agentName: string) => {
+      if (!issue) return;
+
+      const updatedIssue = await updateIssue(issue.id, {
+        assignee: agentName,
+        status: "in_progress",
+      });
+      onIssueUpdate?.(updatedIssue);
+    },
+    [issue, onIssueUpdate],
+  );
+
   const handleAddDependency = useCallback(
     async (dependsOnId: string, type: DependencyType) => {
       if (!issue) return;
@@ -421,6 +783,28 @@ function DefaultContent({
       // The parent component should refresh issue details via SSE or manual refetch
     },
     [issue],
+  );
+
+  const handleAddLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+      const updatedIssue = await updateIssue(issue.id, {
+        add_labels: [label],
+      });
+      onIssueUpdate?.(updatedIssue);
+    },
+    [issue, onIssueUpdate],
+  );
+
+  const handleRemoveLabel = useCallback(
+    async (label: string) => {
+      if (!issue) return;
+      const updatedIssue = await updateIssue(issue.id, {
+        remove_labels: [label],
+      });
+      onIssueUpdate?.(updatedIssue);
+    },
+    [issue, onIssueUpdate],
   );
 
   // Approve handler
@@ -465,12 +849,32 @@ function DefaultContent({
     [issue, onReject, isRejecting],
   );
 
+  // Move issue handler
+  const handleMoveConfirm = useCallback(
+    async (targetWorkspace: string) => {
+      if (!issue) return;
+      setMoveError(null);
+      try {
+        await moveIssue(issue.id, targetWorkspace);
+        setShowMoveDialog(false);
+        onClose();
+      } catch (err) {
+        setMoveError(
+          err instanceof Error ? err.message : "Failed to move issue",
+        );
+      }
+    },
+    [issue, onClose],
+  );
+
   // Reset reject form state when issue changes
   useEffect(() => {
     setShowRejectForm(false);
     setIsApproving(false);
     setIsRejecting(false);
     setRejectError(null);
+    setShowMoveDialog(false);
+    setMoveError(null);
   }, [issue?.id]);
 
   // Loading state
@@ -518,11 +922,14 @@ function DefaultContent({
   const openBlockerCount =
     dependencies?.filter((d) => d.status !== "closed").length ?? 0;
 
-  // Auto-collapse logic for Design/Notes (collapse if long, but keep expanded for review items)
-  const shouldCollapseDesign =
-    !isReviewItem &&
-    issue.design &&
-    (issue.design.length > 200 || issue.design.split("\n").length > 5);
+  // Extract PR URL and number from external_ref for header links
+  const prNumber =
+    issue.external_ref && isPRUrl(issue.external_ref)
+      ? issue.external_ref.match(/\/pulls?\/(\d+)/)?.[1]
+      : undefined;
+  const prProps = prNumber ? { prUrl: issue.external_ref!, prNumber } : {};
+
+  // Auto-collapse logic for Notes (collapse if long, but keep expanded for review items)
   const shouldCollapseNotes =
     issue.notes &&
     (issue.notes.length > 200 || issue.notes.split("\n").length > 5);
@@ -540,6 +947,9 @@ function DefaultContent({
           onStatusChange={handleStatusChange}
           isSavingStatus={isSavingStatus}
           showPriority={true}
+          {...(onCopyLink !== undefined && { onCopyLink })}
+          {...(canMove && { onMove: () => setShowMoveDialog(true) })}
+          {...prProps}
           sticky={true}
         />
 
@@ -556,49 +966,18 @@ function DefaultContent({
             </svg>
             {formatIssueType(issue.issue_type)}
           </span>
-          {issue.owner && (
-            <span className={styles.metadataItem} data-testid="metadata-owner">
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle
-                  cx="8"
-                  cy="5"
-                  r="3"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="M2 14c0-2.5 2.5-4 6-4s6 1.5 6 4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              {issue.owner}
-            </span>
-          )}
-          {issue.assignee && (
-            <span
-              className={styles.metadataItem}
-              data-testid="metadata-assignee"
-            >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle
-                  cx="8"
-                  cy="5"
-                  r="3"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="M2 14c0-2.5 2.5-4 6-4s6 1.5 6 4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              @{issue.assignee}
-            </span>
-          )}
+          <OwnerDropdown
+            owner={issue.owner}
+            onSave={handleOwnerSave}
+            isSaving={isSavingOwner}
+          />
+          <AssigneeDropdown
+            assignee={issue.assignee}
+            onSave={handleAssigneeSave}
+            isSaving={isSavingAssignee}
+            agents={agents}
+            agentTasks={agentTasks}
+          />
           {issue.created_at && (
             <span
               className={styles.metadataItem}
@@ -653,38 +1032,160 @@ function DefaultContent({
       />
 
       {/* Tab Bar */}
-      <div
-        className={styles.tabBar}
-        role="tablist"
-        aria-label="Issue detail tabs"
-      >
-        <button
-          type="button"
-          role="tab"
-          className={`${styles.tab} ${activeTab === "details" ? styles.activeTab : ""}`}
-          aria-selected={activeTab === "details"}
-          aria-controls="issue-panel-tabpanel-details"
-          id="issue-panel-tab-details"
-          onClick={() => setActiveTab("details")}
+      <div className={styles.tabBarWrapper}>
+        <div
+          className={styles.tabBar}
+          role="tablist"
+          aria-label="Issue detail tabs"
         >
-          Details
-        </button>
-        {hasAgent && (
-          <button
-            type="button"
-            role="tab"
-            className={`${styles.tab} ${activeTab === "logs" ? styles.activeTab : ""}`}
-            aria-selected={activeTab === "logs"}
-            aria-controls="issue-panel-tabpanel-logs"
-            id="issue-panel-tab-logs"
-            onClick={() => setActiveTab("logs")}
-          >
-            Logs
-          </button>
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              role="tab"
+              className={`${styles.tab} ${activeTabId === tab.id ? styles.activeTab : ""}`}
+              aria-selected={activeTabId === tab.id}
+              aria-controls={`issue-panel-tabpanel-${tab.id}`}
+              id={`issue-panel-tab-${tab.id}`}
+              onClick={() => setActiveTabId(tab.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveTabId(tab.id);
+                }
+              }}
+              tabIndex={activeTabId === tab.id ? 0 : -1}
+            >
+              {tab.type === "terminal" && tab.connectionState && (
+                <span
+                  className={styles.tabConnectionDot}
+                  data-state={tab.connectionState}
+                  data-testid={`tab-connection-dot-${tab.id}`}
+                />
+              )}
+              <span className={styles.tabLabel}>{tab.label}</span>
+              {tab.closable && (
+                <button
+                  type="button"
+                  className={styles.tabCloseButton}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTabClose(tab.id);
+                  }}
+                  aria-label={`Close ${tab.label} tab`}
+                  data-testid={`close-tab-${tab.id}`}
+                >
+                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M4 4l8 8M12 4l-8 8"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        {/* "+" dropdown for adding tabs */}
+        {hasAgent && !tabs.some((t) => t.type === "logs") && (
+          <div className={styles.addTabContainer} ref={addTabRef}>
+            <button
+              type="button"
+              className={styles.addTabButton}
+              onClick={() => setShowAddTabDropdown((prev) => !prev)}
+              aria-label="Add tab"
+              data-testid="add-tab-button"
+            >
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M8 3v10M3 8h10"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+            {showAddTabDropdown && (
+              <div
+                className={styles.addTabDropdown}
+                data-testid="add-tab-dropdown"
+                onKeyDown={handleAddTabKeyDown}
+              >
+                <button
+                  type="button"
+                  className={styles.addTabOption}
+                  onClick={() => addTab("logs")}
+                  data-testid="add-tab-logs"
+                >
+                  Logs
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      {activeTab === "logs" && hasAgent ? (
+      {/* Terminal tab content — split view: details on top, terminal on bottom */}
+      {activeTabId.startsWith("terminal-") &&
+        (() => {
+          const activeTab = tabs.find((t) => t.id === activeTabId);
+          if (!activeTab?.metadata?.sessionName || !activeTab.metadata.backend)
+            return null;
+          return (
+            <div
+              ref={splitContainerRef}
+              className={styles.splitContainer}
+              role="tabpanel"
+              id={`issue-panel-tabpanel-${activeTabId}`}
+              aria-labelledby={`issue-panel-tab-${activeTabId}`}
+            >
+              <div
+                className={styles.splitTop}
+                style={{ flex: `0 0 ${ratio * 100}%` }}
+              >
+                <SplitDetailSummary
+                  issue={issue}
+                  isSavingPriority={isSavingPriority}
+                  isSavingType={isSavingType}
+                  isSavingAssignee={isSavingAssignee}
+                  agents={agents}
+                  agentTasks={agentTasks}
+                  onPrioritySave={handlePrioritySave}
+                  onTypeSave={handleTypeSave}
+                  onAssigneeSave={handleAssigneeSave}
+                  onIssueUpdate={onIssueUpdate}
+                />
+              </div>
+              <ResizeDivider
+                onDragDelta={(deltaY) =>
+                  applyDelta(
+                    splitContainerRef.current?.clientHeight ?? 600,
+                    deltaY,
+                  )
+                }
+                onDoubleClick={resetRatio}
+                ratio={ratio}
+              />
+              <div className={styles.splitBottom}>
+                <EmbeddedTerminal
+                  sessionName={activeTab.metadata.sessionName}
+                  backend={activeTab.metadata.backend}
+                  agentName={activeTab.metadata.agentName ?? null}
+                  worktreePath={activeTab.metadata.worktreePath}
+                  isActive={true}
+                  onConnectionStateChange={(state) =>
+                    handleConnectionStateChange(activeTab.id, state)
+                  }
+                  onMaximize={toggleMaximize}
+                  isMaximized={isMaximized}
+                />
+              </div>
+            </div>
+          );
+        })()}
+
+      {activeTabId === "logs" && (
         <div
           className={styles.logsContainer}
           role="tabpanel"
@@ -726,7 +1227,9 @@ function DefaultContent({
             {...(logMode === "tmux" ? { onTerminalData: sendLogInput } : {})}
           />
         </div>
-      ) : (
+      )}
+
+      {activeTabId === "details" && (
         <div
           className={styles.scrollableContent}
           role="tabpanel"
@@ -734,50 +1237,87 @@ function DefaultContent({
           aria-labelledby="issue-panel-tab-details"
         >
           <div className={styles.detailContent}>
-            {/* Priority/Type dropdowns for editing */}
-            <div className={styles.statusRow}>
-              <PriorityDropdown
-                priority={issue.priority as Priority}
-                onSave={handlePrioritySave}
-                isSaving={isSavingPriority}
-              />
-              <TypeDropdown
-                type={issue.issue_type}
-                onSave={handleTypeSave}
-                isSaving={isSavingType}
-              />
-              <AssigneeDropdown
-                assignee={issue.assignee}
-                onSave={handleAssigneeSave}
-                isSaving={isSavingAssignee}
-              />
+            {/* Two-column layout: left=metadata+description, right=design */}
+            <div className={issue.design ? styles.detailColumns : undefined}>
+              <div
+                className={
+                  issue.design
+                    ? styles.detailColumnLeft
+                    : styles.detailColumnFull
+                }
+              >
+                {/* Priority/Type dropdowns for editing */}
+                <div className={styles.statusRow}>
+                  <PriorityDropdown
+                    priority={issue.priority as Priority}
+                    onSave={handlePrioritySave}
+                    isSaving={isSavingPriority}
+                  />
+                  <TypeDropdown
+                    type={issue.issue_type}
+                    onSave={handleTypeSave}
+                    isSaving={isSavingType}
+                  />
+                  <AssigneeDropdown
+                    assignee={issue.assignee}
+                    onSave={handleAssigneeSave}
+                    isSaving={isSavingAssignee}
+                    agents={agents}
+                    agentTasks={agentTasks}
+                  />
+                  {(repos.length > 0 || currentRepo !== null) && (
+                    <RepoDropdown
+                      currentRepo={currentRepo}
+                      repos={repos.map((r) => r.name)}
+                      onSave={handleRepoSave}
+                      isSaving={isSavingRepo}
+                    />
+                  )}
+                  {issue.assignee && !issue.assignee.startsWith("[H]") && (
+                    <AgentStatusBadge
+                      agentName={issue.assignee}
+                      onOpenTerminal={() => setActiveTabId("logs")}
+                    />
+                  )}
+                  <StartWorkButton
+                    issueId={issue.id}
+                    issueStatus={issue.status}
+                    currentAssignee={issue.assignee}
+                    agents={agents}
+                    agentTasks={agentTasks}
+                    isConnected={isLoomConnected}
+                    onAssign={handleStartWork}
+                  />
+                </div>
+
+                {/* Description */}
+                <section className={styles.section}>
+                  <h3 className={styles.sectionTitle}>Description</h3>
+                  <EditableDescription
+                    description={issue.description}
+                    isEditable={true}
+                    onSave={async (newDescription) => {
+                      const updatedIssue = await updateIssue(issue.id, {
+                        description: newDescription,
+                      });
+                      onIssueUpdate?.(updatedIssue);
+                    }}
+                  />
+                </section>
+              </div>
+
+              {/* Design in right column */}
+              {issue.design && (
+                <div
+                  className={styles.detailColumnRight}
+                  data-testid="design-section"
+                >
+                  <DesignPanel content={issue.design} />
+                </div>
+              )}
             </div>
 
-            {/* Description */}
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>Description</h3>
-              <EditableDescription
-                description={issue.description}
-                isEditable={true}
-                onSave={async (newDescription) => {
-                  const updatedIssue = await updateIssue(issue.id, {
-                    description: newDescription,
-                  });
-                  onIssueUpdate?.(updatedIssue);
-                }}
-              />
-            </section>
-
-            {/* Design (collapsible, markdown rendered) */}
-            {issue.design && (
-              <CollapsibleSection
-                title="Design"
-                defaultExpanded={!shouldCollapseDesign}
-                testId="design-section"
-              >
-                <MarkdownRenderer content={issue.design} />
-              </CollapsibleSection>
-            )}
+            {/* Full-width sections below the columns */}
 
             {/* Notes (collapsible) */}
             {issue.notes && (
@@ -797,6 +1337,7 @@ function DefaultContent({
                 dependencies={dependencies ?? []}
                 onAddDependency={handleAddDependency}
                 onRemoveDependency={handleRemoveDependency}
+                {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
                 disabled={isLoading}
               />
             )}
@@ -808,31 +1349,49 @@ function DefaultContent({
                   Blocks ({dependents.length})
                 </h3>
                 <ul className={styles.dependencyList}>
-                  {dependents.map(renderDependencyItem)}
+                  {dependents.map((dep) =>
+                    renderDependencyChip(dep, onNavigateToIssue),
+                  )}
                 </ul>
               </section>
             )}
 
-            {/* Comments */}
-            <CommentsSection comments={localComments} />
+            {/* Session History */}
+            <CollapsibleSection
+              title="Session History"
+              defaultExpanded={false}
+              testId="session-history-section"
+            >
+              <SessionHistorySection
+                issueId={issue.id}
+                onJumpToSession={(sessionName) => {
+                  const tabId = `terminal-${sessionName}`;
+                  const tab = tabs.find((t) => t.id === tabId);
+                  if (tab) {
+                    setActiveTabId(tabId);
+                  }
+                }}
+              />
+            </CollapsibleSection>
+
+            {/* Activity Log (comments + events) */}
+            <ActivityLog
+              comments={localComments ?? []}
+              events={events}
+              issueId={issue.id}
+            />
             <CommentForm
               issueId={issue.id}
               onCommentAdded={handleCommentAdded}
             />
 
             {/* Labels */}
-            {issue.labels && issue.labels.length > 0 && (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>Labels</h3>
-                <div className={styles.labels}>
-                  {issue.labels.map((label) => (
-                    <span key={label} className={styles.label}>
-                      {label}
-                    </span>
-                  ))}
-                </div>
-              </section>
-            )}
+            <LabelEditor
+              labels={issue.labels ?? []}
+              onAddLabel={handleAddLabel}
+              onRemoveLabel={handleRemoveLabel}
+              disabled={isLoading}
+            />
           </div>
         </div>
       )}
@@ -845,6 +1404,32 @@ function DefaultContent({
           testId="status-error-toast"
         />
       )}
+
+      {/* Close confirmation dialog for terminal tabs with active sessions */}
+      <ConfirmDialog
+        isOpen={pendingCloseTabId !== null}
+        title="Close terminal?"
+        message="This terminal has an active session. Closing it will terminate the session after a brief grace period."
+        confirmLabel="Close"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingCloseTabId) closeTab(pendingCloseTabId);
+          setPendingCloseTabId(null);
+        }}
+        onCancel={() => setPendingCloseTabId(null)}
+      />
+
+      {/* Move issue dialog */}
+      <MoveIssueDialog
+        isOpen={showMoveDialog}
+        issue={issue}
+        workspaces={workspaces}
+        currentWorkspace={currentWorkspace}
+        dependencies={dependencies}
+        error={moveError}
+        onConfirm={handleMoveConfirm}
+        onCancel={() => setShowMoveDialog(false)}
+      />
     </>
   );
 }
@@ -869,22 +1454,14 @@ export function IssueDetailPanel({
   children,
   onApprove,
   onReject,
+  onIssueUpdate,
+  onCopyLink,
+  onNavigateToIssue,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Handle Escape key to close panel
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  // Handle Escape key to close panel via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen);
 
   // Lock body scroll when open, restoring previous value on close.
   // Note: Only ONE panel should be open at a time. Multiple concurrent panels
@@ -900,22 +1477,8 @@ export function IssueDetailPanel({
   }, [isOpen]);
 
   // Focus management: focus the panel when opened, restore focus on close
-  useEffect(() => {
-    if (isOpen && panelRef.current) {
-      const previouslyFocused = document.activeElement as HTMLElement | null;
-      panelRef.current.focus();
-      return () => {
-        // Check element is still in DOM before restoring focus (could be unmounted)
-        if (
-          previouslyFocused &&
-          document.contains(previouslyFocused) &&
-          previouslyFocused.focus
-        ) {
-          previouslyFocused.focus();
-        }
-      };
-    }
-  }, [isOpen]);
+  useFocusReturn(isOpen, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen);
 
   // Build root class name
   const rootClassName = [styles.overlay, isOpen && styles.open, className]
@@ -932,6 +1495,9 @@ export function IssueDetailPanel({
       onClose={onClose}
       {...(onApprove !== undefined && { onApprove })}
       {...(onReject !== undefined && { onReject })}
+      {...(onIssueUpdate !== undefined && { onIssueUpdate })}
+      {...(onCopyLink !== undefined && { onCopyLink })}
+      {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
     />
   );
 

@@ -28,6 +28,12 @@ func frontendHandler() http.Handler {
 	fileServer := http.FileServer(http.FS(distFS))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Reject unregistered API paths — never serve SPA HTML for /api/* requests
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			respondError(w, http.StatusNotFound, "not found")
+			return
+		}
+
 		// Clean the path and check if the file exists.
 		// Note: path.Clean removes .. elements and embed.FS is inherently safe,
 		// but we add explicit validation for defense-in-depth.
@@ -113,6 +119,12 @@ func devFrontendHandler(dir string) http.Handler {
 	fileServer := http.FileServer(http.Dir(absDir))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Reject unregistered API paths — never serve SPA HTML for /api/* requests
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			respondError(w, http.StatusNotFound, "not found")
+			return
+		}
+
 		urlPath := path.Clean(r.URL.Path)
 		if urlPath == "/" {
 			urlPath = "/index.html"

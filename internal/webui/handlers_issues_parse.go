@@ -26,6 +26,7 @@ func parseListParams(r *http.Request) (*rpc.ListArgs, error) {
 
 	// Labels (comma-separated)
 	args.Labels = parseArrayParam(q, "labels")
+	args.SourceRepos = parseArrayParam(q, "source_repos")
 
 	// Limit (capped at MaxListLimit to prevent DoS, silently ignore invalid)
 	limitPtr, _ := parseIntParam(q, "limit")
@@ -139,7 +140,7 @@ func fetchUnclosedIDSetAndMap(client *rpc.Client) (map[string]bool, map[string]*
 func getUnclosedBlockerRefs(deps []*types.Dependency, unclosedIDs map[string]bool, issueMap map[string]*types.IssueWithCounts) []types.BlockerRef {
 	var refs []types.BlockerRef
 	for _, dep := range deps {
-		if dep.Type.AffectsReadyWork() && unclosedIDs[dep.DependsOnID] {
+		if dep.Type.IsDirectBlocker() && unclosedIDs[dep.DependsOnID] {
 			ref := types.BlockerRef{ID: dep.DependsOnID}
 			if blocker, ok := issueMap[dep.DependsOnID]; ok {
 				ref.Title = blocker.Issue.Title

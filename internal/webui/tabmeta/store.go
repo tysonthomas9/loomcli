@@ -1,7 +1,8 @@
 // Package tabmeta provides Redis-backed persistence for terminal tab metadata.
 //
-// Each tmux session gets a Redis hash at key "terminal:meta:{session_name}"
+// Each tmux session gets a Redis hash at key "terminal:meta:{workspace}:{session_name}"
 // storing label, notes, sort_order, created_at, and updated_at fields.
+// Metadata is scoped per workspace — each workspace has its own independent tab set.
 // Metadata survives session death — tabs remember their custom labels/notes
 // even after tmux sessions are destroyed.
 package tabmeta
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -26,9 +28,12 @@ var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // TabMetadata represents persisted metadata for a single terminal tab.
 type TabMetadata struct {
 	SessionName string    `json:"session_name"`
+	Workspace   string    `json:"workspace,omitempty"`
 	Label       string    `json:"label"`
 	Notes       string    `json:"notes"`
 	SortOrder   int       `json:"sort_order"`
+	Pinned      bool      `json:"pinned"`
+	IssueID     string    `json:"issue_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -52,8 +57,13 @@ func (s *Store) Close() error {
 	return s.client.Close()
 }
 
-func metaKey(session string) string {
-	return keyPrefix + session
+// RedisClient returns the underlying Redis client for direct operations.
+func (s *Store) RedisClient() *redis.Client {
+	return s.client
+}
+
+func metaKey(workspace, session string) string {
+	return keyPrefix + workspace + ":" + session
 }
 
 // ValidateSessionName returns an error if the session name is invalid.
@@ -67,13 +77,27 @@ func ValidateSessionName(name string) error {
 	return nil
 }
 
-// Get retrieves metadata for a single session. Returns nil if not found.
-func (s *Store) Get(ctx context.Context, sessionName string) (*TabMetadata, error) {
+// ValidateWorkspaceName returns an error if the workspace name is invalid.
+func ValidateWorkspaceName(name string) error {
+	if name == "" {
+		return fmt.Errorf("workspace name is required")
+	}
+	if !validSessionName.MatchString(name) {
+		return fmt.Errorf("invalid workspace name %q: must match [a-zA-Z0-9_-]+", name)
+	}
+	return nil
+}
+
+// Get retrieves metadata for a single session within a workspace. Returns nil if not found.
+func (s *Store) Get(ctx context.Context, workspace, sessionName string) (*TabMetadata, error) {
+	if err := ValidateWorkspaceName(workspace); err != nil {
+		return nil, err
+	}
 	if err := ValidateSessionName(sessionName); err != nil {
 		return nil, err
 	}
 
-	vals, err := s.client.HGetAll(ctx, metaKey(sessionName)).Result()
+	vals, err := s.client.HGetAll(ctx, metaKey(workspace, sessionName)).Result()
 	if err != nil {
 		return nil, fmt.Errorf("hgetall %s: %w", sessionName, err)
 	}
@@ -81,22 +105,27 @@ func (s *Store) Get(ctx context.Context, sessionName string) (*TabMetadata, erro
 		return nil, nil
 	}
 
-	return parseMetadata(sessionName, vals)
+	return parseMetadata(workspace, sessionName, vals)
 }
 
-// List retrieves metadata for all stored sessions.
-func (s *Store) List(ctx context.Context) ([]TabMetadata, error) {
+// List retrieves metadata for all sessions within a workspace.
+func (s *Store) List(ctx context.Context, workspace string) ([]TabMetadata, error) {
+	if err := ValidateWorkspaceName(workspace); err != nil {
+		return nil, err
+	}
+
 	var result []TabMetadata
 	var cursor uint64
+	prefix := keyPrefix + workspace + ":"
 
 	for {
-		keys, nextCursor, err := s.client.Scan(ctx, cursor, keyPrefix+"*", 100).Result()
+		keys, nextCursor, err := s.client.Scan(ctx, cursor, prefix+"*", 100).Result()
 		if err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 
 		for _, key := range keys {
-			sessionName := key[len(keyPrefix):]
+			sessionName := key[len(prefix):]
 			vals, err := s.client.HGetAll(ctx, key).Result()
 			if err != nil {
 				s.logger.Warn("failed to get tab metadata", "key", key, "error", err)
@@ -105,7 +134,7 @@ func (s *Store) List(ctx context.Context) ([]TabMetadata, error) {
 			if len(vals) == 0 {
 				continue
 			}
-			meta, err := parseMetadata(sessionName, vals)
+			meta, err := parseMetadata(workspace, sessionName, vals)
 			if err != nil {
 				s.logger.Warn("failed to parse tab metadata", "key", key, "error", err)
 				continue
@@ -120,40 +149,109 @@ func (s *Store) List(ctx context.Context) ([]TabMetadata, error) {
 	}
 
 	sort.Slice(result, func(i, j int) bool {
+		if result[i].Pinned != result[j].Pinned {
+			return result[i].Pinned
+		}
 		return result[i].SortOrder < result[j].SortOrder
 	})
 
 	return result, nil
 }
 
-// Set writes full metadata for a session.
+// ListAll retrieves metadata for all sessions across all workspaces.
+func (s *Store) ListAll(ctx context.Context) ([]TabMetadata, error) {
+	var result []TabMetadata
+	var cursor uint64
+
+	for {
+		keys, nextCursor, err := s.client.Scan(ctx, cursor, keyPrefix+"*", 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+
+		for _, key := range keys {
+			remainder := key[len(keyPrefix):]
+			// Key format: {workspace}:{session}
+			idx := strings.Index(remainder, ":")
+			if idx < 0 {
+				s.logger.Warn("skipping key with invalid format", "key", key)
+				continue
+			}
+			ws := remainder[:idx]
+			sessionName := remainder[idx+1:]
+
+			vals, err := s.client.HGetAll(ctx, key).Result()
+			if err != nil {
+				s.logger.Warn("failed to get tab metadata", "key", key, "error", err)
+				continue
+			}
+			if len(vals) == 0 {
+				continue
+			}
+			meta, err := parseMetadata(ws, sessionName, vals)
+			if err != nil {
+				s.logger.Warn("failed to parse tab metadata", "key", key, "error", err)
+				continue
+			}
+			result = append(result, *meta)
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Pinned != result[j].Pinned {
+			return result[i].Pinned
+		}
+		return result[i].SortOrder < result[j].SortOrder
+	})
+
+	return result, nil
+}
+
+// Set writes full metadata for a session. meta.Workspace must be set.
 func (s *Store) Set(ctx context.Context, meta *TabMetadata) error {
+	if err := ValidateWorkspaceName(meta.Workspace); err != nil {
+		return err
+	}
 	if err := ValidateSessionName(meta.SessionName); err != nil {
 		return err
 	}
 
+	pinnedStr := "false"
+	if meta.Pinned {
+		pinnedStr = "true"
+	}
 	fields := map[string]interface{}{
 		"label":      meta.Label,
 		"notes":      meta.Notes,
 		"sort_order": strconv.Itoa(meta.SortOrder),
+		"pinned":     pinnedStr,
+		"issue_id":   meta.IssueID,
 		"created_at": meta.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at": meta.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 
-	if err := s.client.HSet(ctx, metaKey(meta.SessionName), fields).Err(); err != nil {
+	if err := s.client.HSet(ctx, metaKey(meta.Workspace, meta.SessionName), fields).Err(); err != nil {
 		return fmt.Errorf("hset %s: %w", meta.SessionName, err)
 	}
 	return nil
 }
 
-// Patch partially updates metadata fields for a session.
+// Patch partially updates metadata fields for a session within a workspace.
 // Only non-empty fields in the map are updated. Returns the full metadata after update.
-func (s *Store) Patch(ctx context.Context, sessionName string, fields map[string]string) (*TabMetadata, error) {
+func (s *Store) Patch(ctx context.Context, workspace, sessionName string, fields map[string]string) (*TabMetadata, error) {
+	if err := ValidateWorkspaceName(workspace); err != nil {
+		return nil, err
+	}
 	if err := ValidateSessionName(sessionName); err != nil {
 		return nil, err
 	}
 
-	key := metaKey(sessionName)
+	key := metaKey(workspace, sessionName)
 
 	// Check if the key exists
 	exists, err := s.client.Exists(ctx, key).Result()
@@ -177,26 +275,29 @@ func (s *Store) Patch(ctx context.Context, sessionName string, fields map[string
 		return nil, fmt.Errorf("hset %s: %w", sessionName, err)
 	}
 
-	return s.Get(ctx, sessionName)
+	return s.Get(ctx, workspace, sessionName)
 }
 
-// Delete removes metadata for a session.
-func (s *Store) Delete(ctx context.Context, sessionName string) error {
+// Delete removes metadata for a session within a workspace.
+func (s *Store) Delete(ctx context.Context, workspace, sessionName string) error {
+	if err := ValidateWorkspaceName(workspace); err != nil {
+		return err
+	}
 	if err := ValidateSessionName(sessionName); err != nil {
 		return err
 	}
 
-	if err := s.client.Del(ctx, metaKey(sessionName)).Err(); err != nil {
+	if err := s.client.Del(ctx, metaKey(workspace, sessionName)).Err(); err != nil {
 		return fmt.Errorf("del %s: %w", sessionName, err)
 	}
 	return nil
 }
 
-// EnsureDefaults cross-references active sessions with stored metadata and creates
-// default records for any sessions that don't have metadata yet.
+// EnsureDefaults cross-references active sessions with stored metadata for a workspace
+// and creates default records for any sessions that don't have metadata yet.
 // Returns the complete sorted list of metadata for all sessions (active + stored).
-func (s *Store) EnsureDefaults(ctx context.Context, activeSessions []string) ([]TabMetadata, error) {
-	existing, err := s.List(ctx)
+func (s *Store) EnsureDefaults(ctx context.Context, workspace string, activeSessions []string) ([]TabMetadata, error) {
+	existing, err := s.List(ctx, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +325,7 @@ func (s *Store) EnsureDefaults(ctx context.Context, activeSessions []string) ([]
 		maxOrder++
 		meta := &TabMetadata{
 			SessionName: session,
+			Workspace:   workspace,
 			Label:       session,
 			Notes:       "",
 			SortOrder:   maxOrder,
@@ -238,18 +340,96 @@ func (s *Store) EnsureDefaults(ctx context.Context, activeSessions []string) ([]
 	}
 
 	sort.Slice(existing, func(i, j int) bool {
+		if existing[i].Pinned != existing[j].Pinned {
+			return existing[i].Pinned
+		}
 		return existing[i].SortOrder < existing[j].SortOrder
 	})
 
 	return existing, nil
 }
 
+// ListByIssue returns all tab metadata associated with the given issue ID (across all workspaces).
+func (s *Store) ListByIssue(ctx context.Context, issueID string) ([]TabMetadata, error) {
+	all, err := s.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var result []TabMetadata
+	for _, m := range all {
+		if m.IssueID == issueID {
+			result = append(result, m)
+		}
+	}
+	return result, nil
+}
+
+// ListIssueSessionMap returns a map of issue_id → []session_name for all sessions
+// that have an issue_id set (across all workspaces).
+func (s *Store) ListIssueSessionMap(ctx context.Context) (map[string][]string, error) {
+	all, err := s.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]string)
+	for _, m := range all {
+		if m.IssueID != "" {
+			result[m.IssueID] = append(result[m.IssueID], m.SessionName)
+		}
+	}
+	return result, nil
+}
+
+// MigrateLegacyKeys scans for old-format keys (terminal:meta:{session} without workspace)
+// and renames them to workspace-scoped format (terminal:meta:{workspace}:{session}).
+// This is idempotent — already-migrated keys are skipped.
+func (s *Store) MigrateLegacyKeys(ctx context.Context, defaultWorkspace string) error {
+	var cursor uint64
+	var migratedCount int
+
+	for {
+		keys, nextCursor, err := s.client.Scan(ctx, cursor, keyPrefix+"*", 100).Result()
+		if err != nil {
+			return fmt.Errorf("scan: %w", err)
+		}
+
+		for _, key := range keys {
+			remainder := key[len(keyPrefix):]
+			// Legacy keys have no ":" in the remainder (just session name).
+			// New keys have format {workspace}:{session}.
+			if strings.Contains(remainder, ":") {
+				continue // Already workspace-scoped
+			}
+
+			newKey := metaKey(defaultWorkspace, remainder)
+			if err := s.client.Rename(ctx, key, newKey).Err(); err != nil {
+				s.logger.Warn("failed to migrate legacy key", "key", key, "error", err)
+				continue
+			}
+			migratedCount++
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	if migratedCount > 0 {
+		s.logger.Info("migrated legacy tab metadata keys", "count", migratedCount, "workspace", defaultWorkspace)
+	}
+
+	return nil
+}
+
 // parseMetadata converts a Redis hash map to a TabMetadata struct.
-func parseMetadata(sessionName string, vals map[string]string) (*TabMetadata, error) {
+func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabMetadata, error) {
 	meta := &TabMetadata{
 		SessionName: sessionName,
+		Workspace:   workspace,
 		Label:       vals["label"],
 		Notes:       vals["notes"],
+		IssueID:     vals["issue_id"],
 	}
 
 	if so, ok := vals["sort_order"]; ok {
@@ -257,6 +437,10 @@ func parseMetadata(sessionName string, vals map[string]string) (*TabMetadata, er
 		if err == nil {
 			meta.SortOrder = n
 		}
+	}
+
+	if p, ok := vals["pinned"]; ok {
+		meta.Pinned = p == "true"
 	}
 
 	if ca, ok := vals["created_at"]; ok {

@@ -189,6 +189,9 @@ var createCmd = &cobra.Command{
 			deferUntil = &t
 		}
 
+		// Parse --source-repo flag
+		sourceRepo, _ := cmd.Flags().GetString("source-repo")
+
 		// Handle --dry-run flag (before --rig to ensure it works with cross-rig creation)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		if dryRun {
@@ -522,6 +525,7 @@ var createCmd = &cobra.Command{
 				EventPayload:       eventPayload,
 				DueAt:              formatTimeForRPC(dueAt),
 				DeferUntil:         formatTimeForRPC(deferUntil),
+				SourceRepo:         sourceRepo,
 			}
 
 			resp, err := daemonClient.Create(createArgs)
@@ -582,6 +586,7 @@ var createCmd = &cobra.Command{
 			Payload:            eventPayload,
 			DueAt:              dueAt,
 			DeferUntil:         deferUntil,
+			SourceRepo:         sourceRepo,
 		}
 
 		ctx := rootCtx
@@ -613,9 +618,10 @@ var createCmd = &cobra.Command{
 		}
 
 		// If we found a discovered-from dependency, inherit source_repo from parent
-		if discoveredFromParentID != "" {
+		// Only inherit if --source-repo was not explicitly provided
+		if discoveredFromParentID != "" && !cmd.Flags().Changed("source-repo") {
 			parentIssue, err := store.GetIssue(ctx, discoveredFromParentID)
-			if err == nil && parentIssue.SourceRepo != "" {
+			if err == nil && parentIssue != nil && parentIssue.SourceRepo != "" {
 				issue.SourceRepo = parentIssue.SourceRepo
 			}
 			// If error getting parent or parent has no source_repo, continue with default
@@ -930,6 +936,7 @@ func init() {
 	//   --defer=tomorrow    Hidden until tomorrow
 	createCmd.Flags().String("due", "", "Due date/time. Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15")
 	createCmd.Flags().String("defer", "", "Defer until date (issue hidden from bd ready until then). Same formats as --due")
+	createCmd.Flags().String("source-repo", "", "Source repository for multi-repo workspaces")
 	createCmd.Flags().String("owner", "", "Owner email (defaults to git user.email)")
 	// Note: --json flag is defined as a persistent flag in main.go, not here
 	rootCmd.AddCommand(createCmd)
@@ -1011,6 +1018,9 @@ func createInRig(cmd *cobra.Command, rigName, explicitID, title, description, is
 		deferUntil = &t
 	}
 
+	// Extract source-repo flag
+	sourceRepo, _ := cmd.Flags().GetString("source-repo")
+
 	// Create issue with explicit ID if provided, otherwise CreateIssue will generate one
 	issue := &types.Issue{
 		ID:                 explicitID, // Set explicit ID if provided (empty string if not)
@@ -1041,6 +1051,8 @@ func createInRig(cmd *cobra.Command, rigName, explicitID, title, description, is
 		DeferUntil: deferUntil,
 		// Cross-rig routing: use route prefix instead of database config
 		PrefixOverride: prefixOverride,
+		// Multi-repo fields
+		SourceRepo: sourceRepo,
 	}
 
 	if err := targetStore.CreateIssue(ctx, issue, actor); err != nil {

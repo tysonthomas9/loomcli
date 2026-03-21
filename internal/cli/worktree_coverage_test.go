@@ -23,9 +23,9 @@ func TestValidateWorktreeName_PathTraversal(t *testing.T) {
 }
 
 func TestValidateWorktreeName_CurrentDir(t *testing.T) {
-	// "." should be cleaned to "." which is not "..", so it's valid
-	if err := validateWorktreeName("."); err != nil {
-		t.Errorf("validateWorktreeName(%q) = %v, want nil", ".", err)
+	// "." resolves to the worktrees parent directory itself, so it must be rejected
+	if err := validateWorktreeName("."); err == nil {
+		t.Errorf("validateWorktreeName(%q) = nil, want error", ".")
 	}
 }
 

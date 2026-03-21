@@ -84,6 +84,24 @@ export type { UseViewStateOptions, UseViewStateReturn } from "./useViewState";
 export { useIssueDetail } from "./useIssueDetail";
 export type { UseIssueDetailReturn } from "./useIssueDetail";
 
+export { useIssueSearch } from "./useIssueSearch";
+export type { UseIssueSearchReturn } from "./useIssueSearch";
+
+export { useIssueDiffStat } from "./useIssueDiffStat";
+export type {
+  UseIssueDiffStatOptions,
+  UseIssueDiffStatReturn,
+} from "./useIssueDiffStat";
+
+export { useWorkspaceTree } from "./useWorkspaceTree";
+export type { EpicWithTasks, UseWorkspaceTreeReturn } from "./useWorkspaceTree";
+
+export { useInlineCreate } from "./useInlineCreate";
+export type {
+  UseInlineCreateOptions,
+  UseInlineCreateReturn,
+} from "./useInlineCreate";
+
 export { useAgents } from "./useAgents";
 export type { UseAgentsOptions, UseAgentsResult } from "./useAgents";
 
@@ -102,8 +120,17 @@ export type {
 export { useRecentAssignees } from "./useRecentAssignees";
 export type { UseRecentAssigneesReturn } from "./useRecentAssignees";
 
+export { useRecentOwners } from "./useRecentOwners";
+export type { UseRecentOwnersReturn } from "./useRecentOwners";
+
 export { useBackendConfig } from "./useBackendConfig";
 export type { UseBackendConfigReturn } from "./useBackendConfig";
+
+export { useDaemonHealth } from "./useDaemonHealth";
+export type {
+  DaemonConnectionMode,
+  UseDaemonHealthReturn,
+} from "./useDaemonHealth";
 
 export { useTaskLogPolling } from "./useTaskLogPolling";
 export type {
@@ -128,14 +155,65 @@ export type {
   UseObservabilityMetricsResult,
 } from "./useObservabilityMetrics";
 
+export { useElapsedTime } from "./useElapsedTime";
+
+export { useWorkspaceRepos } from "./useWorkspaceRepos";
+export type {
+  UseWorkspaceReposReturn,
+  WorkspaceConnectionState,
+} from "./useWorkspaceRepos";
+
+export { useRepoFilter, parseReposFromUrl } from "./useRepoFilter";
+export type {
+  UseRepoFilterOptions,
+  UseRepoFilterReturn,
+} from "./useRepoFilter";
+
+export { useWorkspace } from "./useWorkspace";
+export type { UseWorkspaceOptions, UseWorkspaceReturn } from "./useWorkspace";
+
+export { WorkspaceProvider, useWorkspaceContext } from "./useWorkspaceContext";
+export type {
+  WorkspaceContextValue,
+  WorkspaceProviderProps,
+} from "./useWorkspaceContext";
+
 export { useTheme } from "./useTheme";
 export type { Theme, UseThemeReturn } from "./useTheme";
+
+export { useWorkspaceState } from "./useWorkspaceState";
+export type {
+  WorkspaceSnapshot,
+  UseWorkspaceStateParams,
+  UseWorkspaceStateReturn,
+} from "./useWorkspaceState";
+
+export { useWorkspaceParam, parseWorkspaceFromUrl } from "./useWorkspaceParam";
+export type {
+  UseWorkspaceParamOptions,
+  UseWorkspaceParamReturn,
+} from "./useWorkspaceParam";
+
+export { useSearchScope } from "./useSearchScope";
+export type { UseSearchScopeReturn } from "./useSearchScope";
+
+export { useVirtualList } from "./useVirtualList";
+export type {
+  UseVirtualListOptions,
+  UseVirtualListReturn,
+} from "./useVirtualList";
+
+export { useScrollRestore, clearScrollPositions } from "./useScrollRestore";
+export type { UseScrollRestoreOptions } from "./useScrollRestore";
 
 export { useEditors } from "./useEditors";
 export type { UseEditorsResult } from "./useEditors";
 
 export { useTerminalSessions } from "./useTerminalSessions";
 export type { UseTerminalSessionsReturn } from "./useTerminalSessions";
+
+export { useIssueSessionMap } from "./useIssueSessionMap";
+export type { UseIssueSessionMapReturn } from "./useIssueSessionMap";
 
 export { useGitStatus } from "./useGitStatus";
 export type { UseGitStatusOptions, UseGitStatusReturn } from "./useGitStatus";
@@ -153,6 +231,9 @@ export type { UseFileTreeReturn } from "./useFileTree";
 export { useFileContent } from "./useFileContent";
 export type { UseFileContentReturn } from "./useFileContent";
 
+export { useDiff } from "./useDiff";
+export type { UseDiffOptions, UseDiffReturn, SummaryStats } from "./useDiff";
+
 export {
   useTerminalFont,
   DEFAULT_FONT_FAMILY,
@@ -162,3 +243,32 @@ export {
   CUSTOM_FONT_SENTINEL,
 } from "./useTerminalFont";
 export type { UseTerminalFontReturn } from "./useTerminalFont";
+
+export { useFocusReturn } from "./useFocusReturn";
+export type { UseFocusReturnOptions } from "./useFocusReturn";
+
+export { useFocusTrap } from "./useFocusTrap";
+export type { UseFocusTrapOptions } from "./useFocusTrap";
+
+export { usePanelManager } from "./usePanelManager";
+export type {
+  PanelState,
+  PanelType,
+  UsePanelManagerReturn,
+} from "./usePanelManager";
+
+export {
+  KeyboardShortcutProvider,
+  useKeyboardShortcuts,
+  useRegisterEscapeLayer,
+  LAYER_CONFIRM_DIALOG,
+  LAYER_TOAST,
+  LAYER_CHEATSHEET,
+  LAYER_WORKSPACE_SWITCHER,
+  LAYER_MODAL,
+  LAYER_TERMINAL_PANEL,
+  LAYER_AGENT_PANEL,
+  LAYER_ISSUE_PANEL,
+  LAYER_TERMINAL_SEARCH,
+} from "./useKeyboardShortcuts";
+export type { KeyboardShortcutProviderProps } from "./useKeyboardShortcuts";

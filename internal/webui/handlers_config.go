@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -16,8 +17,25 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
+// shellCommand returns the user's default shell, falling back to /bin/bash.
+func shellCommand() string {
+	if sh := os.Getenv("SHELL"); sh != "" {
+		return sh
+	}
+	return "/bin/bash"
+}
+
+// attachCommandForSession returns the shell command for plain terminal tabs,
+// or empty string (use manager's defaultCommand) for AI backend sessions.
+func attachCommandForSession(session string) string {
+	if strings.HasPrefix(session, "lead-shell-") {
+		return shellCommand()
+	}
+	return ""
+}
+
 // validBackends is the list of supported AI backend names.
-var validBackends = []string{"claude", "codex", "opencode"}
+var validBackends = []string{"claude", "codex", "opencode", "gemini", "cursor"}
 
 // BackendConfigResponse wraps the backend config data for JSON response.
 type BackendConfigResponse struct {
@@ -30,7 +48,7 @@ type BackendConfigResponse struct {
 type BackendConfigData struct {
 	Backend   string                 `json:"backend"`
 	Source    string                 `json:"source"`
-	Available []string               `json:"available"`
+	Available []string               `json:"available"` // All backends available for tab creation (includes "shell"); PATCH only accepts AI backends (validBackends).
 	Agents    []AgentBackendOverride `json:"agents"`
 }
 
@@ -140,12 +158,13 @@ func handleGetBackendConfigWithPool(pool configConnectionGetter) http.HandlerFun
 			})
 		}
 
+		available := append(append([]string(nil), validBackends...), "shell")
 		respondJSON(w, http.StatusOK, BackendConfigResponse{
 			Success: true,
 			Data: &BackendConfigData{
 				Backend:   backend,
 				Source:    source,
-				Available: validBackends,
+				Available: available,
 				Agents:    agents,
 			},
 		})
@@ -182,7 +201,7 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 		}
 
 		if !isValidBackend(req.Backend) {
-			respondJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: fmt.Sprintf("invalid backend %q; valid options: claude, codex, opencode", req.Backend)})
+			respondJSON(w, http.StatusBadRequest, BackendConfigResponse{Success: false, Error: fmt.Sprintf("invalid backend %q; valid options: %s", req.Backend, strings.Join(validBackends, ", "))})
 			return
 		}
 
@@ -223,12 +242,13 @@ func handlePatchBackendConfigWithPool(pool configConnectionGetter) http.HandlerF
 			})
 		}
 
+		available := append(append([]string(nil), validBackends...), "shell")
 		respondJSON(w, http.StatusOK, BackendConfigResponse{
 			Success: true,
 			Data: &BackendConfigData{
 				Backend:   pf.Backend,
 				Source:    "project",
-				Available: validBackends,
+				Available: available,
 				Agents:    agents,
 			},
 		})

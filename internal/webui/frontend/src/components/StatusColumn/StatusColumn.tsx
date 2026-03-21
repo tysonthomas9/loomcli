@@ -5,7 +5,7 @@
  */
 
 import { useDroppable } from "@dnd-kit/core";
-import type { ReactNode } from "react";
+import { useCallback, type ReactNode, type RefObject } from "react";
 
 import type { Status } from "@/types";
 
@@ -40,6 +40,8 @@ export interface StatusColumnProps {
   headerIcon?: ReactNode;
   /** Optional footer action (e.g., "Show all 63 closed") */
   footerAction?: ReactNode;
+  /** Optional ref to the content scroll container (for virtualization) */
+  contentRef?: RefObject<HTMLDivElement | null>;
 }
 
 /**
@@ -57,12 +59,25 @@ export function StatusColumn({
   columnType,
   headerIcon,
   footerAction,
+  contentRef,
 }: StatusColumnProps): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({
     id: status,
     disabled: droppableDisabled,
     data: { status },
   });
+
+  // Merge droppable setNodeRef with optional contentRef
+  const mergedContentRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      setNodeRef(node);
+      if (contentRef) {
+        (contentRef as React.MutableRefObject<HTMLDivElement | null>).current =
+          node;
+      }
+    },
+    [setNodeRef, contentRef],
+  );
 
   const displayLabel = statusLabel ?? formatStatusLabel(status);
   const issueWord = count === 1 ? "issue" : "issues";
@@ -104,7 +119,7 @@ export function StatusColumn({
         </span>
       </header>
       <div
-        ref={setNodeRef}
+        ref={mergedContentRef}
         className={contentClasses.join(" ")}
         role="list"
         data-droppable-id={status}

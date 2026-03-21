@@ -19,13 +19,25 @@ import {
 export type ToastType = "success" | "error" | "warning" | "info";
 
 /**
+ * Type-specific default durations in milliseconds.
+ */
+const defaultDurations: Record<ToastType, number> = {
+  success: 3000,
+  error: 10000,
+  warning: 5000,
+  info: 5000,
+};
+
+/**
  * Options for showing a toast.
  */
 export interface ToastOptions {
   /** Toast type for styling (default: 'info') */
   type?: ToastType;
-  /** Auto-dismiss duration in ms (default: 5000, 0 = no auto-dismiss) */
+  /** Auto-dismiss duration in ms (default: type-specific, 0 = no auto-dismiss) */
   duration?: number;
+  /** Callback for undo action on destructive toasts */
+  onUndo?: () => void;
 }
 
 /**
@@ -36,6 +48,7 @@ export interface Toast {
   message: string;
   type: ToastType;
   duration: number;
+  onUndo?: () => void;
 }
 
 /**
@@ -85,7 +98,7 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined);
  */
 export interface ToastProviderProps {
   children: ReactNode;
-  /** Maximum number of visible toasts (default: 5) */
+  /** Maximum number of visible toasts (default: 3) */
   maxToasts?: number;
 }
 
@@ -94,7 +107,7 @@ export interface ToastProviderProps {
  */
 export function ToastProvider({
   children,
-  maxToasts = 5,
+  maxToasts = 3,
 }: ToastProviderProps): JSX.Element {
   const [toasts, dispatch] = useReducer(toastReducer, []);
 
@@ -102,6 +115,9 @@ export function ToastProvider({
   const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
+
+  // Track recent toast message+type for coalescing (key: "type:message", value: timestamp)
+  const recentToastsRef = useRef<Map<string, number>>(new Map());
 
   // Cleanup all timeouts on unmount
   useEffect(() => {
@@ -121,18 +137,38 @@ export function ToastProvider({
       clearTimeout(timeoutId);
       timeoutsRef.current.delete(id);
     }
+    // No cleanup needed for recentToastsRef — entries expire naturally via timestamp check
     dispatch({ type: "REMOVE", payload: id });
   }, []);
 
   const showToast = useCallback(
     (message: string, options?: ToastOptions): string => {
       const type = options?.type ?? "info";
-      const duration = options?.duration ?? 5000;
+      const duration = options?.duration ?? defaultDurations[type];
+
+      // Coalescing: skip duplicate if same message+type within 500ms
+      const now = Date.now();
+      const COALESCE_WINDOW = 500;
+
+      // Evict stale entries to prevent unbounded growth
+      for (const [key, ts] of recentToastsRef.current) {
+        if (now - ts >= COALESCE_WINDOW) recentToastsRef.current.delete(key);
+      }
+
+      const coalesceKey = `${type}:${message}`;
+      const lastSeen = recentToastsRef.current.get(coalesceKey);
+      if (lastSeen && now - lastSeen < COALESCE_WINDOW) {
+        return ""; // coalesced — no new toast created
+      }
 
       const id = generateId();
       const toast: Toast = { id, message, type, duration };
+      if (options?.onUndo) {
+        toast.onUndo = options.onUndo;
+      }
 
       dispatch({ type: "ADD", payload: toast });
+      recentToastsRef.current.set(coalesceKey, now);
 
       // Set up auto-dismiss if duration > 0
       if (duration > 0) {

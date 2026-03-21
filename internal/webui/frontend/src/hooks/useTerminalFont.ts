@@ -9,8 +9,8 @@ import { useState, useCallback } from "react";
 export const DEFAULT_FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace';
 export const DEFAULT_FONT_SIZE = 14;
 
-const STORAGE_KEY_FONT_FAMILY = "terminal-font-family";
-const STORAGE_KEY_FONT_SIZE = "terminal-font-size";
+const STORAGE_KEY_FONT_FAMILY = "cortex:terminal-font-family";
+const STORAGE_KEY_FONT_SIZE = "cortex:terminal-font-size";
 
 /** Sentinel value in the dropdown that triggers the custom text input. */
 export const CUSTOM_FONT_SENTINEL = "__custom__";

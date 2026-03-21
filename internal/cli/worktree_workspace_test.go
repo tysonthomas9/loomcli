@@ -499,6 +499,245 @@ func TestResolver_WorkspaceRepoRelativePaths(t *testing.T) {
 	}
 }
 
+// --- DefaultBranchForWorktree tests ---
+
+func TestDefaultBranchForWorktree_WithRepoDefaultBranch(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "")
+	wt := WorktreeInfo{
+		Name:   "api",
+		Path:   "/tmp/api",
+		Branch: "feature-x",
+		Repo:   &RepoConfig{Name: "api", Path: "/tmp/api", DefaultBranch: "develop"},
+	}
+	got := DefaultBranchForWorktree(wt)
+	if got != "develop" {
+		t.Errorf("DefaultBranchForWorktree() = %q, want %q", got, "develop")
+	}
+}
+
+func TestDefaultBranchForWorktree_WithRepoEmptyDefaultBranch(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "")
+	wt := WorktreeInfo{
+		Name:   "api",
+		Path:   "/tmp/api",
+		Branch: "feature-x",
+		Repo:   &RepoConfig{Name: "api", Path: "/tmp/api", DefaultBranch: ""},
+	}
+	got := DefaultBranchForWorktree(wt)
+	if got != "main" {
+		t.Errorf("DefaultBranchForWorktree() = %q, want %q (fallback)", got, "main")
+	}
+}
+
+func TestDefaultBranchForWorktree_WithoutRepo(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "")
+	wt := WorktreeInfo{
+		Name:   "falcon",
+		Path:   "/tmp/falcon",
+		Branch: "falcon",
+	}
+	got := DefaultBranchForWorktree(wt)
+	if got != "main" {
+		t.Errorf("DefaultBranchForWorktree() = %q, want %q (legacy fallback)", got, "main")
+	}
+}
+
+func TestDefaultBranchForWorktree_EnvOverride(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "env-branch")
+	// Even with a Repo that has DefaultBranch set, env var wins
+	wt := WorktreeInfo{
+		Name:   "api",
+		Path:   "/tmp/api",
+		Branch: "feature-x",
+		Repo:   &RepoConfig{Name: "api", Path: "/tmp/api", DefaultBranch: "develop"},
+	}
+	got := DefaultBranchForWorktree(wt)
+	if got != "env-branch" {
+		t.Errorf("DefaultBranchForWorktree() = %q, want %q (env override)", got, "env-branch")
+	}
+}
+
+func TestDefaultBranchForWorktree_EnvOverride_NoRepo(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "env-branch")
+	wt := WorktreeInfo{
+		Name:   "falcon",
+		Path:   "/tmp/falcon",
+		Branch: "falcon",
+	}
+	got := DefaultBranchForWorktree(wt)
+	if got != "env-branch" {
+		t.Errorf("DefaultBranchForWorktree() = %q, want %q (env override)", got, "env-branch")
+	}
+}
+
+// --- GetDefaultBranchForWorktrees workspace-mode guard tests ---
+
+func TestGetDefaultBranchForWorktrees_WorkspaceMode_ReturnsFirstRepoDefaultBranch(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "")
+	resetIntegrationBranchCache()
+	t.Cleanup(resetIntegrationBranchCache)
+
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "api",
+			Path:   "/tmp/api",
+			Branch: "feature-a",
+			Repo:   &RepoConfig{Name: "api", Path: "/tmp/api", DefaultBranch: ""},
+		},
+		{
+			Name:   "web",
+			Path:   "/tmp/web",
+			Branch: "feature-b",
+			Repo:   &RepoConfig{Name: "web", Path: "/tmp/web", DefaultBranch: "develop"},
+		},
+	}
+	got := GetDefaultBranchForWorktrees(worktrees)
+	if got != "develop" {
+		t.Errorf("GetDefaultBranchForWorktrees() = %q, want %q (first non-empty repo default)", got, "develop")
+	}
+}
+
+func TestGetDefaultBranchForWorktrees_WorkspaceMode_AllEmpty_ReturnMain(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "")
+	resetIntegrationBranchCache()
+	t.Cleanup(resetIntegrationBranchCache)
+
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "api",
+			Path:   "/tmp/api",
+			Branch: "feature-a",
+			Repo:   &RepoConfig{Name: "api", Path: "/tmp/api"},
+		},
+		{
+			Name:   "web",
+			Path:   "/tmp/web",
+			Branch: "feature-b",
+			Repo:   &RepoConfig{Name: "web", Path: "/tmp/web"},
+		},
+	}
+	got := GetDefaultBranchForWorktrees(worktrees)
+	if got != "main" {
+		t.Errorf("GetDefaultBranchForWorktrees() = %q, want %q (all empty defaults)", got, "main")
+	}
+}
+
+func TestGetDefaultBranchForWorktrees_WorkspaceMode_SingleWorktree(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "")
+	// Single workspace worktree should still use repo's DefaultBranch
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "api",
+			Path:   "/tmp/api",
+			Branch: "feature-a",
+			Repo:   &RepoConfig{Name: "api", Path: "/tmp/api", DefaultBranch: "develop"},
+		},
+	}
+	got := GetDefaultBranchForWorktrees(worktrees)
+	if got != "develop" {
+		t.Errorf("GetDefaultBranchForWorktrees() = %q, want %q (single workspace worktree)", got, "develop")
+	}
+}
+
+func TestGetDefaultBranchForWorktrees_LegacyMode_PreservedBehavior(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "")
+	resetIntegrationBranchCache()
+	t.Cleanup(resetIntegrationBranchCache)
+
+	// Legacy worktrees have Repo == nil; with fewer than 2 worktrees, returns "main"
+	worktrees := []WorktreeInfo{
+		{Name: "falcon", Path: "/tmp/falcon", Branch: "falcon"},
+	}
+	got := GetDefaultBranchForWorktrees(worktrees)
+	if got != "main" {
+		t.Errorf("GetDefaultBranchForWorktrees() = %q, want %q (legacy single)", got, "main")
+	}
+}
+
+func TestGetDefaultBranchForWorktrees_WorkspaceMode_EnvOverride(t *testing.T) {
+	t.Setenv("LOOM_DEFAULT_BRANCH", "env-override")
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "api",
+			Path:   "/tmp/api",
+			Branch: "feature-a",
+			Repo:   &RepoConfig{Name: "api", Path: "/tmp/api", DefaultBranch: "develop"},
+		},
+		{
+			Name:   "web",
+			Path:   "/tmp/web",
+			Branch: "feature-b",
+			Repo:   &RepoConfig{Name: "web", Path: "/tmp/web", DefaultBranch: "staging"},
+		},
+	}
+	got := GetDefaultBranchForWorktrees(worktrees)
+	if got != "env-override" {
+		t.Errorf("GetDefaultBranchForWorktrees() = %q, want %q (env override)", got, "env-override")
+	}
+}
+
+// --- DetectIntegrationBranch workspace-mode guard tests ---
+
+func TestDetectIntegrationBranch_WorkspaceMode_ReturnsEmpty(t *testing.T) {
+	// When any worktree has Repo set, DetectIntegrationBranch should bail out
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "api",
+			Path:   "/tmp/api",
+			Branch: "feature-a",
+			Repo:   &RepoConfig{Name: "api", Path: "/tmp/api", DefaultBranch: "develop"},
+		},
+		{
+			Name:   "web",
+			Path:   "/tmp/web",
+			Branch: "feature-b",
+			Repo:   &RepoConfig{Name: "web", Path: "/tmp/web"},
+		},
+	}
+	got := DetectIntegrationBranch(worktrees)
+	if got != "" {
+		t.Errorf("DetectIntegrationBranch() = %q, want empty string for workspace-mode worktrees", got)
+	}
+}
+
+func TestDetectIntegrationBranch_WorkspaceMode_MixedRepoNil(t *testing.T) {
+	// Even if only one worktree has Repo set, should return empty
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "api",
+			Path:   "/tmp/api",
+			Branch: "feature-a",
+			Repo:   &RepoConfig{Name: "api", Path: "/tmp/api"},
+		},
+		{
+			Name:   "legacy-wt",
+			Path:   "/tmp/legacy",
+			Branch: "feature-b",
+			// Repo is nil (legacy)
+		},
+	}
+	got := DetectIntegrationBranch(worktrees)
+	if got != "" {
+		t.Errorf("DetectIntegrationBranch() = %q, want empty string when any worktree has Repo set", got)
+	}
+}
+
+func TestDetectIntegrationBranch_LegacyMode_NoRepoSet(t *testing.T) {
+	// With no git repo available, DetectIntegrationBranch will fail git commands
+	// and return empty, but the important thing is it doesn't bail out early
+	// (the workspace-mode guard does not trigger)
+	worktrees := []WorktreeInfo{
+		{Name: "falcon", Path: "/nonexistent/path", Branch: "falcon"},
+		{Name: "nova", Path: "/nonexistent/path", Branch: "nova"},
+	}
+	// This will return "" because git commands fail, but critically it
+	// does NOT bail out due to the workspace-mode guard (Repo is nil)
+	got := DetectIntegrationBranch(worktrees)
+	if got != "" {
+		t.Errorf("DetectIntegrationBranch() = %q, want empty (git commands fail)", got)
+	}
+}
+
 func TestWorktreeInfo_WorkspaceFields(t *testing.T) {
 	// Legacy mode: Workspace and Repo should be zero values
 	legacyInfo := WorktreeInfo{

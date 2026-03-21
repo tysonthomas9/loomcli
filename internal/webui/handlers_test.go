@@ -5020,61 +5020,86 @@ func TestParseGraphParams(t *testing.T) {
 		url               string
 		wantStatus        string
 		wantIncludeClosed bool
+		wantSourceRepos   []string
 	}{
 		{
 			name:              "default values",
 			url:               "/api/issues/graph",
 			wantStatus:        "all",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "status=open",
 			url:               "/api/issues/graph?status=open",
 			wantStatus:        "open",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "status=closed",
 			url:               "/api/issues/graph?status=closed",
 			wantStatus:        "closed",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "status=all",
 			url:               "/api/issues/graph?status=all",
 			wantStatus:        "all",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "include_closed=false",
 			url:               "/api/issues/graph?include_closed=false",
 			wantStatus:        "all",
 			wantIncludeClosed: false,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "include_closed=true",
 			url:               "/api/issues/graph?include_closed=true",
 			wantStatus:        "all",
 			wantIncludeClosed: true,
+			wantSourceRepos:   nil,
 		},
 		{
 			name:              "combined status and include_closed",
 			url:               "/api/issues/graph?status=open&include_closed=false",
 			wantStatus:        "open",
 			wantIncludeClosed: false,
+			wantSourceRepos:   nil,
+		},
+		{
+			name:              "source_repos single",
+			url:               "/api/issues/graph?source_repos=repo1",
+			wantStatus:        "all",
+			wantIncludeClosed: true,
+			wantSourceRepos:   []string{"repo1"},
+		},
+		{
+			name:              "source_repos multiple",
+			url:               "/api/issues/graph?source_repos=repo1,repo2",
+			wantStatus:        "all",
+			wantIncludeClosed: true,
+			wantSourceRepos:   []string{"repo1", "repo2"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
-			status, includeClosed := parseGraphParams(req)
+			status, includeClosed, sourceRepos := parseGraphParams(req)
 
 			if status != tt.wantStatus {
 				t.Errorf("status = %q, want %q", status, tt.wantStatus)
 			}
 			if includeClosed != tt.wantIncludeClosed {
 				t.Errorf("includeClosed = %v, want %v", includeClosed, tt.wantIncludeClosed)
+			}
+			if !slices.Equal(sourceRepos, tt.wantSourceRepos) {
+				t.Errorf("sourceRepos = %v, want %v", sourceRepos, tt.wantSourceRepos)
 			}
 		})
 	}
@@ -8817,5 +8842,503 @@ func TestHandlerFileSplit_SharedHelpersFromHealth(t *testing.T) {
 	// Verify trimming happened (splitAndTrim from handlers.go)
 	if args.Labels[1] != "feature" {
 		t.Errorf("labels[1] = %q, want %q (should be trimmed)", args.Labels[1], "feature")
+	}
+}
+
+// ============================================================================
+// Repo Field Tests
+// ============================================================================
+
+func TestIssueWithParentRepoJSON(t *testing.T) {
+	t.Run("repo present when SourceRepo set", func(t *testing.T) {
+		repo := "github.com/org/repo-a"
+		iwp := &IssueWithParent{
+			IssueWithCounts: &types.IssueWithCounts{
+				Issue: &types.Issue{
+					ID:     "task-1",
+					Title:  "Test Task",
+					Status: types.StatusOpen,
+				},
+			},
+			Repo: &repo,
+		}
+
+		data, err := json.Marshal(iwp)
+		if err != nil {
+			t.Fatalf("json.Marshal() error: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+
+		if result["repo"] != "github.com/org/repo-a" {
+			t.Errorf("repo = %v, want %q", result["repo"], "github.com/org/repo-a")
+		}
+	})
+
+	t.Run("repo omitted when nil", func(t *testing.T) {
+		iwp := &IssueWithParent{
+			IssueWithCounts: &types.IssueWithCounts{
+				Issue: &types.Issue{
+					ID:     "task-2",
+					Title:  "No Repo Task",
+					Status: types.StatusOpen,
+				},
+			},
+		}
+
+		data, err := json.Marshal(iwp)
+		if err != nil {
+			t.Fatalf("json.Marshal() error: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+
+		if _, ok := result["repo"]; ok {
+			t.Errorf("repo should be omitted when nil")
+		}
+	})
+}
+
+func TestKanbanIssueRepoJSON(t *testing.T) {
+	t.Run("repo present when SourceRepo set", func(t *testing.T) {
+		repo := "github.com/org/repo-b"
+		ki := &KanbanIssue{
+			IssueWithCounts: &types.IssueWithCounts{
+				Issue: &types.Issue{
+					ID:     "task-3",
+					Title:  "Kanban Task",
+					Status: types.StatusOpen,
+				},
+			},
+			Repo: &repo,
+		}
+
+		data, err := json.Marshal(ki)
+		if err != nil {
+			t.Fatalf("json.Marshal() error: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+
+		if result["repo"] != "github.com/org/repo-b" {
+			t.Errorf("repo = %v, want %q", result["repo"], "github.com/org/repo-b")
+		}
+	})
+
+	t.Run("repo omitted when nil", func(t *testing.T) {
+		ki := &KanbanIssue{
+			IssueWithCounts: &types.IssueWithCounts{
+				Issue: &types.Issue{
+					ID:     "task-4",
+					Title:  "No Repo Kanban",
+					Status: types.StatusOpen,
+				},
+			},
+		}
+
+		data, err := json.Marshal(ki)
+		if err != nil {
+			t.Fatalf("json.Marshal() error: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+
+		if _, ok := result["repo"]; ok {
+			t.Errorf("repo should be omitted when nil")
+		}
+	})
+}
+
+func TestReadyIssueWithParentRepoJSON(t *testing.T) {
+	t.Run("repo present when SourceRepo set", func(t *testing.T) {
+		repo := "github.com/org/repo-c"
+		riwp := &ReadyIssueWithParent{
+			Issue: &types.Issue{
+				ID:     "task-5",
+				Title:  "Ready Task",
+				Status: types.StatusOpen,
+			},
+			Repo: &repo,
+		}
+
+		data, err := json.Marshal(riwp)
+		if err != nil {
+			t.Fatalf("json.Marshal() error: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+
+		if result["repo"] != "github.com/org/repo-c" {
+			t.Errorf("repo = %v, want %q", result["repo"], "github.com/org/repo-c")
+		}
+	})
+
+	t.Run("repo omitted when nil", func(t *testing.T) {
+		riwp := &ReadyIssueWithParent{
+			Issue: &types.Issue{
+				ID:     "task-6",
+				Title:  "No Repo Ready",
+				Status: types.StatusOpen,
+			},
+		}
+
+		data, err := json.Marshal(riwp)
+		if err != nil {
+			t.Fatalf("json.Marshal() error: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("json.Unmarshal() error: %v", err)
+		}
+
+		if _, ok := result["repo"]; ok {
+			t.Errorf("repo should be omitted when nil")
+		}
+	})
+}
+
+func TestBuildReadyResponse_RepoPopulation(t *testing.T) {
+	issues := []*types.Issue{
+		{ID: "issue-1", Title: "With Repo", SourceRepo: "github.com/org/repo-a"},
+		{ID: "issue-2", Title: "Without Repo"},
+	}
+
+	client := &mockReadyClient{
+		getParentIDsFunc: func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error) {
+			return &rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}, nil
+		},
+	}
+
+	result := buildReadyResponse(client, issues)
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(result))
+	}
+
+	// issue-1 has SourceRepo set, so Repo should be populated
+	if result[0].Repo == nil {
+		t.Fatal("expected Repo to be non-nil for issue-1")
+	}
+	if *result[0].Repo != "github.com/org/repo-a" {
+		t.Errorf("Repo = %q, want %q", *result[0].Repo, "github.com/org/repo-a")
+	}
+
+	// issue-2 has no SourceRepo, so Repo should be nil
+	if result[1].Repo != nil {
+		t.Errorf("expected Repo to be nil for issue-2, got %q", *result[1].Repo)
+	}
+}
+
+func TestHandleReadyWithPool_RepoInResponse(t *testing.T) {
+	issues := []*types.Issue{
+		{ID: "issue-1", Title: "With Repo", SourceRepo: "github.com/org/repo-x"},
+		{ID: "issue-2", Title: "Without Repo"},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	client := &mockReadyClient{
+		readyFunc: func(args *rpc.ReadyArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: true,
+				Data:    issuesJSON,
+			}, nil
+		},
+		getParentIDsFunc: func(args *rpc.GetParentIDsArgs) (*rpc.GetParentIDsResponse, error) {
+			return &rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}, nil
+		},
+	}
+	pool := &mockReadyPool{
+		getFunc: func(ctx context.Context) (readyClient, error) {
+			return client, nil
+		},
+		putFunc: func(c readyClient) {},
+	}
+
+	handler := handleReadyWithPool(pool)
+	req := httptest.NewRequest(http.MethodGet, "/api/ready", nil)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp ReadyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected Success to be true")
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(resp.Data))
+	}
+
+	// issue-1 should have repo
+	if resp.Data[0].Repo == nil || *resp.Data[0].Repo != "github.com/org/repo-x" {
+		t.Errorf("expected issue-1 repo = %q, got %v", "github.com/org/repo-x", resp.Data[0].Repo)
+	}
+	// issue-2 should not have repo
+	if resp.Data[1].Repo != nil {
+		t.Errorf("expected issue-2 repo to be nil, got %v", resp.Data[1].Repo)
+	}
+}
+
+func TestHandleListIssues_RepoInStandardMode(t *testing.T) {
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{
+			ID: "issue-1", Title: "With Repo", Status: types.StatusOpen,
+			SourceRepo: "github.com/org/repo-y",
+		}},
+		{Issue: &types.Issue{
+			ID: "issue-2", Title: "Without Repo", Status: types.StatusOpen,
+		}},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			return rpc.Response{Success: true, Data: issuesJSON}
+		case "get_parent_ids":
+			resp := rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}
+			data, _ := json.Marshal(resp)
+			return rpc.Response{Success: true, Data: data}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true, got false (error: %s)", resp.Error)
+	}
+
+	var items []*IssueWithParent
+	if err := json.Unmarshal(resp.Data, &items); err != nil {
+		t.Fatalf("failed to parse items: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	// issue-1 should have repo
+	if items[0].Repo == nil || *items[0].Repo != "github.com/org/repo-y" {
+		t.Errorf("expected issue-1 repo = %q, got %v", "github.com/org/repo-y", items[0].Repo)
+	}
+	// issue-2 should not have repo
+	if items[1].Repo != nil {
+		t.Errorf("expected issue-2 repo to be nil, got %v", items[1].Repo)
+	}
+}
+
+func TestHandleListIssues_KanbanModeRepo(t *testing.T) {
+	issues := []*types.IssueWithCounts{
+		{Issue: &types.Issue{
+			ID: "issue-1", Title: "With Repo", Status: types.StatusOpen,
+			SourceRepo: "github.com/org/repo-z",
+		}},
+		{Issue: &types.Issue{
+			ID: "issue-2", Title: "Without Repo", Status: types.StatusOpen,
+		}},
+	}
+	issuesJSON, _ := json.Marshal(issues)
+
+	allIssuesJSON, _ := json.Marshal(issues)
+	blockedJSON, _ := json.Marshal([]*types.BlockedIssue{})
+
+	listCallCount := 0
+	socketPath := startHandlersMockServer(t, func(req rpc.Request) rpc.Response {
+		if resp, ok := defaultHealthPingHandler(req); ok {
+			return resp
+		}
+		switch req.Operation {
+		case "list":
+			listCallCount++
+			if listCallCount == 1 {
+				return rpc.Response{Success: true, Data: issuesJSON}
+			}
+			return rpc.Response{Success: true, Data: allIssuesJSON}
+		case "get_parent_ids":
+			resp := rpc.GetParentIDsResponse{Parents: map[string]*rpc.ParentInfo{}}
+			data, _ := json.Marshal(resp)
+			return rpc.Response{Success: true, Data: data}
+		case "blocked":
+			return rpc.Response{Success: true, Data: blockedJSON}
+		default:
+			return rpc.Response{Success: false, Error: "unknown: " + req.Operation}
+		}
+	})
+
+	pool := newHandlersMockPool(t, socketPath)
+	handler := handleListIssues(pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues?include_blocked=true", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp IssuesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected Success=true, got false (error: %s)", resp.Error)
+	}
+
+	var kanbanItems []*KanbanIssue
+	if err := json.Unmarshal(resp.Data, &kanbanItems); err != nil {
+		t.Fatalf("failed to parse kanban items: %v", err)
+	}
+	if len(kanbanItems) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(kanbanItems))
+	}
+
+	// issue-1 should have repo
+	if kanbanItems[0].Repo == nil || *kanbanItems[0].Repo != "github.com/org/repo-z" {
+		t.Errorf("expected issue-1 repo = %q, got %v", "github.com/org/repo-z", kanbanItems[0].Repo)
+	}
+	// issue-2 should not have repo
+	if kanbanItems[1].Repo != nil {
+		t.Errorf("expected issue-2 repo to be nil, got %v", kanbanItems[1].Repo)
+	}
+}
+
+func TestParseListParams_SourceRepos(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantVal []string
+	}{
+		{
+			name:    "no source_repos returns nil",
+			url:     "/api/issues",
+			wantVal: nil,
+		},
+		{
+			name:    "single source repo",
+			url:     "/api/issues?source_repos=repo1",
+			wantVal: []string{"repo1"},
+		},
+		{
+			name:    "multiple source repos comma-separated",
+			url:     "/api/issues?source_repos=repo1,repo2,repo3",
+			wantVal: []string{"repo1", "repo2", "repo3"},
+		},
+		{
+			name:    "empty source_repos value returns nil",
+			url:     "/api/issues?source_repos=",
+			wantVal: nil,
+		},
+		{
+			name:    "source_repos combined with other params",
+			url:     "/api/issues?status=open&source_repos=repo1,repo2&priority=1",
+			wantVal: []string{"repo1", "repo2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.url, nil)
+			args, err := parseListParams(req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if !slices.Equal(args.SourceRepos, tt.wantVal) {
+				t.Errorf("SourceRepos = %v, want %v", args.SourceRepos, tt.wantVal)
+			}
+		})
+	}
+}
+
+func TestParseReadyParams_SourceRepos(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   string
+		wantVal []string
+	}{
+		{
+			name:    "no source_repos returns nil",
+			query:   "",
+			wantVal: nil,
+		},
+		{
+			name:    "single source repo",
+			query:   "source_repos=repo1",
+			wantVal: []string{"repo1"},
+		},
+		{
+			name:    "multiple source repos comma-separated",
+			query:   "source_repos=repo1,repo2,repo3",
+			wantVal: []string{"repo1", "repo2", "repo3"},
+		},
+		{
+			name:    "empty source_repos value returns nil",
+			query:   "source_repos=",
+			wantVal: nil,
+		},
+		{
+			name:    "source_repos combined with other params",
+			query:   "assignee=tyson&source_repos=repo1,repo2&limit=10",
+			wantVal: []string{"repo1", "repo2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url := "/api/ready"
+			if tt.query != "" {
+				url += "?" + tt.query
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+
+			args, err := parseReadyParams(req)
+			if err != nil {
+				t.Errorf("parseReadyParams() unexpected error: %v", err)
+				return
+			}
+
+			if !slices.Equal(args.SourceRepos, tt.wantVal) {
+				t.Errorf("SourceRepos = %v, want %v", args.SourceRepos, tt.wantVal)
+			}
+		})
 	}
 }

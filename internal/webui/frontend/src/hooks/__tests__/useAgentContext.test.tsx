@@ -48,14 +48,15 @@ function setupMockAgents(agents: LoomAgentStatus[] = []) {
       ready_to_implement: 0,
       in_progress: 0,
       need_review: 0,
-      blocked: 0,
+      backlog: 0,
     },
     taskLists: {
       needsPlanning: [],
       readyToImplement: [],
       needsReview: [],
       inProgress: [],
-      blocked: [],
+      backlog: [],
+      done: [],
     },
     agentTasks: {},
     sync: {
@@ -83,6 +84,9 @@ function setupMockAgents(agents: LoomAgentStatus[] = []) {
     lastUpdated: null,
     refetch: vi.fn(),
     retryNow: vi.fn(),
+    showStaleBanner: false,
+    connectionLost: false,
+    disconnectedSince: null,
   });
 }
 

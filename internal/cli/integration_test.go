@@ -739,7 +739,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		mock.AddStub("bd", []string{"list"}, CommandResult{Stdout: "[]"})
 		mock.Install()
 
-		hasTasks, err := HasAvailablePlanningTasks("")
+		hasTasks, err := HasAvailablePlanningTasks("", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -755,7 +755,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		mock.AddStub("bd", []string{"list"}, CommandResult{Stdout: "[]"})
 		mock.Install()
 
-		hasTasks, err := HasAvailableImplementationTasks("")
+		hasTasks, err := HasAvailableImplementationTasks("", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -824,7 +824,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		mock.AddStub("bd", []string{"list"}, CommandResult{Stdout: "[]"})
 		mock.Install()
 
-		hasTasks, err := HasAvailablePlanningTasks("")
+		hasTasks, err := HasAvailablePlanningTasks("", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -843,7 +843,7 @@ func TestPlanReviewTaskWorkflow(t *testing.T) {
 		mock.AddStub("bd", []string{"list"}, CommandResult{Stdout: "[]"})
 		mock.Install()
 
-		hasTasks, err := HasAvailableImplementationTasks("")
+		hasTasks, err := HasAvailableImplementationTasks("", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

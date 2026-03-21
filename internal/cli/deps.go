@@ -39,12 +39,12 @@ type FileSystem interface {
 // Deps is the central dependency-injection container for CLI commands.
 // It holds all external dependencies so they can be swapped for testing.
 type Deps struct {
-	Git    GitRunner
-	Exec   ExecRunner
-	FS     FileSystem
-	Logger *slog.Logger
-	Clock  func() time.Time
-	BD     BDRunner
+	Git     GitRunner
+	Exec    ExecRunner
+	FS      FileSystem
+	Logger  *slog.Logger
+	Clock   func() time.Time
+	Tracker IssueTracker
 }
 
 // --- default implementations ---
@@ -63,12 +63,6 @@ type defaultExecRunner struct{}
 
 func (defaultExecRunner) Run(dir, name string, args ...string) CommandResult {
 	return execCommand(dir, name, args...)
-}
-
-type defaultBDRunner struct{}
-
-func (defaultBDRunner) Run(dir string, args ...string) CommandResult {
-	return execCommand(dir, "bd", args...)
 }
 
 type defaultFileSystem struct{}
@@ -95,14 +89,23 @@ func (defaultFileSystem) Remove(path string) error {
 
 // DefaultDeps returns a Deps populated with real (production) implementations.
 func DefaultDeps() *Deps {
+	bdRunner := defaultBDRunnerImpl{}
 	return &Deps{
-		Git:    defaultGitRunner{},
-		Exec:   defaultExecRunner{},
-		FS:     defaultFileSystem{},
-		Logger: slog.Default(),
-		Clock:  time.Now,
-		BD:     defaultBDRunner{},
+		Git:     defaultGitRunner{},
+		Exec:    defaultExecRunner{},
+		FS:      defaultFileSystem{},
+		Logger:  slog.Default(),
+		Clock:   time.Now,
+		Tracker: newBdBackend(bdRunner, GetBeadsDir()),
 	}
+}
+
+// defaultBDRunnerImpl implements BDRunner by shelling out to the bd CLI.
+// Used only as the internal runner for bdBackend in DefaultDeps().
+type defaultBDRunnerImpl struct{}
+
+func (defaultBDRunnerImpl) Run(dir string, args ...string) CommandResult {
+	return execCommand(dir, "bd", args...)
 }
 
 // defaultDeps is the package-level Deps instance used by backward-compatible

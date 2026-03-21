@@ -3,13 +3,20 @@
  * Uses CSS variables from styles/variables.css.
  */
 
-/* Wrapper for horizontal scrolling on narrow viewports */
+/* Wrapper for horizontal + vertical scrolling with sticky headers */
 .issue-table__wrapper {
   width: 100%;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 80vh;
   border: 1px solid var(--color-border);
   border-radius: 12px;
   background: var(--color-bg-card);
+}
+
+/* Applied when table uses virtualized rendering (>100 rows) */
+.issue-table__wrapper--virtualized {
+  overflow-y: auto;
+  max-height: 80vh;
 }
 
 /* Main table */
@@ -23,7 +30,7 @@
 
 /* Table header */
 .issue-table__head {
-  background-color: #ece9df;
+  background-color: var(--color-bg-tertiary);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -35,6 +42,10 @@
   font-size: var(--font-size-xs);
   letter-spacing: 0.05em;
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky, 10);
+  background-color: var(--color-bg-tertiary);
 }
 
 /* Sortable header styles */
@@ -48,7 +59,7 @@
 
 .issue-table__header-cell--sortable:hover {
   color: var(--color-text);
-  background-color: #e6e1d4;
+  background-color: var(--color-bg-active);
 }
 
 .issue-table__header-cell--sortable:focus {
@@ -101,16 +112,24 @@
 }
 
 .issue-table__row:hover {
-  background-color: #eeebe2;
+  background-color: var(--color-bg-hover);
 }
 
 .issue-table__row--clickable {
   cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.issue-table__row--clickable:hover {
+  background-color: var(--color-bg-hover);
+  box-shadow: inset 3px 0 0 var(--color-primary);
 }
 
 .issue-table__row--clickable:focus {
   outline: none;
-  background-color: #e9e4d7;
+  background-color: var(--color-bg-active);
 }
 
 .issue-table__row--clickable:focus-visible {
@@ -119,11 +138,11 @@
 }
 
 .issue-table__row--selected {
-  background-color: #e9e4d7;
+  background-color: var(--color-bg-active);
 }
 
 .issue-table__row--selected:hover {
-  background-color: #e9e4d7;
+  background-color: var(--color-bg-active);
 }
 
 /* Table cells */
@@ -197,6 +216,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text);
+  transition: color var(--transition-fast);
+}
+
+/* Underline title on clickable row hover to signal interactivity */
+.issue-table__row--clickable:hover .issue-table__title {
+  color: var(--color-primary);
+  text-decoration: underline;
 }
 
 /* Status badges */
@@ -258,6 +284,18 @@
 .issue-table__assignee {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
+}
+
+/* Repo */
+.issue-table__repo {
+  display: inline-block;
+  max-width: 100px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Date */
@@ -369,9 +407,10 @@
   z-index: var(--z-sticky);
 }
 
-/* Header sticky cells need explicit background */
+/* Header sticky cells need explicit background and elevated z-index for dual-axis sticking */
 .issue-table__header-cell[data-column="id"] {
   background-color: var(--color-bg-secondary);
+  z-index: calc(var(--z-sticky, 10) + 1);
 }
 
 /* Body sticky cells need opaque background */
@@ -413,6 +452,7 @@
 
 .issue-table__header-cell--checkbox {
   background-color: var(--color-bg-secondary);
+  z-index: calc(var(--z-sticky, 10) + 2);
 }
 
 .issue-table__cell--checkbox {

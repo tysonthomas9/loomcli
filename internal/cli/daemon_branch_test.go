@@ -38,7 +38,7 @@ func TestEnsureWorktreeBranch_AlreadyOnCorrectBranch(t *testing.T) {
 	outMock := NewOutputCommandMock(t, []OutputCommandStub{})
 	outMock.Install()
 
-	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin/main")
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -65,7 +65,7 @@ func TestEnsureWorktreeBranch_SwitchToLocalBranch(t *testing.T) {
 	})
 	outMock.Install()
 
-	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin/main")
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -94,7 +94,7 @@ func TestEnsureWorktreeBranch_CreateFromRemote(t *testing.T) {
 	})
 	outMock.Install()
 
-	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin/main")
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -123,7 +123,7 @@ func TestEnsureWorktreeBranch_CreateFromFallback(t *testing.T) {
 	})
 	outMock.Install()
 
-	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin/main")
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -154,7 +154,7 @@ func TestEnsureWorktreeBranch_DirtyTree_CommitsWIP(t *testing.T) {
 	})
 	outMock.Install()
 
-	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin/main")
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -181,7 +181,7 @@ func TestEnsureWorktreeBranch_FetchFailsNonFatal(t *testing.T) {
 	})
 	outMock.Install()
 
-	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin/main")
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -261,7 +261,7 @@ func TestEnsureWorktreeBranch_DirtyTree_CommitFails_StashSucceeds(t *testing.T) 
 	})
 	outMock.Install()
 
-	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin/main")
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -290,12 +290,104 @@ func TestEnsureWorktreeBranch_DirtyTree_BothFail(t *testing.T) {
 	})
 	outMock.Install()
 
-	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin/main")
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
 
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
 	if err != nil && !strings.Contains(err.Error(), "dirty worktree and both WIP commit and stash failed") {
 		t.Errorf("error message should contain expected text, got: %v", err)
+	}
+}
+
+func TestEnsureWorktreeBranch_CustomRemote(t *testing.T) {
+	// Verify that a custom remote ("upstream") is used for fetch and remote branch lookup.
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon\n"},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/epic/bd-spq5"}, Err: errors.New("not found")},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/remotes/upstream/epic/bd-spq5"}, Stdout: "def456\n"},
+	})
+	cmdMock.Install()
+
+	outMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "upstream"}, Err: nil},
+		{Args: []string{"checkout", "-b", "epic/bd-spq5", "upstream/epic/bd-spq5"}, Err: nil},
+	})
+	outMock.Install()
+
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "upstream", "upstream/develop")
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsureWorktreeBranch_CustomRemote_FallbackToRef(t *testing.T) {
+	// Custom remote, branch doesn't exist locally or remotely — falls back to ref.
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon\n"},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/epic/bd-spq5"}, Err: errors.New("not found")},
+		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/remotes/upstream/epic/bd-spq5"}, Err: errors.New("not found")},
+	})
+	cmdMock.Install()
+
+	outMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "upstream"}, Err: nil},
+		{Args: []string{"checkout", "-b", "epic/bd-spq5", "upstream/develop"}, Err: nil},
+	})
+	outMock.Install()
+
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "upstream", "upstream/develop")
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestAgentProcess_resolveRemote(t *testing.T) {
+	tests := []struct {
+		name       string
+		repoConfig *RepoConfig
+		want       string
+	}{
+		{"nil config", nil, "origin"},
+		{"empty remote", &RepoConfig{}, "origin"},
+		{"custom remote", &RepoConfig{Remote: "upstream"}, "upstream"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ap := &AgentProcess{repoConfig: tc.repoConfig}
+			got := ap.resolveRemote()
+			if got != tc.want {
+				t.Errorf("resolveRemote() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAgentProcess_resolveRemoteBranch(t *testing.T) {
+	tests := []struct {
+		name       string
+		repoConfig *RepoConfig
+		want       string
+	}{
+		{"nil config", nil, "origin/main"},
+		{"empty config", &RepoConfig{}, "origin/main"},
+		{"custom remote and branch", &RepoConfig{Remote: "upstream", DefaultBranch: "develop"}, "upstream/develop"},
+		{"custom branch only", &RepoConfig{DefaultBranch: "develop"}, "origin/develop"},
+		{"custom remote only", &RepoConfig{Remote: "upstream"}, "upstream/main"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ap := &AgentProcess{repoConfig: tc.repoConfig}
+			got := ap.resolveRemoteBranch()
+			if got != tc.want {
+				t.Errorf("resolveRemoteBranch() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

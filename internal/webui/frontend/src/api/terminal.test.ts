@@ -3,21 +3,30 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { ApiError, get, patch, del } from "./client";
+import { ApiError, get, post, patch, del } from "./client";
 import {
   listTerminalSessions,
   fetchTerminalToken,
   buildTerminalWsUrl,
+  seedTerminalSession,
   listTabMetadata,
   getTabMetadata,
   patchTabMetadata,
   deleteTabMetadata,
+  fetchScrollback,
+  getTerminalState,
+  patchTerminalState,
 } from "./terminal";
-import type { TerminalSessionInfo, TabMetadata } from "./terminal";
+import type {
+  TerminalSessionInfo,
+  TabMetadata,
+  IssueContext,
+} from "./terminal";
 
 // Mock the client module
 vi.mock("./client", () => ({
   get: vi.fn(),
+  post: vi.fn(),
   patch: vi.fn(),
   del: vi.fn(),
   ApiError: class ApiError extends Error {
@@ -33,6 +42,7 @@ vi.mock("./client", () => ({
 }));
 
 const mockGet = get as ReturnType<typeof vi.fn>;
+const mockPost = post as ReturnType<typeof vi.fn>;
 const mockPatch = patch as ReturnType<typeof vi.fn>;
 const mockDel = del as ReturnType<typeof vi.fn>;
 
@@ -168,6 +178,36 @@ describe("terminal API", () => {
 
       await expect(listTabMetadata()).rejects.toThrow(ApiError);
     });
+
+    it("returns empty array on 404 ApiError (tab metadata disabled)", async () => {
+      mockGet.mockRejectedValue(new ApiError(404, "Not Found"));
+
+      const result = await listTabMetadata();
+
+      expect(result).toEqual([]);
+    });
+
+    it("returns empty array on 503 ApiError (Redis unavailable)", async () => {
+      mockGet.mockRejectedValue(new ApiError(503, "Service Unavailable"));
+
+      const result = await listTabMetadata();
+
+      expect(result).toEqual([]);
+    });
+
+    it("re-throws non-404/503 ApiError", async () => {
+      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+
+      await expect(listTabMetadata()).rejects.toThrow(
+        "API Error: 500 Internal Server Error",
+      );
+    });
+
+    it("re-throws non-ApiError errors", async () => {
+      mockGet.mockRejectedValue(new Error("network failure"));
+
+      await expect(listTabMetadata()).rejects.toThrow("network failure");
+    });
   });
 
   // ============= getTabMetadata =============
@@ -242,6 +282,67 @@ describe("terminal API", () => {
     });
   });
 
+  // ============= seedTerminalSession =============
+
+  describe("seedTerminalSession", () => {
+    it("sends POST to correct URL with context body", async () => {
+      mockPost.mockResolvedValue({ success: true });
+
+      const context: IssueContext = {
+        issue_id: "PROJ-123",
+        title: "Fix login bug",
+        description: "Users cannot log in",
+        design: "Use OAuth2",
+        blockers: [{ id: "PROJ-100", title: "Auth service down" }],
+      };
+
+      await seedTerminalSession("my-session", context);
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/terminal/sessions/my-session/seed",
+        context,
+      );
+    });
+
+    it("URL-encodes the session name", async () => {
+      mockPost.mockResolvedValue({ success: true });
+
+      await seedTerminalSession("session with spaces", {
+        issue_id: "X-1",
+        title: "Test",
+      });
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/terminal/sessions/session%20with%20spaces/seed",
+        { issue_id: "X-1", title: "Test" },
+      );
+    });
+
+    it("sends minimal context without optional fields", async () => {
+      mockPost.mockResolvedValue({ success: true });
+
+      const context: IssueContext = {
+        issue_id: "X-1",
+        title: "Simple issue",
+      };
+
+      await seedTerminalSession("test-session", context);
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/terminal/sessions/test-session/seed",
+        context,
+      );
+    });
+
+    it("propagates errors from client", async () => {
+      mockPost.mockRejectedValue(new ApiError(404, "Not Found"));
+
+      await expect(
+        seedTerminalSession("missing", { issue_id: "X-1", title: "Test" }),
+      ).rejects.toThrow("API Error: 404 Not Found");
+    });
+  });
+
   // ============= buildTerminalWsUrl =============
 
   describe("buildTerminalWsUrl", () => {
@@ -308,6 +409,118 @@ describe("terminal API", () => {
 
       expect(url).toBe(
         "ws://localhost:8080/api/terminal/ws?session=session%20with%20spaces&token=tok%26en%3Dval",
+      );
+    });
+  });
+
+  // ============= fetchScrollback =============
+
+  describe("fetchScrollback", () => {
+    it("returns scrollback content and line count on success", async () => {
+      mockGet.mockResolvedValue({
+        success: true,
+        data: { content: "line1\nline2\nline3", lines: 3 },
+      });
+
+      const result = await fetchScrollback("my-session");
+
+      expect(result).toEqual({ content: "line1\nline2\nline3", lines: 3 });
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/terminal/sessions/my-session/scrollback",
+      );
+    });
+
+    it("URL-encodes the session name", async () => {
+      mockGet.mockResolvedValue({
+        success: true,
+        data: { content: "", lines: 0 },
+      });
+
+      await fetchScrollback("session with spaces");
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/terminal/sessions/session%20with%20spaces/scrollback",
+      );
+    });
+
+    it("throws ApiError when response indicates failure", async () => {
+      mockGet.mockResolvedValue({
+        success: false,
+        error: "session not found",
+      });
+
+      await expect(fetchScrollback("missing")).rejects.toThrow(ApiError);
+      await expect(fetchScrollback("missing")).rejects.toThrow(
+        "session not found",
+      );
+    });
+
+    it("propagates network errors from client", async () => {
+      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+
+      await expect(fetchScrollback("my-session")).rejects.toThrow(
+        "API Error: 500 Internal Server Error",
+      );
+    });
+  });
+
+  // ============= getTerminalState =============
+
+  describe("getTerminalState", () => {
+    it("returns terminal state with active_tab", async () => {
+      mockGet.mockResolvedValue({ active_tab: "session-abc" });
+
+      const result = await getTerminalState();
+
+      expect(result).toEqual({ active_tab: "session-abc" });
+      expect(mockGet).toHaveBeenCalledWith("/api/terminal/state");
+    });
+
+    it("returns empty active_tab when no state set", async () => {
+      mockGet.mockResolvedValue({ active_tab: "" });
+
+      const result = await getTerminalState();
+
+      expect(result).toEqual({ active_tab: "" });
+    });
+
+    it("propagates network errors from client", async () => {
+      mockGet.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+
+      await expect(getTerminalState()).rejects.toThrow(
+        "API Error: 500 Internal Server Error",
+      );
+    });
+  });
+
+  // ============= patchTerminalState =============
+
+  describe("patchTerminalState", () => {
+    it("sends PATCH with active_tab", async () => {
+      mockPatch.mockResolvedValue({ active_tab: "session-xyz" });
+
+      await patchTerminalState({ active_tab: "session-xyz" });
+
+      expect(mockPatch).toHaveBeenCalledWith("/api/terminal/state", {
+        active_tab: "session-xyz",
+      });
+    });
+
+    it("sends PATCH with empty active_tab to clear state", async () => {
+      mockPatch.mockResolvedValue({ active_tab: "" });
+
+      await patchTerminalState({ active_tab: "" });
+
+      expect(mockPatch).toHaveBeenCalledWith("/api/terminal/state", {
+        active_tab: "",
+      });
+    });
+
+    it("propagates network errors from client", async () => {
+      mockPatch.mockRejectedValue(new ApiError(500, "Internal Server Error"));
+
+      await expect(patchTerminalState({ active_tab: "test" })).rejects.toThrow(
+        "API Error: 500 Internal Server Error",
       );
     });
   });

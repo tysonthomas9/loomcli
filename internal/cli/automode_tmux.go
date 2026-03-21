@@ -47,16 +47,15 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	}
 	logFile := filepath.Join(agentLogDir, fmt.Sprintf("%s.log", opts.AgentName))
 
-	// Choose task checker based on agent type.
-	// Note: CustomPromptGen is not used here because tmux mode delegates prompt
-	// generation to the daemon subprocess via the loom command.
+	// Choose task checker based on agent type (CustomPromptGen not used — tmux delegates to daemon).
 	var hasAvailableTasks func() (bool, error)
+	repoLabel := os.Getenv("LOOM_AGENT_REPO")
 	if opts.CustomTaskCheck != nil {
 		hasAvailableTasks = opts.CustomTaskCheck
 	} else if opts.AgentType == "plan" {
-		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID) }
+		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID, repoLabel) }
 	} else {
-		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
+		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID, repoLabel) }
 	}
 
 	// Print header
@@ -153,7 +152,7 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		}
 
 		// Check if agent actually claimed a task
-		if agentClaimedTask(opts.WorktreePath) {
+		if agentClaimedTask(opts.WorktreePath, opts.AgentName, opts.LockBridge) {
 			taskCount++
 			consecutiveNoProgress = 0
 			fmt.Printf("[Session #%d] Completed, cycling...\n", taskCount)

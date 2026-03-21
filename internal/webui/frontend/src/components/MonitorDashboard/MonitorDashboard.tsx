@@ -9,6 +9,7 @@
 
 import { lazy, Suspense } from "react";
 
+import { LoadingSkeleton } from "@/components";
 import type { ViewMode } from "@/components/ViewSwitcher";
 import { useAgents, useBlockedIssues } from "@/hooks";
 import type { Issue } from "@/types";
@@ -161,7 +162,11 @@ export function MonitorDashboard({
           </h2>
         </header>
         <div className={styles.panelContent}>
-          <Suspense fallback={<div>Loading usage...</div>}>
+          <Suspense
+            fallback={
+              <LoadingSkeleton shape="rect" width="100%" height={120} />
+            }
+          >
             <UsageDashboard />
           </Suspense>
         </div>

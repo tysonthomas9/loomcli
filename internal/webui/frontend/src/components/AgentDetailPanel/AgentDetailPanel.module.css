@@ -95,7 +95,7 @@
 .agentName {
   font-size: 28px;
   font-weight: 700;
-  color: #111827;
+  color: var(--color-text-primary);
   line-height: 1.15;
   margin: 0;
 }
@@ -131,7 +131,7 @@
 
 .statusLabel {
   font-size: 12px;
-  color: #5f6b7c;
+  color: var(--color-text-secondary);
   font-weight: 500;
   letter-spacing: 0;
 }
@@ -213,7 +213,7 @@
   margin-bottom: -1px;
   font-size: 18px;
   font-weight: 600;
-  color: #5f6b7c;
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition:
     color var(--transition-fast),
@@ -230,7 +230,7 @@
 }
 
 .tab.activeTab {
-  color: #111827;
+  color: var(--color-text-primary);
   font-weight: 700;
   border-bottom-color: #111827;
 }
@@ -300,6 +300,26 @@
   background: var(--color-bg-hover);
 }
 
+/* ============= Files Container ============= */
+
+.filesContainer {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.loadingFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--color-text-muted);
+  font-size: var(--font-sm);
+}
+
 /* ============= Content Sections ============= */
 
 .section {
@@ -315,7 +335,7 @@
 .sectionTitle {
   font-size: 10px;
   font-weight: 700;
-  color: #6b7789;
+  color: var(--color-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin: 0 0 10px;
@@ -328,7 +348,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 10px 12px;
-  background: #fff;
+  background: var(--color-panel-bg);
   border-radius: 8px;
   cursor: pointer;
   border: 1px solid var(--color-border-light);
@@ -362,7 +382,7 @@
 .taskTitle {
   font-size: 13px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text-primary);
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -463,14 +483,14 @@
 .commitHash {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: #2563eb;
+  color: var(--color-primary);
   flex-shrink: 0;
 }
 
 .commitHashLink {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: #2563eb;
+  color: var(--color-primary);
   flex-shrink: 0;
   text-decoration: none;
 }
@@ -500,7 +520,7 @@
 }
 
 .showAllCommitsBtn:hover {
-  color: #2563eb;
+  color: var(--color-primary);
   text-decoration: underline;
 }
 
@@ -574,7 +594,7 @@
 }
 
 .infoGrid dt {
-  color: #8a95a7;
+  color: var(--color-text-muted);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -584,11 +604,25 @@
 }
 
 .infoGrid dd {
-  color: #1f2937;
+  color: var(--color-text-primary);
   margin: 0;
   font-family: var(--font-family-base);
   font-size: 15px;
   line-height: 1.25;
+}
+
+/* Repo detail in info grid */
+.repoDetail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.crossRepoLabel {
+  font-size: 12px;
+  color: var(--color-text-muted, #9ca3af);
+  font-style: italic;
 }
 
 .openInSection {

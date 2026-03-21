@@ -3,7 +3,7 @@
  * Wraps content in @dnd-kit DndContext to enable drag-and-drop between status columns.
  * Renders StatusColumns for each status and uses DragOverlay for visual drag feedback.
  *
- * Supports 6-column layout: Backlog, Open, Blocked, In Progress, Needs Review, Done
+ * Supports 6-column layout: Backlog, Open, Blocked, In Progress, Review, Done
  * where columns can be computed from issue data (status + blocked dependencies + title patterns).
  */
 
@@ -18,11 +18,12 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef, createRef } from "react";
 
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyColumn } from "@/components/EmptyColumn";
-import { StatusColumn } from "@/components/StatusColumn";
+import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
+import { StatusColumn, VirtualizedCardList } from "@/components/StatusColumn";
 import { formatStatusLabel } from "@/utils/statusFormat";
 import type { FilterState } from "@/hooks/useFilterState";
 import type { BlockerRef, Issue, Status } from "@/types";
@@ -30,6 +31,8 @@ import type { BlockerRef, Issue, Status } from "@/types";
 import { DEFAULT_COLUMNS } from "./columnConfigs";
 import styles from "./KanbanBoard.module.css";
 import type { KanbanColumnConfig } from "./types";
+
+const LOAD_MORE_BATCH = 50;
 
 /**
  * Blocked issue info for lookup.
@@ -62,6 +65,10 @@ export interface KanbanBoardProps {
   blockedIssues?: Map<string, BlockedInfo>;
   /** Whether to show blocked issues (default: true) */
   showBlocked?: boolean;
+  /** Set of issue IDs with pending optimistic updates */
+  pendingIds?: Set<string>;
+  /** Whether the app is in multi-repo mode (affects empty state text) */
+  isMultiRepo?: boolean;
 }
 
 /**
@@ -95,12 +102,27 @@ export function KanbanBoard({
   className,
   blockedIssues,
   showBlocked = true,
+  pendingIds,
+  isMultiRepo,
 }: KanbanBoardProps): JSX.Element {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
-  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(
-    new Set(),
+  const [columnDisplayLimits, setColumnDisplayLimits] = useState<
+    Map<string, number>
+  >(new Map());
+
+  // Refs for column scroll containers (used by VirtualizedCardList)
+  const columnRefsMap = useRef(
+    new Map<string, React.RefObject<HTMLDivElement | null>>(),
   );
+  const getColumnRef = useCallback((colId: string) => {
+    let ref = columnRefsMap.current.get(colId);
+    if (!ref) {
+      ref = createRef<HTMLDivElement | null>();
+      columnRefsMap.current.set(colId, ref);
+    }
+    return ref;
+  }, []);
 
   // Resolve columns: props.columns > props.statuses (legacy) > DEFAULT_COLUMNS
   const columns = useMemo(() => {
@@ -241,6 +263,23 @@ export function KanbanBoard({
     [onDragEnd, columns, sourceColumnId],
   );
 
+  // Board-level empty state: show when all issues have been filtered out
+  if (filteredIssues.length === 0) {
+    // Determine if user-driven filters caused the empty state (not just showBlocked)
+    const hasUserFilters =
+      filters !== undefined &&
+      (filters.priority !== undefined ||
+        filters.type !== undefined ||
+        (filters.labels !== undefined && filters.labels.length > 0) ||
+        (filters.search !== undefined && filters.search !== ""));
+    return (
+      <EmptyWorkspaceBoard
+        {...(isMultiRepo !== undefined && { isMultiRepo })}
+        hasFiltersActive={hasUserFilters}
+      />
+    );
+  }
+
   const rootClassName = className
     ? `${styles.board} ${className}`
     : styles.board;
@@ -269,12 +308,12 @@ export function KanbanBoard({
           const columnType = isBacklogColumn ? ("backlog" as const) : undefined;
 
           // Apply display limit for columns with defaultLimit
-          const isExpanded = expandedColumns.has(col.id);
           const hasLimit =
             col.defaultLimit !== undefined && col.defaultLimit > 0;
-          const isTruncated =
-            hasLimit && !isExpanded && allColIssues.length > col.defaultLimit!;
-          const colIssues = isTruncated
+          const currentLimit =
+            columnDisplayLimits.get(col.id) ?? col.defaultLimit ?? Infinity;
+          const shouldTruncate = hasLimit && allColIssues.length > currentLimit;
+          const colIssues = shouldTruncate
             ? allColIssues
                 .slice()
                 .sort((a, b) => {
@@ -288,29 +327,52 @@ export function KanbanBoard({
                     (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA)
                   );
                 })
-                .slice(0, col.defaultLimit!)
+                .slice(0, currentLimit)
             : allColIssues;
 
-          // Footer action for truncated columns
-          const footerAction =
-            hasLimit && allColIssues.length > col.defaultLimit! ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setExpandedColumns((prev) => {
-                    const next = new Set(prev);
-                    if (isExpanded) {
+          // Footer action for columns with defaultLimit and more items than the limit
+          let footerAction: JSX.Element | undefined;
+          if (hasLimit && allColIssues.length > col.defaultLimit!) {
+            const remaining = allColIssues.length - currentLimit;
+            if (remaining > 0) {
+              const batch = Math.min(LOAD_MORE_BATCH, remaining);
+              footerAction = (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setColumnDisplayLimits((prev) => {
+                      const next = new Map(prev);
+                      next.set(col.id, currentLimit + LOAD_MORE_BATCH);
+                      return next;
+                    });
+                  }}
+                >
+                  {`Load ${batch} more · ${allColIssues.length} total`}
+                </button>
+              );
+            } else {
+              footerAction = (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setColumnDisplayLimits((prev) => {
+                      const next = new Map(prev);
                       next.delete(col.id);
-                    } else {
-                      next.add(col.id);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                {isExpanded ? "Show recent" : `Show all ${allColIssues.length}`}
-              </button>
-            ) : undefined;
+                      return next;
+                    });
+                  }}
+                >
+                  Show recent
+                </button>
+              );
+            }
+          }
+
+          // Virtualize columns with >50 cards for performance
+          const useVirtualization = colIssues.length > 50;
+          const columnContentRef = useVirtualization
+            ? getColumnRef(col.id)
+            : undefined;
 
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const statusColumnProps = {
@@ -326,34 +388,46 @@ export function KanbanBoard({
             }),
             ...(columnType !== undefined && { columnType }),
             ...(footerAction !== undefined && { footerAction }),
+            ...(columnContentRef !== undefined && {
+              contentRef: columnContentRef,
+            }),
+          };
+
+          const renderCard = (issue: Issue) => {
+            const blockedInfo = blockedIssues?.get(issue.id);
+            return (
+              <DraggableIssueCard
+                key={issue.id}
+                issue={issue}
+                columnId={col.id}
+                {...(onIssueClick !== undefined && {
+                  onClick: onIssueClick,
+                })}
+                {...(blockedInfo !== undefined && {
+                  blockedByCount: blockedInfo.blockedByCount,
+                  blockedBy: blockedInfo.blockedBy,
+                  ...(blockedInfo.blockedByDetails !== undefined && {
+                    blockedByDetails: blockedInfo.blockedByDetails,
+                  }),
+                })}
+                {...(isMutedColumn && { isBacklog: true })}
+                {...(pendingIds?.has(issue.id) && { isPending: true })}
+              />
+            );
           };
 
           return (
             <StatusColumn key={col.id} {...statusColumnProps}>
               {colIssues.length === 0 ? (
                 <EmptyColumn status={col.id} />
+              ) : useVirtualization && columnContentRef ? (
+                <VirtualizedCardList
+                  count={colIssues.length}
+                  scrollContainerRef={columnContentRef}
+                  renderItem={(index) => renderCard(colIssues[index]!)}
+                />
               ) : (
-                colIssues.map((issue) => {
-                  const blockedInfo = blockedIssues?.get(issue.id);
-                  return (
-                    <DraggableIssueCard
-                      key={issue.id}
-                      issue={issue}
-                      columnId={col.id}
-                      {...(onIssueClick !== undefined && {
-                        onClick: onIssueClick,
-                      })}
-                      {...(blockedInfo !== undefined && {
-                        blockedByCount: blockedInfo.blockedByCount,
-                        blockedBy: blockedInfo.blockedBy,
-                        ...(blockedInfo.blockedByDetails !== undefined && {
-                          blockedByDetails: blockedInfo.blockedByDetails,
-                        }),
-                      })}
-                      {...(isMutedColumn && { isBacklog: true })}
-                    />
-                  );
-                })
+                colIssues.map((issue) => renderCard(issue))
               )}
             </StatusColumn>
           );

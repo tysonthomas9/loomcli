@@ -1,9 +1,10 @@
 package cli
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -47,22 +48,21 @@ func (p *adaptivePoller) hadNoActivity() {
 	p.currentInterval = newInterval
 }
 
-// fetchReadyIssues runs "bd ready --json" and returns the parsed issues.
+// fetchReadyIssues returns parsed ready issues via the typed IssueTracker.
 // When parentID is non-empty, filters to tasks under that epic.
-// It routes through the package-level defaultDeps.BD runner.
-func fetchReadyIssues(parentID string) ([]BdIssue, error) {
-	args := []string{"ready", "--json", "--limit", "100"}
-	if parentID != "" {
-		args = append(args, "--parent", parentID)
+// When repoLabel is non-empty, filters to tasks labeled repo:<name>.
+func fetchReadyIssues(parentID string, repoLabel string) ([]BdIssue, error) {
+	tracker := defaultTracker()
+	opts := ReadyOpts{Limit: 100, ParentID: parentID}
+	if repoLabel != "" {
+		opts.Labels = []string{"repo:" + repoLabel}
 	}
-	result := defaultDeps.BD.Run(GetBeadsDir(), args...)
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to check ready tasks: %w", result.Err)
+	if sourceRepos := os.Getenv("LOOM_SOURCE_REPOS"); sourceRepos != "" {
+		opts.SourceRepos = strings.Split(sourceRepos, ",")
 	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse task list: %w", err)
+	issues, err := tracker.Ready(context.Background(), opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check ready tasks: %w", err)
 	}
 	return issues, nil
 }
@@ -70,16 +70,13 @@ func fetchReadyIssues(parentID string) ([]BdIssue, error) {
 // fetchUnclosedIssueIDs returns IDs of all issues that are NOT closed.
 // Used for accurate blocker checking — a blocker is resolved only when closed,
 // not when it merely moves to in_progress or review.
-// It routes through the package-level defaultDeps.BD runner.
+// ListOpts{Limit: 500} with zero-value Status returns ALL statuses (per
+// IssueTracker contract); client-side filtering then excludes closed.
 func fetchUnclosedIssueIDs() (map[string]bool, error) {
-	result := defaultDeps.BD.Run(GetBeadsDir(), "list", "--json", "--limit", "500")
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to list issues: %w", result.Err)
-	}
-
-	var issues []BdIssue
-	if err := json.Unmarshal([]byte(result.Stdout), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse issue list: %w", err)
+	tracker := defaultTracker()
+	issues, err := tracker.List(context.Background(), ListOpts{Limit: 500})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list issues: %w", err)
 	}
 	ids := make(map[string]bool, len(issues))
 	for _, issue := range issues {
@@ -93,8 +90,9 @@ func fetchUnclosedIssueIDs() (map[string]bool, error) {
 // GetAvailablePlanningTasks returns tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
 // When parentID is non-empty, only tasks under that epic are returned.
-func GetAvailablePlanningTasks(parentID string) ([]BdIssue, error) {
-	candidates, err := fetchReadyIssues(parentID)
+// When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
+func GetAvailablePlanningTasks(parentID string, repoLabel string) ([]BdIssue, error) {
+	candidates, err := fetchReadyIssues(parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -114,8 +112,8 @@ func GetAvailablePlanningTasks(parentID string) ([]BdIssue, error) {
 
 // HasAvailablePlanningTasks checks if there are tasks that need planning
 // (ready tasks without a design OR with needs-revision label, excluding epics)
-func HasAvailablePlanningTasks(parentID string) (bool, error) {
-	tasks, err := GetAvailablePlanningTasks(parentID)
+func HasAvailablePlanningTasks(parentID string, repoLabel string) (bool, error) {
+	tasks, err := GetAvailablePlanningTasks(parentID, repoLabel)
 	if err != nil {
 		return false, err
 	}
@@ -125,8 +123,9 @@ func HasAvailablePlanningTasks(parentID string) (bool, error) {
 // GetAvailableImplementationTasks returns tasks ready for implementation
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
 // When parentID is non-empty, only tasks under that epic are returned.
-func GetAvailableImplementationTasks(parentID string) ([]BdIssue, error) {
-	candidates, err := fetchReadyIssues(parentID)
+// When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
+func GetAvailableImplementationTasks(parentID string, repoLabel string) ([]BdIssue, error) {
+	candidates, err := fetchReadyIssues(parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +145,8 @@ func GetAvailableImplementationTasks(parentID string) ([]BdIssue, error) {
 
 // HasAvailableImplementationTasks checks if there are tasks ready for implementation
 // (ready tasks WITH an approved design, excluding tasks with needs-revision label and epics)
-func HasAvailableImplementationTasks(parentID string) (bool, error) {
-	tasks, err := GetAvailableImplementationTasks(parentID)
+func HasAvailableImplementationTasks(parentID string, repoLabel string) (bool, error) {
+	tasks, err := GetAvailableImplementationTasks(parentID, repoLabel)
 	if err != nil {
 		return false, err
 	}
@@ -157,8 +156,9 @@ func HasAvailableImplementationTasks(parentID string) (bool, error) {
 // GetAnyAvailableTasks returns any ready tasks regardless of design status.
 // Used by custom roles with task_filter=any.
 // When parentID is non-empty, only tasks under that epic are returned.
-func GetAnyAvailableTasks(parentID string) ([]BdIssue, error) {
-	candidates, err := fetchReadyIssues(parentID)
+// When repoLabel is non-empty, only tasks labeled repo:<name> are returned.
+func GetAnyAvailableTasks(parentID string, repoLabel string) ([]BdIssue, error) {
+	candidates, err := fetchReadyIssues(parentID, repoLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -178,8 +178,8 @@ func GetAnyAvailableTasks(parentID string) ([]BdIssue, error) {
 
 // HasAnyAvailableTasks checks if there are any ready tasks regardless of design status.
 // Used by custom roles with task_filter=any.
-func HasAnyAvailableTasks(parentID string) (bool, error) {
-	tasks, err := GetAnyAvailableTasks(parentID)
+func HasAnyAvailableTasks(parentID string, repoLabel string) (bool, error) {
+	tasks, err := GetAnyAvailableTasks(parentID, repoLabel)
 	if err != nil {
 		return false, err
 	}
@@ -196,12 +196,13 @@ func HasAnyAvailableTasks(parentID string) (bool, error) {
 // Consumer-side integration is tracked separately.
 func BuildRouterTaskCheck(rc RoleConfig, ae AgentEntry, parentID string) func() (bool, error) {
 	constraints := MergeRoleConstraints(rc, ae)
+	repoLabel := ae.Repo
 	// If no routing fields are set, return nil to use defaults
-	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" {
+	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
 		return nil
 	}
 	return func() (bool, error) {
-		issues, err := fetchReadyIssues(parentID)
+		issues, err := fetchReadyIssues(parentID, repoLabel)
 		if err != nil {
 			return false, err
 		}

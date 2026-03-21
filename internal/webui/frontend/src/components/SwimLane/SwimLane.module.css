@@ -80,8 +80,8 @@
   padding: var(--space-1) var(--space-2);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
-  color: #555555;
-  background-color: #e5e5e5;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-active);
   border-radius: var(--radius-full);
   text-align: center;
 }

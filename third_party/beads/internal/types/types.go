@@ -48,6 +48,7 @@ type Issue struct {
 	// ===== External Integration =====
 	ExternalRef  *string `json:"external_ref,omitempty"`  // e.g., "gh-9", "jira-ABC"
 	SourceSystem string  `json:"source_system,omitempty"` // Adapter/system that created this issue (federation)
+	SourceRepo   string  `json:"source_repo,omitempty"`   // Which repo owns this issue (multi-repo support)
 
 	// ===== Compaction Metadata =====
 	CompactionLevel   int        `json:"compaction_level,omitempty"`
@@ -56,7 +57,6 @@ type Issue struct {
 	OriginalSize      int        `json:"original_size,omitempty"`
 
 	// ===== Internal Routing (not exported to JSONL) =====
-	SourceRepo     string `json:"-"` // Which repo owns this issue (multi-repo support)
 	IDPrefix       string `json:"-"` // Override prefix for ID generation (appends to config prefix)
 	PrefixOverride string `json:"-"` // Completely replace config prefix (for cross-rig creation)
 
@@ -744,6 +744,14 @@ func (d DependencyType) AffectsReadyWork() bool {
 	return d == DepBlocks || d == DepParentChild || d == DepConditionalBlocks || d == DepWaitsFor
 }
 
+// IsDirectBlocker returns true if this dependency type directly creates blockage.
+// Unlike AffectsReadyWork(), this excludes parent-child which only propagates
+// existing blockage transitively (via blocked_issues_cache SQL) but does not
+// itself create a blocking relationship.
+func (d DependencyType) IsDirectBlocker() bool {
+	return d == DepBlocks || d == DepConditionalBlocks || d == DepWaitsFor
+}
+
 // WaitsForMeta holds metadata for waits-for dependencies (fanout gates).
 // Stored as JSON in the Dependency.Metadata field.
 type WaitsForMeta struct {
@@ -957,6 +965,9 @@ type IssueFilter struct {
 	// Molecule type filtering
 	MolType *MolType // Filter by molecule type (nil = any, swarm/patrol/work)
 
+	// Source repo filtering
+	SourceRepos []string // Filter by source_repo values (IN semantics)
+
 	// Status exclusion (for default non-closed behavior)
 	ExcludeStatus []Status // Exclude issues with these statuses
 
@@ -1017,6 +1028,9 @@ type WorkFilter struct {
 
 	// Molecule type filtering
 	MolType *MolType // Filter by molecule type (nil = any, swarm/patrol/work)
+
+	// Source repo filtering
+	SourceRepos []string // Filter by source_repo values (IN semantics)
 
 	// Time-based deferral filtering (GH#820)
 	IncludeDeferred bool // If true, include issues with future defer_until timestamps

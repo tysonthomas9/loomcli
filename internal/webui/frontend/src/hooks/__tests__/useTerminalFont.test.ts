@@ -15,8 +15,8 @@ import {
   DEFAULT_FONT_SIZE,
 } from "../useTerminalFont";
 
-const KEY_FAMILY = "terminal-font-family";
-const KEY_SIZE = "terminal-font-size";
+const KEY_FAMILY = "cortex:terminal-font-family";
+const KEY_SIZE = "cortex:terminal-font-size";
 
 describe("useTerminalFont", () => {
   beforeEach(() => {

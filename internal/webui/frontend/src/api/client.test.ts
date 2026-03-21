@@ -468,6 +468,7 @@ describe("API Client", () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
+        headers: new Headers({ "Content-Type": "application/json" }),
         json: () => Promise.resolve({ token: "reset-token" }),
       });
       await initAuth();
@@ -486,6 +487,7 @@ describe("API Client", () => {
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
+          headers: new Headers({ "Content-Type": "application/json" }),
           json: () => Promise.resolve({ token: "retry-token" }),
         });
       global.fetch = mockFetch;
@@ -535,6 +537,7 @@ describe("API Client", () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
+        headers: new Headers({ "Content-Type": "application/json" }),
         json: () => Promise.resolve({ token: "test-token" }),
       });
 
@@ -542,6 +545,51 @@ describe("API Client", () => {
 
       expect(getAuthState()).toBe("authenticated");
       expect(getAuthToken()).toBe("test-token");
+    });
+
+    it("initAuth sets state to disabled when 200 response has text/html Content-Type", async () => {
+      // First set a non-authenticated state so pendingAuthPromise is clear
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: () => Promise.resolve("not found"),
+      });
+      await initAuth();
+
+      // Simulates SPA catch-all returning HTML instead of JSON
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "Content-Type": "text/html; charset=utf-8" }),
+        json: () => Promise.reject(new SyntaxError("Unexpected token <")),
+      });
+
+      await initAuth();
+
+      expect(getAuthState()).toBe("disabled");
+    });
+
+    it("initAuth sets state to disabled when 200 response has no Content-Type header", async () => {
+      // Clear any prior auth state
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: () => Promise.resolve("not found"),
+      });
+      await initAuth();
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: () => Promise.resolve({ token: "test-token" }),
+      });
+
+      await initAuth();
+
+      expect(getAuthState()).toBe("disabled");
     });
 
     it("initAuth sets state to failed after all retries exhausted", async () => {
@@ -578,6 +626,7 @@ describe("API Client", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
+        headers: new Headers({ "Content-Type": "application/json" }),
         json: () => Promise.resolve({ token: "new-token" }),
       });
 
@@ -670,6 +719,7 @@ describe("API Client", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
+        headers: new Headers({ "Content-Type": "application/json" }),
         json: () => Promise.resolve({ token: "new-token-2" }),
       });
 
@@ -697,6 +747,7 @@ describe("API Client", () => {
       mockFetch2.mockResolvedValueOnce({
         ok: true,
         status: 200,
+        headers: new Headers({ "Content-Type": "application/json" }),
         json: () => Promise.resolve({ token: "new-token-3" }),
       });
       mockFetch2.mockResolvedValueOnce({
@@ -719,6 +770,7 @@ describe("API Client", () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
+        headers: new Headers({ "Content-Type": "application/json" }),
         json: () => Promise.resolve({ token: "dedup-token" }),
       });
       global.fetch = mockFetch;
@@ -860,6 +912,7 @@ describe("API Client", () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
+        headers: new Headers({ "Content-Type": "application/json" }),
         json: () => Promise.resolve({ token: "unsub-test" }),
       });
       await initAuth();
@@ -898,6 +951,7 @@ describe("API Client", () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
           status: 200,
+          headers: new Headers({ "Content-Type": "application/json" }),
           json: () => Promise.resolve({ token: "listener-token" }),
         });
 

@@ -5,6 +5,7 @@
 
 import type { ReactNode } from "react";
 
+import { HighlightText } from "@/components/HighlightText";
 import type { BlockedInfo } from "@/components/KanbanBoard";
 import type { Issue, Priority, Status, IssueType } from "@/types";
 
@@ -26,6 +27,8 @@ export interface RenderCellOptions {
   blockedInfo?: BlockedInfo | undefined;
   /** Click handler for blocked cell */
   onBlockedClick?: (() => void) | undefined;
+  /** Search term for title highlighting */
+  searchTerm?: string | undefined;
 }
 
 /**
@@ -57,7 +60,10 @@ export function renderCellContent(
     case "title":
       return (
         <span className="issue-table__title" title={String(value)}>
-          {String(value)}
+          <HighlightText
+            text={String(value)}
+            searchTerm={options?.searchTerm ?? ""}
+          />
         </span>
       );
 
@@ -92,6 +98,13 @@ export function renderCellContent(
       return (
         <span className="issue-table__assignee">
           {value ? String(value) : "-"}
+        </span>
+      );
+
+    case "repo":
+      return (
+        <span className="issue-table__repo">
+          {value ? String(value) : "\u2014"}
         </span>
       );
 

@@ -25,7 +25,7 @@ func (d *Daemon) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	logPath := ap.logFilePath
 	ap.mu.Unlock()
 	if backend == "" {
-		backend = d.config.Backend
+		backend = d.configSnapshot().Backend
 	}
 
 	if exitCode == 0 && (lockInfo == nil || lockInfo.TaskID == "") {

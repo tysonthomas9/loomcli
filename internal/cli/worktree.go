@@ -248,7 +248,7 @@ func (r *Resolver) resolveWorkspacePath(name string) (string, error) {
 // traversal sequences. Returns an error if the name is unsafe.
 func validateWorktreeName(name string) error {
 	cleaned := filepath.Clean(name)
-	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("invalid worktree name %q: path traversal not allowed", name)
 	}
 	return nil
@@ -444,12 +444,40 @@ var (
 	integrationBranchTTL     = 60 * time.Second
 )
 
+// DefaultBranchForWorktree returns the default branch for a single worktree.
+// In workspace mode (Repo != nil), uses RepoConfig.DefaultBranch with "main" fallback.
+// In legacy mode, returns "main" (caller should use GetDefaultBranchForWorktrees for auto-detection).
+func DefaultBranchForWorktree(wt WorktreeInfo) string {
+	if branch := os.Getenv("LOOM_DEFAULT_BRANCH"); branch != "" {
+		return branch
+	}
+	if wt.Repo != nil && wt.Repo.DefaultBranch != "" {
+		return wt.Repo.DefaultBranch
+	}
+	return "main"
+}
+
 // GetDefaultBranchForWorktrees returns the default integration branch using
 // pre-discovered worktrees to avoid redundant filesystem/git operations.
 func GetDefaultBranchForWorktrees(worktrees []WorktreeInfo) string {
 	if branch := os.Getenv("LOOM_DEFAULT_BRANCH"); branch != "" {
 		return branch
 	}
+	// In workspace mode, worktrees may span multiple repos.
+	// DetectIntegrationBranch uses worktrees[0].Path for all git ops,
+	// which is meaningless across repos. Use per-repo config instead.
+	for _, wt := range worktrees {
+		if wt.Repo != nil {
+			// Workspace mode: return first non-empty DefaultBranch, or "main"
+			for _, w := range worktrees {
+				if w.Repo != nil && w.Repo.DefaultBranch != "" {
+					return w.Repo.DefaultBranch
+				}
+			}
+			return "main"
+		}
+	}
+
 	if len(worktrees) < 2 {
 		return "main"
 	}
@@ -480,6 +508,14 @@ func GetDefaultBranchForWorktrees(worktrees []WorktreeInfo) string {
 func DetectIntegrationBranch(worktrees []WorktreeInfo) string {
 	if len(worktrees) < 2 {
 		return ""
+	}
+
+	// Safety: if any worktree has Repo set (workspace mode), cross-repo
+	// git operations are meaningless. Return empty to skip detection.
+	for _, wt := range worktrees {
+		if wt.Repo != nil {
+			return ""
+		}
 	}
 
 	repoPath := worktrees[0].Path
@@ -610,69 +646,6 @@ func GetScriptDir() (string, error) {
 //   - Empty string -> current directory
 func ResolveWorktreePath(name string) (string, error) {
 	return getDefaultResolver().ResolveWorktreePath(name)
-}
-
-// ResolvedTarget holds the result of workspace-aware argument resolution.
-type ResolvedTarget struct {
-	WorkDir   string // directory where Claude should run
-	AgentName string // agent name for locks and prompts
-}
-
-// ResolveAgentTarget resolves a CLI argument (workspace name, repo name, or
-// worktree name) into the working directory and agent name. In workspace mode,
-// Claude always runs from the workspace root so bd commands use the shared
-// .beads/ directory.
-func ResolveAgentTarget(name string) (ResolvedTarget, error) {
-	resolver, _ := NewResolver()
-	if resolver.Mode() == ModeWorkspace {
-		// Absolute paths are used as-is even in workspace mode
-		if name != "" && filepath.IsAbs(name) {
-			if _, err := os.Stat(name); err != nil {
-				return ResolvedTarget{}, fmt.Errorf("path does not exist: %s", name)
-			}
-			return ResolvedTarget{
-				WorkDir:   name,
-				AgentName: filepath.Base(name),
-			}, nil
-		}
-		// Try workspace name first
-		if wsPath, ok := resolver.ResolveWorkspaceByName(name); ok {
-			return ResolvedTarget{
-				WorkDir:   wsPath,
-				AgentName: name,
-			}, nil
-		}
-		// Validate repo name exists (but still use workspace root for Claude)
-		if name != "" {
-			if _, err := resolver.ResolveWorktreePath(name); err != nil {
-				return ResolvedTarget{}, fmt.Errorf("'%s' is not a workspace or repo name: %w", name, err)
-			}
-		}
-		// In workspace mode, always use workspace root for Claude
-		wsConfig, ok := resolver.config.Workspaces[resolver.workspace]
-		if !ok || wsConfig.Path == "" {
-			return ResolvedTarget{}, fmt.Errorf("workspace %q has no path configured", resolver.workspace)
-		}
-		return ResolvedTarget{
-			WorkDir:   wsConfig.Path,
-			AgentName: resolver.WorkspaceName(),
-		}, nil
-	}
-
-	// Legacy mode - unchanged behavior
-	worktreePath, err := ResolveWorktreePath(name)
-	if err != nil {
-		return ResolvedTarget{}, err
-	}
-	return ResolvedTarget{
-		WorkDir:   worktreePath,
-		AgentName: GetWorktreeName(worktreePath),
-	}, nil
-}
-
-// GetWorktreeName extracts the worktree name from a path
-func GetWorktreeName(path string) string {
-	return filepath.Base(path)
 }
 
 // DiscoverWorktrees finds all worktrees in the worktrees directory

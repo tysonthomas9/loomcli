@@ -45,6 +45,10 @@ export interface UseMutationHandlerOptions {
 
   /** Callback when a refresh event is received (external DB change detected) */
   onRefreshRequired?: () => void;
+
+  /** Optional filter for gating mutations (e.g., during optimistic windows).
+   *  Return true to process, false to skip (caller handles buffering). */
+  mutationFilter?: (mutation: MutationPayload) => boolean;
 }
 
 /**
@@ -183,6 +187,7 @@ export function useMutationHandler(
     onIssueDeleted,
     onMutationSkipped,
     onRefreshRequired,
+    mutationFilter,
   } = options;
 
   // Track mutation stats
@@ -198,6 +203,7 @@ export function useMutationHandler(
   const onIssueDeletedRef = useRef(onIssueDeleted);
   const onMutationSkippedRef = useRef(onMutationSkipped);
   const onRefreshRequiredRef = useRef(onRefreshRequired);
+  const mutationFilterRef = useRef(mutationFilter);
 
   // Update refs when callbacks change (following useSSE pattern)
   useEffect(() => {
@@ -220,6 +226,10 @@ export function useMutationHandler(
     onRefreshRequiredRef.current = onRefreshRequired;
   }, [onRefreshRequired]);
 
+  useEffect(() => {
+    mutationFilterRef.current = mutationFilter;
+  }, [mutationFilter]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -234,6 +244,11 @@ export function useMutationHandler(
     (mutation: MutationPayload) => {
       // Guard against state updates after unmount
       if (!mountedRef.current) return;
+
+      // Apply mutation filter (e.g., for optimistic update buffering)
+      if (mutationFilterRef.current && !mutationFilterRef.current(mutation)) {
+        return;
+      }
 
       const { issue_id, type } = mutation;
 

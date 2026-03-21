@@ -1351,6 +1351,19 @@ func (t *sqliteTxStorage) SearchIssues(ctx context.Context, query string, filter
 		args = append(args, *filter.ParentID)
 	}
 
+	// Source repo filtering (IN semantics)
+	if len(filter.SourceRepos) > 0 {
+		if len(filter.SourceRepos) > 100 {
+			return nil, fmt.Errorf("source_repos filter supports at most 100 values, got %d", len(filter.SourceRepos))
+		}
+		placeholders := make([]string, len(filter.SourceRepos))
+		for i, repo := range filter.SourceRepos {
+			placeholders[i] = "?"
+			args = append(args, repo)
+		}
+		whereClauses = append(whereClauses, fmt.Sprintf("source_repo IN (%s)", strings.Join(placeholders, ",")))
+	}
+
 	whereSQL := ""
 	if len(whereClauses) > 0 {
 		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")

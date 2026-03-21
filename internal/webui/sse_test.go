@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1504,5 +1505,450 @@ func TestHandleSSE_SendChannelClosed(t *testing.T) {
 		// Good — handler exited cleanly
 	case <-time.After(3 * time.Second):
 		t.Fatal("handler did not exit after hub stopped and send channel closed")
+	}
+}
+
+// TestRpcMutationToPayload_SourceRepo tests that SourceRepo is correctly mapped from rpc.MutationEvent.
+func TestRpcMutationToPayload_SourceRepo(t *testing.T) {
+	input := rpc.MutationEvent{
+		Type:       "create",
+		IssueID:    "bd-10",
+		Timestamp:  time.Date(2025, 1, 23, 12, 0, 0, 0, time.UTC),
+		SourceRepo: "payments/api",
+	}
+
+	result := rpcMutationToPayload(input)
+
+	if result.SourceRepo != "payments/api" {
+		t.Errorf("SourceRepo: got %q, want %q", result.SourceRepo, "payments/api")
+	}
+}
+
+// TestRpcMutationToPayload_EmptySourceRepo tests that an empty SourceRepo is preserved and omitted from JSON.
+func TestRpcMutationToPayload_EmptySourceRepo(t *testing.T) {
+	input := rpc.MutationEvent{
+		Type:      "create",
+		IssueID:   "bd-11",
+		Timestamp: time.Date(2025, 1, 23, 12, 0, 0, 0, time.UTC),
+	}
+
+	result := rpcMutationToPayload(input)
+
+	if result.SourceRepo != "" {
+		t.Errorf("SourceRepo: got %q, want empty string", result.SourceRepo)
+	}
+
+	// Verify JSON marshaling omits the field when empty
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	if strings.Contains(string(data), "source_repo") {
+		t.Errorf("expected source_repo to be omitted from JSON, got: %s", data)
+	}
+}
+
+// TestMutationPayload_SourceRepoInJSON tests JSON marshaling of MutationPayload with SourceRepo.
+func TestMutationPayload_SourceRepoInJSON(t *testing.T) {
+	// With SourceRepo set, the field should appear in JSON
+	payload := &MutationPayload{
+		Type:       "create",
+		IssueID:    "bd-12",
+		Timestamp:  "2025-01-23T12:00:00Z",
+		SourceRepo: "payments/api",
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	if !strings.Contains(string(data), `"source_repo":"payments/api"`) {
+		t.Errorf("expected JSON to contain source_repo field, got: %s", data)
+	}
+
+	// With empty SourceRepo, the field should be absent from JSON
+	payloadEmpty := &MutationPayload{
+		Type:      "create",
+		IssueID:   "bd-13",
+		Timestamp: "2025-01-23T12:00:00Z",
+	}
+
+	dataEmpty, err := json.Marshal(payloadEmpty)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	if strings.Contains(string(dataEmpty), "source_repo") {
+		t.Errorf("expected source_repo to be absent from JSON, got: %s", dataEmpty)
+	}
+}
+
+// TestContainsRepo tests the containsRepo helper function.
+func TestContainsRepo(t *testing.T) {
+	tests := []struct {
+		name   string
+		repos  []string
+		repo   string
+		expect bool
+	}{
+		{"empty slice", nil, "repo-a", false},
+		{"single match", []string{"repo-a"}, "repo-a", true},
+		{"single no match", []string{"repo-a"}, "repo-b", false},
+		{"multiple match", []string{"repo-a", "repo-b", "repo-c"}, "repo-b", true},
+		{"multiple no match", []string{"repo-a", "repo-b"}, "repo-c", false},
+		{"empty repo string", []string{"repo-a"}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containsRepo(tt.repos, tt.repo)
+			if got != tt.expect {
+				t.Errorf("containsRepo(%v, %q) = %v, want %v", tt.repos, tt.repo, got, tt.expect)
+			}
+		})
+	}
+}
+
+// TestSSEHub_BroadcastFiltersSourceRepo tests that the broadcast loop filters mutations by source repo.
+func TestSSEHub_BroadcastFiltersSourceRepo(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	clientA := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		sourceRepos: []string{"repo-a"},
+	}
+	clientB := &SSEClient{
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		sourceRepos: []string{"repo-b"},
+	}
+
+	hub.RegisterClient(clientA)
+	hub.RegisterClient(clientB)
+	time.Sleep(50 * time.Millisecond)
+
+	// Broadcast mutation for repo-a
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "issue-1",
+		SourceRepo: "repo-a",
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	// clientA should receive it
+	select {
+	case m := <-clientA.send:
+		if m.IssueID != "issue-1" {
+			t.Errorf("clientA got wrong issue: %s", m.IssueID)
+		}
+	default:
+		t.Error("clientA should have received the mutation")
+	}
+
+	// clientB should NOT receive it
+	select {
+	case m := <-clientB.send:
+		t.Errorf("clientB should not have received mutation, got: %+v", m)
+	default:
+		// expected
+	}
+}
+
+// TestSSEHub_BroadcastNoFilterPassesAll tests that a client with no filter receives all mutations.
+func TestSSEHub_BroadcastNoFilterPassesAll(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+		// sourceRepos is nil — should receive all
+	}
+
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	repos := []string{"repo-a", "repo-b", ""}
+	for _, repo := range repos {
+		hub.Broadcast(&MutationPayload{
+			Type:       "update",
+			IssueID:    "issue-" + repo,
+			SourceRepo: repo,
+		})
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	received := 0
+	for {
+		select {
+		case <-client.send:
+			received++
+		default:
+			goto done
+		}
+	}
+done:
+	if received != 3 {
+		t.Errorf("expected 3 mutations, got %d", received)
+	}
+}
+
+// TestSSEHub_BroadcastEmptySourceRepoPassesAll tests that mutations with empty SourceRepo
+// pass through to all clients, including those with a filter.
+func TestSSEHub_BroadcastEmptySourceRepoPassesAll(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	client := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		sourceRepos: []string{"repo-a"},
+	}
+
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	// Mutation with empty SourceRepo should pass through
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "issue-1",
+		SourceRepo: "",
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	select {
+	case m := <-client.send:
+		if m.IssueID != "issue-1" {
+			t.Errorf("got wrong issue: %s", m.IssueID)
+		}
+	default:
+		t.Error("client with filter should still receive mutations with empty SourceRepo")
+	}
+}
+
+// TestHandleSSE_ParsesSourceReposParam tests that the SSE handler parses the source_repos query param
+// and filters mutations accordingly.
+func TestHandleSSE_ParsesSourceReposParam(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	handler := handleSSE(hub, nil)
+
+	// Connect with source_repos=repo-a,repo-b
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest("GET", "/api/events?source_repos=repo-a,repo-b", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	// Run handler in background
+	done := make(chan struct{})
+	go func() {
+		handler(rec, req)
+		close(done)
+	}()
+
+	// Wait for client to register
+	time.Sleep(100 * time.Millisecond)
+
+	// Broadcast mutation for repo-a (should pass)
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "issue-a",
+		SourceRepo: "repo-a",
+	})
+
+	// Broadcast mutation for repo-c (should be filtered)
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "issue-c",
+		SourceRepo: "repo-c",
+	})
+
+	// Broadcast mutation for repo-b (should pass)
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "issue-b",
+		SourceRepo: "repo-b",
+	})
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rec.Body.String()
+
+	if !strings.Contains(body, "issue-a") {
+		t.Error("expected issue-a (repo-a) to be delivered")
+	}
+	if !strings.Contains(body, "issue-b") {
+		t.Error("expected issue-b (repo-b) to be delivered")
+	}
+	if strings.Contains(body, "issue-c") {
+		t.Error("expected issue-c (repo-c) to be filtered out")
+	}
+}
+
+// TestHandleSSE_SourceReposParamEmpty tests that no source_repos param delivers all mutations.
+func TestHandleSSE_SourceReposParamEmpty(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	handler := handleSSE(hub, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest("GET", "/api/events", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler(rec, req)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "issue-x",
+		SourceRepo: "repo-x",
+	})
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "issue-y",
+		SourceRepo: "repo-y",
+	})
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "issue-x") {
+		t.Error("expected issue-x to be delivered (no filter)")
+	}
+	if !strings.Contains(body, "issue-y") {
+		t.Error("expected issue-y to be delivered (no filter)")
+	}
+}
+
+// TestHandleSSE_SourceReposTrimsWhitespace tests that whitespace in source_repos param is trimmed.
+func TestHandleSSE_SourceReposTrimsWhitespace(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	handler := handleSSE(hub, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Spaces around repo names and an empty segment
+	req := httptest.NewRequest("GET", "/api/events?source_repos=repo-a,+repo-b+,,repo-c", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler(rec, req)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// repo-b should match (whitespace trimmed)
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "issue-b",
+		SourceRepo: "repo-b",
+	})
+
+	// repo-d should be filtered
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "issue-d",
+		SourceRepo: "repo-d",
+	})
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "issue-b") {
+		t.Error("expected issue-b to be delivered (whitespace trimmed)")
+	}
+	if strings.Contains(body, "issue-d") {
+		t.Error("expected issue-d to be filtered out")
+	}
+}
+
+// TestHandleSSE_CatchUpFiltersSourceRepos tests that catch-up events on reconnect
+// are also filtered by source_repos.
+func TestHandleSSE_CatchUpFiltersSourceRepos(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Provide a getMutationsSince that returns events for multiple repos
+	getMutationsSince := func(since int64) []rpc.MutationEvent {
+		return []rpc.MutationEvent{
+			{Type: "update", IssueID: "issue-a", SourceRepo: "repo-a", Timestamp: time.Now()},
+			{Type: "update", IssueID: "issue-b", SourceRepo: "repo-b", Timestamp: time.Now()},
+			{Type: "update", IssueID: "issue-c", SourceRepo: "", Timestamp: time.Now()},
+		}
+	}
+
+	handler := handleSSE(hub, getMutationsSince)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Connect with source_repos=repo-a and a since value to trigger catch-up
+	req := httptest.NewRequest("GET", "/api/events?source_repos=repo-a&since=1000", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler(rec, req)
+		close(done)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rec.Body.String()
+
+	// issue-a should be in catch-up (matches filter)
+	if !strings.Contains(body, "issue-a") {
+		t.Error("expected issue-a (repo-a) in catch-up events")
+	}
+	// issue-b should be filtered out (repo-b not in filter)
+	if strings.Contains(body, "issue-b") {
+		t.Error("expected issue-b (repo-b) to be filtered from catch-up events")
+	}
+	// issue-c should pass through (empty SourceRepo = backward compat)
+	if !strings.Contains(body, "issue-c") {
+		t.Error("expected issue-c (empty SourceRepo) in catch-up events")
 	}
 }

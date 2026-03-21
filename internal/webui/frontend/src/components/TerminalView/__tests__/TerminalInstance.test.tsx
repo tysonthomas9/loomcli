@@ -61,11 +61,18 @@ vi.mock("@xterm/xterm", () => {
     open = vi.fn();
     dispose = vi.fn();
     onData = vi.fn(() => ({ dispose: vi.fn() }));
+    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
+    onSelectionChange = vi.fn(() => ({ dispose: vi.fn() }));
+    getSelection = vi.fn(() => "");
+    attachCustomKeyEventHandler = vi.fn();
+    paste = vi.fn();
     write = vi.fn();
     loadAddon = vi.fn();
+    scrollToBottom = vi.fn();
     cols = 80;
     rows = 24;
     options: Record<string, unknown> = {};
+    buffer = { active: { viewportY: 0, baseY: 0 } };
     constructor(opts?: Record<string, unknown>) {
       if (opts) {
         this.options = { ...opts };
@@ -96,6 +103,7 @@ vi.mock("@xterm/addon-search", () => {
     findNext = shared.findNext;
     findPrevious = shared.findPrevious;
     clearDecorations = shared.clearDecorations;
+    onDidChangeResults = vi.fn(() => ({ dispose: vi.fn() }));
     dispose = vi.fn();
   }
   return { SearchAddon: MockSearchAddon };
@@ -290,8 +298,8 @@ describe("TerminalInstance", () => {
       await vi.runAllTimersAsync();
     });
 
-    expect(onStateChange).toHaveBeenCalledWith("connecting");
-    expect(onStateChange).toHaveBeenCalledWith("connected");
+    expect(onStateChange).toHaveBeenCalledWith("connecting", false);
+    expect(onStateChange).toHaveBeenCalledWith("connected", true);
   });
 
   it("calls fitAddon.fit() via requestAnimationFrame when isActive becomes true", () => {
@@ -321,9 +329,10 @@ describe("TerminalInstance", () => {
     expect(ref.current).not.toBeNull();
     ref.current!.search("hello", { caseSensitive: true });
 
-    expect(shared.findNext).toHaveBeenCalledWith("hello", {
-      caseSensitive: true,
-    });
+    expect(shared.findNext).toHaveBeenCalledWith(
+      "hello",
+      expect.objectContaining({ caseSensitive: true }),
+    );
   });
 
   it("exposes findNext() and findPrevious() via imperative handle", async () => {
@@ -336,11 +345,22 @@ describe("TerminalInstance", () => {
       await vi.runAllTimersAsync();
     });
 
+    // Search with a term first so findNext/findPrevious have something to search for
+    ref.current!.search("test");
+    shared.findNext.mockClear();
+    shared.findPrevious.mockClear();
+
     ref.current!.findNext();
-    expect(shared.findNext).toHaveBeenCalledWith("");
+    expect(shared.findNext).toHaveBeenCalledWith(
+      "test",
+      expect.objectContaining({}),
+    );
 
     ref.current!.findPrevious();
-    expect(shared.findPrevious).toHaveBeenCalledWith("");
+    expect(shared.findPrevious).toHaveBeenCalledWith(
+      "test",
+      expect.objectContaining({}),
+    );
   });
 
   it("exposes clearSearch() via imperative handle", async () => {

@@ -60,6 +60,12 @@ export interface UseAgentsResult {
   refetch: () => Promise<void>;
   /** Function to retry immediately (skips countdown) */
   retryNow: () => void;
+  /** True when disconnected >5s — data may be stale */
+  showStaleBanner: boolean;
+  /** True when reconnection failed after max retries */
+  connectionLost: boolean;
+  /** Timestamp (ms) when disconnection started, null if connected */
+  disconnectedSince: number | null;
 }
 
 /**
@@ -131,6 +137,12 @@ const MAX_RETRY_DELAY = 60; // seconds
 const BACKOFF_MULTIPLIER = 2;
 const LOOM_FETCH_TIMEOUT_MS = 15000;
 
+// Stale banner delay (ms) — show banner when disconnected >5s
+const STALE_BANNER_DELAY_MS = 5000;
+
+// Max consecutive failures at MAX_RETRY_DELAY before declaring connection lost
+const MAX_FAILURES_AT_CEILING = 5;
+
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -170,6 +182,18 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
   const [retryCountdown, setRetryCountdown] = useState<number>(0);
   const [error, setError] = useState<Error | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  // Stale data banner state
+  const [showStaleBanner, setShowStaleBanner] = useState(false);
+  const [connectionLost, setConnectionLost] = useState(false);
+  const [disconnectedSince, setDisconnectedSince] = useState<number | null>(
+    null,
+  );
+  const staleBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const consecutiveFailuresAtCeilingRef = useRef(0);
+  const disconnectedSinceRef = useRef<number | null>(null);
 
   // Track if a fetch is in progress to prevent overlapping requests
   const fetchInProgressRef = useRef<boolean>(false);
@@ -239,8 +263,18 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
         setWasEverConnected(true);
         // Reset retry delay on successful connection
         currentRetryDelayRef.current = INITIAL_RETRY_DELAY;
+        consecutiveFailuresAtCeilingRef.current = 0;
         setError(null);
         setLastUpdated(new Date());
+        // Clear stale banner on successful connection
+        if (staleBannerTimerRef.current) {
+          clearTimeout(staleBannerTimerRef.current);
+          staleBannerTimerRef.current = null;
+        }
+        setShowStaleBanner(false);
+        setConnectionLost(false);
+        disconnectedSinceRef.current = null;
+        setDisconnectedSince(null);
       }
 
       void (async () => {
@@ -288,7 +322,28 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
       if (mountedRef.current) {
         setError(err instanceof Error ? err : new Error(String(err)));
         setIsConnected(false);
-        // Keep stale data on error - retry scheduling handled by effect
+        // Start stale banner timer on first disconnect
+        if (
+          wasEverConnectedRef.current &&
+          disconnectedSinceRef.current === null &&
+          !staleBannerTimerRef.current
+        ) {
+          const now = Date.now();
+          disconnectedSinceRef.current = now;
+          setDisconnectedSince(now);
+          staleBannerTimerRef.current = setTimeout(() => {
+            setShowStaleBanner(true);
+          }, STALE_BANNER_DELAY_MS);
+        }
+        // Track consecutive failures at max delay to detect connection lost
+        if (currentRetryDelayRef.current >= MAX_RETRY_DELAY) {
+          consecutiveFailuresAtCeilingRef.current += 1;
+          if (
+            consecutiveFailuresAtCeilingRef.current >= MAX_FAILURES_AT_CEILING
+          ) {
+            setConnectionLost(true);
+          }
+        }
       }
     } finally {
       if (mountedRef.current) {
@@ -373,8 +428,10 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
   // Retry immediately (skips countdown)
   const retryNow = useCallback(() => {
     clearRetryTimers();
-    // Reset retry delay when user manually retries
+    // Reset retry delay and failure counter when user manually retries
     currentRetryDelayRef.current = INITIAL_RETRY_DELAY;
+    consecutiveFailuresAtCeilingRef.current = 0;
+    setConnectionLost(false);
     void fetchData();
   }, [clearRetryTimers, fetchData]);
 
@@ -429,6 +486,10 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
       if (retryIntervalRef.current) {
         clearInterval(retryIntervalRef.current);
       }
+      // Clear stale banner timer on unmount
+      if (staleBannerTimerRef.current) {
+        clearTimeout(staleBannerTimerRef.current);
+      }
     };
   }, [enabled, pollInterval, fetchData]);
 
@@ -448,5 +509,8 @@ export function useAgents(options?: UseAgentsOptions): UseAgentsResult {
     lastUpdated,
     refetch,
     retryNow,
+    showStaleBanner,
+    connectionLost,
+    disconnectedSince,
   };
 }

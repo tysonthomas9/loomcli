@@ -458,7 +458,7 @@ test.describe("Backlog column header and styling", () => {
     await expect(backlogColumn.getByLabel("0 issues")).toBeVisible()
   })
 
-  test("column order is Backlog, Open, Blocked, In Progress, Needs Review, Done", async ({
+  test("column order is Backlog, Open, Blocked, In Progress, Review, Done", async ({
     page,
   }) => {
     const issues = [

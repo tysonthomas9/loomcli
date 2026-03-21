@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 type DaemonAgentStatus struct {
 	Worktree       string    `json:"worktree"`
 	Role           string    `json:"role"`
+	Repo           string    `json:"repo,omitempty"`
 	PID            int       `json:"pid"`
 	Status         string    `json:"status"` // "running", "starting", "stopped", "failed"
 	TaskID         string    `json:"task_id,omitempty"`
@@ -210,6 +212,24 @@ func runDaemon(cmd *cobra.Command, args []string) {
 		defer stopOTelExporter(otelExp)
 	}
 
+	// 9.7. Start fleet-db backend if enabled (soft-failure, like OTel)
+	var fleetDBSrv *FleetDBServer
+	fleetCfg, fleetEnabled := resolveFleetDBConfig(&config.Daemon)
+	if fleetEnabled {
+		fleetCfg.DBPath = filepath.Join(projectDir, ".loom", "fleetdb.sqlite")
+		fleetCfg.SocketPath = filepath.Join(projectDir, ".loom", "fleetdb.sock")
+		var fleetErr error
+		fleetDBSrv, fleetErr = NewFleetDBServer(fleetCfg, slog.Default())
+		if fleetErr != nil {
+			log.Printf("warning: failed to start fleet-db server: %v (continuing without fleet-db)", fleetErr)
+			fleetDBSrv = nil
+		} else {
+			setDefaultTracker(fleetDBSrv.Backend())
+			defer fleetDBSrv.Stop()
+			log.Printf("fleet-db backend active (workspace: %s)", fleetCfg.Workspace)
+		}
+	}
+
 	// 10. Create and start daemon (from daemon.go)
 	daemon, err := NewDaemon(config, projectDir, eventBus)
 	if err != nil {
@@ -243,7 +263,10 @@ func runDaemon(cmd *cobra.Command, args []string) {
 
 	// 12. Start daemon
 	if err := daemon.Start(); err != nil {
-		// Clean up files before exiting (os.Exit doesn't run defers)
+		// Clean up before exiting (os.Exit doesn't run defers)
+		if fleetDBSrv != nil {
+			fleetDBSrv.Stop()
+		}
 		os.Remove(pidFilePath)
 		os.Remove(stateFilePath)
 		lockFile.Close()
@@ -479,6 +502,7 @@ func writeStateFile(path string, startedAt time.Time, agents []SupervisedAgentSt
 		state.Agents[i] = DaemonAgentStatus{
 			Worktree:       ap.Worktree,
 			Role:           ap.Role,
+			Repo:           ap.Repo,
 			PID:            ap.PID,
 			Status:         computeAgentStatus(ap, maxRetries),
 			EpicID:         ap.AssignedEpicID,

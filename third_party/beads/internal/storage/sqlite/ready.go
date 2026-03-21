@@ -127,6 +127,19 @@ func (s *SQLiteStorage) GetReadyWork(ctx context.Context, filter types.WorkFilte
 		args = append(args, string(*filter.MolType))
 	}
 
+	// Source repo filtering (IN semantics)
+	if len(filter.SourceRepos) > 0 {
+		if len(filter.SourceRepos) > 100 {
+			return nil, fmt.Errorf("source_repos filter supports at most 100 values, got %d", len(filter.SourceRepos))
+		}
+		placeholders := make([]string, len(filter.SourceRepos))
+		for i, repo := range filter.SourceRepos {
+			placeholders[i] = "?"
+			args = append(args, repo)
+		}
+		whereClauses = append(whereClauses, fmt.Sprintf("i.source_repo IN (%s)", strings.Join(placeholders, ",")))
+	}
+
 	// Time-based deferral filtering (GH#820)
 	// By default, exclude issues where defer_until is in the future.
 	// If IncludeDeferred is true, skip this filter to show deferred issues.

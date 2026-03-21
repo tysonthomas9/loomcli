@@ -196,6 +196,8 @@ export interface GraphFilter {
   status?: "all" | "open" | "closed";
   /** Include closed issues when status is 'all' (default: true) */
   includeClosed?: boolean;
+  /** Filter by source repositories */
+  source_repos?: string[];
 }
 
 /**
@@ -240,6 +242,9 @@ export async function fetchGraphIssues(
   }
   if (options?.includeClosed !== undefined) {
     params.include_closed = options.includeClosed;
+  }
+  if (options?.source_repos?.length) {
+    params.source_repos = options.source_repos;
   }
   const query = buildQueryString(params);
   const response = await get<GraphApiResponse>(`/api/issues/graph${query}`);
@@ -323,8 +328,10 @@ export interface UpdateIssueRequest {
   priority?: Priority;
   status?: Status;
   assignee?: string;
+  owner?: string;
   labels?: string[];
   add_labels?: string[];
+  remove_labels?: string[];
   issue_type?: IssueType;
 }
 
@@ -394,6 +401,32 @@ export async function removeDependency(
     `/api/issues/${encodeURIComponent(issueId)}/dependencies/${encodeURIComponent(dependsOnId)}`,
   );
   unwrap(response);
+}
+
+// ============= MOVE OPERATIONS =============
+
+/**
+ * Result from moving an issue to another workspace.
+ */
+export interface MoveIssueResult {
+  source_id: string;
+  target_id: string;
+  warnings?: string[];
+}
+
+/**
+ * Move an issue to a different workspace.
+ * Creates a copy in the target workspace and closes the source.
+ */
+export async function moveIssue(
+  id: string,
+  targetWorkspace: string,
+): Promise<MoveIssueResult> {
+  const response = await post<ApiResult<MoveIssueResult>>(
+    `/api/issues/${encodeURIComponent(id)}/move`,
+    { target_workspace: targetWorkspace },
+  );
+  return unwrap(response);
 }
 
 // ============= COMMENT OPERATIONS =============

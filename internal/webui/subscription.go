@@ -39,7 +39,10 @@ type DaemonSubscriber struct {
 	wg          sync.WaitGroup
 	lastSince   int64
 	mu          sync.RWMutex
-	useFallback bool // true if wait_for_mutations is not supported
+	useFallback bool      // true if wait_for_mutations is not supported
+	workspaceID string    // workspace ID to tag on all outgoing MutationPayloads
+	started     bool      // guard against double-start
+	stopOnce    sync.Once // guard against double-close of done channel
 
 	// External change detection fields
 	lastKnownCount   int64
@@ -57,7 +60,12 @@ func NewDaemonSubscriber(pool daemon.Pool, hub *SSEHub) *DaemonSubscriber {
 }
 
 // Start begins the subscription loop in a goroutine.
+// Safe to call multiple times — only the first call starts goroutines.
 func (s *DaemonSubscriber) Start() {
+	if s.started {
+		return
+	}
+	s.started = true
 	s.wg.Add(2)
 	go s.subscriptionLoop()
 	go s.externalChangeLoop()
@@ -65,10 +73,13 @@ func (s *DaemonSubscriber) Start() {
 }
 
 // Stop gracefully stops the subscription loop.
+// Safe to call multiple times.
 func (s *DaemonSubscriber) Stop() {
-	close(s.done)
-	s.wg.Wait()
-	log.Printf("Daemon subscription stopped")
+	s.stopOnce.Do(func() {
+		close(s.done)
+		s.wg.Wait()
+		log.Printf("Daemon subscription stopped")
+	})
 }
 
 // GetMutationsSince retrieves mutations since the given timestamp.
@@ -261,6 +272,9 @@ func (s *DaemonSubscriber) processMutationResponse(resp *rpc.Response) {
 	// Broadcast each mutation to SSE clients
 	for _, m := range mutations {
 		payload := rpcMutationToPayload(m)
+		if s.workspaceID != "" {
+			payload.WorkspaceID = s.workspaceID
+		}
 		s.hub.Broadcast(payload)
 	}
 
@@ -356,9 +370,10 @@ func (s *DaemonSubscriber) pollDBChanges() {
 
 	if changeDetected {
 		s.hub.Broadcast(&MutationPayload{
-			Type:      rpc.MutationRefresh,
-			IssueID:   "",
-			Timestamp: now.UTC().Format(time.RFC3339),
+			Type:        rpc.MutationRefresh,
+			IssueID:     "",
+			Timestamp:   now.UTC().Format(time.RFC3339),
+			WorkspaceID: s.workspaceID,
 		})
 		s.mu.Lock()
 		s.lastKnownCount = totalCount

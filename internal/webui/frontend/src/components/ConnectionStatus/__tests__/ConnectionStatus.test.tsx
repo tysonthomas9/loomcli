@@ -305,4 +305,93 @@ describe("ConnectionStatus", () => {
       ).toBeInTheDocument();
     });
   });
+
+  describe("connectionLost prop", () => {
+    it('shows "Connection lost" text when connectionLost=true', () => {
+      render(<ConnectionStatus state="reconnecting" connectionLost={true} />);
+      expect(screen.getByText("Connection lost")).toBeInTheDocument();
+    });
+
+    it('overrides reconnecting text with "Connection lost" when connectionLost=true', () => {
+      render(
+        <ConnectionStatus
+          state="reconnecting"
+          reconnectAttempts={5}
+          connectionLost={true}
+        />,
+      );
+      expect(screen.getByText("Connection lost")).toBeInTheDocument();
+      expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
+    });
+
+    it('uses data-state="connection-lost" when connectionLost=true', () => {
+      const { container } = render(
+        <ConnectionStatus state="reconnecting" connectionLost={true} />,
+      );
+      const root = container.firstChild as HTMLElement;
+      expect(root).toHaveAttribute("data-state", "connection-lost");
+    });
+
+    it('does not use data-state="connection-lost" when connectionLost=false', () => {
+      const { container } = render(
+        <ConnectionStatus state="reconnecting" connectionLost={false} />,
+      );
+      const root = container.firstChild as HTMLElement;
+      expect(root).toHaveAttribute("data-state", "reconnecting");
+    });
+
+    it("shows retry button when connectionLost=true and onRetry provided regardless of reconnectAttempts", () => {
+      const onRetry = vi.fn();
+      render(
+        <ConnectionStatus
+          state="reconnecting"
+          connectionLost={true}
+          onRetry={onRetry}
+          reconnectAttempts={0}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("shows retry button when connectionLost=true and onRetry provided without reconnectAttempts", () => {
+      const onRetry = vi.fn();
+      render(
+        <ConnectionStatus
+          state="disconnected"
+          connectionLost={true}
+          onRetry={onRetry}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: /retry/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("calls onRetry when retry button clicked in connectionLost state", () => {
+      const onRetry = vi.fn();
+      render(
+        <ConnectionStatus
+          state="reconnecting"
+          connectionLost={true}
+          onRetry={onRetry}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+      expect(onRetry).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not show retry button when connectionLost=true but no onRetry", () => {
+      render(<ConnectionStatus state="reconnecting" connectionLost={true} />);
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
+
+    it("has correct aria-label when connectionLost=true", () => {
+      render(<ConnectionStatus state="reconnecting" connectionLost={true} />);
+      expect(
+        screen.getByLabelText("Connection status: Connection lost"),
+      ).toBeInTheDocument();
+    });
+  });
 });

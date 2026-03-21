@@ -224,7 +224,7 @@ func TestResolveAgentTarget_LegacyMode_InvalidWorktree(t *testing.T) {
 	// Create worktrees directory but no worktree named "nonexistent"
 	os.MkdirAll(filepath.Join(tmpDir, "worktrees"), 0755)
 
-	_, err := ResolveAgentTarget("nonexistent")
+	_, err := ResolveAgentTarget("nonexistent", "")
 	if err == nil {
 		t.Fatal("expected error for nonexistent worktree in legacy mode")
 	}
@@ -242,7 +242,7 @@ func TestResolveAgentTarget_LegacyMode_AbsolutePath(t *testing.T) {
 	absTarget := filepath.Join(tmpDir, "my-project")
 	os.MkdirAll(absTarget, 0755)
 
-	target, err := ResolveAgentTarget(absTarget)
+	target, err := ResolveAgentTarget(absTarget, "")
 	if err != nil {
 		t.Fatalf("ResolveAgentTarget: %v", err)
 	}

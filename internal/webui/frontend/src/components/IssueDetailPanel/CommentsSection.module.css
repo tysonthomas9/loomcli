@@ -33,33 +33,35 @@
   border-bottom: none;
 }
 
-/* Top row: author + timestamp */
+/* Top row: avatar + author + timestamp */
 .commentHeader {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .commentAuthor {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
+  flex: 1;
+  min-width: 0;
 }
 
 .commentTime {
   font-size: 11px;
   color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
-/* Comment body text */
-.commentText {
+/* Comment body with markdown */
+.commentBody {
   font-size: 14px;
   color: var(--color-text-secondary);
   line-height: 1.5;
-  margin: 0;
-  white-space: pre-wrap;
   word-break: break-word;
+  padding-left: 36px;
 }
 
 /* Empty state */

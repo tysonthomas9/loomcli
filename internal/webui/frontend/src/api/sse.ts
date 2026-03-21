@@ -3,7 +3,22 @@
  * Provides a simpler push model compared to WebSocket with built-in browser reconnection.
  */
 
-import { getAuthToken, getAuthState, initAuth } from "./client";
+import {
+  getAuthToken,
+  getAuthState,
+  getActiveWorkspace,
+  initAuth,
+} from "./client";
+
+// Track page unload to suppress false-positive SSE errors during workspace switching.
+// Without this, rapid page navigation causes the EventSource to fire error events
+// that trigger stale data banners and reconnection UI.
+let isPageUnloading = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", () => {
+    isPageUnloading = true;
+  });
+}
 
 // Connection states for real-time event streaming
 export type ConnectionState =
@@ -23,7 +38,9 @@ export type MutationType =
   | "squashed"
   | "burned"
   | "refresh"
-  | "terminal_metadata";
+  | "terminal_metadata"
+  | "terminal_session_change"
+  | "issue_tabs";
 
 // Server → Client: Mutation payload
 export interface MutationPayload {
@@ -31,12 +48,15 @@ export interface MutationPayload {
   issue_id: string;
   title?: string;
   assignee?: string;
+  owner?: string;
   actor?: string;
   timestamp: string;
   old_status?: string;
   new_status?: string;
   parent_id?: string;
   step_count?: number;
+  source_repo?: string;
+  workspace_id?: string;
 }
 
 /**
@@ -63,6 +83,7 @@ export class BeadsSSEClient {
   private reconnectAttempts = 0;
   private lastEventId: number | undefined;
   private manualDisconnect = false;
+  private currentSourceRepos?: string[] | undefined;
 
   private onMutation: ((mutation: MutationPayload) => void) | undefined;
   private onError: ((error: string) => void) | undefined;
@@ -80,8 +101,15 @@ export class BeadsSSEClient {
    * Connect to the SSE endpoint.
    * If auth state is 'failed', attempts token re-acquisition before connecting.
    * @param since Optional timestamp (ms) to receive events since that time
+   * @param sourceRepos Optional repo filter for server-side event filtering
    */
-  async connect(since?: number): Promise<void> {
+  async connect(since?: number, sourceRepos?: string[]): Promise<void> {
+    // Always update stored sourceRepos even if we bail early,
+    // so retryNow() uses the latest filter
+    if (sourceRepos !== undefined) {
+      this.currentSourceRepos = sourceRepos;
+    }
+
     if (this.state === "connected" || this.state === "connecting") {
       return;
     }
@@ -98,7 +126,7 @@ export class BeadsSSEClient {
 
     // Use provided since value or fall back to last received event ID
     const sinceParam = since ?? this.lastEventId;
-    const url = getSSEUrl(sinceParam);
+    const url = getSSEUrl(sinceParam, sourceRepos);
 
     try {
       this.eventSource = new EventSource(url);
@@ -175,7 +203,7 @@ export class BeadsSSEClient {
 
     this.reconnectAttempts = 0;
     this.onReconnect?.(0);
-    this.connect();
+    this.connect(undefined, this.currentSourceRepos);
   }
 
   /**
@@ -211,6 +239,13 @@ export class BeadsSSEClient {
   private handleError(): void {
     // If manually disconnected, don't process error
     if (this.manualDisconnect) {
+      return;
+    }
+
+    // Suppress errors during page navigation — in-flight EventSource
+    // connections are aborted by the browser, firing spurious error events
+    // that would otherwise trigger false reconnect attempts and stale banners.
+    if (isPageUnloading) {
       return;
     }
 
@@ -272,15 +307,23 @@ export class BeadsSSEClient {
  * Get the SSE URL for the events endpoint.
  * @param since Optional timestamp (ms) for catch-up events
  */
-export function getSSEUrl(since?: number): string {
+export function getSSEUrl(since?: number, sourceRepos?: string[]): string {
   const base = `${window.location.origin}/api/events`;
   const params = new URLSearchParams();
   if (since !== undefined) {
     params.set("since", String(since));
   }
+  if (sourceRepos && sourceRepos.length > 0) {
+    params.set("source_repos", sourceRepos.join(","));
+  }
   const token = getAuthToken();
   if (token) {
     params.set("token", token);
+  }
+  // EventSource doesn't support custom headers, so pass workspace as query param
+  const workspace = getActiveWorkspace();
+  if (workspace) {
+    params.set("workspace", workspace);
   }
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;

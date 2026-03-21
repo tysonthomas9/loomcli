@@ -28,6 +28,7 @@ export {
   createIssue,
   updateIssue,
   closeIssue,
+  moveIssue,
   fetchGraphIssues,
   addDependency,
   removeDependency,
@@ -36,9 +37,13 @@ export {
 export type {
   CreateIssueRequest,
   UpdateIssueRequest,
+  MoveIssueResult,
   GraphFilter,
   AddCommentRequest,
 } from "./issues";
+
+// Event API functions
+export { getIssueEvents } from "./events";
 
 // Agent API functions (loom server)
 export {
@@ -63,6 +68,19 @@ export { fetchUsage } from "./usage";
 // Observability API functions (loom server)
 export { fetchObservabilityMetrics } from "./observability";
 
+// Workspace API functions
+export {
+  fetchWorkspace,
+  refreshWorkspace,
+  getCachedWorkspace,
+} from "./workspace";
+export type {
+  WorkspaceData,
+  RepoInfo,
+  WorkspaceAgentInfo,
+  WorkspaceSummary,
+} from "./workspace";
+
 // Editor API functions
 export {
   fetchEditors,
@@ -74,6 +92,10 @@ export {
 // Diff API functions (agent worktree diffs)
 export { fetchDiffCommits, fetchDiffFiles, fetchDiffFile } from "./diff";
 export type { DiffCommit, DiffFile, DiffFilePatch } from "./diff";
+
+// Issue diff stat API
+export { fetchIssueDiffStat } from "./diff-stat";
+export type { IssueDiffStat } from "./diff-stat";
 
 // Git API functions
 export {
@@ -113,6 +135,10 @@ export {
   buildTerminalWsUrl,
 } from "./terminal";
 export type { TerminalSessionInfo } from "./terminal";
+
+// Backend health API functions
+export { fetchBackends, refreshBackends } from "./backends";
+export type { BackendHealthData } from "./backends";
 
 // File API functions (agent worktree file operations)
 export { listWorktreeDir, readWorktreeFile, writeWorktreeFile } from "./files";

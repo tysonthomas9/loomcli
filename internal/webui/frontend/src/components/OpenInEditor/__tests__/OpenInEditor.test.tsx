@@ -19,6 +19,22 @@ const mockUseEditors = vi.fn();
 
 vi.mock("@/hooks", () => ({
   useEditors: (...args: unknown[]) => mockUseEditors(...args),
+  useRegisterEscapeLayer: vi.fn(),
+  useKeyboardShortcuts: vi.fn(() => ({
+    isCheatsheetOpen: false,
+    toggleCheatsheet: vi.fn(),
+    closeCheatsheet: vi.fn(),
+  })),
+  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  LAYER_CONFIRM_DIALOG: 60,
+  LAYER_TOAST: 50,
+  LAYER_CHEATSHEET: 45,
+  LAYER_MODAL: 40,
+  LAYER_TERMINAL_PANEL: 30,
+  LAYER_AGENT_PANEL: 20,
+  LAYER_ISSUE_PANEL: 10,
+  LAYER_TERMINAL_SEARCH: 5,
 }));
 
 const defaultEditors = [
@@ -89,7 +105,8 @@ describe("OpenInEditor", () => {
       fireEvent.click(screen.getByTestId("open-in-editor-trigger"));
       expect(screen.getByTestId("open-in-editor-menu")).toBeInTheDocument();
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("open-in-editor-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(
         screen.queryByTestId("open-in-editor-menu"),
       ).not.toBeInTheDocument();
@@ -145,7 +162,8 @@ describe("OpenInEditor", () => {
       const trigger = screen.getByTestId("open-in-editor-trigger");
       fireEvent.click(trigger);
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("open-in-editor-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(document.activeElement).toBe(trigger);
     });
   });

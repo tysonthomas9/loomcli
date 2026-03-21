@@ -85,7 +85,7 @@ Examples:
 	// Override PersistentPreRunE: doctor must run even when the backend
 	// binary is missing (that is one of the things it diagnoses).
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return nil
+		return InitLogger(logFormat, logOutput)
 	},
 }
 
@@ -98,22 +98,14 @@ func init() {
 type checkFunc func() CheckResult
 
 func runDoctor(cmd *cobra.Command, args []string) error {
-	checks := []checkFunc{
-		checkGit,
-		checkGitRepo,
-		checkTmux,
-		checkBdCLI,
-		checkBdDaemon,
-		checkBdSocket,
-		checkBackendCLI,
-		checkBeadsInit,
-		checkProjectConfig,
-		checkGlobalConfig,
-		checkWorktrees,
-		checkStaleLocks,
-		checkLoomDaemon,
-		checkRedis,
+	checks := []checkFunc{checkGit, checkGitRepo, checkTmux, checkIssueBackend}
+	if isFleetDBActive() {
+		checks = append(checks, checkFleetDB)
+	} else {
+		checks = append(checks, checkBdCLI, checkBdDaemon, checkBdSocket, checkBeadsInit)
 	}
+	checks = append(checks, checkBackendCLI, checkProjectConfig, checkGlobalConfig,
+		checkWorktrees, checkStaleLocks, checkLoomDaemon, checkRedis)
 
 	var results []CheckResult
 	for _, check := range checks {

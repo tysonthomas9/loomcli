@@ -115,7 +115,8 @@ describe("PriorityDropdown", () => {
       fireEvent.click(trigger);
       expect(screen.getByTestId("priority-dropdown-menu")).toBeInTheDocument();
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("priority-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(
         screen.queryByTestId("priority-dropdown-menu"),
       ).not.toBeInTheDocument();
@@ -196,7 +197,8 @@ describe("PriorityDropdown", () => {
       const trigger = screen.getByTestId("priority-dropdown-trigger");
       fireEvent.click(trigger);
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("priority-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(document.activeElement).toBe(trigger);
     });
 
@@ -748,7 +750,8 @@ describe("PriorityDropdown", () => {
       fireEvent.click(trigger);
       expect(screen.getByTestId("priority-dropdown-menu")).toBeInTheDocument();
 
-      fireEvent.keyDown(trigger, { key: "Escape" });
+      const menu = screen.getByTestId("priority-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(
         screen.queryByTestId("priority-dropdown-menu"),
       ).not.toBeInTheDocument();
@@ -811,7 +814,8 @@ describe("PriorityDropdown", () => {
       );
 
       // Close and reopen
-      fireEvent.keyDown(trigger, { key: "Escape" });
+      const menu = screen.getByTestId("priority-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       fireEvent.click(trigger);
 
       // Should be back to current priority
@@ -849,7 +853,8 @@ describe("PriorityDropdown", () => {
       );
 
       // Close and update priority
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("priority-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       rerender(<PriorityDropdown {...defaultProps} priority={1} />);
 
       fireEvent.click(screen.getByTestId("priority-dropdown-trigger"));

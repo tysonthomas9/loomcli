@@ -97,7 +97,7 @@ func runAgent(cmd *cobra.Command, args []string) {
 	}
 
 	// Resolve worktree/workspace path
-	target, err := ResolveAgentTarget(argName)
+	target, err := ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -212,13 +212,14 @@ func runAgent(cmd *cobra.Command, args []string) {
 // mapTaskFilter converts a filter string to the corresponding HasAvailable* function.
 // The parentID is captured in the returned closure to scope task discovery.
 func mapTaskFilter(filter, parentID string) (func() (bool, error), error) {
+	repoLabel := os.Getenv("LOOM_AGENT_REPO")
 	switch filter {
 	case "needs_design":
-		return func() (bool, error) { return HasAvailablePlanningTasks(parentID) }, nil
+		return func() (bool, error) { return HasAvailablePlanningTasks(parentID, repoLabel) }, nil
 	case "has_design":
-		return func() (bool, error) { return HasAvailableImplementationTasks(parentID) }, nil
+		return func() (bool, error) { return HasAvailableImplementationTasks(parentID, repoLabel) }, nil
 	case "any", "":
-		return func() (bool, error) { return HasAnyAvailableTasks(parentID) }, nil
+		return func() (bool, error) { return HasAnyAvailableTasks(parentID, repoLabel) }, nil
 	default:
 		return nil, fmt.Errorf("invalid task filter: %s (must be needs_design, has_design, or any)", filter)
 	}

@@ -146,6 +146,7 @@ func patchRequestToUpdateArgs(issueID string, req *PatchIssueRequest) *rpc.Updat
 		Status:             req.Status,
 		Priority:           req.Priority,
 		Assignee:           req.Assignee,
+		Owner:              req.Owner,
 		Design:             req.Design,
 		AcceptanceCriteria: req.AcceptanceCriteria,
 		Notes:              req.Notes,

@@ -85,25 +85,24 @@ func TestResetAllWorktrees_PerRepoBranch(t *testing.T) {
 	})
 	mock.Install()
 
-	// GitFetch, GitReset, GitClean, GitPushForce all use runGitWithOutputFunc
+	// GitFetch, GitReset, GitClean all use runGitWithOutputFunc (no push without --push)
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// repo1: fetch, reset HEAD, clean, reset origin/develop, push
+		// repo1: fetch, reset HEAD, clean, reset origin/develop
 		{Dir: repo1Path, Args: []string{"fetch", "origin"}},
 		{Dir: repo1Path, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: repo1Path, Args: []string{"clean", "-fd"}},
 		{Dir: repo1Path, Args: []string{"reset", "--hard", "origin/develop"}},
-		{Dir: repo1Path, Args: []string{"push", "origin", "feature-1", "--force"}},
-		// repo2: fetch, reset HEAD, clean, reset origin/staging, push
+		// repo2: fetch, reset HEAD, clean, reset origin/staging
 		{Dir: repo2Path, Args: []string{"fetch", "origin"}},
 		{Dir: repo2Path, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: repo2Path, Args: []string{"clean", "-fd"}},
 		{Dir: repo2Path, Args: []string{"reset", "--hard", "origin/staging"}},
-		{Dir: repo2Path, Args: []string{"push", "origin", "feature-2", "--force"}},
 	})
 	outputMock.Install()
 
 	resetForce = true
-	defer func() { resetForce = false }()
+	resetPush = false
+	defer func() { resetForce = false; resetPush = false }()
 
 	defaultBranch := GetDefaultBranch()
 	err := resetAllWorktrees(defaultBranch, false)
@@ -153,25 +152,24 @@ func TestResetAllWorktrees_ExplicitBranchOverridesPerRepo(t *testing.T) {
 	})
 	mock.Install()
 
-	// Both repos should reset to "release" (explicit target overrides per-repo)
+	// Both repos should reset to "release" (explicit target overrides per-repo, no push)
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		// repo1
 		{Dir: repo1Path, Args: []string{"fetch", "origin"}},
 		{Dir: repo1Path, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: repo1Path, Args: []string{"clean", "-fd"}},
 		{Dir: repo1Path, Args: []string{"reset", "--hard", "origin/release"}},
-		{Dir: repo1Path, Args: []string{"push", "origin", "main", "--force"}},
 		// repo2
 		{Dir: repo2Path, Args: []string{"fetch", "origin"}},
 		{Dir: repo2Path, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: repo2Path, Args: []string{"clean", "-fd"}},
 		{Dir: repo2Path, Args: []string{"reset", "--hard", "origin/release"}},
-		{Dir: repo2Path, Args: []string{"push", "origin", "main", "--force"}},
 	})
 	outputMock.Install()
 
 	resetForce = true
-	defer func() { resetForce = false }()
+	resetPush = false
+	defer func() { resetForce = false; resetPush = false }()
 
 	err := resetAllWorktrees("release", true)
 	if err != nil {
@@ -222,25 +220,24 @@ func TestResetAllWorktrees_MixedDefaultBranch(t *testing.T) {
 	})
 	mock.Install()
 
-	// repo1 resets to "develop", repo2 resets to the global default
+	// repo1 resets to "develop", repo2 resets to the global default (no push)
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
 		// repo1 -> develop
 		{Dir: repo1Path, Args: []string{"fetch", "origin"}},
 		{Dir: repo1Path, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: repo1Path, Args: []string{"clean", "-fd"}},
 		{Dir: repo1Path, Args: []string{"reset", "--hard", "origin/develop"}},
-		{Dir: repo1Path, Args: []string{"push", "origin", "feat", "--force"}},
 		// repo2 -> global default
 		{Dir: repo2Path, Args: []string{"fetch", "origin"}},
 		{Dir: repo2Path, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: repo2Path, Args: []string{"clean", "-fd"}},
 		{Dir: repo2Path, Args: []string{"reset", "--hard", "origin/" + defaultBranch}},
-		{Dir: repo2Path, Args: []string{"push", "origin", "feat", "--force"}},
 	})
 	outputMock.Install()
 
 	resetForce = true
-	defer func() { resetForce = false }()
+	resetPush = false
+	defer func() { resetForce = false; resetPush = false }()
 
 	err := resetAllWorktrees(defaultBranch, false)
 	if err != nil {
@@ -281,23 +278,22 @@ func TestResetAllWorktrees_LegacyMode_NoPerRepoBranch(t *testing.T) {
 	mock.Install()
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// alpha -> main
+		// alpha -> main (no push)
 		{Dir: wt1, Args: []string{"fetch", "origin"}},
 		{Dir: wt1, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: wt1, Args: []string{"clean", "-fd"}},
 		{Dir: wt1, Args: []string{"reset", "--hard", "origin/main"}},
-		{Dir: wt1, Args: []string{"push", "origin", "main", "--force"}},
-		// beta -> main
+		// beta -> main (no push)
 		{Dir: wt2, Args: []string{"fetch", "origin"}},
 		{Dir: wt2, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: wt2, Args: []string{"clean", "-fd"}},
 		{Dir: wt2, Args: []string{"reset", "--hard", "origin/main"}},
-		{Dir: wt2, Args: []string{"push", "origin", "main", "--force"}},
 	})
 	outputMock.Install()
 
 	resetForce = true
-	defer func() { resetForce = false }()
+	resetPush = false
+	defer func() { resetForce = false; resetPush = false }()
 
 	err := resetAllWorktrees("main", false)
 	if err != nil {
@@ -395,7 +391,7 @@ func TestResetCmd_ArgsValidation_WorktreeAndBranch(t *testing.T) {
 // ============================================================================
 
 func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
-	// Verify that resetWorktree returns true on a successful reset.
+	// Verify that resetWorktree returns true on a successful reset (local only, no push).
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -418,9 +414,11 @@ func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
 		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
-		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
 	})
 	outputMock.Install()
+
+	resetPush = false
+	defer func() { resetPush = false }()
 
 	// Capture stdout to suppress output
 	oldStdout := os.Stdout
@@ -608,19 +606,19 @@ func TestResetAllWorktrees_PartialFailure_ReturnsError(t *testing.T) {
 	mock.Install()
 
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
-		// repo1: full success sequence
+		// repo1: full success sequence (no push)
 		{Dir: repo1Path, Args: []string{"fetch", "origin"}},
 		{Dir: repo1Path, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: repo1Path, Args: []string{"clean", "-fd"}},
 		{Dir: repo1Path, Args: []string{"reset", "--hard", "origin/main"}},
-		{Dir: repo1Path, Args: []string{"push", "origin", "feature-1", "--force"}},
 		// repo2: fetch fails
 		{Dir: repo2Path, Args: []string{"fetch", "origin"}, Err: fmt.Errorf("network error")},
 	})
 	outputMock.Install()
 
 	resetForce = true
-	defer func() { resetForce = false }()
+	resetPush = false
+	defer func() { resetForce = false; resetPush = false }()
 
 	// Capture stderr to verify failure summary
 	oldStderr := os.Stderr
@@ -705,7 +703,8 @@ func TestResetAllWorktrees_AllFail_ReturnsError(t *testing.T) {
 	outputMock.Install()
 
 	resetForce = true
-	defer func() { resetForce = false }()
+	resetPush = false
+	defer func() { resetForce = false; resetPush = false }()
 
 	// Capture stderr
 	oldStderr := os.Stderr
@@ -878,9 +877,11 @@ func TestResetWorktree_Success(t *testing.T) {
 		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
-		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
 	})
 	outputMock.Install()
+
+	resetPush = false
+	defer func() { resetPush = false }()
 
 	// Capture stdout to suppress output
 	oldStdout := os.Stdout
@@ -1080,11 +1081,12 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 	}
 	defer ReleaseLock(wtPath)
 
-	// Set --force
+	// Set --force (no --push, so no force-push expected)
 	resetForce = true
-	defer func() { resetForce = false }()
+	resetPush = false
+	defer func() { resetForce = false; resetPush = false }()
 
-	// Set up mocks for the git operations (should proceed with --force)
+	// Set up mocks for the git operations (should proceed with --force, no push)
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
 	})
@@ -1095,7 +1097,6 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
-		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
 	})
 	outputMock.Install()
 
@@ -1154,9 +1155,10 @@ func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
 	}
 
 	resetForce = false
-	defer func() { resetForce = false }()
+	resetPush = false
+	defer func() { resetForce = false; resetPush = false }()
 
-	// Set up mocks - should proceed normally (stale lock does not block)
+	// Set up mocks - should proceed normally (stale lock does not block, no push)
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
 	})
@@ -1167,7 +1169,6 @@ func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
 		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
-		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
 	})
 	outputMock.Install()
 
@@ -1202,7 +1203,8 @@ func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
 	// No lock file created
 
 	resetForce = false
-	defer func() { resetForce = false }()
+	resetPush = false
+	defer func() { resetForce = false; resetPush = false }()
 
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "test-branch\n"},
@@ -1214,7 +1216,6 @@ func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
 		{Dir: wtPath, Args: []string{"reset", "--hard", "HEAD"}},
 		{Dir: wtPath, Args: []string{"clean", "-fd"}},
 		{Dir: wtPath, Args: []string{"reset", "--hard", "origin/main"}},
-		{Dir: wtPath, Args: []string{"push", "origin", "test-branch", "--force"}},
 	})
 	outputMock.Install()
 
@@ -1262,8 +1263,8 @@ func TestIsProtectedBranch(t *testing.T) {
 // ============================================================================
 
 func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
-	// When current branch is "main" and resetForce is false, resetWorktree
-	// should return false and NOT call GitPushForce.
+	// When current branch is "main", --push is set but --force is not,
+	// resetWorktree should return false and NOT call GitPushForce.
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1277,7 +1278,8 @@ func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	resetForce = false
-	defer func() { resetForce = false }()
+	resetPush = true
+	defer func() { resetForce = false; resetPush = false }()
 
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
@@ -1337,7 +1339,8 @@ func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	resetForce = false
-	defer func() { resetForce = false }()
+	resetPush = true
+	defer func() { resetForce = false; resetPush = false }()
 
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "master\n"},
@@ -1383,8 +1386,8 @@ func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
 }
 
 func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
-	// When current branch is "main" AND resetForce is true, force push
-	// should proceed with a warning.
+	// When current branch is "main" AND both --push and --force are set,
+	// force push should proceed with a warning.
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1398,7 +1401,8 @@ func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	resetForce = true
-	defer func() { resetForce = false }()
+	resetPush = true
+	defer func() { resetForce = false; resetPush = false }()
 
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "main\n"},
@@ -1446,7 +1450,7 @@ func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
 
 func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
 	// A non-protected branch like "feature-x" should push without warnings
-	// or blocks when resetForce is false.
+	// or blocks when --push is set (even without --force).
 	ResetBeadsDirCache()
 
 	tmpDir := t.TempDir()
@@ -1460,7 +1464,8 @@ func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	resetForce = false
-	defer func() { resetForce = false }()
+	resetPush = true
+	defer func() { resetForce = false; resetPush = false }()
 
 	mock := NewCommandMock(t, []CommandStub{
 		{Dir: wtPath, Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature-x\n"},

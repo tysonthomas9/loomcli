@@ -48,13 +48,13 @@ export function calculateBackoffDelay(
 /**
  * Start an automatic reconnection loop with exponential backoff.
  *
- * @param connectFn - Called on each reconnection attempt. Must return true if connection succeeded, false otherwise.
+ * @param connectFn - Called on each reconnection attempt. Return true if connection succeeded, false otherwise. May return a Promise for async connection attempts.
  * @param onStateChange - Called whenever the reconnect state changes.
  * @param config - Backoff configuration.
  * @returns A cancel function that stops the reconnection loop.
  */
 export function startAutoReconnect(
-  connectFn: () => boolean,
+  connectFn: () => boolean | Promise<boolean>,
   onStateChange: (state: ReconnectState) => void,
   config: ReconnectConfig = DEFAULT_RECONNECT_CONFIG,
 ): () => void {
@@ -79,13 +79,13 @@ export function startAutoReconnect(
       if (cancelled) return;
       timerId = null;
 
-      const succeeded = connectFn();
-      if (!succeeded) {
-        attempt++;
-        scheduleNext();
-      }
-      // If succeeded, the caller is responsible for resetting state
-      // via the onclose handler on the new WebSocket.
+      Promise.resolve(connectFn()).then((succeeded) => {
+        if (cancelled) return;
+        if (!succeeded) {
+          attempt++;
+          scheduleNext();
+        }
+      });
     }, delay);
   }
 

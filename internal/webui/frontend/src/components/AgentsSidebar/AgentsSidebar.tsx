@@ -1,21 +1,24 @@
 /**
  * AgentsSidebar component displays a collapsible sidebar with agent status.
- * Shows all agents from the loom server with real-time updates.
- * Includes work queue summary, project stats, and sync status.
  */
-
 import type { ReactNode } from "react";
 import { useState, useCallback, useEffect } from "react";
 
 import { ApiError } from "@/api/client";
-import { gitPushAll } from "@/api/git";
-import { useAgentContext } from "@/hooks";
-import type { LoomTaskInfo, WorktreeSyncDetail } from "@/types";
+import { gitPush, gitPushAll } from "@/api/git";
+import { ConfirmDialog, ErrorDisplay, LoadingSkeleton } from "@/components";
+import { useAgentContext, useRepoFilter } from "@/hooks";
+import type {
+  LoomAgentStatus,
+  LoomTaskInfo,
+  WorktreeSyncDetail,
+} from "@/types";
 
-import { AgentCard } from "../AgentCard";
 import { TaskDrawer } from "../TaskDrawer";
 import type { TaskCategory } from "../TaskDrawer";
 import styles from "./AgentsSidebar.module.css";
+import { RepoGroupedList } from "./RepoGroupedList";
+import { WorkspaceGroupedList } from "./WorkspaceGroupedList";
 
 function buildSyncTooltip(
   details: WorktreeSyncDetail[] | undefined,
@@ -30,19 +33,39 @@ function buildSyncTooltip(
     .join("\n");
 }
 
+export type AgentTaskMap = Record<string, LoomTaskInfo>;
+
 /**
- * Props for the AgentsSidebar component.
+ * Group agents by repo affinity when repo filters are active.
+ * Agents matching selected repos go into named groups; the rest go into "other".
  */
+export function groupAgentsByRepo(
+  agents: LoomAgentStatus[],
+  selectedRepos: string[],
+): { grouped: Map<string, LoomAgentStatus[]>; other: LoomAgentStatus[] } {
+  const grouped = new Map<string, LoomAgentStatus[]>();
+  const other: LoomAgentStatus[] = [];
+
+  for (const repo of selectedRepos) {
+    grouped.set(repo, []);
+  }
+
+  for (const agent of agents) {
+    if (agent.repo && grouped.has(agent.repo)) {
+      grouped.get(agent.repo)!.push(agent);
+    } else {
+      other.push(agent);
+    }
+  }
+
+  return { grouped, other };
+}
+
 export interface AgentsSidebarProps {
-  /** Additional CSS class name */
   className?: string;
-  /** Default collapsed state */
   defaultCollapsed?: boolean;
-  /** Allow collapsing the sidebar (default: true) */
   collapsible?: boolean;
-  /** Callback when an agent card is clicked */
   onAgentClick?: (agentName: string) => void;
-  /** Optional content to render at the top of the sidebar (e.g., ViewSwitcher) */
   viewSwitcher?: ReactNode;
 }
 
@@ -87,6 +110,16 @@ export function AgentsSidebar({
   // Push All state
   const [isPushing, setIsPushing] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
+  const [showPushConfirm, setShowPushConfirm] = useState(false);
+
+  // Push details list (expandable per-agent push)
+  const [isPushListExpanded, setIsPushListExpanded] = useState(false);
+  const [pushingAgents, setPushingAgents] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [agentPushErrors, setAgentPushErrors] = useState<
+    Record<string, string>
+  >({});
 
   const {
     agents,
@@ -100,6 +133,9 @@ export function AgentsSidebar({
     wasEverConnected,
     lastUpdated,
   } = useAgentContext();
+
+  const [selectedRepos] = useRepoFilter();
+  const isGrouped = selectedRepos.length > 0;
 
   // Persist collapsed state
   useEffect(() => {
@@ -118,6 +154,48 @@ export function AgentsSidebar({
       // Ignore localStorage errors
     }
   }, [isWorkQueueExpanded]);
+
+  // Auto-collapse at <1024px viewport width
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia("(max-width: 1024px)");
+    if (mql.matches) setIsCollapsed(true);
+    const onChange = (e: MediaQueryListEvent) => {
+      if (e.matches) setIsCollapsed(true);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
+  // Auto-collapse push list and clear stale state when no agents need push
+  useEffect(() => {
+    if (sync.git_needs_push === 0) {
+      setIsPushListExpanded(false);
+      setAgentPushErrors({});
+      setPushingAgents({});
+    }
+  }, [sync.git_needs_push]);
+
+  const anyAgentPushing = Object.values(pushingAgents).some(Boolean);
+
+  const handleAgentPush = useCallback(async (agentName: string) => {
+    setPushingAgents((prev) => ({ ...prev, [agentName]: true }));
+    setAgentPushErrors((prev) => {
+      const next = { ...prev };
+      delete next[agentName];
+      return next;
+    });
+    try {
+      await gitPush(agentName);
+    } catch (err) {
+      setAgentPushErrors((prev) => ({
+        ...prev,
+        [agentName]: err instanceof ApiError ? err.statusText : "Push failed",
+      }));
+    } finally {
+      setPushingAgents((prev) => ({ ...prev, [agentName]: false }));
+    }
+  }, []);
 
   const handleToggle = useCallback(() => {
     if (!collapsible) return;
@@ -155,6 +233,11 @@ export function AgentsSidebar({
     }
   }, []);
 
+  const handlePushConfirm = useCallback(() => {
+    setShowPushConfirm(false);
+    handlePushAll();
+  }, [handlePushAll]);
+
   // Get tasks and title for the selected category
   const getDrawerData = useCallback((): {
     title: string;
@@ -179,6 +262,20 @@ export function AgentsSidebar({
   }, [selectedCategory, taskLists]);
 
   const drawerData = getDrawerData();
+
+  const pushDetails = sync.git_push_details;
+  const pushConfirmMessage =
+    pushDetails && pushDetails.length > 0 ? (
+      <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
+        {pushDetails.map((d) => (
+          <li key={d.name}>
+            {d.name}: {d.count} commit{d.count !== 1 ? "s" : ""}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      `Push ${sync.git_needs_push} branch${sync.git_needs_push !== 1 ? "es" : ""} to remote?`
+    );
 
   const collapsed = collapsible ? isCollapsed : false;
 
@@ -231,32 +328,51 @@ export function AgentsSidebar({
       {!collapsed && (
         <div className={styles.content}>
           {!isConnected && !isLoading && (
-            <div className={styles.disconnected}>
-              <span className={styles.disconnectedIcon}>!</span>
-              <span>Loom server not available</span>
-            </div>
+            <ErrorDisplay
+              variant="connection-error"
+              title="Loom server not available"
+              description="Unable to connect to the agent server."
+              className={styles.sidebarError ?? ""}
+            />
           )}
 
           {isLoading && agents.length === 0 && !wasEverConnected && (
-            <div className={styles.loading}>Loading agents...</div>
+            <div className={styles.loadingCards}>
+              <LoadingSkeleton.Card />
+              <LoadingSkeleton.Card />
+              <LoadingSkeleton.Card />
+            </div>
           )}
 
           {agents.length === 0 && isConnected && !isLoading && (
-            <div className={styles.empty}>No agents found</div>
+            <div className={styles.emptyGuide}>
+              <p className={styles.emptyHeadline}>No agents configured</p>
+              <p className={styles.emptyHint}>
+                Add agents in your loom config to start automating work
+              </p>
+            </div>
           )}
 
           {agents.length > 0 && (
             <div className={styles.agentList}>
-              {agents.map((agent) => (
-                <AgentCard
-                  key={agent.name}
-                  agent={agent}
-                  taskTitle={agentTasks[agent.name]?.title}
+              {isGrouped ? (
+                <RepoGroupedList
+                  agents={agents}
+                  selectedRepos={selectedRepos}
+                  agentTasks={agentTasks}
                   {...(onAgentClick !== undefined && {
-                    onClick: () => onAgentClick(agent.name),
+                    onAgentClick,
                   })}
                 />
-              ))}
+              ) : (
+                <WorkspaceGroupedList
+                  agents={agents}
+                  agentTasks={agentTasks}
+                  {...(onAgentClick !== undefined && {
+                    onAgentClick,
+                  })}
+                />
+              )}
             </div>
           )}
 
@@ -280,24 +396,83 @@ export function AgentsSidebar({
                   {sync.git_needs_push > 0 && (
                     <>
                       <div className={styles.syncBanner}>
-                        <span
-                          className={styles.syncBannerText}
-                          title={buildSyncTooltip(
-                            sync.git_push_details,
-                            "ahead",
-                          )}
-                        >
-                          {sync.git_needs_push} need push
-                        </span>
+                        {sync.git_push_details &&
+                        sync.git_push_details.length > 0 ? (
+                          <button
+                            type="button"
+                            className={styles.syncBannerText}
+                            onClick={() =>
+                              setIsPushListExpanded((prev) => !prev)
+                            }
+                            aria-expanded={isPushListExpanded}
+                            aria-label={`${isPushListExpanded ? "Collapse" : "Expand"} push details`}
+                            title={buildSyncTooltip(
+                              sync.git_push_details,
+                              "ahead",
+                            )}
+                          >
+                            <span className={styles.syncBannerToggle}>
+                              {isPushListExpanded ? "v" : ">"}
+                            </span>
+                            {sync.git_needs_push} need push
+                          </button>
+                        ) : (
+                          <span
+                            className={styles.syncBannerTextStatic}
+                            title={buildSyncTooltip(
+                              sync.git_push_details,
+                              "ahead",
+                            )}
+                          >
+                            {sync.git_needs_push} need push
+                          </span>
+                        )}
                         <button
                           type="button"
                           className={styles.pushButton}
-                          onClick={handlePushAll}
-                          disabled={isPushing}
+                          onClick={() => setShowPushConfirm(true)}
+                          disabled={isPushing || anyAgentPushing}
                         >
                           {isPushing ? "Pushing..." : "Push All"}
                         </button>
                       </div>
+                      {isPushListExpanded &&
+                        sync.git_push_details &&
+                        sync.git_push_details.length > 0 && (
+                          <div className={styles.pushDetailsList}>
+                            {sync.git_push_details.map((detail) => (
+                              <div
+                                key={detail.name}
+                                className={styles.pushDetailRow}
+                              >
+                                <span className={styles.pushDetailName}>
+                                  {detail.name}
+                                </span>
+                                <span className={styles.pushDetailCount}>
+                                  {detail.count} commit
+                                  {detail.count !== 1 ? "s" : ""}
+                                </span>
+                                <button
+                                  type="button"
+                                  className={styles.pushDetailButton}
+                                  onClick={() => handleAgentPush(detail.name)}
+                                  disabled={
+                                    pushingAgents[detail.name] || isPushing
+                                  }
+                                >
+                                  {pushingAgents[detail.name]
+                                    ? "Pushing..."
+                                    : "Push"}
+                                </button>
+                                {agentPushErrors[detail.name] && (
+                                  <span className={styles.pushDetailError}>
+                                    {agentPushErrors[detail.name]}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       {pushError && (
                         <div className={styles.pushError}>{pushError}</div>
                       )}
@@ -445,6 +620,17 @@ export function AgentsSidebar({
           {activeCount}
         </div>
       )}
+
+      {/* Push All Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showPushConfirm}
+        title="Push all branches?"
+        confirmLabel="Push"
+        variant="danger"
+        message={pushConfirmMessage}
+        onConfirm={handlePushConfirm}
+        onCancel={() => setShowPushConfirm(false)}
+      />
 
       {/* Task Drawer */}
       <TaskDrawer

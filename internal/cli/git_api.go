@@ -36,6 +36,7 @@ type ResetResult struct {
 	Success        bool   `json:"success"`
 	Message        string `json:"message"`
 	PreviousBranch string `json:"previous_branch,omitempty"`
+	Pushed         bool   `json:"pushed"`
 }
 
 // GitStatusSummary contains a comprehensive git status for a worktree.
@@ -254,7 +255,8 @@ func CreatePRResult(repoPath, sourceBranch, targetBranch, remote string) (*PRRes
 // ResetWorktreeResult hard-resets a worktree to a target branch and returns structured result.
 // Unlike resetWorktree, it does NOT prompt for confirmation — callers must handle that.
 // It DOES check the agent lock and returns an error if locked (unless force=true).
-func ResetWorktreeResult(worktreePath, worktreeName, targetBranch string, force bool) (*ResetResult, error) {
+// If push=true, force-pushes the branch to origin after resetting.
+func ResetWorktreeResult(worktreePath, worktreeName, targetBranch string, force, push bool) (*ResetResult, error) {
 	// Check for active agent lock
 	lockInfo, running, checkErr := CheckLock(worktreePath)
 	if checkErr == nil && running && !force {
@@ -272,8 +274,8 @@ func ResetWorktreeResult(worktreePath, worktreeName, targetBranch string, force 
 		return nil, fmt.Errorf("getting current branch: %v", err)
 	}
 
-	// Check protected branch BEFORE any destructive operations
-	if isProtectedBranch(currentBranch) && !force {
+	// Check protected branch BEFORE any destructive operations (only relevant when pushing)
+	if push && isProtectedBranch(currentBranch) && !force {
 		return nil, fmt.Errorf("refusing to force-push to protected branch '%s'; set force=true to override", currentBranch)
 	}
 
@@ -292,14 +294,17 @@ func ResetWorktreeResult(worktreePath, worktreeName, targetBranch string, force 
 		return nil, fmt.Errorf("resetting to %s: %v", targetBranch, err)
 	}
 
-	if err := GitPushForce(worktreePath, currentBranch); err != nil {
-		return nil, fmt.Errorf("force pushing: %v", err)
+	if push {
+		if err := GitPushForce(worktreePath, currentBranch); err != nil {
+			return nil, fmt.Errorf("force pushing: %v", err)
+		}
 	}
 
 	return &ResetResult{
 		Success:        true,
 		Message:        fmt.Sprintf("Reset complete: %s is now at origin/%s", worktreeName, targetBranch),
 		PreviousBranch: currentBranch,
+		Pushed:         push,
 	}, nil
 }
 

@@ -1,6 +1,7 @@
 /**
  * Format issue ID for display.
- * Shows last 7 characters of the ID for readability.
+ * Preserves the project prefix for recognizable IDs.
+ * Only truncates unusually long IDs (e.g. hierarchical sub-task IDs).
  */
 export function formatIssueId(id: string): string {
   if (!id) {
@@ -9,8 +10,15 @@ export function formatIssueId(id: string): string {
     }
     return "unknown";
   }
-  // If ID is short enough, return as-is
-  if (id.length <= 10) return id;
-  // Otherwise show last 7 characters
-  return id.slice(-7);
+  // Most IDs (e.g. 'loomcli-pso6j') are ≤16 chars — show in full
+  if (id.length <= 16) return id;
+  // For longer IDs, preserve prefix and truncate
+  const hyphenIdx = id.indexOf("-");
+  if (hyphenIdx > 0) {
+    const prefix = id.slice(0, hyphenIdx);
+    const rest = id.slice(hyphenIdx + 1);
+    return `${prefix}-${rest.slice(0, 5)}...`;
+  }
+  // No hyphen — just truncate
+  return `${id.slice(0, 13)}...`;
 }

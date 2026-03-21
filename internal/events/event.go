@@ -42,6 +42,7 @@ const (
 	PRCreated        EventType = "pr_created"
 	ConflictResolved EventType = "conflict_resolved"
 	HealthCheck      EventType = "health_check"
+	ConfigReloaded   EventType = "config_reloaded"
 )
 
 // Event is the envelope written to JSONL files. Data is stored as json.RawMessage
@@ -108,6 +109,8 @@ func (e *Event) DecodeData() (interface{}, error) {
 		target = &ConflictResolvedData{}
 	case HealthCheck:
 		target = &HealthCheckData{}
+	case ConfigReloaded:
+		target = &ConfigReloadedData{}
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", e.Type)
 	}
@@ -176,4 +179,11 @@ type ConflictResolvedData struct {
 type HealthCheckData struct {
 	AgentCount   int `json:"agent_count"`
 	HealthyCount int `json:"healthy_count"`
+}
+
+type ConfigReloadedData struct {
+	Added    int    `json:"added"`
+	Removed  int    `json:"removed"`
+	Modified int    `json:"modified"`
+	Error    string `json:"error,omitempty"`
 }

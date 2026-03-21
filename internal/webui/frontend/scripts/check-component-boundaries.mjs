@@ -28,6 +28,18 @@ export const ALLOWLIST = [
     source: "src/components/IssueDetailPanel/CommentsSection.tsx",
     target: "@/components/table/columns",
   },
+  {
+    source: "src/components/RepoSelector/RepoSelector.tsx",
+    target: "../FilterBar/FilterBar.module.css",
+  },
+  {
+    source: "src/components/IssueDetailPanel/PriorityDropdown.tsx",
+    target: "@/components/VisuallyHidden/VisuallyHidden",
+  },
+  {
+    source: "src/components/AppLayout/AppLayout.tsx",
+    target: "@/components/LiveRegion/LiveRegion",
+  },
 ];
 
 /**

@@ -2,6 +2,7 @@ package webui
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -73,15 +75,19 @@ const defaultMaxTerminalSessions = 20
 // Multiple WebSocket connections can attach to the same tmux session simultaneously,
 // each tracked by a unique connection ID.
 type TerminalManager struct {
-	sessions       map[string]*TerminalSession // keyed by connection ID
-	mu             sync.RWMutex
-	tmuxPath       string
-	sessionPrefix  string // prepended to tmux session names for isolation between server instances
-	defaultCommand string // command to run in all terminal sessions
-	defaultCols    uint16
-	defaultRows    uint16
-	maxSessions    int // maximum concurrent connections (immutable after construction)
-	connCounter    atomic.Uint64
+	sessions           map[string]*TerminalSession   // keyed by connection ID
+	pendingKills       map[string]context.CancelFunc // deferred session kills, guarded by mu
+	scrollbackBuffers  map[string]*ScrollbackBuffer  // keyed by tmux session name (internal)
+	mu                 sync.RWMutex
+	tmuxPath           string
+	sessionPrefix      string // prepended to tmux session names for isolation between server instances
+	defaultCommand     string // command to run in all terminal sessions
+	defaultCols        uint16
+	defaultRows        uint16
+	maxSessions        int // maximum concurrent connections (immutable after construction)
+	scrollbackMaxLines int // max lines per scrollback buffer (default: defaultScrollbackMaxLines)
+	connCounter        atomic.Uint64
+	onSessionKilled    func(sessionName string) // set once at init, read-only after
 }
 
 // NewTerminalManager creates a manager. Returns ErrTmuxNotFound if tmux is not installed.
@@ -98,13 +104,16 @@ func NewTerminalManager(defaultCommand, sessionPrefix string, maxSessions int) (
 		maxSessions = defaultMaxTerminalSessions
 	}
 	return &TerminalManager{
-		sessions:       make(map[string]*TerminalSession),
-		tmuxPath:       tmuxPath,
-		sessionPrefix:  sessionPrefix,
-		defaultCommand: defaultCommand,
-		defaultCols:    80,
-		defaultRows:    24,
-		maxSessions:    maxSessions,
+		sessions:           make(map[string]*TerminalSession),
+		pendingKills:       make(map[string]context.CancelFunc),
+		scrollbackBuffers:  make(map[string]*ScrollbackBuffer),
+		tmuxPath:           tmuxPath,
+		sessionPrefix:      sessionPrefix,
+		defaultCommand:     defaultCommand,
+		defaultCols:        80,
+		defaultRows:        24,
+		maxSessions:        maxSessions,
+		scrollbackMaxLines: defaultScrollbackMaxLines,
 	}, nil
 }
 
@@ -114,6 +123,12 @@ func (m *TerminalManager) tmuxName(name string) string {
 		return name
 	}
 	return m.sessionPrefix + "-" + name
+}
+
+// SessionExists reports whether the named tmux session already exists.
+// The session prefix is applied automatically.
+func (m *TerminalManager) SessionExists(name string) bool {
+	return m.tmuxHasSession(m.tmuxName(name))
 }
 
 // tmuxHasSession checks whether a tmux session with the given name exists.
@@ -139,12 +154,16 @@ func (m *TerminalManager) tmuxNewSession(name, command string, cols, rows uint16
 		return err
 	}
 
-	// Enable mouse mode so wheel events reach the application inside tmux
-	mouseCmd := exec.Command(m.tmuxPath, "set-option", "-t", name, "mouse", "on")
-	if err := mouseCmd.Run(); err != nil {
-		log.Printf("Warning: failed to enable mouse mode for session %q: %v", name, err)
+	// Enable mouse mode and set scrollback history limit.
+	for _, opt := range [][2]string{
+		{"mouse", "on"},
+		{"history-limit", fmt.Sprintf("%d", m.scrollbackMaxLines)},
+	} {
+		c := exec.Command(m.tmuxPath, "set-option", "-t", name, opt[0], opt[1])
+		if err := c.Run(); err != nil {
+			log.Printf("Warning: failed to set %s for session %q: %v", opt[0], name, err)
+		}
 	}
-
 	return nil
 }
 
@@ -167,6 +186,7 @@ func (m *TerminalManager) tmuxAttach(name string) (*exec.Cmd, *os.File, error) {
 // If the tmux session doesn't exist, it creates one with the given command.
 // If command is empty, uses the manager's default command.
 // Multiple connections can attach to the same tmux session simultaneously.
+// Re-attaching cancels any pending deferred kill for this session.
 func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*TerminalSession, error) {
 	if !validSessionName.MatchString(name) {
 		return nil, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
@@ -180,6 +200,9 @@ func (m *TerminalManager) Attach(name, command string, cols, rows uint16) (*Term
 	if command == "" {
 		command = m.defaultCommand
 	}
+
+	// Cancel any pending deferred kill for this session.
+	m.CancelPendingKill(name)
 
 	// Apply prefix to get the actual tmux session name.
 	internalName := m.tmuxName(name)
@@ -354,6 +377,35 @@ func (m *TerminalManager) FindLatestAgentSession(agentName string) (string, bool
 	return bestName, true, nil
 }
 
+// Spawn creates a tmux session without attaching a PTY connection.
+// It is idempotent: if the session already exists, it returns (false, nil).
+// The returned bool indicates whether a new session was created.
+func (m *TerminalManager) Spawn(name, command string, cols, rows uint16) (bool, error) {
+	if !validSessionName.MatchString(name) {
+		return false, fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", name)
+	}
+	if cols == 0 {
+		cols = m.defaultCols
+	}
+	if rows == 0 {
+		rows = m.defaultRows
+	}
+
+	internalName := m.tmuxName(name)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.tmuxHasSession(internalName) {
+		return false, nil
+	}
+
+	if err := m.tmuxNewSession(internalName, command, cols, rows); err != nil {
+		return false, fmt.Errorf("tmux new-session: %w", err)
+	}
+	return true, nil
+}
+
 // Resize changes the PTY and tmux window dimensions for a connection.
 func (m *TerminalManager) Resize(connID string, cols, rows uint16) error {
 	m.mu.RLock()
@@ -403,11 +455,17 @@ func (m *TerminalManager) Detach(connID string) error {
 // Shutdown kills all tmux sessions and cleans up all PTYs.
 func (m *TerminalManager) Shutdown() error {
 	m.mu.Lock()
+	// Cancel all pending deferred kills.
+	for name, cancel := range m.pendingKills {
+		cancel()
+		delete(m.pendingKills, name)
+	}
 	sessions := make(map[string]*TerminalSession, len(m.sessions))
 	for k, v := range m.sessions {
 		sessions[k] = v
 	}
 	m.sessions = make(map[string]*TerminalSession)
+	m.scrollbackBuffers = make(map[string]*ScrollbackBuffer)
 	m.mu.Unlock()
 
 	// Close all PTYs first.
@@ -470,10 +528,44 @@ func (m *TerminalManager) KillSessionByName(name string) error {
 		}
 	}
 
+	// Capture scrollback to file before killing tmux session (best-effort).
+	m.captureScrollbackToFile(name)
+
 	// Kill the tmux session. Ignore errors (session may not exist).
 	cmd := exec.Command(m.tmuxPath, "kill-session", "-t", internalName)
 	_ = cmd.Run()
 
+	// Clean up the scrollback buffer for this session.
+	m.mu.Lock()
+	delete(m.scrollbackBuffers, internalName)
+	m.mu.Unlock()
+
+	// Invoke the session-killed callback (for session history recording).
+	if m.onSessionKilled != nil {
+		m.onSessionKilled(name)
+	}
+
+	return nil
+}
+
+// SendKeys sends text to a tmux session via `tmux send-keys`.
+// The session name should be the user-facing name (prefix is applied internally).
+// The text is sent as literal keys without a trailing Enter.
+func (m *TerminalManager) SendKeys(sessionName string, text string) error {
+	if !validSessionName.MatchString(sessionName) {
+		return fmt.Errorf("invalid session name %q: must match [a-zA-Z0-9_-]+", sessionName)
+	}
+
+	internalName := m.tmuxName(sessionName)
+
+	if !m.tmuxHasSession(internalName) {
+		return fmt.Errorf("tmux session %q not found", sessionName)
+	}
+
+	cmd := exec.Command(m.tmuxPath, "send-keys", "-t", internalName, "-l", text)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux send-keys failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
 	return nil
 }
 
@@ -487,4 +579,56 @@ func (m *TerminalManager) SessionCount() int {
 // MaxSessions returns the maximum allowed concurrent connections.
 func (m *TerminalManager) MaxSessions() int {
 	return m.maxSessions
+}
+
+// ScheduleKill schedules a deferred kill for the named session after the given delay.
+// If a pending kill already exists for this session, it is replaced.
+// The kill is cancelled if the session is re-attached before the delay expires.
+func (m *TerminalManager) ScheduleKill(name string, delay time.Duration) {
+	m.mu.Lock()
+	// Cancel any existing pending kill for this session.
+	if cancel, ok := m.pendingKills[name]; ok {
+		cancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.pendingKills[name] = cancel
+	myCancel := cancel // capture for identity check in goroutine
+	m.mu.Unlock()
+
+	go func() {
+		select {
+		case <-time.After(delay):
+			m.mu.Lock()
+			// Only delete if this goroutine's cancel is still the current one.
+			// A replacement ScheduleKill may have installed a new cancel.
+			if current, ok := m.pendingKills[name]; ok && sameFunc(current, myCancel) {
+				delete(m.pendingKills, name)
+			}
+			m.mu.Unlock()
+			// Only kill if no active connections remain.
+			if !m.HasActiveConnections(name) {
+				_ = m.KillSessionByName(name)
+			}
+		case <-ctx.Done():
+			// Cancelled — session was re-attached or server is shutting down.
+		}
+	}()
+}
+
+// sameFunc compares two function values by pointer identity.
+func sameFunc(a, b context.CancelFunc) bool {
+	return fmt.Sprintf("%p", a) == fmt.Sprintf("%p", b)
+}
+
+// CancelPendingKill cancels a pending deferred kill for the named session.
+// Returns true if a pending kill was found and cancelled.
+func (m *TerminalManager) CancelPendingKill(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cancel, ok := m.pendingKills[name]; ok {
+		cancel()
+		delete(m.pendingKills, name)
+		return true
+	}
+	return false
 }

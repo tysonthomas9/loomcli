@@ -377,10 +377,17 @@ func (s *Server) handleCreate(req *Request) Response {
 	// If we found a discovered-from dependency, inherit source_repo from parent
 	if discoveredFromParentID != "" {
 		parentIssue, err := store.GetIssue(ctx, discoveredFromParentID)
-		if err == nil && parentIssue.SourceRepo != "" {
+		if err == nil && parentIssue != nil && parentIssue.SourceRepo != "" {
 			issue.SourceRepo = parentIssue.SourceRepo
 		}
 		// If error getting parent or parent has no source_repo, continue with default
+	}
+
+	// Explicit --source-repo flag takes precedence over discovered-from inheritance.
+	// Note: the RPC protocol uses empty string for "not provided", so clearing
+	// source_repo via --source-repo="" is only supported in direct (non-daemon) mode.
+	if createArgs.SourceRepo != "" {
+		issue.SourceRepo = createArgs.SourceRepo
 	}
 
 	if err := store.CreateIssue(ctx, issue, s.reqActor(req)); err != nil {
@@ -540,7 +547,13 @@ func (s *Server) handleCreate(req *Request) Response {
 	}
 
 	// Emit mutation event for event-driven daemon
-	s.emitMutation(MutationCreate, issue.ID, issue.Title, issue.Assignee)
+	s.emitRichMutation(MutationEvent{
+		Type:       MutationCreate,
+		IssueID:    issue.ID,
+		Title:      issue.Title,
+		Assignee:   issue.Assignee,
+		SourceRepo: issue.SourceRepo,
+	})
 
 	data, _ := json.Marshal(issue)
 	return Response{
@@ -796,21 +809,23 @@ func (s *Server) handleUpdate(req *Request) Response {
 		// Check if this was a status change - emit rich MutationStatus event
 		if updateArgs.Status != nil && *updateArgs.Status != string(issue.Status) {
 			s.emitRichMutation(MutationEvent{
-				Type:      MutationStatus,
-				IssueID:   updateArgs.ID,
-				Title:     updatedIssue.Title,
-				Assignee:  updatedIssue.Assignee,
-				Actor:     actor,
-				OldStatus: string(issue.Status),
-				NewStatus: *updateArgs.Status,
+				Type:       MutationStatus,
+				IssueID:    updateArgs.ID,
+				Title:      updatedIssue.Title,
+				Assignee:   updatedIssue.Assignee,
+				Actor:      actor,
+				OldStatus:  string(issue.Status),
+				NewStatus:  *updateArgs.Status,
+				SourceRepo: updatedIssue.SourceRepo,
 			})
 		} else {
 			s.emitRichMutation(MutationEvent{
-				Type:     MutationUpdate,
-				IssueID:  updateArgs.ID,
-				Title:    updatedIssue.Title,
-				Assignee: updatedIssue.Assignee,
-				Actor:    actor,
+				Type:       MutationUpdate,
+				IssueID:    updateArgs.ID,
+				Title:      updatedIssue.Title,
+				Assignee:   updatedIssue.Assignee,
+				Actor:      actor,
+				SourceRepo: updatedIssue.SourceRepo,
 			})
 		}
 	}
@@ -889,12 +904,13 @@ func (s *Server) handleClose(req *Request) Response {
 
 	// Emit rich status change event for event-driven daemon
 	s.emitRichMutation(MutationEvent{
-		Type:      MutationStatus,
-		IssueID:   closeArgs.ID,
-		Title:     issue.Title,
-		Assignee:  issue.Assignee,
-		OldStatus: oldStatus,
-		NewStatus: "closed",
+		Type:       MutationStatus,
+		IssueID:    closeArgs.ID,
+		Title:      issue.Title,
+		Assignee:   issue.Assignee,
+		OldStatus:  oldStatus,
+		NewStatus:  "closed",
+		SourceRepo: issue.SourceRepo,
 	})
 
 	closedIssue, _ := store.GetIssue(ctx, closeArgs.ID)
@@ -1250,6 +1266,11 @@ func (s *Server) handleList(req *Request) Response {
 		filter.MolType = &molType
 	}
 
+	// Source repo filtering
+	if len(listArgs.SourceRepos) > 0 {
+		filter.SourceRepos = listArgs.SourceRepos
+	}
+
 	// Status exclusion (for default non-closed behavior, GH#788)
 	if len(listArgs.ExcludeStatus) > 0 {
 		for _, s := range listArgs.ExcludeStatus {
@@ -1488,6 +1509,11 @@ func (s *Server) handleCount(req *Request) Response {
 	// Priority range
 	filter.PriorityMin = countArgs.PriorityMin
 	filter.PriorityMax = countArgs.PriorityMax
+
+	// Source repo filtering
+	if len(countArgs.SourceRepos) > 0 {
+		filter.SourceRepos = countArgs.SourceRepos
+	}
 
 	ctx, cancel := s.reqCtx(req)
 	defer cancel()
@@ -1757,6 +1783,9 @@ func (s *Server) handleReady(req *Request) Response {
 	if readyArgs.MolType != "" {
 		molType := types.MolType(readyArgs.MolType)
 		wf.MolType = &molType
+	}
+	if len(readyArgs.SourceRepos) > 0 {
+		wf.SourceRepos = readyArgs.SourceRepos
 	}
 
 	ctx, cancel := s.reqCtx(req)
@@ -2173,6 +2202,10 @@ func (s *Server) handleGetGraphData(req *Request) Response {
 	}
 	for _, s := range args.ExcludeStatus {
 		filter.ExcludeStatus = append(filter.ExcludeStatus, types.Status(s))
+	}
+	// Source repo filtering
+	if len(args.SourceRepos) > 0 {
+		filter.SourceRepos = args.SourceRepos
 	}
 	// Exclude templates by default
 	isTemplate := false

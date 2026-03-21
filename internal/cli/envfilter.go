@@ -27,6 +27,8 @@ var envAllowlistExact = map[string]bool{
 	"NO_COLOR": true, "FORCE_COLOR": true, "CLICOLOR": true, "CLICOLOR_FORCE": true,
 	// AI backend keys
 	"ANTHROPIC_API_KEY": true, "OPENAI_API_KEY": true,
+	// Git hosting tokens (needed by container agents for git push)
+	"GITHUB_TOKEN": true,
 	// Editor
 	"EDITOR": true, "VISUAL": true,
 }

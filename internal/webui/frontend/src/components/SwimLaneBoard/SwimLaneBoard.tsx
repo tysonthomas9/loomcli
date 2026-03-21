@@ -19,6 +19,7 @@ import {
 import { useState, useMemo, useCallback, useEffect } from "react";
 
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
+import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
 import type { BlockedInfo } from "@/components/KanbanBoard";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import {
@@ -132,6 +133,10 @@ export interface SwimLaneBoardProps {
   defaultCollapsed?: boolean;
   /** Maximum cards to show per column in swim lanes (default: 5) */
   cardLimit?: number;
+  /** Set of issue IDs with pending optimistic updates */
+  pendingIds?: Set<string>;
+  /** Whether the app is in multi-repo mode (affects empty state text) */
+  isMultiRepo?: boolean;
 }
 
 /**
@@ -153,6 +158,8 @@ export function SwimLaneBoard({
   sortLanesBy = "title",
   defaultCollapsed = false,
   cardLimit,
+  pendingIds,
+  isMultiRepo,
 }: SwimLaneBoardProps): JSX.Element {
   // Resolve columns: props.columns > props.statuses (legacy) > default
   // In swim lane mode (groupBy !== 'none'), include epics in columns so they appear in lanes
@@ -175,6 +182,8 @@ export function SwimLaneBoard({
       ...(onDragEnd !== undefined && { onDragEnd }),
       ...(className !== undefined && { className }),
       ...(blockedIssues !== undefined && { blockedIssues }),
+      ...(pendingIds !== undefined && { pendingIds }),
+      ...(isMultiRepo !== undefined && { isMultiRepo }),
     };
     return <KanbanBoard {...kanbanProps} />;
   }
@@ -192,6 +201,8 @@ export function SwimLaneBoard({
     ...(className !== undefined && { className }),
     ...(blockedIssues !== undefined && { blockedIssues }),
     ...(cardLimit !== undefined && { cardLimit }),
+    ...(pendingIds !== undefined && { pendingIds }),
+    ...(isMultiRepo !== undefined && { isMultiRepo }),
   };
 
   return <SwimLaneBoardContent {...contentProps} />;
@@ -213,6 +224,8 @@ function SwimLaneBoardContent({
   sortLanesBy,
   defaultCollapsed,
   cardLimit,
+  pendingIds,
+  isMultiRepo,
 }: Omit<SwimLaneBoardProps, "filters" | "groupBy" | "statuses"> & {
   groupBy: Exclude<GroupByField, "none">;
   columns: KanbanColumnConfig[];
@@ -363,6 +376,17 @@ function SwimLaneBoardContent({
     [onDragEnd, columns, sourceColumnId],
   );
 
+  // Board-level empty state in swim lane mode
+  // SwimLaneBoardContent only applies showBlocked filtering, not user-driven filters,
+  // so hasFiltersActive is not set here — the caller is responsible for filtering issues.
+  if (filteredIssues.length === 0) {
+    return (
+      <EmptyWorkspaceBoard
+        {...(isMultiRepo !== undefined && { isMultiRepo })}
+      />
+    );
+  }
+
   const rootClassName = [styles.swimLaneBoard, className]
     .filter(Boolean)
     .join(" ");
@@ -415,6 +439,7 @@ function SwimLaneBoardContent({
             ...(blockedIssues !== undefined && { blockedIssues }),
             ...(showBlocked !== undefined && { showBlocked }),
             ...(cardLimit !== undefined && { cardLimit }),
+            ...(pendingIds !== undefined && { pendingIds }),
           };
           return <SwimLane key={lane.id} {...laneProps} />;
         })}

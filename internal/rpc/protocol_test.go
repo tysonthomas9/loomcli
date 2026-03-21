@@ -422,6 +422,7 @@ func TestOperationConstants(t *testing.T) {
 		"label_remove":          OpLabelRemove,
 		"comment_list":          OpCommentList,
 		"comment_add":           OpCommentAdd,
+		"event_list":            OpEventList,
 		"batch":                 OpBatch,
 		"resolve_id":            OpResolveID,
 		"compact":               OpCompact,

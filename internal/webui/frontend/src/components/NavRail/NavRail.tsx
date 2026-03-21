@@ -11,6 +11,8 @@ export interface NavRailProps {
   activeView: ViewMode;
   onChange: (view: ViewMode) => void;
   className?: string;
+  sessionCount?: number;
+  badges?: Partial<Record<ViewMode, boolean>>;
 }
 
 type NavItem = { id: ViewMode; label: string; icon: JSX.Element };
@@ -75,59 +77,6 @@ const TOP_ITEMS: NavItem[] = [
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "observability",
-    label: "Observability",
-    icon: (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect
-          x="4"
-          y="14"
-          width="4"
-          height="6"
-          rx="1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-        <rect
-          x="10"
-          y="8"
-          width="4"
-          height="12"
-          rx="1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-        <rect
-          x="16"
-          y="4"
-          width="4"
-          height="16"
-          rx="1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "files",
-    label: "Files",
-    icon: (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path
-          d="M3 7V5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinejoin="round"
         />
       </svg>
     ),
@@ -200,11 +149,16 @@ export function NavRail({
   activeView,
   onChange,
   className,
+  sessionCount,
+  badges,
 }: NavRailProps): JSX.Element {
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
 
   const renderButton = (item: NavItem) => {
     const isActive = activeView === item.id;
+    const showBadge =
+      item.id === "terminal" && sessionCount != null && sessionCount > 0;
+    const showUnread = !isActive && badges?.[item.id] === true;
     return (
       <button
         key={item.id}
@@ -213,11 +167,25 @@ export function NavRail({
         data-active={isActive || undefined}
         onClick={() => onChange(item.id)}
         aria-label={item.label}
+        title={item.label}
       >
         <span className={styles.icon}>{item.icon}</span>
-        <span className={styles.tooltip} role="tooltip">
-          {item.label}
-        </span>
+        {showBadge && (
+          <span
+            className={styles.badge}
+            aria-label={`${sessionCount} active sessions`}
+          >
+            {sessionCount}
+          </span>
+        )}
+        {showUnread && (
+          <span
+            role="img"
+            className={styles.unreadIndicator}
+            aria-label="has unread output"
+          />
+        )}
+        <span className={styles.tooltip}>{item.label}</span>
       </button>
     );
   };

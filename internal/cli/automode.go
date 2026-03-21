@@ -28,6 +28,11 @@ type AutoModeOptions struct {
 	CustomTaskCheck func() (bool, error)                  // Custom task availability check (overrides AgentType selection)
 	BackoffBase     time.Duration                         // Base backoff duration for no-progress retries (default 30s)
 	EventBus        events.Emitter                        // Event emission for observability (nil = no events)
+
+	// Interface abstractions for remote agent support.
+	// When nil, local filesystem implementations are used (existing behavior).
+	LockBridge   LockBridge
+	EventEmitter EventEmitter
 }
 
 // AutoModeState tracks the current state of auto mode execution
@@ -73,8 +78,15 @@ func interruptibleSleep(d time.Duration, shutdown <-chan struct{}) bool {
 
 // agentClaimedTask checks the lock file to determine if the agent claimed a task
 // during its session. Returns true if TaskID is non-empty.
-func agentClaimedTask(worktreePath string) bool {
-	info, err := ReadLockFile(worktreePath)
+// When bridge is non-nil, reads via the bridge; otherwise uses the local filesystem.
+func agentClaimedTask(worktreePath, agentName string, bridge LockBridge) bool {
+	var info *LockInfo
+	var err error
+	if bridge != nil {
+		info, err = bridge.ReadLock(agentName)
+	} else {
+		info, err = ReadLockFile(worktreePath)
+	}
 	if err != nil {
 		// Can't read lock file — daemon never ran or failed before writing lock.
 		// No task was claimed (no progress).
@@ -105,9 +117,11 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 	if opts.CustomTaskCheck != nil {
 		hasAvailableTasks = opts.CustomTaskCheck
 	} else if opts.AgentType == "plan" {
-		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID) }
+		hasAvailableTasks = func() (bool, error) { return HasAvailablePlanningTasks(opts.ParentID, os.Getenv("LOOM_AGENT_REPO")) }
 	} else {
-		hasAvailableTasks = func() (bool, error) { return HasAvailableImplementationTasks(opts.ParentID) }
+		hasAvailableTasks = func() (bool, error) {
+			return HasAvailableImplementationTasks(opts.ParentID, os.Getenv("LOOM_AGENT_REPO"))
+		}
 	}
 
 	// Prompt gen: custom overrides default
@@ -141,9 +155,29 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		fmt.Printf("[auto] Warning: usage tracking disabled: %v\n", usageErr)
 	}
 
+	// Helper closures for lock operations that use bridge when available.
+	updateState := func(state string) error {
+		if opts.LockBridge != nil {
+			return opts.LockBridge.UpdateState(opts.AgentName, state)
+		}
+		return UpdateLockState(opts.WorktreePath, state)
+	}
+	clearTaskID := func() error {
+		if opts.LockBridge != nil {
+			return opts.LockBridge.ClearTaskID(opts.AgentName)
+		}
+		return ClearLockTaskID(opts.WorktreePath)
+	}
+	readLock := func() (*LockInfo, error) {
+		if opts.LockBridge != nil {
+			return opts.LockBridge.ReadLock(opts.AgentName)
+		}
+		return ReadLockFile(opts.WorktreePath)
+	}
+
 	for {
 		// Set idle state at loop start
-		if err := UpdateLockState(opts.WorktreePath, StateIdle); err != nil {
+		if err := updateState(StateIdle); err != nil {
 			fmt.Printf("[auto] Warning: failed to update state: %v\n", err)
 		}
 
@@ -203,12 +237,12 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		state.IdleStartTime = time.Now()
 
 		// Set active state before invoking Claude
-		if err := UpdateLockState(opts.WorktreePath, StateActive); err != nil {
+		if err := updateState(StateActive); err != nil {
 			fmt.Printf("[auto] Warning: failed to update state: %v\n", err)
 		}
 
 		// Clear TaskID before new session so we can detect if the agent claims one
-		if clearErr := ClearLockTaskID(opts.WorktreePath); clearErr != nil {
+		if clearErr := clearTaskID(); clearErr != nil {
 			fmt.Printf("[auto] Warning: failed to clear task ID: %v\n", clearErr)
 		}
 
@@ -231,10 +265,10 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		err = InvokeAgentNonInteractive(opts.WorktreePath, prompt, opts.AgentName, shutdown, collector)
 
 		endedAt := time.Now()
-		recordSessionUsage(usageStore, collector, opts.WorktreePath, opts.ParentID, startedAt, endedAt, err)
+		recordSessionUsage(usageStore, collector, opts.WorktreePath, opts.AgentName, opts.ParentID, startedAt, endedAt, err, opts.LockBridge)
 
 		// Return to idle state after agent finishes
-		if updateErr := UpdateLockState(opts.WorktreePath, StateIdle); updateErr != nil {
+		if updateErr := updateState(StateIdle); updateErr != nil {
 			fmt.Printf("[auto] Warning: failed to update state: %v\n", updateErr)
 		}
 
@@ -244,7 +278,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 
 			// Emit task_failed event (try to include TaskID from lock file)
 			failedTaskID := ""
-			if info, readErr := ReadLockFile(opts.WorktreePath); readErr == nil && info != nil {
+			if info, readErr := readLock(); readErr == nil && info != nil {
 				failedTaskID = info.TaskID
 			}
 			if evt, evtErr := events.NewEvent(events.TaskFailed, opts.AgentName, "", "", events.TaskFailedData{TaskID: failedTaskID, Error: err.Error()}); evtErr == nil {
@@ -273,14 +307,14 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		// Success - reset error counter, check if real work happened
 		state.ConsecutiveErrors = 0
 
-		if agentClaimedTask(opts.WorktreePath) {
+		if agentClaimedTask(opts.WorktreePath, opts.AgentName, opts.LockBridge) {
 			state.TasksCompleted++
 			state.ConsecutiveNoProgress = 0
 			state.LastTaskTime = time.Now()
 
 			// Emit task_completed event with diff stats
 			taskID := ""
-			if info, readErr := ReadLockFile(opts.WorktreePath); readErr == nil && info != nil {
+			if info, readErr := readLock(); readErr == nil && info != nil {
 				taskID = info.TaskID
 			}
 			diffStats := ComputeDiffStats(opts.WorktreePath, beforeRef)
@@ -368,7 +402,8 @@ func formatTimeout(timeout int) string {
 
 // recordSessionUsage finalizes the usage collector and appends the record to the store.
 // Failures are logged but do not interrupt the auto mode loop.
-func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktreePath, parentID string, startedAt, endedAt time.Time, invokeErr error) {
+// When bridge is non-nil, reads the lock via the bridge; otherwise uses the local filesystem.
+func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktreePath, agentName, parentID string, startedAt, endedAt time.Time, invokeErr error, bridge LockBridge) {
 	if store == nil || collector == nil {
 		return
 	}
@@ -385,8 +420,14 @@ func recordSessionUsage(store *usage.Store, collector *usage.Collector, worktree
 
 	// Read task/epic context from lock file
 	var taskID, epicID string
-	if info, err := ReadLockFile(worktreePath); err == nil && info != nil {
-		taskID = info.TaskID
+	if bridge != nil {
+		if info, err := bridge.ReadLock(agentName); err == nil && info != nil {
+			taskID = info.TaskID
+		}
+	} else {
+		if info, err := ReadLockFile(worktreePath); err == nil && info != nil {
+			taskID = info.TaskID
+		}
 	}
 	epicID = parentID
 

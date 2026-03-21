@@ -5,8 +5,13 @@
 
 import type { LoomAgentStatus, ParsedLoomStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
+import { RepoBadge } from "@/components/RepoBadge";
+import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./AgentCard.module.css";
+
+// Re-export for backward compatibility (consumed by IssueCard, etc.)
+export { getAvatarColor } from "@/utils/colorUtils";
 
 /**
  * Props for the AgentCard component.
@@ -20,44 +25,6 @@ export interface AgentCardProps {
   className?: string;
   /** Click handler */
   onClick?: () => void;
-}
-
-/**
- * Pastel color palette for agent avatars.
- */
-const AVATAR_COLORS = [
-  "#9DC08B", // sage green
-  "#F59E87", // peach
-  "#B6B2DF", // lavender
-  "#95CBE9", // sky blue
-  "#F5C28E", // apricot
-  "#E8A5B3", // rose
-  "#A5D4C8", // mint
-  "#D4A5D8", // orchid
-];
-
-/**
- * Get a deterministic avatar background color from agent name.
- */
-export function getAvatarColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#9DC08B";
-}
-
-/**
- * Determine if white text has sufficient contrast on the given background.
- * Uses relative luminance approximation; returns true if bg is dark enough for white text.
- */
-function shouldUseWhiteText(hex: string): boolean {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  // Perceived brightness (ITU-R BT.601)
-  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-  return brightness < 160;
 }
 
 /**
@@ -129,6 +96,7 @@ export function AgentCard({
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
     : "Agent";
+  const changeCount = agent.ahead + (agent.changes?.length ?? 0);
 
   const rootClassName = [styles.card, className].filter(Boolean).join(" ");
 
@@ -169,6 +137,20 @@ export function AgentCard({
       <div className={styles.info}>
         <span className={styles.name}>{agent.name}</span>
         <span className={styles.role}>{roleLabel}</span>
+        {agent.repo && (
+          <span className={styles.repoLine}>
+            <RepoBadge repoName={agent.repo} />
+            {agent.cross_repo && (
+              <span
+                className={styles.crossRepoIndicator}
+                aria-label="Works across multiple repositories"
+                title="Cross-repo"
+              >
+                ↔
+              </span>
+            )}
+          </span>
+        )}
       </div>
 
       <div className={styles.meta}>
@@ -190,6 +172,14 @@ export function AgentCard({
               <span className={styles.behindCount}>-{agent.behind}</span>
             )}
           </div>
+        )}
+        {changeCount > 0 && (
+          <span
+            className={styles.changeBadge}
+            title={`${changeCount} total pending changes`}
+          >
+            +{changeCount}
+          </span>
         )}
         <span
           className={styles.statusLine}

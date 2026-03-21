@@ -62,7 +62,11 @@
 }
 
 .statusDropdown[data-status="review"] {
-  background-color: #f3e8ff; /* purple-100 */
+  background-color: color-mix(
+    in srgb,
+    var(--color-status-review) 15%,
+    var(--color-bg)
+  );
   color: var(--color-status-review);
 }
 

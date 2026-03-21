@@ -5,7 +5,7 @@ import { renderHook, act, waitFor as _waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { getIssue } from "@/api/issues";
-import type { IssueDetails } from "@/types";
+import type { Issue, IssueDetails } from "@/types";
 
 import { useIssueDetail } from "./useIssueDetail";
 
@@ -34,6 +34,20 @@ function createIssueDetails(
   };
 }
 
+/**
+ * Helper to create a minimal valid Issue for testing updateIssueDetails.
+ */
+function createIssue(overrides: Partial<Issue> = {}): Issue {
+  return {
+    id: overrides.id ?? "issue-1",
+    title: overrides.title ?? "Test Issue",
+    priority: overrides.priority ?? 2,
+    created_at: overrides.created_at ?? "2024-01-01T00:00:00Z",
+    updated_at: overrides.updated_at ?? "2024-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
 describe("useIssueDetail", () => {
   beforeEach(() => {
     mockGetIssue.mockReset();
@@ -52,9 +66,11 @@ describe("useIssueDetail", () => {
       expect(result.current).toHaveProperty("error");
       expect(result.current).toHaveProperty("fetchIssue");
       expect(result.current).toHaveProperty("clearIssue");
+      expect(result.current).toHaveProperty("updateIssueDetails");
 
       expect(typeof result.current.fetchIssue).toBe("function");
       expect(typeof result.current.clearIssue).toBe("function");
+      expect(typeof result.current.updateIssueDetails).toBe("function");
     });
 
     it("starts with null issueDetails, not loading, no error", () => {
@@ -629,6 +645,305 @@ describe("useIssueDetail", () => {
       expect(result.current.issueDetails?.dependencies).toHaveLength(1);
       expect(result.current.issueDetails?.comments).toHaveLength(1);
       expect(result.current.issueDetails?.parent).toBe("epic-1");
+    });
+  });
+
+  describe("updateIssueDetails", () => {
+    it("merges Issue fields into existing IssueDetails", async () => {
+      const original = createIssueDetails({
+        id: "issue-1",
+        title: "Original Title",
+        status: "open",
+        priority: 2,
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      mockGetIssue.mockResolvedValueOnce(original);
+
+      const { result } = renderHook(() => useIssueDetail());
+
+      await act(async () => {
+        await result.current.fetchIssue("issue-1");
+      });
+
+      expect(result.current.issueDetails?.title).toBe("Original Title");
+      expect(result.current.issueDetails?.status).toBe("open");
+
+      // Update with changed fields
+      act(() => {
+        result.current.updateIssueDetails(
+          createIssue({
+            id: "issue-1",
+            title: "Updated Title",
+            status: "in_progress",
+            priority: 1,
+            updated_at: "2024-01-02T00:00:00Z",
+          }),
+        );
+      });
+
+      expect(result.current.issueDetails?.title).toBe("Updated Title");
+      expect(result.current.issueDetails?.status).toBe("in_progress");
+      expect(result.current.issueDetails?.priority).toBe(1);
+      expect(result.current.issueDetails?.updated_at).toBe(
+        "2024-01-02T00:00:00Z",
+      );
+    });
+
+    it("preserves IssueDetails-only fields (comments, dependencies, dependents, parent)", async () => {
+      const original = createIssueDetails({
+        id: "issue-1",
+        title: "Original Title",
+        status: "open",
+        priority: 2,
+        comments: [
+          {
+            id: "comment-1",
+            content: "A comment",
+            created_at: "2024-01-01T00:00:00Z",
+            author: "user-1",
+          },
+        ],
+        dependencies: [
+          {
+            id: "dep-1",
+            title: "Dependency 1",
+            priority: 2,
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+            dependency_type: "blocks",
+          },
+        ],
+        dependents: [
+          {
+            id: "dep-2",
+            title: "Dependent 1",
+            priority: 3,
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+            dependency_type: "blocks",
+          },
+        ],
+        parent: "epic-1",
+      });
+      mockGetIssue.mockResolvedValueOnce(original);
+
+      const { result } = renderHook(() => useIssueDetail());
+
+      await act(async () => {
+        await result.current.fetchIssue("issue-1");
+      });
+
+      // Update with changed status via an Issue (which lacks comments/dependencies/dependents/parent)
+      act(() => {
+        result.current.updateIssueDetails(
+          createIssue({
+            id: "issue-1",
+            title: "Updated Title",
+            status: "closed",
+            priority: 2,
+            updated_at: "2024-01-02T00:00:00Z",
+          }),
+        );
+      });
+
+      // IssueDetails-only fields should be preserved
+      expect(result.current.issueDetails?.comments).toHaveLength(1);
+      expect(result.current.issueDetails?.comments?.[0]?.id).toBe("comment-1");
+      expect(result.current.issueDetails?.dependencies).toHaveLength(1);
+      expect(result.current.issueDetails?.dependencies?.[0]?.id).toBe("dep-1");
+      expect(result.current.issueDetails?.dependents).toHaveLength(1);
+      expect(result.current.issueDetails?.dependents?.[0]?.id).toBe("dep-2");
+      expect(result.current.issueDetails?.parent).toBe("epic-1");
+
+      // Updated fields should be applied
+      expect(result.current.issueDetails?.title).toBe("Updated Title");
+      expect(result.current.issueDetails?.status).toBe("closed");
+    });
+
+    it("is a no-op when issueDetails is null", () => {
+      const { result } = renderHook(() => useIssueDetail());
+
+      // issueDetails starts as null
+      expect(result.current.issueDetails).toBeNull();
+
+      act(() => {
+        result.current.updateIssueDetails(
+          createIssue({
+            id: "issue-1",
+            title: "Should not appear",
+            status: "open",
+          }),
+        );
+      });
+
+      // Should still be null
+      expect(result.current.issueDetails).toBeNull();
+    });
+
+    it("only updates defined optional fields (undefined fields are not merged)", async () => {
+      const original = createIssueDetails({
+        id: "issue-1",
+        title: "Original Title",
+        status: "open",
+        issue_type: "feature",
+        assignee: "user-a",
+        owner: "user-b",
+        description: "Original description",
+        design: "Original design",
+        notes: "Original notes",
+        labels: ["frontend", "urgent"],
+        priority: 2,
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      mockGetIssue.mockResolvedValueOnce(original);
+
+      const { result } = renderHook(() => useIssueDetail());
+
+      await act(async () => {
+        await result.current.fetchIssue("issue-1");
+      });
+
+      // Update with an Issue that only has required fields and status
+      // (all other optional fields are undefined)
+      act(() => {
+        result.current.updateIssueDetails(
+          createIssue({
+            id: "issue-1",
+            title: "New Title",
+            priority: 1,
+            updated_at: "2024-01-02T00:00:00Z",
+            status: "in_progress",
+            // issue_type, assignee, owner, description, design, notes, labels are all undefined
+          }),
+        );
+      });
+
+      // Always-patched fields should update
+      expect(result.current.issueDetails?.title).toBe("New Title");
+      expect(result.current.issueDetails?.priority).toBe(1);
+      expect(result.current.issueDetails?.updated_at).toBe(
+        "2024-01-02T00:00:00Z",
+      );
+      expect(result.current.issueDetails?.status).toBe("in_progress");
+
+      // Undefined optional fields should preserve original values
+      expect(result.current.issueDetails?.issue_type).toBe("feature");
+      expect(result.current.issueDetails?.assignee).toBe("user-a");
+      expect(result.current.issueDetails?.owner).toBe("user-b");
+      expect(result.current.issueDetails?.description).toBe(
+        "Original description",
+      );
+      expect(result.current.issueDetails?.design).toBe("Original design");
+      expect(result.current.issueDetails?.notes).toBe("Original notes");
+      expect(result.current.issueDetails?.labels).toEqual([
+        "frontend",
+        "urgent",
+      ]);
+    });
+
+    it("updates all optional fields when they are provided", async () => {
+      const original = createIssueDetails({
+        id: "issue-1",
+        title: "Original Title",
+        status: "open",
+        issue_type: "task",
+        assignee: "user-a",
+        owner: "user-b",
+        description: "Old description",
+        design: "Old design",
+        notes: "Old notes",
+        labels: ["old-label"],
+        priority: 3,
+        updated_at: "2024-01-01T00:00:00Z",
+      });
+      mockGetIssue.mockResolvedValueOnce(original);
+
+      const { result } = renderHook(() => useIssueDetail());
+
+      await act(async () => {
+        await result.current.fetchIssue("issue-1");
+      });
+
+      // Update all optional fields
+      act(() => {
+        result.current.updateIssueDetails(
+          createIssue({
+            id: "issue-1",
+            title: "New Title",
+            status: "closed",
+            issue_type: "bug",
+            assignee: "user-c",
+            owner: "user-d",
+            description: "New description",
+            design: "New design",
+            notes: "New notes",
+            labels: ["new-label-1", "new-label-2"],
+            priority: 1,
+            updated_at: "2024-01-03T00:00:00Z",
+          }),
+        );
+      });
+
+      expect(result.current.issueDetails?.title).toBe("New Title");
+      expect(result.current.issueDetails?.status).toBe("closed");
+      expect(result.current.issueDetails?.issue_type).toBe("bug");
+      expect(result.current.issueDetails?.assignee).toBe("user-c");
+      expect(result.current.issueDetails?.owner).toBe("user-d");
+      expect(result.current.issueDetails?.description).toBe("New description");
+      expect(result.current.issueDetails?.design).toBe("New design");
+      expect(result.current.issueDetails?.notes).toBe("New notes");
+      expect(result.current.issueDetails?.labels).toEqual([
+        "new-label-1",
+        "new-label-2",
+      ]);
+      expect(result.current.issueDetails?.priority).toBe(1);
+      expect(result.current.issueDetails?.updated_at).toBe(
+        "2024-01-03T00:00:00Z",
+      );
+    });
+
+    it("preserves id and created_at from the original IssueDetails", async () => {
+      const original = createIssueDetails({
+        id: "issue-1",
+        title: "Original Title",
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+        priority: 2,
+      });
+      mockGetIssue.mockResolvedValueOnce(original);
+
+      const { result } = renderHook(() => useIssueDetail());
+
+      await act(async () => {
+        await result.current.fetchIssue("issue-1");
+      });
+
+      act(() => {
+        result.current.updateIssueDetails(
+          createIssue({
+            id: "issue-1",
+            title: "Updated Title",
+            priority: 1,
+            updated_at: "2024-01-02T00:00:00Z",
+          }),
+        );
+      });
+
+      // id and created_at should remain from original
+      expect(result.current.issueDetails?.id).toBe("issue-1");
+      expect(result.current.issueDetails?.created_at).toBe(
+        "2024-01-01T00:00:00Z",
+      );
+    });
+
+    it("is stable across renders (referential equality)", () => {
+      const { result, rerender } = renderHook(() => useIssueDetail());
+
+      const initialUpdateFn = result.current.updateIssueDetails;
+
+      rerender();
+
+      expect(result.current.updateIssueDetails).toBe(initialUpdateFn);
     });
   });
 });

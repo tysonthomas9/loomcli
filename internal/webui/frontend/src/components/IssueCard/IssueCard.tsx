@@ -9,8 +9,13 @@ import {
   getStatusLabel,
 } from "@/components/AgentCard";
 import { BlockedBadge } from "@/components/BlockedBadge";
+import { HighlightText } from "@/components/HighlightText";
+import { RepoBadge } from "@/components/RepoBadge";
 import { TypeIcon } from "@/components/TypeIcon";
+import { useHasActiveSession } from "@/contexts/IssueSessionContext";
+import { useSearchTerm } from "@/contexts/SearchTermContext";
 import { useAgentContext } from "@/hooks";
+import { useWorkspaceContext } from "@/hooks/useWorkspaceContext";
 import type { BlockerRef, Issue } from "@/types";
 import { isKnownIssueType, parseLoomStatus } from "@/types";
 import { formatIssueId } from "@/utils/formatIssueId";
@@ -67,7 +72,17 @@ export interface IssueCardProps {
   isBacklog?: boolean;
   /** Column ID this card is displayed in (for conditional rendering) */
   columnId?: string;
+  /** Whether this issue has an active terminal session */
+  hasActiveSession?: boolean;
 }
+
+const PRIORITY_LABELS: Record<number, string> = {
+  0: "Critical",
+  1: "High",
+  2: "Medium",
+  3: "Normal",
+  4: "Backlog",
+};
 
 /**
  * Get priority level, defaulting to 4 (backlog) if undefined or out of range.
@@ -92,8 +107,16 @@ export function IssueCard({
   blockedByDetails,
   isBacklog = false,
   columnId,
+  hasActiveSession,
 }: IssueCardProps): JSX.Element {
   const { getAgentByName } = useAgentContext();
+  const { isMultiRepo, isAllSelected } = useWorkspaceContext();
+  const searchTerm = useSearchTerm();
+  const checkActiveSession = useHasActiveSession();
+  const showSessionBadge =
+    hasActiveSession !== undefined
+      ? hasActiveSession
+      : checkActiveSession(issue.id);
 
   const priority = getPriorityLevel(issue.priority);
   const displayId = formatIssueId(issue.id);
@@ -144,7 +167,32 @@ export function IssueCard({
       aria-label={`Issue: ${displayTitle}${isBlocked ? " (blocked)" : ""}${isBacklog ? " (backlog)" : ""}`}
     >
       <header className={styles.header}>
-        <span className={styles.id}>{displayId}</span>
+        <span className={styles.id} title={issue.id}>
+          {displayId}
+        </span>
+        {showSessionBadge && (
+          <span
+            className={styles.sessionBadge}
+            aria-label="Active terminal session"
+            title="Active terminal session"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="2" y="3" width="20" height="18" rx="2" />
+              <polyline points="8 10 12 14 8 18" />
+              <line x1="16" y1="18" x2="16" y2="18.01" />
+            </svg>
+          </span>
+        )}
         {issue.issue_type && isKnownIssueType(issue.issue_type) && (
           <TypeIcon
             type={issue.issue_type}
@@ -203,12 +251,33 @@ export function IssueCard({
         <span
           className={`${styles.priorityBadge} ${styles[`priority${priority}`]}`}
           data-priority={priority}
-          aria-label={`Priority ${priority}`}
+          aria-label={`Priority: P${priority} - ${PRIORITY_LABELS[priority] ?? "Unknown"}`}
         >
           P{priority}
         </span>
       </header>
-      <h3 className={styles.title}>{displayTitle}</h3>
+      <h3 className={styles.title}>
+        <HighlightText text={displayTitle} searchTerm={searchTerm} />
+      </h3>
+      {issue.owner && (
+        <span
+          className={styles.ownerBadge}
+          title={`Owner: ${issue.owner}`}
+          data-testid="issue-card-owner"
+        >
+          {issue.owner
+            .split(/\s+/)
+            .map((w) => w[0])
+            .join("")
+            .toUpperCase()
+            .slice(0, 2)}
+        </span>
+      )}
+      {isMultiRepo && isAllSelected && issue.repo && (
+        <div className={styles.cardFooter}>
+          <RepoBadge repoName={issue.repo} />
+        </div>
+      )}
       {showAgentRow && issue.assignee && (
         <AgentRow
           agentName={issue.assignee}

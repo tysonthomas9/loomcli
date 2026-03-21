@@ -20,6 +20,7 @@ type ReadyIssueWithParent struct {
 	*types.Issue
 	Parent      *string `json:"parent,omitempty"`       // Parent issue ID (null for root-level issues)
 	ParentTitle *string `json:"parent_title,omitempty"` // Parent issue title for display
+	Repo        *string `json:"repo,omitempty"`         // Repository that owns this issue
 }
 
 // ReadyResponse wraps the ready issues data for JSON response.
@@ -118,6 +119,9 @@ func buildReadyResponse(client readyClient, issues []*types.Issue) []*ReadyIssue
 			iwp.Parent = &parentInfo.ParentID
 			iwp.ParentTitle = &parentInfo.ParentTitle
 		}
+		if issue.SourceRepo != "" {
+			iwp.Repo = &issue.SourceRepo
+		}
 		result[i] = iwp
 	}
 	return result
@@ -212,7 +216,7 @@ func filterUnclosedBlockers(client readyClient, issues []*types.Issue) []*types.
 // an issue that is still unclosed. Uses types.Dependency (pointer slice).
 func hasUnclosedBlockersTyped(deps []*types.Dependency, unclosedIDs map[string]bool) bool {
 	for _, dep := range deps {
-		if dep.Type.AffectsReadyWork() && unclosedIDs[dep.DependsOnID] {
+		if dep.Type.IsDirectBlocker() && unclosedIDs[dep.DependsOnID] {
 			return true
 		}
 	}
@@ -274,6 +278,7 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 	// Array parameters
 	args.Labels = parseArrayParam(q, "labels")
 	args.LabelsAny = parseArrayParam(q, "labels_any")
+	args.SourceRepos = parseArrayParam(q, "source_repos")
 
 	return args, nil
 }

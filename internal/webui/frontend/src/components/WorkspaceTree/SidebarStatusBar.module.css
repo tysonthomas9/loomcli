@@ -1,0 +1,43 @@
+/**
+ * SidebarStatusBar styles.
+ * Compact bar at sidebar bottom showing agent activity counts.
+ */
+
+.statusBar {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dotWorking {
+  background: var(--color-status-working);
+}
+
+.dotReview {
+  background: var(--color-status-review);
+}
+
+.dotIdle {
+  background: var(--color-status-idle);
+}
+
+.separator {
+  color: var(--color-text-tertiary);
+}

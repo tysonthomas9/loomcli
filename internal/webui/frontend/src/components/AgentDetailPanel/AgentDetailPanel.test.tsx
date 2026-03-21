@@ -30,6 +30,24 @@ vi.mock("@/hooks", () => ({
     hasMoreLines: false,
     isLoadingMore: false,
   }),
+  useFocusReturn: vi.fn(),
+  useFocusTrap: vi.fn(),
+  useRegisterEscapeLayer: vi.fn(),
+  useKeyboardShortcuts: vi.fn(() => ({
+    isCheatsheetOpen: false,
+    toggleCheatsheet: vi.fn(),
+    closeCheatsheet: vi.fn(),
+  })),
+  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  LAYER_CONFIRM_DIALOG: 60,
+  LAYER_TOAST: 50,
+  LAYER_CHEATSHEET: 45,
+  LAYER_MODAL: 40,
+  LAYER_TERMINAL_PANEL: 30,
+  LAYER_AGENT_PANEL: 20,
+  LAYER_ISSUE_PANEL: 10,
+  LAYER_TERMINAL_SEARCH: 5,
 }));
 
 // Mock LogViewer to avoid terminal rendering complexity
@@ -48,6 +66,30 @@ vi.mock("../OpenInEditor", () => ({
 vi.mock("./GitTab", () => ({
   GitTab: ({ agent }: { agent: { name: string } }) => (
     <div data-testid="git-tab-mock" data-agent={agent.name} />
+  ),
+}));
+
+// Mock DiffTab to avoid its hook dependencies (useDiff)
+vi.mock("./DiffTab", () => ({
+  DiffTab: ({ agent }: { agent: { name: string } }) => (
+    <div data-testid="diff-tab-mock" data-agent={agent.name} />
+  ),
+}));
+
+// Mock FileEditorPanel to avoid pulling in CodeMirror and editor stack
+vi.mock("@/components/FileEditorPanel", () => ({
+  FileEditorPanel: ({
+    agentName,
+    isActive,
+  }: {
+    agentName: string;
+    isActive: boolean;
+  }) => (
+    <div
+      data-testid="file-editor-panel-mock"
+      data-agent={agentName}
+      data-active={String(isActive)}
+    />
   ),
 }));
 
@@ -165,12 +207,14 @@ describe("AgentDetailPanel", () => {
       expect(gitTab).toBeInTheDocument();
     });
 
-    it("renders all three tabs: Info, Logs, Git", () => {
+    it("renders all five tabs: Info, Logs, Git, Diff, Files", () => {
       renderPanel();
 
       expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
     });
 
     it("Info tab is selected by default", () => {
@@ -242,6 +286,175 @@ describe("AgentDetailPanel", () => {
         "aria-controls",
         "agent-panel-tabpanel-git",
       );
+    });
+  });
+
+  describe("Diff tab in tab bar", () => {
+    it("renders Diff tab button in the tab bar", () => {
+      renderPanel();
+      const diffTab = screen.getByRole("tab", { name: "Diff" });
+      expect(diffTab).toBeInTheDocument();
+    });
+
+    it("Diff tab activates on click and shows DiffTab component", async () => {
+      renderPanel({ name: "nova" });
+
+      // Diff tab should not be selected initially
+      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+
+      // Click Diff tab
+      fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+
+      // Diff tab should be selected
+      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+
+      // DiffTab mock should render (lazy-loaded via Suspense)
+      const diffTabMock = await screen.findByTestId("diff-tab-mock");
+      expect(diffTabMock).toHaveAttribute("data-agent", "nova");
+    });
+
+    it("Diff tab panel has correct ARIA attributes", async () => {
+      renderPanel();
+      fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+
+      // Wait for lazy load
+      await screen.findByTestId("diff-tab-mock");
+
+      const tabPanel = document.getElementById("agent-panel-tabpanel-diff");
+      expect(tabPanel).toBeInTheDocument();
+      expect(tabPanel).toHaveAttribute("role", "tabpanel");
+      expect(tabPanel).toHaveAttribute(
+        "aria-labelledby",
+        "agent-panel-tab-diff",
+      );
+    });
+
+    it("Diff tab button has correct ARIA attributes", () => {
+      renderPanel();
+      const diffTab = screen.getByRole("tab", { name: "Diff" });
+      expect(diffTab).toHaveAttribute("id", "agent-panel-tab-diff");
+      expect(diffTab).toHaveAttribute(
+        "aria-controls",
+        "agent-panel-tabpanel-diff",
+      );
+    });
+  });
+
+  describe("Files tab in tab bar", () => {
+    it("renders Files tab button in the tab bar", () => {
+      renderPanel();
+
+      const filesTab = screen.getByRole("tab", { name: "Files" });
+      expect(filesTab).toBeInTheDocument();
+    });
+
+    it("renders all five tabs: Info, Logs, Git, Diff, Files", () => {
+      renderPanel();
+
+      expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
+    });
+
+    it("Files tab activates on click", () => {
+      renderPanel();
+
+      // Files tab should not be selected initially
+      expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+
+      // Click Files tab
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+      // Files tab should be selected
+      expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+
+      // The tabpanel should render
+      const tabPanel = document.getElementById("agent-panel-tabpanel-files");
+      expect(tabPanel).toBeInTheDocument();
+    });
+
+    it("passes correct props to FileEditorPanel", async () => {
+      renderPanel({ name: "nova" });
+
+      // Click Files tab to render FileEditorPanel
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+      // FileEditorPanel is lazy-loaded, wait for it to resolve
+      const fileEditorMock = await screen.findByTestId(
+        "file-editor-panel-mock",
+      );
+      expect(fileEditorMock).toHaveAttribute("data-agent", "nova");
+      expect(fileEditorMock).toHaveAttribute("data-active", "true");
+    });
+
+    it("Files tab panel has correct ARIA attributes", () => {
+      renderPanel();
+
+      // Click Files tab
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+      const tabPanel = document.getElementById("agent-panel-tabpanel-files");
+      expect(tabPanel).toBeInTheDocument();
+      expect(tabPanel).toHaveAttribute("role", "tabpanel");
+      expect(tabPanel).toHaveAttribute(
+        "aria-labelledby",
+        "agent-panel-tab-files",
+      );
+    });
+
+    it("Files tab button has correct ARIA attributes", () => {
+      renderPanel();
+
+      const filesTab = screen.getByRole("tab", { name: "Files" });
+      expect(filesTab).toHaveAttribute("id", "agent-panel-tab-files");
+      expect(filesTab).toHaveAttribute(
+        "aria-controls",
+        "agent-panel-tabpanel-files",
+      );
+    });
+  });
+
+  describe("repo info in Agent Info section", () => {
+    it('shows "Repos" row with RepoBadge when agent.repo is set', () => {
+      renderPanel({ repo: "api" });
+
+      expect(screen.getByText("Repos")).toBeInTheDocument();
+      expect(screen.getByLabelText("Repository: api")).toBeInTheDocument();
+      expect(screen.getByText("api")).toBeInTheDocument();
+    });
+
+    it('does not show "Repos" row when agent.repo is undefined', () => {
+      renderPanel({ repo: undefined });
+
+      expect(screen.queryByText("Repos")).not.toBeInTheDocument();
+    });
+
+    it('shows "All repos" label when agent.cross_repo is true', () => {
+      renderPanel({ repo: "api", cross_repo: true });
+
+      expect(screen.getByText("Repos")).toBeInTheDocument();
+      expect(screen.getByText("All repos")).toBeInTheDocument();
+    });
+
+    it('does not show "All repos" when agent.cross_repo is false', () => {
+      renderPanel({ repo: "api", cross_repo: false });
+
+      expect(screen.getByText("Repos")).toBeInTheDocument();
+      expect(screen.queryByText("All repos")).not.toBeInTheDocument();
     });
   });
 

@@ -19,8 +19,12 @@ func NewSecurityHeadersMiddleware(cfg SecurityConfig) func(http.Handler) http.Ha
 			// does not support CSP nonces. The risk is mitigated by img-src 'self'
 			// which prevents CSS-based data exfiltration via background-image URLs.
 			// To remove: wait for @xterm/xterm nonce support or replace the terminal library.
+			//
+			// The sha256 hash allows the inline theme-detection script in index.html
+			// (prevents flash-of-wrong-theme). If that script changes, regenerate with:
+			//   python3 -c "import hashlib,base64;f=open('internal/webui/frontend/index.html').read();s=f[f.index('<script>')+8:f.index('</script>')];print('sha256-'+base64.b64encode(hashlib.sha256(s.encode()).digest()).decode())"
 			h.Set("Content-Security-Policy",
-				"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'")
+				"default-src 'self'; script-src 'self' 'sha256-E907z9SPF4o7blRe1MXfQVC2tBrJopXOXrMYZvksy/o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; report-uri /api/csp-report")
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			h.Set("X-Frame-Options", "DENY")

@@ -21,6 +21,7 @@ import { useBackendConfig } from "../useBackendConfig";
 vi.mock("@/api/config", () => ({
   getBackendConfig: vi.fn(),
   updateBackendConfig: vi.fn(),
+  getCachedBackendConfig: vi.fn().mockReturnValue(null),
 }));
 
 const mockGetBackendConfig = vi.mocked(getBackendConfig);

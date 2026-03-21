@@ -4,6 +4,7 @@
  */
 
 import Markdown from "react-markdown";
+import rehypeSanitize from "rehype-sanitize";
 
 import styles from "./MarkdownRenderer.module.css";
 
@@ -34,7 +35,7 @@ export function MarkdownRenderer({
 
   return (
     <div className={rootClassName} data-testid="markdown-content">
-      <Markdown>{content}</Markdown>
+      <Markdown rehypePlugins={[rehypeSanitize]}>{content}</Markdown>
     </div>
   );
 }

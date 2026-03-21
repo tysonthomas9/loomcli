@@ -31,7 +31,7 @@
   align-items: center;
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border-light);
-  background: #ece9df;
+  background: var(--color-bg-tertiary);
 }
 
 .panelTitle {
@@ -39,6 +39,13 @@
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   margin: 0;
+}
+
+.cachedBadge {
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: var(--color-warning);
+  margin-left: 8px;
 }
 
 .panelContent {
@@ -194,6 +201,32 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   font-style: italic;
+}
+
+/* Navigation button */
+.navButton {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.navButton:hover {
+  background-color: var(--color-bg-hover, #f0ede6);
+  border-color: var(--color-border-hover);
+}
+
+.navButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 /* Mobile */

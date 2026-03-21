@@ -665,6 +665,55 @@ describe("DraggableIssueCard", () => {
     });
   });
 
+  describe("pending optimistic state", () => {
+    it("applies data-optimistic='pending' when isPending is true", () => {
+      const mockIssue = createMockIssue();
+
+      const { container } = render(
+        <DraggableIssueCard issue={mockIssue} isPending={true} />,
+      );
+
+      const wrapper = container.firstChild as HTMLElement;
+      expect(wrapper).toHaveAttribute("data-optimistic", "pending");
+    });
+
+    it("does not apply data-optimistic when isPending is false", () => {
+      const mockIssue = createMockIssue();
+
+      const { container } = render(
+        <DraggableIssueCard issue={mockIssue} isPending={false} />,
+      );
+
+      const wrapper = container.firstChild as HTMLElement;
+      expect(wrapper).not.toHaveAttribute("data-optimistic");
+    });
+
+    it("does not apply data-optimistic when isPending is undefined", () => {
+      const mockIssue = createMockIssue();
+
+      const { container } = render(<DraggableIssueCard issue={mockIssue} />);
+
+      const wrapper = container.firstChild as HTMLElement;
+      expect(wrapper).not.toHaveAttribute("data-optimistic");
+    });
+
+    it("data-optimistic is not set in overlay mode even with isPending", () => {
+      const mockIssue = createMockIssue();
+
+      const { container } = render(
+        <DraggableIssueCard
+          issue={mockIssue}
+          isOverlay={true}
+          isPending={true}
+        />,
+      );
+
+      const wrapper = container.firstChild as HTMLElement;
+      // Overlay mode has different rendering path, no data-optimistic
+      expect(wrapper).not.toHaveAttribute("data-optimistic");
+    });
+  });
+
   describe("blocked props", () => {
     it("passes blockedByCount to IssueCard", () => {
       const mockIssue = createMockIssue();

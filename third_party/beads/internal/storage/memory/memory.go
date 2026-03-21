@@ -672,6 +672,20 @@ func (m *MemoryStorage) SearchIssues(ctx context.Context, query string, filter t
 			}
 		}
 
+		// Source repo filtering
+		if len(filter.SourceRepos) > 0 {
+			found := false
+			for _, repo := range filter.SourceRepos {
+				if issue.SourceRepo == repo {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
 		// Parent filtering (bd-yqhh): filter children by parent issue
 		if filter.ParentID != nil {
 			isChild := false
@@ -1212,6 +1226,20 @@ func (m *MemoryStorage) GetReadyWork(ctx context.Context, filter types.WorkFilte
 				}
 			}
 			if !hasAnyLabel {
+				continue
+			}
+		}
+
+		// Source repo filtering
+		if len(filter.SourceRepos) > 0 {
+			found := false
+			for _, repo := range filter.SourceRepos {
+				if issue.SourceRepo == repo {
+					found = true
+					break
+				}
+			}
+			if !found {
 				continue
 			}
 		}

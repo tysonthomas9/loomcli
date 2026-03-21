@@ -239,10 +239,10 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 
-		done := make(chan struct{})
+		crashCh := make(chan crashInfo, 1)
 		go func() {
-			defer close(done)
-			ptyToWS(ctx, cancel, conn, termSession)
+			result := ptyToWS(ctx, cancel, conn, termSession, manager, nil)
+			crashCh <- result
 		}()
 
 		wsToPTY(ctx, conn, termSession, manager, connID)
@@ -251,8 +251,6 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 			log.Printf("Failed to detach agent terminal connection %q: %v", connID, err)
 		}
 
-		<-done
-		closeStatus = websocket.StatusNormalClosure
-		closeReason = "session detached"
+		closeStatus, closeReason = (<-crashCh).wsClose()
 	}
 }

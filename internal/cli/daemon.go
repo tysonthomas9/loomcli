@@ -2,7 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
@@ -14,9 +14,10 @@ import (
 
 // AgentProcess tracks a single supervised agent subprocess.
 type AgentProcess struct {
-	entry        AgentEntry // config from loom.yaml
-	roleConfig   RoleConfig // resolved role configuration
-	worktreePath string     // resolved worktree path
+	entry        AgentEntry  // config from loom.yaml
+	roleConfig   RoleConfig  // resolved role configuration
+	worktreePath string      // resolved worktree path
+	repoConfig   *RepoConfig // per-repo config (nil in non-workspace mode)
 
 	cmd         *exec.Cmd // current subprocess (nil when not running)
 	pid         int       // PID of current subprocess (0 when not running)
@@ -35,7 +36,38 @@ type AgentProcess struct {
 
 	currentBackendIdx int // 0=primary, 1+=fallback index into entry.FallbackBackends
 
+	stopCh   chan struct{} // closed to signal this specific agent to stop (created in Start/addAgent)
+	done     chan struct{} // closed when superviseAgent goroutine exits
+	stopOnce sync.Once     // prevents double-close of stopCh
+
 	mu sync.Mutex // protects cmd, pid, logFile, restart tracking, assignedEpicID, lastError, currentBackendIdx
+}
+
+// resolveRemote returns the git remote name for this agent.
+// Uses repoConfig.Remote if available, otherwise defaults to "origin".
+func (ap *AgentProcess) resolveRemote() string {
+	if ap.repoConfig != nil && ap.repoConfig.Remote != "" {
+		return ap.repoConfig.Remote
+	}
+	return "origin"
+}
+
+// resolveRemoteBranch returns the full remote/branch ref for this agent
+// (e.g. "origin/main"). Uses repoConfig if available, otherwise defaults
+// to "origin/main".
+func (ap *AgentProcess) resolveRemoteBranch() string {
+	if ap.repoConfig != nil {
+		remote := ap.repoConfig.Remote
+		if remote == "" {
+			remote = "origin"
+		}
+		branch := ap.repoConfig.DefaultBranch
+		if branch == "" {
+			branch = "main"
+		}
+		return remote + "/" + branch
+	}
+	return "origin/main"
 }
 
 // SupervisedAgentStatus is a snapshot of a supervised agent's state for external inspection.
@@ -43,6 +75,7 @@ type AgentProcess struct {
 type SupervisedAgentStatus struct {
 	Worktree       string
 	Role           string
+	Repo           string
 	WorktreePath   string
 	PID            int
 	RestartCount   int
@@ -58,9 +91,11 @@ type Daemon struct {
 	config     *DaemonConfig
 	projectDir string // directory containing loom.yaml
 
-	// agents is populated during NewDaemon and is immutable afterward.
-	// Safe to read without holding mu after Start() is called.
-	agents       []*AgentProcess
+	// agents is the list of supervised agents. Protected by agentsMu for
+	// concurrent access — readers acquire RLock, writers (addAgent/drainAgent) acquire Lock.
+	agents   []*AgentProcess
+	agentsMu sync.RWMutex // protects the agents slice for concurrent read/write access
+
 	shutdown     chan struct{}  // closed to signal shutdown
 	shutdownOnce sync.Once      // protects shutdown channel from double-close
 	wg           sync.WaitGroup // tracks superviseAgent goroutines
@@ -68,6 +103,33 @@ type Daemon struct {
 	epicAssigner *EpicAssigner       // manages epic-to-worktree assignments
 	concurrency  *ConcurrencyTracker // enforces per-role concurrency limits
 	eventBus     events.Emitter      // event emission for observability (nil-safe via NopBus default)
+	repos        []RepoConfig        // workspace repos for resolveAgentRepos; nil outside workspace mode
+
+	configHash  string       // SHA-256 hash of current running config for no-op detection
+	reconcileMu sync.RWMutex // serializes config writes; readers hold RLock when accessing d.config
+}
+
+// configSnapshot returns a snapshot of the current config pointer under RLock.
+// Safe for concurrent use with reloadAndReconcile which swaps d.config under Lock.
+func (d *Daemon) configSnapshot() *DaemonConfig {
+	d.reconcileMu.RLock()
+	cfg := d.config
+	d.reconcileMu.RUnlock()
+	return cfg
+}
+
+// findRepoConfig looks up a RepoConfig by name in d.repos.
+// Returns nil if repoName is empty or not found (non-workspace mode).
+func (d *Daemon) findRepoConfig(repoName string) *RepoConfig {
+	if repoName == "" {
+		return nil
+	}
+	for i := range d.repos {
+		if d.repos[i].Name == repoName {
+			return &d.repos[i]
+		}
+	}
+	return nil
 }
 
 // emitEvent is a convenience helper that emits an event via the daemon's event bus.
@@ -77,7 +139,7 @@ func (d *Daemon) emitEvent(evt events.Event) {
 		return
 	}
 	if err := d.eventBus.Emit(evt); err != nil {
-		log.Printf("[daemon] Failed to emit %s event: %v", evt.Type, err)
+		slog.Warn("failed to emit event", "event_type", evt.Type, "err", err)
 	}
 }
 
@@ -110,9 +172,14 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 		eventBus:     eventBus,
 	}
 
+	// Load workspace repos for source repo resolution (best-effort)
+	if ws, err := ResolveActiveWorkspace(); err == nil && ws != nil {
+		d.repos = ws.Repos
+	}
+
 	for i, entry := range config.Agents {
-		// Resolve worktree path
-		target, err := ResolveAgentTarget(entry.Worktree)
+		// Resolve worktree path (handles per-repo routing when entry.Repo is set)
+		target, err := ResolveAgentTarget(entry.Worktree, entry.Repo)
 		if err != nil {
 			return nil, fmt.Errorf("agent[%d] worktree %q: %w", i, entry.Worktree, err)
 		}
@@ -127,6 +194,7 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 			entry:        entry,
 			roleConfig:   roleConfig,
 			worktreePath: target.WorkDir,
+			repoConfig:   d.findRepoConfig(entry.Repo),
 		}
 		d.agents = append(d.agents, ap)
 	}
@@ -139,27 +207,32 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 // when epic assignments differ from a prior daemon run — git refuses
 // to checkout a branch that is already checked out in another worktree.
 func (d *Daemon) resetWorktreeBranches() {
-	for _, ap := range d.agents {
+	d.agentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(d.agents))
+	copy(snapshot, d.agents)
+	d.agentsMu.RUnlock()
+
+	for _, ap := range snapshot {
 		current, err := GetCurrentBranch(ap.worktreePath)
 		if err != nil {
-			log.Printf("[daemon] Warning: failed to get branch for %s: %v", ap.entry.Worktree, err)
+			slog.Warn("failed to get branch", "worktree", ap.entry.Worktree, "err", err)
 			continue
 		}
 		defaultBranch := ap.entry.Worktree
 		if current == defaultBranch {
 			continue
 		}
-		log.Printf("[daemon] Resetting worktree %s from %s to %s", ap.entry.Worktree, current, defaultBranch)
+		slog.Info("resetting worktree branch", "worktree", ap.entry.Worktree, "from", current, "to", defaultBranch)
 		// Create WIP commit if dirty
 		clean, _ := IsCleanWorkingTree(ap.worktreePath)
 		if !clean {
 			msg := fmt.Sprintf("WIP: daemon startup reset from %s", current)
 			if err := commitWIP(ap.worktreePath, msg); err != nil {
-				log.Printf("[daemon] Warning: WIP commit failed for %s: %v", ap.entry.Worktree, err)
+				slog.Warn("WIP commit failed", "worktree", ap.entry.Worktree, "err", err)
 			}
 		}
 		if err := GitCheckout(ap.worktreePath, defaultBranch); err != nil {
-			log.Printf("[daemon] Warning: failed to reset worktree %s to %s: %v", ap.entry.Worktree, defaultBranch, err)
+			slog.Warn("failed to reset worktree", "worktree", ap.entry.Worktree, "branch", defaultBranch, "err", err)
 		}
 	}
 }
@@ -172,6 +245,12 @@ func (d *Daemon) Start() error {
 	// cross-checkout conflicts from prior daemon runs.
 	d.resetWorktreeBranches()
 
+	// Compute initial config hash for reconciler no-op detection.
+	// Take reconcileMu to stay consistent with reloadAndReconcile's write pattern.
+	d.reconcileMu.Lock()
+	d.configHash = computeConfigHash(d.config)
+	d.reconcileMu.Unlock()
+
 	// Start healthChecker goroutine
 	d.wg.Add(1)
 	go func() {
@@ -179,11 +258,26 @@ func (d *Daemon) Start() error {
 		d.healthChecker()
 	}()
 
-	// Start superviseAgent goroutine for each agent
-	for _, ap := range d.agents {
+	// Start configReconciler goroutine
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.configReconciler()
+	}()
+
+	// Initialize stop/done channels and start superviseAgent goroutine for each agent
+	d.agentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(d.agents))
+	copy(snapshot, d.agents)
+	d.agentsMu.RUnlock()
+
+	for _, ap := range snapshot {
+		ap.stopCh = make(chan struct{})
+		ap.done = make(chan struct{})
 		d.wg.Add(1)
 		go func(agent *AgentProcess) {
 			defer d.wg.Done()
+			defer close(agent.done)
 			d.superviseAgent(agent)
 		}(ap)
 	}
@@ -202,7 +296,12 @@ func (d *Daemon) Stop() {
 	d.concurrency.Close()
 
 	// Stop all agent processes
-	for _, ap := range d.agents {
+	d.agentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(d.agents))
+	copy(snapshot, d.agents)
+	d.agentsMu.RUnlock()
+
+	for _, ap := range snapshot {
 		d.stopAgent(ap)
 	}
 
@@ -213,33 +312,36 @@ func (d *Daemon) Stop() {
 // superviseAgent is the main loop for a single agent (runs in goroutine).
 func (d *Daemon) superviseAgent(ap *AgentProcess) {
 	defer d.epicAssigner.ReleaseWorktree(ap.entry.Worktree)
-	log.Printf("[daemon] Starting supervisor for agent %s (role: %s)", ap.entry.Worktree, ap.entry.Role)
+	slog.Info("starting agent supervisor", "worktree", ap.entry.Worktree, "role", ap.entry.Role)
 
 	for {
-		// Check shutdown before each cycle
+		// Check shutdown or per-agent stop before each cycle
 		select {
 		case <-d.shutdown:
-			log.Printf("[daemon] Agent %s: shutdown signal received", ap.entry.Worktree)
+			slog.Info("shutdown signal received", "worktree", ap.entry.Worktree)
+			return
+		case <-ap.stopCh:
+			slog.Info("stop signal received", "worktree", ap.entry.Worktree)
 			return
 		default:
 		}
 
 		// Acquire concurrency slot for this role (blocks if at limit)
 		if !d.concurrency.Acquire(ap.entry.Role) {
-			log.Printf("[daemon] Agent %s: concurrency tracker closed, exiting", ap.entry.Worktree)
+			slog.Info("concurrency tracker closed, exiting", "worktree", ap.entry.Worktree)
 			return
 		}
 
 		// 1. Pre-flight recovery
 		if err := d.recoverAgent(ap, 0); err != nil {
-			log.Printf("[daemon] Agent %s: pre-flight recovery failed: %v", ap.entry.Worktree, err)
+			slog.Warn("pre-flight recovery failed", "worktree", ap.entry.Worktree, "err", err)
 			// Continue with caution - spawn may still work
 		}
 
 		// 1.5. Assign epic to worktree (if available)
 		epicID, err := d.epicAssigner.AssignWorktree(ap.entry.Worktree)
 		if err != nil {
-			log.Printf("[daemon] Agent %s: epic assignment failed (falling back to non-epic mode): %v", ap.entry.Worktree, err)
+			slog.Warn("epic assignment failed, falling back to non-epic mode", "worktree", ap.entry.Worktree, "err", err)
 			epicID = ""
 		}
 		ap.mu.Lock()
@@ -258,9 +360,9 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		if epicID != "" {
 			targetBranch = epicBranchName(epicID)
 		}
-		log.Printf("[daemon] Agent %s: ensuring branch %s", ap.entry.Worktree, targetBranch)
-		if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, "origin/main"); err != nil {
-			log.Printf("[daemon] Agent %s: branch setup failed: %v", ap.entry.Worktree, err)
+		slog.Info("ensuring branch", "worktree", ap.entry.Worktree, "branch", targetBranch)
+		if err := EnsureWorktreeBranch(ap.worktreePath, targetBranch, ap.resolveRemote(), ap.resolveRemoteBranch()); err != nil {
+			slog.Warn("branch setup failed", "worktree", ap.entry.Worktree, "err", err)
 			d.concurrency.Release(ap.entry.Role)
 			if !d.handleRestartAfterError(ap) {
 				return
@@ -270,7 +372,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 3. Spawn subprocess
 		if err := d.spawnAgent(ap); err != nil {
-			log.Printf("[daemon] Agent %s: spawn failed: %v", ap.entry.Worktree, err)
+			slog.Warn("spawn failed", "worktree", ap.entry.Worktree, "err", err)
 			d.concurrency.Release(ap.entry.Role)
 			if !d.handleRestartAfterError(ap) {
 				return
@@ -289,7 +391,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 5. Post-mortem recovery (exit-code-aware)
 		if err := d.recoverAgent(ap, exitCode); err != nil {
-			log.Printf("[daemon] Agent %s: post-mortem recovery failed: %v", ap.entry.Worktree, err)
+			slog.Warn("post-mortem recovery failed", "worktree", ap.entry.Worktree, "err", err)
 			// Non-fatal, continue with restart logic
 		}
 
@@ -299,7 +401,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		ap.mu.Unlock()
 		if currentEpicID != "" {
 			if err := EnsureEpicPR(ap.worktreePath, currentEpicID, d.eventBus); err != nil {
-				log.Printf("[daemon] Agent %s: PR creation failed: %v", ap.entry.Worktree, err)
+				slog.Warn("PR creation failed", "worktree", ap.entry.Worktree, "err", err)
 				// Non-fatal — don't block restart
 			}
 		}
@@ -312,28 +414,30 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 		// 6. Epic exhaustion check and reassignment
 		if err := d.handleEpicTransition(ap); err != nil {
-			log.Printf("[daemon] Agent %s: epic transition failed: %v", ap.entry.Worktree, err)
+			slog.Warn("epic transition failed", "worktree", ap.entry.Worktree, "err", err)
 			// Non-fatal: agent will respawn in current mode
 		}
 
-		// 7. Check shutdown after subprocess exit
+		// 7. Check shutdown or per-agent stop after subprocess exit
 		select {
 		case <-d.shutdown:
-			log.Printf("[daemon] Agent %s: shutdown signal received after exit", ap.entry.Worktree)
+			slog.Info("shutdown signal received after exit", "worktree", ap.entry.Worktree)
+			return
+		case <-ap.stopCh:
+			slog.Info("stop signal received after exit", "worktree", ap.entry.Worktree)
 			return
 		default:
 		}
 
 		// 7.5. Check for backend failover (before restart decision)
 		if d.tryFallbackBackend(ap) {
-			log.Printf("[daemon] Agent %s: backend failover triggered, retrying with %s",
-				ap.entry.Worktree, d.getEffectiveBackend(ap))
+			slog.Info("backend failover triggered", "worktree", ap.entry.Worktree, "backend", d.getEffectiveBackend(ap))
 			continue
 		}
 
 		// 8. Restart decision
 		if !d.shouldRestart(ap) {
-			log.Printf("[daemon] Agent %s: max restarts exceeded, stopping supervisor", ap.entry.Worktree)
+			slog.Warn("max restarts exceeded, stopping supervisor", "worktree", ap.entry.Worktree)
 			return
 		}
 
@@ -342,7 +446,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		ap.mu.Lock()
 		count := ap.restartCount
 		ap.mu.Unlock()
-		log.Printf("[daemon] Agent %s: waiting %v before restart (attempt %d)", ap.entry.Worktree, backoff, count)
+		slog.Info("waiting before restart", "worktree", ap.entry.Worktree, "backoff", backoff, "attempt", count)
 
 		// Emit agent_restarted event
 		if evt, err := events.NewEvent(events.AgentRestarted, ap.entry.Worktree, ap.entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
@@ -353,7 +457,10 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		case <-time.After(backoff):
 			// Backoff complete, continue to next iteration
 		case <-d.shutdown:
-			log.Printf("[daemon] Agent %s: shutdown during backoff", ap.entry.Worktree)
+			slog.Info("shutdown during backoff", "worktree", ap.entry.Worktree)
+			return
+		case <-ap.stopCh:
+			slog.Info("stop signal during backoff", "worktree", ap.entry.Worktree)
 			return
 		}
 	}
@@ -361,18 +468,27 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 
 // AgentCount returns the number of configured agents.
 func (d *Daemon) AgentCount() int {
-	return len(d.agents)
+	d.agentsMu.RLock()
+	n := len(d.agents)
+	d.agentsMu.RUnlock()
+	return n
 }
 
 // Agents returns a snapshot of all agent statuses for inspection.
 // The returned SupervisedAgentStatus structs are safe to use without synchronization.
 func (d *Daemon) Agents() []SupervisedAgentStatus {
-	result := make([]SupervisedAgentStatus, len(d.agents))
-	for i, ap := range d.agents {
+	d.agentsMu.RLock()
+	snapshot := make([]*AgentProcess, len(d.agents))
+	copy(snapshot, d.agents)
+	d.agentsMu.RUnlock()
+
+	result := make([]SupervisedAgentStatus, len(snapshot))
+	for i, ap := range snapshot {
 		ap.mu.Lock()
 		result[i] = SupervisedAgentStatus{
 			Worktree:       ap.entry.Worktree,
 			Role:           ap.entry.Role,
+			Repo:           ap.entry.Repo,
 			WorktreePath:   ap.worktreePath,
 			PID:            ap.pid,
 			RestartCount:   ap.restartCount,

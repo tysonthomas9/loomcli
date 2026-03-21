@@ -216,6 +216,168 @@ describe("IssueHeader", () => {
     });
   });
 
+  describe("PR links", () => {
+    it("does not render PR links when prUrl and prNumber are not provided", () => {
+      render(<IssueHeader issue={mockIssue} onClose={() => {}} />);
+      expect(
+        screen.queryByTestId("header-pr-view-link"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-pr-merge-link"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render PR links when only prUrl is provided", () => {
+      render(
+        <IssueHeader
+          issue={mockIssue}
+          onClose={() => {}}
+          prUrl="https://github.com/owner/repo/pull/42"
+        />,
+      );
+      expect(
+        screen.queryByTestId("header-pr-view-link"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-pr-merge-link"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render PR links when only prNumber is provided", () => {
+      render(
+        <IssueHeader issue={mockIssue} onClose={() => {}} prNumber="42" />,
+      );
+      expect(
+        screen.queryByTestId("header-pr-view-link"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-pr-merge-link"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders view link with correct text when prUrl and prNumber provided", () => {
+      render(
+        <IssueHeader
+          issue={mockIssue}
+          onClose={() => {}}
+          prUrl="https://github.com/owner/repo/pull/42"
+          prNumber="42"
+        />,
+      );
+      const viewLink = screen.getByTestId("header-pr-view-link");
+      expect(viewLink).toBeInTheDocument();
+      expect(viewLink).toHaveTextContent("↗ #42");
+    });
+
+    it("renders merge link with correct text when prUrl and prNumber provided", () => {
+      render(
+        <IssueHeader
+          issue={mockIssue}
+          onClose={() => {}}
+          prUrl="https://github.com/owner/repo/pull/42"
+          prNumber="42"
+        />,
+      );
+      const mergeLink = screen.getByTestId("header-pr-merge-link");
+      expect(mergeLink).toBeInTheDocument();
+      expect(mergeLink).toHaveTextContent("→ merge #42");
+    });
+
+    it("view link has correct href, target, and rel attributes", () => {
+      render(
+        <IssueHeader
+          issue={mockIssue}
+          onClose={() => {}}
+          prUrl="https://github.com/owner/repo/pull/42"
+          prNumber="42"
+        />,
+      );
+      const viewLink = screen.getByTestId("header-pr-view-link");
+      expect(viewLink).toHaveAttribute(
+        "href",
+        "https://github.com/owner/repo/pull/42",
+      );
+      expect(viewLink).toHaveAttribute("target", "_blank");
+      expect(viewLink).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    it("merge link has correct href, target, and rel attributes", () => {
+      render(
+        <IssueHeader
+          issue={mockIssue}
+          onClose={() => {}}
+          prUrl="https://github.com/owner/repo/pull/42"
+          prNumber="42"
+        />,
+      );
+      const mergeLink = screen.getByTestId("header-pr-merge-link");
+      expect(mergeLink).toHaveAttribute(
+        "href",
+        "https://github.com/owner/repo/pull/42",
+      );
+      expect(mergeLink).toHaveAttribute("target", "_blank");
+      expect(mergeLink).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    it("view link has correct aria-label", () => {
+      render(
+        <IssueHeader
+          issue={mockIssue}
+          onClose={() => {}}
+          prUrl="https://github.com/owner/repo/pull/42"
+          prNumber="42"
+        />,
+      );
+      const viewLink = screen.getByTestId("header-pr-view-link");
+      expect(viewLink).toHaveAttribute("aria-label", "View pull request #42");
+    });
+
+    it("merge link has correct aria-label", () => {
+      render(
+        <IssueHeader
+          issue={mockIssue}
+          onClose={() => {}}
+          prUrl="https://github.com/owner/repo/pull/42"
+          prNumber="42"
+        />,
+      );
+      const mergeLink = screen.getByTestId("header-pr-merge-link");
+      expect(mergeLink).toHaveAttribute("aria-label", "Merge pull request #42");
+    });
+
+    it("view link calls stopPropagation on click", () => {
+      render(
+        <IssueHeader
+          issue={mockIssue}
+          onClose={() => {}}
+          prUrl="https://github.com/owner/repo/pull/42"
+          prNumber="42"
+        />,
+      );
+      const viewLink = screen.getByTestId("header-pr-view-link");
+      const clickEvent = new MouseEvent("click", { bubbles: true });
+      const stopPropagation = vi.spyOn(clickEvent, "stopPropagation");
+      viewLink.dispatchEvent(clickEvent);
+      expect(stopPropagation).toHaveBeenCalled();
+    });
+
+    it("merge link calls stopPropagation on click", () => {
+      render(
+        <IssueHeader
+          issue={mockIssue}
+          onClose={() => {}}
+          prUrl="https://github.com/owner/repo/pull/42"
+          prNumber="42"
+        />,
+      );
+      const mergeLink = screen.getByTestId("header-pr-merge-link");
+      const clickEvent = new MouseEvent("click", { bubbles: true });
+      const stopPropagation = vi.spyOn(clickEvent, "stopPropagation");
+      mergeLink.dispatchEvent(clickEvent);
+      expect(stopPropagation).toHaveBeenCalled();
+    });
+  });
+
   describe("sticky mode", () => {
     it("applies sticky class when sticky prop is true", () => {
       render(

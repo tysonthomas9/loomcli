@@ -17,6 +17,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import "@testing-library/jest-dom";
 
+import type { LoomAgentStatus } from "@/types";
+
 import { AssigneeDropdown } from "../AssigneeDropdown";
 
 // Mock useRecentAssignees hook
@@ -30,6 +32,22 @@ vi.mock("@/hooks", () => ({
     addRecentAssignee: mockAddRecentAssignee,
     clearRecentAssignees: mockClearRecentAssignees,
   }),
+  useRegisterEscapeLayer: vi.fn(),
+  useKeyboardShortcuts: vi.fn(() => ({
+    isCheatsheetOpen: false,
+    toggleCheatsheet: vi.fn(),
+    closeCheatsheet: vi.fn(),
+  })),
+  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  LAYER_CONFIRM_DIALOG: 60,
+  LAYER_TOAST: 50,
+  LAYER_CHEATSHEET: 45,
+  LAYER_MODAL: 40,
+  LAYER_TERMINAL_PANEL: 30,
+  LAYER_AGENT_PANEL: 20,
+  LAYER_ISSUE_PANEL: 10,
+  LAYER_TERMINAL_SEARCH: 5,
 }));
 
 describe("AssigneeDropdown", () => {
@@ -147,7 +165,8 @@ describe("AssigneeDropdown", () => {
       fireEvent.click(trigger);
       expect(screen.getByTestId("assignee-dropdown-menu")).toBeInTheDocument();
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("assignee-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(
         screen.queryByTestId("assignee-dropdown-menu"),
       ).not.toBeInTheDocument();
@@ -191,7 +210,8 @@ describe("AssigneeDropdown", () => {
       const trigger = screen.getByTestId("assignee-dropdown-trigger");
       fireEvent.click(trigger);
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("assignee-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
       expect(document.activeElement).toBe(trigger);
     });
 
@@ -223,7 +243,8 @@ describe("AssigneeDropdown", () => {
       });
 
       // Close
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("assignee-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
 
       // Reopen
       fireEvent.click(trigger);
@@ -339,7 +360,7 @@ describe("AssigneeDropdown", () => {
       render(<AssigneeDropdown {...defaultProps} />);
       fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
 
-      expect(screen.getByText("Recent")).toBeInTheDocument();
+      expect(screen.getByText("People")).toBeInTheDocument();
       expect(screen.getByTestId("recent-assignee-Alice")).toBeInTheDocument();
       expect(screen.getByTestId("recent-assignee-Bob")).toBeInTheDocument();
     });
@@ -349,7 +370,7 @@ describe("AssigneeDropdown", () => {
       render(<AssigneeDropdown {...defaultProps} />);
       fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
 
-      expect(screen.queryByText("Recent")).not.toBeInTheDocument();
+      expect(screen.queryByText("People")).not.toBeInTheDocument();
     });
 
     it("calls onSave with [H] prefix when clicking a recent name", async () => {
@@ -487,7 +508,8 @@ describe("AssigneeDropdown", () => {
         target: { value: "Bob" },
       });
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("assignee-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
 
       expect(
         screen.queryByTestId("assignee-dropdown-menu"),
@@ -504,7 +526,8 @@ describe("AssigneeDropdown", () => {
         target: { value: "Bob" },
       });
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const menu = screen.getByTestId("assignee-dropdown-menu");
+      fireEvent.keyDown(menu, { key: "Escape" });
 
       // Reopen and verify input is cleared
       fireEvent.click(trigger);
@@ -967,6 +990,571 @@ describe("AssigneeDropdown", () => {
       const trigger = screen.getByTestId("assignee-dropdown-trigger");
       const svg = trigger.querySelector("svg");
       expect(svg).toBeInTheDocument();
+    });
+  });
+
+  describe("Agent features", () => {
+    const readyAgent: LoomAgentStatus = {
+      name: "nova",
+      branch: "nova",
+      status: "ready",
+      ahead: 0,
+      behind: 0,
+      role: "task",
+    };
+
+    const busyAgent: LoomAgentStatus = {
+      name: "falcon",
+      branch: "falcon",
+      status: "working: bd-123 (5m)",
+      ahead: 1,
+      behind: 0,
+      role: "task",
+    };
+
+    const warningAgent: LoomAgentStatus = {
+      name: "spark",
+      branch: "spark",
+      status: "error: process crashed",
+      ahead: 0,
+      behind: 0,
+      role: "task",
+    };
+
+    const planAgent: LoomAgentStatus = {
+      name: "planner",
+      branch: "planner",
+      status: "ready",
+      ahead: 0,
+      behind: 0,
+      role: "plan",
+    };
+
+    const idleAgent: LoomAgentStatus = {
+      name: "drift",
+      branch: "drift",
+      status: "idle: (1m)",
+      ahead: 0,
+      behind: 0,
+      role: "task",
+    };
+
+    describe("Agent list rendering", () => {
+      it("renders agent section header when agents prop is provided", () => {
+        render(<AssigneeDropdown {...defaultProps} agents={[readyAgent]} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        expect(screen.getByText("Agents")).toBeInTheDocument();
+      });
+
+      it("renders available agents as clickable buttons", () => {
+        render(<AssigneeDropdown {...defaultProps} agents={[readyAgent]} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        const agentItem = screen.getByTestId("agent-assignee-nova");
+        expect(agentItem).toBeInTheDocument();
+        expect(agentItem.tagName).toBe("BUTTON");
+        expect(agentItem).toHaveTextContent("nova");
+        expect(agentItem).toHaveTextContent("available");
+      });
+
+      it("renders busy agents as non-clickable (div) elements", () => {
+        render(<AssigneeDropdown {...defaultProps} agents={[busyAgent]} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        const agentItem = screen.getByTestId("agent-assignee-falcon");
+        expect(agentItem).toBeInTheDocument();
+        expect(agentItem.tagName).toBe("DIV");
+        expect(agentItem).toHaveTextContent("falcon");
+        expect(agentItem).toHaveTextContent("working");
+      });
+
+      it("renders warning agents with warning status", () => {
+        render(<AssigneeDropdown {...defaultProps} agents={[warningAgent]} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        const agentItem = screen.getByTestId("agent-assignee-spark");
+        expect(agentItem).toBeInTheDocument();
+        expect(agentItem.tagName).toBe("BUTTON");
+        expect(agentItem).toHaveTextContent("spark");
+        expect(agentItem).toHaveTextContent("error");
+      });
+
+      it("shows available, busy, and warning agents together", () => {
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            agents={[readyAgent, busyAgent, warningAgent]}
+          />,
+        );
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        expect(screen.getByTestId("agent-assignee-nova")).toBeInTheDocument();
+        expect(screen.getByTestId("agent-assignee-falcon")).toBeInTheDocument();
+        expect(screen.getByTestId("agent-assignee-spark")).toBeInTheDocument();
+      });
+
+      it("filters out plan-role agents", () => {
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            agents={[readyAgent, planAgent]}
+          />,
+        );
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        expect(screen.getByTestId("agent-assignee-nova")).toBeInTheDocument();
+        expect(
+          screen.queryByTestId("agent-assignee-planner"),
+        ).not.toBeInTheDocument();
+      });
+
+      it("does not render agent section when no agents prop", () => {
+        render(<AssigneeDropdown {...defaultProps} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+      });
+
+      it("does not render agent section when agents array is empty", () => {
+        render(<AssigneeDropdown {...defaultProps} agents={[]} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+      });
+
+      it("shows status dot with data-status attribute", () => {
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            agents={[readyAgent, busyAgent, warningAgent]}
+          />,
+        );
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        const novaItem = screen.getByTestId("agent-assignee-nova");
+        const novaDot = novaItem.querySelector("[data-status='available']");
+        expect(novaDot).toBeInTheDocument();
+
+        const falconItem = screen.getByTestId("agent-assignee-falcon");
+        const falconDot = falconItem.querySelector("[data-status='busy']");
+        expect(falconDot).toBeInTheDocument();
+
+        const sparkItem = screen.getByTestId("agent-assignee-spark");
+        const sparkDot = sparkItem.querySelector("[data-status='warning']");
+        expect(sparkDot).toBeInTheDocument();
+      });
+    });
+
+    describe("Agent selection", () => {
+      it("calls onSave with agent name (no [H] prefix) when clicking available agent", async () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            onSave={onSave}
+            agents={[readyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId("agent-assignee-nova"));
+        });
+
+        await waitFor(() => {
+          expect(onSave).toHaveBeenCalledWith("nova");
+        });
+      });
+
+      it("calls onSave with agent name when clicking warning agent", async () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            onSave={onSave}
+            agents={[warningAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId("agent-assignee-spark"));
+        });
+
+        await waitFor(() => {
+          expect(onSave).toHaveBeenCalledWith("spark");
+        });
+      });
+
+      it("busy agents cannot be clicked (they are div, not button)", () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            onSave={onSave}
+            agents={[busyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        // Busy agent is a div, not a button, so click should not trigger save
+        fireEvent.click(screen.getByTestId("agent-assignee-falcon"));
+
+        expect(onSave).not.toHaveBeenCalled();
+      });
+
+      it("closes dropdown after selecting an available agent", async () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            assignee={undefined}
+            onSave={onSave}
+            agents={[readyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId("agent-assignee-nova"));
+        });
+
+        expect(
+          screen.queryByTestId("assignee-dropdown-menu"),
+        ).not.toBeInTheDocument();
+      });
+
+      it("adds agent name to recent assignees when selected", async () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            onSave={onSave}
+            agents={[readyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId("agent-assignee-nova"));
+        });
+
+        expect(mockAddRecentAssignee).toHaveBeenCalledWith("nova");
+      });
+    });
+
+    describe("Search filtering", () => {
+      it("filters agents by search input", () => {
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            agents={[readyAgent, busyAgent, warningAgent]}
+          />,
+        );
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        // Initially all agents visible
+        expect(screen.getByTestId("agent-assignee-nova")).toBeInTheDocument();
+        expect(screen.getByTestId("agent-assignee-falcon")).toBeInTheDocument();
+        expect(screen.getByTestId("agent-assignee-spark")).toBeInTheDocument();
+
+        // Type to filter
+        fireEvent.change(screen.getByTestId("assignee-input"), {
+          target: { value: "nov" },
+        });
+
+        // Only nova should be visible
+        expect(screen.getByTestId("agent-assignee-nova")).toBeInTheDocument();
+        expect(
+          screen.queryByTestId("agent-assignee-falcon"),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByTestId("agent-assignee-spark"),
+        ).not.toBeInTheDocument();
+      });
+
+      it("filters both agents and recent humans", () => {
+        mockRecentAssignees = ["Alice", "Bob"];
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            agents={[readyAgent, busyAgent]}
+          />,
+        );
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        // Type to filter - should filter both agents and people
+        fireEvent.change(screen.getByTestId("assignee-input"), {
+          target: { value: "ali" },
+        });
+
+        // nova and falcon should be hidden
+        expect(
+          screen.queryByTestId("agent-assignee-nova"),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByTestId("agent-assignee-falcon"),
+        ).not.toBeInTheDocument();
+
+        // Alice should still be visible, Bob should be hidden
+        expect(screen.getByTestId("recent-assignee-Alice")).toBeInTheDocument();
+        expect(
+          screen.queryByTestId("recent-assignee-Bob"),
+        ).not.toBeInTheDocument();
+      });
+
+      it("shows no matching agents message when filter excludes all agents", () => {
+        render(<AssigneeDropdown {...defaultProps} agents={[readyAgent]} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        fireEvent.change(screen.getByTestId("assignee-input"), {
+          target: { value: "zzzzz" },
+        });
+
+        expect(screen.getByText("No matching agents")).toBeInTheDocument();
+      });
+
+      it("search is case-insensitive", () => {
+        render(<AssigneeDropdown {...defaultProps} agents={[readyAgent]} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        fireEvent.change(screen.getByTestId("assignee-input"), {
+          target: { value: "NOVA" },
+        });
+
+        expect(screen.getByTestId("agent-assignee-nova")).toBeInTheDocument();
+      });
+    });
+
+    describe("Confirmation dialog for agent reassignment", () => {
+      it("shows confirmation when reassigning from one agent to another", () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            assignee="falcon"
+            onSave={onSave}
+            agents={[readyAgent, busyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+        fireEvent.click(screen.getByTestId("agent-assignee-nova"));
+
+        // Confirmation dialog should appear
+        expect(screen.getByTestId("reassign-confirm")).toBeInTheDocument();
+        // Should not have called onSave yet
+        expect(onSave).not.toHaveBeenCalled();
+      });
+
+      it("does not show confirmation when assigning to agent from human", async () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            assignee="[H] Alice"
+            onSave={onSave}
+            agents={[readyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId("agent-assignee-nova"));
+        });
+
+        // Should not show confirmation for human-to-agent
+        expect(
+          screen.queryByTestId("reassign-confirm"),
+        ).not.toBeInTheDocument();
+        // Should have called onSave directly
+        expect(onSave).toHaveBeenCalledWith("nova");
+      });
+
+      it("does not show confirmation when assigning to agent from unassigned", async () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            assignee={undefined}
+            onSave={onSave}
+            agents={[readyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId("agent-assignee-nova"));
+        });
+
+        expect(
+          screen.queryByTestId("reassign-confirm"),
+        ).not.toBeInTheDocument();
+        expect(onSave).toHaveBeenCalledWith("nova");
+      });
+
+      it("proceeds with reassignment when confirm button is clicked", async () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            assignee="falcon"
+            onSave={onSave}
+            agents={[readyAgent, busyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+        fireEvent.click(screen.getByTestId("agent-assignee-nova"));
+
+        expect(screen.getByTestId("reassign-confirm")).toBeInTheDocument();
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId("reassign-confirm-proceed"));
+        });
+
+        await waitFor(() => {
+          expect(onSave).toHaveBeenCalledWith("nova");
+        });
+      });
+
+      it("cancels reassignment when cancel button is clicked", () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            assignee="falcon"
+            onSave={onSave}
+            agents={[readyAgent, busyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+        fireEvent.click(screen.getByTestId("agent-assignee-nova"));
+
+        expect(screen.getByTestId("reassign-confirm")).toBeInTheDocument();
+
+        // Click cancel
+        fireEvent.click(screen.getByText("Cancel"));
+
+        // Confirmation should disappear but menu stays open
+        expect(
+          screen.queryByTestId("reassign-confirm"),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.getByTestId("assignee-dropdown-menu"),
+        ).toBeInTheDocument();
+        expect(onSave).not.toHaveBeenCalled();
+      });
+
+      it("dismisses confirmation on Escape key", () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            assignee="falcon"
+            onSave={onSave}
+            agents={[readyAgent, busyAgent]}
+          />,
+        );
+
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+        fireEvent.click(screen.getByTestId("agent-assignee-nova"));
+
+        expect(screen.getByTestId("reassign-confirm")).toBeInTheDocument();
+
+        // Escape should dismiss confirm dialog but keep menu open
+        const menu = screen.getByTestId("assignee-dropdown-menu");
+        fireEvent.keyDown(menu, { key: "Escape" });
+
+        expect(
+          screen.queryByTestId("reassign-confirm"),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.getByTestId("assignee-dropdown-menu"),
+        ).toBeInTheDocument();
+        expect(onSave).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("Backward compatibility", () => {
+      it("without agents prop, behaves identically to before", async () => {
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        mockRecentAssignees = ["Alice"];
+
+        render(
+          <AssigneeDropdown
+            {...defaultProps}
+            assignee="[H] Bob"
+            onSave={onSave}
+          />,
+        );
+
+        // Trigger shows name without [H] prefix
+        expect(
+          screen.getByTestId("assignee-dropdown-trigger"),
+        ).toHaveTextContent("Bob");
+
+        // Open dropdown
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        // No agents section
+        expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+
+        // Recent assignees still work
+        expect(screen.getByTestId("recent-assignee-Alice")).toBeInTheDocument();
+
+        // Manual input still works with [H] prefix
+        fireEvent.change(screen.getByTestId("assignee-input"), {
+          target: { value: "Charlie" },
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId("assignee-submit"));
+        });
+
+        await waitFor(() => {
+          expect(onSave).toHaveBeenCalledWith("[H] Charlie");
+        });
+      });
+
+      it("shows search placeholder instead of type placeholder when agents are present", () => {
+        render(<AssigneeDropdown {...defaultProps} agents={[readyAgent]} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+        expect(screen.getByTestId("assignee-input")).toHaveAttribute(
+          "placeholder",
+          "Search or type a name...",
+        );
+      });
+
+      it("shows type placeholder when no agents", () => {
+        render(<AssigneeDropdown {...defaultProps} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+        expect(screen.getByTestId("assignee-input")).toHaveAttribute(
+          "placeholder",
+          "Type a name...",
+        );
+      });
+    });
+
+    describe("Idle agents", () => {
+      it("treats idle agents as available", () => {
+        render(<AssigneeDropdown {...defaultProps} agents={[idleAgent]} />);
+        fireEvent.click(screen.getByTestId("assignee-dropdown-trigger"));
+
+        const agentItem = screen.getByTestId("agent-assignee-drift");
+        expect(agentItem).toBeInTheDocument();
+        expect(agentItem.tagName).toBe("BUTTON");
+        expect(agentItem).toHaveTextContent("available");
+      });
     });
   });
 });

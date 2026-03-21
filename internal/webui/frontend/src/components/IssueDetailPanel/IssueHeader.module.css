@@ -110,6 +110,112 @@
   color: var(--color-text-muted);
 }
 
+/* PR view link */
+.prViewLink {
+  font-size: 11px;
+  font-family: var(--font-family-mono);
+  color: var(--color-primary);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.prViewLink:hover {
+  background-color: var(--color-primary-bg);
+  text-decoration: underline;
+}
+
+.prViewLink:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* PR merge link */
+.prMergeLink {
+  font-size: 11px;
+  font-family: var(--font-family-mono);
+  color: var(--color-success);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.prMergeLink:hover {
+  background-color: var(--color-success-bg);
+  text-decoration: underline;
+}
+
+.prMergeLink:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.copyLinkButton {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.copyLinkButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.copyLinkButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.moveButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.moveButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.moveButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* When copyLinkButton is present, it takes the margin-left: auto.
+   closeButton only needs it when copyLinkButton is absent. */
+.copyLinkButton + .moveButton,
+.copyLinkButton + .closeButton {
+  margin-left: 0;
+}
+
+.moveButton + .closeButton {
+  margin-left: 0;
+}
+
 .closeButton {
   margin-left: auto;
   width: 28px;
@@ -140,7 +246,7 @@
 .title {
   font-size: 24px;
   font-weight: 700;
-  color: #111827;
+  color: var(--color-text-primary);
   margin: 0;
   line-height: 1.25;
   word-break: break-word;

@@ -5,7 +5,11 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 
-import { getBackendConfig, updateBackendConfig } from "@/api/config";
+import {
+  getBackendConfig,
+  updateBackendConfig,
+  getCachedBackendConfig,
+} from "@/api/config";
 import type { BackendConfigData } from "@/api/config";
 
 /**
@@ -20,6 +24,8 @@ export interface UseBackendConfigReturn {
   error: string | null;
   /** Whether a save is in progress */
   isSaving: boolean;
+  /** Whether the current config is from cache (stale) */
+  isCached: boolean;
   /** Update the project default backend (optimistic). Returns true on success. */
   updateBackend: (backend: string) => Promise<boolean>;
   /** Re-fetch config from the API */
@@ -31,12 +37,16 @@ export interface UseBackendConfigReturn {
  * Fetches from GET /api/config/backend on mount, updates via PATCH.
  */
 export function useBackendConfig(): UseBackendConfigReturn {
-  const [config, setConfig] = useState<BackendConfigData | null>(null);
+  const [initialCache] = useState(() => getCachedBackendConfig());
+  const [config, setConfig] = useState<BackendConfigData | null>(initialCache);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCached, setIsCached] = useState(initialCache !== null);
 
   const mountedRef = useRef(true);
+  const configRef = useRef(config);
+  configRef.current = config;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -53,12 +63,17 @@ export function useBackendConfig(): UseBackendConfigReturn {
       const data = await getBackendConfig();
       if (mountedRef.current) {
         setConfig(data);
+        setIsCached(false);
       }
     } catch (err) {
       if (mountedRef.current) {
         const message =
           err instanceof Error ? err.message : "Failed to load backend config";
         setError(message);
+        // Keep cached config visible if available (don't null it out)
+        if (configRef.current !== null) {
+          setIsCached(true);
+        }
       }
     } finally {
       if (mountedRef.current) {
@@ -113,6 +128,7 @@ export function useBackendConfig(): UseBackendConfigReturn {
     isLoading,
     error,
     isSaving,
+    isCached,
     updateBackend,
     refetch: fetchConfig,
   };

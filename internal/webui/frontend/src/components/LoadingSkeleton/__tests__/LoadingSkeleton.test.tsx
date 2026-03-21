@@ -497,11 +497,462 @@ describe("LoadingSkeleton.Graph", () => {
   });
 });
 
+describe("LoadingSkeleton.DetailPanel", () => {
+  describe("rendering", () => {
+    it('renders with data-testid="loading-skeleton-detail-panel"', () => {
+      const { getByTestId } = render(<LoadingSkeleton.DetailPanel />);
+
+      const panel = getByTestId("loading-skeleton-detail-panel");
+      expect(panel).toBeInTheDocument();
+    });
+
+    it("renders with detailPanel structure", () => {
+      const { container } = render(<LoadingSkeleton.DetailPanel />);
+
+      const panel = container.firstChild as HTMLElement;
+      expect(panel).toBeInTheDocument();
+      expect(panel.className).toContain("detailPanel");
+    });
+
+    it('has aria-hidden="true" for accessibility', () => {
+      const { container } = render(<LoadingSkeleton.DetailPanel />);
+
+      const panel = container.firstChild as HTMLElement;
+      expect(panel).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("contains detailPanelHeader section", () => {
+      const { container } = render(<LoadingSkeleton.DetailPanel />);
+
+      const header = container.querySelector('[class*="detailPanelHeader"]');
+      expect(header).toBeInTheDocument();
+    });
+
+    it("contains detailPanelMeta section with 3 badges", () => {
+      const { container } = render(<LoadingSkeleton.DetailPanel />);
+
+      const meta = container.querySelector('[class*="detailPanelMeta"]');
+      expect(meta).toBeInTheDocument();
+      expect(meta?.children.length).toBe(3);
+    });
+
+    it("contains detailPanelBody section", () => {
+      const { container } = render(<LoadingSkeleton.DetailPanel />);
+
+      const body = container.querySelector('[class*="detailPanelBody"]');
+      expect(body).toBeInTheDocument();
+    });
+
+    it("contains detailPanelSection section", () => {
+      const { container } = render(<LoadingSkeleton.DetailPanel />);
+
+      const section = container.querySelector('[class*="detailPanelSection"]');
+      expect(section).toBeInTheDocument();
+    });
+  });
+
+  describe("custom className", () => {
+    it("applies custom className to detailPanel", () => {
+      const { container } = render(
+        <LoadingSkeleton.DetailPanel className="custom-detail-class" />,
+      );
+
+      const panel = container.firstChild as HTMLElement;
+      expect(panel).toHaveClass("custom-detail-class");
+    });
+
+    it("preserves detailPanel class when custom className is added", () => {
+      const { container } = render(
+        <LoadingSkeleton.DetailPanel className="my-detail" />,
+      );
+
+      const panel = container.firstChild as HTMLElement;
+      expect(panel.className).toContain("detailPanel");
+      expect(panel).toHaveClass("my-detail");
+    });
+  });
+});
+
+describe("LoadingSkeleton.Table", () => {
+  describe("rendering", () => {
+    it('renders with data-testid="loading-skeleton-table"', () => {
+      const { getByTestId } = render(<LoadingSkeleton.Table />);
+
+      const table = getByTestId("loading-skeleton-table");
+      expect(table).toBeInTheDocument();
+    });
+
+    it("renders with table structure", () => {
+      const { container } = render(<LoadingSkeleton.Table />);
+
+      const table = container.firstChild as HTMLElement;
+      expect(table).toBeInTheDocument();
+      expect(table.className).toContain("table");
+    });
+
+    it('has aria-hidden="true" for accessibility', () => {
+      const { container } = render(<LoadingSkeleton.Table />);
+
+      const table = container.firstChild as HTMLElement;
+      expect(table).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("contains tableHeader section with 4 column skeletons", () => {
+      const { container } = render(<LoadingSkeleton.Table />);
+
+      const header = container.querySelector('[class*="tableHeader"]');
+      expect(header).toBeInTheDocument();
+      expect(header?.children.length).toBe(4);
+    });
+
+    it("contains 5 tableRow elements", () => {
+      const { container } = render(<LoadingSkeleton.Table />);
+
+      const rows = container.querySelectorAll('[class*="tableRow"]');
+      expect(rows.length).toBe(5);
+    });
+
+    it("each row contains 4 skeleton elements", () => {
+      const { container } = render(<LoadingSkeleton.Table />);
+
+      const rows = container.querySelectorAll('[class*="tableRow"]');
+      rows.forEach((row) => {
+        expect(row.children.length).toBe(4);
+      });
+    });
+  });
+
+  describe("custom className", () => {
+    it("applies custom className to table", () => {
+      const { container } = render(
+        <LoadingSkeleton.Table className="custom-table-class" />,
+      );
+
+      const table = container.firstChild as HTMLElement;
+      expect(table).toHaveClass("custom-table-class");
+    });
+
+    it("preserves table class when custom className is added", () => {
+      const { container } = render(
+        <LoadingSkeleton.Table className="my-table" />,
+      );
+
+      const table = container.firstChild as HTMLElement;
+      expect(table.className).toContain("table");
+      expect(table).toHaveClass("my-table");
+    });
+  });
+});
+
+describe("LoadingSkeleton.FileExplorer", () => {
+  describe("rendering", () => {
+    it('renders with data-testid="loading-skeleton-file-explorer"', () => {
+      const { getByTestId } = render(<LoadingSkeleton.FileExplorer />);
+
+      const explorer = getByTestId("loading-skeleton-file-explorer");
+      expect(explorer).toBeInTheDocument();
+    });
+
+    it("renders with fileExplorer structure", () => {
+      const { container } = render(<LoadingSkeleton.FileExplorer />);
+
+      const explorer = container.firstChild as HTMLElement;
+      expect(explorer).toBeInTheDocument();
+      expect(explorer.className).toContain("fileExplorer");
+    });
+
+    it('has aria-hidden="true" for accessibility', () => {
+      const { container } = render(<LoadingSkeleton.FileExplorer />);
+
+      const explorer = container.firstChild as HTMLElement;
+      expect(explorer).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("contains fileTree section with tree items", () => {
+      const { container } = render(<LoadingSkeleton.FileExplorer />);
+
+      const fileTree = container.querySelector('[class*="fileTree"]');
+      expect(fileTree).toBeInTheDocument();
+
+      const treeItems = fileTree?.querySelectorAll('[class*="fileTreeItem"]');
+      expect(treeItems?.length).toBe(8);
+    });
+
+    it("tree items have indentation via paddingLeft", () => {
+      const { container } = render(<LoadingSkeleton.FileExplorer />);
+
+      const treeItems = container.querySelectorAll('[class*="fileTreeItem"]');
+      // First item (level 0): 0*16+8 = 8px
+      expect((treeItems[0] as HTMLElement).style.paddingLeft).toBe("8px");
+      // Second item (level 1): 1*16+8 = 24px
+      expect((treeItems[1] as HTMLElement).style.paddingLeft).toBe("24px");
+    });
+
+    it("contains codeArea section with skeleton lines", () => {
+      const { container } = render(<LoadingSkeleton.FileExplorer />);
+
+      const codeArea = container.querySelector('[class*="codeArea"]');
+      expect(codeArea).toBeInTheDocument();
+      expect(codeArea?.children.length).toBe(6);
+    });
+  });
+
+  describe("custom className", () => {
+    it("applies custom className to fileExplorer", () => {
+      const { container } = render(
+        <LoadingSkeleton.FileExplorer className="custom-explorer-class" />,
+      );
+
+      const explorer = container.firstChild as HTMLElement;
+      expect(explorer).toHaveClass("custom-explorer-class");
+    });
+
+    it("preserves fileExplorer class when custom className is added", () => {
+      const { container } = render(
+        <LoadingSkeleton.FileExplorer className="my-explorer" />,
+      );
+
+      const explorer = container.firstChild as HTMLElement;
+      expect(explorer.className).toContain("fileExplorer");
+      expect(explorer).toHaveClass("my-explorer");
+    });
+  });
+});
+
+describe("LoadingSkeleton.Terminal", () => {
+  describe("rendering", () => {
+    it('renders with data-testid="loading-skeleton-terminal"', () => {
+      const { getByTestId } = render(<LoadingSkeleton.Terminal />);
+
+      const terminal = getByTestId("loading-skeleton-terminal");
+      expect(terminal).toBeInTheDocument();
+    });
+
+    it("renders with terminal structure", () => {
+      const { container } = render(<LoadingSkeleton.Terminal />);
+
+      const terminal = container.firstChild as HTMLElement;
+      expect(terminal).toBeInTheDocument();
+      expect(terminal.className).toContain("terminal");
+    });
+
+    it('has aria-hidden="true" for accessibility', () => {
+      const { container } = render(<LoadingSkeleton.Terminal />);
+
+      const terminal = container.firstChild as HTMLElement;
+      expect(terminal).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("contains terminalTabBar section with 2 tab skeletons", () => {
+      const { container } = render(<LoadingSkeleton.Terminal />);
+
+      const tabBar = container.querySelector('[class*="terminalTabBar"]');
+      expect(tabBar).toBeInTheDocument();
+      expect(tabBar?.children.length).toBe(2);
+    });
+
+    it("contains terminalBody section with 4 line skeletons", () => {
+      const { container } = render(<LoadingSkeleton.Terminal />);
+
+      const body = container.querySelector('[class*="terminalBody"]');
+      expect(body).toBeInTheDocument();
+      expect(body?.children.length).toBe(4);
+    });
+  });
+
+  describe("custom className", () => {
+    it("applies custom className to terminal", () => {
+      const { container } = render(
+        <LoadingSkeleton.Terminal className="custom-terminal-class" />,
+      );
+
+      const terminal = container.firstChild as HTMLElement;
+      expect(terminal).toHaveClass("custom-terminal-class");
+    });
+
+    it("preserves terminal class when custom className is added", () => {
+      const { container } = render(
+        <LoadingSkeleton.Terminal className="my-terminal" />,
+      );
+
+      const terminal = container.firstChild as HTMLElement;
+      expect(terminal.className).toContain("terminal");
+      expect(terminal).toHaveClass("my-terminal");
+    });
+  });
+});
+
+describe("LoadingSkeleton.Observability", () => {
+  describe("rendering", () => {
+    it('renders with data-testid="loading-skeleton-observability"', () => {
+      const { getByTestId } = render(<LoadingSkeleton.Observability />);
+
+      const obs = getByTestId("loading-skeleton-observability");
+      expect(obs).toBeInTheDocument();
+    });
+
+    it("renders with observability structure", () => {
+      const { container } = render(<LoadingSkeleton.Observability />);
+
+      const obs = container.firstChild as HTMLElement;
+      expect(obs).toBeInTheDocument();
+      expect(obs.className).toContain("observability");
+    });
+
+    it('has aria-hidden="true" for accessibility', () => {
+      const { container } = render(<LoadingSkeleton.Observability />);
+
+      const obs = container.firstChild as HTMLElement;
+      expect(obs).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("contains observabilityCards section with 4 metric cards", () => {
+      const { container } = render(<LoadingSkeleton.Observability />);
+
+      const cards = container.querySelector('[class*="observabilityCards"]');
+      expect(cards).toBeInTheDocument();
+
+      const cardItems = cards?.querySelectorAll('[class*="observabilityCard"]');
+      expect(cardItems?.length).toBe(4);
+    });
+
+    it("each metric card contains skeleton elements for label and value", () => {
+      const { container } = render(<LoadingSkeleton.Observability />);
+
+      const cards = container.querySelector('[class*="observabilityCards"]');
+      // Direct children of the cards container are the individual card divs
+      const directCards = Array.from(cards?.children ?? []);
+      expect(directCards.length).toBe(4);
+
+      directCards.forEach((card) => {
+        // Each card has 2 skeleton elements: a label and a value
+        const skeletons = card.querySelectorAll('[class*="skeleton"]');
+        expect(skeletons.length).toBe(2);
+      });
+    });
+
+    it("contains observabilityChart section", () => {
+      const { container } = render(<LoadingSkeleton.Observability />);
+
+      const chart = container.querySelector('[class*="observabilityChart"]');
+      expect(chart).toBeInTheDocument();
+      expect(chart?.children.length).toBe(2);
+    });
+  });
+
+  describe("custom className", () => {
+    it("applies custom className to observability", () => {
+      const { container } = render(
+        <LoadingSkeleton.Observability className="custom-obs-class" />,
+      );
+
+      const obs = container.firstChild as HTMLElement;
+      expect(obs).toHaveClass("custom-obs-class");
+    });
+
+    it("preserves observability class when custom className is added", () => {
+      const { container } = render(
+        <LoadingSkeleton.Observability className="my-obs" />,
+      );
+
+      const obs = container.firstChild as HTMLElement;
+      expect(obs.className).toContain("observability");
+      expect(obs).toHaveClass("my-obs");
+    });
+  });
+});
+
+describe("LoadingSkeleton.AgentDetail", () => {
+  describe("rendering", () => {
+    it('renders with data-testid="loading-skeleton-agent-detail"', () => {
+      const { getByTestId } = render(<LoadingSkeleton.AgentDetail />);
+
+      const detail = getByTestId("loading-skeleton-agent-detail");
+      expect(detail).toBeInTheDocument();
+    });
+
+    it("renders with agentDetail structure", () => {
+      const { container } = render(<LoadingSkeleton.AgentDetail />);
+
+      const detail = container.firstChild as HTMLElement;
+      expect(detail).toBeInTheDocument();
+      expect(detail.className).toContain("agentDetail");
+    });
+
+    it('has aria-hidden="true" for accessibility', () => {
+      const { container } = render(<LoadingSkeleton.AgentDetail />);
+
+      const detail = container.firstChild as HTMLElement;
+      expect(detail).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("contains agentDetailHeader section with avatar and info", () => {
+      const { container } = render(<LoadingSkeleton.AgentDetail />);
+
+      const header = container.querySelector('[class*="agentDetailHeader"]');
+      expect(header).toBeInTheDocument();
+      // Should have circle avatar + info container
+      expect(header?.children.length).toBe(2);
+    });
+
+    it("header info contains name and status skeletons", () => {
+      const { container } = render(<LoadingSkeleton.AgentDetail />);
+
+      const info = container.querySelector('[class*="agentDetailInfo"]');
+      expect(info).toBeInTheDocument();
+      expect(info?.children.length).toBe(2);
+    });
+
+    it("contains agentDetailTabs section with 3 tab skeletons", () => {
+      const { container } = render(<LoadingSkeleton.AgentDetail />);
+
+      const tabs = container.querySelector('[class*="agentDetailTabs"]');
+      expect(tabs).toBeInTheDocument();
+      expect(tabs?.children.length).toBe(3);
+    });
+
+    it("contains agentDetailContent section", () => {
+      const { container } = render(<LoadingSkeleton.AgentDetail />);
+
+      const content = container.querySelector('[class*="agentDetailContent"]');
+      expect(content).toBeInTheDocument();
+    });
+  });
+
+  describe("custom className", () => {
+    it("applies custom className to agentDetail", () => {
+      const { container } = render(
+        <LoadingSkeleton.AgentDetail className="custom-agent-class" />,
+      );
+
+      const detail = container.firstChild as HTMLElement;
+      expect(detail).toHaveClass("custom-agent-class");
+    });
+
+    it("preserves agentDetail class when custom className is added", () => {
+      const { container } = render(
+        <LoadingSkeleton.AgentDetail className="my-agent" />,
+      );
+
+      const detail = container.firstChild as HTMLElement;
+      expect(detail.className).toContain("agentDetail");
+      expect(detail).toHaveClass("my-agent");
+    });
+  });
+});
+
 describe("LoadingSkeleton integration", () => {
-  it("Card, Column, and Graph are accessible as static properties", () => {
+  it("all presets are accessible as static properties", () => {
     expect(LoadingSkeleton.Card).toBeDefined();
     expect(LoadingSkeleton.Column).toBeDefined();
     expect(LoadingSkeleton.Graph).toBeDefined();
+    expect(LoadingSkeleton.Monitor).toBeDefined();
+    expect(LoadingSkeleton.DetailPanel).toBeDefined();
+    expect(LoadingSkeleton.Table).toBeDefined();
+    expect(LoadingSkeleton.FileExplorer).toBeDefined();
+    expect(LoadingSkeleton.Terminal).toBeDefined();
+    expect(LoadingSkeleton.Observability).toBeDefined();
+    expect(LoadingSkeleton.AgentDetail).toBeDefined();
   });
 
   it("Card component is a function", () => {
@@ -514,6 +965,30 @@ describe("LoadingSkeleton integration", () => {
 
   it("Graph component is a function", () => {
     expect(typeof LoadingSkeleton.Graph).toBe("function");
+  });
+
+  it("DetailPanel component is a function", () => {
+    expect(typeof LoadingSkeleton.DetailPanel).toBe("function");
+  });
+
+  it("Table component is a function", () => {
+    expect(typeof LoadingSkeleton.Table).toBe("function");
+  });
+
+  it("FileExplorer component is a function", () => {
+    expect(typeof LoadingSkeleton.FileExplorer).toBe("function");
+  });
+
+  it("Terminal component is a function", () => {
+    expect(typeof LoadingSkeleton.Terminal).toBe("function");
+  });
+
+  it("Observability component is a function", () => {
+    expect(typeof LoadingSkeleton.Observability).toBe("function");
+  });
+
+  it("AgentDetail component is a function", () => {
+    expect(typeof LoadingSkeleton.AgentDetail).toBe("function");
   });
 
   it("renders all variants without errors", () => {
@@ -529,6 +1004,13 @@ describe("LoadingSkeleton integration", () => {
           <LoadingSkeleton.Column />
           <LoadingSkeleton.Column cardCount={5} />
           <LoadingSkeleton.Graph />
+          <LoadingSkeleton.Monitor />
+          <LoadingSkeleton.DetailPanel />
+          <LoadingSkeleton.Table />
+          <LoadingSkeleton.FileExplorer />
+          <LoadingSkeleton.Terminal />
+          <LoadingSkeleton.Observability />
+          <LoadingSkeleton.AgentDetail />
         </>,
       );
     }).not.toThrow();

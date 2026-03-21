@@ -21,6 +21,33 @@ import {
 } from "./columns";
 import { IssueTable, IssueTableProps } from "./IssueTable";
 
+// Mock useWorkspaceContext — default to multi-repo so all columns render
+vi.mock("@/hooks/useWorkspaceContext", () => ({
+  useWorkspaceContext: () => ({
+    workspace: null,
+    repos: [],
+    isMultiRepo: true,
+    activeRepos: [],
+    activeRepoNames: [],
+    selectedRepoNames: new Set(),
+    isAllSelected: true,
+    selectRepos: vi.fn(),
+    selectAll: vi.fn(),
+    toggleRepo: vi.fn(),
+    sourceReposFilter: undefined,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+    getRepoByName: vi.fn(),
+    getReposByGroup: vi.fn(() => []),
+    getAgentByName: vi.fn(),
+    groups: [],
+    agents: [],
+    activeWorkspaceName: null,
+    setActiveWorkspace: vi.fn(),
+  }),
+}));
+
 // Helper to create mock issues for testing
 function createMockIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -219,11 +246,11 @@ describe("columns.ts helpers", () => {
   });
 
   describe("DEFAULT_ISSUE_COLUMNS", () => {
-    it("has 8 columns defined", () => {
-      expect(DEFAULT_ISSUE_COLUMNS).toHaveLength(8);
+    it("has 9 columns defined", () => {
+      expect(DEFAULT_ISSUE_COLUMNS).toHaveLength(9);
     });
 
-    it("includes id, priority, title, status, blocked, issue_type, assignee, updated_at columns", () => {
+    it("includes id, priority, title, status, blocked, issue_type, assignee, repo, updated_at columns", () => {
       const columnIds = DEFAULT_ISSUE_COLUMNS.map((c) => c.id);
       expect(columnIds).toEqual([
         "id",
@@ -233,6 +260,7 @@ describe("columns.ts helpers", () => {
         "blocked",
         "issue_type",
         "assignee",
+        "repo",
         "updated_at",
       ]);
     });

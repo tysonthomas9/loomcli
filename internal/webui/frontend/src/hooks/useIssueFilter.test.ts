@@ -849,4 +849,130 @@ describe("useIssueFilter", () => {
       expect(result.current.count).toBe(1); // 1 closed issue
     });
   });
+
+  describe("repos filter tests", () => {
+    it("includes issues with matching repo", () => {
+      const issues = [
+        createIssue({ id: "issue-1", title: "API bug", repo: "api" }),
+        createIssue({ id: "issue-2", title: "Frontend fix", repo: "frontend" }),
+        createIssue({ id: "issue-3", title: "Backend task", repo: "api" }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { repos: ["api"] }),
+      );
+
+      expect(result.current.filteredIssues).toHaveLength(2);
+      const ids = result.current.filteredIssues.map((i) => i.id);
+      expect(ids).toContain("issue-1");
+      expect(ids).toContain("issue-3");
+    });
+
+    it("excludes issues with non-matching repo", () => {
+      const issues = [
+        createIssue({ id: "issue-1", title: "API bug", repo: "api" }),
+        createIssue({ id: "issue-2", title: "Frontend fix", repo: "frontend" }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { repos: ["backend"] }),
+      );
+
+      expect(result.current.filteredIssues).toHaveLength(0);
+    });
+
+    it("excludes issues with undefined repo", () => {
+      const issues = [
+        createIssue({ id: "issue-1", title: "API bug", repo: "api" }),
+        createIssue({ id: "issue-2", title: "No repo issue" }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { repos: ["api"] }),
+      );
+
+      expect(result.current.filteredIssues).toHaveLength(1);
+      expect(result.current.filteredIssues[0].id).toBe("issue-1");
+    });
+
+    it("does not filter when repos array is empty", () => {
+      const issues = [
+        createIssue({ id: "issue-1", title: "API bug", repo: "api" }),
+        createIssue({ id: "issue-2", title: "No repo issue" }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { repos: [] }),
+      );
+
+      expect(result.current.filteredIssues).toHaveLength(2);
+    });
+
+    it("includes repos in activeFilters when set", () => {
+      const issues = [
+        createIssue({ id: "issue-1", title: "API bug", repo: "api" }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { repos: ["api"] }),
+      );
+
+      expect(result.current.activeFilters).toContain("repos");
+      expect(result.current.hasActiveFilters).toBe(true);
+    });
+
+    it("does not include repos in activeFilters when empty", () => {
+      const issues = [
+        createIssue({ id: "issue-1", title: "API bug", repo: "api" }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { repos: [] }),
+      );
+
+      expect(result.current.activeFilters).not.toContain("repos");
+    });
+
+    it("supports multiple repos", () => {
+      const issues = [
+        createIssue({ id: "issue-1", title: "API bug", repo: "api" }),
+        createIssue({ id: "issue-2", title: "Frontend fix", repo: "frontend" }),
+        createIssue({ id: "issue-3", title: "Docs update", repo: "docs" }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { repos: ["api", "frontend"] }),
+      );
+
+      expect(result.current.filteredIssues).toHaveLength(2);
+      const ids = result.current.filteredIssues.map((i) => i.id);
+      expect(ids).toContain("issue-1");
+      expect(ids).toContain("issue-2");
+    });
+
+    it("combines repos filter with other filters", () => {
+      const issues = [
+        createIssue({
+          id: "issue-1",
+          title: "API bug",
+          repo: "api",
+          status: "open",
+        }),
+        createIssue({
+          id: "issue-2",
+          title: "API task",
+          repo: "api",
+          status: "closed",
+        }),
+        createIssue({
+          id: "issue-3",
+          title: "Frontend fix",
+          repo: "frontend",
+          status: "open",
+        }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, {
+          repos: ["api"],
+          status: "open" as Status,
+        }),
+      );
+
+      expect(result.current.filteredIssues).toHaveLength(1);
+      expect(result.current.filteredIssues[0].id).toBe("issue-1");
+    });
+  });
 });

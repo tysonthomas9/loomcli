@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -56,10 +57,8 @@ func init() {
 	rootCmd.AddCommand(monitorCmd)
 }
 
-// loadDaemonManagedAgents reads the daemon state file and returns metadata
-// for worktrees under daemon supervision, including their role.
-// Returns nil if the file doesn't exist, can't be parsed, or daemon isn't running.
-// The stateFilePath should be resolved via ResolveDaemonStatePath().
+// loadDaemonManagedAgents reads the daemon state file and returns metadata for
+// worktrees under daemon supervision. Returns nil if unavailable or daemon died.
 func loadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 	data, err := os.ReadFile(stateFilePath)
 	if err != nil {
@@ -82,6 +81,7 @@ func loadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 			result[agent.Worktree] = DaemonAgentInfo{
 				Managed: true,
 				Role:    agent.Role,
+				Repo:    agent.Repo,
 			}
 		}
 	}
@@ -316,12 +316,10 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 	var agents []AgentStatus
 	taskIDToAgents := make(map[string][]string) // Track which agents claim which tasks
 
-	// Compute default branch once per tick using already-discovered worktrees
-	defaultBranch := GetDefaultBranchForWorktrees(worktrees)
-
-	// Get GitHub remote URL once (all worktrees share the same remote)
+	// Global defaults for legacy mode; per-worktree values resolved in loop for workspace mode.
+	globalDefaultBranch := GetDefaultBranchForWorktrees(worktrees)
 	githubURL := ""
-	if len(worktrees) > 0 {
+	if len(worktrees) > 0 && worktrees[0].Repo == nil {
 		githubURL = getGitHubRemoteURL(worktrees[0].Path)
 	}
 
@@ -332,6 +330,7 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			Branch:        wt.Branch,
 			Workspace:     wt.Workspace,
 			Role:          daemonInfo.Role,
+			Repo:          daemonInfo.Repo,
 			DaemonManaged: daemonInfo.Managed,
 		}
 
@@ -393,12 +392,22 @@ func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentS
 			}
 		}
 
+		// Use per-worktree default branch in workspace mode
+		wtDefaultBranch := globalDefaultBranch
+		if wt.Repo != nil {
+			wtDefaultBranch = DefaultBranchForWorktree(wt)
+		}
+
 		// Check ahead/behind integration branch
-		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, defaultBranch, branch)
+		agent.Ahead, agent.Behind = getWorktreeGitSyncStatus(wt.Path, wtDefaultBranch, branch)
 
 		// Populate commit details when ahead > 0
 		if agent.Ahead > 0 {
-			agent.Commits = getWorktreeCommitDetails(wt.Path, defaultBranch, 10, githubURL, branch)
+			wtGithubURL := githubURL
+			if wt.Repo != nil {
+				wtGithubURL = getGitHubRemoteURL(wt.Path)
+			}
+			agent.Commits = getWorktreeCommitDetails(wt.Path, wtDefaultBranch, 10, wtGithubURL, branch)
 		}
 
 		// Populate file changes (returns nil for clean trees)
@@ -443,91 +452,91 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	var closedTasks []TaskInfo
 	agentTasks := make(map[string]TaskInfo)
 
-	// Run all 5 bd commands in parallel
+	// Run all 5 typed IssueTracker queries in parallel
 	var (
-		readyOutput, inProgressOutput, needReviewOutput, backlogOutput, closedOutput string
-		readyErr, inProgressErr, needReviewErr, backlogErr, closedErr                error
-		wg                                                                           sync.WaitGroup
+		readyIssues, inProgressIssues, reviewIssues, backlogIssues, closedIssues []BdIssue
+		readyErr, inProgressErr, reviewErr, backlogErr, closedErr                error
+		wg                                                                       sync.WaitGroup
 	)
+
+	tracker := defaultTracker()
+	ctx := context.Background()
 
 	wg.Add(5)
 
 	go func() {
 		defer wg.Done()
-		readyOutput, readyErr = runBdCommand("ready", "--json", "--limit", strconv.Itoa(readyLimit))
+		readyIssues, readyErr = tracker.Ready(ctx, ReadyOpts{Limit: readyLimit})
 	}()
 
 	go func() {
 		defer wg.Done()
-		inProgressOutput, inProgressErr = runBdCommand("list", "--status=in_progress", "--json")
+		inProgressIssues, inProgressErr = tracker.List(ctx, ListOpts{Status: "in_progress"})
 	}()
 
 	go func() {
 		defer wg.Done()
-		needReviewOutput, needReviewErr = runBdCommand("list", "--status=review", "--json")
+		reviewIssues, reviewErr = tracker.List(ctx, ListOpts{Status: "review"})
 	}()
 
 	go func() {
 		defer wg.Done()
-		backlogOutput, backlogErr = runBdCommand("blocked", "--json")
+		backlogIssues, backlogErr = tracker.Blocked(ctx)
 	}()
 
 	go func() {
 		defer wg.Done()
-		closedOutput, closedErr = runBdCommand("list", "--status=closed", "--json", "--limit", "50")
+		closedIssues, closedErr = tracker.List(ctx, ListOpts{Status: "closed", Limit: 50})
 	}()
 
 	wg.Wait()
 
-	// Build unclosed issue ID set from existing responses for accurate blocker filtering.
+	// Build unclosed issue ID set from typed results for accurate blocker filtering.
 	// A blocker is only resolved when closed — not when it moves to in_progress/review.
-	unclosedIDs := buildUnclosedIDsFromResponses(readyOutput, inProgressOutput, needReviewOutput, backlogOutput)
+	unclosedIDs := buildUnclosedIDsFromIssues(readyIssues, inProgressIssues, reviewIssues, backlogIssues)
 
 	// Process ready tasks, split by workflow stage
 	// Note: bd ready returns tasks not blocked by dependencies (open, in_progress, review)
 	if readyErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(readyOutput), &issues) == nil {
-			needsPlanningCount := 0
-			readyToImplementCount := 0
-			for _, issue := range issues {
-				// Skip non-open tasks - they appear in their own sections
-				if !IsOpen(issue) {
-					continue
-				}
-				if IsEpic(issue) {
-					summary.Epics++
-					continue
-				}
-				if HasUnclosedBlockers(issue.Dependencies, unclosedIDs) {
-					// Count these in backlog — they have open deps
-					summary.Backlog++
-					continue
-				}
+		needsPlanningCount := 0
+		readyToImplementCount := 0
+		for _, issue := range readyIssues {
+			// Skip non-open tasks - they appear in their own sections
+			if !IsOpen(issue) {
+				continue
+			}
+			if IsEpic(issue) {
+				summary.Epics++
+				continue
+			}
+			if HasUnclosedBlockers(issue.Dependencies, unclosedIDs) {
+				// Count these in backlog — they have open deps
+				summary.Backlog++
+				continue
+			}
 
-				// Split by workflow stage using shared predicates
-				// SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
-				if ReadyToImplement(issue) {
-					summary.ReadyToImplement++
-					if readyToImplementCount < 5 {
-						readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
-							ID:       issue.ID,
-							Title:    issue.Title,
-							Priority: issue.Priority,
-						})
-						readyToImplementCount++
-					}
-				} else {
-					// NeedsPlan: no design OR needs-revision label
-					summary.NeedsPlanning++
-					if needsPlanningCount < 5 {
-						needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
-							ID:       issue.ID,
-							Title:    issue.Title,
-							Priority: issue.Priority,
-						})
-						needsPlanningCount++
-					}
+			// Split by workflow stage using shared predicates
+			// SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
+			if ReadyToImplement(issue) {
+				summary.ReadyToImplement++
+				if readyToImplementCount < 5 {
+					readyToImplementTasks = append(readyToImplementTasks, TaskInfo{
+						ID:       issue.ID,
+						Title:    issue.Title,
+						Priority: issue.Priority,
+					})
+					readyToImplementCount++
+				}
+			} else {
+				// NeedsPlan: no design OR needs-revision label
+				summary.NeedsPlanning++
+				if needsPlanningCount < 5 {
+					needsPlanningTasks = append(needsPlanningTasks, TaskInfo{
+						ID:       issue.ID,
+						Title:    issue.Title,
+						Priority: issue.Priority,
+					})
+					needsPlanningCount++
 				}
 			}
 		}
@@ -535,21 +544,18 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 
 	// Process in_progress tasks and build agent-task map
 	if inProgressErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(inProgressOutput), &issues) == nil {
-			summary.InProgress = len(issues)
-			for _, issue := range issues {
-				taskInfo := TaskInfo{
-					ID:       issue.ID,
-					Title:    issue.Title,
-					Priority: issue.Priority,
-					Status:   "in_progress",
-				}
-				inProgressTasks = append(inProgressTasks, taskInfo)
-				// Build agent-task map from assignee field
-				if issue.Assignee != "" {
-					agentTasks[issue.Assignee] = taskInfo
-				}
+		summary.InProgress = len(inProgressIssues)
+		for _, issue := range inProgressIssues {
+			taskInfo := TaskInfo{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+				Status:   "in_progress",
+			}
+			inProgressTasks = append(inProgressTasks, taskInfo)
+			// Build agent-task map from assignee field
+			if issue.Assignee != "" {
+				agentTasks[issue.Assignee] = taskInfo
 			}
 		}
 	}
@@ -558,59 +564,50 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 	// Note: Don't add to agentTasks - these tasks have status=review meaning
 	// the planning agent finished and released its lock. The assignee field
 	// still points to the planning agent but it's no longer running.
-	if needReviewErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(needReviewOutput), &issues) == nil {
-			// All tasks with status=review are review tasks
-			summary.NeedReview = len(issues)
-			for i, issue := range issues {
-				if i >= 5 {
-					break
-				}
-				reviewTasks = append(reviewTasks, TaskInfo{
-					ID:       issue.ID,
-					Title:    issue.Title,
-					Priority: issue.Priority,
-				})
+	if reviewErr == nil {
+		// All tasks with status=review are review tasks
+		summary.NeedReview = len(reviewIssues)
+		for i, issue := range reviewIssues {
+			if i >= 5 {
+				break
 			}
+			reviewTasks = append(reviewTasks, TaskInfo{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+			})
 		}
 	}
 
 	// Process backlog tasks
 	if backlogErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(backlogOutput), &issues) == nil {
-			summary.Backlog += len(issues)
-			// Store up to 20 backlog tasks for display
-			for i, issue := range issues {
-				if i >= 20 {
-					break
-				}
-				backlogTasks = append(backlogTasks, TaskInfo{
-					ID:       issue.ID,
-					Title:    issue.Title,
-					Priority: issue.Priority,
-					Status:   issue.Status,
-				})
+		summary.Backlog += len(backlogIssues)
+		// Store up to 20 backlog tasks for display
+		for i, issue := range backlogIssues {
+			if i >= 20 {
+				break
 			}
+			backlogTasks = append(backlogTasks, TaskInfo{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+				Status:   issue.Status,
+			})
 		}
 	}
 
 	// Process closed tasks (top 50)
 	if closedErr == nil {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(closedOutput), &issues) == nil {
-			for i, issue := range issues {
-				if i >= 50 {
-					break
-				}
-				closedTasks = append(closedTasks, TaskInfo{
-					ID:       issue.ID,
-					Title:    issue.Title,
-					Priority: issue.Priority,
-					Status:   issue.Status,
-				})
+		for i, issue := range closedIssues {
+			if i >= 50 {
+				break
 			}
+			closedTasks = append(closedTasks, TaskInfo{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Priority: issue.Priority,
+				Status:   issue.Status,
+			})
 		}
 	}
 
@@ -618,11 +615,12 @@ func collectTaskStatus(readyLimit int) (TaskSummary, []TaskInfo, []TaskInfo, []T
 }
 
 // collectSyncBdStatus runs the bd sync --status command (safe to call concurrently).
+// Uses execCommand directly since sync is an infrastructure operation, not an issue query.
 func collectSyncBdStatus() SyncInfo {
 	var info SyncInfo
-	syncOutput, err := runBdCommand("sync", "--status")
-	if err == nil {
-		info.DBSynced = !strings.Contains(syncOutput, "error") && !strings.Contains(syncOutput, "failed")
+	result := execCommand(GetBeadsDir(), "bd", "sync", "--status")
+	if result.Err == nil {
+		info.DBSynced = !strings.Contains(result.Stdout, "error") && !strings.Contains(result.Stdout, "failed")
 		info.DBLastSync = "recently"
 	} else {
 		info.DBError = "unable to check"
@@ -660,34 +658,30 @@ func collectSyncStatus(agents []AgentStatus) SyncInfo {
 func collectStatistics() MonitorStats {
 	var stats MonitorStats
 
-	// Get stats from bd
-	statsOutput, err := runBdCommand("stats", "--json")
-	if err == nil {
-		var bdStats BdStats
-		if json.Unmarshal([]byte(statsOutput), &bdStats) == nil {
-			stats.Open = bdStats.Summary.OpenIssues
-			stats.Closed = bdStats.Summary.ClosedIssues
-			stats.Total = bdStats.Summary.TotalIssues
-			stats.InProgress = bdStats.Summary.InProgressIssues
-			stats.Blocked = bdStats.Summary.BlockedIssues
-			if stats.Total > 0 {
-				stats.Completion = float64(stats.Closed) / float64(stats.Total) * 100
-			}
+	bdStats, err := defaultTracker().Stats(context.Background())
+	if err == nil && bdStats != nil {
+		stats.Open = bdStats.Summary.OpenIssues
+		stats.Closed = bdStats.Summary.ClosedIssues
+		stats.Total = bdStats.Summary.TotalIssues
+		stats.InProgress = bdStats.Summary.InProgressIssues
+		stats.Blocked = bdStats.Summary.BlockedIssues
+		if stats.Total > 0 {
+			stats.Completion = float64(stats.Closed) / float64(stats.Total) * 100
+		}
 
-			// Remaining = total - closed
-			// Note: bd stats total_issues already excludes tombstones
-			stats.Remaining = stats.Total - stats.Closed
-			if stats.Remaining < 0 {
-				stats.Remaining = 0
-			}
+		// Remaining = total - closed
+		// Note: bd stats total_issues already excludes tombstones
+		stats.Remaining = stats.Total - stats.Closed
+		if stats.Remaining < 0 {
+			stats.Remaining = 0
+		}
 
-			// Review = total - open - inProgress - closed - blocked - deferred - pinned
-			// Note: bd stats total_issues already excludes tombstones
-			stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
-				stats.Blocked - bdStats.Summary.DeferredIssues - bdStats.Summary.PinnedIssues
-			if stats.Review < 0 {
-				stats.Review = 0
-			}
+		// Review = total - open - inProgress - closed - blocked - deferred - pinned
+		// Note: bd stats total_issues already excludes tombstones
+		stats.Review = stats.Total - stats.Open - stats.InProgress - stats.Closed -
+			stats.Blocked - bdStats.Summary.DeferredIssues - bdStats.Summary.PinnedIssues
+		if stats.Review < 0 {
+			stats.Review = 0
 		}
 	}
 
@@ -704,13 +698,8 @@ func collectReadyTasksByPriority(readyLimit int) map[int]int {
 		counts[i] = 0
 	}
 
-	output, err := runBdCommand("ready", "--json", "--limit", strconv.Itoa(readyLimit))
+	issues, err := defaultTracker().Ready(context.Background(), ReadyOpts{Limit: readyLimit})
 	if err != nil {
-		return counts
-	}
-
-	var issues []BdIssue
-	if json.Unmarshal([]byte(output), &issues) != nil {
 		return counts
 	}
 
@@ -735,44 +724,29 @@ func collectReadyTasksByPriority(readyLimit int) map[int]int {
 	return counts
 }
 
-// buildUnclosedIDsFromResponses builds a set of unclosed issue IDs from the
-// JSON responses already fetched by collectTaskStatus's parallel bd commands.
-// Issues from ready/in_progress/review are unclosed by definition; backlog
-// issues need a status check since bd blocked may include closed issues.
-func buildUnclosedIDsFromResponses(readyJSON, inProgressJSON, reviewJSON, backlogJSON string) map[string]bool {
+// buildUnclosedIDsFromIssues builds a set of unclosed issue IDs from the
+// typed results already fetched by collectTaskStatus's parallel IssueTracker queries.
+// Issues from ready/in_progress/review are unclosed by definition; backlog issues need a status check.
+func buildUnclosedIDsFromIssues(ready, inProgress, review, backlog []BdIssue) map[string]bool {
 	unclosed := make(map[string]bool)
 
-	addAll := func(jsonStr string) {
-		var issues []BdIssue
-		if json.Unmarshal([]byte(jsonStr), &issues) == nil {
-			for _, issue := range issues {
-				unclosed[issue.ID] = true
-			}
+	addAll := func(issues []BdIssue) {
+		for _, issue := range issues {
+			unclosed[issue.ID] = true
 		}
 	}
 
 	// Ready, in_progress, and review issues are all unclosed by definition
-	addAll(readyJSON)
-	addAll(inProgressJSON)
-	addAll(reviewJSON)
+	addAll(ready)
+	addAll(inProgress)
+	addAll(review)
 
 	// Backlog (blocked) issues need status filtering
-	var backlogIssues []BdIssue
-	if json.Unmarshal([]byte(backlogJSON), &backlogIssues) == nil {
-		for _, issue := range backlogIssues {
-			if issue.Status != "closed" {
-				unclosed[issue.ID] = true
-			}
+	for _, issue := range backlog {
+		if issue.Status != "closed" {
+			unclosed[issue.ID] = true
 		}
 	}
 
 	return unclosed
-}
-
-func runBdCommand(args ...string) (string, error) {
-	result := execCommand(GetBeadsDir(), "bd", args...)
-	if result.Err != nil {
-		return "", result.Err
-	}
-	return result.Stdout, nil
 }

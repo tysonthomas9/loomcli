@@ -15,6 +15,8 @@ import (
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
+	cfg := d.configSnapshot() // snapshot config for consistent reads
+
 	ap.mu.Lock()
 	epicID := ap.assignedEpicID // snapshot before getEffectiveBackend (also acquires ap.mu)
 	ap.mu.Unlock()
@@ -58,8 +60,13 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 	cmd.Env = append(FilteredEnv(),
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
-		fmt.Sprintf("LOOM_EVENTS_DIR=%s", resolveDaemonPath(d.projectDir, d.config.Daemon.EventsDir)),
+		fmt.Sprintf("LOOM_EVENTS_DIR=%s", resolveDaemonPath(d.projectDir, cfg.Daemon.EventsDir)),
 	)
+
+	// Propagate repo context for subprocess diagnostics and prompts
+	if ap.entry.Repo != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_REPO=%s", ap.entry.Repo))
+	}
 
 	// Propagate role constraints as env vars for the subprocess
 	if len(ap.roleConfig.AllowedTools) > 0 {
@@ -90,6 +97,11 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_PATH_PATTERNS=%s", strings.Join(ap.entry.PathPatterns, ",")))
 	}
 
+	// Propagate resolved source repos for repo affinity scoring
+	if sourceRepos := resolveAgentRepos(ap.entry, d.repos); len(sourceRepos) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
+	}
+
 	return cmd
 }
 
@@ -100,8 +112,9 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 	ap.mu.Lock()
 
 	// Set up log files if log directory is configured
-	if d.config.Daemon.LogDir != "" {
-		logDir := d.config.Daemon.LogDir
+	cfg := d.configSnapshot()
+	if cfg.Daemon.LogDir != "" {
+		logDir := cfg.Daemon.LogDir
 		if !filepath.IsAbs(logDir) {
 			logDir = filepath.Join(d.projectDir, logDir)
 		}

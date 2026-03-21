@@ -4,7 +4,9 @@
  * action buttons and a selection count.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
+
+import { useAnnounce } from "@/hooks/useAnnounce";
 
 import styles from "./BulkActionToolbar.module.css";
 
@@ -63,6 +65,20 @@ export function BulkActionToolbar({
   actions = [],
   className,
 }: BulkActionToolbarProps): JSX.Element | null {
+  const { announce } = useAnnounce();
+  const prevCountRef = useRef(selectedIds.size);
+
+  // Announce selection count changes
+  useEffect(() => {
+    const count = selectedIds.size;
+    if (count !== prevCountRef.current) {
+      if (count > 0) {
+        announce(`${count} issue${count !== 1 ? "s" : ""} selected`);
+      }
+      prevCountRef.current = count;
+    }
+  }, [selectedIds.size, announce]);
+
   // Handle action button click - defined before early return to satisfy rules-of-hooks
   const handleActionClick = useCallback(
     (action: BulkAction) => {

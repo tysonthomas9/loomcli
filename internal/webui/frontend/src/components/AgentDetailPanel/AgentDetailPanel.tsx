@@ -4,14 +4,41 @@
  * Follows the same slide-out pattern as IssueDetailPanel.
  */
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useCallback,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
 
-import { useAgentTerminalLogs } from "@/hooks";
+import { ErrorDisplay } from "@/components";
+import {
+  useAgentTerminalLogs,
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  LAYER_AGENT_PANEL,
+} from "@/hooks";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types";
 
+const FileEditorPanel = lazy(() =>
+  import("@/components/FileEditorPanel").then((m) => ({
+    default: m.FileEditorPanel,
+  })),
+);
+
+const DiffTab = lazy(() =>
+  import("./DiffTab").then((m) => ({
+    default: m.DiffTab,
+  })),
+);
+
 import { LogViewer } from "../LogViewer";
 import { OpenInEditor } from "../OpenInEditor";
+import { RepoBadge } from "../RepoBadge";
 import styles from "./AgentDetailPanel.module.css";
 import { GitTab } from "./GitTab";
 import { useExpandedCommits } from "./useExpandedCommits";
@@ -44,7 +71,7 @@ export interface AgentDetailPanelProps {
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = "info" | "logs" | "git";
+type TabType = "info" | "logs" | "git" | "diff" | "files";
 
 export function AgentDetailPanel({
   isOpen,
@@ -79,19 +106,8 @@ export function AgentDetailPanel({
     setActiveTab("info");
   }, [agentName]);
 
-  // Handle Escape key
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  // Handle Escape key via global shortcut layer system
+  useRegisterEscapeLayer(LAYER_AGENT_PANEL, onClose, isOpen);
 
   // Lock body scroll when open
   useEffect(() => {
@@ -105,21 +121,8 @@ export function AgentDetailPanel({
   }, [isOpen]);
 
   // Focus management
-  useEffect(() => {
-    if (isOpen && panelRef.current) {
-      const previouslyFocused = document.activeElement as HTMLElement | null;
-      panelRef.current.focus();
-      return () => {
-        if (
-          previouslyFocused &&
-          document.contains(previouslyFocused) &&
-          previouslyFocused.focus
-        ) {
-          previouslyFocused.focus();
-        }
-      };
-    }
-  }, [isOpen]);
+  useFocusReturn(isOpen, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen);
 
   const handleTaskClick = useCallback(
     (taskId: string) => {
@@ -263,6 +266,28 @@ export function AgentDetailPanel({
                   aria-controls="agent-panel-tabpanel-git"
                 >
                   Git
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.tab} ${activeTab === "diff" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("diff")}
+                  aria-selected={activeTab === "diff"}
+                  role="tab"
+                  id="agent-panel-tab-diff"
+                  aria-controls="agent-panel-tabpanel-diff"
+                >
+                  Diff
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.tab} ${activeTab === "files" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("files")}
+                  aria-selected={activeTab === "files"}
+                  role="tab"
+                  id="agent-panel-tab-files"
+                  aria-controls="agent-panel-tabpanel-files"
+                >
+                  Files
                 </button>
               </div>
             </div>
@@ -419,6 +444,19 @@ export function AgentDetailPanel({
                     )}
                     <dt>Branch</dt>
                     <dd>{agent.branch}</dd>
+                    {agent.repo && (
+                      <>
+                        <dt>Repos</dt>
+                        <dd className={styles.repoDetail}>
+                          <RepoBadge repoName={agent.repo} />
+                          {agent.cross_repo && (
+                            <span className={styles.crossRepoLabel}>
+                              All repos
+                            </span>
+                          )}
+                        </dd>
+                      </>
+                    )}
                     <dt>Status</dt>
                     <dd>{agent.status}</dd>
                     {parsed.taskId && (
@@ -488,7 +526,7 @@ export function AgentDetailPanel({
                     : {})}
                 />
               </div>
-            ) : (
+            ) : activeTab === "git" ? (
               /* Git Tab */
               <div
                 className={styles.scrollableContent}
@@ -498,14 +536,54 @@ export function AgentDetailPanel({
               >
                 <GitTab agent={agent} isActive={activeTab === "git"} />
               </div>
+            ) : activeTab === "diff" ? (
+              /* Diff Tab */
+              <div
+                className={styles.scrollableContent}
+                id="agent-panel-tabpanel-diff"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-diff"
+              >
+                <Suspense
+                  fallback={
+                    <div className={styles.loadingFallback}>
+                      Loading diff viewer...
+                    </div>
+                  }
+                >
+                  <DiffTab agent={agent} isActive={activeTab === "diff"} />
+                </Suspense>
+              </div>
+            ) : (
+              /* Files Tab */
+              <div
+                className={styles.filesContainer}
+                id="agent-panel-tabpanel-files"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-files"
+              >
+                <Suspense
+                  fallback={
+                    <div className={styles.loadingFallback}>
+                      Loading editor...
+                    </div>
+                  }
+                >
+                  <FileEditorPanel
+                    agentName={agent.name}
+                    isActive={activeTab === "files"}
+                  />
+                </Suspense>
+              </div>
             )}
           </>
         ) : agentName ? (
           /* Agent not found state */
-          <div className={styles.notFound}>
-            <span className={styles.notFoundIcon}>?</span>
-            <span>Agent disconnected or not found</span>
-          </div>
+          <ErrorDisplay
+            variant="connection-error"
+            title="Agent disconnected"
+            description="This agent is no longer connected or could not be found."
+          />
         ) : null}
       </aside>
     </div>

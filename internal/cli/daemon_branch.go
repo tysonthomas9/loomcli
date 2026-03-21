@@ -12,9 +12,10 @@ func epicBranchName(epicID string) string {
 
 // EnsureWorktreeBranch switches the worktree to the target branch.
 // If already on the target branch, it's a no-op. If the working tree is dirty,
-// a WIP commit is created before switching. The fallbackRef (e.g. "origin/main")
-// is used when creating a brand-new branch.
-func EnsureWorktreeBranch(worktreePath, targetBranch, fallbackRef string) error {
+// a WIP commit is created before switching. The remote is used for fetch and
+// remote branch lookups. The fallbackRef (e.g. "origin/main") is used when
+// creating a brand-new branch.
+func EnsureWorktreeBranch(worktreePath, targetBranch, remote, fallbackRef string) error {
 	// Check current branch
 	current, err := GetCurrentBranch(worktreePath)
 	if err != nil {
@@ -40,7 +41,7 @@ func EnsureWorktreeBranch(worktreePath, targetBranch, fallbackRef string) error 
 	}
 
 	// Fetch (non-fatal if offline)
-	if err := GitFetch(worktreePath); err != nil {
+	if err := GitFetchRemote(worktreePath, remote); err != nil {
 		log.Printf("[daemon] Warning: fetch failed (continuing with local refs): %v", err)
 	}
 
@@ -54,12 +55,12 @@ func EnsureWorktreeBranch(worktreePath, targetBranch, fallbackRef string) error 
 	}
 
 	// Try remote tracking branch
-	remoteExists, err := RemoteBranchExists(worktreePath, "", targetBranch)
+	remoteExists, err := RemoteBranchExists(worktreePath, remote, targetBranch)
 	if err != nil {
 		return fmt.Errorf("failed to check remote branch: %w", err)
 	}
 	if remoteExists {
-		return GitCheckoutNewFromRef(worktreePath, targetBranch, "origin/"+targetBranch)
+		return GitCheckoutNewFromRef(worktreePath, targetBranch, remote+"/"+targetBranch)
 	}
 
 	// Create new branch from fallback ref (e.g. origin/main)

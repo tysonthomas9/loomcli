@@ -50,7 +50,7 @@ describe("useToast", () => {
       expect(result.current.toasts).toHaveLength(1);
       expect(result.current.toasts[0].message).toBe("Test message");
       expect(result.current.toasts[0].type).toBe("info");
-      expect(result.current.toasts[0].duration).toBe(5000);
+      expect(result.current.toasts[0].duration).toBe(5000); // info default
     });
 
     it("returns toast ID", () => {
@@ -246,17 +246,17 @@ describe("useToast", () => {
   });
 
   describe("maxToasts limit", () => {
-    it("respects maxToasts limit (default 5)", () => {
+    it("respects maxToasts limit (default 3)", () => {
       const { result } = renderHook(() => useToast(), { wrapper });
 
       act(() => {
-        for (let i = 0; i < 7; i++) {
+        for (let i = 0; i < 5; i++) {
           result.current.showToast(`Toast ${i}`, { duration: 0 });
         }
       });
 
-      // After adding 7 toasts, we should have at most 5
-      expect(result.current.toasts.length).toBeLessThanOrEqual(5);
+      // After adding 5 toasts, we should have at most 3
+      expect(result.current.toasts.length).toBeLessThanOrEqual(3);
     });
 
     it("removes oldest toasts when limit exceeded", () => {
@@ -267,11 +267,9 @@ describe("useToast", () => {
         result.current.showToast("Toast 2", { duration: 0 });
         result.current.showToast("Toast 3", { duration: 0 });
         result.current.showToast("Toast 4", { duration: 0 });
-        result.current.showToast("Toast 5", { duration: 0 });
-        result.current.showToast("Toast 6", { duration: 0 });
       });
 
-      expect(result.current.toasts.length).toBe(5);
+      expect(result.current.toasts.length).toBe(3);
       // The oldest (Toast 1) should be removed
       expect(result.current.toasts.map((t) => t.message)).not.toContain(
         "Toast 1",
@@ -280,7 +278,7 @@ describe("useToast", () => {
 
     it("respects custom maxToasts", () => {
       function customWrapper({ children }: { children: ReactNode }) {
-        return <ToastProvider maxToasts={3}>{children}</ToastProvider>;
+        return <ToastProvider maxToasts={2}>{children}</ToastProvider>;
       }
 
       const { result } = renderHook(() => useToast(), {
@@ -291,10 +289,162 @@ describe("useToast", () => {
         result.current.showToast("Toast 1", { duration: 0 });
         result.current.showToast("Toast 2", { duration: 0 });
         result.current.showToast("Toast 3", { duration: 0 });
-        result.current.showToast("Toast 4", { duration: 0 });
       });
 
-      expect(result.current.toasts.length).toBe(3);
+      expect(result.current.toasts.length).toBe(2);
+    });
+  });
+
+  describe("type-specific default durations", () => {
+    it("uses 3000ms for success toasts", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Success!", { type: "success" });
+      });
+
+      expect(result.current.toasts[0].duration).toBe(3000);
+    });
+
+    it("uses 10000ms for error toasts", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Error!", { type: "error" });
+      });
+
+      expect(result.current.toasts[0].duration).toBe(10000);
+    });
+
+    it("uses 5000ms for warning toasts", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Warning!", { type: "warning" });
+      });
+
+      expect(result.current.toasts[0].duration).toBe(5000);
+    });
+
+    it("uses 5000ms for info toasts", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Info!", { type: "info" });
+      });
+
+      expect(result.current.toasts[0].duration).toBe(5000);
+    });
+
+    it("allows overriding default duration", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Custom!", {
+          type: "success",
+          duration: 7000,
+        });
+      });
+
+      expect(result.current.toasts[0].duration).toBe(7000);
+    });
+  });
+
+  describe("onUndo callback", () => {
+    it("stores onUndo in toast data", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+      const undoFn = vi.fn();
+
+      act(() => {
+        result.current.showToast("Deleted", {
+          type: "warning",
+          onUndo: undoFn,
+        });
+      });
+
+      expect(result.current.toasts[0].onUndo).toBe(undoFn);
+    });
+
+    it("does not include onUndo when not provided", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Normal toast");
+      });
+
+      expect(result.current.toasts[0].onUndo).toBeUndefined();
+    });
+  });
+
+  describe("coalescing", () => {
+    it("coalesces duplicate toasts within 500ms window", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Same message", {
+          type: "error",
+          duration: 0,
+        });
+        result.current.showToast("Same message", {
+          type: "error",
+          duration: 0,
+        });
+      });
+
+      expect(result.current.toasts).toHaveLength(1);
+    });
+
+    it("does not coalesce toasts with different messages", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Message A", { type: "error", duration: 0 });
+        result.current.showToast("Message B", { type: "error", duration: 0 });
+      });
+
+      expect(result.current.toasts).toHaveLength(2);
+    });
+
+    it("does not coalesce toasts with different types", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Same message", {
+          type: "error",
+          duration: 0,
+        });
+        result.current.showToast("Same message", {
+          type: "warning",
+          duration: 0,
+        });
+      });
+
+      expect(result.current.toasts).toHaveLength(2);
+    });
+
+    it("allows duplicate toasts after 500ms window", () => {
+      const { result } = renderHook(() => useToast(), { wrapper });
+
+      act(() => {
+        result.current.showToast("Same message", {
+          type: "error",
+          duration: 0,
+        });
+      });
+
+      // Advance past the coalescing window
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+
+      act(() => {
+        result.current.showToast("Same message", {
+          type: "error",
+          duration: 0,
+        });
+      });
+
+      expect(result.current.toasts).toHaveLength(2);
     });
   });
 
@@ -305,7 +455,7 @@ describe("useToast", () => {
       const ids: string[] = [];
       act(() => {
         for (let i = 0; i < 10; i++) {
-          ids.push(result.current.showToast("Test", { duration: 0 }));
+          ids.push(result.current.showToast(`Test ${i}`, { duration: 0 }));
         }
       });
 

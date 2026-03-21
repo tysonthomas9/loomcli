@@ -4,14 +4,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
+
+var configVersionWarnOnce sync.Once
+
+func resetConfigVersionWarnOnce() {
+	configVersionWarnOnce = sync.Once{}
+}
 
 // LoomConfig is the top-level configuration from ~/.loom/config.yaml
 type LoomConfig struct {
 	Version          int                        `yaml:"version,omitempty"`
 	DefaultWorkspace string                     `yaml:"default_workspace,omitempty"`
+	WorkspaceOrder   []string                   `yaml:"workspace_order,omitempty"`
 	Backend          string                     `yaml:"backend,omitempty"`
 	Workspaces       map[string]WorkspaceConfig `yaml:"workspaces"`
 	Daemon           *DaemonSettings            `yaml:"daemon,omitempty"`
@@ -19,16 +27,29 @@ type LoomConfig struct {
 
 // WorkspaceConfig defines a named workspace containing multiple repos
 type WorkspaceConfig struct {
-	Path  string       `yaml:"path" json:"path"`   // Directory path for this workspace
-	Repos []RepoConfig `yaml:"repos" json:"repos"` // Repositories in this workspace
+	Path    string       `yaml:"path" json:"path"`                           // Directory path for this workspace
+	Backend string       `yaml:"backend,omitempty" json:"backend,omitempty"` // AI backend override for this workspace
+	Repos   []RepoConfig `yaml:"repos" json:"repos"`                         // Repositories in this workspace
 }
 
 // RepoConfig defines a single repository within a workspace
 type RepoConfig struct {
-	Name          string `yaml:"name" json:"name"`                                         // Display name / identifier
-	Path          string `yaml:"path" json:"path"`                                         // Path to the repo (absolute or relative to workspace)
-	DefaultBranch string `yaml:"default_branch,omitempty" json:"default_branch,omitempty"` // Override default branch (defaults to "main")
-	Remote        string `yaml:"remote,omitempty" json:"remote,omitempty"`                 // Git remote name (defaults to "origin")
+	Name          string   `yaml:"name" json:"name"`                                         // Display name / identifier
+	Path          string   `yaml:"path" json:"path"`                                         // Path to the repo (absolute or relative to workspace)
+	DefaultBranch string   `yaml:"default_branch,omitempty" json:"default_branch,omitempty"` // Override default branch (defaults to "main")
+	Remote        string   `yaml:"remote,omitempty" json:"remote,omitempty"`                 // Git remote name (defaults to "origin")
+	Groups        []string `yaml:"groups,omitempty" json:"groups,omitempty"`                 // Logical groups (e.g., backend, infra)
+	SourceRepoID  string   `yaml:"source_repo_id,omitempty" json:"source_repo_id,omitempty"` // Stable identifier for server-side filtering (defaults to Name)
+}
+
+// ResolveAbsPath returns the absolute path for this repo.
+// If repo.Path is already absolute, returns it as-is.
+// Otherwise, joins it with workspacePath.
+func (rc RepoConfig) ResolveAbsPath(workspacePath string) string {
+	if filepath.IsAbs(rc.Path) {
+		return rc.Path
+	}
+	return filepath.Join(workspacePath, rc.Path)
 }
 
 // ValidateRemoteName checks if a remote name is safe for use in git commands.
@@ -102,11 +123,18 @@ func LoadConfig() (*LoomConfig, error) {
 			if err := ValidateRemoteName(repo.Remote); err != nil {
 				return nil, fmt.Errorf("invalid config %s: workspace %q repo %d (%q): %w", path, wsName, i, repo.Name, err)
 			}
+			// Default SourceRepoID to Name if not explicitly set
+			if repo.SourceRepoID == "" {
+				ws.Repos[i].SourceRepoID = repo.Name
+			}
 		}
+		cfg.Workspaces[wsName] = ws
 	}
 
 	if cfg.Version < CurrentConfigVersion {
-		fmt.Fprintf(os.Stderr, "Warning: config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, cfg.Version, CurrentConfigVersion)
+		configVersionWarnOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "Warning: config %s is version %d (current: %d). Run 'loom config migrate' to upgrade.\n", path, cfg.Version, CurrentConfigVersion)
+		})
 	}
 
 	// Run comprehensive validation (warnings only — don't block on path checks)

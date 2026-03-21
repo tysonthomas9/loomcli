@@ -151,6 +151,14 @@ export const DEFAULT_ISSUE_COLUMNS: ColumnDef<Issue>[] = [
     sortable: true,
   },
   {
+    id: "repo",
+    header: "Repo",
+    accessor: "repo",
+    width: "100px",
+    align: "left",
+    sortable: true,
+  },
+  {
     id: "updated_at",
     header: "Updated",
     accessor: "updated_at",

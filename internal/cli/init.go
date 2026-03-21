@@ -142,21 +142,16 @@ func runInitWorkspace(_ *cobra.Command, _ []string) {
 	}
 	fmt.Println("")
 
-	// Step 3: Initialize beads in workspace root (if not done)
-	fmt.Println("Step 3: Initialize beads")
-	beadsPath := filepath.Join(ws.Path, ".beads")
-	if _, err := os.Stat(beadsPath); err == nil {
+	// Step 3: Initialize beads in workspace root (skip when fleet-db is active)
+	fmt.Println("Step 3: Issue backend")
+	if isFleetDBActive() {
+		fmt.Println("→ Skipping beads init (fleet-db backend active)")
+	} else if _, statErr := os.Stat(filepath.Join(ws.Path, ".beads")); statErr == nil {
 		fmt.Println("✓ beads already initialized in workspace")
+	} else if initYes || promptYesNo("Initialize beads in workspace root?", true) {
+		initBeadsInWorkspace(ws.Path)
 	} else {
-		if !initYes {
-			if !promptYesNo("Initialize beads in workspace root?", true) {
-				fmt.Println("→ Skipping beads initialization")
-			} else {
-				initBeadsInWorkspace(ws.Path)
-			}
-		} else {
-			initBeadsInWorkspace(ws.Path)
-		}
+		fmt.Println("→ Skipping beads initialization")
 	}
 	fmt.Println("")
 
@@ -221,23 +216,27 @@ func checkPrerequisites() bool {
 		}
 	}
 
-	// Check if bd (beads) CLI is available (run from cwd — just checking PATH)
-	result = execCommand(".", "bd", "--version")
-	if result.Err != nil {
+	// Check if bd (beads) CLI is available (skip when fleet-db is active)
+	if isFleetDBActive() {
+		fmt.Println("✓ fleet-db backend active (bd CLI not required)")
+	} else if result = execCommand(".", "bd", "--version"); result.Err != nil {
 		fmt.Println("✗ bd (beads CLI) not found")
-		fmt.Println("")
-		fmt.Println("  Please install beads CLI from the vendored source:")
+		fmt.Println("\n  Please install beads CLI from the vendored source:")
 		fmt.Println("    make install-bd")
 		return false
+	} else {
+		fmt.Println("✓ bd (beads CLI) found")
 	}
-	fmt.Println("✓ bd (beads CLI) found")
 
 	return true
 }
 
 // initBeads initializes beads if not already done
 func initBeads() bool {
-	// Check if .beads/ already exists
+	if isFleetDBActive() {
+		fmt.Println("→ Skipping beads init (fleet-db backend active)")
+		return true
+	}
 	if _, err := os.Stat(filepath.Join(GetBeadsDir(), ".beads")); err == nil {
 		fmt.Println("✓ beads already initialized, skipping...")
 		return true

@@ -66,12 +66,18 @@ func setupTestWorktree(t *testing.T) string {
 }
 
 // resolveToDir returns a mockFileOps that resolves to the given directory.
+// It evaluates symlinks on the path so that validatePathWithinDir (which also
+// resolves symlinks) can match prefixes correctly (e.g. /var → /private/var on macOS).
 func resolveToDir(dir string) *mockFileOps {
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		resolved = dir
+	}
 	return &mockFileOps{
 		resolveFunc: func(name string) (*AgentWorktree, error) {
 			return &AgentWorktree{
 				Name:          name,
-				Path:          dir,
+				Path:          resolved,
 				Branch:        "test-branch",
 				DefaultBranch: "main",
 			}, nil

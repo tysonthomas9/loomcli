@@ -1,4 +1,4 @@
-import { get, patch, del, ApiError } from "./client";
+import { get, post, put, patch, del, ApiError } from "./client";
 
 // ============= Types =============
 
@@ -78,6 +78,93 @@ export function buildTerminalWsUrl(
   return url;
 }
 
+// ============= Spawn Session =============
+
+/**
+ * Pre-create a tmux session for the given backend via POST /api/terminal/spawn.
+ * Used for shell tabs to ensure the correct command before WebSocket connects.
+ */
+export async function spawnTerminalSession(
+  sessionName: string,
+  backend: string,
+): Promise<void> {
+  await post<{ success: boolean; data?: unknown; error?: string }>(
+    "/api/terminal/spawn",
+    { session_name: sessionName, backend },
+  );
+}
+
+// ============= Restart Session =============
+
+/**
+ * Restart a terminal session with the current backend.
+ * POST /api/terminal/restart?session=<name>&token=<token>
+ */
+export async function restartTerminalSession(
+  sessionName: string,
+  token: string | null,
+): Promise<{ success: boolean; backend: string }> {
+  let url = `/api/terminal/restart?session=${encodeURIComponent(sessionName)}`; // allow-url
+  if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+  return post<{ success: boolean; backend: string }>(url, {});
+}
+
+// ============= Kill Session =============
+
+/**
+ * Forcibly kill a terminal session (for hung backends).
+ * POST /api/terminal/kill?session=<name>&token=<token>
+ */
+export async function killTerminalSession(
+  sessionName: string,
+  token: string | null,
+): Promise<void> {
+  let url = `/api/terminal/kill?session=${encodeURIComponent(sessionName)}`; // allow-url
+  if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+  await post<{ success: boolean }>(url, {});
+}
+
+// ============= Session Status =============
+
+/**
+ * Check whether a terminal session's backend is alive.
+ * GET /api/terminal/session-status?session=<name>
+ */
+export async function getSessionStatus(
+  sessionName: string,
+): Promise<{ alive: boolean; exit_reason?: string }> {
+  return get<{ alive: boolean; exit_reason?: string }>(
+    `/api/terminal/session-status?session=${encodeURIComponent(sessionName)}`, // allow-url
+  );
+}
+
+// ============= Issue Context Seeding =============
+
+export interface IssueContext {
+  issue_id: string;
+  title: string;
+  description?: string;
+  design?: string;
+  blockers?: Array<{ id: string; title: string }>;
+}
+
+/**
+ * Seed a terminal session with issue context via POST /api/terminal/sessions/{name}/seed.
+ */
+export async function seedTerminalSession(
+  sessionName: string,
+  context: IssueContext,
+): Promise<void> {
+  await post<{ success: boolean }>(
+    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/seed`,
+    context,
+  );
+}
+
 // ============= Tab Metadata Types =============
 
 export interface TabMetadata {
@@ -85,26 +172,51 @@ export interface TabMetadata {
   label: string;
   notes: string;
   sort_order: number;
+  pinned: boolean;
+  issue_id?: string;
   created_at: string;
   updated_at: string;
 }
 
 // ============= Tab Metadata API Functions =============
 
+/** Build workspace query string suffix for tab metadata requests. */
+function wsQuery(workspace?: string): string {
+  return workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+}
+
 /**
  * List all tab metadata from GET /api/terminal/tabs.
+ * Returns an empty array when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
  */
-export async function listTabMetadata(): Promise<TabMetadata[]> {
-  const response = await get<ApiResult<TabMetadata[]>>("/api/terminal/tabs");
-  return unwrap(response);
+export async function listTabMetadata(
+  workspace?: string,
+): Promise<TabMetadata[]> {
+  try {
+    const response = await get<ApiResult<TabMetadata[]>>(
+      `/api/terminal/tabs${wsQuery(workspace)}`,
+    );
+    return unwrap(response);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 503)
+    ) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 /**
  * Get metadata for a single tab from GET /api/terminal/tabs/{session}.
  */
-export async function getTabMetadata(session: string): Promise<TabMetadata> {
+export async function getTabMetadata(
+  session: string,
+  workspace?: string,
+): Promise<TabMetadata> {
   const response = await get<ApiResult<TabMetadata>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
   );
   return unwrap(response);
 }
@@ -114,10 +226,32 @@ export async function getTabMetadata(session: string): Promise<TabMetadata> {
  */
 export async function patchTabMetadata(
   session: string,
-  fields: Partial<{ label: string; notes: string; sort_order: number }>,
+  fields: Partial<{
+    label: string;
+    notes: string;
+    sort_order: number;
+    pinned: boolean;
+    issue_id: string;
+  }>,
+  workspace?: string,
 ): Promise<TabMetadata> {
   const response = await patch<ApiResult<TabMetadata>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
+    fields,
+  );
+  return unwrap(response);
+}
+
+/**
+ * Create or replace tab metadata via PUT /api/terminal/tabs/{session}.
+ */
+export async function putTabMetadata(
+  session: string,
+  fields: { label: string; sort_order: number; notes?: string },
+  workspace?: string,
+): Promise<TabMetadata> {
+  const response = await put<ApiResult<TabMetadata>>(
+    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
     fields,
   );
   return unwrap(response);
@@ -126,8 +260,120 @@ export async function patchTabMetadata(
 /**
  * Delete tab metadata via DELETE /api/terminal/tabs/{session}.
  */
-export async function deleteTabMetadata(session: string): Promise<void> {
+export async function deleteTabMetadata(
+  session: string,
+  workspace?: string,
+): Promise<void> {
   await del<ApiResult<undefined>>(
-    `/api/terminal/tabs/${encodeURIComponent(session)}`,
+    `/api/terminal/tabs/${encodeURIComponent(session)}${wsQuery(workspace)}`,
   );
+}
+
+/**
+ * Schedule a deferred tmux session kill with grace period.
+ * POST /api/terminal/sessions/{session}/kill
+ */
+export async function scheduleSessionKill(sessionName: string): Promise<void> {
+  await post<{ success: boolean }>(
+    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/kill`,
+    {},
+  );
+}
+
+// ============= Issue Session Management =============
+
+/**
+ * List sessions grouped by issue ID from GET /api/terminal/sessions/by-issue.
+ * Returns a map of issue_id → session_name[].
+ * Returns an empty map when tab metadata is unavailable (404 = no Redis, 503 = Redis down).
+ */
+export async function listSessionsByIssue(): Promise<Record<string, string[]>> {
+  try {
+    const response = await get<ApiResult<Record<string, string[]>>>(
+      "/api/terminal/sessions/by-issue",
+    );
+    return unwrap(response);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 503)
+    ) {
+      return {};
+    }
+    throw error;
+  }
+}
+
+/**
+ * Close all terminal sessions via POST /api/terminal/sessions/close-all.
+ * Kills all tmux sessions and clears all tab metadata.
+ */
+export async function closeAllSessions(): Promise<void> {
+  await post<{ success: boolean }>("/api/terminal/sessions/close-all", {});
+}
+
+// ============= Scrollback API =============
+
+/**
+ * Fetch scrollback content for a terminal session.
+ * GET /api/terminal/sessions/{session}/scrollback
+ */
+export async function fetchScrollback(
+  sessionName: string,
+): Promise<{ content: string; lines: number }> {
+  const response = await get<ApiResult<{ content: string; lines: number }>>(
+    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/scrollback`,
+  );
+  return unwrap(response);
+}
+
+// ============= Export API =============
+
+export interface ScrollbackInfo {
+  line_count: number;
+  max_lines: number;
+  truncated_count: number;
+}
+
+/**
+ * Get scrollback buffer info for a terminal session.
+ * GET /api/terminal/sessions/{session}/scrollback-info
+ */
+export async function getScrollbackInfo(
+  sessionName: string,
+): Promise<ScrollbackInfo> {
+  return get<ScrollbackInfo>(
+    `/api/terminal/sessions/${encodeURIComponent(sessionName)}/scrollback-info`,
+  );
+}
+
+/**
+ * Export session scrollback as a downloadable file.
+ * Returns the URL for direct browser download.
+ */
+export function getExportUrl(
+  sessionName: string,
+  format: "txt" | "md" = "txt",
+): string {
+  return `/api/terminal/sessions/${encodeURIComponent(sessionName)}/export?format=${format}`;
+}
+
+// ============= Terminal UI State =============
+
+/**
+ * Get persisted terminal UI state (active tab).
+ * GET /api/terminal/state
+ */
+export async function getTerminalState(): Promise<{ active_tab: string }> {
+  return get<{ active_tab: string }>("/api/terminal/state");
+}
+
+/**
+ * Persist terminal UI state (active tab).
+ * PATCH /api/terminal/state
+ */
+export async function patchTerminalState(state: {
+  active_tab: string;
+}): Promise<void> {
+  await patch<{ active_tab: string }>("/api/terminal/state", state);
 }
