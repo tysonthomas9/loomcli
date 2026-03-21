@@ -303,8 +303,8 @@ func TestAppendTranscript_Concurrent(t *testing.T) {
 		t.Errorf("got %d lines, want %d", lineNum, numGoroutines)
 	}
 
-	// Verify all seqs are present.
-	for i := 0; i < numGoroutines; i++ {
+	// Verify all seqs are present (1-based, auto-assigned).
+	for i := 1; i <= numGoroutines; i++ {
 		if !seen[i] {
 			t.Errorf("missing seq %d", i)
 		}
