@@ -50,14 +50,15 @@ func WorkspaceMiddleware(next http.Handler) http.Handler {
 }
 
 // OptionalWorkspaceMiddleware reads the Workspace header and injects it into
-// the context. If the header is missing, it injects the defaultWS value instead.
-// This enables non-scoped routes (e.g., /api/issues) to be workspace-aware
-// when used with a MultiPool that reads workspace ID from the context.
-func OptionalWorkspaceMiddleware(defaultWS string, next http.Handler) http.Handler {
+// the context. If the header is missing, it calls defaultWSFn to resolve the
+// current default workspace dynamically. This ensures that changes to the
+// default workspace (via PUT /api/workspace/default) take effect immediately
+// without requiring a server restart.
+func OptionalWorkspaceMiddleware(defaultWSFn func() string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsID := strings.TrimSpace(r.Header.Get("Workspace"))
 		if wsID == "" {
-			wsID = defaultWS
+			wsID = defaultWSFn()
 		}
 		if wsID != "" {
 			ctx := WithWorkspace(r.Context(), wsID)

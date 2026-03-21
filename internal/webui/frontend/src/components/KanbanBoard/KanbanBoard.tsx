@@ -3,7 +3,7 @@
  * Wraps content in @dnd-kit DndContext to enable drag-and-drop between status columns.
  * Renders StatusColumns for each status and uses DragOverlay for visual drag feedback.
  *
- * Supports 6-column layout: Backlog, Open, Blocked, In Progress, Needs Review, Done
+ * Supports 6-column layout: Backlog, Open, Blocked, In Progress, Review, Done
  * where columns can be computed from issue data (status + blocked dependencies + title patterns).
  */
 
@@ -31,6 +31,8 @@ import type { BlockerRef, Issue, Status } from "@/types";
 import { DEFAULT_COLUMNS } from "./columnConfigs";
 import styles from "./KanbanBoard.module.css";
 import type { KanbanColumnConfig } from "./types";
+
+const LOAD_MORE_BATCH = 50;
 
 /**
  * Blocked issue info for lookup.
@@ -105,9 +107,9 @@ export function KanbanBoard({
 }: KanbanBoardProps): JSX.Element {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
-  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(
-    new Set(),
-  );
+  const [columnDisplayLimits, setColumnDisplayLimits] = useState<
+    Map<string, number>
+  >(new Map());
 
   // Refs for column scroll containers (used by VirtualizedCardList)
   const columnRefsMap = useRef(
@@ -306,12 +308,12 @@ export function KanbanBoard({
           const columnType = isBacklogColumn ? ("backlog" as const) : undefined;
 
           // Apply display limit for columns with defaultLimit
-          const isExpanded = expandedColumns.has(col.id);
           const hasLimit =
             col.defaultLimit !== undefined && col.defaultLimit > 0;
-          const isTruncated =
-            hasLimit && !isExpanded && allColIssues.length > col.defaultLimit!;
-          const colIssues = isTruncated
+          const currentLimit =
+            columnDisplayLimits.get(col.id) ?? col.defaultLimit ?? Infinity;
+          const shouldTruncate = hasLimit && allColIssues.length > currentLimit;
+          const colIssues = shouldTruncate
             ? allColIssues
                 .slice()
                 .sort((a, b) => {
@@ -325,29 +327,46 @@ export function KanbanBoard({
                     (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA)
                   );
                 })
-                .slice(0, col.defaultLimit!)
+                .slice(0, currentLimit)
             : allColIssues;
 
-          // Footer action for truncated columns
-          const footerAction =
-            hasLimit && allColIssues.length > col.defaultLimit! ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setExpandedColumns((prev) => {
-                    const next = new Set(prev);
-                    if (isExpanded) {
+          // Footer action for columns with defaultLimit and more items than the limit
+          let footerAction: JSX.Element | undefined;
+          if (hasLimit && allColIssues.length > col.defaultLimit!) {
+            const remaining = allColIssues.length - currentLimit;
+            if (remaining > 0) {
+              const batch = Math.min(LOAD_MORE_BATCH, remaining);
+              footerAction = (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setColumnDisplayLimits((prev) => {
+                      const next = new Map(prev);
+                      next.set(col.id, currentLimit + LOAD_MORE_BATCH);
+                      return next;
+                    });
+                  }}
+                >
+                  {`Load ${batch} more · ${allColIssues.length} total`}
+                </button>
+              );
+            } else {
+              footerAction = (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setColumnDisplayLimits((prev) => {
+                      const next = new Map(prev);
                       next.delete(col.id);
-                    } else {
-                      next.add(col.id);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                {isExpanded ? "Show recent" : `Show all ${allColIssues.length}`}
-              </button>
-            ) : undefined;
+                      return next;
+                    });
+                  }}
+                >
+                  Show recent
+                </button>
+              );
+            }
+          }
 
           // Virtualize columns with >50 cards for performance
           const useVirtualization = colIssues.length > 50;

@@ -56,7 +56,7 @@ describe("KanbanBoard", () => {
   });
 
   describe("rendering", () => {
-    it("renders default 6-column kanban layout (Backlog, Open, Blocked, In Progress, Needs Review, Done)", () => {
+    it("renders default 6-column kanban layout (Backlog, Open, Blocked, In Progress, Review, Done)", () => {
       const issues = [createMockIssue({ status: "open" })];
       render(<KanbanBoard issues={issues} />);
 
@@ -72,7 +72,7 @@ describe("KanbanBoard", () => {
         screen.getByRole("heading", { name: "In Progress" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole("heading", { name: "Needs Review" }),
+        screen.getByRole("heading", { name: "Review" }),
       ).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Done" })).toBeInTheDocument();
     });
@@ -1461,44 +1461,96 @@ describe("KanbanBoard", () => {
       expect(articles).toHaveLength(10);
     });
 
-    it('shows "Show all" button when Done column has more than 10 items', () => {
+    it('shows "Load more" button when Done column has more than 10 items', () => {
       const issues = createClosedIssues(15);
 
       render(<KanbanBoard issues={issues} />);
 
       expect(
-        screen.getByRole("button", { name: "Show all 15" }),
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
       ).toBeInTheDocument();
     });
 
-    it('clicking "Show all" displays all closed issues', () => {
+    it('clicking "Load more" shows next batch of closed issues', () => {
       const issues = createClosedIssues(15);
 
       render(<KanbanBoard issues={issues} />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Show all 15" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
+      );
 
       const doneColumn = screen.getByRole("region", { name: "Done issues" });
       const articles = within(doneColumn).getAllByRole("article");
       expect(articles).toHaveLength(15);
     });
 
-    it('after clicking "Show all", button text changes to "Show recent"', () => {
+    it('after loading all items, button text changes to "Show recent"', () => {
       const issues = createClosedIssues(15);
 
       render(<KanbanBoard issues={issues} />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Show all 15" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
+      );
 
       expect(
         screen.getByRole("button", { name: "Show recent" }),
       ).toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: /Show all/ }),
+        screen.queryByRole("button", { name: /Load .* more/ }),
       ).not.toBeInTheDocument();
     });
 
-    it('shows all items when 10 or fewer closed issues (no "Show all" button)', () => {
+    it('"Load more" button shows correct remaining count', () => {
+      const issues = createClosedIssues(25);
+
+      render(<KanbanBoard issues={issues} />);
+
+      const doneColumn = screen.getByRole("region", { name: "Done issues" });
+      expect(within(doneColumn).getAllByRole("article")).toHaveLength(10);
+
+      // Remaining is 15, which is less than batch size 50
+      expect(
+        screen.getByRole("button", { name: "Load 15 more · 25 total" }),
+      ).toBeInTheDocument();
+
+      // Click to load all remaining
+      fireEvent.click(
+        screen.getByRole("button", { name: "Load 15 more · 25 total" }),
+      );
+      expect(within(doneColumn).getAllByRole("article")).toHaveLength(25);
+
+      // Now should show "Show recent"
+      expect(
+        screen.getByRole("button", { name: "Show recent" }),
+      ).toBeInTheDocument();
+    });
+
+    it('"Show recent" resets to default limit', () => {
+      const issues = createClosedIssues(15);
+
+      render(<KanbanBoard issues={issues} />);
+
+      // Load all
+      fireEvent.click(
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
+      );
+
+      const doneColumn = screen.getByRole("region", { name: "Done issues" });
+      expect(within(doneColumn).getAllByRole("article")).toHaveLength(15);
+
+      // Reset
+      fireEvent.click(screen.getByRole("button", { name: "Show recent" }));
+      expect(within(doneColumn).getAllByRole("article")).toHaveLength(10);
+
+      // Load more button should be back
+      expect(
+        screen.getByRole("button", { name: "Load 5 more · 15 total" }),
+      ).toBeInTheDocument();
+    });
+
+    it('shows all items when 10 or fewer closed issues (no "Load more" button)', () => {
       const issues = createClosedIssues(8);
 
       render(<KanbanBoard issues={issues} />);
@@ -1507,7 +1559,7 @@ describe("KanbanBoard", () => {
       const articles = within(doneColumn).getAllByRole("article");
       expect(articles).toHaveLength(8);
       expect(
-        screen.queryByRole("button", { name: /Show all/ }),
+        screen.queryByRole("button", { name: /Load .* more/ }),
       ).not.toBeInTheDocument();
     });
 
