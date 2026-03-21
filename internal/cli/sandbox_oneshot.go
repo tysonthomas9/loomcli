@@ -183,9 +183,19 @@ func loadSandboxDefaults(projectDir string) SandboxConfig {
 func buildOneshotCreateArgs(strategy *SandboxStrategy, sandboxName, branch string, cfg SandboxOneshotConfig, repoURL string) []string {
 	args := []string{"sandbox", "create", "--name", sandboxName}
 
-	// Upload the loom binary
+	// Upload the loom binary. --upload destination is a directory;
+	// the file keeps its original name inside.
 	if loomBin, err := os.Executable(); err == nil {
-		args = append(args, "--upload", loomBin+":/sandbox/bin/loom")
+		uploadPath := loomBin
+		if filepath.Base(loomBin) != "loom" {
+			tmpLoom := filepath.Join(os.TempDir(), "loom")
+			if data, err := os.ReadFile(loomBin); err == nil {
+				if err := os.WriteFile(tmpLoom, data, 0755); err == nil {
+					uploadPath = tmpLoom
+				}
+			}
+		}
+		args = append(args, "--upload", uploadPath+":/sandbox/bin")
 	}
 
 	// Container image (--from)
@@ -198,10 +208,10 @@ func buildOneshotCreateArgs(strategy *SandboxStrategy, sandboxName, branch strin
 		args = append(args, "--provider", p)
 	}
 
-	// Policy YAML file
-	policyPath := strategy.ensurePolicyFile()
-	if policyPath != "" {
-		args = append(args, "--policy", policyPath)
+	// Policy YAML file — only pass custom policies.
+	// Skip "open" policy to use default sandbox network access.
+	if strategy.cfg.Network != "" && strategy.cfg.Network != "open" {
+		args = append(args, "--policy", strategy.cfg.Network)
 	}
 
 	// NOTE: no --no-tty for interactive one-shot mode
@@ -218,6 +228,9 @@ func buildOneshotCommand(branch string, cfg SandboxOneshotConfig, repoURL, backe
 	var sb strings.Builder
 	sb.WriteString("set -e\n")
 	sb.WriteString("chmod +x /sandbox/bin/loom\n")
+	// The sandbox proxy intercepts HTTPS but its CA cert is not in the container's
+	// trust store. Disable git SSL verification for sandbox network operations.
+	sb.WriteString("export GIT_SSL_NO_VERIFY=1\n")
 	sb.WriteString(fmt.Sprintf("git clone --branch %s --single-branch %s /sandbox/repo\n",
 		shellQuote(branch), shellQuote(repoURL)))
 	sb.WriteString("cd /sandbox/repo\n")

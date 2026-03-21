@@ -116,9 +116,22 @@ func (s *SandboxStrategy) Cleanup(ap *AgentProcess) error {
 func (s *SandboxStrategy) buildCreateArgs(ap *AgentProcess, name string) []string {
 	args := []string{"sandbox", "create", "--name", name}
 
-	// Upload the loom binary (the ONLY upload — --upload accepts one value)
+	// Upload the loom binary (the ONLY upload — --upload accepts one value).
+	// The --upload destination is a directory: the file keeps its original name.
+	// So we need the source file to be named "loom" at the destination /sandbox/bin/.
 	if loomBin, err := os.Executable(); err == nil {
-		args = append(args, "--upload", loomBin+":/sandbox/bin/loom")
+		// If the binary isn't named "loom", copy it to a temp file named "loom"
+		// so it lands at /sandbox/bin/loom inside the container.
+		uploadPath := loomBin
+		if filepath.Base(loomBin) != "loom" {
+			tmpLoom := filepath.Join(os.TempDir(), "loom")
+			if data, err := os.ReadFile(loomBin); err == nil {
+				if err := os.WriteFile(tmpLoom, data, 0755); err == nil {
+					uploadPath = tmpLoom
+				}
+			}
+		}
+		args = append(args, "--upload", uploadPath+":/sandbox/bin")
 	}
 
 	// Container image (--from)
@@ -131,10 +144,12 @@ func (s *SandboxStrategy) buildCreateArgs(ap *AgentProcess, name string) []strin
 		args = append(args, "--provider", p)
 	}
 
-	// Policy YAML file
-	policyPath := s.ensurePolicyFile()
-	if policyPath != "" {
-		args = append(args, "--policy", policyPath)
+	// Policy YAML file — only pass custom policies for now.
+	// The "open" policy is skipped because the default sandbox policy already
+	// allows network access, and passing --policy can cause provisioning issues
+	// with some OpenShell versions.
+	if s.cfg.Network != "" && s.cfg.Network != "open" {
+		args = append(args, "--policy", s.cfg.Network)
 	}
 
 	// Disable PTY for non-interactive daemon mode
@@ -162,6 +177,9 @@ func (s *SandboxStrategy) buildSandboxCommand(ap *AgentProcess) string {
 	var sb strings.Builder
 	sb.WriteString("set -e\n")
 	sb.WriteString("chmod +x /sandbox/bin/loom\n")
+	// The sandbox proxy intercepts HTTPS but its CA cert is not in the container's
+	// trust store. Disable git SSL verification for sandbox network operations.
+	sb.WriteString("export GIT_SSL_NO_VERIFY=1\n")
 	sb.WriteString(fmt.Sprintf("git clone --branch %s --single-branch %s /sandbox/repo\n",
 		shellQuote(branch), shellQuote(s.repoURL)))
 	sb.WriteString("cd /sandbox/repo\n")
