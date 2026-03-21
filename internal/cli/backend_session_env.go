@@ -1,6 +1,9 @@
 package cli
 
-import "sync"
+import (
+	"os"
+	"sync"
+)
 
 // Thread-safe package-level state for active session env vars.
 // Set by the parent loom process before invoking an agent, cleared after.
@@ -50,4 +53,13 @@ func activeSessionEnvVars() []string {
 		vars = append(vars, "LOOM_SESSION_ID="+sessionID)
 	}
 	return vars
+}
+
+// resolveWebUIURL returns the local webui server URL for session notifications.
+// Uses LOOM_WEBUI_URL env if set, otherwise defaults to http://127.0.0.1:8080.
+func resolveWebUIURL() string {
+	if url := os.Getenv("LOOM_WEBUI_URL"); url != "" {
+		return url
+	}
+	return "http://127.0.0.1:8080"
 }

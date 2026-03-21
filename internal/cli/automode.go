@@ -17,15 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
-// resolveWebUIURL returns the local webui server URL for session notifications.
-// Uses LOOM_WEBUI_URL env if set, otherwise defaults to http://127.0.0.1:8080.
-func resolveWebUIURL() string {
-	if url := os.Getenv("LOOM_WEBUI_URL"); url != "" {
-		return url
-	}
-	return "http://127.0.0.1:8080"
-}
-
 // AutoModeOptions holds configuration for auto mode
 type AutoModeOptions struct {
 	Interval        int    // Polling interval in seconds when no tasks available
@@ -273,7 +264,6 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := generatePrompt(opts.AgentName, workspace)
-
 		// Create session record before invocation
 		var sess *sessions.Session
 		if sessStore != nil {
@@ -299,7 +289,6 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 
 		endedAt := time.Now()
 		recordSessionUsage(usageStore, collector, opts.WorktreePath, opts.AgentName, opts.ParentID, startedAt, endedAt, err, opts.LockBridge)
-
 		// Finalize session record
 		if sess != nil {
 			exitCode := 0
