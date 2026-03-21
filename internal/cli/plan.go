@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
 
 	"github.com/spf13/cobra"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 var (
@@ -94,8 +98,58 @@ func runPlan(cmd *cobra.Command, args []string) {
 		}
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := GeneratePlanningPrompt(agentName, workspace, planParentID)
-		if err := InvokeAgent(worktreePath, prompt, agentName); err != nil { // Interactive mode, nice output
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+
+		// Create session before invocation (non-fatal if store init fails)
+		sessStore, sessErr := sessions.NewStore(GetBeadsDir())
+		if sessErr != nil {
+			log.Printf("[plan] Warning: session store unavailable: %v", sessErr)
+		}
+		var sess *sessions.Session
+		if sessStore != nil {
+			sess, _ = sessStore.CreateSession(sessions.CreateOptions{
+				AgentName: agentName,
+				Backend:   ResolveBackendName(),
+				EpicID:    planParentID,
+				Prompt:    prompt,
+			})
+			if sess != nil {
+				sess.Meta.Phase = "planning"
+				SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
+			}
+		}
+
+		beforeRef := captureHEADRef(worktreePath)
+		invokeErr := InvokeAgent(worktreePath, prompt, agentName) // Interactive mode, nice output
+
+		// Finalize session after invocation
+		if sess != nil {
+			exitCode := 0
+			if invokeErr != nil {
+				exitCode = 1
+				var exitErr *exec.ExitError
+				if errors.As(invokeErr, &exitErr) {
+					exitCode = exitErr.ExitCode()
+				}
+			}
+			taskID := ""
+			if info, lockErr := ReadLockFile(worktreePath); lockErr == nil {
+				taskID = info.TaskID
+			}
+			diffStats := ComputeDiffStats(worktreePath, beforeRef)
+			_ = sess.Finalize(sessions.FinalizeOptions{
+				TaskID:   taskID,
+				ExitCode: exitCode,
+				DiffStats: sessions.DiffStats{
+					FilesChanged: diffStats.FilesChanged,
+					LinesAdded:   diffStats.LinesAdded,
+					LinesRemoved: diffStats.LinesRemoved,
+				},
+			})
+			ClearActiveSessionEnv()
+		}
+
+		if invokeErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
 			os.Exit(1)
 		}
 		// Note: No StateIdle here - daemon exits immediately, lock left for parent to read
@@ -170,8 +224,58 @@ func runPlan(cmd *cobra.Command, args []string) {
 	// Generate and run the planning prompt
 	workspace, _ := ResolveActiveWorkspace()
 	prompt := GeneratePlanningPrompt(agentName, workspace, planParentID)
-	if err := InvokeAgent(worktreePath, prompt, agentName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
+
+	// Create session before invocation (non-fatal if store init fails)
+	sessStore, sessErr := sessions.NewStore(GetBeadsDir())
+	if sessErr != nil {
+		log.Printf("[plan] Warning: session store unavailable: %v", sessErr)
+	}
+	var sess *sessions.Session
+	if sessStore != nil {
+		sess, _ = sessStore.CreateSession(sessions.CreateOptions{
+			AgentName: agentName,
+			Backend:   ResolveBackendName(),
+			EpicID:    planParentID,
+			Prompt:    prompt,
+		})
+		if sess != nil {
+			sess.Meta.Phase = "planning"
+			SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
+		}
+	}
+
+	beforeRef := captureHEADRef(worktreePath)
+	invokeErr := InvokeAgent(worktreePath, prompt, agentName)
+
+	// Finalize session after invocation
+	if sess != nil {
+		exitCode := 0
+		if invokeErr != nil {
+			exitCode = 1
+			var exitErr *exec.ExitError
+			if errors.As(invokeErr, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			}
+		}
+		taskID := ""
+		if info, lockErr := ReadLockFile(worktreePath); lockErr == nil {
+			taskID = info.TaskID
+		}
+		diffStats := ComputeDiffStats(worktreePath, beforeRef)
+		_ = sess.Finalize(sessions.FinalizeOptions{
+			TaskID:   taskID,
+			ExitCode: exitCode,
+			DiffStats: sessions.DiffStats{
+				FilesChanged: diffStats.FilesChanged,
+				LinesAdded:   diffStats.LinesAdded,
+				LinesRemoved: diffStats.LinesRemoved,
+			},
+		})
+		ClearActiveSessionEnv()
+	}
+
+	if invokeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)
 		os.Exit(1)
 	}
 }
