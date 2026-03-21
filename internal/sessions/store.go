@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
@@ -25,6 +26,53 @@ func NewStore(beadsDir string) (*Store, error) {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}
 	return &Store{dir: dir}, nil
+}
+
+// CreateSession initializes a new session directory with prompt.txt and
+// metadata.json (status=running). Returns a Session handle for the caller
+// to use during the agent run.
+func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
+	// Derive a short task identifier (empty string is fine — design allows it).
+	taskShort := ""
+
+	sid, err := GenerateSessionID(opts.AgentName, taskShort)
+	if err != nil {
+		return nil, fmt.Errorf("generate session ID: %w", err)
+	}
+
+	sessDir := filepath.Join(s.dir, sid)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create session dir: %w", err)
+	}
+
+	// Write prompt.txt.
+	promptPath := filepath.Join(sessDir, "prompt.txt")
+	// #nosec G306 — prompt text is not sensitive
+	if err := os.WriteFile(promptPath, []byte(opts.Prompt), 0o644); err != nil {
+		return nil, fmt.Errorf("write prompt.txt: %w", err)
+	}
+
+	// Build initial metadata.
+	now := time.Now().UTC()
+	meta := SessionMetadata{
+		SessionRecord: SessionRecord{
+			SessionID:  sid,
+			EpicID:     opts.EpicID,
+			AgentName:  opts.AgentName,
+			Backend:    opts.Backend,
+			Phase:      "", // set later by caller if needed
+			StartedAt:  now,
+			Status:     StatusRunning,
+			AttemptNum: opts.AttemptNum,
+		},
+	}
+
+	// Write metadata.json atomically (temp + rename).
+	if err := writeMetadataAtomic(sessDir, meta); err != nil {
+		return nil, fmt.Errorf("write metadata.json: %w", err)
+	}
+
+	return &Session{store: s, Meta: meta}, nil
 }
 
 // AppendTranscript appends a single TranscriptEntry to
@@ -76,5 +124,29 @@ func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error 
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write transcript entry: %w", err)
 	}
+	return nil
+}
+
+// writeMetadataAtomic writes metadata.json using temp file + rename
+// to prevent partial reads.
+func writeMetadataAtomic(sessDir string, meta SessionMetadata) error {
+	metaPath := filepath.Join(sessDir, "metadata.json")
+	tmpPath := metaPath + ".tmp"
+
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	// #nosec G306 — metadata is not sensitive
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return fmt.Errorf("write metadata tmp: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, metaPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename metadata: %w", err)
+	}
+
 	return nil
 }
