@@ -16,14 +16,24 @@ import (
 // Each agent gets its own isolated container with the loom binary uploaded
 // and the repo cloned from the remote at the agent's branch.
 type SandboxStrategy struct {
-	cfg        SandboxConfig
-	projectDir string
-	repoURL    string
+	cfg          SandboxConfig
+	projectDir   string
+	repoURL      string
+	openshellBin string // path to openshell binary; defaults to "openshell"
 }
 
 // Name returns the strategy identifier.
 func (s *SandboxStrategy) Name() string {
 	return "sandbox"
+}
+
+// openshellCmd returns the path to the openshell binary.
+// If openshellBin is set (e.g. for testing), it is returned; otherwise "openshell".
+func (s *SandboxStrategy) openshellCmd() string {
+	if s.openshellBin != "" {
+		return s.openshellBin
+	}
+	return "openshell"
 }
 
 // Spawn creates an OpenShell sandbox and starts the agent inside it.
@@ -42,7 +52,7 @@ func (s *SandboxStrategy) Spawn(ap *AgentProcess, loomArgs []string, env []strin
 	// Build the openshell sandbox create arguments
 	args := s.buildCreateArgs(ap, sandboxName)
 
-	cmd := exec.Command("openshell", args...)
+	cmd := exec.Command(s.openshellCmd(), args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if logFile != nil {
 		cmd.Stdout = logFile
@@ -238,7 +248,7 @@ func (s *SandboxStrategy) deleteSandbox(name string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "openshell", "sandbox", "delete", name)
+	cmd := exec.CommandContext(ctx, s.openshellCmd(), "sandbox", "delete", name)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("[sandbox] delete %s: %s: %v", name, string(out), err)
 	}
