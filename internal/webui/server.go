@@ -22,6 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -65,6 +66,7 @@ type ServerConfig struct {
 	WorkspaceCreateFn       WorkspaceCreateFn              // Workspace creation function; nil = creation unavailable
 	BackendOps              BackendOps                     // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines      int                            // Maximum lines per scrollback buffer (0 = default 10000)
+	SessionsStore           *sessions.Store                // File-based session audit trail store (optional; nil disables session endpoints)
 	Logger                  *slog.Logger                   // Structured logger (optional; nil falls back to slog.Default())
 }
 
@@ -432,7 +434,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 
 	// Create HTTP server and register routes (allowedOrigins: nil = same-origin only)
 	mux := http.NewServeMux()
-	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore)
+	clientErrLimiter, cspLimiter := setupRoutes(mux, pool, multiPool, hub, getMutationsSince, termMgr, termAuth, fleetStore, tokenCfg, apiKey, config.AuthEnabled, corsConfig.AllowedOrigins, fleetRegCfg, timeoutEnforcer, claimMetrics, config.FleetEnabled, config.DevMode, config.DevFrontendDir, config.LoomServerURL, config.GitOps, config.FileOps, tabMetaStore, issueTabStore, config.WorkspaceConfigFn, config.WorkspaceDeleteFn, config.SetDefaultWorkspaceFn, config.ClearDefaultWorkspaceFn, wrappedCreateFn, config.BackendOps, sessionHistoryStore, config.SessionsStore)
 	defer clientErrLimiter.stop()
 	defer cspLimiter.stop()
 
