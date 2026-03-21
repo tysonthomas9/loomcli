@@ -216,7 +216,7 @@ func filterUnclosedBlockers(client readyClient, issues []*types.Issue) []*types.
 // an issue that is still unclosed. Uses types.Dependency (pointer slice).
 func hasUnclosedBlockersTyped(deps []*types.Dependency, unclosedIDs map[string]bool) bool {
 	for _, dep := range deps {
-		if dep.Type.AffectsReadyWork() && unclosedIDs[dep.DependsOnID] {
+		if dep.Type.IsDirectBlocker() && unclosedIDs[dep.DependsOnID] {
 			return true
 		}
 	}

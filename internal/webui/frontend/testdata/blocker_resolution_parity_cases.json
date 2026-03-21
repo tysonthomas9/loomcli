@@ -43,10 +43,10 @@
   },
   {
     "id": "parent-child-open-blocker",
-    "description": "parent-child dep on open blocker -> blocked (AffectsReadyWork)",
+    "description": "parent-child dep on open parent -> NOT blocked (parent-child does not create direct blockage)",
     "blocker_status": "open",
     "dep_type": "parent-child",
-    "expected_blocked": true
+    "expected_blocked": false
   },
   {
     "id": "parent-child-closed-blocker",

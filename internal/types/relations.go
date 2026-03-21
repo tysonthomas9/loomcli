@@ -126,6 +126,14 @@ func (d DependencyType) AffectsReadyWork() bool {
 	return d == DepBlocks || d == DepParentChild || d == DepConditionalBlocks || d == DepWaitsFor
 }
 
+// IsDirectBlocker returns true if this dependency type directly creates blockage.
+// Unlike AffectsReadyWork(), this excludes parent-child which only propagates
+// existing blockage transitively (via blocked_issues_cache SQL) but does not
+// itself create a blocking relationship.
+func (d DependencyType) IsDirectBlocker() bool {
+	return d == DepBlocks || d == DepConditionalBlocks || d == DepWaitsFor
+}
+
 // WaitsForMeta holds metadata for waits-for dependencies (fanout gates).
 // Stored as JSON in the Dependency.Metadata field.
 type WaitsForMeta struct {

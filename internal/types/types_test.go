@@ -767,6 +767,41 @@ func TestDependencyTypeAffectsReadyWork(t *testing.T) {
 	}
 }
 
+func TestDependencyTypeIsDirectBlocker(t *testing.T) {
+	tests := []struct {
+		depType       DependencyType
+		directBlocker bool
+	}{
+		{DepBlocks, true},
+		{DepParentChild, false},
+		{DepConditionalBlocks, true},
+		{DepWaitsFor, true},
+		{DepRelated, false},
+		{DepDiscoveredFrom, false},
+		{DepRepliesTo, false},
+		{DepRelatesTo, false},
+		{DepDuplicates, false},
+		{DepSupersedes, false},
+		{DepAuthoredBy, false},
+		{DepAssignedTo, false},
+		{DepApprovedBy, false},
+		{DepAttests, false},
+		{DepTracks, false},
+		{DepUntil, false},
+		{DepCausedBy, false},
+		{DepValidates, false},
+		{DependencyType("custom-type"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.depType), func(t *testing.T) {
+			if got := tt.depType.IsDirectBlocker(); got != tt.directBlocker {
+				t.Errorf("DependencyType(%q).IsDirectBlocker() = %v, want %v", tt.depType, got, tt.directBlocker)
+			}
+		})
+	}
+}
+
 func TestIsFailureClose(t *testing.T) {
 	tests := []struct {
 		name        string
