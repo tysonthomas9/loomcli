@@ -26,7 +26,7 @@ type SessionListResponse struct {
 
 // SessionListData contains the task ID and its sessions.
 type SessionListData struct {
-	TaskID   string                   `json:"task_id"`
+	TaskID   string            `json:"task_id"`
 	Sessions []SessionListItem `json:"sessions"`
 }
 
