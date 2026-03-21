@@ -77,6 +77,24 @@ func mapEventToEntry(event *HookEvent) (sessions.TranscriptEntry, bool) {
 		entry.Type = "session_end"
 		entry.Content = "Session ended"
 
+	case HookSubagentStart:
+		entry.Role = "system"
+		entry.Type = "subagent_start"
+		entry.ToolName = "Task"
+		entry.ToolInput = string(event.ToolInput)
+		entry.Content = fmt.Sprintf("Subagent started (tool_use_id: %s)", event.ToolUseID)
+
+	case HookSubagentEnd:
+		entry.Role = "system"
+		entry.Type = "subagent_end"
+		entry.ToolName = "Task"
+		entry.ToolInput = string(event.ToolInput)
+		if event.SubagentID != "" {
+			entry.Content = fmt.Sprintf("Subagent completed (tool_use_id: %s, agent_id: %s)", event.ToolUseID, event.SubagentID)
+		} else {
+			entry.Content = fmt.Sprintf("Subagent completed (tool_use_id: %s)", event.ToolUseID)
+		}
+
 	default:
 		return entry, false
 	}

@@ -64,6 +64,28 @@ var hookStopCmd = &cobra.Command{
 	},
 }
 
+// hookPreTaskCmd handles the Claude Code PreToolUse[Task] hook.
+var hookPreTaskCmd = &cobra.Command{
+	Use:    "pre-task",
+	Short:  "Handle Claude Code PreToolUse[Task] hook",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runClaudeHook(cmd, "pre-task")
+	},
+}
+
+// hookPostTaskCmd handles the Claude Code PostToolUse[Task] hook.
+var hookPostTaskCmd = &cobra.Command{
+	Use:    "post-task",
+	Short:  "Handle Claude Code PostToolUse[Task] hook",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runClaudeHook(cmd, "post-task")
+	},
+}
+
 // hookSessionEndCmd handles the Claude Code SessionEnd hook.
 var hookSessionEndCmd = &cobra.Command{
 	Use:    "session-end",
@@ -173,6 +195,8 @@ func init() {
 	hooksClaudeCodeCmd.AddCommand(hookUserPromptSubmitCmd)
 	hooksClaudeCodeCmd.AddCommand(hookStopCmd)
 	hooksClaudeCodeCmd.AddCommand(hookSessionEndCmd)
+	hooksClaudeCodeCmd.AddCommand(hookPreTaskCmd)
+	hooksClaudeCodeCmd.AddCommand(hookPostTaskCmd)
 
 	// Wire up user-facing commands and claude-code subgroup
 	hooksCmd.AddCommand(hooksClaudeCodeCmd)

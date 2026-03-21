@@ -67,9 +67,41 @@ func ParseClaudeHookInput(hookName string, r io.Reader) (*HookEvent, error) {
 			Timestamp:  time.Now(),
 		}, nil
 
+	case "pre-task":
+		raw, err := readAndParseHookInput[claudePreToolUsePayload](r)
+		if err != nil {
+			return nil, err
+		}
+		return &HookEvent{
+			Type:       HookSubagentStart,
+			SessionID:  raw.SessionID,
+			SessionRef: raw.TranscriptPath,
+			ToolUseID:  raw.ToolUseID,
+			ToolInput:  raw.ToolInput,
+			Backend:    "claude",
+			Timestamp:  time.Now(),
+		}, nil
+
+	case "post-task":
+		raw, err := readAndParseHookInput[claudePostToolUsePayload](r)
+		if err != nil {
+			return nil, err
+		}
+		event := &HookEvent{
+			Type:       HookSubagentEnd,
+			SessionID:  raw.SessionID,
+			SessionRef: raw.TranscriptPath,
+			ToolUseID:  raw.ToolUseID,
+			ToolInput:  raw.ToolInput,
+			Backend:    "claude",
+			Timestamp:  time.Now(),
+		}
+		if raw.ToolResponse.AgentID != "" {
+			event.SubagentID = raw.ToolResponse.AgentID
+		}
+		return event, nil
+
 	default:
-		// Intentionally unhandled: pre-task, post-task, post-todo (subagent/todo lifecycle).
-		// Loom only tracks session-level and turn-level events.
 		return nil, nil //nolint:nilnil // nil event = unhandled hook, not an error
 	}
 }
