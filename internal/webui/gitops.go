@@ -37,6 +37,18 @@ type GitOps interface {
 
 	// DiffStat returns line-level diff statistics for a worktree vs a base ref.
 	DiffStat(worktreePath, fromRef string) DiffStatResult
+
+	// ResolveMergeBase returns the merge-base commit hash between branch and HEAD.
+	ResolveMergeBase(worktreePath, branch string) (string, error)
+
+	// DiffCommits returns the list of commits between mergeBase and HEAD.
+	DiffCommits(worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error)
+
+	// DiffFiles returns the list of changed files between two refs.
+	DiffFiles(worktreePath, from, to string) ([]DiffFileResult, error)
+
+	// DiffFilePatch returns the unified diff patch for a single file between two refs.
+	DiffFilePatch(worktreePath, from, to, path string) (*DiffFilePatchResult, error)
 }
 
 // AgentWorktree contains resolved worktree info for an agent.
@@ -99,6 +111,34 @@ type DiffStatResult struct {
 	FilesChanged int
 	LinesAdded   int
 	LinesRemoved int
+}
+
+// DiffCommitResult contains metadata for a single commit in a diff range.
+type DiffCommitResult struct {
+	Hash      string `json:"hash"`
+	ShortHash string `json:"short_hash"`
+	Subject   string `json:"subject"`
+	Author    string `json:"author"`
+	Email     string `json:"email"`
+	Date      string `json:"date"`
+}
+
+// DiffFileResult contains the status and stats for a changed file.
+type DiffFileResult struct {
+	Path      string `json:"path"`
+	Status    string `json:"status"`
+	OldPath   string `json:"old_path,omitempty"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// DiffFilePatchResult contains the unified diff patch for a single file.
+type DiffFilePatchResult struct {
+	Patch      string `json:"patch"`
+	IsBinary   bool   `json:"is_binary"`
+	IsTooLarge bool   `json:"is_too_large"`
+	Additions  int    `json:"additions"`
+	Deletions  int    `json:"deletions"`
 }
 
 // GitStatusResult contains comprehensive git status for a worktree.

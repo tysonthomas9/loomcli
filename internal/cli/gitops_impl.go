@@ -185,6 +185,22 @@ func (g *GitOpsImpl) DiffStat(worktreePath, fromRef string) webui.DiffStatResult
 	}
 }
 
+func (g *GitOpsImpl) ResolveMergeBase(worktreePath, branch string) (string, error) {
+	return ResolveMergeBase(worktreePath, branch)
+}
+
+func (g *GitOpsImpl) DiffCommits(worktreePath, mergeBase string, limit int) ([]webui.DiffCommitResult, error) {
+	return DiffCommits(worktreePath, mergeBase, limit)
+}
+
+func (g *GitOpsImpl) DiffFiles(worktreePath, from, to string) ([]webui.DiffFileResult, error) {
+	return DiffFiles(worktreePath, from, to)
+}
+
+func (g *GitOpsImpl) DiffFilePatch(worktreePath, from, to, path string) (*webui.DiffFilePatchResult, error) {
+	return DiffFilePatch(worktreePath, from, to, path)
+}
+
 // isLockedError checks if err is a LockedError and extracts it.
 func isLockedError(err error, target **LockedError) bool {
 	le, ok := err.(*LockedError)

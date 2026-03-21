@@ -22,6 +22,10 @@ type mockGitOps struct {
 	setRepoDefaultFunc     func(repoName, branch string) error
 	listAgentWorktreesFunc func() ([]AgentWorktree, error)
 	diffStatFunc           func(worktreePath, fromRef string) DiffStatResult
+	resolveMergeBaseFunc   func(worktreePath, branch string) (string, error)
+	diffCommitsFunc        func(worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error)
+	diffFilesFunc          func(worktreePath, from, to string) ([]DiffFileResult, error)
+	diffFilePatchFunc      func(worktreePath, from, to, path string) (*DiffFilePatchResult, error)
 }
 
 func (m *mockGitOps) ResolveAgentWorktree(name string) (*AgentWorktree, error) {
@@ -99,6 +103,34 @@ func (m *mockGitOps) DiffStat(worktreePath, fromRef string) DiffStatResult {
 		return m.diffStatFunc(worktreePath, fromRef)
 	}
 	return DiffStatResult{}
+}
+
+func (m *mockGitOps) ResolveMergeBase(worktreePath, branch string) (string, error) {
+	if m.resolveMergeBaseFunc != nil {
+		return m.resolveMergeBaseFunc(worktreePath, branch)
+	}
+	return "abc123", nil
+}
+
+func (m *mockGitOps) DiffCommits(worktreePath, mergeBase string, limit int) ([]DiffCommitResult, error) {
+	if m.diffCommitsFunc != nil {
+		return m.diffCommitsFunc(worktreePath, mergeBase, limit)
+	}
+	return []DiffCommitResult{}, nil
+}
+
+func (m *mockGitOps) DiffFiles(worktreePath, from, to string) ([]DiffFileResult, error) {
+	if m.diffFilesFunc != nil {
+		return m.diffFilesFunc(worktreePath, from, to)
+	}
+	return []DiffFileResult{}, nil
+}
+
+func (m *mockGitOps) DiffFilePatch(worktreePath, from, to, path string) (*DiffFilePatchResult, error) {
+	if m.diffFilePatchFunc != nil {
+		return m.diffFilePatchFunc(worktreePath, from, to, path)
+	}
+	return &DiffFilePatchResult{}, nil
 }
 
 // testWorktree returns a standard AgentWorktree used across tests.
