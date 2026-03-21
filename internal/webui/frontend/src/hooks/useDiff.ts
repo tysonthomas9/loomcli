@@ -65,6 +65,7 @@ export function useDiff({ agentName, enabled }: UseDiffOptions): UseDiffReturn {
     setViewedFiles(new Set());
     setError(null);
     setIsLoading(false);
+    fetchInProgressRef.current = false;
     inFlightPatchesRef.current.clear();
   }, [agentName]);
 

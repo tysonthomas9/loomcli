@@ -15,7 +15,7 @@ describe("formatIssueId", () => {
     expect(formatIssueId("")).toBe("unknown");
   });
 
-  it("returns short ID as-is when length <= 10", () => {
+  it("returns short ID as-is when length <= 16", () => {
     expect(formatIssueId("beads-v3vw")).toBe("beads-v3vw");
   });
 
@@ -27,12 +27,39 @@ describe("formatIssueId", () => {
     expect(formatIssueId("1234567890")).toBe("1234567890");
   });
 
-  it("returns last 7 characters for ID longer than 10", () => {
-    expect(formatIssueId("beads-abcdefgh")).toBe("bcdefgh");
+  it("returns typical loomcli ID as-is (13 chars)", () => {
+    expect(formatIssueId("loomcli-pso6j")).toBe("loomcli-pso6j");
   });
 
-  it("returns last 7 characters for very long ID", () => {
-    expect(formatIssueId("some-very-long-issue-id-12345")).toBe("d-12345");
+  it("returns 14-char ID as-is", () => {
+    expect(formatIssueId("beads-abcdefgh")).toBe("beads-abcdefgh");
+  });
+
+  it("returns 16-char ID as-is", () => {
+    expect(formatIssueId("loomcli-a3f2dda8")).toBe("loomcli-a3f2dda8");
+  });
+
+  it("truncates ID that is exactly 17 chars", () => {
+    expect(formatIssueId("some-abcdefghijkl")).toBe("some-abcde...");
+  });
+
+  it("truncates long hierarchical ID preserving prefix", () => {
+    // 'loomcli-af78e9a2.1.2' = 20 chars
+    expect(formatIssueId("loomcli-af78e9a2.1.2")).toBe("loomcli-af78e...");
+  });
+
+  it("truncates very long ID preserving prefix", () => {
+    expect(formatIssueId("some-very-long-issue-id-12345")).toBe(
+      "some-very-...",
+    );
+  });
+
+  it("truncates long ID with no hyphen", () => {
+    expect(formatIssueId("abcdefghijklmnopqrst")).toBe("abcdefghijklm...");
+  });
+
+  it("returns short ID without hyphen as-is", () => {
+    expect(formatIssueId("bd-xyz")).toBe("bd-xyz");
   });
 
   it("warns in development for empty ID", () => {

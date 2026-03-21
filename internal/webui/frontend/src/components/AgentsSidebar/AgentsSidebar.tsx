@@ -178,28 +178,24 @@ export function AgentsSidebar({
 
   const anyAgentPushing = Object.values(pushingAgents).some(Boolean);
 
-  const handleAgentPush = useCallback(
-    async (agentName: string) => {
-      setPushingAgents((prev) => ({ ...prev, [agentName]: true }));
-      setAgentPushErrors((prev) => {
-        const next = { ...prev };
-        delete next[agentName];
-        return next;
-      });
-      try {
-        await gitPush(agentName);
-      } catch (err) {
-        setAgentPushErrors((prev) => ({
-          ...prev,
-          [agentName]:
-            err instanceof ApiError ? err.statusText : "Push failed",
-        }));
-      } finally {
-        setPushingAgents((prev) => ({ ...prev, [agentName]: false }));
-      }
-    },
-    [],
-  );
+  const handleAgentPush = useCallback(async (agentName: string) => {
+    setPushingAgents((prev) => ({ ...prev, [agentName]: true }));
+    setAgentPushErrors((prev) => {
+      const next = { ...prev };
+      delete next[agentName];
+      return next;
+    });
+    try {
+      await gitPush(agentName);
+    } catch (err) {
+      setAgentPushErrors((prev) => ({
+        ...prev,
+        [agentName]: err instanceof ApiError ? err.statusText : "Push failed",
+      }));
+    } finally {
+      setPushingAgents((prev) => ({ ...prev, [agentName]: false }));
+    }
+  }, []);
 
   const handleToggle = useCallback(() => {
     if (!collapsible) return;
@@ -405,7 +401,9 @@ export function AgentsSidebar({
                           <button
                             type="button"
                             className={styles.syncBannerText}
-                            onClick={() => setIsPushListExpanded((prev) => !prev)}
+                            onClick={() =>
+                              setIsPushListExpanded((prev) => !prev)
+                            }
                             aria-expanded={isPushListExpanded}
                             aria-label={`${isPushListExpanded ? "Collapse" : "Expand"} push details`}
                             title={buildSyncTooltip(
