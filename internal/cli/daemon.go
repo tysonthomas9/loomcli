@@ -198,7 +198,7 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 			roleConfig:   roleConfig,
 			worktreePath: target.WorkDir,
 			repoConfig:   d.findRepoConfig(entry.Repo),
-			strategy:     &DirectStrategy{},
+			strategy:     resolveStrategy(entry, config.Daemon.Sandbox, projectDir),
 		}
 		d.agents = append(d.agents, ap)
 	}

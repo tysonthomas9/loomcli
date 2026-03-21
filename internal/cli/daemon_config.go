@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -29,6 +30,7 @@ type DaemonSettings struct {
 	JWTKey        string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
 	OTel          *OTelDaemonConfig `yaml:"otel,omitempty"`
 	FleetDB       *FleetDBSettings  `yaml:"fleetdb,omitempty"` // fleet-db backend config (separate from RedisURL above)
+	Sandbox       *SandboxConfig    `yaml:"sandbox,omitempty"` // daemon-level sandbox defaults
 }
 
 // OTelDaemonConfig holds OpenTelemetry export configuration for the daemon.
@@ -55,6 +57,14 @@ type RestartPolicy struct {
 	TimeoutBackoff   *int  `yaml:"timeout_backoff,omitempty"`     // seconds (default 5)
 	NoWorkBackoff    *int  `yaml:"no_work_backoff,omitempty"`     // seconds (default 30); fixed interval when no tasks available
 	IdlePollInterval *int  `yaml:"idle_poll_interval,omitempty"`  // seconds (default 30); polling interval for task availability
+}
+
+// SandboxConfig holds sandbox execution settings.
+type SandboxConfig struct {
+	Providers []string `yaml:"providers,omitempty"`
+	Network   string   `yaml:"network,omitempty"` // "open" or path to policy YAML
+	From      string   `yaml:"from,omitempty"`    // sandbox container image (--from)
+	Backend   string   `yaml:"backend,omitempty"` // override backend inside sandbox
 }
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
@@ -94,6 +104,8 @@ type AgentEntry struct {
 	Repos            []string `yaml:"repos,omitempty"`
 	RepoGroups       []string `yaml:"repo_groups,omitempty"`
 	CrossRepo        bool     `yaml:"cross_repo,omitempty"`
+	Execution        string         `yaml:"execution,omitempty"` // "" | "direct" | "sandbox"
+	Sandbox          *SandboxConfig `yaml:"sandbox,omitempty"`   // per-agent sandbox override
 }
 
 // ProjectFile represents the project-local loom.yaml.
@@ -366,6 +378,12 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 		}
 		overlayFleetDBSettings(dst.FleetDB, src.FleetDB)
 	}
+	if src.Sandbox != nil {
+		if dst.Sandbox == nil {
+			dst.Sandbox = &SandboxConfig{}
+		}
+		overlaySandboxConfig(dst.Sandbox, src.Sandbox)
+	}
 }
 
 func overlayRestartPolicy(dst, src *RestartPolicy) {
@@ -426,6 +444,63 @@ func overlayOTelConfig(dst, src *OTelDaemonConfig) {
 	if src.Metrics != nil {
 		dst.Metrics = src.Metrics
 	}
+}
+
+// overlaySandboxConfig applies non-zero fields from src onto dst.
+func overlaySandboxConfig(dst, src *SandboxConfig) {
+	if dst == nil || src == nil {
+		return
+	}
+	if len(src.Providers) > 0 {
+		dst.Providers = src.Providers
+	}
+	if src.Network != "" {
+		dst.Network = src.Network
+	}
+	if src.From != "" {
+		dst.From = src.From
+	}
+	if src.Backend != "" {
+		dst.Backend = src.Backend
+	}
+}
+
+// mergeSandboxConfig produces a merged SandboxConfig from daemon-level defaults
+// and an optional agent-level override. Agent-level fields win when set.
+func mergeSandboxConfig(daemon *SandboxConfig, agent *SandboxConfig) SandboxConfig {
+	var merged SandboxConfig
+	if daemon != nil {
+		merged = *daemon
+	}
+	if agent != nil {
+		overlaySandboxConfig(&merged, agent)
+	}
+	return merged
+}
+
+// resolveRepoURL returns the git remote URL for the given project directory.
+// It shells out to "git remote get-url origin". Returns an empty string on error.
+func resolveRepoURL(projectDir string) string {
+	output, err := RunGitCommand(projectDir, "remote", "get-url", "origin")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(output)
+}
+
+// resolveStrategy returns the ExecutionStrategy for an agent based on config.
+// When execution is "sandbox", it merges daemon-level and agent-level sandbox config.
+// NOTE: SandboxStrategy is not yet implemented (Phase 3). For now, sandbox agents
+// fall back to DirectStrategy with a log warning.
+func resolveStrategy(agent AgentEntry, daemonSandbox *SandboxConfig, projectDir string) ExecutionStrategy {
+	if agent.Execution != "sandbox" {
+		return &DirectStrategy{}
+	}
+	// TODO(phase3): Return &SandboxStrategy{} once implemented.
+	// Merge daemon-level + agent-level sandbox config for future use.
+	_ = mergeSandboxConfig(daemonSandbox, agent.Sandbox)
+	_ = resolveRepoURL(projectDir)
+	return &DirectStrategy{}
 }
 
 func intPtr(v int) *int    { return &v }

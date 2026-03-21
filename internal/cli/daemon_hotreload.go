@@ -78,12 +78,14 @@ func (d *Daemon) addAgent(entry AgentEntry) error {
 		return err
 	}
 
+	cfg := d.configSnapshot()
+
 	ap := &AgentProcess{
 		entry:        entry,
 		roleConfig:   roleConfig,
 		worktreePath: target.WorkDir,
 		repoConfig:   d.findRepoConfig(entry.Repo),
-		strategy:     &DirectStrategy{},
+		strategy:     resolveStrategy(entry, cfg.Daemon.Sandbox, d.projectDir),
 		stopCh:       make(chan struct{}),
 		done:         make(chan struct{}),
 	}

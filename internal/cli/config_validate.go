@@ -73,6 +73,7 @@ func ValidateProjectConfig(dc *DaemonConfig, projectDir string) *ValidationResul
 	if dc.Daemon.FleetDB != nil {
 		validateFleetDBSettings(r, dc.Daemon.FleetDB)
 	}
+	validateSandboxConfig(r, dc.Daemon.Sandbox, dc.Agents, projectDir)
 
 	return r
 }
@@ -128,6 +129,12 @@ func validateAgentEntries(r *ValidationResult, agents []AgentEntry, roles map[st
 
 		// Agent-level backend override
 		validateBackendName(r, field+".backend", a.Backend)
+
+		// Execution mode validation
+		if a.Execution != "" && a.Execution != "direct" && a.Execution != "sandbox" {
+			r.addError(field+".execution", fmt.Sprintf(
+				"%q must be one of: direct, sandbox", a.Execution))
+		}
 
 		// Validate Repos entries are non-empty strings
 		for j, repo := range a.Repos {
@@ -329,4 +336,52 @@ func isValidWorktreeName(name string) bool {
 		}
 	}
 	return true
+}
+
+// validateSandboxConfig validates sandbox-related configuration across daemon-level
+// and agent-level settings. It checks that sandbox agents have providers configured
+// and that network policy files exist.
+func validateSandboxConfig(r *ValidationResult, daemonSandbox *SandboxConfig, agents []AgentEntry, projectDir string) {
+	for i, a := range agents {
+		if a.Execution != "sandbox" {
+			continue
+		}
+		field := fmt.Sprintf("agents[%d]", i)
+
+		// Error if no providers configured at either level
+		hasProviders := false
+		if daemonSandbox != nil && len(daemonSandbox.Providers) > 0 {
+			hasProviders = true
+		}
+		if a.Sandbox != nil && len(a.Sandbox.Providers) > 0 {
+			hasProviders = true
+		}
+		if !hasProviders {
+			r.addError(field+".sandbox", "execution is \"sandbox\" but no providers configured; set daemon.sandbox.providers or agents[].sandbox.providers")
+		}
+
+		// Validate network policy file if set at agent level
+		if a.Sandbox != nil && a.Sandbox.Network != "" && a.Sandbox.Network != "open" {
+			networkPath := a.Sandbox.Network
+			if !filepath.IsAbs(networkPath) {
+				networkPath = filepath.Join(projectDir, networkPath)
+			}
+			if _, err := os.Stat(networkPath); err != nil {
+				r.addWarning(field+".sandbox.network", fmt.Sprintf(
+					"policy file %q does not exist", a.Sandbox.Network))
+			}
+		}
+	}
+
+	// Validate daemon-level network policy file
+	if daemonSandbox != nil && daemonSandbox.Network != "" && daemonSandbox.Network != "open" {
+		networkPath := daemonSandbox.Network
+		if !filepath.IsAbs(networkPath) {
+			networkPath = filepath.Join(projectDir, networkPath)
+		}
+		if _, err := os.Stat(networkPath); err != nil {
+			r.addWarning("daemon.sandbox.network", fmt.Sprintf(
+				"policy file %q does not exist", daemonSandbox.Network))
+		}
+	}
 }
