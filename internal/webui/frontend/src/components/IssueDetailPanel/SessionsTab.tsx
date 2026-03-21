@@ -24,7 +24,7 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
 
   const selectedSession =
     selectedSessionId != null
-      ? sessions.find((s) => s.id === selectedSessionId) ?? null
+      ? (sessions.find((s) => s.id === selectedSessionId) ?? null)
       : null;
 
   // Loading state with no data yet

@@ -25,9 +25,7 @@ const POLL_INTERVAL_NORMAL = 10_000;
 /** Fast polling interval when any session is active (ms). */
 const POLL_INTERVAL_ACTIVE = 3_000;
 
-export function useTaskSessions(
-  taskId: string | null,
-): UseTaskSessionsResult {
+export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -74,8 +72,7 @@ export function useTaskSessions(
 
     void fetchData();
 
-    const hasActive = () =>
-      sessions.some((s) => s.is_active);
+    const hasActive = () => sessions.some((s) => s.is_active);
 
     const getPollInterval = () =>
       hasActive() ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_NORMAL;

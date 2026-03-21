@@ -30,10 +30,17 @@ export function SessionDetailView({
 }: SessionDetailViewProps): JSX.Element {
   const [innerTab, setInnerTab] = useState<InnerTab>("transcript");
 
-  const { entries, isLoading: transcriptLoading, error: transcriptError } =
-    useSessionTranscript(taskId, session.id, session.is_active);
+  const {
+    entries,
+    isLoading: transcriptLoading,
+    error: transcriptError,
+  } = useSessionTranscript(taskId, session.id, session.is_active);
 
-  const { diff, isLoading: diffLoading, error: diffError } = useSessionDiff(
+  const {
+    diff,
+    isLoading: diffLoading,
+    error: diffError,
+  } = useSessionDiff(
     taskId,
     session.id,
     innerTab === "diff" && session.has_diff,
@@ -94,7 +101,10 @@ export function SessionDetailView({
 
       {/* Transcript tab content */}
       {innerTab === "transcript" && (
-        <div className={styles.transcriptContainer} data-testid="session-transcript">
+        <div
+          className={styles.transcriptContainer}
+          data-testid="session-transcript"
+        >
           {transcriptLoading && entries.length === 0 && (
             <div className={styles.emptyState}>Loading transcript...</div>
           )}
@@ -120,7 +130,9 @@ export function SessionDetailView({
                 <div className={styles.transcriptContent}>{entry.content}</div>
               )}
               {!entry.content && entry.tool_input && (
-                <div className={styles.transcriptContent}>{entry.tool_input}</div>
+                <div className={styles.transcriptContent}>
+                  {entry.tool_input}
+                </div>
               )}
             </div>
           ))}

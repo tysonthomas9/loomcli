@@ -76,9 +76,7 @@ export function SessionTimelineRow({
           <span className={styles.duration}>
             {formatDuration(session.duration_s)}
           </span>
-          <span className={styles.tokens}>
-            {formatTokens(totalTokens)} tok
-          </span>
+          <span className={styles.tokens}>{formatTokens(totalTokens)} tok</span>
           <span className={styles.cost}>
             {formatCost(session.estimated_cost_usd)}
           </span>
