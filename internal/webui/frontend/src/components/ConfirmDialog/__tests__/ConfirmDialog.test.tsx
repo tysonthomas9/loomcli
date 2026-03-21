@@ -86,6 +86,26 @@ describe("ConfirmDialog", () => {
         "Keep open",
       );
     });
+
+    it("renders ReactNode message content", () => {
+      render(
+        <ConfirmDialog
+          isOpen={true}
+          title="Confirm"
+          message={
+            <ul>
+              <li>Branch A: 2 commits</li>
+              <li>Branch B: 1 commit</li>
+            </ul>
+          }
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Branch A: 2 commits")).toBeInTheDocument();
+      expect(screen.getByText("Branch B: 1 commit")).toBeInTheDocument();
+    });
   });
 
   describe("interactions", () => {

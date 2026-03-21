@@ -251,7 +251,49 @@ describe("AgentsSidebar", () => {
       expect(title).toContain("ahead");
     });
 
-    it("push button calls POST /api/git/push-all on click", async () => {
+    it("Push All button opens confirmation dialog instead of pushing immediately", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 1,
+          git_needs_pull: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      const pushButton = screen.getByRole("button", { name: /push all/i });
+      fireEvent.click(pushButton);
+
+      // Dialog should appear, push should NOT be called yet
+      expect(screen.getByText("Push all branches?")).toBeInTheDocument();
+      expect(mockGitPushAll).not.toHaveBeenCalled();
+    });
+
+    it("confirmation dialog lists branches with commit counts", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 2,
+          git_needs_pull: 0,
+          git_push_details: [
+            { name: "nova", count: 3 },
+            { name: "falcon", count: 1 },
+          ],
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+
+      expect(screen.getByText(/nova: 3 commits/)).toBeInTheDocument();
+      expect(screen.getByText(/falcon: 1 commit$/)).toBeInTheDocument();
+    });
+
+    it("confirming the dialog triggers the push", async () => {
       mockContextOverride = {
         sync: {
           db_synced: true,
@@ -269,12 +311,78 @@ describe("AgentsSidebar", () => {
 
       render(<AgentsSidebar />);
 
-      const pushButton = screen.getByRole("button", { name: /push all/i });
-      fireEvent.click(pushButton);
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+      fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
 
       expect(mockGitPushAll).toHaveBeenCalled();
 
       mockGitPushAll.mockReset();
+    });
+
+    it("canceling the dialog does not trigger push", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 1,
+          git_needs_pull: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+      fireEvent.click(screen.getByTestId("confirm-dialog-cancel"));
+
+      expect(mockGitPushAll).not.toHaveBeenCalled();
+      // Dialog should be closed
+      expect(screen.queryByText("Push all branches?")).not.toBeInTheDocument();
+    });
+
+    it("dialog closes after confirming", async () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 1,
+          git_needs_pull: 0,
+        },
+      };
+
+      mockGitPushAll.mockResolvedValueOnce({
+        results: [],
+        pushed: 1,
+        failed: 0,
+      });
+
+      render(<AgentsSidebar />);
+
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+      expect(screen.getByText("Push all branches?")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+      expect(screen.queryByText("Push all branches?")).not.toBeInTheDocument();
+
+      mockGitPushAll.mockReset();
+    });
+
+    it("fallback message when no push details available", () => {
+      mockContextOverride = {
+        sync: {
+          db_synced: true,
+          db_last_sync: "",
+          git_needs_push: 3,
+          git_needs_pull: 0,
+        },
+      };
+
+      render(<AgentsSidebar />);
+
+      fireEvent.click(screen.getByRole("button", { name: /push all/i }));
+
+      expect(
+        screen.getByText("Push 3 branches to remote?"),
+      ).toBeInTheDocument();
     });
   });
 

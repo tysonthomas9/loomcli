@@ -6,7 +6,7 @@ import { useState, useCallback, useEffect } from "react";
 
 import { ApiError } from "@/api/client";
 import { gitPushAll } from "@/api/git";
-import { ErrorDisplay, LoadingSkeleton } from "@/components";
+import { ConfirmDialog, ErrorDisplay, LoadingSkeleton } from "@/components";
 import { useAgentContext, useRepoFilter } from "@/hooks";
 import type {
   LoomAgentStatus,
@@ -110,6 +110,7 @@ export function AgentsSidebar({
   // Push All state
   const [isPushing, setIsPushing] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
+  const [showPushConfirm, setShowPushConfirm] = useState(false);
 
   const {
     agents,
@@ -193,6 +194,11 @@ export function AgentsSidebar({
     }
   }, []);
 
+  const handlePushConfirm = useCallback(() => {
+    setShowPushConfirm(false);
+    handlePushAll();
+  }, [handlePushAll]);
+
   // Get tasks and title for the selected category
   const getDrawerData = useCallback((): {
     title: string;
@@ -217,6 +223,20 @@ export function AgentsSidebar({
   }, [selectedCategory, taskLists]);
 
   const drawerData = getDrawerData();
+
+  const pushDetails = sync.git_push_details;
+  const pushConfirmMessage =
+    pushDetails && pushDetails.length > 0 ? (
+      <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
+        {pushDetails.map((d) => (
+          <li key={d.name}>
+            {d.name}: {d.count} commit{d.count !== 1 ? "s" : ""}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      `Push ${sync.git_needs_push} branch${sync.git_needs_push !== 1 ? "es" : ""} to remote?`
+    );
 
   const collapsed = collapsible ? isCollapsed : false;
 
@@ -349,7 +369,7 @@ export function AgentsSidebar({
                         <button
                           type="button"
                           className={styles.pushButton}
-                          onClick={handlePushAll}
+                          onClick={() => setShowPushConfirm(true)}
                           disabled={isPushing}
                         >
                           {isPushing ? "Pushing..." : "Push All"}
@@ -502,6 +522,17 @@ export function AgentsSidebar({
           {activeCount}
         </div>
       )}
+
+      {/* Push All Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showPushConfirm}
+        title="Push all branches?"
+        confirmLabel="Push"
+        variant="danger"
+        message={pushConfirmMessage}
+        onConfirm={handlePushConfirm}
+        onCancel={() => setShowPushConfirm(false)}
+      />
 
       {/* Task Drawer */}
       <TaskDrawer
