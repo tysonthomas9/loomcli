@@ -258,4 +258,3 @@ func buildOneshotCommand(branch string, cfg SandboxOneshotConfig, repoURL, backe
 
 	return sb.String()
 }
-

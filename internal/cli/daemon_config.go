@@ -93,17 +93,17 @@ type RoleConfig struct {
 //
 // An agent with neither repos nor repo_groups can work on any repo (backward compatible).
 type AgentEntry struct {
-	Worktree         string   `yaml:"worktree"`
-	Role             string   `yaml:"role"`
-	Repo             string   `yaml:"repo,omitempty"`
-	Auto             bool     `yaml:"auto,omitempty"`
-	Backend          string   `yaml:"backend,omitempty"`
-	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
-	PathPatterns     []string `yaml:"path_patterns,omitempty"`
-	SourceRepos      []string `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
-	Repos            []string `yaml:"repos,omitempty"`
-	RepoGroups       []string `yaml:"repo_groups,omitempty"`
-	CrossRepo        bool     `yaml:"cross_repo,omitempty"`
+	Worktree         string         `yaml:"worktree"`
+	Role             string         `yaml:"role"`
+	Repo             string         `yaml:"repo,omitempty"`
+	Auto             bool           `yaml:"auto,omitempty"`
+	Backend          string         `yaml:"backend,omitempty"`
+	FallbackBackends []string       `yaml:"fallback_backends,omitempty"`
+	PathPatterns     []string       `yaml:"path_patterns,omitempty"`
+	SourceRepos      []string       `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
+	Repos            []string       `yaml:"repos,omitempty"`
+	RepoGroups       []string       `yaml:"repo_groups,omitempty"`
+	CrossRepo        bool           `yaml:"cross_repo,omitempty"`
 	Execution        string         `yaml:"execution,omitempty"` // "" | "direct" | "sandbox"
 	Sandbox          *SandboxConfig `yaml:"sandbox,omitempty"`   // per-agent sandbox override
 }
