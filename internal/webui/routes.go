@@ -188,6 +188,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	mux.HandleFunc("GET /api/tasks/{taskId}/sessions/{sessionId}/transcript", handleGetSessionTranscript(sessStore))
 	mux.HandleFunc("GET /api/tasks/{taskId}/sessions/{sessionId}/diff", handleGetSessionDiff(sessStore))
 
+	// Session change notification endpoint for local agents to push SSE events
+	if hub != nil {
+		mux.HandleFunc("POST /api/sessions/notify", handleNotifySessionChange(hub))
+	}
+
 	// Log streaming endpoints
 	mux.HandleFunc("GET /api/agents/{name}/logs", handleGetAgentLog())
 	mux.HandleFunc("GET /api/tasks/{id}/logs", handleListTaskPhases())

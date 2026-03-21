@@ -1,12 +1,16 @@
 package webui
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
+	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -241,6 +245,53 @@ func handleGetSessionTranscript(sessStore *sessions.Store) http.HandlerFunc {
 				Entries:   entries,
 			},
 		})
+	}
+}
+
+// sessionNotifyRequest is the JSON body expected by handleNotifySessionChange.
+type sessionNotifyRequest struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+	Status    string `json:"status"`
+}
+
+// handleNotifySessionChange receives fire-and-forget notifications from local
+// agent processes when a session status changes, and broadcasts a session_change
+// SSE event to all connected web UI clients.
+// POST /api/sessions/notify
+func handleNotifySessionChange(hub *SSEHub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Restrict to loopback only — this endpoint is for local agents, not external callers.
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+
+		var req sessionNotifyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		if req.TaskID == "" || req.SessionID == "" {
+			http.Error(w, "Bad Request: task_id and session_id required", http.StatusBadRequest)
+			return
+		}
+
+		hub.Broadcast(&MutationPayload{
+			Type:      rpc.MutationSessionChange,
+			IssueID:   req.TaskID,
+			NewStatus: req.Status,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		})
+
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

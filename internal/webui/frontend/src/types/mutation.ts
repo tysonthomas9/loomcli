@@ -22,6 +22,7 @@ export const MutationBonded: MutationType = "bonded";
 export const MutationSquashed: MutationType = "squashed";
 export const MutationBurned: MutationType = "burned";
 export const MutationRefresh: MutationType = "refresh";
+export const MutationSessionChange: MutationType = "session_change";
 
 /**
  * Application-level mutation event.

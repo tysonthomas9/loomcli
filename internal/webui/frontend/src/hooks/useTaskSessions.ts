@@ -1,12 +1,15 @@
 /**
  * useTaskSessions - React hook for fetching session records for a given task.
  * Polls at 10s normally, 3s when any session is active (running).
+ * Also subscribes to SSE session_change events for immediate refetch.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
 import { getTaskSessions } from "../api/sessions";
+import type { MutationPayload } from "../api/sse";
 import type { SessionRecord } from "../types/session";
+import { useSSE } from "./useSSE";
 
 /** Return type for the useTaskSessions hook. */
 export interface UseTaskSessionsResult {
@@ -60,6 +63,20 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
   const refetch = useCallback(() => {
     void fetchData();
   }, [fetchData]);
+
+  // Subscribe to SSE session_change events for immediate refetch.
+  // Keeps polling as a fallback in case the SSE connection drops.
+  const handleMutation = useCallback(
+    (mutation: MutationPayload) => {
+      if (mutation.type !== "session_change") return;
+      // Only refetch when the event is for our task (or no task filter)
+      if (taskId && mutation.issue_id && mutation.issue_id !== taskId) return;
+      void fetchData();
+    },
+    [taskId, fetchData],
+  );
+
+  useSSE({ onMutation: handleMutation });
 
   useEffect(() => {
     mountedRef.current = true;
