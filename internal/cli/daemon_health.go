@@ -3,71 +3,27 @@ package cli
 import (
 	"log/slog"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
-// stopAgent sends SIGTERM then SIGKILL to a single agent and its entire process group.
+// stopAgent terminates a single agent using its execution strategy.
 // This function is safe to call concurrently with waitForAgent.
-// It uses polling instead of cmd.Wait() to avoid double-wait issues.
-// The process group kill ensures child processes (e.g. codex) are not orphaned.
+// It delegates to the agent's ExecutionStrategy.Kill method which handles
+// the SIGTERM/SIGKILL sequence and process group cleanup.
 func (d *Daemon) stopAgent(ap *AgentProcess) {
+	// Resolve strategy (fallback to DirectStrategy for backward compatibility with tests)
 	ap.mu.Lock()
-	proc := ap.cmd
-	pid := ap.pid
+	strategy := ap.strategy
 	ap.mu.Unlock()
 
-	if proc == nil || proc.Process == nil || pid == 0 {
-		return
+	if strategy == nil {
+		strategy = &DirectStrategy{}
 	}
 
-	slog.Info("sending signal to process group", "worktree", ap.entry.Worktree, "signal", "SIGTERM", "pid", pid)
-
-	// Send SIGTERM to the entire process group (negative PID)
-	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
-		// Process group may have already exited; try the process directly
-		slog.Warn("SIGTERM to process group failed, trying process directly", "worktree", ap.entry.Worktree, "err", err)
-		if err := proc.Process.Signal(syscall.SIGTERM); err != nil {
-			slog.Warn("SIGTERM failed, process may have exited", "worktree", ap.entry.Worktree, "err", err)
-			return
-		}
-	}
-
-	// Poll for process exit up to 5 seconds instead of calling Wait()
-	// (Wait() is called by waitForAgent in the supervise loop)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		ap.mu.Lock()
-		currentPID := ap.pid
-		ap.mu.Unlock()
-
-		if currentPID == 0 {
-			// Process has exited (waitForAgent cleared the pid)
-			slog.Info("process exited gracefully", "worktree", ap.entry.Worktree)
-			return
-		}
-
-		// Also check if process is still running via OS
-		if !lockfile.IsProcessRunning(pid) {
-			slog.Info("process exited gracefully", "worktree", ap.entry.Worktree)
-			return
-		}
-
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	// Force kill the entire process group if still running
-	ap.mu.Lock()
-	stillRunning := ap.pid != 0
-	ap.mu.Unlock()
-
-	if stillRunning {
-		slog.Warn("sending SIGKILL to process group", "worktree", ap.entry.Worktree, "pid", pid)
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-	}
+	strategy.Kill(ap)
 }
 
 // healthChecker runs periodic health checks in a goroutine.

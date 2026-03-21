@@ -13,31 +13,30 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
-// buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
-func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
-	cfg := d.configSnapshot() // snapshot config for consistent reads
-
+// buildLoomArgs constructs the loom CLI arguments for spawning an agent subprocess.
+// The returned slice is suitable for passing to exec.Command("loom", args...) or
+// to an ExecutionStrategy's Spawn method.
+func (d *Daemon) buildLoomArgs(ap *AgentProcess) []string {
 	ap.mu.Lock()
 	epicID := ap.assignedEpicID // snapshot before getEffectiveBackend (also acquires ap.mu)
 	ap.mu.Unlock()
-	var cmd *exec.Cmd
 
 	// Resolve backend using failover-aware resolution
 	agentBackend := d.getEffectiveBackend(ap)
 
+	var args []string
 	if builtInRoles[ap.entry.Role] {
 		// Built-in role: loom <role> <worktree> --auto --daemon-mode
-		args := []string{ap.entry.Role, ap.worktreePath, "--auto", "--daemon-mode"}
+		args = []string{ap.entry.Role, ap.worktreePath, "--auto", "--daemon-mode"}
 		if agentBackend != "" {
 			args = append(args, "--backend", agentBackend)
 		}
 		if epicID != "" {
 			args = append(args, "--parent", epicID)
 		}
-		cmd = exec.Command("loom", args...)
 	} else {
 		// Custom role: loom agent <worktree> --prompt <path> --task-filter <filter> --auto --daemon-mode
-		args := []string{"agent", ap.worktreePath, "--prompt", ap.roleConfig.PromptFile, "--auto", "--daemon-mode"}
+		args = []string{"agent", ap.worktreePath, "--prompt", ap.roleConfig.PromptFile, "--auto", "--daemon-mode"}
 		if ap.roleConfig.TaskFilter != "" {
 			args = append(args, "--task-filter", ap.roleConfig.TaskFilter)
 		}
@@ -47,17 +46,16 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		if epicID != "" {
 			args = append(args, "--parent", epicID)
 		}
-		cmd = exec.Command("loom", args...)
 	}
 
-	// Set working directory to worktree
-	cmd.Dir = ap.worktreePath
+	return args
+}
 
-	// Create a new process group so we can kill the entire tree on stop
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+// buildEnv constructs the environment variable slice for an agent subprocess.
+func (d *Daemon) buildEnv(ap *AgentProcess) []string {
+	cfg := d.configSnapshot() // snapshot config for consistent reads
 
-	// Set environment
-	cmd.Env = append(FilteredEnv(),
+	env := append(FilteredEnv(),
 		fmt.Sprintf("BD_ACTOR=%s", ap.entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.worktreePath),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", resolveDaemonPath(d.projectDir, cfg.Daemon.EventsDir)),
@@ -65,54 +63,75 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 
 	// Propagate repo context for subprocess diagnostics and prompts
 	if ap.entry.Repo != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_REPO=%s", ap.entry.Repo))
+		env = append(env, fmt.Sprintf("LOOM_AGENT_REPO=%s", ap.entry.Repo))
 	}
 
 	// Propagate role constraints as env vars for the subprocess
 	if len(ap.roleConfig.AllowedTools) > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ALLOWED_TOOLS=%s", strings.Join(ap.roleConfig.AllowedTools, ",")))
+		env = append(env, fmt.Sprintf("LOOM_ALLOWED_TOOLS=%s", strings.Join(ap.roleConfig.AllowedTools, ",")))
 	}
 	if len(ap.roleConfig.DeniedTools) > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_DENIED_TOOLS=%s", strings.Join(ap.roleConfig.DeniedTools, ",")))
+		env = append(env, fmt.Sprintf("LOOM_DENIED_TOOLS=%s", strings.Join(ap.roleConfig.DeniedTools, ",")))
 	}
 	if ap.roleConfig.ReadOnly {
-		cmd.Env = append(cmd.Env, "LOOM_READ_ONLY=1")
+		env = append(env, "LOOM_READ_ONLY=1")
 	}
 
 	// Propagate routing constraints as env vars for subprocess task routing
 	if len(ap.roleConfig.Skills) > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_SKILLS=%s", strings.Join(ap.roleConfig.Skills, ",")))
+		env = append(env, fmt.Sprintf("LOOM_ROLE_SKILLS=%s", strings.Join(ap.roleConfig.Skills, ",")))
 	}
 	if len(ap.roleConfig.PathPatterns) > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_PATH_PATTERNS=%s", strings.Join(ap.roleConfig.PathPatterns, ",")))
+		env = append(env, fmt.Sprintf("LOOM_ROLE_PATH_PATTERNS=%s", strings.Join(ap.roleConfig.PathPatterns, ",")))
 	}
 	if ap.roleConfig.MaxPriority != nil {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_MAX_PRIORITY=%d", *ap.roleConfig.MaxPriority))
+		env = append(env, fmt.Sprintf("LOOM_ROLE_MAX_PRIORITY=%d", *ap.roleConfig.MaxPriority))
 	}
 	if ap.roleConfig.TaskFilter != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE_TASK_FILTER=%s", ap.roleConfig.TaskFilter))
+		env = append(env, fmt.Sprintf("LOOM_ROLE_TASK_FILTER=%s", ap.roleConfig.TaskFilter))
 	}
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ROLE=%s", ap.entry.Role))
+	env = append(env, fmt.Sprintf("LOOM_ROLE=%s", ap.entry.Role))
 	if len(ap.entry.PathPatterns) > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_PATH_PATTERNS=%s", strings.Join(ap.entry.PathPatterns, ",")))
+		env = append(env, fmt.Sprintf("LOOM_AGENT_PATH_PATTERNS=%s", strings.Join(ap.entry.PathPatterns, ",")))
 	}
 
 	// Propagate resolved source repos for repo affinity scoring
 	if sourceRepos := resolveAgentRepos(ap.entry, d.repos); len(sourceRepos) > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
+		env = append(env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
 	}
+
+	return env
+}
+
+// buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
+// It combines buildLoomArgs and buildEnv into a fully configured exec.Cmd.
+// This method is retained for backward compatibility with existing tests that
+// inspect the constructed command.
+func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
+	loomArgs := d.buildLoomArgs(ap)
+	env := d.buildEnv(ap)
+
+	cmd := exec.Command("loom", loomArgs...)
+	cmd.Dir = ap.worktreePath
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = env
 
 	return cmd
 }
 
-// spawnAgent starts the subprocess for an agent.
+// spawnAgent starts the subprocess for an agent using its execution strategy.
 func (d *Daemon) spawnAgent(ap *AgentProcess) error {
-	cmd := d.buildCommand(ap)
+	loomArgs := d.buildLoomArgs(ap)
+	env := d.buildEnv(ap)
+
+	// Read config BEFORE acquiring ap.mu to avoid lock-order inversion
+	// (configSnapshot acquires d.reconcileMu.RLock).
+	cfg := d.configSnapshot()
 
 	ap.mu.Lock()
 
 	// Set up log files if log directory is configured
-	cfg := d.configSnapshot()
+	var logFile *os.File
 	if cfg.Daemon.LogDir != "" {
 		logDir := cfg.Daemon.LogDir
 		if !filepath.IsAbs(logDir) {
@@ -129,15 +148,23 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 			if err != nil {
 				log.Printf("[daemon] Agent %s: failed to open log file: %v", ap.entry.Worktree, err)
 			} else {
-				cmd.Stdout = f
-				cmd.Stderr = f
+				logFile = f
 				ap.logFile = f // Track file handle for cleanup in waitForAgent
 			}
 		}
 	}
 
-	// Start the subprocess
-	if err := cmd.Start(); err != nil {
+	// Resolve strategy (fallback to DirectStrategy if nil for backward compatibility with tests)
+	strategy := ap.strategy
+	if strategy == nil {
+		strategy = &DirectStrategy{}
+	}
+
+	// Start the subprocess via execution strategy.
+	// Spawn returns the *exec.Cmd; we assign ap.cmd and ap.pid here while
+	// holding ap.mu so that Spawn implementations never need ap.mu.
+	cmd, err := strategy.Spawn(ap, loomArgs, env, logFile)
+	if err != nil {
 		if ap.logFile != nil {
 			_ = ap.logFile.Close()
 			ap.logFile = nil
@@ -145,9 +172,9 @@ func (d *Daemon) spawnAgent(ap *AgentProcess) error {
 		ap.mu.Unlock()
 		return fmt.Errorf("failed to start subprocess: %w", err)
 	}
-
 	ap.cmd = cmd
 	ap.pid = cmd.Process.Pid
+
 	ap.lastStart = time.Now()
 
 	// Snapshot fields before releasing lock for event emission
@@ -205,7 +232,17 @@ func (d *Daemon) waitForAgent(ap *AgentProcess) int {
 		}
 		ap.logFile = nil
 	}
+
+	// Resolve strategy for cleanup (fallback for backward compatibility with tests)
+	strategy := ap.strategy
 	ap.mu.Unlock()
+
+	// Run strategy-specific cleanup (e.g., fetch changes from sandbox)
+	if strategy != nil {
+		if err := strategy.Cleanup(ap); err != nil {
+			log.Printf("[daemon] Agent %s: strategy cleanup failed: %v", worktree, err)
+		}
+	}
 
 	// Emit agent_stopped event outside the lock (best-effort)
 	if evt, err := events.NewEvent(events.AgentStopped, worktree, role, epicID, events.AgentStoppedData{PID: pid, ExitCode: exitCode}); err == nil {

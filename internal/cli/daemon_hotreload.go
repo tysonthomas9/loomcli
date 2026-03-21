@@ -83,6 +83,7 @@ func (d *Daemon) addAgent(entry AgentEntry) error {
 		roleConfig:   roleConfig,
 		worktreePath: target.WorkDir,
 		repoConfig:   d.findRepoConfig(entry.Repo),
+		strategy:     &DirectStrategy{},
 		stopCh:       make(chan struct{}),
 		done:         make(chan struct{}),
 	}

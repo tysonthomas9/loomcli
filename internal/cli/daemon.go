@@ -36,6 +36,9 @@ type AgentProcess struct {
 
 	currentBackendIdx int // 0=primary, 1+=fallback index into entry.FallbackBackends
 
+	strategy    ExecutionStrategy // how this agent is spawned/killed (DirectStrategy or SandboxStrategy)
+	sandboxName string            // sandbox container name (set by SandboxStrategy, empty for direct)
+
 	stopCh   chan struct{} // closed to signal this specific agent to stop (created in Start/addAgent)
 	done     chan struct{} // closed when superviseAgent goroutine exits
 	stopOnce sync.Once     // prevents double-close of stopCh
@@ -195,6 +198,7 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 			roleConfig:   roleConfig,
 			worktreePath: target.WorkDir,
 			repoConfig:   d.findRepoConfig(entry.Repo),
+			strategy:     &DirectStrategy{},
 		}
 		d.agents = append(d.agents, ap)
 	}
