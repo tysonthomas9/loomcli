@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -15,6 +16,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
+
+// resolveWebUIURL returns the local webui server URL for session notifications.
+// Uses LOOM_WEBUI_URL env if set, otherwise defaults to http://127.0.0.1:8080.
+func resolveWebUIURL() string {
+	if url := os.Getenv("LOOM_WEBUI_URL"); url != "" {
+		return url
+	}
+	return "http://127.0.0.1:8080"
+}
 
 // AutoModeOptions holds configuration for auto mode
 type AutoModeOptions struct {
@@ -276,6 +286,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			})
 			if sess != nil {
 				SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
+				go sessions.NotifyWebUI(context.Background(), resolveWebUIURL(), "", sess.SessionID(), sessions.StatusRunning)
 			}
 		}
 
@@ -314,6 +325,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 				},
 			})
 			ClearActiveSessionEnv()
+			go sessions.NotifyWebUI(context.Background(), resolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status)
 		}
 
 		// Return to idle state after agent finishes

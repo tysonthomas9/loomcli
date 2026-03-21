@@ -35,6 +35,8 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
 
   const mountedRef = useRef(true);
   const fetchInProgressRef = useRef(false);
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions; // always keep ref in sync with latest state
 
   const fetchData = useCallback(async () => {
     if (!taskId) return;
@@ -89,7 +91,7 @@ export function useTaskSessions(taskId: string | null): UseTaskSessionsResult {
 
     void fetchData();
 
-    const hasActive = () => sessions.some((s) => s.is_active);
+    const hasActive = () => sessionsRef.current.some((s) => s.is_active);
 
     const getPollInterval = () =>
       hasActive() ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_NORMAL;
