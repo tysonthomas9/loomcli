@@ -135,7 +135,9 @@ function NodeTooltipComponent({
       aria-hidden="true"
     >
       {/* Issue ID */}
-      <span className={styles.issueId}>{displayId}</span>
+      <span className={styles.issueId} title={issue.id}>
+        {displayId}
+      </span>
 
       {/* Title */}
       <h4 className={styles.title}>{displayTitle}</h4>

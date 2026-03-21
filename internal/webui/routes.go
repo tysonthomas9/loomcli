@@ -162,6 +162,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.HandleFunc("GET /api/agents/{name}/git/status", handleGitStatus(gitOps))
 		mux.HandleFunc("PATCH /api/agents/{name}/git/target", handleGitTargetUpdate(gitOps))
 		mux.HandleFunc("GET /api/issues/{id}/git/diff-stat", handleGetIssueDiffStat(pool, gitOps))
+
+		// Diff endpoints for agent worktrees
+		mux.HandleFunc("GET /api/agents/{name}/diff/commits", handleDiffCommits(gitOps))
+		mux.HandleFunc("GET /api/agents/{name}/diff/files", handleDiffFiles(gitOps))
+		mux.HandleFunc("GET /api/agents/{name}/diff/file", handleDiffFile(gitOps))
 	}
 
 	// File operation endpoints for worktrees
@@ -199,24 +204,28 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 // registerIssueRoutes sets up issue and dependency endpoints with optional workspace middleware.
 func registerIssueRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error)) {
 	var issuePool daemon.Pool = pool
-	defaultWSID := ""
 	if multiPool != nil {
 		issuePool = multiPool
+	}
+	defaultWSFn := func() string {
 		if workspaceConfigFn != nil {
 			if wsData, err := workspaceConfigFn(); err == nil && wsData != nil {
-				defaultWSID = wsData.Name
+				if wsData.DefaultWorkspace != "" {
+					return wsData.DefaultWorkspace
+				}
+				return wsData.Name
 			}
 		}
-		if defaultWSID == "" {
-			wsIDs := multiPool.WorkspaceIDs()
-			if len(wsIDs) > 0 {
-				defaultWSID = wsIDs[0]
+		if multiPool != nil {
+			if wsIDs := multiPool.WorkspaceIDs(); len(wsIDs) > 0 {
+				return wsIDs[0]
 			}
 		}
+		return ""
 	}
 	wrapWS := func(h http.HandlerFunc) http.Handler {
 		if multiPool != nil {
-			return OptionalWorkspaceMiddleware(defaultWSID, h)
+			return OptionalWorkspaceMiddleware(defaultWSFn, h)
 		}
 		return h
 	}

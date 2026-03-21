@@ -231,6 +231,9 @@ export type { UseFileTreeReturn } from "./useFileTree";
 export { useFileContent } from "./useFileContent";
 export type { UseFileContentReturn } from "./useFileContent";
 
+export { useDiff } from "./useDiff";
+export type { UseDiffOptions, UseDiffReturn, SummaryStats } from "./useDiff";
+
 export {
   useTerminalFont,
   DEFAULT_FONT_FAMILY,

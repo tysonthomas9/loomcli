@@ -6,7 +6,7 @@
  * - Open: Open issues with no blockers (can be started immediately)
  * - Blocked: Issues blocked by dependencies or explicit 'blocked' status
  * - In Progress: Issues actively being worked on
- * - Needs Review: Issues needing human attention (status=review)
+ * - Review: Issues needing human attention (status=review)
  * - Done: Closed issues
  */
 
@@ -89,7 +89,7 @@ export function createColumns(options?: {
     },
     {
       id: "review",
-      label: "Needs Review",
+      label: "Review",
       filter: (issue) =>
         (includeEpics || issue.issue_type !== "epic") &&
         issue.status === "review",

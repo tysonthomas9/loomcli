@@ -167,6 +167,7 @@ export function NavRail({
         data-active={isActive || undefined}
         onClick={() => onChange(item.id)}
         aria-label={item.label}
+        title={item.label}
       >
         <span className={styles.icon}>{item.icon}</span>
         {showBadge && (

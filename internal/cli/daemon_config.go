@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"text/template"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,17 +20,26 @@ func resetProjectConfigVersionWarnOnce() {
 
 // DaemonSettings holds daemon-specific config fields.
 type DaemonSettings struct {
-	PIDFile       string            `yaml:"pid_file,omitempty"`
-	LogDir        string            `yaml:"log_dir,omitempty"`
-	EventsDir     string            `yaml:"events_dir,omitempty"`
-	RestartPolicy RestartPolicy     `yaml:"restart_policy,omitempty"`
-	MaxAgents     *int              `yaml:"max_agents,omitempty"`
-	RedisURL      string            `yaml:"redis_url,omitempty"`        // stale-detector/serve Redis — NOT used by fleet-db (see FleetDBSettings.RedisURL)
-	APIKey        string            `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
-	JWTKey        string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
-	OTel          *OTelDaemonConfig `yaml:"otel,omitempty"`
-	FleetDB       *FleetDBSettings  `yaml:"fleetdb,omitempty"` // fleet-db backend config (separate from RedisURL above)
-	Sandbox       *SandboxConfig    `yaml:"sandbox,omitempty"` // daemon-level sandbox defaults
+	PIDFile        string            `yaml:"pid_file,omitempty"`
+	LogDir         string            `yaml:"log_dir,omitempty"`
+	EventsDir      string            `yaml:"events_dir,omitempty"`
+	RestartPolicy  RestartPolicy     `yaml:"restart_policy,omitempty"`
+	MaxAgents      *int              `yaml:"max_agents,omitempty"`
+	RedisURL       string            `yaml:"redis_url,omitempty"`        // stale-detector/serve Redis — NOT used by fleet-db (see FleetDBSettings.RedisURL)
+	APIKey         string            `yaml:"api_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	JWTKey         string            `yaml:"jwt_key,omitempty" json:"-"` //nolint:gosec // config field, not a hardcoded credential
+	OTel           *OTelDaemonConfig `yaml:"otel,omitempty"`
+	FleetDB        *FleetDBSettings  `yaml:"fleetdb,omitempty"`         // fleet-db backend config (separate from RedisURL above)
+	Sandbox        *SandboxConfig    `yaml:"sandbox,omitempty"`         // daemon-level sandbox defaults
+	StartupTimeout *int              `yaml:"startup_timeout,omitempty"` // seconds; how long to wait for daemon readiness (default 30)
+}
+
+// GetStartupTimeout returns the configured startup timeout or the given fallback.
+func (d *DaemonSettings) GetStartupTimeout(fallback time.Duration) time.Duration {
+	if d == nil || d.StartupTimeout == nil || *d.StartupTimeout <= 0 {
+		return fallback
+	}
+	return time.Duration(*d.StartupTimeout) * time.Second
 }
 
 // OTelDaemonConfig holds OpenTelemetry export configuration for the daemon.
@@ -382,6 +392,9 @@ func overlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 			dst.Sandbox = &SandboxConfig{}
 		}
 		overlaySandboxConfig(dst.Sandbox, src.Sandbox)
+	}
+	if src.StartupTimeout != nil {
+		dst.StartupTimeout = src.StartupTimeout
 	}
 }
 
