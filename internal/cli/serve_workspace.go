@@ -361,7 +361,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		seenNames[repoName] = true
 
 		clonePath := filepath.Join(wsDir, repoName)
-		cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, clonePath) //nolint:gosec // URL validated by handler
+		cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, clonePath) //nolint:gosec // URL validated: prefix (https://|git@), no control chars, no dash-prefixed path segments
 		if output, err := cmd.CombinedOutput(); err != nil {
 			cleanupDir()
 			return fmt.Errorf("git clone failed for %s: %s", cloneURL, strings.TrimSpace(string(output)))
