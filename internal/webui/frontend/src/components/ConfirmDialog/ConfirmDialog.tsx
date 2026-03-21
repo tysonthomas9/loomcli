@@ -4,6 +4,7 @@
  * Renders via React portal above all other content.
  */
 
+import type { ReactNode } from "react";
 import { useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 
@@ -13,7 +14,7 @@ import styles from "./ConfirmDialog.module.css";
 export interface ConfirmDialogProps {
   isOpen: boolean;
   title: string;
-  message: string;
+  message: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: "danger" | "default";

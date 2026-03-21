@@ -85,7 +85,9 @@ function IssueNodeComponent({
       )}
 
       <header className={styles.header}>
-        <span className={styles.id}>{displayId}</span>
+        <span className={styles.id} title={issue.id}>
+          {displayId}
+        </span>
         {issueType && (
           <span className={styles.typeBadge} data-type={issueType}>
             {issueType}

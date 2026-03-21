@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
@@ -283,7 +282,8 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 	}
 
 	// Start bd daemon for the workspace (best-effort; non-fatal)
-	if err := ensureDaemonForWorkspace(wsDir, 10*time.Second); err != nil {
+	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
+	if err := ensureDaemonForWorkspace(ctx, wsDir, timeout); err != nil {
 		slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 	}
 
@@ -379,7 +379,8 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 	}
 
 	// Start bd daemon for the workspace (best-effort; non-fatal)
-	if err := ensureDaemonForWorkspace(wsDir, 10*time.Second); err != nil {
+	timeout := cfg.Daemon.GetStartupTimeout(defaultDaemonStartupTimeout)
+	if err := ensureDaemonForWorkspace(ctx, wsDir, timeout); err != nil {
 		slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 	}
 

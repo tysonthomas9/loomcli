@@ -65,7 +65,9 @@ function BlockingNodeComponent({
       />
 
       <header className={styles.header}>
-        <span className={styles.issueId}>{displayId}</span>
+        <span className={styles.issueId} title={issue.id}>
+          {displayId}
+        </span>
         <span className={styles.statusBadge} data-status={nodeStatus}>
           {nodeStatus === "blocked"
             ? "Waiting"

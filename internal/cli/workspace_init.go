@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -9,6 +10,9 @@ import (
 	"strings"
 	"time"
 )
+
+// defaultDaemonStartupTimeout is the fallback timeout for waiting for the daemon to become ready.
+const defaultDaemonStartupTimeout = 30 * time.Second
 
 // agentNamePool is the list of fun agent names to pick from when seeding loom.yaml.
 var agentNamePool = []string{
@@ -60,7 +64,13 @@ func writeLoomYaml(wsDir string) error {
 // It shells out to `bd daemon start` with Dir set to wsDir, then polls for readiness.
 // If wsDir is not itself a git repository (e.g., a multi-repo workspace), the daemon
 // is started with --local to avoid requiring a git repo at the workspace root.
-func ensureDaemonForWorkspace(wsDir string, timeout time.Duration) error {
+// The function respects the provided context for cancellation and uses timeout as
+// a fallback deadline for polling.
+func ensureDaemonForWorkspace(ctx context.Context, wsDir string, timeout time.Duration) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("daemon startup in %s cancelled: %w", wsDir, ctx.Err())
+	}
+
 	// Check if workspace dir is a git repo; if not, use --local mode
 	args := []string{"daemon", "start"}
 	if _, err := os.Stat(filepath.Join(wsDir, ".git")); err != nil {
@@ -75,11 +85,14 @@ func ensureDaemonForWorkspace(wsDir string, timeout time.Duration) error {
 
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
-	deadline := time.After(timeout)
+	deadlineTimer := time.NewTimer(timeout)
+	defer deadlineTimer.Stop()
 
 	for {
 		select {
-		case <-deadline:
+		case <-ctx.Done():
+			return fmt.Errorf("daemon startup in %s cancelled: %w", wsDir, ctx.Err())
+		case <-deadlineTimer.C:
 			return fmt.Errorf("daemon in %s did not become ready within %s", wsDir, timeout)
 		case <-ticker.C:
 			check := execCommand(wsDir, "bd", "daemon", "status", "--json")

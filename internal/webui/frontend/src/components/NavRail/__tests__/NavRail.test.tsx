@@ -75,6 +75,24 @@ describe("NavRail", () => {
       expect(tooltipTexts).toContain("Settings");
     });
 
+    it("each button has a title attribute matching its label", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Kanban")).toHaveAttribute(
+        "title",
+        "Kanban",
+      );
+      expect(screen.getByLabelText("List")).toHaveAttribute("title", "List");
+      expect(screen.getByLabelText("Terminal")).toHaveAttribute(
+        "title",
+        "Terminal",
+      );
+      expect(screen.getByLabelText("Settings")).toHaveAttribute(
+        "title",
+        "Settings",
+      );
+    });
+
     it("renders buttons in correct order: Kanban, List, Terminal", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
