@@ -1165,6 +1165,7 @@ function App() {
                 onOpenInTerminal={handleOpenIssueInTerminal}
                 onCopyLink={handleCopyLink}
                 onNavigateToIssue={handleIssueClick}
+                onIssueUpdate={updateIssueDetails}
               />
             </ErrorBoundary>
           )}

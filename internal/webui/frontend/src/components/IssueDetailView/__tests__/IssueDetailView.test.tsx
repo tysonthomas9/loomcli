@@ -7,11 +7,18 @@
  * Focuses on Escape key handling and back button behavior.
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  act,
+  waitFor,
+} from "@testing-library/react";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Issue } from "@/types";
+import { updateIssue } from "@/api";
 
 import { IssueDetailView } from "../IssueDetailView";
 import type { IssueDetailViewProps } from "../IssueDetailView";
@@ -28,6 +35,12 @@ vi.mock("@/hooks", async (importOriginal) => {
     useRegisterEscapeLayer: mockUseRegisterEscapeLayer,
   };
 });
+
+vi.mock("@/api", () => ({
+  updateIssue: vi.fn(),
+}));
+
+const mockUpdateIssue = vi.mocked(updateIssue);
 
 /**
  * Create a minimal test issue with required fields.
@@ -176,6 +189,112 @@ describe("IssueDetailView", () => {
       );
       expect(call).toBeDefined();
       expect(call![0]).toBe(10); // LAYER_ISSUE_PANEL
+    });
+  });
+
+  describe("StatusDropdown integration", () => {
+    it("renders StatusDropdown with current issue status", () => {
+      const issue = createTestIssue({ status: "in_progress" });
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      const dropdown = screen.getByTestId("status-dropdown");
+      expect(dropdown).toBeInTheDocument();
+      expect(dropdown).toHaveValue("in_progress");
+    });
+
+    it("defaults to open when issue has no status", () => {
+      const issue = createTestIssue({ status: undefined });
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      const dropdown = screen.getByTestId("status-dropdown");
+      expect(dropdown).toHaveValue("open");
+    });
+
+    it("calls updateIssue and onIssueUpdate on status change", async () => {
+      const updatedIssue = createTestIssue({ status: "closed" });
+      mockUpdateIssue.mockResolvedValue(updatedIssue);
+      const onIssueUpdate = vi.fn();
+      const issue = createTestIssue({ status: "open" });
+
+      render(
+        <IssueDetailView {...createDefaultProps({ issue, onIssueUpdate })} />,
+      );
+
+      const dropdown = screen.getByTestId("status-dropdown");
+      await act(async () => {
+        fireEvent.change(dropdown, { target: { value: "closed" } });
+      });
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
+        expect(mockUpdateIssue).toHaveBeenCalledWith("test-issue-abc123", {
+          status: "closed",
+        });
+        expect(onIssueUpdate).toHaveBeenCalledTimes(1);
+        expect(onIssueUpdate).toHaveBeenCalledWith(updatedIssue);
+      });
+    });
+
+    it("shows saving state while API call is in flight", async () => {
+      // Use a promise that we control to keep the API call in flight
+      let resolveUpdate: (value: Issue) => void;
+      const pendingPromise = new Promise<Issue>((resolve) => {
+        resolveUpdate = resolve;
+      });
+      mockUpdateIssue.mockReturnValue(pendingPromise);
+
+      const issue = createTestIssue({ status: "open" });
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      const dropdown = screen.getByTestId("status-dropdown");
+
+      // Trigger the status change without awaiting resolution
+      await act(async () => {
+        fireEvent.change(dropdown, { target: { value: "in_progress" } });
+      });
+
+      // While the API call is in flight, the dropdown should be disabled (saving)
+      expect(dropdown).toBeDisabled();
+      expect(dropdown).toHaveAttribute("data-saving", "true");
+
+      // Resolve the API call
+      await act(async () => {
+        resolveUpdate!(createTestIssue({ status: "in_progress" }));
+      });
+
+      // After resolution, the dropdown should be enabled again
+      await waitFor(() => {
+        expect(dropdown).not.toBeDisabled();
+      });
+    });
+
+    it("handles API error gracefully and shows ErrorToast", async () => {
+      mockUpdateIssue.mockRejectedValue(new Error("Network error"));
+      const onIssueUpdate = vi.fn();
+      const issue = createTestIssue({ status: "open" });
+
+      render(
+        <IssueDetailView {...createDefaultProps({ issue, onIssueUpdate })} />,
+      );
+
+      const dropdown = screen.getByTestId("status-dropdown");
+      await act(async () => {
+        fireEvent.change(dropdown, { target: { value: "blocked" } });
+      });
+
+      // ErrorToast should appear with the error message
+      await waitFor(() => {
+        expect(screen.getByTestId("status-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("status-error-toast")).toHaveTextContent(
+        "Network error",
+      );
+
+      // onIssueUpdate should NOT have been called on error
+      expect(onIssueUpdate).not.toHaveBeenCalled();
+
+      // Dropdown should be re-enabled after error
+      expect(dropdown).not.toBeDisabled();
     });
   });
 });

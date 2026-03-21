@@ -9,9 +9,12 @@ import { useEffect, useState, useCallback } from "react";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { ViewMode } from "@/components/ViewSwitcher";
+import type { Status } from "@/types/status";
 import { useRegisterEscapeLayer, LAYER_ISSUE_PANEL } from "@/hooks";
 import { getReviewType } from "@/utils/issueCategory";
-import { formatStatusLabel } from "@/utils/statusFormat";
+import { StatusDropdown } from "@/components/StatusDropdown";
+import { ErrorToast } from "@/components/ErrorToast";
+import { updateIssue } from "@/api";
 
 import styles from "./IssueDetailView.module.css";
 
@@ -29,6 +32,7 @@ export interface IssueDetailViewProps {
   onOpenInTerminal?: (issue: Issue | IssueDetails) => void;
   onCopyLink?: () => void;
   onNavigateToIssue?: (issue: Issue) => void;
+  onIssueUpdate?: (issue: Issue) => void;
 }
 
 /**
@@ -163,11 +167,14 @@ export function IssueDetailView({
   onOpenInTerminal,
   onCopyLink,
   onNavigateToIssue,
+  onIssueUpdate,
 }: IssueDetailViewProps): JSX.Element {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectComment, setRejectComment] = useState("");
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
+  const [isSavingStatus, setIsSavingStatus] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   // Reset state when issue changes
   useEffect(() => {
@@ -175,6 +182,8 @@ export function IssueDetailView({
     setRejectComment("");
     setIsApproving(false);
     setIsRejecting(false);
+    setIsSavingStatus(false);
+    setStatusError(null);
   }, [issue?.id]);
 
   // Escape key handler via global shortcut layer system.
@@ -208,6 +217,26 @@ export function IssueDetailView({
       setIsRejecting(false);
     }
   }, [issue, onReject, isRejecting, rejectComment]);
+
+  const handleStatusChange = useCallback(
+    async (newStatus: Status) => {
+      if (!issue) return;
+
+      setIsSavingStatus(true);
+      setStatusError(null);
+      try {
+        const updatedIssue = await updateIssue(issue.id, { status: newStatus });
+        onIssueUpdate?.(updatedIssue);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to update status";
+        setStatusError(message);
+      } finally {
+        setIsSavingStatus(false);
+      }
+    },
+    [issue, onIssueUpdate],
+  );
 
   // Loading state
   if (isLoading) {
@@ -354,13 +383,11 @@ export function IssueDetailView({
         <span className={styles.issueIdBadge} data-testid="detail-issue-id">
           {issue.id}
         </span>
-        <span
-          className={styles.statusBadge}
-          data-status={issue.status ?? "open"}
-          data-testid="detail-status-badge"
-        >
-          {formatStatusLabel(issue.status ?? "open")}
-        </span>
+        <StatusDropdown
+          status={(issue.status ?? "open") as Status}
+          onStatusChange={handleStatusChange}
+          isSaving={isSavingStatus}
+        />
         <h1 className={styles.headerTitle} data-testid="detail-title">
           {issue.title}
         </h1>
@@ -622,6 +649,14 @@ export function IssueDetailView({
           </section>
         )}
       </div>
+
+      {statusError && (
+        <ErrorToast
+          message={statusError}
+          onDismiss={() => setStatusError(null)}
+          testId="status-error-toast"
+        />
+      )}
     </div>
   );
 }
