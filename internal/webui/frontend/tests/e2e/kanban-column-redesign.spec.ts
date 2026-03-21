@@ -81,7 +81,7 @@ async function navigateToKanban(page: import("@playwright/test").Page) {
 }
 
 test.describe("Column Redesign: 6-column layout", () => {
-  test("renders 6 columns in order: Backlog, Open, Blocked, In Progress, Needs Review, Done", async ({
+  test("renders 6 columns in order: Backlog, Open, Blocked, In Progress, Review, Done", async ({
     page,
   }) => {
     const issues = [
@@ -137,7 +137,7 @@ test.describe("Column Redesign: 6-column layout", () => {
     await expect(openColumn.locator("h2")).toHaveText("Open")
     await expect(blockedColumn.locator("h2")).toHaveText("Blocked")
     await expect(inProgressColumn.locator("h2")).toHaveText("In Progress")
-    await expect(reviewColumn.locator("h2")).toHaveText("Needs Review")
+    await expect(reviewColumn.locator("h2")).toHaveText("Review")
     await expect(doneColumn.locator("h2")).toHaveText("Done")
   })
 
@@ -174,7 +174,7 @@ test.describe("Column Redesign: 6-column layout", () => {
     const openIcon = openColumn.locator("header svg[aria-hidden='true']").first()
     await expect(openIcon).toBeVisible()
 
-    // Backlog, Blocked, In Progress, Needs Review, Done headers should NOT have SVG icons
+    // Backlog, Blocked, In Progress, Review, Done headers should NOT have SVG icons
     const backlogColumn = page.locator('section[data-status="backlog"]')
     await expect(
       backlogColumn.locator("header svg[aria-hidden='true']")
@@ -284,7 +284,7 @@ test.describe("Column Redesign: issue distribution across all columns", () => {
     await expect(inProgressColumn.locator("article")).toHaveCount(1)
     await expect(inProgressColumn.getByText("In Progress Task")).toBeVisible()
 
-    // Needs Review: 2 (title-based + status-based)
+    // Review: 2 (title-based + status-based)
     await expect(reviewColumn.locator("article")).toHaveCount(2)
     await expect(
       reviewColumn.getByText("[Need Review] Review Task")
@@ -348,7 +348,7 @@ test.describe("Column Redesign: issue distribution across all columns", () => {
     await expect(openColumn.locator("article")).toHaveCount(1)
     await expect(openColumn.getByText("Normal Task")).toBeVisible()
 
-    // Epics are excluded from Backlog, Open, Blocked, In Progress, Needs Review columns
+    // Epics are excluded from Backlog, Open, Blocked, In Progress, Review columns
     await expect(backlogColumn.locator("article")).toHaveCount(0)
     await expect(blockedColumn.locator("article")).toHaveCount(0)
     await expect(inProgressColumn.locator("article")).toHaveCount(0)
@@ -459,7 +459,7 @@ test.describe("Column Redesign: status badges and header accents", () => {
     await expect(blockedColumn.getByLabel("1 issue")).toBeVisible()
     // In Progress: 1
     await expect(inProgressColumn.getByLabel("1 issue")).toBeVisible()
-    // Needs Review: 1 (title-based)
+    // Review: 1 (title-based)
     await expect(reviewColumn.getByLabel("1 issue")).toBeVisible()
     // Done: 3
     await expect(doneColumn.getByLabel("3 issues")).toBeVisible()

@@ -40,12 +40,12 @@ describe("IssueCard", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders issue ID (shortened)", () => {
+    it("renders issue ID (shortened with prefix preserved)", () => {
       const issue = createTestIssue({ id: "beads-abc123def456" });
       render(<IssueCard issue={issue} />);
 
-      // Should show last 7 characters
-      expect(screen.getByText("3def456")).toBeInTheDocument();
+      // Should preserve prefix and truncate: "beads-abc12..."
+      expect(screen.getByText("beads-abc12...")).toBeInTheDocument();
     });
 
     it("renders short ID as-is", () => {
@@ -942,6 +942,37 @@ describe("IssueCard", () => {
 
       const badge = screen.getByLabelText("Needs Plan");
       expect(badge.className).toMatch(/openNeedsPlan/);
+    });
+  });
+
+  describe("issue ID tooltip", () => {
+    it("ID span has title attribute with full issue ID for hover tooltip", () => {
+      const issue = createTestIssue({ id: "loomcli-af78e9a2.1.2" });
+      const { container } = render(<IssueCard issue={issue} />);
+
+      const idSpan = container.querySelector(`.${styles.id}`);
+      expect(idSpan).toHaveAttribute("title", "loomcli-af78e9a2.1.2");
+    });
+
+    it("title attribute shows full ID even when display text is truncated", () => {
+      const longId = "some-very-long-issue-id-12345";
+      const issue = createTestIssue({ id: longId });
+      const { container } = render(<IssueCard issue={issue} />);
+
+      const idSpan = container.querySelector(`.${styles.id}`);
+      // Display text is truncated
+      expect(idSpan).toHaveTextContent("some-very-...");
+      // But title shows the full ID
+      expect(idSpan).toHaveAttribute("title", longId);
+    });
+
+    it("title attribute matches display text for short IDs", () => {
+      const issue = createTestIssue({ id: "loomcli-pso6j" });
+      const { container } = render(<IssueCard issue={issue} />);
+
+      const idSpan = container.querySelector(`.${styles.id}`);
+      expect(idSpan).toHaveTextContent("loomcli-pso6j");
+      expect(idSpan).toHaveAttribute("title", "loomcli-pso6j");
     });
   });
 

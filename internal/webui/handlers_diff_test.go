@@ -343,6 +343,23 @@ func TestDiffFile_PathTraversal(t *testing.T) {
 	}
 }
 
+func TestDiffFile_DotPath(t *testing.T) {
+	ops := resolveOK()
+
+	// "." would trigger a repo-wide diff instead of a single file
+	for _, p := range []string{".", "./", "./."} {
+		req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/diff/file?path="+p+"&to=HEAD", nil)
+		req.SetPathValue("name", "test-agent")
+		w := httptest.NewRecorder()
+
+		handleDiffFile(ops).ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("path=%q: status = %d, want %d", p, w.Code, http.StatusBadRequest)
+		}
+	}
+}
+
 func TestDiffFile_AbsolutePath(t *testing.T) {
 	ops := resolveOK()
 

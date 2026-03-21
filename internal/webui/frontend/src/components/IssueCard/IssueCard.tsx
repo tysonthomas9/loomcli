@@ -167,7 +167,9 @@ export function IssueCard({
       aria-label={`Issue: ${displayTitle}${isBlocked ? " (blocked)" : ""}${isBacklog ? " (backlog)" : ""}`}
     >
       <header className={styles.header}>
-        <span className={styles.id}>{displayId}</span>
+        <span className={styles.id} title={issue.id}>
+          {displayId}
+        </span>
         {showSessionBadge && (
           <span
             className={styles.sessionBadge}
