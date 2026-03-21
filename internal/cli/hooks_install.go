@@ -35,7 +35,7 @@ var hookCommands = map[string]string{
 //
 //	[{"matcher": "", "hooks": [{"type": "command", "command": "..."}]}]
 type claudeHookMatcher struct {
-	Matcher string           `json:"matcher"`
+	Matcher string            `json:"matcher"`
 	Hooks   []claudeHookEntry `json:"hooks"`
 }
 

@@ -447,4 +447,3 @@ func TestGetSession_IsActive(t *testing.T) {
 		t.Error("is_active = false, want true for running session")
 	}
 }
-

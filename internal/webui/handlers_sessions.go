@@ -52,7 +52,7 @@ type TranscriptResponse struct {
 
 // TranscriptData contains the session ID and its transcript entries.
 type TranscriptData struct {
-	SessionID string                    `json:"session_id"`
+	SessionID string                     `json:"session_id"`
 	Entries   []sessions.TranscriptEntry `json:"entries"`
 }
 
