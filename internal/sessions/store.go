@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,7 +84,8 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 
 // AppendTranscript appends a single TranscriptEntry to
 // sessions/<sessionID>/transcript.jsonl using flock for concurrency safety.
-// The caller is responsible for setting the Seq field.
+// The Seq field is auto-assigned from a counter file (seq) in the session
+// directory, ensuring monotonic ordering even across concurrent processes.
 func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error {
 	// Reject session IDs containing path separators to prevent traversal.
 	if strings.ContainsAny(sessionID, "/\\") {
@@ -106,12 +108,6 @@ func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error 
 		return fmt.Errorf("stat session dir: %w", err)
 	}
 
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("marshal transcript entry: %w", err)
-	}
-	data = append(data, '\n')
-
 	txPath := filepath.Join(sessDir, "transcript.jsonl")
 
 	// #nosec G304 — path constructed from trusted store directory
@@ -127,10 +123,41 @@ func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error 
 	}
 	defer func() { _ = lockfile.FlockUnlock(f) }()
 
+	// Auto-assign Seq from a counter file, under the flock.
+	seq := readAndIncrementSeq(sessDir)
+	entry.Seq = seq
+
+	// Marshal with the assigned seq.
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshal transcript entry: %w", err)
+	}
+	data = append(data, '\n')
+
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write transcript entry: %w", err)
 	}
 	return nil
+}
+
+// readAndIncrementSeq reads the current sequence number from sessDir/seq,
+// increments it, writes it back, and returns the new value.
+// Starts at 1 if the file doesn't exist. Best-effort: returns 0 on error.
+func readAndIncrementSeq(sessDir string) int {
+	seqPath := filepath.Join(sessDir, "seq")
+	seq := 1
+
+	// #nosec G304 — path constructed from trusted session directory
+	data, err := os.ReadFile(seqPath)
+	if err == nil {
+		if n, parseErr := strconv.Atoi(strings.TrimSpace(string(data))); parseErr == nil {
+			seq = n + 1
+		}
+	}
+
+	// #nosec G306 — seq file is not sensitive
+	_ = os.WriteFile(seqPath, []byte(strconv.Itoa(seq)), 0o644)
+	return seq
 }
 
 // writeMetadataAtomic writes metadata.json using temp file + rename

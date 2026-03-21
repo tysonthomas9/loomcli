@@ -412,11 +412,11 @@ func TestLoadTranscript(t *testing.T) {
 	sid := sess.SessionID()
 	now := time.Now().UTC()
 
-	// Append entries out of order to test sorting.
+	// Append entries in order — Seq is auto-assigned by AppendTranscript.
 	entries := []TranscriptEntry{
-		{Seq: 3, Timestamp: now.Add(2 * time.Second), Role: "assistant", Type: "tool_use", ToolName: "Read"},
-		{Seq: 1, Timestamp: now, Role: "user", Type: "text", Content: "Hello"},
-		{Seq: 2, Timestamp: now.Add(time.Second), Role: "assistant", Type: "text", Content: "Hi"},
+		{Timestamp: now, Role: "user", Type: "text", Content: "Hello"},
+		{Timestamp: now.Add(time.Second), Role: "assistant", Type: "text", Content: "Hi"},
+		{Timestamp: now.Add(2 * time.Second), Role: "assistant", Type: "tool_use", ToolName: "Read"},
 	}
 	for _, e := range entries {
 		if err := store.AppendTranscript(sid, e); err != nil {
@@ -433,7 +433,7 @@ func TestLoadTranscript(t *testing.T) {
 		t.Fatalf("got %d entries, want 3", len(loaded))
 	}
 
-	// Verify sorted by Seq ascending.
+	// Verify Seq is auto-assigned monotonically.
 	for i, e := range loaded {
 		expected := i + 1
 		if e.Seq != expected {
@@ -441,7 +441,7 @@ func TestLoadTranscript(t *testing.T) {
 		}
 	}
 
-	// Verify content.
+	// Verify content preserves write order.
 	if loaded[0].Content != "Hello" {
 		t.Errorf("entry[0].Content = %q, want %q", loaded[0].Content, "Hello")
 	}
