@@ -162,6 +162,11 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.HandleFunc("GET /api/agents/{name}/git/status", handleGitStatus(gitOps))
 		mux.HandleFunc("PATCH /api/agents/{name}/git/target", handleGitTargetUpdate(gitOps))
 		mux.HandleFunc("GET /api/issues/{id}/git/diff-stat", handleGetIssueDiffStat(pool, gitOps))
+
+		// Diff endpoints for agent worktrees
+		mux.HandleFunc("GET /api/agents/{name}/diff/commits", handleDiffCommits(gitOps))
+		mux.HandleFunc("GET /api/agents/{name}/diff/files", handleDiffFiles(gitOps))
+		mux.HandleFunc("GET /api/agents/{name}/diff/file", handleDiffFile(gitOps))
 	}
 
 	// File operation endpoints for worktrees
