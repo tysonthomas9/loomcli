@@ -78,6 +78,7 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
+	env = append(env, activeSessionEnvVars()...)
 	cmd.Env = env
 
 	// Pass prompt via stdin pipe
@@ -156,6 +157,7 @@ func (c *ClaudeBackend) ContinueSession(workDir, sessionID, agentName string) er
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
+	env = append(env, activeSessionEnvVars()...)
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -188,6 +190,7 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
+	env = append(env, activeSessionEnvVars()...)
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -217,6 +220,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	if agentName != "" {
 		env = append(env, "BD_ACTOR="+agentName)
 	}
+	env = append(env, activeSessionEnvVars()...)
 	cmd.Env = env
 
 	// Pass prompt via stdin pipe (not CLI args) to avoid exposure in process listings
