@@ -17,7 +17,7 @@ const (
 type SessionRecord struct {
 	// Identity
 	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
+	TaskID    string `json:"task_id"` // populated at Finalize, not CreateSession (agent claims task mid-session)
 	EpicID    string `json:"epic_id,omitempty"`
 
 	// Agent context
