@@ -20,3 +20,4 @@
 540 internal/webui/handlers_terminal.go
 568 internal/webui/server.go
 506 internal/cli/daemon.go
+515 internal/cli/automode.go
