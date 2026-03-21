@@ -65,9 +65,9 @@ func TestTruncateUTF8(t *testing.T) {
 			wantUTF8: true,
 		},
 		{
-			name:  "multi-byte UTF-8 no split 2-byte char",
-			input: "abc\u00e9\u00e9", // e-acute is 2 bytes each, total = 3 + 2 + 2 = 7
-			max:   4,                  // tail 4 bytes = last 2-byte char + possibly split char before it
+			name:     "multi-byte UTF-8 no split 2-byte char",
+			input:    "abc\u00e9\u00e9", // e-acute is 2 bytes each, total = 3 + 2 + 2 = 7
+			max:      4,                 // tail 4 bytes = last 2-byte char + possibly split char before it
 			wantUTF8: true,
 			wantLen: func(s string) bool {
 				return len(s) <= 4 && utf8.ValidString(s)
@@ -76,7 +76,7 @@ func TestTruncateUTF8(t *testing.T) {
 		{
 			name:     "multi-byte UTF-8 no split 3-byte char",
 			input:    "ab\u4e16\u754c", // Chinese chars, 3 bytes each, total = 2 + 3 + 3 = 8
-			max:      5,                 // tail 5 bytes could split the first Chinese char
+			max:      5,                // tail 5 bytes could split the first Chinese char
 			wantUTF8: true,
 			wantLen: func(s string) bool {
 				return len(s) <= 5 && utf8.ValidString(s)
@@ -85,7 +85,7 @@ func TestTruncateUTF8(t *testing.T) {
 		{
 			name:     "emoji 4-byte chars",
 			input:    "hi\U0001F600\U0001F601", // two 4-byte emojis, total = 2 + 4 + 4 = 10
-			max:      6,                          // tail 6 bytes could split first emoji
+			max:      6,                        // tail 6 bytes could split first emoji
 			wantUTF8: true,
 			wantLen: func(s string) bool {
 				return len(s) <= 6 && utf8.ValidString(s)

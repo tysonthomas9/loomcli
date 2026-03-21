@@ -17,7 +17,7 @@ func TestOptionalWorkspaceMiddleware_WithHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := OptionalWorkspaceMiddleware("default-ws", inner)
+	handler := OptionalWorkspaceMiddleware(func() string { return "default-ws" }, inner)
 
 	req := httptest.NewRequest("GET", "/api/issues", nil)
 	req.Header.Set("Workspace", "custom-ws")
@@ -42,7 +42,7 @@ func TestOptionalWorkspaceMiddleware_NoHeader_UsesDefault(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := OptionalWorkspaceMiddleware("fallback-ws", inner)
+	handler := OptionalWorkspaceMiddleware(func() string { return "fallback-ws" }, inner)
 
 	req := httptest.NewRequest("GET", "/api/issues", nil)
 	// No Workspace header
@@ -67,7 +67,7 @@ func TestOptionalWorkspaceMiddleware_WhitespaceHeader_UsesDefault(t *testing.T) 
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := OptionalWorkspaceMiddleware("default-ws", inner)
+	handler := OptionalWorkspaceMiddleware(func() string { return "default-ws" }, inner)
 
 	req := httptest.NewRequest("GET", "/api/issues", nil)
 	req.Header.Set("Workspace", "   ")
@@ -93,7 +93,7 @@ func TestOptionalWorkspaceMiddleware_EmptyDefault_NoHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := OptionalWorkspaceMiddleware("", inner)
+	handler := OptionalWorkspaceMiddleware(func() string { return "" }, inner)
 
 	req := httptest.NewRequest("GET", "/api/issues", nil)
 	// No Workspace header, empty default
@@ -118,7 +118,7 @@ func TestOptionalWorkspaceMiddleware_HeaderTrimmed(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := OptionalWorkspaceMiddleware("default-ws", inner)
+	handler := OptionalWorkspaceMiddleware(func() string { return "default-ws" }, inner)
 
 	req := httptest.NewRequest("GET", "/api/issues", nil)
 	req.Header.Set("Workspace", "  trimmed-ws  ")
@@ -143,7 +143,7 @@ func TestOptionalWorkspaceMiddleware_HeaderOverridesDefault(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := OptionalWorkspaceMiddleware("should-be-overridden", inner)
+	handler := OptionalWorkspaceMiddleware(func() string { return "should-be-overridden" }, inner)
 
 	req := httptest.NewRequest("GET", "/api/issues", nil)
 	req.Header.Set("Workspace", "explicit-ws")
@@ -180,7 +180,7 @@ func TestOptionalWorkspaceMiddleware_InnerHandlerCalled(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			})
 
-			handler := OptionalWorkspaceMiddleware(tt.defaultWS, inner)
+			handler := OptionalWorkspaceMiddleware(func() string { return tt.defaultWS }, inner)
 
 			req := httptest.NewRequest("GET", "/api/issues", nil)
 			if tt.header != "" {
