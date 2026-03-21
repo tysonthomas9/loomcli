@@ -46,6 +46,7 @@ import {
   ThemeToggle,
   KeyboardCheatsheet,
   WorkspaceSwitcher,
+  CreateIssueModal,
   CreateWorkspaceModal,
 } from "@/components";
 import { SearchTermProvider } from "@/contexts/SearchTermContext";
@@ -401,6 +402,9 @@ function App() {
 
   // Create workspace modal state
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
+
+  // Create issue modal state
+  const [showCreateIssue, setShowCreateIssue] = useState(false);
 
   // Assignee prompt state for Ready → In Progress drag
   const { recentAssignees, addRecentAssignee } = useRecentAssignees();
@@ -847,6 +851,13 @@ function App() {
           groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
           onGroupByChange={filterActions.setGroupBy}
         />
+        <button
+          className={styles.newIssueButton}
+          onClick={() => setShowCreateIssue(true)}
+          data-testid="new-issue-button"
+        >
+          + New Issue
+        </button>
       </div>
     </div>
   );
@@ -1265,6 +1276,13 @@ function App() {
           );
           url.searchParams.set("_ws", createdName);
           window.location.replace(url.toString());
+        }}
+      />
+      <CreateIssueModal
+        isOpen={showCreateIssue}
+        onClose={() => setShowCreateIssue(false)}
+        onSuccess={() => {
+          refetch();
         }}
       />
     </KeyboardShortcutProvider>
