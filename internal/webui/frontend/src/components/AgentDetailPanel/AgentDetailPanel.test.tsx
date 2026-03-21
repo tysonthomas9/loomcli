@@ -69,6 +69,13 @@ vi.mock("./GitTab", () => ({
   ),
 }));
 
+// Mock DiffTab to avoid its hook dependencies (useDiff)
+vi.mock("./DiffTab", () => ({
+  DiffTab: ({ agent }: { agent: { name: string } }) => (
+    <div data-testid="diff-tab-mock" data-agent={agent.name} />
+  ),
+}));
+
 // Mock FileEditorPanel to avoid pulling in CodeMirror and editor stack
 vi.mock("@/components/FileEditorPanel", () => ({
   FileEditorPanel: ({
@@ -200,12 +207,13 @@ describe("AgentDetailPanel", () => {
       expect(gitTab).toBeInTheDocument();
     });
 
-    it("renders all four tabs: Info, Logs, Git, Files", () => {
+    it("renders all five tabs: Info, Logs, Git, Diff, Files", () => {
       renderPanel();
 
       expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
     });
 
@@ -281,6 +289,63 @@ describe("AgentDetailPanel", () => {
     });
   });
 
+  describe("Diff tab in tab bar", () => {
+    it("renders Diff tab button in the tab bar", () => {
+      renderPanel();
+      const diffTab = screen.getByRole("tab", { name: "Diff" });
+      expect(diffTab).toBeInTheDocument();
+    });
+
+    it("Diff tab activates on click and shows DiffTab component", async () => {
+      renderPanel({ name: "nova" });
+
+      // Diff tab should not be selected initially
+      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+        "aria-selected",
+        "false",
+      );
+
+      // Click Diff tab
+      fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+
+      // Diff tab should be selected
+      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+
+      // DiffTab mock should render (lazy-loaded via Suspense)
+      const diffTabMock = await screen.findByTestId("diff-tab-mock");
+      expect(diffTabMock).toHaveAttribute("data-agent", "nova");
+    });
+
+    it("Diff tab panel has correct ARIA attributes", async () => {
+      renderPanel();
+      fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
+
+      // Wait for lazy load
+      await screen.findByTestId("diff-tab-mock");
+
+      const tabPanel = document.getElementById("agent-panel-tabpanel-diff");
+      expect(tabPanel).toBeInTheDocument();
+      expect(tabPanel).toHaveAttribute("role", "tabpanel");
+      expect(tabPanel).toHaveAttribute(
+        "aria-labelledby",
+        "agent-panel-tab-diff",
+      );
+    });
+
+    it("Diff tab button has correct ARIA attributes", () => {
+      renderPanel();
+      const diffTab = screen.getByRole("tab", { name: "Diff" });
+      expect(diffTab).toHaveAttribute("id", "agent-panel-tab-diff");
+      expect(diffTab).toHaveAttribute(
+        "aria-controls",
+        "agent-panel-tabpanel-diff",
+      );
+    });
+  });
+
   describe("Files tab in tab bar", () => {
     it("renders Files tab button in the tab bar", () => {
       renderPanel();
@@ -289,12 +354,13 @@ describe("AgentDetailPanel", () => {
       expect(filesTab).toBeInTheDocument();
     });
 
-    it("renders all four tabs: Info, Logs, Git, Files", () => {
+    it("renders all five tabs: Info, Logs, Git, Diff, Files", () => {
       renderPanel();
 
       expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
     });
 
