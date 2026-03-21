@@ -56,7 +56,7 @@ describe("KanbanBoard", () => {
   });
 
   describe("rendering", () => {
-    it("renders default 6-column kanban layout (Backlog, Open, Blocked, In Progress, Needs Review, Done)", () => {
+    it("renders default 6-column kanban layout (Backlog, Open, Blocked, In Progress, Review, Done)", () => {
       const issues = [createMockIssue({ status: "open" })];
       render(<KanbanBoard issues={issues} />);
 
@@ -72,7 +72,7 @@ describe("KanbanBoard", () => {
         screen.getByRole("heading", { name: "In Progress" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole("heading", { name: "Needs Review" }),
+        screen.getByRole("heading", { name: "Review" }),
       ).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Done" })).toBeInTheDocument();
     });

@@ -127,19 +127,19 @@ describe("columnConfigs", () => {
   });
 
   // ---------------------------------------------------------------
-  // 6-8. Needs Review column (id: 'review', label: 'Needs Review')
+  // 6-8. Review column (id: 'review', label: 'Review')
   // ---------------------------------------------------------------
-  describe("Needs Review column identity", () => {
+  describe("Review column identity", () => {
     it('has id "review" at index 4', () => {
       expect(DEFAULT_COLUMNS[4].id).toBe("review");
     });
 
-    it('has label "Needs Review" at index 4', () => {
-      expect(DEFAULT_COLUMNS[4].label).toBe("Needs Review");
+    it('has label "Review" at index 4', () => {
+      expect(DEFAULT_COLUMNS[4].label).toBe("Review");
     });
   });
 
-  describe("Needs Review filter", () => {
+  describe("Review filter", () => {
     const review = getColumn("review");
 
     it("does NOT match status=blocked issues", () => {
@@ -205,7 +205,7 @@ describe("columnConfigs", () => {
   // Column style configuration
   // ---------------------------------------------------------------
   describe("Column style configuration", () => {
-    it('Needs Review column has style "normal" (not highlighted)', () => {
+    it('Review column has style "normal" (not highlighted)', () => {
       const review = getColumn("review");
       expect(review.style).toBe("normal");
     });
@@ -267,7 +267,7 @@ describe("columnConfigs", () => {
       expect(getColumn("in_progress").filter(issue, notBlocked)).toBe(false);
     });
 
-    it("excludes epics from Needs Review (status)", () => {
+    it("excludes epics from Review (status)", () => {
       const issue = createMockIssue({ issue_type: "epic", status: "review" });
       expect(getColumn("review").filter(issue, notBlocked)).toBe(false);
     });
@@ -385,7 +385,7 @@ describe("columnConfigs", () => {
         expect(inProgress.filter(epicIssue, notBlocked)).toBe(false);
       });
 
-      it("filters out epics from Needs Review", () => {
+      it("filters out epics from Review", () => {
         const columns = createColumns();
         const review = getColumnFrom(columns, "review");
         const epicIssue = createMockIssue({
@@ -507,7 +507,7 @@ describe("columnConfigs", () => {
         expect(inProgress.filter(epicIssue, notBlocked)).toBe(true);
       });
 
-      it("allows epics in Needs Review (status)", () => {
+      it("allows epics in Review (status)", () => {
         const columns = createColumns({ includeEpics: true });
         const review = getColumnFrom(columns, "review");
         const epicIssue = createMockIssue({

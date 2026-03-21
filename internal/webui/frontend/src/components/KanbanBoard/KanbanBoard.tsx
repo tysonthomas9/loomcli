@@ -3,7 +3,7 @@
  * Wraps content in @dnd-kit DndContext to enable drag-and-drop between status columns.
  * Renders StatusColumns for each status and uses DragOverlay for visual drag feedback.
  *
- * Supports 6-column layout: Backlog, Open, Blocked, In Progress, Needs Review, Done
+ * Supports 6-column layout: Backlog, Open, Blocked, In Progress, Review, Done
  * where columns can be computed from issue data (status + blocked dependencies + title patterns).
  */
 
