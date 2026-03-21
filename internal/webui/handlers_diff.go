@@ -50,7 +50,7 @@ func validateDiffPath(p string) bool {
 		return false
 	}
 	cleaned := path.Clean(p)
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return false
 	}
 	return true
