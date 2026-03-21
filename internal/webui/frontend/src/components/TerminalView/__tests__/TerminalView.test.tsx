@@ -272,13 +272,16 @@ describe("TerminalView", () => {
       expect(screen.getByTestId("tab-session-2")).toBeInTheDocument();
     });
 
-    it("auto-creates tabs from backend config on first open (empty metadata)", () => {
+    it("auto-creates only default backend tab on first open (empty metadata)", () => {
       setMetadata([]);
       render(<TerminalView />);
 
+      // Only the default backend tab is auto-created; users add others via "+"
       expect(screen.getByTestId("tab-lead-claude-1")).toBeInTheDocument();
-      expect(screen.getByTestId("tab-lead-codex-1")).toBeInTheDocument();
-      expect(screen.getByTestId("tab-lead-opencode-1")).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-lead-codex-1")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("tab-lead-opencode-1"),
+      ).not.toBeInTheDocument();
     });
 
     it("claude tab is active by default on first open", () => {
@@ -318,25 +321,15 @@ describe("TerminalView", () => {
       expect(screen.getByTestId("no-backends-empty-state")).toBeInTheDocument();
     });
 
-    it("createTab called for each auto-created tab on first open", () => {
+    it("createTab called once for default backend on first open", () => {
       setMetadata([]);
       render(<TerminalView />);
 
-      expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(3);
+      expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(1);
       expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
         "lead-claude-1",
         "lead-claude-1",
         0,
-      );
-      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
-        "lead-codex-1",
-        "lead-codex-1",
-        1,
-      );
-      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
-        "lead-opencode-1",
-        "lead-opencode-1",
-        2,
       );
     });
 
@@ -345,6 +338,33 @@ describe("TerminalView", () => {
       render(<TerminalView />);
 
       expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+    });
+
+    it("does not initialize tabs when isActive is false", () => {
+      setMetadata([]);
+      render(<TerminalView isActive={false} />);
+
+      // No tabs should have been created — init is deferred until view is active
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("tab-lead-claude-1")).not.toBeInTheDocument();
+    });
+
+    it("initializes tabs when isActive transitions from false to true", () => {
+      setMetadata([]);
+      const { rerender } = render(<TerminalView isActive={false} />);
+
+      // Should not have initialized yet
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalled();
+
+      // Transition to active
+      rerender(<TerminalView isActive={true} />);
+
+      // Now tabs should appear — only default backend tab auto-created
+      expect(screen.getByTestId("tab-lead-claude-1")).toBeInTheDocument();
+      expect(screen.getByTestId("active-tab-id").textContent).toBe(
+        "lead-claude-1",
+      );
+      expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -935,7 +955,17 @@ describe("TerminalView", () => {
     });
 
     it("tabs with lead-codex-1 session get codex brand color (#22c55e)", async () => {
-      setMetadata([]);
+      // Use metadata to restore a codex tab (auto-creation only creates default backend)
+      setMetadata([
+        {
+          session_name: "lead-codex-1",
+          label: "lead-codex-1",
+          notes: "",
+          sort_order: 0,
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
+        },
+      ]);
       render(<TerminalView />);
 
       const { TerminalTabBar } = await import("../TerminalTabBar");
@@ -1137,13 +1167,16 @@ describe("TerminalView", () => {
 
     it("tab cycling does not fire when isActive=false", () => {
       setMetadata(DEFAULT_METADATA);
-      render(<TerminalView isActive={false} />);
+      // Render active first to initialize tabs, then switch to inactive
+      const { rerender } = render(<TerminalView isActive={true} />);
 
       expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
 
+      rerender(<TerminalView isActive={false} />);
+
       fireEvent.keyDown(document, { key: "Tab", ctrlKey: true });
 
-      // Should still be on session-1 — handler not registered
+      // Should still be on session-1 — handler not registered when inactive
       expect(screen.getByTestId("active-tab-id").textContent).toBe("session-1");
     });
   });

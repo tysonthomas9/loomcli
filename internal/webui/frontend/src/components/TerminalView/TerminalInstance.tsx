@@ -23,6 +23,7 @@ import { fetchScrollback } from "@/api/terminal";
 import { stripAnsi } from "@/utils/stripAnsi";
 import {
   startAutoReconnect,
+  type ReconnectConfig,
   type ReconnectState,
 } from "@/utils/reconnectBackoff";
 import type { ReconnectOverlayState } from "./ReconnectingOverlay";
@@ -39,6 +40,14 @@ const SEARCH_DECORATIONS = {
   activeMatchBackground: "#EE8B17",
   activeMatchBorder: "#EE8B17",
   activeMatchColorOverviewRuler: "#ee8b17ff",
+};
+
+/** Stricter backoff for initial connection failures (e.g. 501 when session doesn't exist). */
+const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
+  maxAttempts: 3,
+  baseDelay: 3000,
+  maxDelay: 15000,
+  jitterFactor: 0.5,
 };
 
 export type ConnectionState =
@@ -211,6 +220,9 @@ export const TerminalInstance = forwardRef<
         },
         () => {
           if (reconnectCancelRef.current) return;
+          const reconnectConfig = hasConnectedRef.current
+            ? undefined
+            : INITIAL_CONNECT_CONFIG;
           const cancel = startAutoReconnect(
             () => {
               handleReconnect();
@@ -218,8 +230,13 @@ export const TerminalInstance = forwardRef<
             },
             (state: ReconnectState) => {
               reconnectAttemptRef.current = state.attempt;
-              if (state.gaveUp) setConnectionState("error");
+              if (state.gaveUp) {
+                clearReconnectState();
+                onReconnectStateChangeRef.current?.("expired");
+                setConnectionState("error");
+              }
             },
+            reconnectConfig,
           );
           reconnectCancelRef.current = cancel;
         },
@@ -540,7 +557,10 @@ export const TerminalInstance = forwardRef<
             reconnectResolveRef.current = null;
             if (!mounted || reconnectCancelRef.current) return;
             onReconnectStateChangeRef.current?.("reconnecting");
-            if (!reconnectTimeoutRef.current) {
+            // Only start the wall-clock timeout for mid-session disconnects.
+            // For initial connection failures (501), the tight 3-attempt backoff
+            // is the sole timeout mechanism — no redundant 30s timer.
+            if (hasConnectedRef.current && !reconnectTimeoutRef.current) {
               reconnectTimeoutRef.current = setTimeout(() => {
                 reconnectTimeoutRef.current = null;
                 reconnectCancelRef.current?.();
@@ -549,6 +569,9 @@ export const TerminalInstance = forwardRef<
                 setConnectionState("error");
               }, RECONNECT_TIMEOUT);
             }
+            const reconnectConfig = hasConnectedRef.current
+              ? undefined
+              : INITIAL_CONNECT_CONFIG;
             const cancel = startAutoReconnect(
               () => {
                 if (!mounted) return true;
@@ -565,6 +588,7 @@ export const TerminalInstance = forwardRef<
                   setConnectionState("error");
                 }
               },
+              reconnectConfig,
             );
             reconnectCancelRef.current = cancel;
           },

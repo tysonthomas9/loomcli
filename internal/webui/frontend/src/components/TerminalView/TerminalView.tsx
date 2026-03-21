@@ -222,6 +222,7 @@ export function TerminalView({
     setActiveTabId,
     initializedRef,
     workspace,
+    isViewActive: isActive ?? false,
   });
 
   // Apply server-restored active tab after initialization (only if restore completed before user interaction)

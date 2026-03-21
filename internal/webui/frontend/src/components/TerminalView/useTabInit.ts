@@ -17,6 +17,8 @@ interface TabInitArgs {
   initializedRef: MutableRefObject<boolean>;
   /** Active workspace name, used to namespace auto-generated session names */
   workspace?: string;
+  /** Whether the Terminal view is currently visible — defer init until user navigates to Terminal */
+  isViewActive: boolean;
 }
 
 export function useTabInit(args: TabInitArgs) {
@@ -30,10 +32,12 @@ export function useTabInit(args: TabInitArgs) {
     setActiveTabId,
     initializedRef,
     workspace,
+    isViewActive,
   } = args;
 
   useEffect(() => {
-    if (initializedRef.current || metaLoading || configLoading) return;
+    if (initializedRef.current || metaLoading || configLoading || !isViewActive)
+      return;
     initializedRef.current = true;
 
     if (tabMetadata.length > 0) {
@@ -80,30 +84,39 @@ export function useTabInit(args: TabInitArgs) {
       const wsPrefix =
         workspace && workspace !== "default" ? `${workspace}--` : "";
 
-      const newTabs: TabState[] = backends.map((backend) => {
-        const label = `lead-${backend}-1`;
-        const sessionName = `${wsPrefix}lead-${backend}-1`;
-        return {
-          id: sessionName,
-          label,
-          sessionName,
-          connectionState: "disconnected" as ConnectionState,
-          backendName: backend,
-        };
-      });
-      setTabs(newTabs);
+      // Only auto-create a single tab for the default backend.
+      // Users can add more backend tabs via the "+" button.
+      const cfgBackend = config?.backend;
+      const defaultBackend =
+        cfgBackend && backends.includes(cfgBackend)
+          ? cfgBackend
+          : (backends[0] as string); // safe: backends.length > 0 checked above
+      const label = `lead-${defaultBackend}-1`;
+      const sessionName = `${wsPrefix}lead-${defaultBackend}-1`;
+      const newTab: TabState = {
+        id: sessionName,
+        label,
+        sessionName,
+        connectionState: "disconnected" as ConnectionState,
+        backendName: defaultBackend,
+      };
+      setTabs([newTab]);
+      setActiveTabId(newTab.id);
 
-      const claudeTab = newTabs.find((t) => t.label.startsWith("lead-claude-"));
-      setActiveTabId(claudeTab?.id ?? newTabs[0]?.id ?? "");
-
-      newTabs.forEach((tab, i) => {
-        createTab(tab.sessionName, tab.label, i).catch((err) =>
-          console.error(
-            `Failed to persist auto-created tab ${tab.sessionName}:`,
-            err,
-          ),
-        );
-      });
+      createTab(newTab.sessionName, newTab.label, 0).catch((err) =>
+        console.error(
+          `Failed to persist auto-created tab ${newTab.sessionName}:`,
+          err,
+        ),
+      );
     }
-  }, [tabMetadata, metaLoading, config, configLoading, createTab, workspace]);
+  }, [
+    tabMetadata,
+    metaLoading,
+    config,
+    configLoading,
+    createTab,
+    workspace,
+    isViewActive,
+  ]);
 }

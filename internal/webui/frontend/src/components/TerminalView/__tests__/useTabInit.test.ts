@@ -20,6 +20,7 @@ function createArgs(overrides: Partial<Parameters<typeof useTabInit>[0]> = {}) {
     setTabs: vi.fn() as React.Dispatch<React.SetStateAction<TabState[]>>,
     setActiveTabId: vi.fn() as React.Dispatch<React.SetStateAction<string>>,
     initializedRef: { current: false } as React.MutableRefObject<boolean>,
+    isViewActive: true,
     ...overrides,
   };
 }
@@ -41,6 +42,15 @@ describe("useTabInit", () => {
 
   it("does not initialize when configLoading is true", () => {
     const args = createArgs({ configLoading: true });
+
+    renderHook(() => useTabInit(args));
+
+    expect(args.initializedRef.current).toBe(false);
+    expect(args.setTabs).not.toHaveBeenCalled();
+  });
+
+  it("does not initialize when isViewActive is false", () => {
+    const args = createArgs({ isViewActive: false });
 
     renderHook(() => useTabInit(args));
 
@@ -199,7 +209,7 @@ describe("useTabInit", () => {
     expect(createTab).not.toHaveBeenCalled();
   });
 
-  it("creates one tab per backend when no metadata exists", () => {
+  it("creates only default backend tab when no metadata exists", () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();
     const createTab = vi.fn().mockResolvedValue(undefined);
@@ -224,21 +234,20 @@ describe("useTabInit", () => {
 
     expect(setTabs).toHaveBeenCalledTimes(1);
     const tabs = setTabs.mock.calls[0][0] as TabState[];
-    expect(tabs).toHaveLength(2);
+    expect(tabs).toHaveLength(1);
     expect(tabs[0].sessionName).toBe("lead-claude-1");
     expect(tabs[0].backendName).toBe("claude");
-    expect(tabs[1].sessionName).toBe("lead-codex-1");
-    expect(tabs[1].backendName).toBe("codex");
 
-    // Should prefer the claude tab as active
+    // Should set default backend tab as active
     expect(setActiveTabId).toHaveBeenCalledWith("lead-claude-1");
 
-    // Should persist both tabs
-    expect(createTab).toHaveBeenCalledTimes(2);
+    // Should persist only the one tab
+    expect(createTab).toHaveBeenCalledTimes(1);
   });
 
-  it("prefers claude tab as active when multiple backends exist", () => {
+  it("creates tab for configured default backend", () => {
     const setActiveTabId = vi.fn();
+    const setTabs = vi.fn();
 
     const args = createArgs({
       config: {
@@ -250,20 +259,27 @@ describe("useTabInit", () => {
       setActiveTabId: setActiveTabId as unknown as React.Dispatch<
         React.SetStateAction<string>
       >,
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
     });
 
     renderHook(() => useTabInit(args));
 
-    // Should pick the claude tab even though codex is the default backend
-    expect(setActiveTabId).toHaveBeenCalledWith("lead-claude-1");
+    // Should create only the configured default backend tab
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].backendName).toBe("codex");
+    expect(setActiveTabId).toHaveBeenCalledWith("lead-codex-1");
   });
 
-  it("falls back to first tab when no claude backend", () => {
+  it("falls back to first available backend when default not in list", () => {
     const setActiveTabId = vi.fn();
+    const setTabs = vi.fn();
 
     const args = createArgs({
       config: {
-        backend: "codex",
+        backend: "gemini",
         source: "config",
         available: ["codex", "opencode"],
         agents: [],
@@ -271,10 +287,16 @@ describe("useTabInit", () => {
       setActiveTabId: setActiveTabId as unknown as React.Dispatch<
         React.SetStateAction<string>
       >,
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
     });
 
     renderHook(() => useTabInit(args));
 
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].backendName).toBe("codex");
     expect(setActiveTabId).toHaveBeenCalledWith("lead-codex-1");
   });
 
@@ -329,19 +351,17 @@ describe("useTabInit", () => {
 
     expect(setTabs).toHaveBeenCalledTimes(1);
     const tabs = setTabs.mock.calls[0][0] as TabState[];
-    // Shell should be filtered out — only claude and codex remain
-    expect(tabs).toHaveLength(2);
+    // Shell should be filtered out — only default backend tab created
+    expect(tabs).toHaveLength(1);
     expect(tabs[0].sessionName).toBe("lead-claude-1");
     expect(tabs[0].backendName).toBe("claude");
-    expect(tabs[1].sessionName).toBe("lead-codex-1");
-    expect(tabs[1].backendName).toBe("codex");
 
     // No shell tab should have been created
     const shellTab = tabs.find((t) => t.backendName === "shell");
     expect(shellTab).toBeUndefined();
 
-    // Only 2 tabs persisted (not 3)
-    expect(createTab).toHaveBeenCalledTimes(2);
+    // Only 1 tab persisted
+    expect(createTab).toHaveBeenCalledTimes(1);
   });
 
   it("sets empty tabs when only shell is available", () => {
@@ -373,6 +393,54 @@ describe("useTabInit", () => {
     expect(tabs).toHaveLength(0);
     expect(setActiveTabId).toHaveBeenCalledWith("");
     expect(createTab).not.toHaveBeenCalled();
+  });
+
+  it("initializes when isViewActive becomes true", () => {
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const createTab = vi.fn().mockResolvedValue(undefined);
+    const initializedRef = {
+      current: false,
+    } as React.MutableRefObject<boolean>;
+
+    const args = createArgs({
+      config: {
+        backend: "claude",
+        source: "config",
+        available: ["claude", "codex"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+      createTab,
+      initializedRef,
+      isViewActive: false,
+    });
+
+    const { rerender } = renderHook((a) => useTabInit(a), {
+      initialProps: args,
+    });
+
+    // Not initialized yet — view is inactive
+    expect(initializedRef.current).toBe(false);
+    expect(setTabs).not.toHaveBeenCalled();
+
+    // Activate the view
+    rerender({ ...args, isViewActive: true });
+
+    // Now should have initialized with single default backend tab
+    expect(initializedRef.current).toBe(true);
+    expect(setTabs).toHaveBeenCalledTimes(1);
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].sessionName).toBe("lead-claude-1");
+    expect(tabs[0].backendName).toBe("claude");
+    expect(setActiveTabId).toHaveBeenCalledWith("lead-claude-1");
+    expect(createTab).toHaveBeenCalledTimes(1);
   });
 
   it("extracts backend name from session name pattern", () => {
