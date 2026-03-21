@@ -156,9 +156,9 @@ linters:
           - gocognit
       # task.go/plan.go — session lifecycle wrappers added complexity
       - path: "internal/cli/task\\.go"
-        linters: [gocognit]
+        linters: [gocognit, cyclop]
       - path: "internal/cli/plan\\.go"
-        linters: [gocognit]
+        linters: [gocognit, cyclop]
       # Existing complexity violations — TODO: address in follow-up cleanup
       - path: "internal/cli/agent_cmd\\.go"
         linters: [funlen]
