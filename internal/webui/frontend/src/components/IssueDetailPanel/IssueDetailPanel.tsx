@@ -68,6 +68,7 @@ import { LogViewer } from "../LogViewer";
 import { useSplitRatio } from "@/hooks/useSplitRatio";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SessionHistorySection } from "./SessionHistorySection";
+import { SessionsTab } from "./SessionsTab";
 import styles from "./IssueDetailPanel.module.css";
 
 /**
@@ -271,7 +272,7 @@ interface DetailTabMetadata {
 
 interface DetailTab {
   id: string;
-  type: "details" | "logs" | "terminal";
+  type: "details" | "logs" | "terminal" | "sessions";
   label: string;
   closable: boolean;
   metadata?: DetailTabMetadata | undefined;
@@ -282,6 +283,13 @@ const DETAILS_TAB: DetailTab = {
   id: "details",
   type: "details",
   label: "Details",
+  closable: false,
+};
+
+const SESSIONS_TAB: DetailTab = {
+  id: "sessions",
+  type: "sessions",
+  label: "Sessions",
   closable: false,
 };
 
@@ -344,7 +352,7 @@ function DefaultContent({
   } = useIssueTabPersistence(issueId);
 
   // Tab state - managed tab array with dynamic add/remove
-  const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB]);
+  const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB, SESSIONS_TAB]);
   const [activeTabId, setActiveTabId] = useState("details");
   const [showAddTabDropdown, setShowAddTabDropdown] = useState(false);
   const addTabRef = useRef<HTMLDivElement>(null);
@@ -486,14 +494,14 @@ function DefaultContent({
     }
     restoredIssueIdRef.current = issue.id;
 
-    const validTypes = new Set(["details", "logs", "terminal"]);
+    const validTypes = new Set(["details", "logs", "terminal", "sessions"]);
     const restoredTabs: DetailTab[] = persistedTabState.tabs
       .filter((t) => validTypes.has(t.type))
       .map((t) => ({
         id: t.id,
         type: t.type as DetailTab["type"],
         label: t.label,
-        closable: t.type !== "details",
+        closable: t.type !== "details" && t.type !== "sessions",
         metadata:
           t.type === "terminal" && t.session_name
             ? { sessionName: t.session_name }
@@ -507,6 +515,12 @@ function DefaultContent({
     // Ensure details tab is always present
     if (!restoredTabs.some((t) => t.id === "details")) {
       restoredTabs.unshift(DETAILS_TAB);
+    }
+    // Ensure sessions tab is always present
+    if (!restoredTabs.some((t) => t.id === "sessions")) {
+      // Insert after details tab
+      const detailsIdx = restoredTabs.findIndex((t) => t.id === "details");
+      restoredTabs.splice(detailsIdx + 1, 0, SESSIONS_TAB);
     }
 
     if (restoredTabs.length > 0) {
@@ -528,10 +542,11 @@ function DefaultContent({
     ) {
       return;
     }
-    // Only persist if there's something beyond the default single details tab
+    // Only persist if there's something beyond the default tabs (details + sessions)
     const isDefault =
-      tabs.length === 1 &&
+      tabs.length === 2 &&
       tabs[0]?.id === "details" &&
+      tabs[1]?.id === "sessions" &&
       activeTabId === "details";
     if (isDefault) return;
 
@@ -553,7 +568,7 @@ function DefaultContent({
   // Reset to details when agent removed while on logs tab
   useEffect(() => {
     if (activeTabId === "logs" && !hasAgent) {
-      setTabs([DETAILS_TAB]);
+      setTabs([DETAILS_TAB, SESSIONS_TAB]);
       setActiveTabId("details");
     }
   }, [activeTabId, hasAgent]);
@@ -1393,6 +1408,17 @@ function DefaultContent({
               disabled={isLoading}
             />
           </div>
+        </div>
+      )}
+
+      {activeTabId === "sessions" && (
+        <div
+          className={styles.logsContainer}
+          role="tabpanel"
+          id="issue-panel-tabpanel-sessions"
+          aria-labelledby="issue-panel-tab-sessions"
+        >
+          <SessionsTab taskId={issue.id} />
         </div>
       )}
 
