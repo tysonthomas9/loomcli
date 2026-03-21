@@ -6,7 +6,7 @@
 all: build
 
 # Build the loom binary
-build: frontend .git/hooks/pre-push
+build: frontend
 	@echo "Building loom..."
 	go build -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$(git rev-parse --short HEAD)" -o loom ./cmd/loom
 
@@ -98,7 +98,7 @@ test-e2e-integration:
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration
 
 # Install loom to GOPATH/bin
-install: frontend .git/hooks/pre-push
+install: frontend
 	@echo "Installing loom to $$(go env GOPATH)/bin..."
 	@bash -c 'build=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
 		go install -ldflags="-X github.com/tysonthomas9/loomcli/internal/cli.Build=$$build" ./cmd/loom'

@@ -30,6 +30,12 @@ const FileEditorPanel = lazy(() =>
   })),
 );
 
+const DiffTab = lazy(() =>
+  import("./DiffTab").then((m) => ({
+    default: m.DiffTab,
+  })),
+);
+
 import { LogViewer } from "../LogViewer";
 import { OpenInEditor } from "../OpenInEditor";
 import { RepoBadge } from "../RepoBadge";
@@ -65,7 +71,7 @@ export interface AgentDetailPanelProps {
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = "info" | "logs" | "git" | "files";
+type TabType = "info" | "logs" | "git" | "diff" | "files";
 
 export function AgentDetailPanel({
   isOpen,
@@ -260,6 +266,17 @@ export function AgentDetailPanel({
                   aria-controls="agent-panel-tabpanel-git"
                 >
                   Git
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.tab} ${activeTab === "diff" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("diff")}
+                  aria-selected={activeTab === "diff"}
+                  role="tab"
+                  id="agent-panel-tab-diff"
+                  aria-controls="agent-panel-tabpanel-diff"
+                >
+                  Diff
                 </button>
                 <button
                   type="button"
@@ -518,6 +535,24 @@ export function AgentDetailPanel({
                 aria-labelledby="agent-panel-tab-git"
               >
                 <GitTab agent={agent} isActive={activeTab === "git"} />
+              </div>
+            ) : activeTab === "diff" ? (
+              /* Diff Tab */
+              <div
+                className={styles.scrollableContent}
+                id="agent-panel-tabpanel-diff"
+                role="tabpanel"
+                aria-labelledby="agent-panel-tab-diff"
+              >
+                <Suspense
+                  fallback={
+                    <div className={styles.loadingFallback}>
+                      Loading diff viewer...
+                    </div>
+                  }
+                >
+                  <DiffTab agent={agent} isActive={activeTab === "diff"} />
+                </Suspense>
               </div>
             ) : (
               /* Files Tab */

@@ -72,6 +72,16 @@
   --color-bg-warning: #332b14;
 
   /* ===========================
+   * Colors - Diff
+   * =========================== */
+  --color-diff-add: #22c55e;
+  --color-diff-add-bg: rgba(34, 197, 94, 0.1);
+  --color-diff-del: #ef4444;
+  --color-diff-del-bg: rgba(239, 68, 68, 0.1);
+  --color-diff-hunk: #818cf8;
+  --color-diff-hunk-bg: rgba(129, 140, 248, 0.08);
+
+  /* ===========================
    * Colors - Issue Type
    * =========================== */
   --color-type-epic: #8b5cf6; /* purple-500 */
@@ -290,6 +300,14 @@
   --color-danger-bg: #fee2e2;
   --color-info-bg: #cffafe;
   --color-bg-warning: #fef3c7;
+
+  /* Diff colors (light) */
+  --color-diff-add: #16a34a;
+  --color-diff-add-bg: rgba(22, 163, 74, 0.08);
+  --color-diff-del: #dc2626;
+  --color-diff-del-bg: rgba(220, 38, 38, 0.08);
+  --color-diff-hunk: #6366f1;
+  --color-diff-hunk-bg: rgba(99, 102, 241, 0.06);
 
   /* Skeleton loading */
   --color-skeleton-bg: var(--color-bg-tertiary);

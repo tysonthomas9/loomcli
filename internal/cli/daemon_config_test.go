@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -1474,4 +1475,121 @@ func TestLoadProjectFile_VersionWarningDedup(t *testing.T) {
 	if count := strings.Count(stderr3, warnSubstr); count != 1 {
 		t.Errorf("after reset, LoadProjectFile(): want exactly 1 warning, got %d; stderr = %q", count, stderr3)
 	}
+}
+
+func TestGetStartupTimeout(t *testing.T) {
+	fallback := 30 * time.Second
+
+	t.Run("nil receiver returns fallback", func(t *testing.T) {
+		var d *DaemonSettings
+		got := d.GetStartupTimeout(fallback)
+		if got != fallback {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, fallback)
+		}
+	})
+
+	t.Run("nil StartupTimeout returns fallback", func(t *testing.T) {
+		d := &DaemonSettings{StartupTimeout: nil}
+		got := d.GetStartupTimeout(fallback)
+		if got != fallback {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, fallback)
+		}
+	})
+
+	t.Run("zero value returns fallback", func(t *testing.T) {
+		zero := 0
+		d := &DaemonSettings{StartupTimeout: &zero}
+		got := d.GetStartupTimeout(fallback)
+		if got != fallback {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, fallback)
+		}
+	})
+
+	t.Run("negative value returns fallback", func(t *testing.T) {
+		neg := -5
+		d := &DaemonSettings{StartupTimeout: &neg}
+		got := d.GetStartupTimeout(fallback)
+		if got != fallback {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, fallback)
+		}
+	})
+
+	t.Run("positive value returns correct duration", func(t *testing.T) {
+		val := 60
+		d := &DaemonSettings{StartupTimeout: &val}
+		got := d.GetStartupTimeout(fallback)
+		want := 60 * time.Second
+		if got != want {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("positive value with different fallback", func(t *testing.T) {
+		val := 10
+		d := &DaemonSettings{StartupTimeout: &val}
+		got := d.GetStartupTimeout(5 * time.Second)
+		want := 10 * time.Second
+		if got != want {
+			t.Errorf("GetStartupTimeout() = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestOverlayDaemonSettings_StartupTimeout(t *testing.T) {
+	t.Run("src StartupTimeout overrides dst", func(t *testing.T) {
+		dstVal := 30
+		srcVal := 60
+		dst := &DaemonSettings{StartupTimeout: &dstVal}
+		src := &DaemonSettings{StartupTimeout: &srcVal}
+
+		overlayDaemonSettings(dst, src)
+
+		if dst.StartupTimeout == nil {
+			t.Fatal("StartupTimeout should not be nil after overlay")
+		}
+		if *dst.StartupTimeout != 60 {
+			t.Errorf("StartupTimeout = %d, want 60", *dst.StartupTimeout)
+		}
+	})
+
+	t.Run("nil src StartupTimeout preserves dst", func(t *testing.T) {
+		dstVal := 30
+		dst := &DaemonSettings{StartupTimeout: &dstVal}
+		src := &DaemonSettings{StartupTimeout: nil}
+
+		overlayDaemonSettings(dst, src)
+
+		if dst.StartupTimeout == nil {
+			t.Fatal("StartupTimeout should not be nil after overlay with nil src")
+		}
+		if *dst.StartupTimeout != 30 {
+			t.Errorf("StartupTimeout = %d, want 30", *dst.StartupTimeout)
+		}
+	})
+
+	t.Run("src StartupTimeout sets previously nil dst", func(t *testing.T) {
+		srcVal := 45
+		dst := &DaemonSettings{StartupTimeout: nil}
+		src := &DaemonSettings{StartupTimeout: &srcVal}
+
+		overlayDaemonSettings(dst, src)
+
+		if dst.StartupTimeout == nil {
+			t.Fatal("StartupTimeout should be set after overlay")
+		}
+		if *dst.StartupTimeout != 45 {
+			t.Errorf("StartupTimeout = %d, want 45", *dst.StartupTimeout)
+		}
+	})
+
+	t.Run("both nil remains nil", func(t *testing.T) {
+		dst := &DaemonSettings{StartupTimeout: nil}
+		src := &DaemonSettings{StartupTimeout: nil}
+
+		overlayDaemonSettings(dst, src)
+
+		if dst.StartupTimeout != nil {
+			t.Errorf("StartupTimeout should remain nil, got %d", *dst.StartupTimeout)
+		}
+	})
 }

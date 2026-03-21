@@ -1,0 +1,227 @@
+/**
+ * DiffTab component styles.
+ * Covers DiffTab, DiffFileRow, and DiffFileViewer components.
+ */
+
+/* ============= Summary Bar ============= */
+
+.summaryBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px var(--panel-padding-md);
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.summaryCount {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.statAdd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  color: var(--color-diff-add);
+  background: var(--color-diff-add-bg);
+}
+
+.statDel {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  color: var(--color-diff-del);
+  background: var(--color-diff-del-bg);
+}
+
+/* ============= File List ============= */
+
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ============= DiffFileRow ============= */
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  padding: 8px var(--panel-padding-md);
+  border-bottom: 1px solid var(--color-border-light);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  gap: 8px;
+}
+
+.fileRow:hover {
+  background: var(--color-bg-hover);
+}
+
+.statusBadge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.statusBadge[data-status="A"] {
+  color: var(--color-success, #22c55e);
+  background: var(--color-success-bg, rgba(34, 197, 94, 0.1));
+}
+
+.statusBadge[data-status="M"] {
+  color: var(--color-warning, #f59e0b);
+  background: var(--color-warning-bg, rgba(245, 158, 11, 0.1));
+}
+
+.statusBadge[data-status="D"] {
+  color: var(--color-danger, #ef4444);
+  background: var(--color-danger-bg, rgba(239, 68, 68, 0.1));
+}
+
+.statusBadge[data-status="R"] {
+  color: var(--color-type-epic, #8b5cf6);
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.filePath {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileRowStats {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.rowStatAdd {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-diff-add);
+}
+
+.rowStatDel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-diff-del);
+}
+
+.viewedCheckbox {
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.expandChevron {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.expandChevron[data-expanded="true"] {
+  transform: rotate(90deg);
+}
+
+/* ============= DiffFileViewer ============= */
+
+.viewerWrapper {
+  padding: 0 var(--panel-padding-md) 8px;
+}
+
+.diffPre {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 600px;
+  overflow-y: auto;
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+  margin: 0;
+  padding: 0;
+}
+
+.diffLine {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diffLine[data-type="add"] {
+  background: var(--color-diff-add-bg);
+  color: var(--color-diff-add);
+}
+
+.diffLine[data-type="del"] {
+  background: var(--color-diff-del-bg);
+  color: var(--color-diff-del);
+}
+
+.diffLine[data-type="hunk"] {
+  background: var(--color-diff-hunk-bg);
+  color: var(--color-diff-hunk);
+  font-style: italic;
+}
+
+.lineNumber {
+  display: inline-block;
+  width: 40px;
+  text-align: right;
+  color: var(--color-text-muted);
+  user-select: none;
+  padding-right: 8px;
+}
+
+/* ============= States ============= */
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.error {
+  padding: 18px var(--panel-padding-md);
+  color: var(--color-danger);
+  font-size: 13px;
+}
+
+.emptyState {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  padding: 18px var(--panel-padding-md);
+}
+
+.viewerMessage {
+  padding: 12px 16px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
