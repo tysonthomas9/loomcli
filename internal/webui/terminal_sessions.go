@@ -18,6 +18,10 @@ func (m *TerminalManager) SetOnSessionKilled(fn func(sessionName string)) {
 // it to ~/.loom/session-scrollback/{sessionName}.log. Returns the file path on success.
 // Best-effort: failure does not prevent the kill.
 func (m *TerminalManager) captureScrollbackToFile(name string) string {
+	if !validSessionName.MatchString(name) {
+		log.Printf("Warning: rejecting scrollback capture for invalid session name %q", name)
+		return ""
+	}
 	internalName := m.tmuxName(name)
 	if !m.tmuxHasSession(internalName) {
 		return ""
@@ -43,7 +47,7 @@ func (m *TerminalManager) captureScrollbackToFile(name string) string {
 	}
 
 	path := dir + "/" + name + ".log"
-	if err := os.WriteFile(path, out, 0o644); err != nil { //nolint:gosec // non-sensitive scrollback content
+	if err := os.WriteFile(path, out, 0o600); err != nil {
 		log.Printf("Warning: failed to write scrollback file %s: %v", path, err)
 		return ""
 	}

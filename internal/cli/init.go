@@ -510,6 +510,14 @@ func createSingleWorktree(worktreesDir, name string) bool {
 	}
 
 	fmt.Printf("  ✓ Created %s\n", worktreePath)
+
+	// Auto-install Claude Code hooks (non-fatal on failure)
+	if err := InstallClaudeHooks(worktreePath); err != nil {
+		fmt.Fprintf(os.Stderr, "  ⚠ Failed to install hooks: %v\n", err)
+	} else {
+		fmt.Printf("  ✓ Installed Claude Code hooks\n")
+	}
+
 	return true
 }
 

@@ -149,6 +149,15 @@ export type {
 export { useUsage } from "./useUsage";
 export type { UseUsageOptions, UseUsageResult } from "./useUsage";
 
+export { useTaskSessions } from "./useTaskSessions";
+export type { UseTaskSessionsResult } from "./useTaskSessions";
+
+export { useSessionTranscript } from "./useSessionTranscript";
+export type { UseSessionTranscriptResult } from "./useSessionTranscript";
+
+export { useSessionDiff } from "./useSessionDiff";
+export type { UseSessionDiffResult } from "./useSessionDiff";
+
 export { useObservabilityMetrics } from "./useObservabilityMetrics";
 export type {
   UseObservabilityMetricsOptions,

@@ -21,6 +21,7 @@ type SessionUsage struct {
 	EndedAt          time.Time `json:"ended_at"`
 	ExitCode         int       `json:"exit_code"`
 	Model            string    `json:"model,omitempty"`
+	SessionID        string    `json:"session_id,omitempty"`
 }
 
 // PricingTier holds per-million-token pricing for a backend.

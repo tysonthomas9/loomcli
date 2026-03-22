@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -155,6 +156,12 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		fmt.Printf("[auto] Warning: usage tracking disabled: %v\n", usageErr)
 	}
 
+	// Initialize session store (non-fatal if it fails)
+	sessStore, sessErr := sessions.NewStore(GetBeadsDir())
+	if sessErr != nil {
+		log.Printf("[auto] Warning: session store unavailable: %v", sessErr)
+	}
+
 	// Helper closures for lock operations that use bridge when available.
 	updateState := func(state string) error {
 		if opts.LockBridge != nil {
@@ -257,6 +264,21 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := generatePrompt(opts.AgentName, workspace)
 
+		// Create session record before invocation
+		var sess *sessions.Session
+		if sessStore != nil {
+			sess, _ = sessStore.CreateSession(sessions.CreateOptions{
+				AgentName:  opts.AgentName,
+				Backend:    ResolveBackendName(),
+				EpicID:     opts.ParentID,
+				Prompt:     prompt,
+				AttemptNum: state.TasksCompleted + 1,
+			})
+			if sess != nil {
+				SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
+			}
+		}
+
 		// Set up usage collector before invocation
 		backendName := GetBackendName()
 		collector := usage.NewCollector(backendName, opts.AgentName)
@@ -266,6 +288,33 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 
 		endedAt := time.Now()
 		recordSessionUsage(usageStore, collector, opts.WorktreePath, opts.AgentName, opts.ParentID, startedAt, endedAt, err, opts.LockBridge)
+
+		// Finalize session record
+		if sess != nil {
+			exitCode := 0
+			if err != nil {
+				exitCode = 1
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					exitCode = exitErr.ExitCode()
+				}
+			}
+			taskID := ""
+			if info, lockErr := ReadLockFile(opts.WorktreePath); lockErr == nil {
+				taskID = info.TaskID
+			}
+			diffStats := ComputeDiffStats(opts.WorktreePath, beforeRef)
+			_ = sess.Finalize(sessions.FinalizeOptions{
+				TaskID:   taskID,
+				ExitCode: exitCode,
+				DiffStats: sessions.DiffStats{
+					FilesChanged: diffStats.FilesChanged,
+					LinesAdded:   diffStats.LinesAdded,
+					LinesRemoved: diffStats.LinesRemoved,
+				},
+			})
+			ClearActiveSessionEnv()
+		}
 
 		// Return to idle state after agent finishes
 		if updateErr := updateState(StateIdle); updateErr != nil {

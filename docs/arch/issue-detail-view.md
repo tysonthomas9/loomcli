@@ -57,6 +57,14 @@ IssueDetailPanel (slide-out overlay)
       |   +-- ActivityLog (unified comment+event timeline)
       |   +-- CommentForm
       |   +-- LabelEditor
+      +-- [activeTab === "sessions"] SessionsTab
+      |   +-- SessionTimeline (sorted newest-first, adaptive polling)
+      |   |   +-- SessionTimelineRow × N (status dot, duration, tokens, cost)
+      |   +-- SessionDetailView (transcript + diff)
+      |       +-- metadata summary (model, exit code, files, lines)
+      |       +-- inner tab bar [Transcript | Diff]
+      |       +-- transcript pane (role-labeled entries)
+      |       +-- CodeMirrorEditor (language="diff", readOnly)
       +-- [activeTab === "logs"] LogViewer
       +-- [activeTab === "terminal-*"] split view
           +-- SplitDetailSummary (condensed detail in top pane)
@@ -81,7 +89,7 @@ IssueDetailView (full-page)
 ```typescript
 interface DetailTab {
   id: string;
-  type: "details" | "logs" | "terminal";
+  type: "details" | "logs" | "terminal" | "sessions";
   label: string;
   closable: boolean;
   metadata?: {
@@ -95,6 +103,7 @@ interface DetailTab {
 ```
 
 - Details tab: always `"details"`, permanent (`closable: false`)
+- Sessions tab: `"sessions"`, permanent (`closable: false`)
 - Logs tab: `"logs"` (only one allowed)
 - Terminal tabs: `"terminal-{sessionName}"` — one per unique session
 
@@ -310,7 +319,12 @@ Renders markdown design content with:
 | `components/IssueDetailPanel/AgentStatusBadge.tsx` | Real-time agent status pill |
 | `components/IssueDetailPanel/AssigneeDropdown.tsx` | Agent/human assignment |
 | `components/IssueDetailPanel/StartWorkButton.tsx` | Agent picker for "Start Work" |
-| `components/IssueDetailPanel/SessionHistorySection.tsx` | Past sessions with scrollback |
+| `components/IssueDetailPanel/SessionHistorySection.tsx` | Past terminal sessions with scrollback |
+| `components/IssueDetailPanel/SessionsTab.tsx` | Agent session audit trail container |
+| `components/IssueDetailPanel/SessionTimeline.tsx` | Session list sorted newest-first |
+| `components/IssueDetailPanel/SessionTimelineRow.tsx` | Individual session row with status/cost |
+| `components/IssueDetailPanel/SessionDetailView.tsx` | Transcript + diff viewer |
+| `components/CodeMirrorEditor/CodeMirrorEditor.tsx` | CodeMirror 6 wrapper (diff syntax) |
 | `components/IssueDetailPanel/SplitDetailSummary.tsx` | Condensed detail for split view |
 | `components/IssueDetailPanel/ResizeDivider.tsx` | Draggable split divider |
 | `components/IssueDetailPanel/DependencySection.tsx` | Editable dependencies |
@@ -328,6 +342,9 @@ Renders markdown design content with:
 | `hooks/usePanelManager.ts` | Panel mutual exclusivity |
 | `hooks/useIssueTabPersistence.ts` | Redis tab state load/save |
 | `hooks/useSplitRatio.ts` | localStorage split ratio |
+| `hooks/useTaskSessions.ts` | Adaptive polling for session list (10s/3s) |
+| `hooks/useSessionTranscript.ts` | Transcript polling (3s when active) |
+| `hooks/useSessionDiff.ts` | Lazy one-shot diff fetch |
 
 ### Backend
 

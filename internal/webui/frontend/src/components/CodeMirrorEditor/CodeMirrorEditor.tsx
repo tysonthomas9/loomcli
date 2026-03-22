@@ -19,6 +19,7 @@ import { go } from "@codemirror/lang-go";
 import { json } from "@codemirror/lang-json";
 import { yaml } from "@codemirror/lang-yaml";
 import { markdown } from "@codemirror/lang-markdown";
+import { diff } from "codemirror-lang-diff";
 
 export interface CodeMirrorEditorProps {
   /** Current document content */
@@ -33,6 +34,8 @@ export interface CodeMirrorEditorProps {
   placeholder?: string | undefined;
   /** When true, opens CM6's built-in search panel */
   searchOpen?: boolean | undefined;
+  /** Hide line numbers gutter */
+  hideLineNumbers?: boolean | undefined;
   /** Additional CSS class for the container */
   className?: string | undefined;
 }
@@ -49,6 +52,8 @@ function getLanguageExtension(lang?: string): Extension {
     case "markdown":
     case "md":
       return markdown();
+    case "diff":
+      return diff();
     default:
       return [];
   }
@@ -61,12 +66,14 @@ export function CodeMirrorEditor({
   readOnly,
   placeholder,
   searchOpen,
+  hideLineNumbers,
   className,
 }: CodeMirrorEditorProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const langCompartmentRef = useRef(new Compartment());
   const readOnlyCompartmentRef = useRef(new Compartment());
+  const lineNumbersCompartmentRef = useRef(new Compartment());
 
   // Sync onChange to ref following LogViewer pattern (avoid stale closures)
   const onChangeRef = useRef(onChange);
@@ -81,11 +88,12 @@ export function CodeMirrorEditor({
 
     const langCompartment = langCompartmentRef.current;
     const readOnlyCompartment = readOnlyCompartmentRef.current;
+    const lineNumbersCompartment = lineNumbersCompartmentRef.current;
 
     const state = EditorState.create({
       doc: value,
       extensions: [
-        lineNumbers(),
+        lineNumbersCompartment.of(hideLineNumbers ? [] : lineNumbers()),
         history(),
         search(),
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
@@ -175,6 +183,17 @@ export function CodeMirrorEditor({
       ),
     });
   }, [readOnly]);
+
+  // Sync hideLineNumbers changes via compartment
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: lineNumbersCompartmentRef.current.reconfigure(
+        hideLineNumbers ? [] : lineNumbers(),
+      ),
+    });
+  }, [hideLineNumbers]);
 
   // Open/close search panel from prop
   useEffect(() => {
