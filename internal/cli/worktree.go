@@ -129,12 +129,20 @@ func GetScriptDir() (string, error) {
 //   - An absolute path (e.g., /path/to/worktree) -> as-is
 //   - Empty string -> current directory
 func ResolveWorktreePath(name string) (string, error) {
-	return getDefaultResolver().ResolveWorktreePath(name)
+	resolver, err := NewResolver()
+	if err != nil {
+		return "", err
+	}
+	return resolver.ResolveWorktreePath(name)
 }
 
 // DiscoverWorktrees finds all worktrees in the worktrees directory
 func DiscoverWorktrees() ([]WorktreeInfo, error) {
-	return getDefaultResolver().DiscoverWorktrees()
+	resolver, err := NewResolver()
+	if err != nil {
+		return nil, err
+	}
+	return resolver.DiscoverWorktrees()
 }
 
 // GetCurrentBranch returns the current branch for a git directory

@@ -17,7 +17,10 @@ func worktreeCompletion(cmd *cobra.Command, args []string, toComplete string) ([
 	var completions []string
 
 	// In workspace mode, include workspace names first
-	resolver, _ := NewResolver()
+	resolver, err := NewResolver()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError
+	}
 	for _, name := range resolver.WorkspaceNames() {
 		completions = append(completions, name+"\tworkspace")
 		seen[name] = true

@@ -95,6 +95,38 @@ func TestNewResolver_WorkspaceMode(t *testing.T) {
 	}
 }
 
+func TestNewResolver_InvalidWorkspaceConfigReturnsError(t *testing.T) {
+	parentDir := t.TempDir()
+	workspaceRepo := filepath.Join(parentDir, "workspace")
+	createGitRepo(t, workspaceRepo)
+
+	worktreePath := filepath.Join(parentDir, "workspace-v2")
+	if _, err := RunGitCommand(workspaceRepo, "worktree", "add", worktreePath, "-b", "v2"); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: workspaceRepo,
+				Repos: []RepoConfig{
+					{Name: "main", Path: workspaceRepo},
+					{Name: "v2", Path: worktreePath},
+				},
+			},
+		},
+	})
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	if _, err := NewResolver(); err == nil {
+		t.Fatal("expected invalid workspace config to return error")
+	}
+}
+
 func TestNewResolver_WorkspaceMode_NoDefault(t *testing.T) {
 	// No default_workspace set → uses first alphabetically
 	cfg := &LoomConfig{

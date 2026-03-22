@@ -20,7 +20,7 @@ type Resolver struct {
 func NewResolver() (*Resolver, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
-		return &Resolver{mode: ModeLegacy}, nil
+		return nil, err
 	}
 	if cfg != nil && len(cfg.Workspaces) > 0 {
 		ws := cfg.DefaultWorkspace

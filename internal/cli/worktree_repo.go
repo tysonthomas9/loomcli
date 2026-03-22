@@ -20,7 +20,10 @@ type ResolvedTarget struct {
 // .beads/ directory. When repo is non-empty in workspace mode, the agent gets
 // its own git worktree under <workspace>/worktrees/<repo>/<name>/.
 func ResolveAgentTarget(name, repo string) (ResolvedTarget, error) {
-	resolver, _ := NewResolver()
+	resolver, err := NewResolver()
+	if err != nil {
+		return ResolvedTarget{}, err
+	}
 	if resolver.Mode() == ModeWorkspace {
 		return resolveWorkspaceTarget(resolver, name, repo)
 	}

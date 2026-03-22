@@ -159,6 +159,42 @@ func TestResolveAgentTarget_WorkspaceMode_WorkspaceName(t *testing.T) {
 	}
 }
 
+func TestResolveAgentTarget_InvalidWorkspaceConfigReturnsError(t *testing.T) {
+	parentDir := t.TempDir()
+	workspaceRepo := filepath.Join(parentDir, "workspace")
+	createGitRepo(t, workspaceRepo)
+
+	worktreePath := filepath.Join(parentDir, "workspace-v2")
+	if _, err := RunGitCommand(workspaceRepo, "worktree", "add", worktreePath, "-b", "v2"); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	setupWorkspaceConfig(t, &LoomConfig{
+		DefaultWorkspace: "ws",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: workspaceRepo,
+				Repos: []RepoConfig{
+					{Name: "main", Path: workspaceRepo},
+					{Name: "v2", Path: worktreePath},
+				},
+			},
+		},
+	})
+
+	old := defaultResolver
+	defaultResolver = nil
+	defer func() { defaultResolver = old }()
+
+	_, err := ResolveAgentTarget("v2", "")
+	if err == nil {
+		t.Fatal("expected invalid workspace config to fail target resolution")
+	}
+	if !strings.Contains(err.Error(), "another git worktree of repo") {
+		t.Fatalf("expected topology validation error, got: %v", err)
+	}
+}
+
 func TestResolveAgentTarget_WorkspaceMode_RepoName(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
