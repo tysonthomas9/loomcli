@@ -37,44 +37,9 @@ type LockInfo struct {
 }
 
 // ResolveLockDir determines the correct directory for the lock file.
-// If the path is inside a workspace (matches a workspace path or repo path),
-// returns the workspace root so all repos share one lock.
-// Otherwise returns the path unchanged (legacy mode).
+// Each worktree gets its own lock file so multiple agents in the same
+// workspace don't collide. Returns the path unchanged.
 func ResolveLockDir(path string) string {
-	cfg, err := LoadConfig()
-	if err != nil || cfg == nil {
-		return path
-	}
-
-	cleanPath := filepath.Clean(path)
-
-	for _, ws := range cfg.Workspaces {
-		if ws.Path == "" {
-			continue
-		}
-		wsPath := filepath.Clean(ws.Path)
-
-		// Check if path matches the workspace root itself
-		if cleanPath == wsPath || strings.HasPrefix(cleanPath, wsPath+string(filepath.Separator)) {
-			return wsPath
-		}
-
-		// Check if path matches any repo in the workspace
-		for _, repo := range ws.Repos {
-			if repo.Path == "" {
-				continue
-			}
-			repoPath := repo.Path
-			if !filepath.IsAbs(repoPath) {
-				repoPath = filepath.Join(wsPath, repoPath)
-			}
-			repoPath = filepath.Clean(repoPath)
-			if cleanPath == repoPath || strings.HasPrefix(cleanPath, repoPath+string(filepath.Separator)) {
-				return wsPath
-			}
-		}
-	}
-
 	return path
 }
 

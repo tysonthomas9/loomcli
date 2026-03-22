@@ -70,13 +70,19 @@ func resolveWorkspaceTarget(resolver *Resolver, name, repo string) (ResolvedTarg
 			AgentName: name,
 		}, nil
 	}
-	// Validate repo name exists (but still use workspace root for Claude)
+	// Try repo/worktree name — use the worktree's own directory so each
+	// agent gets an isolated lock file and working tree.
 	if name != "" {
-		if _, err := resolver.ResolveWorktreePath(name); err != nil {
+		wtPath, err := resolver.ResolveWorktreePath(name)
+		if err != nil {
 			return ResolvedTarget{}, fmt.Errorf("'%s' is not a workspace or repo name: %w", name, err)
 		}
+		return ResolvedTarget{
+			WorkDir:   wtPath,
+			AgentName: name,
+		}, nil
 	}
-	// In workspace mode, use workspace root for Claude
+	// No name given — use workspace root
 	return ResolvedTarget{
 		WorkDir:   wsConfig.Path,
 		AgentName: resolver.WorkspaceName(),

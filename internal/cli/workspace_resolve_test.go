@@ -185,13 +185,13 @@ func TestResolveAgentTarget_WorkspaceMode_RepoName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAgentTarget: %v", err)
 	}
-	// In workspace mode, always returns workspace root, not repo path
-	if target.WorkDir != tmpDir {
-		t.Errorf("expected WorkDir=%s (workspace root), got %s", tmpDir, target.WorkDir)
+	// In workspace mode, repo name resolves to the repo's worktree path
+	// so each agent gets its own lock file and working directory.
+	if target.WorkDir != repoPath {
+		t.Errorf("expected WorkDir=%s (repo path), got %s", repoPath, target.WorkDir)
 	}
-	// Agent name should be the workspace name, not the repo name
-	if target.AgentName != "myws" {
-		t.Errorf("expected AgentName='myws', got %q", target.AgentName)
+	if target.AgentName != "repo1" {
+		t.Errorf("expected AgentName='repo1', got %q", target.AgentName)
 	}
 }
 

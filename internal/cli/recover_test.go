@@ -911,8 +911,8 @@ func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
 // ============================================================================
 
 func TestForceReleaseLock_WorkspacePath(t *testing.T) {
-	// In workspace mode, forceReleaseLock uses ResolveLockDir which redirects
-	// to the workspace root. Verify the lock at the workspace root is removed.
+	// With per-worktree locks, forceReleaseLock removes the lock at the
+	// given path (no redirect to workspace root).
 	wsDir := t.TempDir()
 	repoDir := filepath.Join(wsDir, "repo1")
 	if err := os.MkdirAll(repoDir, 0755); err != nil {
@@ -930,27 +930,21 @@ func TestForceReleaseLock_WorkspacePath(t *testing.T) {
 		},
 	})
 
-	// Create lock file at workspace root (where ResolveLockDir points)
-	lockPath := filepath.Join(wsDir, LockFileName)
+	// Create lock file at repo dir (per-worktree lock)
+	lockPath := filepath.Join(repoDir, LockFileName)
 	if err := os.WriteFile(lockPath, []byte(`{"pid":12345}`), 0644); err != nil {
 		t.Fatalf("failed to create lock file: %v", err)
 	}
 
-	// Call forceReleaseLock with the REPO path (not workspace root)
+	// Call forceReleaseLock with the repo path
 	err := forceReleaseLock(repoDir)
 	if err != nil {
 		t.Errorf("forceReleaseLock returned error: %v", err)
 	}
 
-	// Lock at workspace root should be removed
+	// Lock at repo dir should be removed
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Error("lock file at workspace root should have been removed")
-	}
-
-	// There should be no lock at repo dir
-	repoLockPath := filepath.Join(repoDir, LockFileName)
-	if _, err := os.Stat(repoLockPath); !os.IsNotExist(err) {
-		t.Error("no lock file should exist at repo dir")
+		t.Error("lock file at repo dir should have been removed")
 	}
 }
 
@@ -1338,8 +1332,7 @@ func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
 }
 
 func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
-	// Full RecoverWorktree flow in workspace mode: lock at workspace root,
-	// clean across workspace repos.
+	// Full RecoverWorktree flow in workspace mode: lock at repo dir (per-worktree).
 	resetDefaultTracker()
 	t.Cleanup(resetDefaultTracker)
 
@@ -1365,8 +1358,8 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	defaultResolver = nil
 	defer func() { defaultResolver = old }()
 
-	// Create lock file at workspace root (where ResolveLockDir resolves to)
-	lockPath := filepath.Join(wsDir, LockFileName)
+	// Create lock file at repo dir (per-worktree lock)
+	lockPath := filepath.Join(repoDir, LockFileName)
 	lockData := `{"pid":999999999,"command":"test","started_at":"2024-01-01T00:00:00Z","agent_name":"test-agent","task_id":"task-ws","workspace":"testws"}`
 	if err := os.WriteFile(lockPath, []byte(lockData), 0644); err != nil {
 		t.Fatalf("failed to create lock file: %v", err)
@@ -1385,15 +1378,15 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	})
 	mock.Install()
 
-	// Pass repoDir as worktreePath -- ResolveLockDir redirects to wsDir
+	// Pass repoDir as worktreePath -- lock is at repoDir (per-worktree)
 	err := RecoverWorktree(repoDir, "test-agent", -1)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
 
-	// Verify lock file was removed at workspace root
+	// Verify lock file was removed at repo dir
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Error("lock file at workspace root should have been removed")
+		t.Error("lock file at repo dir should have been removed")
 	}
 }
 

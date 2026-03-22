@@ -56,15 +56,15 @@ func TestResolveLockDir_WorkspaceRepoPath(t *testing.T) {
 		},
 	})
 
-	// Path matching a repo should resolve to workspace root
+	// Each repo gets its own lock dir (not workspace root)
 	result := ResolveLockDir(repo1)
-	if result != wsDir {
-		t.Errorf("expected workspace root %q, got %q", wsDir, result)
+	if result != repo1 {
+		t.Errorf("expected %q, got %q", repo1, result)
 	}
 
 	result = ResolveLockDir(repo2)
-	if result != wsDir {
-		t.Errorf("expected workspace root %q, got %q", wsDir, result)
+	if result != repo2 {
+		t.Errorf("expected %q, got %q", repo2, result)
 	}
 }
 
@@ -126,15 +126,17 @@ func TestResolveLockDir_RelativeRepoPaths(t *testing.T) {
 		},
 	})
 
-	// Relative repo paths should be resolved against workspace root
-	result := ResolveLockDir(filepath.Join(wsDir, "repo1"))
-	if result != wsDir {
-		t.Errorf("expected workspace root %q, got %q", wsDir, result)
+	// Each path returns unchanged — per-worktree locks
+	repo1Path := filepath.Join(wsDir, "repo1")
+	result := ResolveLockDir(repo1Path)
+	if result != repo1Path {
+		t.Errorf("expected %q, got %q", repo1Path, result)
 	}
 
-	result = ResolveLockDir(filepath.Join(wsDir, "sub", "repo2"))
-	if result != wsDir {
-		t.Errorf("expected workspace root %q, got %q", wsDir, result)
+	repo2Path := filepath.Join(wsDir, "sub", "repo2")
+	result = ResolveLockDir(repo2Path)
+	if result != repo2Path {
+		t.Errorf("expected %q, got %q", repo2Path, result)
 	}
 }
 
@@ -172,32 +174,20 @@ func TestResolveLockDir_EmptyRepoPath(t *testing.T) {
 		},
 	})
 
-	// Should still match via workspace path prefix
-	result := ResolveLockDir(filepath.Join(wsDir, "anything"))
-	if result != wsDir {
-		t.Errorf("expected workspace root %q, got %q", wsDir, result)
+	// Returns path unchanged
+	inputPath := filepath.Join(wsDir, "anything")
+	result := ResolveLockDir(inputPath)
+	if result != inputPath {
+		t.Errorf("expected %q, got %q", inputPath, result)
 	}
 }
 
 func TestResolveLockDir_PathNormalization(t *testing.T) {
-	wsDir := t.TempDir()
-
-	setupLockWorkspaceConfig(t, &LoomConfig{
-		Workspaces: map[string]WorkspaceConfig{
-			"myws": {
-				Path: wsDir,
-				Repos: []RepoConfig{
-					{Name: "repo1", Path: filepath.Join(wsDir, "repo1")},
-				},
-			},
-		},
-	})
-
-	// Path with trailing slash and .. should be cleaned
-	messyPath := filepath.Join(wsDir, "repo1", "subdir", "..")
+	// Path with .. is returned as-is (caller is responsible for cleaning)
+	messyPath := filepath.Join(t.TempDir(), "repo1", "subdir", "..")
 	result := ResolveLockDir(messyPath)
-	if result != wsDir {
-		t.Errorf("expected workspace root %q, got %q", wsDir, result)
+	if result != messyPath {
+		t.Errorf("expected %q, got %q", messyPath, result)
 	}
 }
 
@@ -259,22 +249,16 @@ func TestAcquireLock_Workspace(t *testing.T) {
 		},
 	})
 
-	// Acquire lock from repo path - should create lock at workspace root
+	// Acquire lock from repo path - lock should be at repo dir (per-worktree)
 	err := AcquireLock(repoDir, "task", "falcon")
 	if err != nil {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 	defer ReleaseLock(repoDir)
 
-	// Lock file should be at workspace root, not repo dir
-	wsLockPath := filepath.Join(wsDir, LockFileName)
 	repoLockPath := filepath.Join(repoDir, LockFileName)
-
-	if _, err := os.Stat(wsLockPath); os.IsNotExist(err) {
-		t.Error("lock file should exist at workspace root")
-	}
-	if _, err := os.Stat(repoLockPath); !os.IsNotExist(err) {
-		t.Error("lock file should NOT exist at repo dir")
+	if _, err := os.Stat(repoLockPath); os.IsNotExist(err) {
+		t.Error("lock file should exist at repo dir")
 	}
 
 	// Verify Workspace field is populated
@@ -287,7 +271,7 @@ func TestAcquireLock_Workspace(t *testing.T) {
 	}
 }
 
-func TestAcquireLock_WorkspaceSharedLock(t *testing.T) {
+func TestAcquireLock_WorkspaceIndependentLocks(t *testing.T) {
 	wsDir := t.TempDir()
 	repo1 := filepath.Join(wsDir, "repo1")
 	repo2 := filepath.Join(wsDir, "repo2")
@@ -313,11 +297,12 @@ func TestAcquireLock_WorkspaceSharedLock(t *testing.T) {
 	}
 	defer ReleaseLock(repo1)
 
-	// Acquire lock from repo2 should FAIL (shared lock)
+	// Acquire lock from repo2 should SUCCEED (independent per-worktree locks)
 	err = AcquireLock(repo2, "task", "nova")
-	if err == nil {
-		t.Error("expected error when acquiring shared workspace lock from second repo")
+	if err != nil {
+		t.Errorf("expected independent locks, but got error: %v", err)
 	}
+	defer ReleaseLock(repo2)
 }
 
 func TestCheckLock_Workspace(t *testing.T) {
@@ -343,7 +328,7 @@ func TestCheckLock_Workspace(t *testing.T) {
 	}
 	defer ReleaseLock(repoDir)
 
-	// CheckLock from repo path should find the workspace lock
+	// CheckLock from repo path should find the lock at repo dir
 	info, running, err := CheckLock(repoDir)
 	if err != nil {
 		t.Fatalf("CheckLock failed: %v", err)
@@ -355,16 +340,10 @@ func TestCheckLock_Workspace(t *testing.T) {
 		t.Errorf("expected agent 'falcon', got %q", info.AgentName)
 	}
 
-	// CheckLock from workspace root should also work
-	info2, running2, err2 := CheckLock(wsDir)
-	if err2 != nil {
-		t.Fatalf("CheckLock from wsDir failed: %v", err2)
-	}
-	if !running2 {
-		t.Error("expected running=true from workspace root")
-	}
-	if info2.AgentName != "falcon" {
-		t.Errorf("expected agent 'falcon' from workspace root, got %q", info2.AgentName)
+	// CheckLock from workspace root should NOT find the repo lock (independent paths)
+	info2, _, _ := CheckLock(wsDir)
+	if info2 != nil {
+		t.Error("expected no lock at workspace root when lock was acquired at repo dir")
 	}
 }
 
@@ -389,14 +368,14 @@ func TestReleaseLock_Workspace(t *testing.T) {
 		t.Fatalf("AcquireLock failed: %v", err)
 	}
 
-	// Release from repo path should remove the lock at workspace root
+	// Release from repo path should remove the lock at repo dir
 	err = ReleaseLock(repoDir)
 	if err != nil {
 		t.Fatalf("ReleaseLock failed: %v", err)
 	}
 
-	wsLockPath := filepath.Join(wsDir, LockFileName)
-	if _, err := os.Stat(wsLockPath); !os.IsNotExist(err) {
+	repoLockPath := filepath.Join(repoDir, LockFileName)
+	if _, err := os.Stat(repoLockPath); !os.IsNotExist(err) {
 		t.Error("lock file should be removed after release")
 	}
 }
@@ -555,25 +534,14 @@ func TestUpdateLockState_Workspace(t *testing.T) {
 }
 
 func TestResolveLockDir_PrefixFalsePositive(t *testing.T) {
-	// Ensure /tmp/ws does NOT match /tmp/ws2
+	// Identity function — all paths returned unchanged
 	wsDir := t.TempDir()
-	similarDir := wsDir + "2" // e.g., /tmp/abc123 vs /tmp/abc1232
+	similarDir := wsDir + "2"
 	os.MkdirAll(similarDir, 0755)
-
-	setupLockWorkspaceConfig(t, &LoomConfig{
-		Workspaces: map[string]WorkspaceConfig{
-			"myws": {
-				Path: wsDir,
-				Repos: []RepoConfig{
-					{Name: "repo1", Path: filepath.Join(wsDir, "repo1")},
-				},
-			},
-		},
-	})
 
 	result := ResolveLockDir(similarDir)
 	if result != similarDir {
-		t.Errorf("path %q should NOT match workspace %q, but resolved to %q", similarDir, wsDir, result)
+		t.Errorf("expected %q, got %q", similarDir, result)
 	}
 }
 
@@ -602,19 +570,18 @@ func TestResolveLockDir_MultipleWorkspaces(t *testing.T) {
 		},
 	})
 
-	// repoA should resolve to wsA
+	// Each repo path returns unchanged (per-worktree locks)
 	result := ResolveLockDir(repoA)
-	if result != wsA {
-		t.Errorf("repoA: expected %q, got %q", wsA, result)
+	if result != repoA {
+		t.Errorf("repoA: expected %q, got %q", repoA, result)
 	}
 
-	// repoB should resolve to wsB
 	result = ResolveLockDir(repoB)
-	if result != wsB {
-		t.Errorf("repoB: expected %q, got %q", wsB, result)
+	if result != repoB {
+		t.Errorf("repoB: expected %q, got %q", repoB, result)
 	}
 
-	// Names should also be correct
+	// resolveWorkspaceName still works correctly
 	nameA := resolveWorkspaceName(repoA)
 	if nameA != "workspace-a" {
 		t.Errorf("expected 'workspace-a', got %q", nameA)
