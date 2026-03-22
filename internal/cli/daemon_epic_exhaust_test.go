@@ -124,9 +124,9 @@ func TestHandleEpicTransition_ConfigDriven_BdReadyFails(t *testing.T) {
 	}
 }
 
-func TestHandleEpicTransition_NoParentConfig_NoOp(t *testing.T) {
-	// When entry.Parent is empty but assignedEpicID is somehow set,
-	// handleEpicTransition is still a no-op (no config-driven parent).
+func TestHandleEpicTransition_NoParentConfig_ClearsStaleAssignment(t *testing.T) {
+	// When entry.Parent is empty but assignedEpicID is set (unexpected state),
+	// handleEpicTransition clears the stale assignment and logs a warning.
 	ea := NewEpicAssigner()
 	d := &Daemon{epicAssigner: ea}
 	ap := &AgentProcess{
@@ -139,33 +139,11 @@ func TestHandleEpicTransition_NoParentConfig_NoOp(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-}
-
-func TestSwitchToNonEpicMode(t *testing.T) {
-	// switchToNonEpicMode clears epic assignment and resets restart count.
-	ea := NewEpicAssigner()
-	d := &Daemon{epicAssigner: ea}
-	ap := &AgentProcess{
-		entry:          AgentEntry{Worktree: "falcon"},
-		worktreePath:   "/repo/worktrees/falcon",
-		assignedEpicID: "epic-1",
-		restartCount:   5,
-	}
-
-	err := d.switchToNonEpicMode(ap)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
 
 	ap.mu.Lock()
 	eid := ap.assignedEpicID
-	rc := ap.restartCount
 	ap.mu.Unlock()
-
 	if eid != "" {
-		t.Errorf("expected assignedEpicID empty, got %q", eid)
-	}
-	if rc != 0 {
-		t.Errorf("expected restartCount reset to 0, got %d", rc)
+		t.Errorf("expected assignedEpicID cleared, got %q", eid)
 	}
 }

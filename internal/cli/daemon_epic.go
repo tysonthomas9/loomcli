@@ -171,36 +171,32 @@ func (d *Daemon) handleEpicTransition(ap *AgentProcess) error {
 		return nil
 	}
 
-	// Config-driven: epic comes from parent field, no automatic transition
-	if ap.entry.Parent != "" {
-		hasReady, err := epicHasReadyTasks(currentEpicID)
-		if err != nil {
-			log.Printf("[daemon] Agent %s: failed to check epic %s for ready tasks: %v",
-				ap.entry.Worktree, currentEpicID, err)
-			return nil
-		}
-		if !hasReady {
-			log.Printf("[daemon] Agent %s: configured epic %s exhausted (no ready tasks), agent will idle",
-				ap.entry.Worktree, currentEpicID)
-			if evt, err := events.NewEvent(events.EpicExhausted, ap.entry.Worktree, ap.entry.Role, currentEpicID, events.EpicExhaustedData{EpicID: currentEpicID}); err == nil {
-				d.emitEvent(evt)
-			}
-			// Set lastNoWork so the daemon applies NoWork backoff
-			ap.mu.Lock()
-			ap.lastNoWork = true
-			ap.mu.Unlock()
-		}
+	// Epic assignment is config-driven via parent field.
+	// If assignedEpicID is set but parent is empty, that's unexpected state.
+	if ap.entry.Parent == "" {
+		log.Printf("[daemon] Agent %s: unexpected assignedEpicID=%q with no parent config, clearing",
+			ap.entry.Worktree, currentEpicID)
+		ap.mu.Lock()
+		ap.assignedEpicID = ""
+		ap.mu.Unlock()
 		return nil
 	}
 
-	return nil
-}
-
-// switchToNonEpicMode clears the epic assignment state.
-func (d *Daemon) switchToNonEpicMode(ap *AgentProcess) error {
-	ap.mu.Lock()
-	ap.assignedEpicID = ""
-	ap.restartCount = 0
-	ap.mu.Unlock()
+	hasReady, err := epicHasReadyTasks(currentEpicID)
+	if err != nil {
+		log.Printf("[daemon] Agent %s: failed to check epic %s for ready tasks: %v",
+			ap.entry.Worktree, currentEpicID, err)
+		return nil
+	}
+	if !hasReady {
+		log.Printf("[daemon] Agent %s: configured epic %s exhausted (no ready tasks), agent will idle",
+			ap.entry.Worktree, currentEpicID)
+		if evt, err := events.NewEvent(events.EpicExhausted, ap.entry.Worktree, ap.entry.Role, currentEpicID, events.EpicExhaustedData{EpicID: currentEpicID}); err == nil {
+			d.emitEvent(evt)
+		}
+		ap.mu.Lock()
+		ap.lastNoWork = true
+		ap.mu.Unlock()
+	}
 	return nil
 }
