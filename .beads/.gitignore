@@ -32,10 +32,16 @@ beads.left.meta.json
 beads.right.jsonl
 beads.right.meta.json
 
+# Session audit trail data (local-only, per-machine)
+sessions/
+
 # Sync state (local-only, per-machine)
 # These files are machine-specific and should not be shared across clones
 .sync.lock
 sync_base.jsonl
+
+# Session data (local agent session artifacts)
+sessions/
 
 # NOTE: Do NOT add negation patterns (e.g., !issues.jsonl) here.
 # They would override fork protection in .git/info/exclude, allowing
