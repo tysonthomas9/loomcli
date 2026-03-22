@@ -68,10 +68,11 @@ func TestValidTaskIDRegex(t *testing.T) {
 		{"mixed case", "TaskID", true},
 		{"all valid chars", "Task_ID-123", true},
 		{"single char", "a", true},
+		{"with dot", "task.123", true},
+		{"beads subtask", "loomcli-5y1sd.1", true},
 
 		{"empty", "", false},
 		{"with space", "task 123", false},
-		{"with dot", "task.123", false},
 		{"with slash", "task/123", false},
 		{"path traversal", "../secrets", false},
 		{"with colon", "task:123", false},
@@ -275,8 +276,8 @@ func TestHandleListTaskPhases_InvalidID(t *testing.T) {
 			if resp.Success {
 				t.Error("expected success to be false")
 			}
-			if resp.Error != "invalid task ID: must match [a-zA-Z0-9_-]+" {
-				t.Errorf("error = %q, want %q", resp.Error, "invalid task ID: must match [a-zA-Z0-9_-]+")
+			if resp.Error != "invalid task ID: must match [a-zA-Z0-9._-]+" {
+				t.Errorf("error = %q, want %q", resp.Error, "invalid task ID: must match [a-zA-Z0-9._-]+")
 			}
 		})
 	}
@@ -333,8 +334,8 @@ func TestHandleGetTaskLog_InvalidID(t *testing.T) {
 	if resp.Success {
 		t.Error("expected success to be false")
 	}
-	if resp.Error != "invalid task ID: must match [a-zA-Z0-9_-]+" {
-		t.Errorf("error = %q, want %q", resp.Error, "invalid task ID: must match [a-zA-Z0-9_-]+")
+	if resp.Error != "invalid task ID: must match [a-zA-Z0-9._-]+" {
+		t.Errorf("error = %q, want %q", resp.Error, "invalid task ID: must match [a-zA-Z0-9._-]+")
 	}
 }
 

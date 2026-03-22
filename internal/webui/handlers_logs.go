@@ -21,8 +21,8 @@ func parseBeforeLine(r *http.Request) int64 {
 // validAgentName matches alphanumeric characters, hyphens, and underscores.
 var validAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-// validTaskID matches UUID-like task IDs (e.g., "bd-abc123").
-var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+// validTaskID matches task IDs (e.g., "bd-abc123", "loomcli-5y1sd.1").
+var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // validPhase matches allowed phase names.
 var validPhase = regexp.MustCompile(`^(planning|implementation)$`)
@@ -127,7 +127,7 @@ func handleListTaskPhases() http.HandlerFunc {
 		if !validTaskID.MatchString(taskID) {
 			respondJSON(w, http.StatusBadRequest, TaskPhasesResponse{
 				Success: false,
-				Error:   "invalid task ID: must match [a-zA-Z0-9_-]+",
+				Error:   "invalid task ID: must match [a-zA-Z0-9._-]+",
 			})
 			return
 		}
@@ -172,7 +172,7 @@ func handleGetTaskLog() http.HandlerFunc {
 		if !validTaskID.MatchString(taskID) {
 			respondJSON(w, http.StatusBadRequest, LogContentResponse{
 				Success: false,
-				Error:   "invalid task ID: must match [a-zA-Z0-9_-]+",
+				Error:   "invalid task ID: must match [a-zA-Z0-9._-]+",
 			})
 			return
 		}

@@ -94,7 +94,7 @@ func handleListTaskSessions(sessStore *sessions.Store) http.HandlerFunc {
 		if !validTaskID.MatchString(taskID) {
 			respondJSON(w, http.StatusBadRequest, SessionListResponse{
 				Success: false,
-				Error:   "invalid task ID: must match [a-zA-Z0-9_-]+",
+				Error:   "invalid task ID: must match [a-zA-Z0-9._-]+",
 			})
 			return
 		}
