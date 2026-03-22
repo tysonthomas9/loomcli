@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -93,7 +93,7 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 				writeIssuesError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)", "REQUEST_TOO_LARGE")
 				return
 			}
-			log.Printf("Invalid JSON body in handleCreateIssue: %v", err)
+			slog.Warn("invalid JSON body in handleCreateIssue", "err", err)
 			writeIssuesError(w, http.StatusBadRequest, "invalid request body", "INVALID_JSON")
 			return
 		}
@@ -118,7 +118,7 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 				code = "CONNECTION_TIMEOUT"
 				message = "timeout connecting to daemon"
 			}
-			log.Printf("Connection pool error: %v", err)
+			slog.Error("connection pool error", "err", err)
 			writeIssuesError(w, status, message, code)
 			return
 		}
@@ -128,7 +128,7 @@ func handleCreateIssueWithPool(pool createConnectionGetter) http.HandlerFunc {
 		createArgs := toCreateArgs(&req)
 		resp, err := client.Create(createArgs)
 		if err != nil {
-			log.Printf("RPC error: %v", err)
+			slog.Error("RPC error in handleCreateIssue", "err", err)
 			writeIssuesError(w, http.StatusInternalServerError, "failed to create issue", "RPC_ERROR")
 			return
 		}
@@ -176,7 +176,7 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 					respondError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1MB)")
 					return
 				}
-				log.Printf("Invalid request body in handleCloseIssue: %v", err)
+				slog.Warn("invalid request body in handleCloseIssue", "err", err)
 				respondError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
@@ -225,7 +225,7 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 				respondError(w, http.StatusConflict, err.Error())
 				return
 			}
-			log.Printf("RPC error in handleCloseIssue for %s: %v", issueID, err)
+			slog.Error("RPC error in handleCloseIssue", "issue_id", issueID, "err", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -314,7 +314,7 @@ func handleDeleteIssueWithPool(pool deleteConnectionGetter) http.HandlerFunc {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("issue not found: %s", issueID))
 				return
 			}
-			log.Printf("RPC error in handleDeleteIssue for %s: %v", issueID, err)
+			slog.Error("RPC error in handleDeleteIssue", "issue_id", issueID, "err", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}

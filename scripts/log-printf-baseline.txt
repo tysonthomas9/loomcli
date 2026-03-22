@@ -15,7 +15,6 @@ internal/cli/daemon_repos.go
 internal/cli/daemon_restart.go
 internal/cli/daemon_run_helpers.go
 internal/cli/daemon_spawn.go
-internal/cli/daemon_state.go
 internal/cli/logger.go
 internal/cli/plan.go
 internal/cli/prompts.go
@@ -49,13 +48,10 @@ internal/webui/handlers_graph.go
 internal/webui/handlers_issue_tabs.go
 internal/webui/handlers_issues.go
 internal/webui/handlers_issues_parse.go
-internal/webui/handlers_issues_write.go
-internal/webui/handlers_issues_write_ops.go
 internal/webui/handlers_logs.go
 internal/webui/handlers_move.go
 internal/webui/handlers_ready.go
 internal/webui/handlers_session_history.go
-internal/webui/handlers_sessions.go
 internal/webui/handlers_terminal.go
 internal/webui/handlers_terminal_sessions.go
 internal/webui/handlers_terminal_spawn.go
@@ -67,5 +63,4 @@ internal/webui/respond.go
 internal/webui/sse.go
 internal/webui/subscription.go
 internal/webui/terminal.go
-internal/webui/terminal_lifecycle.go
 internal/webui/terminal_sessions.go

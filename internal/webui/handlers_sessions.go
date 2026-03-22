@@ -3,7 +3,7 @@ package webui
 import (
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -101,7 +101,7 @@ func handleListTaskSessions(sessStore *sessions.Store) http.HandlerFunc {
 
 		records, err := sessStore.SessionsByTask(taskID)
 		if err != nil {
-			log.Printf("Failed to list sessions for task %s: %v", taskID, err)
+			slog.Error("failed to list sessions", "task_id", taskID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, SessionListResponse{
 				Success: false,
 				Error:   "failed to list sessions",
@@ -175,7 +175,7 @@ func handleGetSession(sessStore *sessions.Store) http.HandlerFunc {
 				})
 				return
 			}
-			log.Printf("Failed to load session %s: %v", sessionID, err)
+			slog.Error("failed to load session", "session_id", sessionID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, SessionDetailResponse{
 				Success: false,
 				Error:   "failed to load session",
@@ -242,7 +242,7 @@ func handleGetSessionTranscript(sessStore *sessions.Store) http.HandlerFunc {
 				})
 				return
 			}
-			log.Printf("Failed to load session metadata %s: %v", sessionID, err)
+			slog.Error("failed to load session metadata", "session_id", sessionID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, TranscriptResponse{
 				Success: false,
 				Error:   "failed to load session",
@@ -259,7 +259,7 @@ func handleGetSessionTranscript(sessStore *sessions.Store) http.HandlerFunc {
 
 		entries, loadErr := sessStore.LoadTranscript(sessionID)
 		if loadErr != nil {
-			log.Printf("Failed to load transcript for session %s: %v", sessionID, loadErr)
+			slog.Error("failed to load transcript", "session_id", sessionID, "err", loadErr)
 			respondJSON(w, http.StatusInternalServerError, TranscriptResponse{
 				Success: false,
 				Error:   "failed to load transcript",
@@ -369,7 +369,7 @@ func handleGetSessionDiff(sessStore *sessions.Store) http.HandlerFunc {
 				})
 				return
 			}
-			log.Printf("Failed to load session metadata %s: %v", sessionID, err)
+			slog.Error("failed to load session metadata", "session_id", sessionID, "err", err)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"success": false,
 				"error":   "failed to load session",
@@ -393,7 +393,7 @@ func handleGetSessionDiff(sessStore *sessions.Store) http.HandlerFunc {
 				})
 				return
 			}
-			log.Printf("Failed to read diff for session %s: %v", sessionID, diffErr)
+			slog.Error("failed to read diff", "session_id", sessionID, "err", diffErr)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"success": false,
 				"error":   "failed to read diff",

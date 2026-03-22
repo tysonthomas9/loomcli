@@ -3,7 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,7 +32,7 @@ func validateDaemonPaths(projectDir, pidFilePath, logDir string) {
 	} {
 		resolved, err := filepath.Abs(entry.path)
 		if err != nil {
-			log.Printf("[daemon] Warning: cannot resolve %s path %q: %v", entry.name, entry.path, err)
+			slog.Warn("cannot resolve path", "entry", entry.name, "path", entry.path, "err", err)
 			continue
 		}
 		absProject, _ := filepath.Abs(projectDir)
@@ -44,7 +44,7 @@ func validateDaemonPaths(projectDir, pidFilePath, logDir string) {
 		if configDir != "" && (strings.HasPrefix(resolved, absConfig+string(filepath.Separator)) || resolved == absConfig) {
 			continue // within ~/.loom/
 		}
-		log.Printf("[daemon] Warning: %s path %q resolves outside project and config directories", entry.name, entry.path)
+		slog.Warn("path resolves outside project and config directories", "entry", entry.name, "path", entry.path)
 	}
 }
 

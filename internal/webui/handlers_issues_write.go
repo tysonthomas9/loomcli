@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -71,7 +71,7 @@ func validatePatchRequest(w http.ResponseWriter, r *http.Request) (string, *Patc
 			})
 			return "", nil, false
 		}
-		log.Printf("Invalid request body in handlePatchIssue: %v", err)
+		slog.Warn("invalid request body in handlePatchIssue", "err", err)
 		respondJSON(w, http.StatusBadRequest, PatchIssueResponse{
 			Success: false,
 			Error:   "invalid request body",
@@ -133,7 +133,7 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			if errors.Is(err, context.DeadlineExceeded) {
 				status = http.StatusGatewayTimeout
 			}
-			log.Printf("Pool error in handlePatchIssue: %v", err)
+			slog.Error("pool error in handlePatchIssue", "err", err)
 			respondJSON(w, status, PatchIssueResponse{
 				Success: false,
 				Error:   "daemon not available",
@@ -148,7 +148,7 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 			if strings.Contains(err.Error(), "not found") {
 				status = http.StatusNotFound
 			}
-			log.Printf("RPC error in handlePatchIssue for %s: %v", issueID, err)
+			slog.Error("RPC error in handlePatchIssue", "issue_id", issueID, "err", err)
 			respondJSON(w, status, PatchIssueResponse{
 				Success: false,
 				Error:   "internal server error",

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -849,13 +850,18 @@ func TestStateFileLifecycle(t *testing.T) {
 func captureLogOutput(t *testing.T, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
+	// Capture stdlib log output.
 	origOutput := log.Writer()
 	origFlags := log.Flags()
 	log.SetOutput(&buf)
-	log.SetFlags(0) // disable timestamps for easier matching
+	log.SetFlags(0)
+	// Capture slog output (slog.Warn etc. write to slog's default handler, not stdlib log).
+	origLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer func() {
 		log.SetOutput(origOutput)
 		log.SetFlags(origFlags)
+		slog.SetDefault(origLogger)
 	}()
 	fn()
 	return buf.String()
@@ -870,7 +876,7 @@ func TestValidateDaemonPaths_WithinProjectDir(t *testing.T) {
 		validateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
-	if strings.Contains(output, "Warning") {
+	if strings.Contains(output, "WARN") {
 		t.Errorf("expected no warnings for paths within project dir, got: %s", output)
 	}
 }
@@ -889,7 +895,7 @@ func TestValidateDaemonPaths_WithinConfigDir(t *testing.T) {
 		validateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
-	if strings.Contains(output, "Warning") {
+	if strings.Contains(output, "WARN") {
 		t.Errorf("expected no warnings for paths within config dir, got: %s", output)
 	}
 }
@@ -908,7 +914,7 @@ func TestValidateDaemonPaths_PIDFileOutsideBoundaries(t *testing.T) {
 		validateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
-	if !strings.Contains(output, "Warning") {
+	if !strings.Contains(output, "WARN") {
 		t.Error("expected warning for pid_file outside boundaries, got no warning")
 	}
 	if !strings.Contains(output, "pid_file") {
@@ -933,7 +939,7 @@ func TestValidateDaemonPaths_LogDirPathTraversal(t *testing.T) {
 		validateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
-	if !strings.Contains(output, "Warning") {
+	if !strings.Contains(output, "WARN") {
 		t.Error("expected warning for log_dir with path traversal, got no warning")
 	}
 	if !strings.Contains(output, "log_dir") {
@@ -954,7 +960,7 @@ func TestValidateDaemonPaths_AbsolutePathOutsideBoundaries(t *testing.T) {
 		validateDaemonPaths(projectDir, pidFile, logDir)
 	})
 
-	if !strings.Contains(output, "Warning") {
+	if !strings.Contains(output, "WARN") {
 		t.Error("expected warning for absolute log_dir outside boundaries, got no warning")
 	}
 	if !strings.Contains(output, "log_dir") {
