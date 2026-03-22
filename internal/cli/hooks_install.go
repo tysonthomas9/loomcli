@@ -15,11 +15,15 @@ const loomHookPrefix = "loom hooks claude-code"
 const claudeSettingsFile = "settings.json"
 
 // managedHookTypes lists the Claude Code hook types that loom manages.
+// Session-level and turn-level hooks use an empty matcher (match all).
+// PreToolUse and PostToolUse use tool-specific matchers (e.g., "Task").
 var managedHookTypes = []string{
 	"SessionStart",
 	"UserPromptSubmit",
 	"Stop",
 	"SessionEnd",
+	"PreToolUse",
+	"PostToolUse",
 }
 
 // hookCommands maps each managed hook type to its loom command.
@@ -28,6 +32,20 @@ var hookCommands = map[string]string{
 	"UserPromptSubmit": "loom hooks claude-code user-prompt-submit",
 	"Stop":             "loom hooks claude-code stop",
 	"SessionEnd":       "loom hooks claude-code session-end",
+	"PreToolUse":       "loom hooks claude-code pre-task",
+	"PostToolUse":      "loom hooks claude-code post-task",
+}
+
+// hookMatchers maps hook types to their matcher pattern.
+// Empty string means "match all" (session/turn hooks).
+// "Task" means only fire when the Task tool is used (subagent hooks).
+var hookMatchers = map[string]string{
+	"SessionStart":     "",
+	"UserPromptSubmit": "",
+	"Stop":             "",
+	"SessionEnd":       "",
+	"PreToolUse":       "Task",
+	"PostToolUse":      "Task",
 }
 
 // claudeHookMatcher groups hook entries under a matcher pattern.
@@ -95,10 +113,12 @@ func InstallClaudeHooks(worktreePath string) error {
 			continue
 		}
 
-		// Append a new matcher with the loom hook entry
+		// Append a new matcher with the loom hook entry.
+		// Use the tool-specific matcher for PreToolUse/PostToolUse hooks.
 		cmd := hookCommands[hookType]
+		matcher := hookMatchers[hookType]
 		matchers = append(matchers, claudeHookMatcher{
-			Matcher: "",
+			Matcher: matcher,
 			Hooks: []claudeHookEntry{{
 				Type:    "command",
 				Command: cmd,

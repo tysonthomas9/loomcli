@@ -40,7 +40,8 @@ export type MutationType =
   | "refresh"
   | "terminal_metadata"
   | "terminal_session_change"
-  | "issue_tabs";
+  | "issue_tabs"
+  | "session_change";
 
 // Server → Client: Mutation payload
 export interface MutationPayload {

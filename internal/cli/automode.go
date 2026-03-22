@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -263,7 +264,6 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 
 		workspace, _ := ResolveActiveWorkspace()
 		prompt := generatePrompt(opts.AgentName, workspace)
-
 		// Create session record before invocation
 		var sess *sessions.Session
 		if sessStore != nil {
@@ -276,6 +276,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 			})
 			if sess != nil {
 				SetActiveSessionEnv(GetBeadsDir(), sess.SessionID())
+				go sessions.NotifyWebUI(context.Background(), resolveWebUIURL(), "", sess.SessionID(), sessions.StatusRunning)
 			}
 		}
 
@@ -288,7 +289,6 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 
 		endedAt := time.Now()
 		recordSessionUsage(usageStore, collector, opts.WorktreePath, opts.AgentName, opts.ParentID, startedAt, endedAt, err, opts.LockBridge)
-
 		// Finalize session record
 		if sess != nil {
 			exitCode := 0
@@ -314,6 +314,7 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 				},
 			})
 			ClearActiveSessionEnv()
+			go sessions.NotifyWebUI(context.Background(), resolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status)
 		}
 
 		// Return to idle state after agent finishes

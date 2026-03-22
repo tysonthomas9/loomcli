@@ -104,6 +104,8 @@ YYYYMMDD-HHMMSS-<agentName>-<taskShort>-<8hexrand>
 | `UserPromptSubmit` | `loom hooks claude-code user-prompt-submit` |
 | `Stop` | `loom hooks claude-code stop` |
 | `SessionEnd` | `loom hooks claude-code session-end` |
+| `PreToolUse[Task]` | `loom hooks claude-code pre-task` |
+| `PostToolUse[Task]` | `loom hooks claude-code post-task` |
 
 Idempotent: detects existing entries by prefix match, preserves non-loom hooks.
 
@@ -117,6 +119,8 @@ Idempotent: detects existing entries by prefix match, preserves non-loom hooks.
 | `user-prompt-submit` | `HookTurnStart` | `prompt` |
 | `stop` | `HookTurnEnd` | session info |
 | `session-end` | `HookSessionEnd` | session info |
+| `pre-task` | `HookSubagentStart` | task info |
+| `post-task` | `HookSubagentEnd` | task info |
 
 Unhandled hook names return `(nil, nil)` — not an error.
 
@@ -132,6 +136,8 @@ Unhandled hook names return `(nil, nil)` — not an error.
 | `HookTurnStart` | `user` | `text` |
 | `HookTurnEnd` | `assistant` | `turn_end` |
 | `HookSessionEnd` | `system` | `session_end` |
+| `HookSubagentStart` | `system` | `system/subagent_start` |
+| `HookSubagentEnd` | `system` | `system/subagent_end` |
 
 ### Performance
 
@@ -249,6 +255,7 @@ Supports Go duration strings and `"Nd"` day suffix shorthand. Calls `store.Purge
 | GET | `/api/tasks/{taskId}/sessions/{sessionId}` | `handleGetSession` | Session detail |
 | GET | `/api/tasks/{taskId}/sessions/{sessionId}/transcript` | `handleGetSessionTranscript` | Transcript entries |
 | GET | `/api/tasks/{taskId}/sessions/{sessionId}/diff` | `handleGetSessionDiff` | Raw diff (text/plain) |
+| POST | `/api/sessions/notify` | `handleNotifySessionChange` | SSE broadcast for session status changes (loopback only) |
 
 All return HTTP 503 when `sessStore` is nil. Input validated via `validTaskID` and `validSessionID` regexes (`[a-zA-Z0-9._-]+`).
 
@@ -313,7 +320,7 @@ export interface TranscriptEntry {
 
 | Hook | Polling | Strategy |
 |------|---------|----------|
-| `useTaskSessions(taskId)` | 10s normal, 3s when any session `is_active` | Adaptive `setTimeout` chain |
+| `useTaskSessions(taskId)` | 10s normal, 3s when any session `is_active` | Adaptive `setTimeout` chain + SSE `session_change` refetch |
 | `useSessionTranscript(taskId, sid, isActive)` | 3s when active, one-shot when inactive | `setInterval` gated by `isActive` |
 | `useSessionDiff(taskId, sid, enabled)` | One-shot | Lazy — only when Diff tab shown and `has_diff` |
 | `useIssueSessionMap()` | SSE-triggered | Debounced refetch on `terminal_session_change` |
@@ -342,7 +349,7 @@ Thin React wrapper around CodeMirror 6. Created once on mount, updated via `Comp
 
 ### Session Data Update Strategy
 
-Session data uses **polling, not SSE push**. The SSE system broadcasts `terminal_session_change` for terminal sessions but the agent session audit trail relies on adaptive polling (3s/10s). This avoids complicating the SSE mutation schema for small per-task session lists.
+Session data uses **SSE push with polling fallback**. Agent processes call `NotifyWebUI` which sends `POST /api/sessions/notify` to the web UI server. The `handleNotifySessionChange` handler broadcasts a `session_change` SSE event to all connected clients. The `useTaskSessions` hook subscribes to these events for immediate refetch, with adaptive polling (3s/10s) as fallback when SSE is unavailable.
 
 ---
 

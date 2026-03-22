@@ -94,7 +94,7 @@ func TestInstallClaudeHooks_FreshInstall(t *testing.T) {
 		t.Fatalf("settings.json not created: %v", err)
 	}
 
-	// Verify all 4 hook types are present with the two-level matcher structure
+	// Verify all hook types are present with the two-level matcher structure
 	for _, hookType := range managedHookTypes {
 		matchers := readHookMatchers(t, dir, hookType)
 		if len(matchers) == 0 {
@@ -105,9 +105,10 @@ func TestInstallClaudeHooks_FreshInstall(t *testing.T) {
 		if !matcherContainsCommand(matchers, expectedCmd) {
 			t.Errorf("%s: expected command %q not found in matchers %+v", hookType, expectedCmd, matchers)
 		}
-		// Verify the matcher has the empty string matcher
-		if matchers[0].Matcher != "" {
-			t.Errorf("%s: expected empty matcher, got %q", hookType, matchers[0].Matcher)
+		// Verify the matcher matches expected value (empty for session/turn hooks, "Task" for tool hooks)
+		expectedMatcher := hookMatchers[hookType]
+		if matchers[0].Matcher != expectedMatcher {
+			t.Errorf("%s: expected matcher %q, got %q", hookType, expectedMatcher, matchers[0].Matcher)
 		}
 	}
 }
@@ -465,8 +466,8 @@ func TestClaudeHooksStatus(t *testing.T) {
 		if !installed {
 			t.Error("expected installed=true after install")
 		}
-		if len(hooks) != 4 {
-			t.Errorf("expected 4 hooks, got %d: %v", len(hooks), hooks)
+		if len(hooks) != len(managedHookTypes) {
+			t.Errorf("expected %d hooks, got %d: %v", len(managedHookTypes), len(hooks), hooks)
 		}
 	})
 

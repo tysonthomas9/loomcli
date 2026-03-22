@@ -567,12 +567,14 @@ A separate `"terminal_session_change"` event is broadcast when issue linkage cha
 
 | File | Responsibility |
 |------|---------------|
-| `internal/webui/terminal.go` | TerminalManager: tmux lifecycle, Attach/Spawn/Detach/Resize/KillSession |
+| `internal/webui/terminal.go` | TerminalManager struct, `ErrTmuxNotFound`, `ErrMaxSessionsReached`, core fields |
+| `internal/webui/terminal_lifecycle.go` | Shutdown, deferred kill cancellation, session cleanup |
 | `internal/webui/terminal_auth.go` | HMAC-SHA256 one-time token (60s expiry, single-use nonce) |
 | `internal/webui/terminal_context.go` | FetchTerminalContext + FormatContextBanner |
 | `internal/webui/terminal_health.go` | SessionAlive, PaneDead, CapturePane |
 | `internal/webui/terminal_sessions.go` | KillAllSessions, CaptureScrollback, captureScrollbackToFile |
-| `internal/webui/handlers_terminal.go` | WebSocket relay (handleTerminalWS), ptyToWS, wsToPTY |
+| `internal/webui/handlers_terminal.go` | `handleTerminalToken`, `handleTerminalRestart`, `handleTerminalKill`, `handleTerminalSessionStatus`, constants |
+| `internal/webui/handlers_terminal_ws.go` | WebSocket relay (`handleTerminalWS`), `ptyToWS`, `wsToPTY`, `crashInfo` |
 | `internal/webui/handlers_terminal_tabs.go` | REST: GET/PUT/PATCH/DELETE /api/terminal/tabs |
 | `internal/webui/handlers_terminal_sessions.go` | REST: list sessions, seed, schedule-kill, close-all |
 | `internal/webui/handlers_terminal_spawn.go` | REST: POST /api/terminal/spawn |

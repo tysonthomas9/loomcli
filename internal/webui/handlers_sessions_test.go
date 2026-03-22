@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -418,6 +420,14 @@ func TestGetSession_IsActive(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Set TaskID on metadata so ownership check passes.
+	sess.Meta.TaskID = "bd-active"
+	metaJSON, _ := json.Marshal(sess.Meta)
+	metaPath := filepath.Join(store.Dir(), sess.SessionID(), "metadata.json")
+	if err := os.WriteFile(metaPath, metaJSON, 0o600); err != nil {
+		t.Fatalf("write metadata: %v", err)
 	}
 
 	handler := handleGetSession(store)

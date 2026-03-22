@@ -1,6 +1,9 @@
 package cli
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // HookEventType represents a normalized lifecycle event from any agent backend.
 // Each backend maps its native hook names to these types.
@@ -18,6 +21,12 @@ const (
 
 	// HookSessionEnd indicates the session has been terminated.
 	HookSessionEnd
+
+	// HookSubagentStart indicates a subagent (Task tool) is about to start.
+	HookSubagentStart
+
+	// HookSubagentEnd indicates a subagent (Task tool) has completed.
+	HookSubagentEnd
 )
 
 // String returns a human-readable name for the event type.
@@ -31,6 +40,10 @@ func (e HookEventType) String() string {
 		return "TurnEnd"
 	case HookSessionEnd:
 		return "SessionEnd"
+	case HookSubagentStart:
+		return "SubagentStart"
+	case HookSubagentEnd:
+		return "SubagentEnd"
 	default:
 		return "Unknown"
 	}
@@ -60,6 +73,15 @@ type HookEvent struct {
 	// Backend identifies which agent backend produced this event (e.g., "claude").
 	Backend string
 
+	// ToolUseID is the unique ID for a tool invocation (subagent events only).
+	ToolUseID string
+
+	// ToolInput is the raw JSON input to the Task tool (subagent events only).
+	ToolInput json.RawMessage
+
+	// SubagentID is the spawned subagent's identifier (SubagentEnd only, from tool_response).
+	SubagentID string
+
 	// Timestamp is when the event occurred.
 	Timestamp time.Time
 }
@@ -84,4 +106,23 @@ type claudeSessionInfoPayload struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	Model          string `json:"model,omitempty"`
+}
+
+// claudePreToolUsePayload is the JSON from PreToolUse[Task] hooks.
+type claudePreToolUsePayload struct {
+	SessionID      string          `json:"session_id"`
+	TranscriptPath string          `json:"transcript_path"`
+	ToolUseID      string          `json:"tool_use_id"`
+	ToolInput      json.RawMessage `json:"tool_input"`
+}
+
+// claudePostToolUsePayload is the JSON from PostToolUse[Task] hooks.
+type claudePostToolUsePayload struct {
+	SessionID      string          `json:"session_id"`
+	TranscriptPath string          `json:"transcript_path"`
+	ToolUseID      string          `json:"tool_use_id"`
+	ToolInput      json.RawMessage `json:"tool_input"`
+	ToolResponse   struct {
+		AgentID string `json:"agentId"`
+	} `json:"tool_response"`
 }

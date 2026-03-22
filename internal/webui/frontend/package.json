@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node -e \"require('fs').writeFileSync('dist/.build-meta',JSON.stringify({built_at:new Date().toISOString(),git_hash:require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}))\"",
     "preview": "vite preview",
     "typecheck": "tsc",
     "lint": "eslint src/",

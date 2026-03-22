@@ -9,11 +9,12 @@ const (
 	MutationDelete  = "delete"
 	MutationComment = "comment"
 	// Molecule-specific event types for activity feed
-	MutationBonded   = "bonded"   // Molecule bonded to parent (dynamic bond)
-	MutationSquashed = "squashed" // Wisp squashed to digest
-	MutationBurned   = "burned"   // Wisp discarded without digest
-	MutationStatus   = "status"   // Status change (in_progress, completed, failed)
-	MutationRefresh  = "refresh"  // External DB change detected, clients should re-fetch
+	MutationBonded        = "bonded"         // Molecule bonded to parent (dynamic bond)
+	MutationSquashed      = "squashed"       // Wisp squashed to digest
+	MutationBurned        = "burned"         // Wisp discarded without digest
+	MutationStatus        = "status"         // Status change (in_progress, completed, failed)
+	MutationRefresh       = "refresh"        // External DB change detected, clients should re-fetch
+	MutationSessionChange = "session_change" // Agent session status change (started, completed, failed, etc.)
 )
 
 // MutationEvent represents a database mutation for event-driven sync
