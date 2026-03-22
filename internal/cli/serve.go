@@ -262,6 +262,13 @@ func runServe(cmd *cobra.Command, args []string) {
 		ensureCurrentProjectRegistered()
 		go func() {
 			gitOps := NewGitOps()
+			// Initialize session audit trail store (best-effort; nil disables endpoints).
+			var sessStore *sessions.Store
+			if dir := GetBeadsDir(); dir != "" {
+				if s, err := sessions.NewStore(dir); err == nil {
+					sessStore = s
+				}
+			}
 			cfg := webui.ServerConfig{
 				Port:                    serveWebUIPort,
 				BindAddress:             serveBindAddr,
@@ -285,6 +292,7 @@ func runServe(cmd *cobra.Command, args []string) {
 				ClearDefaultWorkspaceFn: clearDefaultWorkspace,
 				WorkspaceCreateFn:       createWorkspace,
 				BackendOps:              backendOps,
+				SessionsStore:           sessStore,
 				Logger:                  slog.Default(),
 			}
 			if serveCorsOrigin != "" {
