@@ -2,8 +2,10 @@ package webui
 
 import (
 	"embed"
+	"encoding/json"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path"
@@ -13,6 +15,26 @@ import (
 
 //go:embed all:frontend/dist
 var frontendFS embed.FS
+
+// logFrontendBuildMeta reads the embedded .build-meta file and logs when the
+// frontend was built. This makes it immediately obvious when the embedded
+// frontend is stale (e.g., developer ran `go install` without `npm run build`).
+func logFrontendBuildMeta() {
+	data, err := frontendFS.ReadFile("frontend/dist/.build-meta")
+	if err != nil {
+		slog.Warn("frontend build metadata not found — frontend may be stale (run 'make install' to rebuild)")
+		return
+	}
+	var meta struct {
+		BuiltAt string `json:"built_at"`
+		GitHash string `json:"git_hash"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		slog.Warn("failed to parse frontend build metadata", "error", err)
+		return
+	}
+	slog.Info("embedded frontend", "built_at", meta.BuiltAt, "git_hash", meta.GitHash)
+}
 
 // frontendHandler returns an http.Handler that serves the embedded frontend assets.
 // It implements SPA routing by returning index.html for paths that don't match

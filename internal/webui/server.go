@@ -80,6 +80,8 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 			dir = "internal/webui/frontend/dist"
 		}
 		slog.Info("dev mode enabled", "frontend_dir", dir)
+	} else {
+		logFrontendBuildMeta()
 	}
 	if config.FleetEnabled {
 		slog.Info("fleet routes enabled")
