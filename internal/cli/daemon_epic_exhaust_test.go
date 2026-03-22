@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 )
@@ -28,18 +27,16 @@ func TestHandleEpicTransition_NotAssignedToEpic(t *testing.T) {
 	}
 }
 
-func TestHandleEpicTransition_EpicStillHasTasks(t *testing.T) {
-	// When the current epic still has ready tasks, no transition occurs.
+func TestHandleEpicTransition_ConfigDriven_StillHasTasks(t *testing.T) {
+	// When the configured epic still has ready tasks, no transition occurs.
 	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
 		return id == "epic-1", nil
 	})
 
 	ea := NewEpicAssigner()
-	seedAssignment(ea, "falcon", "epic-1")
-
 	d := &Daemon{epicAssigner: ea}
 	ap := &AgentProcess{
-		entry:          AgentEntry{Worktree: "falcon"},
+		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
 		assignedEpicID: "epic-1",
 		restartCount:   2,
@@ -50,54 +47,30 @@ func TestHandleEpicTransition_EpicStillHasTasks(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// Verify still assigned to same epic
-	if got := ea.GetAssignment("falcon"); got != "epic-1" {
-		t.Errorf("expected still assigned to epic-1, got %q", got)
-	}
-
-	// Verify restart count was NOT reset (no transition occurred)
+	// Verify restart count was NOT reset (no transition)
 	ap.mu.Lock()
 	rc := ap.restartCount
+	noWork := ap.lastNoWork
 	ap.mu.Unlock()
 	if rc != 2 {
 		t.Errorf("expected restartCount unchanged at 2, got %d", rc)
 	}
+	if noWork {
+		t.Error("expected lastNoWork=false when epic still has tasks")
+	}
 }
 
-func TestHandleEpicTransition_ExhaustedWithNewEpic(t *testing.T) {
-	// When epic-1 is exhausted but epic-2 is available, transitions to epic-2.
+func TestHandleEpicTransition_ConfigDriven_Exhausted(t *testing.T) {
+	// When the configured epic is exhausted, agent idles (sets lastNoWork).
+	// No automatic reassignment — parent is config-driven.
 	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
-		// epic-1 has no tasks, epic-2 has tasks
-		return id == "epic-2", nil
-	})
-	stubQueryOpenEpics(t, func() ([]EpicInfo, error) {
-		return []EpicInfo{
-			{ID: "epic-1", Priority: 1},
-			{ID: "epic-2", Priority: 2},
-		}, nil
+		return false, nil
 	})
 
 	ea := NewEpicAssigner()
-	seedAssignment(ea, "falcon", "epic-1")
-
-	// Mock branch switching for the new epic
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "epic/epic-1\n"},
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
-		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/epic/epic-2"}, Err: errors.New("not found")},
-		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/remotes/origin/epic/epic-2"}, Err: errors.New("not found")},
-	})
-	cmdMock.Install()
-
-	outMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"checkout", "-b", "epic/epic-2", "origin/main"}, Err: nil},
-	})
-	outMock.Install()
-
 	d := &Daemon{epicAssigner: ea}
 	ap := &AgentProcess{
-		entry:          AgentEntry{Worktree: "falcon"},
+		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
 		assignedEpicID: "epic-1",
 		restartCount:   3,
@@ -108,97 +81,30 @@ func TestHandleEpicTransition_ExhaustedWithNewEpic(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// Verify assigned to new epic
-	if got := ea.GetAssignment("falcon"); got != "epic-2" {
-		t.Errorf("expected assigned to epic-2, got %q", got)
-	}
-
-	// Verify assignedEpicID was updated
+	// Verify lastNoWork is set so daemon applies NoWork backoff
 	ap.mu.Lock()
+	noWork := ap.lastNoWork
 	eid := ap.assignedEpicID
-	rc := ap.restartCount
 	ap.mu.Unlock()
-	if eid != "epic-2" {
-		t.Errorf("expected assignedEpicID epic-2, got %q", eid)
+	if !noWork {
+		t.Error("expected lastNoWork=true when epic is exhausted")
 	}
-
-	// Verify restart counter was reset
-	if rc != 0 {
-		t.Errorf("expected restartCount reset to 0, got %d", rc)
+	// Epic assignment stays — it's config-driven, not auto-cleared
+	if eid != "epic-1" {
+		t.Errorf("expected assignedEpicID still epic-1, got %q", eid)
 	}
 }
 
-func TestHandleEpicTransition_ExhaustedNoMoreEpics(t *testing.T) {
-	// When epic-1 is exhausted and no other epics are available, falls back to non-epic mode.
-	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
-		return false, nil // no ready tasks in any epic
-	})
-	stubQueryOpenEpics(t, func() ([]EpicInfo, error) {
-		return []EpicInfo{{ID: "epic-1", Priority: 1}}, nil
-	})
-
-	ea := NewEpicAssigner()
-	seedAssignment(ea, "falcon", "epic-1")
-
-	// Mock branch switching back to agent-name branch
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "epic/epic-1\n"},
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
-		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/falcon"}, Stdout: "abc123\n"},
-	})
-	cmdMock.Install()
-
-	outMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"checkout", "falcon"}, Err: nil},
-	})
-	outMock.Install()
-
-	d := &Daemon{epicAssigner: ea}
-	ap := &AgentProcess{
-		entry:          AgentEntry{Worktree: "falcon"},
-		worktreePath:   "/repo/worktrees/falcon",
-		assignedEpicID: "epic-1",
-		restartCount:   2,
-	}
-
-	err := d.handleEpicTransition(ap)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	// Verify released from epic
-	if got := ea.GetAssignment("falcon"); got != "" {
-		t.Errorf("expected no assignment, got %q", got)
-	}
-
-	// Verify assignedEpicID was cleared
-	ap.mu.Lock()
-	eid := ap.assignedEpicID
-	rc := ap.restartCount
-	ap.mu.Unlock()
-	if eid != "" {
-		t.Errorf("expected assignedEpicID empty, got %q", eid)
-	}
-
-	// Verify restart counter was reset
-	if rc != 0 {
-		t.Errorf("expected restartCount reset to 0, got %d", rc)
-	}
-}
-
-func TestHandleEpicTransition_BdReadyFails(t *testing.T) {
+func TestHandleEpicTransition_ConfigDriven_BdReadyFails(t *testing.T) {
 	// When bd ready fails, stay on current epic (graceful handling).
 	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
 		return false, fmt.Errorf("bd command failed")
 	})
 
 	ea := NewEpicAssigner()
-	seedAssignment(ea, "falcon", "epic-1")
-
 	d := &Daemon{epicAssigner: ea}
 	ap := &AgentProcess{
-		entry:          AgentEntry{Worktree: "falcon"},
+		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
 		assignedEpicID: "epic-1",
 		restartCount:   1,
@@ -207,11 +113,6 @@ func TestHandleEpicTransition_BdReadyFails(t *testing.T) {
 	err := d.handleEpicTransition(ap)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
-	}
-
-	// Verify still assigned (stayed on current epic)
-	if got := ea.GetAssignment("falcon"); got != "epic-1" {
-		t.Errorf("expected still assigned to epic-1, got %q", got)
 	}
 
 	// Verify restart count was NOT reset
@@ -223,21 +124,25 @@ func TestHandleEpicTransition_BdReadyFails(t *testing.T) {
 	}
 }
 
+func TestHandleEpicTransition_NoParentConfig_NoOp(t *testing.T) {
+	// When entry.Parent is empty but assignedEpicID is somehow set,
+	// handleEpicTransition is still a no-op (no config-driven parent).
+	ea := NewEpicAssigner()
+	d := &Daemon{epicAssigner: ea}
+	ap := &AgentProcess{
+		entry:          AgentEntry{Worktree: "falcon"},
+		worktreePath:   "/repo/worktrees/falcon",
+		assignedEpicID: "epic-1",
+	}
+
+	err := d.handleEpicTransition(ap)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestSwitchToNonEpicMode(t *testing.T) {
-	// switchToNonEpicMode clears epic assignment and switches to agent-name branch.
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "epic/epic-1\n"},
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
-		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/falcon"}, Stdout: "abc123\n"},
-	})
-	cmdMock.Install()
-
-	outMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"checkout", "falcon"}, Err: nil},
-	})
-	outMock.Install()
-
+	// switchToNonEpicMode clears epic assignment and resets restart count.
 	ea := NewEpicAssigner()
 	d := &Daemon{epicAssigner: ea}
 	ap := &AgentProcess{

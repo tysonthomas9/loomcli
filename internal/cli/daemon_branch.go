@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"log"
+	"log/slog"
 )
 
 // epicBranchName returns the branch name for an epic.
@@ -12,9 +13,10 @@ func epicBranchName(epicID string) string {
 
 // EnsureWorktreeBranch switches the worktree to the target branch.
 // If already on the target branch, it's a no-op. If the working tree is dirty,
-// a WIP commit is created before switching. The remote is used for fetch and
-// remote branch lookups. The fallbackRef (e.g. "origin/main") is used when
-// creating a brand-new branch.
+// changes are stashed and discarded before switching (dirty state is ephemeral
+// daemon artifacts like lock files and beads state). The remote is used for
+// fetch and remote branch lookups. The fallbackRef (e.g. "origin/main") is
+// used when creating a brand-new branch.
 func EnsureWorktreeBranch(worktreePath, targetBranch, remote, fallbackRef string) error {
 	// Check current branch
 	current, err := GetCurrentBranch(worktreePath)
@@ -25,18 +27,14 @@ func EnsureWorktreeBranch(worktreePath, targetBranch, remote, fallbackRef string
 		return nil
 	}
 
-	// Handle dirty working tree
+	// Handle dirty working tree — stash and discard
 	clean, err := IsCleanWorkingTree(worktreePath)
 	if err != nil {
 		return fmt.Errorf("failed to check working tree: %w", err)
 	}
 	if !clean {
-		msg := fmt.Sprintf("WIP: daemon branch switch from %s to %s", current, targetBranch)
-		if err := commitWIP(worktreePath, msg); err != nil {
-			log.Printf("[daemon] WIP commit failed, falling back to stash: %v", err)
-			if _, stashErr := GitStash(worktreePath); stashErr != nil {
-				return fmt.Errorf("dirty worktree and both WIP commit and stash failed: commit: %w, stash: %v", err, stashErr)
-			}
+		if err := discardDirtyState(worktreePath); err != nil {
+			return fmt.Errorf("could not discard dirty state before branch switch: %w", err)
 		}
 	}
 
@@ -74,13 +72,57 @@ func EnsureWorktreeBranch(worktreePath, targetBranch, remote, fallbackRef string
 	return nil
 }
 
-// commitWIP stages all changes and creates a WIP commit.
-func commitWIP(worktreePath, message string) error {
-	if _, err := RunGitCommand(worktreePath, "add", "-A"); err != nil {
-		return fmt.Errorf("git add failed: %w", err)
+// discardDirtyState stashes all changes (including untracked files) and
+// immediately drops the stash. The dirty state in daemon worktrees is
+// ephemeral (lock files, beads state) and should not be preserved across
+// branch switches.
+func discardDirtyState(worktreePath string) error {
+	// Stash everything including untracked files
+	stashed, err := gitStashIncludeUntracked(worktreePath)
+	if err != nil {
+		return fmt.Errorf("git stash failed: %w", err)
 	}
-	if _, err := RunGitCommand(worktreePath, "commit", "-m", message); err != nil {
-		return fmt.Errorf("git commit failed: %w", err)
+	if !stashed {
+		// Nothing was actually stashed (e.g., only ignored files)
+		return nil
+	}
+
+	// Log what we're discarding
+	if show, err := RunGitCommand(worktreePath, "stash", "show", "stash@{0}"); err == nil {
+		slog.Info("discarding dirty state before branch switch", "worktree", worktreePath, "files", show)
+	}
+
+	// Drop the stash — we don't need this state on the new branch
+	if err := gitStashDrop(worktreePath); err != nil {
+		slog.Warn("stash drop failed (benign)", "worktree", worktreePath, "err", err)
+	}
+	return nil
+}
+
+// gitStashIncludeUntracked stashes all changes including untracked files.
+// Returns true if a new stash entry was created.
+func gitStashIncludeUntracked(dir string) (bool, error) {
+	countBefore, err := getStashCount(dir)
+	if err != nil {
+		return false, err
+	}
+
+	if _, err := RunGitCommand(dir, "stash", "--include-untracked"); err != nil {
+		return false, fmt.Errorf("git stash --include-untracked failed: %w", err)
+	}
+
+	countAfter, err := getStashCount(dir)
+	if err != nil {
+		return false, err
+	}
+
+	return countAfter > countBefore, nil
+}
+
+// gitStashDrop drops the most recent stash entry.
+func gitStashDrop(dir string) error {
+	if _, err := RunGitCommand(dir, "stash", "drop", "stash@{0}"); err != nil {
+		return fmt.Errorf("git stash drop failed: %w", err)
 	}
 	return nil
 }

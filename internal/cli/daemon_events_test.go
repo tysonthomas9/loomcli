@@ -124,33 +124,16 @@ func TestHandleEpicTransition_EmitsEpicExhausted(t *testing.T) {
 	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
 		return false, nil
 	})
-	stubQueryOpenEpics(t, func() ([]EpicInfo, error) {
-		return nil, nil // No new epics available
-	})
-
-	// Mock branch switching for non-epic mode
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "epic/epic-1\n"},
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: ""},
-		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/falcon"}, Stdout: "abc123\n"},
-	})
-	cmdMock.Install()
-	outMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"fetch", "origin"}, Err: nil},
-		{Args: []string{"checkout", "falcon"}, Err: nil},
-	})
-	outMock.Install()
 
 	spy := &SpyEmitter{}
 	ea := NewEpicAssigner()
-	seedAssignment(ea, "falcon", "epic-1")
 
 	d := &Daemon{
 		epicAssigner: ea,
 		eventBus:     spy,
 	}
 	ap := &AgentProcess{
-		entry:          AgentEntry{Worktree: "falcon", Role: "task"},
+		entry:          AgentEntry{Worktree: "falcon", Role: "task", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
 		assignedEpicID: "epic-1",
 	}

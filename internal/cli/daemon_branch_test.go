@@ -130,20 +130,26 @@ func TestEnsureWorktreeBranch_CreateFromFallback(t *testing.T) {
 	}
 }
 
-func TestEnsureWorktreeBranch_DirtyTree_CommitsWIP(t *testing.T) {
+func TestEnsureWorktreeBranch_DirtyTree_StashesAndDiscards(t *testing.T) {
 	// Call sequence:
 	// 1. GetCurrentBranch → "falcon" (CommandMock)
 	// 2. IsCleanWorkingTree → dirty (CommandMock)
-	// 3. commitWIP: git add -A (CommandMock)
-	// 4. commitWIP: git commit -m (CommandMock)
-	// 5. GitFetch → ok (OutputCommandMock)
-	// 6. BranchExistsLocally → ok (CommandMock)
-	// 7. GitCheckout → ok (OutputCommandMock)
+	// 3. discardDirtyState: getStashCount before → 0 (CommandMock)
+	// 4. discardDirtyState: git stash --include-untracked (CommandMock)
+	// 5. discardDirtyState: getStashCount after → 1 (CommandMock)
+	// 6. discardDirtyState: git stash show (CommandMock)
+	// 7. discardDirtyState: git stash drop (CommandMock)
+	// 8. GitFetch → ok (OutputCommandMock)
+	// 9. BranchExistsLocally → ok (CommandMock)
+	// 10. GitCheckout → ok (OutputCommandMock)
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon\n"},
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
-		{Name: "git", Args: []string{"add", "-A"}, Stdout: ""},
-		{Name: "git", Args: []string{"commit", "-m", "WIP: daemon branch switch from falcon to epic/bd-spq5"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "--include-untracked"}, Stdout: "Saved working directory\n"},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on falcon\n"},
+		{Name: "git", Args: []string{"stash", "show", "stash@{0}"}, Stdout: " file.go | 1 +\n"},
+		{Name: "git", Args: []string{"stash", "drop", "stash@{0}"}, Stdout: "Dropped stash@{0}\n"},
 		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/epic/bd-spq5"}, Stdout: "abc123\n"},
 	})
 	cmdMock.Install()
@@ -188,74 +194,42 @@ func TestEnsureWorktreeBranch_FetchFailsNonFatal(t *testing.T) {
 	}
 }
 
-func TestCommitWIP(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		cmdMock := NewCommandMock(t, []CommandStub{
-			{Name: "git", Args: []string{"add", "-A"}, Stdout: ""},
-			{Name: "git", Args: []string{"commit", "-m", "WIP: test message"}, Stdout: ""},
-		})
-		cmdMock.Install()
-
-		err := commitWIP("/repo", "WIP: test message")
-
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("add fails", func(t *testing.T) {
-		cmdMock := NewCommandMock(t, []CommandStub{
-			{Name: "git", Args: []string{"add", "-A"}, Err: errors.New("add failed")},
-		})
-		cmdMock.Install()
-
-		err := commitWIP("/repo", "WIP: test message")
-
-		if err == nil {
-			t.Error("expected error, got nil")
-		}
-	})
-
-	t.Run("commit fails", func(t *testing.T) {
-		cmdMock := NewCommandMock(t, []CommandStub{
-			{Name: "git", Args: []string{"add", "-A"}, Stdout: ""},
-			{Name: "git", Args: []string{"commit", "-m", "WIP: test message"}, Err: errors.New("nothing to commit")},
-		})
-		cmdMock.Install()
-
-		err := commitWIP("/repo", "WIP: test message")
-
-		if err == nil {
-			t.Error("expected error, got nil")
-		}
-	})
-}
-
-func TestEnsureWorktreeBranch_DirtyTree_CommitFails_StashSucceeds(t *testing.T) {
-	// Call sequence:
-	// 1. GetCurrentBranch → "falcon" (CommandMock)
-	// 2. IsCleanWorkingTree → dirty (CommandMock)
-	// 3. commitWIP: git add -A → success (CommandMock)
-	// 4. commitWIP: git commit -m → FAILS (CommandMock)
-	// 5. GitStash - getStashCount before (CommandMock)
-	// 6. GitStash - stash (OutputCommandMock)
-	// 7. GitStash - getStashCount after (CommandMock)
-	// 8. GitFetch (OutputCommandMock)
-	// 9. BranchExistsLocally → ok (CommandMock)
-	// 10. GitCheckout (OutputCommandMock)
+func TestEnsureWorktreeBranch_DirtyTree_StashFails(t *testing.T) {
+	// When stash fails, EnsureWorktreeBranch should return an error
 	cmdMock := NewCommandMock(t, []CommandStub{
 		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon\n"},
 		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
-		{Name: "git", Args: []string{"add", "-A"}, Stdout: ""},
-		{Name: "git", Args: []string{"commit", "-m", "WIP: daemon branch switch from falcon to epic/bd-spq5"}, Err: errors.New("nothing to commit")},
 		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: "stash@{0}: WIP on falcon\n"},
+		{Name: "git", Args: []string{"stash", "--include-untracked"}, Err: errors.New("stash failed")},
+	})
+	cmdMock.Install()
+
+	outMock := NewOutputCommandMock(t, []OutputCommandStub{})
+	outMock.Install()
+
+	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
+
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "could not discard dirty state") {
+		t.Errorf("error message should contain expected text, got: %v", err)
+	}
+}
+
+func TestEnsureWorktreeBranch_DirtyTree_NothingStashed(t *testing.T) {
+	// When stash count doesn't increase (e.g. only ignored files), proceed normally
+	cmdMock := NewCommandMock(t, []CommandStub{
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon\n"},
+		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "--include-untracked"}, Stdout: "No local changes to save\n"},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
 		{Name: "git", Args: []string{"rev-parse", "--verify", "refs/heads/epic/bd-spq5"}, Stdout: "abc123\n"},
 	})
 	cmdMock.Install()
 
 	outMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"stash"}, Err: nil},
 		{Args: []string{"fetch", "origin"}, Err: nil},
 		{Args: []string{"checkout", "epic/bd-spq5"}, Err: nil},
 	})
@@ -265,38 +239,6 @@ func TestEnsureWorktreeBranch_DirtyTree_CommitFails_StashSucceeds(t *testing.T) 
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestEnsureWorktreeBranch_DirtyTree_BothFail(t *testing.T) {
-	// Call sequence:
-	// 1. GetCurrentBranch → "falcon" (CommandMock)
-	// 2. IsCleanWorkingTree → dirty (CommandMock)
-	// 3. commitWIP: git add -A → success (CommandMock)
-	// 4. commitWIP: git commit -m → FAILS (CommandMock)
-	// 5. GitStash - getStashCount before (CommandMock)
-	// 6. GitStash - stash → FAILS (OutputCommandMock)
-	cmdMock := NewCommandMock(t, []CommandStub{
-		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "falcon\n"},
-		{Name: "git", Args: []string{"status", "--porcelain"}, Stdout: " M file.go\n"},
-		{Name: "git", Args: []string{"add", "-A"}, Stdout: ""},
-		{Name: "git", Args: []string{"commit", "-m", "WIP: daemon branch switch from falcon to epic/bd-spq5"}, Err: errors.New("nothing to commit")},
-		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
-	})
-	cmdMock.Install()
-
-	outMock := NewOutputCommandMock(t, []OutputCommandStub{
-		{Args: []string{"stash"}, Err: errors.New("stash failed")},
-	})
-	outMock.Install()
-
-	err := EnsureWorktreeBranch("/repo", "epic/bd-spq5", "origin", "origin/main")
-
-	if err == nil {
-		t.Error("expected error, got nil")
-	}
-	if err != nil && !strings.Contains(err.Error(), "dirty worktree and both WIP commit and stash failed") {
-		t.Errorf("error message should contain expected text, got: %v", err)
 	}
 }
 

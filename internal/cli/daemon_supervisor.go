@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -29,12 +28,11 @@ func (d *Daemon) resetWorktreeBranches() {
 			continue
 		}
 		slog.Info("resetting worktree branch", "worktree", ap.entry.Worktree, "from", current, "to", defaultBranch)
-		// Create WIP commit if dirty
+		// Discard dirty state before switching
 		clean, _ := IsCleanWorkingTree(ap.worktreePath)
 		if !clean {
-			msg := fmt.Sprintf("WIP: daemon startup reset from %s", current)
-			if err := commitWIP(ap.worktreePath, msg); err != nil {
-				slog.Warn("WIP commit failed", "worktree", ap.entry.Worktree, "err", err)
+			if err := discardDirtyState(ap.worktreePath); err != nil {
+				slog.Warn("discard dirty state failed", "worktree", ap.entry.Worktree, "err", err)
 			}
 		}
 		if err := GitCheckout(ap.worktreePath, defaultBranch); err != nil {
@@ -144,11 +142,11 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			// Continue with caution - spawn may still work
 		}
 
-		// 1.5. Assign epic to worktree (if available)
-		epicID, err := d.epicAssigner.AssignWorktree(ap.entry.Worktree)
-		if err != nil {
-			slog.Warn("epic assignment failed, falling back to non-epic mode", "worktree", ap.entry.Worktree, "err", err)
-			epicID = ""
+		// 1.5. Assign epic to worktree (only if parent is configured)
+		var epicID string
+		if ap.entry.Parent != "" {
+			epicID = ap.entry.Parent
+			slog.Info("using configured epic", "worktree", ap.entry.Worktree, "epic", epicID)
 		}
 		ap.mu.Lock()
 		ap.assignedEpicID = epicID

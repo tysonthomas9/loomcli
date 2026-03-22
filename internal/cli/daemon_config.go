@@ -104,6 +104,7 @@ type AgentEntry struct {
 	Repos            []string `yaml:"repos,omitempty"`
 	RepoGroups       []string `yaml:"repo_groups,omitempty"`
 	CrossRepo        bool     `yaml:"cross_repo,omitempty"`
+	Parent           string   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
 }
 
 // ProjectFile represents the project-local loom.yaml.
