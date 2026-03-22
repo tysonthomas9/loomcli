@@ -334,3 +334,180 @@ func TestHandleDeleteIssueTabs_NonExistentIssue(t *testing.T) {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 }
+
+// ── Additional coverage tests ─────────────────────────────────────────────────
+
+func TestHandleGetIssueTabs_InvalidIssueID(t *testing.T) {
+	store, _ := setupIssueTabsTest(t)
+	handler := handleGetIssueTabs(store, nil)
+
+	// Issue ID with invalid characters should fail validation
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/PROJ@!#/tabs", nil)
+	req.SetPathValue("issueId", "PROJ@!#")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+
+	var resp issueTabResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected success=false for invalid issue ID")
+	}
+	if resp.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+func TestHandleGetIssueTabs_EmptyIssueID(t *testing.T) {
+	store, _ := setupIssueTabsTest(t)
+	handler := handleGetIssueTabs(store, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues//tabs", nil)
+	req.SetPathValue("issueId", "")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
+func TestHandleGetIssueTabs_PoolError(t *testing.T) {
+	// Create a miniredis, get the store, then close the server to simulate pool error
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	store := issuetabs.NewStore(rdb, nil)
+
+	// Close Redis to simulate connection failure
+	mr.Close()
+
+	handler := handleGetIssueTabs(store, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/POOL-ERR/tabs", nil)
+	req.SetPathValue("issueId", "POOL-ERR")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusInternalServerError, rr.Body.String())
+	}
+
+	var resp issueTabResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected success=false on pool error")
+	}
+	if resp.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+
+	rdb.Close()
+}
+
+func TestHandleGetIssueTabs_EmptyTabs(t *testing.T) {
+	store, _ := setupIssueTabsTest(t)
+	ctx := context.Background()
+
+	// Save state with an empty tabs slice
+	state := &issuetabs.IssueTabState{
+		IssueID:     "EMPTY-TABS",
+		Tabs:        []issuetabs.IssueTab{},
+		ActiveTabID: "",
+	}
+	if err := store.Save(ctx, state); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	handler := handleGetIssueTabs(store, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/issues/EMPTY-TABS/tabs", nil)
+	req.SetPathValue("issueId", "EMPTY-TABS")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool                    `json:"success"`
+		Data    issuetabs.IssueTabState `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected success=true")
+	}
+	if len(resp.Data.Tabs) != 0 {
+		t.Errorf("len(Tabs) = %d, want 0", len(resp.Data.Tabs))
+	}
+}
+
+func TestHandleDeleteIssueTabs_PoolTimeout(t *testing.T) {
+	// Create a miniredis, get the store, then close the server to simulate timeout/pool error
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	store := issuetabs.NewStore(rdb, nil)
+
+	// Close Redis to simulate connection failure (pool timeout)
+	mr.Close()
+
+	handler := handleDeleteIssueTabs(store)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/TIMEOUT-DEL/tabs", nil)
+	req.SetPathValue("issueId", "TIMEOUT-DEL")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusInternalServerError, rr.Body.String())
+	}
+
+	var resp issueTabResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected success=false on pool timeout")
+	}
+	if !strings.Contains(resp.Error, "failed to delete") {
+		t.Errorf("expected error to mention 'failed to delete', got: %q", resp.Error)
+	}
+
+	rdb.Close()
+}
+
+func TestHandleDeleteIssueTabs_InvalidIssueID(t *testing.T) {
+	store, _ := setupIssueTabsTest(t)
+	handler := handleDeleteIssueTabs(store)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/BAD@ID/tabs", nil)
+	req.SetPathValue("issueId", "BAD@ID")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleDeleteIssueTabs_EmptyIssueID(t *testing.T) {
+	store, _ := setupIssueTabsTest(t)
+	handler := handleDeleteIssueTabs(store)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues//tabs", nil)
+	req.SetPathValue("issueId", "")
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}

@@ -758,6 +758,312 @@ func TestHandleAgentTerminalWS_NoActiveSession(t *testing.T) {
 	}
 }
 
+// TestHandleAgentTerminalWS_TokenScopeMismatch tests that a valid token generated
+// for one agent cannot be used to connect to a different agent's terminal.
+func TestHandleAgentTerminalWS_TokenScopeMismatch(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	ta := newTestTerminalAuth()
+	defer ta.Stop()
+
+	handler := handleAgentTerminalWS(manager, ta, nil)
+
+	// Generate a token scoped to "ember"
+	token, err := ta.GenerateToken(agentLogTokenScope("ember"))
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v", err)
+	}
+
+	// Try to use it for "spark" — scope mismatch should fail auth
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/spark/terminal/ws?token="+token, nil)
+	req.SetPathValue("name", "spark")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["success"] != false {
+		t.Error("expected success to be false")
+	}
+
+	if resp["error"] != "terminal authentication failed" {
+		t.Errorf("error = %q, want %q", resp["error"], "terminal authentication failed")
+	}
+}
+
+// TestHandleAgentTerminalWS_NonWebSocketRequest tests that a valid token and
+// existing (or non-existing) session but a plain HTTP request (not a WebSocket
+// upgrade) results in the handler rejecting the upgrade. Since the agent has no
+// active tmux session, it returns 404 before reaching the upgrade. This test
+// verifies the full pre-upgrade validation pipeline with a scope-correct token.
+func TestHandleAgentTerminalWS_NonWebSocketRequest(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	ta := newTestTerminalAuth()
+	defer ta.Stop()
+
+	handler := handleAgentTerminalWS(manager, ta, nil)
+
+	agentName := "nonexistent-agent-ws"
+	token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v", err)
+	}
+
+	// Plain HTTP GET (no WebSocket upgrade headers). Auth passes, but there
+	// is no active tmux session so the handler returns 404 before attempting
+	// the WebSocket upgrade.
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+agentName+"/terminal/ws?token="+token, nil)
+	req.SetPathValue("name", agentName)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Should NOT be 401 — the token is valid for this agent
+	if w.Code == http.StatusUnauthorized {
+		t.Fatalf("status = 401; valid scoped token should pass auth")
+	}
+
+	// Expect 404 because there is no tmux session for this agent
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if resp["error"] != "no active terminal session for agent" {
+		t.Errorf("error = %q, want %q", resp["error"], "no active terminal session for agent")
+	}
+}
+
+// TestHandleAgentTerminalWS_ReusedTokenFails tests that a token consumed by
+// the WS handler cannot be reused on a subsequent request.
+func TestHandleAgentTerminalWS_ReusedTokenFails(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	ta := newTestTerminalAuth()
+	defer ta.Stop()
+
+	handler := handleAgentTerminalWS(manager, ta, nil)
+
+	agentName := "reuse-agent"
+	token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v", err)
+	}
+
+	urlPath := "/api/agents/" + agentName + "/terminal/ws?token=" + token
+
+	// First request: token is consumed (request will hit 404 since no tmux session)
+	req1 := httptest.NewRequest(http.MethodGet, urlPath, nil)
+	req1.SetPathValue("name", agentName)
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, req1)
+
+	if w1.Code == http.StatusUnauthorized {
+		t.Fatalf("first request should pass auth, got 401")
+	}
+
+	// Second request with same token: should be rejected
+	req2 := httptest.NewRequest(http.MethodGet, urlPath, nil)
+	req2.SetPathValue("name", agentName)
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusUnauthorized {
+		t.Errorf("second request status = %d, want %d (token already used)", w2.Code, http.StatusUnauthorized)
+	}
+}
+
+// --- handleAgentTerminalWS additional coverage tests ---
+
+// TestHandleAgentTerminalWS_ValidAuthNoSession_ResponseShape tests the full JSON
+// envelope shape when auth passes but no tmux session exists. This verifies that
+// the 404 response includes success=false and a descriptive error string.
+func TestHandleAgentTerminalWS_ValidAuthNoSession_ResponseShape(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	ta := newTestTerminalAuth()
+	defer ta.Stop()
+
+	handler := handleAgentTerminalWS(manager, ta, nil)
+
+	agentName := "shape-test-agent"
+	token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/"+agentName+"/terminal/ws?token="+token, nil)
+	req.SetPathValue("name", agentName)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusNotFound, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	// Verify all expected fields are present
+	if resp["success"] != false {
+		t.Errorf("success = %v, want false", resp["success"])
+	}
+	errMsg, ok := resp["error"].(string)
+	if !ok {
+		t.Fatalf("error field is not a string: %T", resp["error"])
+	}
+	if errMsg != "no active terminal session for agent" {
+		t.Errorf("error = %q, want %q", errMsg, "no active terminal session for agent")
+	}
+}
+
+// TestHandleAgentTerminalWS_ValidAuthMultipleAgents tests that valid tokens for
+// different agents each reach the session-lookup phase independently.
+func TestHandleAgentTerminalWS_ValidAuthMultipleAgents(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	ta := newTestTerminalAuth()
+	defer ta.Stop()
+
+	handler := handleAgentTerminalWS(manager, ta, nil)
+
+	agents := []string{"alpha", "beta", "gamma"}
+	for _, agentName := range agents {
+		t.Run(agentName, func(t *testing.T) {
+			token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+			if err != nil {
+				t.Fatalf("GenerateToken() error = %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/api/agents/"+agentName+"/terminal/ws?token="+token, nil)
+			req.SetPathValue("name", agentName)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			// Each agent should pass auth and reach the session lookup (returning 404)
+			if w.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want %d for agent %q", w.Code, http.StatusNotFound, agentName)
+			}
+
+			var resp map[string]interface{}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to parse response: %v", err)
+			}
+			if resp["error"] != "no active terminal session for agent" {
+				t.Errorf("error = %q, want %q", resp["error"], "no active terminal session for agent")
+			}
+		})
+	}
+}
+
+// TestHandleAgentTerminalWS_ExpiredTokenFails tests that an expired token
+// (consumed by a prior request) returns 401.
+func TestHandleAgentTerminalWS_ExpiredTokenFails(t *testing.T) {
+	manager, err := NewTerminalManager("", "", 0)
+	if err == ErrTmuxNotFound {
+		t.Skip("tmux not installed, skipping test")
+	}
+	if err != nil {
+		t.Fatalf("failed to create terminal manager: %v", err)
+	}
+	defer manager.Shutdown()
+
+	ta := newTestTerminalAuth()
+	defer ta.Stop()
+
+	handler := handleAgentTerminalWS(manager, ta, nil)
+
+	agentName := "expire-test"
+	token, err := ta.GenerateToken(agentLogTokenScope(agentName))
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v", err)
+	}
+
+	// First request consumes the token
+	req1 := httptest.NewRequest(http.MethodGet, "/api/agents/"+agentName+"/terminal/ws?token="+token, nil)
+	req1.SetPathValue("name", agentName)
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, req1)
+
+	// Token should have been consumed (first request passes auth, hits 404)
+	if w1.Code == http.StatusUnauthorized {
+		t.Fatalf("first request should pass auth")
+	}
+
+	// Second request: token is now consumed/expired
+	req2 := httptest.NewRequest(http.MethodGet, "/api/agents/"+agentName+"/terminal/ws?token="+token, nil)
+	req2.SetPathValue("name", agentName)
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d (token consumed)", w2.Code, http.StatusUnauthorized)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w2.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["success"] != false {
+		t.Error("expected success=false for expired token")
+	}
+	if resp["error"] != "terminal authentication failed" {
+		t.Errorf("error = %q, want %q", resp["error"], "terminal authentication failed")
+	}
+}
+
 // --- agentLogTokenScope tests ---
 
 // TestAgentLogTokenScope tests the token scope format for agent names.

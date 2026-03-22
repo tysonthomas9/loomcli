@@ -110,6 +110,37 @@ func (m *wMockClosePool) Put(client issueCloser) {
 	}
 }
 
+// wMockDeleteClient implements issueDeleter for testing.
+type wMockDeleteClient struct {
+	deleteFunc func(args *rpc.DeleteArgs) (*rpc.Response, error)
+}
+
+func (m *wMockDeleteClient) Delete(args *rpc.DeleteArgs) (*rpc.Response, error) {
+	if m.deleteFunc != nil {
+		return m.deleteFunc(args)
+	}
+	return nil, errors.New("deleteFunc not implemented")
+}
+
+// wMockDeletePool implements deleteConnectionGetter for testing.
+type wMockDeletePool struct {
+	getFunc func(ctx context.Context) (issueDeleter, error)
+	putFunc func(client issueDeleter)
+}
+
+func (m *wMockDeletePool) Get(ctx context.Context) (issueDeleter, error) {
+	if m.getFunc != nil {
+		return m.getFunc(ctx)
+	}
+	return nil, errors.New("getFunc not implemented")
+}
+
+func (m *wMockDeletePool) Put(client issueDeleter) {
+	if m.putFunc != nil {
+		m.putFunc(client)
+	}
+}
+
 // ===========================================================================
 // handlePatchIssue tests
 // ===========================================================================
@@ -1096,5 +1127,227 @@ func TestHandleDeleteIssueW_MissingID(t *testing.T) {
 	errMsg, _ := result["error"].(string)
 	if !strings.Contains(errMsg, "missing issue ID") {
 		t.Errorf("error = %q, want to contain 'missing issue ID'", errMsg)
+	}
+}
+
+func TestHandleDeleteIssueW_Success(t *testing.T) {
+	client := &wMockDeleteClient{
+		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
+			if len(args.IDs) != 1 || args.IDs[0] != "del-ok" {
+				t.Errorf("Delete() IDs = %v, want [del-ok]", args.IDs)
+			}
+			if !args.Force {
+				t.Error("Delete() Force = false, want true")
+			}
+			return &rpc.Response{
+				Success: true,
+				Data:    []byte(`{"id":"del-ok","deleted":true}`),
+			}, nil
+		},
+	}
+	pool := &wMockDeletePool{
+		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
+		putFunc: func(c issueDeleter) {},
+	}
+	handler := handleDeleteIssueWithPool(pool)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/del-ok", nil)
+	req.SetPathValue("id", "del-ok")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	result := assertJSONResponse(t, w)
+	success, _ := result["success"].(bool)
+	if !success {
+		t.Error("expected success=true")
+	}
+	data, ok := result["data"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected data to be a JSON object")
+	}
+	if data["id"] != "del-ok" {
+		t.Errorf("data.id = %v, want del-ok", data["id"])
+	}
+}
+
+func TestHandleDeleteIssueW_RPCError(t *testing.T) {
+	client := &wMockDeleteClient{
+		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
+			return nil, errors.New("connection reset")
+		},
+	}
+	pool := &wMockDeletePool{
+		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
+		putFunc: func(c issueDeleter) {},
+	}
+	handler := handleDeleteIssueWithPool(pool)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/rpc-del", nil)
+	req.SetPathValue("id", "rpc-del")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	result := assertJSONResponse(t, w)
+	errMsg, _ := result["error"].(string)
+	if !strings.Contains(errMsg, "internal server error") {
+		t.Errorf("error = %q, want to contain 'internal server error'", errMsg)
+	}
+}
+
+func TestHandleDeleteIssueW_DaemonReturnsFalse(t *testing.T) {
+	client := &wMockDeleteClient{
+		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
+			return &rpc.Response{
+				Success: false,
+				Error:   "cannot delete: issue has children",
+			}, nil
+		},
+	}
+	pool := &wMockDeletePool{
+		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
+		putFunc: func(c issueDeleter) {},
+	}
+	handler := handleDeleteIssueWithPool(pool)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/fail-del", nil)
+	req.SetPathValue("id", "fail-del")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	result := assertJSONResponse(t, w)
+	errMsg, _ := result["error"].(string)
+	if !strings.Contains(errMsg, "cannot delete: issue has children") {
+		t.Errorf("error = %q, want to contain 'cannot delete: issue has children'", errMsg)
+	}
+}
+
+func TestHandleDeleteIssueW_NotFound(t *testing.T) {
+	client := &wMockDeleteClient{
+		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
+			return nil, errors.New("issue not found: ghost-del")
+		},
+	}
+	pool := &wMockDeletePool{
+		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
+		putFunc: func(c issueDeleter) {},
+	}
+	handler := handleDeleteIssueWithPool(pool)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/ghost-del", nil)
+	req.SetPathValue("id", "ghost-del")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+	result := assertJSONResponse(t, w)
+	errMsg, _ := result["error"].(string)
+	if !strings.Contains(errMsg, "not found") {
+		t.Errorf("error = %q, want to contain 'not found'", errMsg)
+	}
+}
+
+func TestHandleDeleteIssueW_PoolGetError(t *testing.T) {
+	pool := &wMockDeletePool{
+		getFunc: func(ctx context.Context) (issueDeleter, error) {
+			return nil, errors.New("pool exhausted")
+		},
+	}
+	handler := handleDeleteIssueWithPool(pool)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/pge-del", nil)
+	req.SetPathValue("id", "pge-del")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+	result := assertJSONResponse(t, w)
+	errMsg, _ := result["error"].(string)
+	if !strings.Contains(errMsg, "daemon not available") {
+		t.Errorf("error = %q, want to contain 'daemon not available'", errMsg)
+	}
+}
+
+func TestHandleDeleteIssueW_PoolGetTimeout(t *testing.T) {
+	pool := &wMockDeletePool{
+		getFunc: func(ctx context.Context) (issueDeleter, error) {
+			return nil, context.DeadlineExceeded
+		},
+	}
+	handler := handleDeleteIssueWithPool(pool)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/timeout-del", nil)
+	req.SetPathValue("id", "timeout-del")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusGatewayTimeout {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusGatewayTimeout)
+	}
+}
+
+func TestHandleDeleteIssueW_ClientReturnedToPool(t *testing.T) {
+	putCalled := false
+	client := &wMockDeleteClient{
+		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
+			return &rpc.Response{Success: true, Data: []byte(`{}`)}, nil
+		},
+	}
+	pool := &wMockDeletePool{
+		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
+		putFunc: func(c issueDeleter) { putCalled = true },
+	}
+	handler := handleDeleteIssueWithPool(pool)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/pool-ret-del", nil)
+	req.SetPathValue("id", "pool-ret-del")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if !putCalled {
+		t.Error("Put() was not called - client not returned to pool")
+	}
+}
+
+func TestHandleDeleteIssueW_ClientReturnedToPoolOnError(t *testing.T) {
+	putCalled := false
+	client := &wMockDeleteClient{
+		deleteFunc: func(args *rpc.DeleteArgs) (*rpc.Response, error) {
+			return nil, errors.New("rpc failure")
+		},
+	}
+	pool := &wMockDeletePool{
+		getFunc: func(ctx context.Context) (issueDeleter, error) { return client, nil },
+		putFunc: func(c issueDeleter) { putCalled = true },
+	}
+	handler := handleDeleteIssueWithPool(pool)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/pool-ret-err", nil)
+	req.SetPathValue("id", "pool-ret-err")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if !putCalled {
+		t.Error("Put() was not called on error path - client not returned to pool")
 	}
 }

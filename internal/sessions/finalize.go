@@ -51,8 +51,7 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	// Write diff.patch if diff data provided.
 	if opts.DiffPatch != "" {
 		diffPath := filepath.Join(sessDir, "diff.patch")
-		// #nosec G306 — diff data is not sensitive
-		if err := os.WriteFile(diffPath, []byte(opts.DiffPatch), 0o644); err != nil {
+		if err := os.WriteFile(diffPath, []byte(opts.DiffPatch), 0o600); err != nil {
 			return fmt.Errorf("write diff.patch: %w", err)
 		}
 	}

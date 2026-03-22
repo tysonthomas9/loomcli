@@ -370,7 +370,7 @@ type CompactArgs struct {
 	DryRun    bool   `json:"dry_run"`
 	Force     bool   `json:"force"`
 	All       bool   `json:"all"`
-	APIKey    string `json:"api_key,omitempty"` //nolint:gosec // G117 — must serialize for RPC wire protocol
+	APIKey    string `json:"api_key,omitempty"` //nolint:gosec // G117 — real external LLM API key; must serialize for local Unix socket IPC. Revisit if transport changes.
 	Workers   int    `json:"workers,omitempty"`
 	BatchSize int    `json:"batch_size,omitempty"`
 }

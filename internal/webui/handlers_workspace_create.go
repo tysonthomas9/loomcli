@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -60,6 +61,9 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) (int, string) {
 			if !cloneURLPattern.MatchString(u) {
 				return http.StatusBadRequest, fmt.Sprintf("clone URL must start with https:// or git@: %s", u)
 			}
+			if err := validateCloneURL(u); err != nil {
+				return http.StatusBadRequest, err.Error()
+			}
 		}
 	case "template":
 		return http.StatusNotImplemented, "template workspace type is not yet supported"
@@ -70,6 +74,22 @@ func validateWorkspaceCreateRequest(req *WorkspaceCreateRequest) (int, string) {
 	}
 
 	return 0, ""
+}
+
+// validateCloneURL rejects clone URLs that could inject git flags or contain
+// control characters. The prefix check (https:// or git@) is done separately.
+func validateCloneURL(u string) error {
+	if strings.ContainsAny(u, "\x00\n\r") {
+		return fmt.Errorf("clone URL contains control characters: %s", u)
+	}
+	// After the scheme, check for path segments starting with "-" which git
+	// may interpret as flags (e.g. --upload-pack, --config).
+	for _, seg := range strings.Split(u, "/") {
+		if strings.HasPrefix(seg, "-") {
+			return fmt.Errorf("clone URL contains suspicious path segment %q: %s", seg, u)
+		}
+	}
+	return nil
 }
 
 // handleWorkspaceCreate returns a handler that creates a new workspace.

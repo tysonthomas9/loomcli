@@ -138,41 +138,62 @@ func AgentEntryFromEnv() AgentEntry {
 
 ```go
 type ServerConfig struct {
-    Port          int
-    LoomServerURL string        // upstream loom server for proxy
-    Pool          *pool.Pool    // beads connection pool
-    MultiPool     *pool.MultiPool
-    GitOps        GitOps
-    FileOps       FileOps
-    Logger        *slog.Logger
-    RedisAddr     string
-    EventsDir     string
-    AgentDir      string
-    DevMode       bool
+    Port                    int
+    BindAddress             string
+    SocketPath              string
+    PoolSize                int
+    CORSEnabled             bool
+    CORSOrigins             []string
+    ShutdownTimeout         time.Duration
+    MaxPortAttempts         int
+    TerminalCmd             string
+    MaxTerminalSessions     int
+    FleetEnabled            bool
+    FleetRedis              *fleet.RedisConfig
+    FleetJWTKey             []byte
+    FleetAPIKey             string
+    APIKey                  string
+    AuthEnabled             bool
+    HSTSEnabled             bool
+    LoomServerURL           string
+    DevMode                 bool
+    DevFrontendDir          string
+    GitOps                  GitOps
+    FileOps                 FileOps
+    WorkspaceConfigFn       func() (*WorkspaceData, error)
+    WorkspaceDeleteFn       func(name string) error
+    SetDefaultWorkspaceFn   func(name string) error
+    ClearDefaultWorkspaceFn func() error
+    WorkspaceCreateFn       WorkspaceCreateFn
+    BackendOps              BackendOps
+    ScrollbackMaxLines      int
+    SessionsStore           *sessions.Store  // file-based session audit trail
+    Logger                  *slog.Logger
 }
 ```
 
 ### Startup Sequence (`StartServer`)
 
-1. Initialize Redis client (if `RedisAddr` set)
+1. Initialize Redis client (if fleet Redis configured)
 2. Create `sessionhistory.Store`, `issuetabs.Store`, `tabmeta.Store`
 3. Create `SSEHub`, start `hub.Run()` goroutine
 4. Create `MultiWorkspaceSubscriber` (per-workspace mutation polling)
 5. Create `TerminalManager`
-6. Create metrics cache (30s TTL)
-7. Call `setupRoutes(mux, ...)` — registers all handlers
-8. Wrap mux with `AuthMiddleware` then `CORSMiddleware` then `RequestLogMiddleware`
-9. Start `http.Server` with graceful shutdown (30s timeout)
+6. Call `setupRoutes(mux, ...)` — registers all handlers
+7. Wrap mux with middleware stack (see below)
+8. Start `http.Server` with graceful shutdown (5s default timeout)
 
 ### Middleware Stack
 
 ```
-Request -> CORSMiddleware -> AuthMiddleware -> RequestLogMiddleware -> Router
+Request -> RequestLogMiddleware -> RateLimitMiddleware -> SecurityHeadersMiddleware -> AuthMiddleware -> CORSMiddleware -> Router
 ```
 
-- **CORSMiddleware**: allowlist-based origin check, preflight handling
+- **RequestLogMiddleware**: structured logging with method, path, status, duration
+- **RateLimitMiddleware**: per-IP rate limiting for client error and CSP report endpoints
+- **SecurityHeadersMiddleware**: HSTS, CSP, X-Content-Type-Options headers
 - **AuthMiddleware**: API key validation from `X-API-Key` header or `?api_key` param. SSE and static file routes exempt.
-- **RequestLogMiddleware**: structured logging with method, path, status, duration via `slog.Logger`
+- **CORSMiddleware**: allowlist-based origin check, preflight handling
 
 ---
 
@@ -188,7 +209,7 @@ Request -> CORSMiddleware -> AuthMiddleware -> RequestLogMiddleware -> Router
 | GET | `/api/issues/graph` | `handleGetGraphData` |
 | GET | `/api/issues/{id}` | `handleGetIssue` |
 | POST | `/api/issues` | `handleCreateIssue` |
-| PATCH | `/api/issues/{id}` | `handleUpdateIssue` |
+| PATCH | `/api/issues/{id}` | `handlePatchIssue` |
 | GET | `/api/issues/{id}/events` | `handleGetEvents` |
 | POST | `/api/issues/{id}/comments` | `handleAddComment` |
 | POST | `/api/issues/{id}/dependencies` | `handleAddDependency` |
@@ -209,16 +230,17 @@ Request -> CORSMiddleware -> AuthMiddleware -> RequestLogMiddleware -> Router
 
 | Method | Pattern | Handler |
 |--------|---------|---------|
-| GET | `/api/agents` | `handleListAgents` |
-| GET | `/api/agents/{name}/status` | `handleGetAgentStatus` |
 | GET | `/api/agents/{name}/git/status` | `handleGitStatus` |
 | POST | `/api/agents/{name}/git/push` | `handleGitPush` |
 | POST | `/api/agents/{name}/git/pull` | `handleGitPull` |
 | POST | `/api/agents/{name}/git/sync` | `handleGitSync` |
 | POST | `/api/agents/{name}/git/pr` | `handleGitPR` |
 | POST | `/api/agents/{name}/git/reset` | `handleGitReset` |
-| POST | `/api/agents/{name}/git/target-update` | `handleGitTargetUpdate` |
-| POST | `/api/agents/git/push-all` | `handleGitPushAll` |
+| PATCH | `/api/agents/{name}/git/target` | `handleGitTargetUpdate` |
+| POST | `/api/git/push-all` | `handleGitPushAll` |
+| GET | `/api/agents/{name}/terminal/token` | `handleAgentTerminalToken` |
+| GET | `/api/agents/{name}/terminal/ws` | `handleAgentTerminalWS` |
+| GET | `/api/agents/{name}/terminal/info` | `handleAgentTerminalInfo` |
 
 ### Diff Routes
 
@@ -244,7 +266,6 @@ Request -> CORSMiddleware -> AuthMiddleware -> RequestLogMiddleware -> Router
 | GET | `/api/tasks/{taskId}/sessions/{sessionId}` | `handleGetSession` |
 | GET | `/api/tasks/{taskId}/sessions/{sessionId}/transcript` | `handleGetSessionTranscript` |
 | GET | `/api/tasks/{taskId}/sessions/{sessionId}/diff` | `handleGetSessionDiff` |
-| POST | `/api/sessions/notify` | `handleNotifySessionChange` |
 
 ### Log Routes
 
@@ -263,7 +284,11 @@ Request -> CORSMiddleware -> AuthMiddleware -> RequestLogMiddleware -> Router
 | GET | `/api/metrics` | `handleMetrics` |
 | GET | `/api/backends` | `handleListBackends` |
 | GET | `/api/config/backend` | `handleGetBackendConfig` |
-| PATCH | `/api/config/backend` | `handleUpdateBackendConfig` |
+| PATCH | `/api/config/backend` | `handlePatchBackendConfig` |
+| GET | `/api/auth/token` | `handleAuthToken` |
+| GET | `/api/daemon/status` | `handleDaemonStatus` |
+| POST | `/api/client-errors` | client error reporting (rate-limited) |
+| POST | `/api/csp-report` | CSP violation reporting (rate-limited) |
 | GET | `/api/editors` | `handleListEditors` |
 | POST | `/api/editors/open` | `handleOpenEditor` |
 | GET/POST | `/api/loom/...` | `newLoomProxy(loomServerURL)` |
