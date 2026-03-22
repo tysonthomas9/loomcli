@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -260,22 +261,40 @@ func ValidateGlobalConfig(cfg *LoomConfig) *ValidationResult {
 	return r
 }
 
+type repoValidationInfo struct {
+	field string
+	repo  RepoConfig
+	git   *gitCheckoutIdentity
+}
+
 // validateWorkspaceRepos validates repos within a workspace for path existence,
 // group name format, and SourceRepoID uniqueness.
 func validateWorkspaceRepos(r *ValidationResult, wsField string, ws WorkspaceConfig) {
 	seenSourceRepoIDs := make(map[string]string) // sourceRepoID -> "repoName"
+	var repoInfos []repoValidationInfo
 	for i, repo := range ws.Repos {
 		repoField := fmt.Sprintf("%s.repos[%d]", wsField, i)
+		repoPath := repo.ResolveAbsPath(ws.Path)
 
 		// Repo path existence (warnings only)
 		if repo.Path != "" {
-			repoPath := repo.Path
-			if !filepath.IsAbs(repoPath) && ws.Path != "" {
-				repoPath = filepath.Join(ws.Path, repoPath)
-			}
 			if _, err := os.Stat(repoPath); err != nil {
 				r.addWarning(repoField+".path", fmt.Sprintf(
 					"%q does not exist", repo.Path))
+			} else {
+				info, err := inspectGitCheckout(repoPath)
+				if err != nil {
+					if !errors.Is(err, errNotGitCheckout) {
+						r.addWarning(repoField+".path", fmt.Sprintf(
+							"could not inspect git metadata for %q: %v", repo.Path, err))
+					}
+				} else {
+					repoInfos = append(repoInfos, repoValidationInfo{
+						field: repoField,
+						repo:  repo,
+						git:   info,
+					})
+				}
 			}
 		}
 
@@ -299,6 +318,60 @@ func validateWorkspaceRepos(r *ValidationResult, wsField string, ws WorkspaceCon
 			} else {
 				seenSourceRepoIDs[effectiveID] = repo.Name
 			}
+		}
+	}
+
+	validateWorkspaceGitTopology(r, ws, repoInfos)
+}
+
+func validateWorkspaceGitTopology(r *ValidationResult, ws WorkspaceConfig, repoInfos []repoValidationInfo) {
+	if len(repoInfos) == 0 {
+		return
+	}
+
+	var wsGit *gitCheckoutIdentity
+	if ws.Path != "" {
+		if info, err := inspectGitCheckout(ws.Path); err == nil {
+			wsGit = info
+		}
+	}
+
+	workspaceRootCovered := false
+	if wsGit != nil {
+		for _, repoInfo := range repoInfos {
+			if repoInfo.git.TopLevel == wsGit.TopLevel {
+				workspaceRootCovered = true
+				break
+			}
+		}
+	}
+
+	if wsGit != nil && !workspaceRootCovered {
+		for _, repoInfo := range repoInfos {
+			if repoInfo.git.CommonDir == wsGit.CommonDir && repoInfo.git.TopLevel != wsGit.TopLevel {
+				r.addError(repoInfo.field+".path", fmt.Sprintf(
+					"%q is another git worktree of the workspace repo at %q; workspace mode expects distinct repositories, not alternate branches/worktrees of the same repo",
+					repoInfo.repo.Path, ws.Path))
+			}
+		}
+	}
+
+	for i := 0; i < len(repoInfos); i++ {
+		for j := i + 1; j < len(repoInfos); j++ {
+			a := repoInfos[i]
+			b := repoInfos[j]
+			if a.git.CommonDir != b.git.CommonDir {
+				continue
+			}
+			if a.git.TopLevel == b.git.TopLevel {
+				r.addError(b.field+".path", fmt.Sprintf(
+					"%q resolves to the same git checkout as repo %q; each workspace repo must point to a distinct repository",
+					b.repo.Path, a.repo.Name))
+				continue
+			}
+			r.addError(b.field+".path", fmt.Sprintf(
+				"%q is another git worktree of repo %q; workspace mode expects distinct repositories, not alternate branches/worktrees of the same repo",
+				b.repo.Path, a.repo.Name))
 		}
 	}
 }

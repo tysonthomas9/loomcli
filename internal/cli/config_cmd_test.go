@@ -345,6 +345,44 @@ func TestConfigAddRepoMultiple(t *testing.T) {
 	}
 }
 
+func TestAddRepoToWorkspaceConfig_RejectsAlternateWorktree(t *testing.T) {
+	parentDir := t.TempDir()
+	workspaceRepo := filepath.Join(parentDir, "workspace")
+	createGitRepo(t, workspaceRepo)
+
+	worktreePath := filepath.Join(parentDir, "workspace-v2")
+	if _, err := RunGitCommand(workspaceRepo, "worktree", "add", worktreePath, "-b", "v2"); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	cfg := &LoomConfig{
+		DefaultWorkspace: "ws",
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: workspaceRepo,
+				Repos: []RepoConfig{
+					{Name: "main", Path: workspaceRepo},
+				},
+			},
+		},
+	}
+
+	err := addRepoToWorkspaceConfig(cfg, "ws", RepoConfig{
+		Name: "v2",
+		Path: worktreePath,
+	})
+	if err == nil {
+		t.Fatal("expected alternate worktree add to fail")
+	}
+	if !strings.Contains(err.Error(), "another git worktree of repo \"main\"") {
+		t.Fatalf("expected worktree validation error, got: %v", err)
+	}
+
+	if got := len(cfg.Workspaces["ws"].Repos); got != 1 {
+		t.Fatalf("expected repo list to remain unchanged, got %d repos", got)
+	}
+}
+
 func TestConfigAddRepoDuplicate(t *testing.T) {
 	// Since runConfigAddRepo calls os.Exit(1) on duplicate, we test the logic directly.
 	dir := t.TempDir()

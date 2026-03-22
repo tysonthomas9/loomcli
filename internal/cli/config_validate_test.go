@@ -825,6 +825,83 @@ func TestValidateGlobalConfig_SourceRepoIDUniqueAcrossWorkspaces(t *testing.T) {
 	}
 }
 
+func TestValidateGlobalConfig_RejectsAlternateWorktreeOfWorkspaceRepo(t *testing.T) {
+	parentDir := t.TempDir()
+	workspaceRepo := filepath.Join(parentDir, "workspace")
+	createGitRepo(t, workspaceRepo)
+
+	worktreePath := filepath.Join(parentDir, "workspace-v2")
+	if _, err := RunGitCommand(workspaceRepo, "worktree", "add", worktreePath, "-b", "v2"); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: workspaceRepo,
+				Repos: []RepoConfig{
+					{Name: "v2", Path: worktreePath},
+				},
+			},
+		},
+	}
+
+	r := ValidateGlobalConfig(cfg)
+	if !r.HasErrors() {
+		t.Fatal("expected error for alternate worktree registered as workspace repo")
+	}
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Field == "workspaces.ws.repos[0].path" &&
+			strings.Contains(issue.Message, "another git worktree of the workspace repo") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected workspace worktree error, got: %s", r.FormatIssues())
+	}
+}
+
+func TestValidateGlobalConfig_RejectsAlternateWorktreeOfExistingRepo(t *testing.T) {
+	parentDir := t.TempDir()
+	workspaceRepo := filepath.Join(parentDir, "workspace")
+	createGitRepo(t, workspaceRepo)
+
+	worktreePath := filepath.Join(parentDir, "workspace-v2")
+	if _, err := RunGitCommand(workspaceRepo, "worktree", "add", worktreePath, "-b", "v2"); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"ws": {
+				Path: workspaceRepo,
+				Repos: []RepoConfig{
+					{Name: "main", Path: workspaceRepo},
+					{Name: "v2", Path: worktreePath},
+				},
+			},
+		},
+	}
+
+	r := ValidateGlobalConfig(cfg)
+	if !r.HasErrors() {
+		t.Fatal("expected error for alternate worktree registered as second repo")
+	}
+
+	found := false
+	for _, issue := range r.Issues {
+		if issue.Field == "workspaces.ws.repos[1].path" &&
+			strings.Contains(issue.Message, "another git worktree of repo \"main\"") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected repo worktree collision error, got: %s", r.FormatIssues())
+	}
+}
+
 func TestValidateProjectConfig_AgentReposValid(t *testing.T) {
 	dc := &DaemonConfig{
 		Roles: make(map[string]RoleConfig),

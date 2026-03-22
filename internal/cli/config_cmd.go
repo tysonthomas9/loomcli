@@ -173,8 +173,7 @@ func runConfigAddRepo(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	ws, ok := cfg.Workspaces[wsName]
-	if !ok {
+	if _, ok := cfg.Workspaces[wsName]; !ok {
 		available := make([]string, 0, len(cfg.Workspaces))
 		for name := range cfg.Workspaces {
 			available = append(available, name)
@@ -184,25 +183,15 @@ func runConfigAddRepo(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	for _, r := range ws.Repos {
-		if r.Name == repoName {
-			fmt.Fprintf(os.Stderr, "Repo %q already exists in workspace %q. Remove it first or use a different name.\n", repoName, wsName)
-			os.Exit(1)
-		}
-	}
-
-	if err := ValidateRemoteName(configAddRepoRemote); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	ws.Repos = append(ws.Repos, RepoConfig{
+	if err := addRepoToWorkspaceConfig(cfg, wsName, RepoConfig{
 		Name:          repoName,
 		Path:          configAddRepoPath,
 		DefaultBranch: configAddRepoBranch,
 		Remote:        configAddRepoRemote,
-	})
-	cfg.Workspaces[wsName] = ws
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	if err := SaveConfig(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -210,6 +199,44 @@ func runConfigAddRepo(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Printf("Added repo %q to workspace %q.\n", repoName, wsName)
+}
+
+func addRepoToWorkspaceConfig(cfg *LoomConfig, wsName string, repo RepoConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+
+	ws, ok := cfg.Workspaces[wsName]
+	if !ok {
+		return fmt.Errorf("workspace %q not found", wsName)
+	}
+
+	for _, existing := range ws.Repos {
+		if existing.Name == repo.Name {
+			return fmt.Errorf("repo %q already exists in workspace %q. Remove it first or use a different name", repo.Name, wsName)
+		}
+	}
+
+	if err := ValidateRemoteName(repo.Remote); err != nil {
+		return err
+	}
+
+	candidate := *cfg
+	candidate.Workspaces = make(map[string]WorkspaceConfig, len(cfg.Workspaces))
+	for name, workspace := range cfg.Workspaces {
+		candidate.Workspaces[name] = workspace
+	}
+
+	wsCopy := candidate.Workspaces[wsName]
+	wsCopy.Repos = append(append([]RepoConfig(nil), ws.Repos...), repo)
+	candidate.Workspaces[wsName] = wsCopy
+
+	if vr := ValidateGlobalConfig(&candidate); vr.HasErrors() {
+		return fmt.Errorf("%s", strings.TrimSpace(vr.FormatIssues()))
+	}
+
+	cfg.Workspaces[wsName] = wsCopy
+	return nil
 }
 
 func runConfigMigrate(cmd *cobra.Command, args []string) {

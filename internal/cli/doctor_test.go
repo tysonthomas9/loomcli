@@ -298,6 +298,38 @@ func TestCheckGlobalConfig(t *testing.T) {
 			t.Errorf("did not expect fail for parseable config: %s", result.Summary)
 		}
 	})
+
+	t.Run("alternate worktree config fails validation", func(t *testing.T) {
+		parentDir := t.TempDir()
+		workspaceRepo := filepath.Join(parentDir, "workspace")
+		createGitRepo(t, workspaceRepo)
+
+		worktreePath := filepath.Join(parentDir, "workspace-v2")
+		if _, err := RunGitCommand(workspaceRepo, "worktree", "add", worktreePath, "-b", "v2"); err != nil {
+			t.Fatalf("git worktree add: %v", err)
+		}
+
+		setupWorkspaceConfig(t, &LoomConfig{
+			DefaultWorkspace: "ws",
+			Workspaces: map[string]WorkspaceConfig{
+				"ws": {
+					Path: workspaceRepo,
+					Repos: []RepoConfig{
+						{Name: "main", Path: workspaceRepo},
+						{Name: "v2", Path: worktreePath},
+					},
+				},
+			},
+		})
+
+		result := checkGlobalConfig()
+		if result.Status != StatusFail {
+			t.Fatalf("expected fail, got %v: %s", result.Status, result.Summary)
+		}
+		if !strings.Contains(result.Detail, "another git worktree of repo \"main\"") {
+			t.Fatalf("expected worktree validation detail, got: %s", result.Detail)
+		}
+	})
 }
 
 func TestCheckStaleLocks(t *testing.T) {
