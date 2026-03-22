@@ -132,7 +132,7 @@ func AgentEntryFromEnv() AgentEntry {
 
 ## 3. Web UI Server Architecture
 
-**File:** `internal/webui/server.go`
+**File:** `internal/webui/server_config.go`
 
 ### ServerConfig
 
@@ -669,7 +669,9 @@ All handlers use:
 
 | File | Responsibility |
 |------|---------------|
-| `internal/webui/server.go` | `ServerConfig`, `StartServer`, startup/shutdown |
+| `internal/webui/server_config.go` | `ServerConfig`, constants, validation |
+| `internal/webui/server.go` | `StartServer`, startup/shutdown |
+| `internal/webui/server_workspace.go` | `WorkspaceData`, `WorkspaceSummary`, workspace route registration |
 | `internal/webui/routes.go` | `setupRoutes`, all route registration |
 | `internal/webui/sse.go` | `SSEHub`, `SSEClient`, `MutationPayload`, `handleSSE` |
 | `internal/webui/auth.go` | `AuthMiddleware`, API key management |
@@ -705,4 +707,21 @@ All handlers use:
 |------|---------------|
 | `internal/cli/serve_observability.go` | Metrics cache, event replay |
 | `internal/webui/handlers_logs.go` | Agent/task log endpoints |
-| `internal/webui/log_streamer.go` | Log tail utilities |
+| `internal/webui/log_streamer.go` | Log streaming/tail utilities (`StreamLogFile`, `ReadLogLastN`) |
+| `internal/webui/log_streamer_paths.go` | Log path resolution (`getLogDir`, `getAgentLogPath`, `getTaskLogPath`, `validatePathWithinDir`) |
+
+### Fleet Handlers
+
+| File | Responsibility |
+|------|---------------|
+| `internal/webui/fleet_handlers.go` | `FleetRegisterConfig`, base setup/routing types |
+| `internal/webui/fleet_handlers_claim.go` | `FleetClaimRequest`, claim handler |
+| `internal/webui/fleet_handlers_done.go` | Done handler |
+| `internal/webui/fleet_handlers_heartbeat.go` | Heartbeat handler |
+
+### Issue Write Handlers
+
+| File | Responsibility |
+|------|---------------|
+| `internal/webui/handlers_issues_write.go` | `issueUpdater` interface, update/patch handler |
+| `internal/webui/handlers_issues_write_ops.go` | `issueCloser`/`issueCreator`/`issueDeleter` interfaces, close/create/delete handlers |
