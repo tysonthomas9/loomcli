@@ -184,4 +184,3 @@ func printTmuxSummary(taskCount int) {
 	fmt.Printf("AUTO MODE COMPLETE - %d task(s) processed\n", taskCount)
 	fmt.Println("═══════════════════════════════════════════════════════════════")
 }
-

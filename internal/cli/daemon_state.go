@@ -50,7 +50,7 @@ func validateDaemonPaths(projectDir, pidFilePath, logDir string) {
 
 // isLoomDaemonRunning checks if a loom daemon is running by reading PID file and checking process
 func isLoomDaemonRunning(pidFilePath string) (int, bool) {
-	data, err := os.ReadFile(pidFilePath)
+	data, err := os.ReadFile(pidFilePath) //nolint:gosec // pidFilePath constructed from known .loom directory
 	if err != nil {
 		return 0, false
 	}
@@ -85,7 +85,7 @@ func writePIDFile(path string, pid int) error {
 
 // readStateFile reads the daemon-agents.json state file
 func readStateFile(path string) (*DaemonState, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path constructed from known .loom directory
 	if err != nil {
 		return nil, err
 	}

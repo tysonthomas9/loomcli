@@ -176,4 +176,3 @@ func handlePatchIssueWithPool(pool patchConnectionGetter) http.HandlerFunc {
 		})
 	}
 }
-

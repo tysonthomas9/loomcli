@@ -223,4 +223,3 @@ type GraphDependency struct {
 type GetGraphDataResponse struct {
 	Issues []GraphIssueSummary `json:"issues"`
 }
-

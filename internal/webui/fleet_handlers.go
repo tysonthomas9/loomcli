@@ -172,7 +172,6 @@ func handleFleetRegisterWithStore(store workerRegistrar, tokenCfg *TokenConfig, 
 	}
 }
 
-
 // extractClientIP returns the client IP address from the request.
 // Uses RemoteAddr only — X-Forwarded-For is not trusted because clients
 // can spoof it to bypass rate limiting. If a reverse proxy is needed,

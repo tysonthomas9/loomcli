@@ -496,4 +496,3 @@ func (s *LogStreamer) sendTruncatedEvent(w http.ResponseWriter, flusher http.Flu
 func (s *LogStreamer) Close() error {
 	return s.watcher.Close()
 }
-

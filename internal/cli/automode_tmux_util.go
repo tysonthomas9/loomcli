@@ -57,7 +57,7 @@ func listenForAttachKey(attachChan chan struct{}, shutdown chan struct{}) {
 
 // tmuxSessionExists checks if a tmux session with the given name exists
 func tmuxSessionExists(name string) bool {
-	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
+	return exec.Command("tmux", "has-session", "-t", name).Run() == nil //nolint:gosec // constant tmux subcommands
 }
 
 // PaneState holds detailed information about a tmux pane
@@ -71,7 +71,7 @@ type PaneState struct {
 // getPaneState returns detailed state information about the session's pane
 func getPaneState(sessionName string) (*PaneState, error) {
 	format := "#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_pid}"
-	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", format).Output()
+	out, err := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", format).Output() //nolint:gosec // constant tmux subcommands + validated session name
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pane state: %w", err)
 	}
@@ -115,11 +115,11 @@ func cleanupTmuxSession(name string) {
 	}
 
 	// Send Ctrl+C for graceful shutdown (allows Claude to save state)
-	_ = exec.Command("tmux", "send-keys", "-t", name, "C-c").Run()
+	_ = exec.Command("tmux", "send-keys", "-t", name, "C-c").Run() //nolint:gosec // constant tmux subcommands
 	time.Sleep(100 * time.Millisecond)
 
 	// Kill session
-	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
+	_ = exec.Command("tmux", "kill-session", "-t", name).Run() //nolint:gosec // constant tmux subcommands
 }
 
 // shellQuote safely quotes a string for use in shell commands

@@ -142,14 +142,14 @@ linters:
           - funlen
           - cyclop
           - gocognit
-      # automode_tmux.go — same patterns as automode.go
-      - path: "internal/cli/automode_tmux\\.go"
+      # automode_tmux*.go — same patterns as automode.go
+      - path: "internal/cli/automode_tmux(_session)?\\.go"
         linters:
           - funlen
           - cyclop
           - gocognit
-      # monitor.go — tracked by loomcli-6yk.8
-      - path: "internal/cli/monitor\\.go"
+      # monitor*.go — tracked by loomcli-6yk.8
+      - path: "internal/cli/monitor(_collect)?\\.go"
         linters:
           - funlen
           - cyclop
@@ -174,18 +174,18 @@ linters:
         linters: [funlen, cyclop, gocognit]
       - path: "internal/cli/workspace_cmd\\.go"
         linters: [funlen, cyclop, gocognit]
-      - path: "internal/cli/worktree\\.go"
+      - path: "internal/cli/worktree(_branch)?\\.go"
         linters: [cyclop, gocognit]
       - path: "internal/webui/cors\\.go"
         linters: [gocognit]
-      - path: "internal/webui/fleet_handlers\\.go"
+      - path: "internal/webui/fleet_handlers(_done|_claim)?\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/handlers_comments\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/handlers_logs\\.go"
         linters: [funlen, gocognit]
-      - path: "internal/webui/handlers_terminal\\.go"
-        linters: [funlen, gocognit]
+      - path: "internal/webui/handlers_terminal(_ws)?\\.go"
+        linters: [funlen, gocognit, staticcheck]
       - path: "internal/webui/handlers_agent_terminal\\.go"
         linters: [funlen]
       - path: "internal/cli/monitor_display\\.go"

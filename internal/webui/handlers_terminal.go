@@ -228,4 +228,3 @@ func handleTerminalSessionStatus(manager *TerminalManager, auth *terminalAuth) h
 		respondJSON(w, http.StatusOK, result)
 	}
 }
-

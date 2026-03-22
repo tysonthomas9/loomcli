@@ -450,4 +450,3 @@ func (m *TerminalManager) Detach(connID string) error {
 
 	return session.Close()
 }
-

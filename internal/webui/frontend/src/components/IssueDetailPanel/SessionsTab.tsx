@@ -85,19 +85,19 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
         )}
       </div>
       <div className={styles.container}>
-      <SessionTimeline
-        sessions={sessions}
-        selectedId={selectedSessionId}
-        onSelect={setSelectedSessionId}
-        isLoading={isLoading}
-      />
-      {selectedSession ? (
-        <SessionDetailView taskId={taskId} session={selectedSession} />
-      ) : (
-        <div className={styles.detailEmpty}>
-          Select a session to view details
-        </div>
-      )}
+        <SessionTimeline
+          sessions={sessions}
+          selectedId={selectedSessionId}
+          onSelect={setSelectedSessionId}
+          isLoading={isLoading}
+        />
+        {selectedSession ? (
+          <SessionDetailView taskId={taskId} session={selectedSession} />
+        ) : (
+          <div className={styles.detailEmpty}>
+            Select a session to view details
+          </div>
+        )}
       </div>
     </div>
   );

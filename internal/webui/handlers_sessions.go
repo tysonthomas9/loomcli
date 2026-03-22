@@ -116,11 +116,11 @@ func handleListTaskSessions(sessStore *sessions.Store) http.HandlerFunc {
 				SessionRecord: rec,
 				IsActive:      rec.Status == sessions.StatusRunning,
 			}
-			// Check if transcript and diff files exist.
-			if _, err := sessStore.LoadTranscript(rec.SessionID); err == nil {
+			// Check if transcript and diff files exist and have content.
+			if entries, err := sessStore.LoadTranscript(rec.SessionID); err == nil && len(entries) > 0 {
 				item.HasTranscript = true
 			}
-			if _, err := sessStore.ReadDiff(rec.SessionID); err == nil {
+			if diff, err := sessStore.ReadDiff(rec.SessionID); err == nil && diff != "" {
 				item.HasDiff = true
 			}
 			items = append(items, item)
@@ -183,6 +183,15 @@ func handleGetSession(sessStore *sessions.Store) http.HandlerFunc {
 			return
 		}
 
+		// Enforce task ownership — session must belong to the requested task.
+		if meta.TaskID != taskID {
+			respondJSON(w, http.StatusNotFound, SessionDetailResponse{
+				Success: false,
+				Error:   "session not found",
+			})
+			return
+		}
+
 		respondJSON(w, http.StatusOK, SessionDetailResponse{
 			Success: true,
 			Data: &SessionDetailData{
@@ -223,9 +232,34 @@ func handleGetSessionTranscript(sessStore *sessions.Store) http.HandlerFunc {
 			return
 		}
 
-		entries, err := sessStore.LoadTranscript(sessionID)
+		// Enforce task ownership before returning transcript.
+		meta, err := sessStore.LoadMetadata(sessionID)
 		if err != nil {
-			log.Printf("Failed to load transcript for session %s: %v", sessionID, err)
+			if errors.Is(err, os.ErrNotExist) {
+				respondJSON(w, http.StatusNotFound, TranscriptResponse{
+					Success: false,
+					Error:   "session not found",
+				})
+				return
+			}
+			log.Printf("Failed to load session metadata %s: %v", sessionID, err)
+			respondJSON(w, http.StatusInternalServerError, TranscriptResponse{
+				Success: false,
+				Error:   "failed to load session",
+			})
+			return
+		}
+		if meta.TaskID != taskID {
+			respondJSON(w, http.StatusNotFound, TranscriptResponse{
+				Success: false,
+				Error:   "session not found",
+			})
+			return
+		}
+
+		entries, loadErr := sessStore.LoadTranscript(sessionID)
+		if loadErr != nil {
+			log.Printf("Failed to load transcript for session %s: %v", sessionID, loadErr)
 			respondJSON(w, http.StatusInternalServerError, TranscriptResponse{
 				Success: false,
 				Error:   "failed to load transcript",
@@ -325,16 +359,41 @@ func handleGetSessionDiff(sessStore *sessions.Store) http.HandlerFunc {
 			return
 		}
 
-		diff, err := sessStore.ReadDiff(sessionID)
+		// Enforce task ownership before returning diff.
+		meta, err := sessStore.LoadMetadata(sessionID)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
+				respondJSON(w, http.StatusNotFound, map[string]interface{}{
+					"success": false,
+					"error":   "session not found",
+				})
+				return
+			}
+			log.Printf("Failed to load session metadata %s: %v", sessionID, err)
+			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "failed to load session",
+			})
+			return
+		}
+		if meta.TaskID != taskID {
+			respondJSON(w, http.StatusNotFound, map[string]interface{}{
+				"success": false,
+				"error":   "session not found",
+			})
+			return
+		}
+
+		diff, diffErr := sessStore.ReadDiff(sessionID)
+		if diffErr != nil {
+			if errors.Is(diffErr, os.ErrNotExist) {
 				respondJSON(w, http.StatusNotFound, map[string]interface{}{
 					"success": false,
 					"error":   "diff not found",
 				})
 				return
 			}
-			log.Printf("Failed to read diff for session %s: %v", sessionID, err)
+			log.Printf("Failed to read diff for session %s: %v", sessionID, diffErr)
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"success": false,
 				"error":   "failed to read diff",

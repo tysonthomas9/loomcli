@@ -19,6 +19,9 @@ type Store struct {
 	dir string // absolute path to <beadsDir>/sessions/
 }
 
+// Dir returns the absolute path to the sessions directory.
+func (s *Store) Dir() string { return s.dir }
+
 // NewStore creates a Store rooted at beadsDir/sessions/.
 // It creates the sessions/ directory if it does not exist.
 func NewStore(beadsDir string) (*Store, error) {

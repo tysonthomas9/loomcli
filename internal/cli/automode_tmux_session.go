@@ -11,7 +11,7 @@ import (
 // startTmuxSession creates a detached tmux session running loom --daemon-mode
 func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) error {
 	// Kill any existing session with this name (error expected if session doesn't exist)
-	_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:gosec // args are constant tmux subcommands + validated session name
 
 	// Build the loom command to run inside tmux
 	// TERM=dumb disables alternate screen buffer for Claude, enabling output streaming via capture-pane.
@@ -40,12 +40,12 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	}
 
 	args = append(args, loomCmd)
-	if err := exec.Command("tmux", args...).Run(); err != nil {
+	if err := exec.Command("tmux", args...).Run(); err != nil { //nolint:gosec // args built from controlled tmux flags + shell-quoted values
 		return fmt.Errorf("tmux new-session failed: %w", err)
 	}
 
 	// Disable tmux focus-events to prevent ^[[I and ^[[O in output
-	_ = exec.Command("tmux", "set", "-t", sessionName, "focus-events", "off").Run()
+	_ = exec.Command("tmux", "set", "-t", sessionName, "focus-events", "off").Run() //nolint:gosec // constant tmux subcommands + validated session name
 
 	// Setup logging via loom log-router for intelligent log routing
 	// log-router writes to agent log always, and task log when a task is claimed
@@ -112,7 +112,7 @@ func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shut
 			fmt.Println("─── ATTACHED (Ctrl+B D to detach) ───")
 			fmt.Println("")
 
-			cmd := exec.Command("tmux", "attach", "-t", sessionName)
+			cmd := exec.Command("tmux", "attach", "-t", sessionName) //nolint:gosec // constant tmux subcommands + validated session name
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
@@ -199,7 +199,7 @@ func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shut
 
 			// Stream new output from log file (not capture-pane)
 			// pipe-pane captures raw byte stream without cursor positioning artifacts
-			file, err := os.Open(logFile)
+			file, err := os.Open(logFile) //nolint:gosec // logFile from resolveLogFile, rooted under ~/.loom/logs/
 			if err != nil {
 				if poller != nil {
 					poller.hadNoActivity()
@@ -256,7 +256,7 @@ func streamUntilExit(sessionName, logFile, worktreePath string, attachChan, shut
 
 // streamRemainingLogContent reads and outputs any remaining content from the log file
 func streamRemainingLogContent(logFile string, lastOffset *int64) {
-	file, err := os.Open(logFile)
+	file, err := os.Open(logFile) //nolint:gosec // logFile is from resolveLogFile, rooted under ~/.loom/logs/
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[auto] Warning: failed to read final output: %v\n", err)
 		return

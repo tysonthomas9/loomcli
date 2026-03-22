@@ -243,8 +243,42 @@ func handleCloseIssueWithPool(pool closeConnectionGetter) http.HandlerFunc {
 	}
 }
 
+// issueDeleter is an internal interface for testing issue delete operations.
+type issueDeleter interface {
+	Delete(args *rpc.DeleteArgs) (*rpc.Response, error)
+}
+
+// deleteConnectionGetter is an internal interface for testing delete handler pool operations.
+type deleteConnectionGetter interface {
+	Get(ctx context.Context) (issueDeleter, error)
+	Put(client issueDeleter)
+}
+
+// deletePoolAdapter wraps daemon.Pool to implement deleteConnectionGetter.
+type deletePoolAdapter struct {
+	pool daemon.Pool
+}
+
+func (p *deletePoolAdapter) Get(ctx context.Context) (issueDeleter, error) {
+	return p.pool.Get(ctx)
+}
+
+func (p *deletePoolAdapter) Put(client issueDeleter) {
+	if c, ok := client.(*rpc.Client); ok {
+		p.pool.Put(c)
+	}
+}
+
 // handleDeleteIssue returns a handler that permanently deletes an issue by ID.
 func handleDeleteIssue(pool daemon.Pool) http.HandlerFunc {
+	if pool == nil {
+		return handleDeleteIssueWithPool(nil)
+	}
+	return handleDeleteIssueWithPool(&deletePoolAdapter{pool: pool})
+}
+
+// handleDeleteIssueWithPool is the internal implementation that accepts an interface for testing.
+func handleDeleteIssueWithPool(pool deleteConnectionGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
 		if issueID == "" {
