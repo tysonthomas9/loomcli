@@ -3,38 +3,26 @@ package cli
 import (
 	"fmt"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 )
 
-// seedAssignment directly populates the EpicAssigner's assignment map for test setup.
-func seedAssignment(ea *EpicAssigner, worktree, epicID string) {
-	ea.mu.Lock()
-	ea.assignments[worktree] = epicID
-	ea.mu.Unlock()
-}
-
 func TestHandleEpicTransition_NotAssignedToEpic(t *testing.T) {
-	// When not assigned to any epic, handleEpicTransition is a no-op.
-	ea := NewEpicAssigner()
-	d := &Daemon{epicAssigner: ea}
+	d := &Daemon{}
 	ap := &AgentProcess{
 		entry:        AgentEntry{Worktree: "falcon"},
 		worktreePath: "/repo/worktrees/falcon",
 	}
 
-	err := d.handleEpicTransition(ap)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	d.handleEpicTransition(ap)
 }
 
 func TestHandleEpicTransition_ConfigDriven_StillHasTasks(t *testing.T) {
-	// When the configured epic still has ready tasks, no transition occurs.
 	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
 		return id == "epic-1", nil
 	})
 
-	ea := NewEpicAssigner()
-	d := &Daemon{epicAssigner: ea}
+	d := &Daemon{}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
@@ -42,12 +30,8 @@ func TestHandleEpicTransition_ConfigDriven_StillHasTasks(t *testing.T) {
 		restartCount:   2,
 	}
 
-	err := d.handleEpicTransition(ap)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	d.handleEpicTransition(ap)
 
-	// Verify restart count was NOT reset (no transition)
 	ap.mu.Lock()
 	rc := ap.restartCount
 	noWork := ap.lastNoWork
@@ -61,14 +45,11 @@ func TestHandleEpicTransition_ConfigDriven_StillHasTasks(t *testing.T) {
 }
 
 func TestHandleEpicTransition_ConfigDriven_Exhausted(t *testing.T) {
-	// When the configured epic is exhausted, agent idles (sets lastNoWork).
-	// No automatic reassignment — parent is config-driven.
 	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
 		return false, nil
 	})
 
-	ea := NewEpicAssigner()
-	d := &Daemon{epicAssigner: ea}
+	d := &Daemon{config: &DaemonConfig{}}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
@@ -76,33 +57,72 @@ func TestHandleEpicTransition_ConfigDriven_Exhausted(t *testing.T) {
 		restartCount:   3,
 	}
 
-	err := d.handleEpicTransition(ap)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	d.handleEpicTransition(ap)
 
-	// Verify lastNoWork is set so daemon applies NoWork backoff
 	ap.mu.Lock()
 	noWork := ap.lastNoWork
 	eid := ap.assignedEpicID
+	lastErr := ap.lastError
 	ap.mu.Unlock()
+
 	if !noWork {
 		t.Error("expected lastNoWork=true when epic is exhausted")
 	}
-	// Epic assignment stays — it's config-driven, not auto-cleared
 	if eid != "epic-1" {
 		t.Errorf("expected assignedEpicID still epic-1, got %q", eid)
+	}
+	if lastErr == nil {
+		t.Fatal("expected lastError to be set on epic exhaustion")
+	}
+	if lastErr.Class != agenterr.NoWork {
+		t.Errorf("expected lastError.Class=NoWork, got %v", lastErr.Class)
+	}
+}
+
+func TestHandleEpicTransition_ConfigDriven_Exhausted_DoesNotMaskCrashError(t *testing.T) {
+	// When the agent crashed (lastError is a real error) and the epic is also
+	// exhausted, the crash error should NOT be overwritten with NoWork.
+	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
+		return false, nil
+	})
+
+	crashErr := &agenterr.AgentError{
+		Class:   agenterr.Unknown,
+		Message: "segfault",
+		Backend: "claude",
+	}
+
+	d := &Daemon{config: &DaemonConfig{}}
+	ap := &AgentProcess{
+		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
+		worktreePath:   "/repo/worktrees/falcon",
+		assignedEpicID: "epic-1",
+		lastError:      crashErr,
+	}
+
+	d.handleEpicTransition(ap)
+
+	ap.mu.Lock()
+	lastErr := ap.lastError
+	noWork := ap.lastNoWork
+	ap.mu.Unlock()
+
+	// lastNoWork should be set (epic IS exhausted)
+	if !noWork {
+		t.Error("expected lastNoWork=true")
+	}
+	// But lastError should still be the crash error, not overwritten
+	if lastErr != crashErr {
+		t.Errorf("expected lastError to remain the crash error, got %v", lastErr)
 	}
 }
 
 func TestHandleEpicTransition_ConfigDriven_BdReadyFails(t *testing.T) {
-	// When bd ready fails, stay on current epic (graceful handling).
 	stubEpicHasReadyTasks(t, func(id string) (bool, error) {
 		return false, fmt.Errorf("bd command failed")
 	})
 
-	ea := NewEpicAssigner()
-	d := &Daemon{epicAssigner: ea}
+	d := &Daemon{}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon", Parent: "epic-1"},
 		worktreePath:   "/repo/worktrees/falcon",
@@ -110,12 +130,8 @@ func TestHandleEpicTransition_ConfigDriven_BdReadyFails(t *testing.T) {
 		restartCount:   1,
 	}
 
-	err := d.handleEpicTransition(ap)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	d.handleEpicTransition(ap)
 
-	// Verify restart count was NOT reset
 	ap.mu.Lock()
 	rc := ap.restartCount
 	ap.mu.Unlock()
@@ -125,20 +141,14 @@ func TestHandleEpicTransition_ConfigDriven_BdReadyFails(t *testing.T) {
 }
 
 func TestHandleEpicTransition_NoParentConfig_ClearsStaleAssignment(t *testing.T) {
-	// When entry.Parent is empty but assignedEpicID is set (unexpected state),
-	// handleEpicTransition clears the stale assignment and logs a warning.
-	ea := NewEpicAssigner()
-	d := &Daemon{epicAssigner: ea}
+	d := &Daemon{}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon"},
 		worktreePath:   "/repo/worktrees/falcon",
 		assignedEpicID: "epic-1",
 	}
 
-	err := d.handleEpicTransition(ap)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	d.handleEpicTransition(ap)
 
 	ap.mu.Lock()
 	eid := ap.assignedEpicID

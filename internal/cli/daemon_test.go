@@ -2132,9 +2132,9 @@ func TestDaemonStop_ClosesConcurrencyTracker(t *testing.T) {
 				},
 			},
 		},
-		agents:       []*AgentProcess{},
-		epicAssigner: NewEpicAssigner(),
-		concurrency:  ct,
+		agents: []*AgentProcess{},
+
+		concurrency: ct,
 	}
 
 	if err := d.Start(); err != nil {

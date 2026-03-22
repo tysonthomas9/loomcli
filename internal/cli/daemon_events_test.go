@@ -126,11 +126,10 @@ func TestHandleEpicTransition_EmitsEpicExhausted(t *testing.T) {
 	})
 
 	spy := &SpyEmitter{}
-	ea := NewEpicAssigner()
 
 	d := &Daemon{
-		epicAssigner: ea,
-		eventBus:     spy,
+		config:   &DaemonConfig{},
+		eventBus: spy,
 	}
 	ap := &AgentProcess{
 		entry:          AgentEntry{Worktree: "falcon", Role: "task", Parent: "epic-1"},
@@ -138,7 +137,7 @@ func TestHandleEpicTransition_EmitsEpicExhausted(t *testing.T) {
 		assignedEpicID: "epic-1",
 	}
 
-	_ = d.handleEpicTransition(ap)
+	d.handleEpicTransition(ap)
 
 	evts := spy.EventsByType(events.EpicExhausted)
 	if len(evts) != 1 {

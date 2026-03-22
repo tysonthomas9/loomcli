@@ -100,10 +100,9 @@ type Daemon struct {
 	shutdownOnce sync.Once      // protects shutdown channel from double-close
 	wg           sync.WaitGroup // tracks superviseAgent goroutines
 
-	epicAssigner *EpicAssigner       // manages epic-to-worktree assignments
-	concurrency  *ConcurrencyTracker // enforces per-role concurrency limits
-	eventBus     events.Emitter      // event emission for observability (nil-safe via NopBus default)
-	repos        []RepoConfig        // workspace repos for resolveAgentRepos; nil outside workspace mode
+	concurrency *ConcurrencyTracker // enforces per-role concurrency limits
+	eventBus    events.Emitter      // event emission for observability (nil-safe via NopBus default)
+	repos       []RepoConfig        // workspace repos for resolveAgentRepos; nil outside workspace mode
 
 	configHash  string       // SHA-256 hash of current running config for no-op detection
 	reconcileMu sync.RWMutex // serializes config writes; readers hold RLock when accessing d.config
@@ -164,12 +163,11 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 	}
 
 	d := &Daemon{
-		config:       config,
-		projectDir:   projectDir,
-		agents:       make([]*AgentProcess, 0, len(config.Agents)),
-		epicAssigner: NewEpicAssigner(),
-		concurrency:  NewConcurrencyTracker(config.Roles),
-		eventBus:     eventBus,
+		config:      config,
+		projectDir:  projectDir,
+		agents:      make([]*AgentProcess, 0, len(config.Agents)),
+		concurrency: NewConcurrencyTracker(config.Roles),
+		eventBus:    eventBus,
 	}
 
 	// Load workspace repos for source repo resolution (best-effort)

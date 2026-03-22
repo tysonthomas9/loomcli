@@ -686,8 +686,7 @@ func TestDaemonStartStop(t *testing.T) {
 					},
 				},
 			},
-			agents:       []*AgentProcess{},
-			epicAssigner: NewEpicAssigner(),
+			agents: []*AgentProcess{},
 		}
 
 		if err := d.Start(); err != nil {
@@ -720,8 +719,7 @@ func TestDaemonStartStop(t *testing.T) {
 					},
 				},
 			},
-			agents:       []*AgentProcess{},
-			epicAssigner: NewEpicAssigner(),
+			agents: []*AgentProcess{},
 		}
 
 		if err := d.Start(); err != nil {
@@ -747,8 +745,7 @@ func TestSuperviseAgent_ShutdownBeforeSpawn(t *testing.T) {
 				},
 			},
 		},
-		shutdown:     make(chan struct{}),
-		epicAssigner: NewEpicAssigner(),
+		shutdown: make(chan struct{}),
 	}
 
 	ap := &AgentProcess{
@@ -1408,9 +1405,8 @@ func TestSuperviseAgent_AcquiresAndReleasesOnShutdown(t *testing.T) {
 				"plan": {MaxConcurrency: &maxConc},
 			},
 		},
-		shutdown:     make(chan struct{}),
-		concurrency:  NewConcurrencyTracker(map[string]RoleConfig{"plan": {MaxConcurrency: &maxConc}}),
-		epicAssigner: NewEpicAssigner(),
+		shutdown:    make(chan struct{}),
+		concurrency: NewConcurrencyTracker(map[string]RoleConfig{"plan": {MaxConcurrency: &maxConc}}),
 	}
 
 	// Pre-acquire the only slot so the next Acquire will block
@@ -1467,9 +1463,8 @@ func TestSuperviseAgent_ReleasesOnBranchSetupFailure(t *testing.T) {
 				},
 			},
 		},
-		shutdown:     make(chan struct{}),
-		concurrency:  tracker,
-		epicAssigner: NewEpicAssigner(),
+		shutdown:    make(chan struct{}),
+		concurrency: tracker,
 	}
 
 	ap := &AgentProcess{

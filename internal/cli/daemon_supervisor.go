@@ -115,7 +115,6 @@ func (d *Daemon) Stop() {
 
 // superviseAgent is the main loop for a single agent (runs in goroutine).
 func (d *Daemon) superviseAgent(ap *AgentProcess) {
-	defer d.epicAssigner.ReleaseWorktree(ap.entry.Worktree)
 	slog.Info("starting agent supervisor", "worktree", ap.entry.Worktree, "role", ap.entry.Role)
 
 	for {
@@ -210,17 +209,11 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 			}
 		}
 
-		// 5.6. Release epic assignment so next iteration re-evaluates
-		d.epicAssigner.ReleaseWorktree(ap.entry.Worktree)
-
-		// 5.7. Release concurrency slot so waiting agents can proceed
+		// 5.6. Release concurrency slot so waiting agents can proceed
 		d.concurrency.Release(ap.entry.Role)
 
-		// 6. Epic exhaustion check and reassignment
-		if err := d.handleEpicTransition(ap); err != nil {
-			slog.Warn("epic transition failed", "worktree", ap.entry.Worktree, "err", err)
-			// Non-fatal: agent will respawn in current mode
-		}
+		// 6. Epic exhaustion check
+		d.handleEpicTransition(ap)
 
 		// 7. Check shutdown or per-agent stop after subprocess exit
 		select {
