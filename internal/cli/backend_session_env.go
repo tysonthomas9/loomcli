@@ -5,7 +5,7 @@ import "sync"
 // Thread-safe package-level state for active session env vars.
 // Set by the parent loom process before invoking an agent, cleared after.
 var (
-	sessionEnvMu  sync.RWMutex
+	sessionEnvMu    sync.RWMutex
 	sessionBeadsDir string
 	sessionID       string
 )

@@ -4,7 +4,7 @@ import { get, put, del, ApiError } from "./client";
 
 export interface IssueTab {
   id: string;
-  type: "details" | "logs" | "terminal";
+  type: "details" | "logs" | "terminal" | "sessions";
   label: string;
   session_name?: string;
   sort_order: number;

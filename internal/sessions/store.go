@@ -60,7 +60,7 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 			EpicID:     opts.EpicID,
 			AgentName:  opts.AgentName,
 			Backend:    opts.Backend,
-			Phase:      "", // set later by caller if needed
+			Phase:      opts.Phase,
 			StartedAt:  now,
 			Status:     StatusRunning,
 			AttemptNum: opts.AttemptNum,
@@ -70,6 +70,12 @@ func (s *Store) CreateSession(opts CreateOptions) (*Session, error) {
 	// Write metadata.json atomically (temp + rename).
 	if err := writeMetadataAtomic(sessDir, meta); err != nil {
 		return nil, fmt.Errorf("write metadata.json: %w", err)
+	}
+
+	// Write running record to index.jsonl so active sessions are queryable.
+	if err := s.appendIndex(meta.SessionRecord); err != nil {
+		// Non-fatal — session dir is created, just won't appear in queries until finalize.
+		fmt.Fprintf(os.Stderr, "sessions: warning: failed to write running index entry: %v\n", err)
 	}
 
 	return &Session{store: s, Meta: meta}, nil
@@ -109,8 +115,7 @@ func (s *Store) AppendTranscript(sessionID string, entry TranscriptEntry) error 
 	txPath := filepath.Join(sessDir, "transcript.jsonl")
 
 	// #nosec G304 — path constructed from trusted store directory
-	// #nosec G302 — transcript data is not sensitive
-	f, err := os.OpenFile(txPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(txPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open transcript file: %w", err)
 	}

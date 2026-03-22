@@ -343,10 +343,26 @@ When `isMultiRepo` is false or workspace data not loaded:
 | `/api/workspace/default` | DELETE | `handleClearDefaultWorkspace` | Clear default |
 | `/api/workspace/{name}/config/backend` | PATCH | `handleWorkspaceBackendPatch` | Per-workspace backend config |
 | `/api/workspaces` | GET | `handleListWorkspaces` | List all workspaces with pool stats |
+| `/api/workspaces/{ws}` | GET | `handleGetWorkspace` | Single workspace details |
+
+### Workspace-Scoped Routes
+
+Alternative URL-path-scoped routing alongside the `Workspace` header mechanism:
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/workspaces/{ws}/issues` | GET | List issues scoped to workspace |
+| `/api/workspaces/{ws}/issues/graph` | GET | Dependency graph scoped to workspace |
+| `/api/workspaces/{ws}/ready` | GET | Ready issues scoped to workspace |
+| `/api/workspaces/{ws}/stats` | GET | Stats scoped to workspace |
+| `/api/workspaces/{ws}/daemon/status` | GET | Daemon status for workspace |
+| `/api/workspaces/{ws}/config/backend` | GET | Backend config for workspace |
+
+These routes use `WorkspaceMiddleware` (extracts `{ws}` from path) instead of `OptionalWorkspaceMiddleware`.
 
 ### Workspace Header Routing
 
-`GET /api/workspace` reads the `Workspace` HTTP header to determine which workspace's repos/agents to return.
+`GET /api/workspace` reads the `Workspace` HTTP header to determine which workspace's repos/agents to return. `OptionalWorkspaceMiddleware` now accepts a `func() string` resolver (not a static string) so default workspace changes via API take effect immediately.
 
 ---
 

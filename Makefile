@@ -131,7 +131,7 @@ frontend:
 
 # Ensure frontend dist exists for go:embed (skip rebuild if already present)
 frontend-ensure:
-	@if [ ! -d $(FRONTEND_DIR)/dist ]; then echo "frontend/dist missing — building..."; $(MAKE) frontend; fi
+	@if [ ! -f $(FRONTEND_DIR)/dist/index.html ]; then echo "frontend/dist/index.html missing — building..."; $(MAKE) frontend; fi
 
 # Sync beads library packages (rewrite imports from vendored copy)
 sync-beads:

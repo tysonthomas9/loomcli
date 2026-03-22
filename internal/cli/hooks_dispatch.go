@@ -16,7 +16,7 @@ import (
 // Returns nil immediately (no-op) when:
 //   - event is nil (unhandled hook type)
 //   - beadsDir or sessionID is empty (non-loom Claude session)
-func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error {
+func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error { //nolint:unparam // always nil by design: hooks must exit 0
 	// Nil event means ParseClaudeHookInput returned nil for an unrecognized
 	// hook name. This is expected and not an error.
 	if event == nil {
@@ -49,8 +49,6 @@ func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error {
 	return nil
 }
 
-// mapEventToEntry converts a backend-agnostic HookEvent into a
-// TranscriptEntry suitable for writing to transcript.jsonl.
 // mapEventToEntry converts a backend-agnostic HookEvent into a TranscriptEntry.
 // Returns false if the event type is unrecognized (caller should skip).
 func mapEventToEntry(event *HookEvent) (sessions.TranscriptEntry, bool) {

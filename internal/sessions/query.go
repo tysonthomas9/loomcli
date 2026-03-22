@@ -49,7 +49,60 @@ func (s *Store) Query(f Filter) ([]SessionRecord, error) {
 	if err := scanner.Err(); err != nil {
 		return records, fmt.Errorf("read index file: %w", err)
 	}
-	return records, nil
+
+	// Deduplicate by SessionID — keep the last-seen record per ID.
+	// Finalized records are appended after running records, so last wins.
+	seen := make(map[string]int, len(records))
+	deduped := make([]SessionRecord, 0, len(records))
+	for _, rec := range records {
+		if idx, ok := seen[rec.SessionID]; ok {
+			deduped[idx] = rec // overwrite with later (finalized) version
+		} else {
+			seen[rec.SessionID] = len(deduped)
+			deduped = append(deduped, rec)
+		}
+	}
+	// Staleness detection pass: auto-heal orphaned running sessions.
+	for i, rec := range deduped {
+		if !isStale(rec) {
+			continue
+		}
+		ended := rec.StartedAt.Add(StaleSessionThreshold)
+		rec.Status = StatusAborted
+		rec.EndedAt = &ended
+		rec.DurationS = ended.Sub(rec.StartedAt).Seconds()
+		deduped[i] = rec
+		s.healStaleSession(rec)
+	}
+
+	// Re-filter if a status filter was set, because healed records
+	// may no longer match (e.g., filter for "running" but record is now "aborted").
+	if f.Status != "" {
+		filtered := deduped[:0]
+		for _, rec := range deduped {
+			if rec.Status == f.Status {
+				filtered = append(filtered, rec)
+			}
+		}
+		deduped = filtered
+	}
+
+	return deduped, nil
+}
+
+// healStaleSession persists the healed (aborted) session record to disk.
+// It writes both metadata.json and appends to index.jsonl so future queries
+// see the corrected status without re-healing.
+func (s *Store) healStaleSession(rec SessionRecord) {
+	sessDir := filepath.Join(s.dir, rec.SessionID)
+	meta := SessionMetadata{SessionRecord: rec}
+	if err := writeMetadataAtomic(sessDir, meta); err != nil {
+		log.Printf("[sessions] heal stale %s: write metadata: %v", rec.SessionID, err)
+		return
+	}
+	if err := s.appendIndex(rec); err != nil {
+		log.Printf("[sessions] heal stale %s: append index: %v", rec.SessionID, err)
+	}
 }
 
 // SessionsByTask is a convenience wrapper that returns all sessions for a task.
@@ -138,6 +191,24 @@ func (s *Store) ReadPrompt(sessionID string) (string, error) {
 	data, err := os.ReadFile(promptPath)
 	if err != nil {
 		return "", fmt.Errorf("read prompt.txt: %w", err)
+	}
+	return string(data), nil
+}
+
+// ReadDiff reads and returns the diff.patch content from
+// sessions/<sessionID>/diff.patch.
+// Returns os.ErrNotExist (wrapped) when no diff.patch exists for the session.
+func (s *Store) ReadDiff(sessionID string) (string, error) {
+	if err := validateSessionID(sessionID); err != nil {
+		return "", err
+	}
+
+	diffPath := filepath.Join(s.dir, sessionID, "diff.patch")
+
+	// #nosec G304 — sessionID validated above
+	data, err := os.ReadFile(diffPath)
+	if err != nil {
+		return "", fmt.Errorf("read diff.patch: %w", err)
 	}
 	return string(data), nil
 }

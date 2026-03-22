@@ -65,8 +65,8 @@ type SessionMetadata struct {
 type TranscriptEntry struct {
 	Seq       int       `json:"seq"`
 	Timestamp time.Time `json:"ts"`
-	Role      string    `json:"role"`                // "user", "assistant", "tool"
-	Type      string    `json:"type"`                // "text", "tool_use", "tool_result"
+	Role      string    `json:"role"` // "user", "assistant", "tool"
+	Type      string    `json:"type"` // "text", "tool_use", "tool_result"
 	Content   string    `json:"content,omitempty"`
 	ToolName  string    `json:"tool_name,omitempty"`
 	ToolInput string    `json:"tool_input,omitempty"`
@@ -78,6 +78,7 @@ type CreateOptions struct {
 	AgentName  string `json:"agent_name"`
 	Backend    string `json:"backend"`
 	EpicID     string `json:"epic_id,omitempty"`
+	Phase      string `json:"phase,omitempty"` // "planning" or "implementation"
 	Prompt     string `json:"prompt,omitempty"`
 	AttemptNum int    `json:"attempt_num"`
 }

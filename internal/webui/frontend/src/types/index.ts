@@ -226,6 +226,16 @@ export type {
   WorkspaceSummary,
 } from "../api/workspace";
 
+// Session types
+export type {
+  SessionRecord,
+  SessionStatus,
+  TranscriptEntry,
+  SessionListResponse,
+  SessionDetailResponse,
+  TranscriptResponse,
+} from "./session";
+
 // Graph types (React Flow)
 export type {
   IssueNodeData,

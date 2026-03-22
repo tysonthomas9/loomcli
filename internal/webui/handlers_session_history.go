@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
@@ -52,12 +53,13 @@ func handleListSessionHistory(store *sessionhistory.Store) http.HandlerFunc {
 // Returns (content, lineCount, httpStatus, errorMessage).
 func readScrollbackFile(path string) (string, int, int, string) {
 	homeDir, _ := os.UserHomeDir()
-	expectedPrefix := homeDir + "/.loom/session-scrollback/"
-	if !strings.HasPrefix(path, expectedPrefix) {
+	expectedPrefix := filepath.Clean(homeDir+"/.loom/session-scrollback") + string(os.PathSeparator)
+	cleanPath := filepath.Clean(path)
+	if !strings.HasPrefix(cleanPath+string(os.PathSeparator), expectedPrefix) {
 		return "", 0, http.StatusBadRequest, "invalid scrollback path"
 	}
 
-	f, err := os.Open(path) //nolint:gosec // path validated above
+	f, err := os.Open(cleanPath) //nolint:gosec // path cleaned and prefix-validated above
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", 0, http.StatusNotFound, "scrollback file not found"

@@ -140,6 +140,14 @@ export type { TerminalSessionInfo } from "./terminal";
 export { fetchBackends, refreshBackends } from "./backends";
 export type { BackendHealthData } from "./backends";
 
+// Session API functions (session audit trail)
+export {
+  getTaskSessions,
+  getSession,
+  getSessionTranscript,
+  getSessionDiff,
+} from "./sessions";
+
 // File API functions (agent worktree file operations)
 export { listWorktreeDir, readWorktreeFile, writeWorktreeFile } from "./files";
 export type { FileEntry, DirListData, FileReadData } from "./files";
