@@ -1,3 +1,0 @@
-src/api/handler.go
-src/models/user.go
-config/settings.yaml

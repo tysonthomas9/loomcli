@@ -1,4 +1,0 @@
-[
-  {"id":"TASK-20","title":"Working on feature A","status":"in_progress","priority":1,"issue_type":"task","assignee":"falcon"},
-  {"id":"TASK-21","title":"Working on feature B","status":"in_progress","priority":2,"issue_type":"task","assignee":"nova"}
-]
