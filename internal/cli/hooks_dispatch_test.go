@@ -170,6 +170,112 @@ func TestDispatchHookEvent_SessionEnd(t *testing.T) {
 	}
 }
 
+func TestDispatchHookEvent_SubagentStart(t *testing.T) {
+	beadsDir := t.TempDir()
+	sessionID := "test-session-subagent-start"
+
+	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+
+	event := &HookEvent{
+		Type:      HookSubagentStart,
+		ToolUseID: "toolu_abc123",
+		ToolInput: json.RawMessage(`{"description":"run tests","prompt":"test all"}`),
+		Timestamp: time.Now(),
+	}
+
+	err := dispatchHookEvent(event, beadsDir, sessionID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := readSingleTranscriptEntry(t, sessDir)
+	if entry.Role != "system" {
+		t.Errorf("expected role %q, got %q", "system", entry.Role)
+	}
+	if entry.Type != "subagent_start" {
+		t.Errorf("expected type %q, got %q", "subagent_start", entry.Type)
+	}
+	if entry.ToolName != "Task" {
+		t.Errorf("expected tool_name %q, got %q", "Task", entry.ToolName)
+	}
+	if !strings.Contains(entry.Content, "toolu_abc123") {
+		t.Errorf("expected content to contain tool_use_id, got %q", entry.Content)
+	}
+}
+
+func TestDispatchHookEvent_SubagentEnd(t *testing.T) {
+	beadsDir := t.TempDir()
+	sessionID := "test-session-subagent-end"
+
+	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+
+	event := &HookEvent{
+		Type:       HookSubagentEnd,
+		ToolUseID:  "toolu_xyz789",
+		SubagentID: "agent-sub-001",
+		ToolInput:  json.RawMessage(`{}`),
+		Timestamp:  time.Now(),
+	}
+
+	err := dispatchHookEvent(event, beadsDir, sessionID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := readSingleTranscriptEntry(t, sessDir)
+	if entry.Role != "system" {
+		t.Errorf("expected role %q, got %q", "system", entry.Role)
+	}
+	if entry.Type != "subagent_end" {
+		t.Errorf("expected type %q, got %q", "subagent_end", entry.Type)
+	}
+	if entry.ToolName != "Task" {
+		t.Errorf("expected tool_name %q, got %q", "Task", entry.ToolName)
+	}
+	if !strings.Contains(entry.Content, "agent-sub-001") {
+		t.Errorf("expected content to contain agent_id, got %q", entry.Content)
+	}
+}
+
+func TestDispatchHookEvent_SubagentEnd_NoAgentID(t *testing.T) {
+	beadsDir := t.TempDir()
+	sessionID := "test-session-subagent-end-no-id"
+
+	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+
+	event := &HookEvent{
+		Type:      HookSubagentEnd,
+		ToolUseID: "toolu_xyz789",
+		ToolInput: json.RawMessage(`{}`),
+		Timestamp: time.Now(),
+	}
+
+	err := dispatchHookEvent(event, beadsDir, sessionID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	entry := readSingleTranscriptEntry(t, sessDir)
+	if entry.Role != "system" {
+		t.Errorf("expected role %q, got %q", "system", entry.Role)
+	}
+	if entry.Type != "subagent_end" {
+		t.Errorf("expected type %q, got %q", "subagent_end", entry.Type)
+	}
+	if !strings.Contains(entry.Content, "toolu_xyz789") {
+		t.Errorf("expected content to contain tool_use_id as fallback, got %q", entry.Content)
+	}
+}
+
 func TestDispatchHookEvent_StoreError(t *testing.T) {
 	// Use a valid beads dir but a session ID that doesn't have a directory.
 	// AppendTranscript will fail because the session dir doesn't exist.
