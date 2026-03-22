@@ -478,7 +478,7 @@ function DefaultContent({
   // Reset tabs when issue changes
   useEffect(() => {
     restoredIssueIdRef.current = null;
-    setTabs([DETAILS_TAB]);
+    setTabs([DETAILS_TAB, SESSIONS_TAB]);
     setActiveTabId("details");
   }, [issue?.id]);
 
