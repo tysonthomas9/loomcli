@@ -146,20 +146,22 @@ update-beads:
 
 # Go-only quality gate (skips frontend rebuild if dist/ exists)
 check-go: frontend-ensure
-	@echo "=== [1/7] Go: format check ==="
+	@echo "=== [1/8] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
-	@echo "=== [2/7] Go: vet ==="
+	@echo "=== [2/8] Go: vet ==="
 	@go vet ./...
-	@echo "=== [3/7] Go: build ==="
+	@echo "=== [3/8] Go: build ==="
 	@go build -buildvcs=false ./...
-	@echo "=== [4/7] Go: lint (golangci-lint + depguard) ==="
+	@echo "=== [4/8] Go: lint (golangci-lint + depguard) ==="
 	@golangci-lint run --timeout=5m
-	@echo "=== [5/7] Go: LOC check ==="
+	@echo "=== [5/8] Go: LOC check ==="
 	@./scripts/check-loc.sh 500
-	@echo "=== [6/7] Go: exec.Command guard ==="
+	@echo "=== [6/8] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
-	@echo "=== [7/7] Go: test with race detector ==="
+	@echo "=== [7/8] Go: log.Printf guard ==="
+	@./scripts/check-no-log-printf.sh
+	@echo "=== [8/8] Go: test with race detector ==="
 	@go test -race -timeout 15m ./...
 	@echo "=== Go quality gates PASSED ==="
 
