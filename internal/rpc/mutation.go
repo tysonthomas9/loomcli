@@ -25,8 +25,9 @@ type MutationEvent struct {
 	Actor     string    `json:"actor,omitempty"`    // Who performed the action (may differ from assignee)
 	Timestamp time.Time `json:"timestamp"`
 	// Optional metadata for richer events (used by status, bonded, etc.)
-	OldStatus string `json:"old_status,omitempty"` // Previous status (for status events)
-	NewStatus string `json:"new_status,omitempty"` // New status (for status events)
-	ParentID  string `json:"parent_id,omitempty"`  // Parent molecule (for bonded events)
-	StepCount int    `json:"step_count,omitempty"` // Number of steps (for bonded events)
+	OldStatus  string `json:"old_status,omitempty"`  // Previous status (for status events)
+	NewStatus  string `json:"new_status,omitempty"`  // New status (for status events)
+	ParentID   string `json:"parent_id,omitempty"`   // Parent molecule (for bonded events)
+	StepCount  int    `json:"step_count,omitempty"`  // Number of steps (for bonded events)
+	SourceRepo string `json:"source_repo,omitempty"` // Source repository for multi-repo filtering
 }

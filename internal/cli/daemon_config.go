@@ -73,6 +73,8 @@ type AgentEntry struct {
 	Backend          string   `yaml:"backend,omitempty"`
 	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
 	PathPatterns     []string `yaml:"path_patterns,omitempty"`
+	Repos            []string `yaml:"repos,omitempty"`
+	RepoGroups       []string `yaml:"repo_groups,omitempty"`
 }
 
 // ProjectFile represents the project-local loom.yaml.

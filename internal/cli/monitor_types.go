@@ -113,6 +113,7 @@ type BdIssue struct {
 	Assignee     string       `json:"assignee"`
 	Labels       []string     `json:"labels"`
 	Dependencies []Dependency `json:"dependencies"`
+	SourceRepo   string       `json:"source_repo,omitempty"`
 }
 
 // BdStats represents output from bd stats --json

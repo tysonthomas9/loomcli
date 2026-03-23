@@ -14,7 +14,8 @@ import (
 )
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
-func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
+// Returns an error if the agent declares repo affinity that resolves to nothing.
+func (d *Daemon) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	ap.mu.Lock()
 	epicID := ap.assignedEpicID // snapshot before getEffectiveBackend (also acquires ap.mu)
 	ap.mu.Unlock()
@@ -90,12 +91,24 @@ func (d *Daemon) buildCommand(ap *AgentProcess) *exec.Cmd {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_AGENT_PATH_PATTERNS=%s", strings.Join(ap.entry.PathPatterns, ",")))
 	}
 
-	return cmd
+	// Propagate resolved source repos for repo affinity scoring
+	sourceRepos, err := resolveAgentRepos(ap.entry, d.repos)
+	if err != nil {
+		return nil, fmt.Errorf("resolve agent repos: %w", err)
+	}
+	if len(sourceRepos) > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
+	}
+
+	return cmd, nil
 }
 
 // spawnAgent starts the subprocess for an agent.
 func (d *Daemon) spawnAgent(ap *AgentProcess) error {
-	cmd := d.buildCommand(ap)
+	cmd, err := d.buildCommand(ap)
+	if err != nil {
+		return fmt.Errorf("build command: %w", err)
+	}
 
 	ap.mu.Lock()
 

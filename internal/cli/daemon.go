@@ -65,6 +65,7 @@ type Daemon struct {
 	shutdownOnce sync.Once      // protects shutdown channel from double-close
 	wg           sync.WaitGroup // tracks superviseAgent goroutines
 
+	repos        []RepoConfig        // workspace repos for resolveAgentRepos; nil outside workspace mode
 	epicAssigner *EpicAssigner       // manages epic-to-worktree assignments
 	concurrency  *ConcurrencyTracker // enforces per-role concurrency limits
 	eventBus     events.Emitter      // event emission for observability (nil-safe via NopBus default)

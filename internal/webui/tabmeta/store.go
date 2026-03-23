@@ -26,8 +26,10 @@ var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // TabMetadata represents persisted metadata for a single terminal tab.
 type TabMetadata struct {
 	SessionName string    `json:"session_name"`
+	Workspace   string    `json:"workspace,omitempty"`
 	Label       string    `json:"label"`
 	Notes       string    `json:"notes"`
+	IssueID     string    `json:"issue_id,omitempty"`
 	SortOrder   int       `json:"sort_order"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -76,6 +78,29 @@ func (s *Store) Get(ctx context.Context, sessionName string) (*TabMetadata, erro
 	vals, err := s.client.HGetAll(ctx, metaKey(sessionName)).Result()
 	if err != nil {
 		return nil, fmt.Errorf("hgetall %s: %w", sessionName, err)
+	}
+	if len(vals) == 0 {
+		return nil, nil
+	}
+
+	return parseMetadata(sessionName, vals)
+}
+
+// GetInWorkspace retrieves metadata for a session within a specific workspace.
+// The workspace is used to construct a workspace-scoped key. Returns nil if not found.
+func (s *Store) GetInWorkspace(ctx context.Context, workspace, sessionName string) (*TabMetadata, error) {
+	if err := ValidateSessionName(sessionName); err != nil {
+		return nil, err
+	}
+
+	key := metaKey(sessionName)
+	if workspace != "" {
+		key = keyPrefix + workspace + ":" + sessionName
+	}
+
+	vals, err := s.client.HGetAll(ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("hgetall %s: %w", key, err)
 	}
 	if len(vals) == 0 {
 		return nil, nil
@@ -248,8 +273,10 @@ func (s *Store) EnsureDefaults(ctx context.Context, activeSessions []string) ([]
 func parseMetadata(sessionName string, vals map[string]string) (*TabMetadata, error) {
 	meta := &TabMetadata{
 		SessionName: sessionName,
+		Workspace:   vals["workspace"],
 		Label:       vals["label"],
 		Notes:       vals["notes"],
+		IssueID:     vals["issue_id"],
 	}
 
 	if so, ok := vals["sort_order"]; ok {

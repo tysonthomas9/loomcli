@@ -11,6 +11,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
+// DefaultWorkspace is the workspace name used when no workspace query parameter is provided.
+const DefaultWorkspace = "default"
+
+// workspaceFromRequest reads the "workspace" query parameter, defaulting to DefaultWorkspace.
+func workspaceFromRequest(r *http.Request) string {
+	ws := r.URL.Query().Get("workspace")
+	if ws == "" {
+		return DefaultWorkspace
+	}
+	return ws
+}
+
 // tabMetadataResponse wraps tab metadata API responses.
 type tabMetadataResponse struct {
 	Success bool        `json:"success"`

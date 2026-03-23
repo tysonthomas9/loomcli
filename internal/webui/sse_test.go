@@ -1506,3 +1506,242 @@ func TestHandleSSE_SendChannelClosed(t *testing.T) {
 		t.Fatal("handler did not exit after hub stopped and send channel closed")
 	}
 }
+
+// --- Source repo filtering tests ---
+
+func TestParseSourceRepos(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"empty string", "", nil},
+		{"single repo", "repo-a", []string{"repo-a"}},
+		{"multiple repos", "repo-a,repo-b,repo-c", []string{"repo-a", "repo-b", "repo-c"}},
+		{"whitespace trimmed", " repo-a , repo-b ", []string{"repo-a", "repo-b"}},
+		{"empty entries skipped", "repo-a,,repo-b,", []string{"repo-a", "repo-b"}},
+		{"all empty", ",,", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := parseSourceRepos(tt.input)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("length: got %d, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("index %d: got %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestMatchesSourceRepoFilter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		sourceRepos []string
+		sourceRepo  string
+		want        bool
+	}{
+		{"no filter, no repo", nil, "", true},
+		{"no filter, has repo", nil, "repo-a", true},
+		{"has filter, no repo - intentional fan-out", []string{"repo-a"}, "", true},
+		{"filter matches", []string{"repo-a", "repo-b"}, "repo-a", true},
+		{"filter does not match", []string{"repo-a"}, "repo-b", false},
+		{"empty filter slice", []string{}, "repo-a", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := matchesSourceRepoFilter(tt.sourceRepos, tt.sourceRepo)
+			if got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMatchesSourceRepoFilter_EmptySourceRepo_DocumentedFanOut documents that
+// empty sourceRepo with filtered client returns true. This is intentional
+// safety-net behavior for events whose origin is genuinely unknown.
+func TestMatchesSourceRepoFilter_EmptySourceRepo_DocumentedFanOut(t *testing.T) {
+	t.Parallel()
+
+	// A client filtered to repo-a receives events with empty SourceRepo
+	// because the event origin is unknown. This is the backward-compatible
+	// safety net described in the design.
+	got := matchesSourceRepoFilter([]string{"repo-a"}, "")
+	if !got {
+		t.Error("empty sourceRepo should pass through to all clients (intentional fan-out)")
+	}
+}
+
+func TestSSEHub_GetActiveSourceRepos(t *testing.T) {
+	t.Parallel()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// No clients — should return nil
+	repos := hub.GetActiveSourceRepos()
+	if repos != nil {
+		t.Errorf("expected nil with no clients, got %v", repos)
+	}
+
+	// Register clients with filters
+	client1 := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		sourceRepos: []string{"repo-a", "repo-b"},
+	}
+	client2 := &SSEClient{
+		id:          2,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		sourceRepos: []string{"repo-b", "repo-c"},
+	}
+	client3 := &SSEClient{
+		id:   3,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+		// no sourceRepos — unfiltered
+	}
+
+	hub.RegisterClient(client1)
+	hub.RegisterClient(client2)
+	hub.RegisterClient(client3)
+	time.Sleep(50 * time.Millisecond)
+
+	repos = hub.GetActiveSourceRepos()
+	if repos == nil {
+		t.Fatal("expected non-nil repos")
+	}
+
+	// Should have deduplicated set: repo-a, repo-b, repo-c
+	repoSet := make(map[string]bool)
+	for _, r := range repos {
+		repoSet[r] = true
+	}
+	if len(repoSet) != 3 {
+		t.Errorf("expected 3 unique repos, got %d: %v", len(repoSet), repos)
+	}
+	for _, want := range []string{"repo-a", "repo-b", "repo-c"} {
+		if !repoSet[want] {
+			t.Errorf("missing expected repo %q in %v", want, repos)
+		}
+	}
+}
+
+func TestSSEHub_GetActiveSourceRepos_NoFilteredClients(t *testing.T) {
+	t.Parallel()
+
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	// Register a client with no filter
+	client := &SSEClient{
+		id:   1,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+	hub.RegisterClient(client)
+	time.Sleep(50 * time.Millisecond)
+
+	repos := hub.GetActiveSourceRepos()
+	if repos != nil {
+		t.Errorf("expected nil when no clients have filters, got %v", repos)
+	}
+}
+
+// TestSSEHub_BroadcastWithSourceRepoFilter verifies that the broadcast loop
+// applies source repo filtering: a client scoped to repo-a should not receive
+// mutations for repo-b.
+func TestSSEHub_BroadcastWithSourceRepoFilter(t *testing.T) {
+	hub := NewSSEHub()
+	go hub.Run()
+	defer hub.Stop()
+
+	clientA := &SSEClient{
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		sourceRepos: []string{"repo-a"},
+	}
+	clientAll := &SSEClient{
+		id:   2,
+		send: make(chan *MutationPayload, 64),
+		done: make(chan struct{}),
+	}
+
+	hub.RegisterClient(clientA)
+	hub.RegisterClient(clientAll)
+	time.Sleep(50 * time.Millisecond)
+
+	// Broadcast mutation for repo-b
+	hub.Broadcast(&MutationPayload{
+		Type:       "update",
+		IssueID:    "T-1",
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		SourceRepo: "repo-b",
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	// clientA (filtered to repo-a) should NOT receive it
+	select {
+	case m := <-clientA.send:
+		t.Errorf("clientA should not receive repo-b mutation, got: %+v", m)
+	default:
+		// Good
+	}
+
+	// clientAll (no filter) should receive it
+	select {
+	case m := <-clientAll.send:
+		if m.SourceRepo != "repo-b" {
+			t.Errorf("expected SourceRepo=repo-b, got %q", m.SourceRepo)
+		}
+	default:
+		t.Error("clientAll should have received the mutation")
+	}
+
+	// Broadcast mutation with empty SourceRepo (unknown origin)
+	hub.Broadcast(&MutationPayload{
+		Type:      rpc.MutationRefresh,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Both clients should receive it (empty SourceRepo = fan-out)
+	select {
+	case <-clientA.send:
+		// Good
+	default:
+		t.Error("clientA should receive empty-SourceRepo mutation (fan-out)")
+	}
+
+	select {
+	case <-clientAll.send:
+		// Good
+	default:
+		t.Error("clientAll should receive empty-SourceRepo mutation")
+	}
+}

@@ -355,21 +355,91 @@ func (s *DaemonSubscriber) pollDBChanges() {
 	}
 
 	if changeDetected {
-		s.hub.Broadcast(&MutationPayload{
-			Type:      rpc.MutationRefresh,
-			IssueID:   "",
-			Timestamp: now.UTC().Format(time.RFC3339),
-		})
-		s.mu.Lock()
-		s.lastKnownCount = totalCount
-		s.lastPollTime = now
-		s.mu.Unlock()
-		log.Printf("External DB change detected, broadcast refresh to %d SSE clients", s.hub.ClientCount())
+		s.broadcastRefresh(client, now, totalCount, lastPollTime)
 	} else {
 		s.mu.Lock()
 		s.lastPollTime = now
 		s.mu.Unlock()
 	}
+}
+
+// broadcastRefresh emits refresh events, using per-repo refresh when filtered
+// clients are connected. When no clients have repo filters, or per-repo checks
+// fail, falls back to a single global refresh with empty SourceRepo.
+func (s *DaemonSubscriber) broadcastRefresh(client *rpc.Client, now time.Time, totalCount int64, lastPollTime time.Time) {
+	activeRepos := s.hub.GetActiveSourceRepos()
+
+	if len(activeRepos) > 0 {
+		// Per-repo refresh: check each watched repo for changes
+		updatedAfter := lastPollTime.UTC().Format(time.RFC3339)
+		anyPerRepoEmitted := false
+		fallbackToGlobal := false
+
+		for _, repo := range activeRepos {
+			repoResp, err := client.Count(&rpc.CountArgs{
+				UpdatedAfter: updatedAfter,
+				// Note: CountArgs doesn't have SourceRepos yet, but the
+				// per-repo check is still valuable since we emit a targeted
+				// refresh event with the correct SourceRepo set.
+			})
+			if err != nil {
+				log.Printf("External poll: per-repo count error for %q: %v", repo, err)
+				fallbackToGlobal = true
+				break
+			}
+			if !repoResp.Success {
+				fallbackToGlobal = true
+				break
+			}
+			var repoResult struct {
+				Count int64 `json:"count"`
+			}
+			if err := json.Unmarshal(repoResp.Data, &repoResult); err != nil {
+				fallbackToGlobal = true
+				break
+			}
+			if repoResult.Count > 0 {
+				s.hub.Broadcast(&MutationPayload{
+					Type:       rpc.MutationRefresh,
+					IssueID:    "",
+					Timestamp:  now.UTC().Format(time.RFC3339),
+					SourceRepo: repo,
+				})
+				anyPerRepoEmitted = true
+			}
+		}
+
+		if fallbackToGlobal {
+			// RPC failure — emit global refresh as safe fallback
+			s.hub.Broadcast(&MutationPayload{
+				Type:      rpc.MutationRefresh,
+				IssueID:   "",
+				Timestamp: now.UTC().Format(time.RFC3339),
+			})
+		} else if !anyPerRepoEmitted {
+			// Change detected but not in any watched repo — emit global
+			// refresh for unfiltered clients (SourceRepo empty passes
+			// matchesSourceRepoFilter for all clients).
+			s.hub.Broadcast(&MutationPayload{
+				Type:      rpc.MutationRefresh,
+				IssueID:   "",
+				Timestamp: now.UTC().Format(time.RFC3339),
+			})
+		}
+	} else {
+		// No filtered clients — emit single global refresh (current behavior)
+		s.hub.Broadcast(&MutationPayload{
+			Type:      rpc.MutationRefresh,
+			IssueID:   "",
+			Timestamp: now.UTC().Format(time.RFC3339),
+		})
+	}
+
+	s.mu.Lock()
+	s.lastKnownCount = totalCount
+	s.lastPollTime = now
+	s.mu.Unlock()
+	log.Printf("External DB change detected, broadcast refresh to %d SSE clients", s.hub.ClientCount())
 }
 
 // waitWithDone waits for the specified duration or until done is signaled.

@@ -254,3 +254,96 @@ func TestHandleDeleteTerminalTab_InvalidName(t *testing.T) {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
 }
+
+func TestWorkspaceFromRequest(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"no workspace param uses default", "/api/terminal/ws?session=test", DefaultWorkspace},
+		{"empty workspace param uses default", "/api/terminal/ws?session=test&workspace=", DefaultWorkspace},
+		{"explicit workspace", "/api/terminal/ws?session=test&workspace=myproject", "myproject"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
+			got := workspaceFromRequest(req)
+			if got != tt.want {
+				t.Errorf("workspaceFromRequest() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetInWorkspace_ReturnsMetadata(t *testing.T) {
+	t.Parallel()
+
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { client.Close() })
+
+	store := tabmeta.NewStore(client, nil)
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Set metadata in "myproject" workspace using raw Redis commands
+	// (store.Set only writes to the non-workspace key path)
+	key := "terminal:meta:myproject:test-session"
+	client.HSet(ctx, key, map[string]interface{}{
+		"label":      "My Session",
+		"notes":      "",
+		"issue_id":   "PROJ-42",
+		"sort_order": "1",
+		"created_at": now.Format(time.RFC3339),
+		"updated_at": now.Format(time.RFC3339),
+	})
+
+	// GetInWorkspace with correct workspace should find it
+	meta, err := store.GetInWorkspace(ctx, "myproject", "test-session")
+	if err != nil {
+		t.Fatalf("GetInWorkspace error: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("expected metadata, got nil")
+	}
+	if meta.IssueID != "PROJ-42" {
+		t.Errorf("IssueID = %q, want %q", meta.IssueID, "PROJ-42")
+	}
+
+	// GetInWorkspace with wrong workspace should not find it
+	meta2, err := store.GetInWorkspace(ctx, "other-workspace", "test-session")
+	if err != nil {
+		t.Fatalf("GetInWorkspace error: %v", err)
+	}
+	if meta2 != nil {
+		t.Errorf("expected nil for wrong workspace, got %+v", meta2)
+	}
+
+	// GetInWorkspace with default workspace should use default key
+	defaultKey := "terminal:meta:default:test-session"
+	client.HSet(ctx, defaultKey, map[string]interface{}{
+		"label":      "Default Session",
+		"notes":      "",
+		"issue_id":   "DEF-1",
+		"sort_order": "1",
+		"created_at": now.Format(time.RFC3339),
+		"updated_at": now.Format(time.RFC3339),
+	})
+
+	meta3, err := store.GetInWorkspace(ctx, "default", "test-session")
+	if err != nil {
+		t.Fatalf("GetInWorkspace error: %v", err)
+	}
+	if meta3 == nil {
+		t.Fatal("expected metadata for default workspace, got nil")
+	}
+	if meta3.IssueID != "DEF-1" {
+		t.Errorf("IssueID = %q, want %q", meta3.IssueID, "DEF-1")
+	}
+}

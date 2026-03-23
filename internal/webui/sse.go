@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,16 +35,17 @@ func init() {
 
 // MutationPayload represents mutation data sent to clients.
 type MutationPayload struct {
-	Type      string `json:"type"` // create, update, delete, comment, status, bonded, squashed, burned, refresh
-	IssueID   string `json:"issue_id"`
-	Title     string `json:"title,omitempty"`
-	Assignee  string `json:"assignee,omitempty"`
-	Actor     string `json:"actor,omitempty"`
-	Timestamp string `json:"timestamp"`
-	OldStatus string `json:"old_status,omitempty"` // For status events
-	NewStatus string `json:"new_status,omitempty"` // For status events
-	ParentID  string `json:"parent_id,omitempty"`  // For bonded events
-	StepCount int    `json:"step_count,omitempty"` // For bonded events
+	Type       string `json:"type"` // create, update, delete, comment, status, bonded, squashed, burned, refresh
+	IssueID    string `json:"issue_id"`
+	Title      string `json:"title,omitempty"`
+	Assignee   string `json:"assignee,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+	Timestamp  string `json:"timestamp"`
+	OldStatus  string `json:"old_status,omitempty"`  // For status events
+	NewStatus  string `json:"new_status,omitempty"`  // For status events
+	ParentID   string `json:"parent_id,omitempty"`   // For bonded events
+	StepCount  int    `json:"step_count,omitempty"`  // For bonded events
+	SourceRepo string `json:"source_repo,omitempty"` // Source repository for multi-repo filtering
 }
 
 // SSEHub manages connected SSE clients and broadcasts mutations to them.
@@ -62,10 +64,49 @@ type SSEHub struct {
 
 // SSEClient represents a single SSE connection.
 type SSEClient struct {
-	id        int64
-	send      chan *MutationPayload
-	done      chan struct{}
-	lastSince int64
+	id          int64
+	send        chan *MutationPayload
+	done        chan struct{}
+	lastSince   int64
+	sourceRepos []string // repos this client wants; empty = all
+}
+
+// parseSourceRepos parses a comma-separated source_repos query parameter,
+// returning nil for empty input.
+func parseSourceRepos(param string) []string {
+	if param == "" {
+		return nil
+	}
+	parts := strings.Split(param, ",")
+	repos := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			repos = append(repos, p)
+		}
+	}
+	if len(repos) == 0 {
+		return nil
+	}
+	return repos
+}
+
+// matchesSourceRepoFilter returns true if the mutation should be delivered
+// to a client with the given sourceRepos filter.
+// When sourceRepos is empty (unfiltered client), all mutations are delivered.
+// When sourceRepo is empty (event with unknown origin), the mutation is
+// delivered to ALL clients as a safety net — this is intentional fan-out
+// for backward compatibility with events whose origin is genuinely unknown.
+func matchesSourceRepoFilter(sourceRepos []string, sourceRepo string) bool {
+	if len(sourceRepos) == 0 || sourceRepo == "" {
+		return true
+	}
+	for _, r := range sourceRepos {
+		if r == sourceRepo {
+			return true
+		}
+	}
+	return false
 }
 
 // NewSSEHub creates a new SSE hub.
@@ -105,6 +146,9 @@ func (h *SSEHub) Run() {
 		case mutation := <-h.broadcast:
 			h.mu.RLock()
 			for client := range h.clients {
+				if !matchesSourceRepoFilter(client.sourceRepos, mutation.SourceRepo) {
+					continue
+				}
 				select {
 				case client.send <- mutation:
 				default:
@@ -208,6 +252,30 @@ func (h *SSEHub) GetUptime() time.Duration {
 	return time.Since(h.startedAt)
 }
 
+// GetActiveSourceRepos returns the unique set of source repos from all connected
+// clients that have repo filters. Returns nil if no clients have filters.
+func (h *SSEHub) GetActiveSourceRepos() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	seen := make(map[string]bool)
+	for client := range h.clients {
+		for _, repo := range client.sourceRepos {
+			seen[repo] = true
+		}
+	}
+
+	if len(seen) == 0 {
+		return nil
+	}
+
+	repos := make([]string, 0, len(seen))
+	for repo := range seen {
+		repos = append(repos, repo)
+	}
+	return repos
+}
+
 // drainRetryQueue attempts to send queued mutations to the broadcast channel.
 func (h *SSEHub) drainRetryQueue() {
 	h.retryMu.Lock()
@@ -288,12 +356,16 @@ func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEv
 			}
 		}
 
+		// Parse source_repos filter for multi-repo scoping
+		sourceRepos := parseSourceRepos(r.URL.Query().Get("source_repos"))
+
 		// Create client
 		client := &SSEClient{
-			id:        clientID,
-			send:      make(chan *MutationPayload, sseClientSendBuf),
-			done:      make(chan struct{}),
-			lastSince: lastSince,
+			id:          clientID,
+			send:        make(chan *MutationPayload, sseClientSendBuf),
+			done:        make(chan struct{}),
+			lastSince:   lastSince,
+			sourceRepos: sourceRepos,
 		}
 
 		// Check if shutting down before registering (r.Context() derives from
@@ -313,13 +385,16 @@ func handleSSE(hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEv
 			close(client.done)
 		}()
 
-		log.Printf("SSE client %d connected from %s (since=%d)", client.id, r.RemoteAddr, lastSince)
+		log.Printf("SSE client %d connected from %s (since=%d, repos=%v)", client.id, r.RemoteAddr, lastSince, sourceRepos)
 
 		// Send catch-up events if reconnecting
 		if lastSince > 0 && getMutationsSince != nil {
 			catchUpMutations := getMutationsSince(lastSince)
 			for _, m := range catchUpMutations {
 				payload := rpcMutationToPayload(m)
+				if !matchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
+					continue
+				}
 				writeSSEEvent(w, payload)
 				flusher.Flush()
 			}
@@ -384,15 +459,16 @@ func writeSSEEvent(w http.ResponseWriter, mutation *MutationPayload) {
 // rpcMutationToPayload converts an RPC mutation event to a payload.
 func rpcMutationToPayload(m rpc.MutationEvent) *MutationPayload {
 	return &MutationPayload{
-		Type:      m.Type,
-		IssueID:   m.IssueID,
-		Title:     m.Title,
-		Assignee:  m.Assignee,
-		Actor:     m.Actor,
-		Timestamp: m.Timestamp.UTC().Format(time.RFC3339),
-		OldStatus: m.OldStatus,
-		NewStatus: m.NewStatus,
-		ParentID:  m.ParentID,
-		StepCount: m.StepCount,
+		Type:       m.Type,
+		IssueID:    m.IssueID,
+		Title:      m.Title,
+		Assignee:   m.Assignee,
+		Actor:      m.Actor,
+		Timestamp:  m.Timestamp.UTC().Format(time.RFC3339),
+		OldStatus:  m.OldStatus,
+		NewStatus:  m.NewStatus,
+		ParentID:   m.ParentID,
+		StepCount:  m.StepCount,
+		SourceRepo: m.SourceRepo,
 	}
 }
