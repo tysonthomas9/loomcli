@@ -18,6 +18,8 @@ import {
   IssueDetailPanelFixture,
   ErrorTriggerFixture,
   ToastTestFixture,
+  SessionNamePromptFixture,
+  PasteConfirmDialogFixture,
 } from "@/TestFixtures";
 
 // Run localStorage migration before anything reads storage.
@@ -56,6 +58,14 @@ function getComponent() {
 
   if (import.meta.env.DEV && path === "/test/toast") {
     return <ToastTestFixture />;
+  }
+
+  if (import.meta.env.DEV && path === "/test/session-name-prompt") {
+    return <SessionNamePromptFixture />;
+  }
+
+  if (import.meta.env.DEV && path === "/test/paste-confirm") {
+    return <PasteConfirmDialogFixture />;
   }
 
   // Default: render main app
