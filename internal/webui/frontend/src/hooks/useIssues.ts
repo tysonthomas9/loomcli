@@ -25,6 +25,37 @@ import { useToast } from "./useToast";
 // If we had this many consecutive reconnect attempts, assume we may have missed events
 const TOO_FAR_BEHIND_THRESHOLD = 3;
 
+// Debounce interval for MutationRefresh refetch (prevents rapid full refetches)
+const REFRESH_DEBOUNCE_MS = 1000;
+
+/**
+ * Compare two issues for equality by key display fields.
+ * Used to preserve object references during refetch merge,
+ * enabling React.memo to skip re-renders for unchanged cards.
+ *
+ * The updated_at timestamp serves as a catch-all: if any field
+ * changed server-side, the timestamp will differ.
+ */
+export function issuesAreEqual(a: Issue, b: Issue): boolean {
+  // updated_at first: cheapest catch-all since any server-side change updates it
+  if (a.updated_at !== b.updated_at) return false;
+  if (a.id !== b.id) return false;
+  if (a.title !== b.title) return false;
+  if (a.status !== b.status) return false;
+  if (a.priority !== b.priority) return false;
+  if (a.assignee !== b.assignee) return false;
+  if (a.issue_type !== b.issue_type) return false;
+
+  const aLabels = a.labels ?? [];
+  const bLabels = b.labels ?? [];
+  if (aLabels.length !== bLabels.length) return false;
+  for (let i = 0; i < aLabels.length; i++) {
+    if (aLabels[i] !== bLabels[i]) return false;
+  }
+
+  return true;
+}
+
 /**
  * Options for the useIssues hook.
  */
@@ -130,11 +161,22 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
   // Ref for refetch callback (needed because refetch is defined after useMutationHandler)
   const refetchRef = useRef<() => void>(() => {});
 
+  // Debounce timer for MutationRefresh refetch
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Mutation handler setup
   const { handleMutation, mutationCount } = useMutationHandler({
     issues: issuesMap,
     setIssues: setIssuesMap,
-    onRefreshRequired: () => refetchRef.current(),
+    onRefreshRequired: () => {
+      if (refreshTimeoutRef.current !== null) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+      refreshTimeoutRef.current = setTimeout(() => {
+        refreshTimeoutRef.current = null;
+        refetchRef.current();
+      }, REFRESH_DEBOUNCE_MS);
+    },
     onIssueDeleted: (issueId) => {
       // Track deletions during fetch to prevent re-adding from stale API response
       if (fetchingRef.current) {
@@ -220,7 +262,12 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
           if (deletedDuringFetch.has(issue.id)) {
             continue;
           }
-          mergedMap.set(issue.id, issue);
+          const existingIssue = currentMap.get(issue.id);
+          if (existingIssue && issuesAreEqual(existingIssue, issue)) {
+            mergedMap.set(issue.id, existingIssue);
+          } else {
+            mergedMap.set(issue.id, issue);
+          }
         }
 
         // Preserve fresher mutations from current state
@@ -312,6 +359,10 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (refreshTimeoutRef.current !== null) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
     };
   }, []);
 

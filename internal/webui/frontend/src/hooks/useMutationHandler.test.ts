@@ -804,6 +804,101 @@ describe("useMutationHandler", () => {
     });
   });
 
+  describe("Extended update fields (kzdf4)", () => {
+    it("applies priority when present in update mutation", () => {
+      const existingIssue = createTestIssue({
+        id: "test-issue",
+        priority: 2,
+        updated_at: "2025-01-23T10:00:00Z",
+      });
+      mockIssues.set("test-issue", existingIssue);
+
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        }),
+      );
+
+      const mutation = createMutationPayload({
+        type: "update",
+        issue_id: "test-issue",
+        priority: 1,
+        timestamp: "2025-01-23T12:00:00Z",
+      });
+
+      act(() => {
+        result.current.handleMutation(mutation);
+      });
+
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
+      const updatedIssue = newIssuesMap.get("test-issue");
+      expect(updatedIssue?.priority).toBe(1);
+    });
+
+    it("applies new_status when present in update mutation", () => {
+      const existingIssue = createTestIssue({
+        id: "test-issue",
+        status: "open",
+        updated_at: "2025-01-23T10:00:00Z",
+      });
+      mockIssues.set("test-issue", existingIssue);
+
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        }),
+      );
+
+      const mutation = createMutationPayload({
+        type: "update",
+        issue_id: "test-issue",
+        new_status: "in_progress",
+        timestamp: "2025-01-23T12:00:00Z",
+      });
+
+      act(() => {
+        result.current.handleMutation(mutation);
+      });
+
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
+      const updatedIssue = newIssuesMap.get("test-issue");
+      expect(updatedIssue?.status).toBe("in_progress");
+    });
+
+    it("does not overwrite priority when not present in mutation", () => {
+      const existingIssue = createTestIssue({
+        id: "test-issue",
+        priority: 3,
+        updated_at: "2025-01-23T10:00:00Z",
+      });
+      mockIssues.set("test-issue", existingIssue);
+
+      const { result } = renderHook(() =>
+        useMutationHandler({
+          issues: mockIssues,
+          setIssues: mockSetIssues,
+        }),
+      );
+
+      const mutation = createMutationPayload({
+        type: "update",
+        issue_id: "test-issue",
+        title: "New Title",
+        timestamp: "2025-01-23T12:00:00Z",
+      });
+
+      act(() => {
+        result.current.handleMutation(mutation);
+      });
+
+      const newIssuesMap = getResultingMap(mockSetIssues, 0, mockIssues);
+      const updatedIssue = newIssuesMap.get("test-issue");
+      expect(updatedIssue?.priority).toBe(3); // Preserved
+    });
+  });
+
   describe("Multiple mutations - handleMutations", () => {
     it("processes batch of mutations correctly", () => {
       const { result } = renderHook(() =>

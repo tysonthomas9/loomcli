@@ -115,7 +115,16 @@ function connectWebSocket(
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
+      // If cleanup already fired while this microtask was queued,
+      // close the socket immediately and bail out.
+      if (cancelled) {
+        ws.close(1000);
+        wsRef.current = null;
+        return;
+      }
+
       ws.onopen = () => {
+        if (cancelled) return;
         setConnectionState("connected");
         fitAddon.fit();
         ws.send(encodeResize(terminal.cols, terminal.rows));
@@ -123,6 +132,7 @@ function connectWebSocket(
       };
 
       ws.onmessage = (ev: MessageEvent) => {
+        if (cancelled) return;
         if (typeof ev.data === "string") {
           terminal.write(ev.data);
         } else if (ev.data instanceof ArrayBuffer) {
@@ -170,6 +180,16 @@ function connectWebSocket(
     if (wsCleanupInner) {
       wsCleanupInner();
     } else {
+      // WebSocket may exist via wsRef.current (assigned before handler setup)
+      // even though wsCleanupInner hasn't been assigned yet.
+      const ws = wsRef.current;
+      if (
+        ws &&
+        (ws.readyState === WebSocket.OPEN ||
+          ws.readyState === WebSocket.CONNECTING)
+      ) {
+        ws.close(1000);
+      }
       wsRef.current = null;
     }
   };

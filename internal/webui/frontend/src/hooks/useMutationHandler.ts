@@ -121,6 +121,12 @@ function applyUpdateToIssue(issue: Issue, mutation: MutationPayload): Issue {
     if (mutation.assignee != null) {
       draft.assignee = mutation.assignee;
     }
+    if (mutation.priority != null) {
+      draft.priority = mutation.priority;
+    }
+    if (mutation.new_status != null) {
+      draft.status = mutation.new_status;
+    }
   });
 }
 

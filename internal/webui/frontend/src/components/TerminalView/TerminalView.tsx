@@ -54,6 +54,8 @@ export function TerminalView({
   const initializedRef = useRef(false);
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
 
   // Initialize tabs from hook sessions on first successful load
   useEffect(() => {
@@ -143,9 +145,9 @@ export function TerminalView({
   );
 
   const handleNewTabClick = useCallback(() => {
-    if (tabs.length >= MAX_TABS) return;
+    if (tabsRef.current.length >= MAX_TABS) return;
     setIsSessionPromptOpen(true);
-  }, [tabs.length]);
+  }, []);
 
   const handleSessionNameConfirm = useCallback((name: string) => {
     setIsSessionPromptOpen(false);

@@ -44,6 +44,7 @@ type MutationPayload struct {
 	NewStatus string `json:"new_status,omitempty"` // For status events
 	ParentID  string `json:"parent_id,omitempty"`  // For bonded events
 	StepCount int    `json:"step_count,omitempty"` // For bonded events
+	Priority  *int   `json:"priority,omitempty"`   // For update events from external poll
 }
 
 // SSEHub manages connected SSE clients and broadcasts mutations to them.
