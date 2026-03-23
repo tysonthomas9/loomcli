@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -165,6 +164,9 @@ func (d *Daemon) reloadAndReconcile() {
 
 	slog.Info("config changed", "added", len(added), "removed", len(removed), "modified", len(modified))
 
+	// Serialize drain/add to prevent concurrent double-drain or double-add.
+	d.drainAddMu.Lock()
+
 	// Drain removed and modified agents
 	for _, entry := range removed {
 		if err := d.drainAgent(entry.Worktree); err != nil {
@@ -188,6 +190,8 @@ func (d *Daemon) reloadAndReconcile() {
 			slog.Error("failed to re-add modified agent", "worktree", entry.Worktree, "err", err)
 		}
 	}
+
+	d.drainAddMu.Unlock()
 
 	if evt, err := events.NewEvent(events.ConfigReloaded, "", "", "", events.ConfigReloadedData{
 		Added:    len(added),
@@ -213,7 +217,7 @@ func diffAgents(old, new []AgentEntry) (added, removed, modified []AgentEntry) {
 	for name, newEntry := range newMap {
 		if oldEntry, exists := oldMap[name]; !exists {
 			added = append(added, newEntry)
-		} else if !reflect.DeepEqual(oldEntry, newEntry) {
+		} else if !oldEntry.Equal(newEntry) {
 			modified = append(modified, newEntry)
 		}
 	}

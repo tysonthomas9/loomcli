@@ -41,7 +41,7 @@ func (m *mockFleetDBClient) Show(args *rpc.ShowArgs) (*rpc.Response, error) {
 	if m.showFn != nil {
 		return m.showFn(args)
 	}
-	return nil, nil
+	return &rpc.Response{Success: true, Data: json.RawMessage(`null`)}, nil
 }
 
 func (m *mockFleetDBClient) Blocked(args *rpc.BlockedArgs) (*rpc.Response, error) {
@@ -55,27 +55,61 @@ func (m *mockFleetDBClient) Stats() (*rpc.Response, error) {
 	if m.statsFn != nil {
 		return m.statsFn()
 	}
-	return nil, nil
+	return &rpc.Response{Success: true, Data: json.RawMessage(`null`)}, nil
 }
 
 func (m *mockFleetDBClient) Update(args *rpc.UpdateArgs) (*rpc.Response, error) {
 	if m.updateFn != nil {
 		return m.updateFn(args)
 	}
-	return nil, nil
+	return &rpc.Response{Success: true, Data: json.RawMessage(`null`)}, nil
 }
 
 func (m *mockFleetDBClient) CloseIssue(args *rpc.CloseArgs) (*rpc.Response, error) {
 	if m.closeFn != nil {
 		return m.closeFn(args)
 	}
-	return nil, nil
+	return &rpc.Response{Success: true, Data: json.RawMessage(`null`)}, nil
 }
 
 // helper: marshal data into a successful Response
 func successResp(data interface{}) *rpc.Response {
 	raw, _ := json.Marshal(data)
 	return &rpc.Response{Success: true, Data: raw}
+}
+
+func TestMockFleetDBClient_DefaultsDoNotPanic(t *testing.T) {
+	t.Parallel()
+	mock := &mockFleetDBClient{}
+
+	tests := []struct {
+		name string
+		call func() (*rpc.Response, error)
+	}{
+		{"Ready", func() (*rpc.Response, error) { return mock.Ready(&rpc.ReadyArgs{}) }},
+		{"List", func() (*rpc.Response, error) { return mock.List(&rpc.ListArgs{}) }},
+		{"Show", func() (*rpc.Response, error) { return mock.Show(&rpc.ShowArgs{}) }},
+		{"Blocked", func() (*rpc.Response, error) { return mock.Blocked(&rpc.BlockedArgs{}) }},
+		{"Stats", func() (*rpc.Response, error) { return mock.Stats() }},
+		{"Update", func() (*rpc.Response, error) { return mock.Update(&rpc.UpdateArgs{}) }},
+		{"CloseIssue", func() (*rpc.Response, error) { return mock.CloseIssue(&rpc.CloseArgs{}) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			resp, err := tt.call()
+			if err != nil {
+				t.Errorf("expected nil error, got %v", err)
+			}
+			if resp == nil {
+				t.Fatalf("expected non-nil response, got nil")
+			}
+			if !resp.Success {
+				t.Errorf("expected resp.Success == true, got false")
+			}
+		})
+	}
 }
 
 // (RunCommand dispatch tests removed — RunCommand and dispatch table no longer exist.

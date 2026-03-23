@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"text/template"
 	"time"
@@ -105,6 +106,24 @@ type AgentEntry struct {
 	RepoGroups       []string `yaml:"repo_groups,omitempty"`
 	CrossRepo        bool     `yaml:"cross_repo,omitempty"`
 	Parent           string   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
+}
+
+// Equal reports whether two AgentEntry values are semantically equal,
+// comparing only persisted configuration fields. SourceRepos is excluded
+// because it is derived/transient state (yaml:"-" json:"-"), not config.
+// NOTE: Update this method when adding new persisted fields to AgentEntry.
+func (a AgentEntry) Equal(b AgentEntry) bool {
+	return a.Worktree == b.Worktree &&
+		a.Role == b.Role &&
+		a.Repo == b.Repo &&
+		a.Auto == b.Auto &&
+		a.Backend == b.Backend &&
+		slices.Equal(a.FallbackBackends, b.FallbackBackends) &&
+		slices.Equal(a.PathPatterns, b.PathPatterns) &&
+		slices.Equal(a.Repos, b.Repos) &&
+		slices.Equal(a.RepoGroups, b.RepoGroups) &&
+		a.CrossRepo == b.CrossRepo &&
+		a.Parent == b.Parent
 }
 
 // ProjectFile represents the project-local loom.yaml.

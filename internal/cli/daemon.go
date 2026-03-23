@@ -106,6 +106,11 @@ type Daemon struct {
 
 	configHash  string       // SHA-256 hash of current running config for no-op detection
 	reconcileMu sync.RWMutex // serializes config writes; readers hold RLock when accessing d.config
+	// drainAddMu serializes the drain/add phase of reconciliation. Separate from
+	// reconcileMu because drainAgent blocks on <-target.done, which requires
+	// superviseAgent to call configSnapshot() under reconcileMu.RLock — holding
+	// reconcileMu.Lock through drain would deadlock.
+	drainAddMu sync.Mutex
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.

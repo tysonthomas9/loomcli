@@ -96,7 +96,7 @@ export interface WorkspaceContextValue extends UseWorkspaceReturn {
 
   /** Repo names for API filtering, undefined = no filter */
   sourceReposFilter: string[] | undefined;
-  /** True when workspace has 2+ repos */
+  /** True when workspace has 1+ repos */
   isMultiRepo: boolean;
 }
 
