@@ -100,3 +100,170 @@ export async function closeTestIssue(id: string): Promise<void> {
     // Ignore network errors during cleanup
   }
 }
+
+// =============================================================================
+// Workspace API Types
+// =============================================================================
+
+/** Workspace summary item in the workspace list. */
+export interface WorkspaceSummary {
+  name: string
+  path: string
+  active: boolean
+  repo_count: number
+  is_default: boolean
+  backend?: string
+}
+
+/** Repo entry within a workspace. */
+export interface WorkspaceRepo {
+  name: string
+  path: string
+  default_branch: string
+  remote: string
+  groups: string[]
+}
+
+/** Agent entry within a workspace. */
+export interface WorkspaceAgent {
+  name: string
+  repos: string[]
+  repo_groups: string[]
+  cross_repo: boolean
+}
+
+/** Full workspace response from GET /api/workspace. */
+export interface WorkspaceResponse {
+  success: boolean
+  data?: {
+    name: string
+    path: string
+    repos: WorkspaceRepo[]
+    groups: string[]
+    agents: WorkspaceAgent[]
+    workspaces: WorkspaceSummary[]
+    workspace_order?: string[]
+    default_workspace: string
+  }
+  error?: string
+}
+
+// =============================================================================
+// Workspace API Helpers
+// =============================================================================
+
+/**
+ * Create a test workspace via the API.
+ * POST /api/workspace/create
+ */
+export async function createTestWorkspace(
+  name: string,
+  options?: { type?: string; repos?: string[] },
+): Promise<Response> {
+  return fetch(`${BASE_URL}/api/workspace/create`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      name,
+      type: options?.type ?? 'empty',
+      repos: options?.repos ?? [],
+    }),
+  })
+}
+
+/**
+ * Delete a test workspace via the API. Swallows 404 errors for cleanup safety.
+ * DELETE /api/workspace/{name}
+ */
+export async function deleteTestWorkspace(name: string): Promise<void> {
+  try {
+    const response = await fetch(`${BASE_URL}/api/workspace/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    if (!response.ok && response.status !== 404) {
+      console.warn(`Failed to delete workspace ${name}: ${response.status}`)
+    }
+  } catch {
+    // Ignore network errors during cleanup
+  }
+}
+
+/**
+ * Get workspace info. Optionally override the Workspace header.
+ * GET /api/workspace
+ */
+export async function getWorkspace(
+  workspaceHeader?: string,
+): Promise<Response> {
+  const hdrs = authHeaders({ 'Content-Type': 'application/json' })
+  if (workspaceHeader) {
+    hdrs['Workspace'] = workspaceHeader
+  }
+  return fetch(`${BASE_URL}/api/workspace`, { headers: hdrs })
+}
+
+/**
+ * Set the default workspace.
+ * PUT /api/workspace/default
+ */
+export async function setDefaultWorkspace(name: string): Promise<Response> {
+  return fetch(`${BASE_URL}/api/workspace/default`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name }),
+  })
+}
+
+/**
+ * Clear the default workspace.
+ * DELETE /api/workspace/default
+ */
+export async function clearDefaultWorkspace(): Promise<Response> {
+  return fetch(`${BASE_URL}/api/workspace/default`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+}
+
+/**
+ * Rename a workspace.
+ * PATCH /api/workspace/rename
+ */
+export async function renameWorkspace(
+  oldName: string,
+  newName: string,
+): Promise<Response> {
+  return fetch(`${BASE_URL}/api/workspace/rename`, {
+    method: 'PATCH',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ old_name: oldName, new_name: newName }),
+  })
+}
+
+/**
+ * Reorder workspaces.
+ * PUT /api/workspace/order
+ */
+export async function reorderWorkspaces(order: string[]): Promise<Response> {
+  return fetch(`${BASE_URL}/api/workspace/order`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ order }),
+  })
+}
+
+/**
+ * Update workspace backend config.
+ * PATCH /api/workspace/{name}/config/backend
+ */
+export async function updateWorkspaceBackend(
+  name: string,
+  backend: string,
+): Promise<Response> {
+  return fetch(`${BASE_URL}/api/workspace/${encodeURIComponent(name)}/config/backend`, {
+    method: 'PATCH',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ backend }),
+  })
+}
