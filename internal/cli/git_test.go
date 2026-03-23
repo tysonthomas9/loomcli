@@ -1578,9 +1578,23 @@ func TestValidateGitRef(t *testing.T) {
 		{"valid_version_tag", "v1.0", false},
 		{"valid_commit_hash", "abc123", false},
 		{"valid_empty", "", false},
+		{"valid_underscore", "feature_branch", false},
+		{"valid_dots_single", "v1.0.0", false},
+		{"valid_slash", "feature/sub/branch", false},
+		{"valid_dashes_mid", "feature-branch-v2", false},
 		{"invalid_flag", "-flag", true},
 		{"invalid_option", "--option", true},
 		{"invalid_dash_only", "-", true},
+		{"invalid_shell_injection", "HEAD~1; rm -rf /", true},
+		{"invalid_upload_pack", "--upload-pack=evil", true},
+		{"invalid_dot_dot_traversal", "refs/heads/../etc/passwd", true},
+		{"invalid_backtick", "ref`whoami`", true},
+		{"invalid_pipe", "main|evil", true},
+		{"invalid_space", "main branch", true},
+		{"invalid_null_byte", "main\x00evil", true},
+		{"invalid_at_brace", "ref@{0}", true},
+		{"invalid_colon", "HEAD:file", true},
+		{"invalid_dot_dot", "main..feature", true},
 	}
 
 	for _, tc := range tests {
@@ -1593,8 +1607,8 @@ func TestValidateGitRef(t *testing.T) {
 			if !tc.wantErr && err != nil {
 				t.Errorf("validateGitRef(%q): unexpected error: %v", tc.input, err)
 			}
-			if tc.wantErr && err != nil && !strings.Contains(err.Error(), "must not start with '-'") {
-				t.Errorf("validateGitRef(%q): error %q does not mention dash prefix", tc.input, err.Error())
+			if tc.wantErr && err != nil && !strings.Contains(err.Error(), "invalid git ref") {
+				t.Errorf("validateGitRef(%q): error %q does not mention invalid git ref", tc.input, err.Error())
 			}
 		})
 	}

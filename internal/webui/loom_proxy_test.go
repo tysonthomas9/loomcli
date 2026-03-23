@@ -1,8 +1,12 @@
 package webui
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -437,6 +441,57 @@ func TestNewLoomProxy_DefaultURLParameter(t *testing.T) {
 		proxy := newLoomProxy("")
 		if proxy == nil {
 			t.Error("newLoomProxy(\"\") = nil, want non-nil (should fall back to default constant)")
+		}
+	})
+}
+
+func TestNewLoomProxy_DebugLogDoesNotLeakToken(t *testing.T) {
+	// Use an unreachable backend so the ErrorHandler fires too
+	cleanup := setEnvCleanup(map[string]string{
+		"LOOM_SERVER_URL":          "http://localhost:19999",
+		"LOOM_PROXY_ALLOWED_HOSTS": "",
+		"LOOM_PROXY_DEBUG":         "1",
+	})
+	defer cleanup()
+
+	// Capture log output
+	var buf bytes.Buffer
+	origOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(origOutput)
+
+	proxy := newLoomProxy("")
+	if proxy == nil {
+		t.Fatal("newLoomProxy() = nil, want non-nil")
+	}
+
+	t.Run("Director log omits token", func(t *testing.T) {
+		buf.Reset()
+		req := httptest.NewRequest(http.MethodGet, "/api/loom/some/path?token=supersecretvalue", nil)
+		w := httptest.NewRecorder()
+
+		proxy.ServeHTTP(w, req)
+
+		logOutput := buf.String()
+		if strings.Contains(logOutput, "supersecretvalue") {
+			t.Errorf("log output contains token: %s", logOutput)
+		}
+		if !strings.Contains(logOutput, "/some/path") {
+			t.Errorf("log output missing path: %s", logOutput)
+		}
+	})
+
+	t.Run("ErrorHandler log omits token", func(t *testing.T) {
+		buf.Reset()
+		// The unreachable backend at port 19999 should trigger ErrorHandler
+		req := httptest.NewRequest(http.MethodGet, "/api/loom/error/path?token=anothersecret", nil)
+		w := httptest.NewRecorder()
+
+		proxy.ServeHTTP(w, req)
+
+		logOutput := buf.String()
+		if strings.Contains(logOutput, "anothersecret") {
+			t.Errorf("log output contains token: %s", logOutput)
 		}
 	})
 }

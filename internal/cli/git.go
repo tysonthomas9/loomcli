@@ -4,15 +4,25 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
-// validateGitRef rejects ref/branch/remote names starting with '-' to prevent
-// git argument injection. Empty strings are allowed (handled downstream by
-// resolveRemote or git itself).
+// gitRefPattern matches safe git ref names: alphanumeric start, then alphanumeric, dots, underscores, slashes, hyphens.
+// Keep in sync with internal/webui/handlers_git.go:validGitRef
+var gitRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
+
+// validateGitRef rejects ref/branch/remote names that don't match the safe pattern.
+// Empty strings are allowed (handled downstream by resolveRemote or git itself).
 func validateGitRef(name string) error {
-	if strings.HasPrefix(name, "-") {
-		return fmt.Errorf("invalid git ref %q: must not start with '-'", name)
+	if name == "" {
+		return nil // empty handled downstream by resolveRemote or git itself
+	}
+	if !gitRefPattern.MatchString(name) {
+		return fmt.Errorf("invalid git ref %q: must match [a-zA-Z0-9][a-zA-Z0-9_./-]*", name)
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("invalid git ref %q: must not contain '..'", name)
 	}
 	return nil
 }

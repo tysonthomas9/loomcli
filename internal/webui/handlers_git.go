@@ -11,6 +11,7 @@ import (
 
 // validGitRef matches safe git ref names: alphanumeric, hyphens, underscores, dots, slashes.
 // Rejects names starting with '-' or containing '..'.
+// Keep in sync with internal/cli/git.go:gitRefPattern
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
 
 // AgentResolver is satisfied by any interface that can resolve agent worktrees.

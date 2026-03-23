@@ -860,6 +860,34 @@ func TestResolveMergeBaseDefault_FallbackToMergeBase(t *testing.T) {
 	}
 }
 
+// TestValidateDiffPath_Table directly unit-tests validateDiffPath with a table of cases.
+func TestValidateDiffPath_Table(t *testing.T) {
+	tests := []struct {
+		name  string
+		path  string
+		valid bool
+	}{
+		{"valid relative", "main.go", true},
+		{"valid subdir", "subdir/file.go", true},
+		{"valid deep path", "a/b/c.txt", true},
+		{"empty string", "", false},
+		{"absolute unix", "/etc/passwd", false},
+		{"dotdot only", "..", false},
+		{"dotdot prefix", "../secret", false},
+		{"traversal deep", "subdir/../../../etc/passwd", false},
+		{"dot only", ".", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := validateDiffPath(tt.path)
+			if got != tt.valid {
+				t.Errorf("validateDiffPath(%q) = %v, want %v", tt.path, got, tt.valid)
+			}
+		})
+	}
+}
+
 // TestResolveMergeBaseDefault_FromWithTraversal tests that ".." in from ref is rejected.
 func TestResolveMergeBaseDefault_FromWithTraversal(t *testing.T) {
 	ops := resolveOK()

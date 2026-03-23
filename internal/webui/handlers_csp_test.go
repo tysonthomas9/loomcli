@@ -1,6 +1,10 @@
 package webui
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -206,5 +210,65 @@ func TestIsPublicRoute_CSPReport(t *testing.T) {
 func TestIsExcludedFromRateLimit_CSPReport(t *testing.T) {
 	if !isExcludedFromRateLimit("/api/csp-report") {
 		t.Error("/api/csp-report should be excluded from global rate limit")
+	}
+}
+
+func TestHandleCSPReport_OversizedFieldsTruncated(t *testing.T) {
+	limiter := newCSPReportLimiter(rate.Limit(10), 20, time.Hour, time.Hour)
+	defer limiter.stop()
+
+	// Capture slog output
+	var buf bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(oldLogger)
+
+	handler := handleCSPReport(limiter)
+
+	// Use a single oversized URI field (3000 bytes) to stay within 10KB body limit
+	// while exceeding the 2048-byte per-field limit.
+	oversizedURI := strings.Repeat("A", 3000)
+	oversizedDirective := strings.Repeat("B", 1000)
+	body := fmt.Sprintf(`{"csp-report":{"document-uri":"%s","violated-directive":"%s","blocked-uri":"short","source-file":"short"}}`,
+		oversizedURI, oversizedDirective)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/csp-report", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/csp-report")
+	req.RemoteAddr = "127.0.0.1:12345"
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
+	}
+
+	// Parse logged JSON and verify truncation
+	var logEntry map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &logEntry); err != nil {
+		t.Fatalf("failed to parse log entry: %v\nraw: %s", err, buf.String())
+	}
+
+	checkLen := func(field string, maxLen int) {
+		t.Helper()
+		val, ok := logEntry[field].(string)
+		if !ok {
+			t.Errorf("field %q not found in log", field)
+			return
+		}
+		if len(val) > maxLen {
+			t.Errorf("field %q length = %d, want <= %d", field, len(val), maxLen)
+		}
+	}
+
+	checkLen("document_uri", 2048)
+	checkLen("violated_directive", 512)
+
+	// blocked_uri and source_file are "short" in this test, so just verify they exist
+	if _, ok := logEntry["blocked_uri"].(string); !ok {
+		t.Error("field \"blocked_uri\" not found in log")
+	}
+	if _, ok := logEntry["source_file"].(string); !ok {
+		t.Error("field \"source_file\" not found in log")
 	}
 }
