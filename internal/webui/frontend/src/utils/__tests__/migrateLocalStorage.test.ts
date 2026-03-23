@@ -185,6 +185,56 @@ describe("migrateLocalStorage", () => {
         expect.stringContaining("Quota exceeded"),
       );
     });
+
+    it("does not lose data when concurrent removal causes re-read to return null", () => {
+      // Set V5 key with a known value
+      localStorage.setItem("theme-preference", "dark");
+
+      const originalSetItem = Storage.prototype.setItem;
+      const originalGetItem = Storage.prototype.getItem;
+      let setCallCount = 0;
+      let getCallCount = 0;
+
+      // Track getItem calls for "theme-preference" specifically
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+      ) {
+        if (key === "theme-preference") {
+          getCallCount++;
+          // First call returns the real value; subsequent calls return null
+          // (simulating concurrent removal)
+          if (getCallCount === 1) {
+            return originalGetItem.call(this, key);
+          }
+          return null;
+        }
+        return originalGetItem.call(this, key);
+      });
+
+      // Make the first setItem call throw QuotaExceeded
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string,
+      ) {
+        setCallCount++;
+        if (setCallCount === 1) {
+          throw new DOMException(
+            "The quota has been exceeded.",
+            "QuotaExceededError",
+          );
+        }
+        originalSetItem.call(this, key, value);
+      });
+
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      migrateLocalStorage();
+
+      // The V6 key should have the original value — data must NOT be lost
+      expect(localStorage.getItem("cortex:theme")).toBe("dark");
+    });
   });
 
   describe("localStorage unavailable", () => {

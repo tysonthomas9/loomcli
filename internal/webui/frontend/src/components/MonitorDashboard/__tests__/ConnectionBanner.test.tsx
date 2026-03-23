@@ -6,7 +6,7 @@
  * Unit tests for ConnectionBanner component.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -236,6 +236,46 @@ describe("ConnectionBanner", () => {
 
       const banner = screen.getByRole("alert");
       expect(banner).toHaveAttribute("data-stale", "true");
+    });
+
+    it("transitions to stale after 6 minutes without parent re-render", () => {
+      const lastUpdated = new Date("2026-01-28T12:00:00Z"); // current fake time
+      render(<ConnectionBanner {...defaultProps} lastUpdated={lastUpdated} />);
+
+      const banner = screen.getByRole("alert");
+      expect(banner).not.toHaveAttribute("data-stale");
+      expect(screen.getByText("Last updated just now")).toBeInTheDocument();
+
+      // Advance 6 minutes — the internal setInterval tick triggers re-render
+      act(() => {
+        vi.advanceTimersByTime(6 * 60 * 1000);
+      });
+
+      expect(banner).toHaveAttribute("data-stale", "true");
+      expect(screen.getByText("Last updated 6 minutes ago")).toBeInTheDocument();
+    });
+
+    it("updates relative time display as time passes", () => {
+      const lastUpdated = new Date("2026-01-28T12:00:00Z");
+      render(<ConnectionBanner {...defaultProps} lastUpdated={lastUpdated} />);
+
+      expect(screen.getByText("Last updated just now")).toBeInTheDocument();
+
+      // Advance 1.5 minutes
+      act(() => {
+        vi.advanceTimersByTime(90_000);
+      });
+
+      expect(screen.getByText("Last updated 1 minute ago")).toBeInTheDocument();
+
+      // Advance 3 more minutes (total 4.5 minutes)
+      act(() => {
+        vi.advanceTimersByTime(3 * 60_000);
+      });
+
+      expect(
+        screen.getByText("Last updated 4 minutes ago"),
+      ).toBeInTheDocument();
     });
   });
 

@@ -1261,7 +1261,8 @@ function App() {
         isOpen={showCreateWorkspace}
         onClose={() => setShowCreateWorkspace(false)}
         onSuccess={(_data, createdName) => {
-          setShowCreateWorkspace(false);
+          // Modal calls onClose() after onSuccess, which sets
+          // showCreateWorkspace to false. No need to duplicate that here.
           // Navigate directly to the new workspace's Kanban view.
           // Bypass setActiveWorkspace's setTimeout(0) to avoid a race
           // where React effects re-sync a stale view param into the URL

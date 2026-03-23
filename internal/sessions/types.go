@@ -2,6 +2,10 @@ package sessions
 
 import "time"
 
+// CurrentSchemaVersion is the version that new sessions are written with.
+// Existing sessions without a version are implicitly version 0.
+const CurrentSchemaVersion = 1
+
 // SessionStatus represents the lifecycle state of a session.
 type SessionStatus string
 
@@ -15,6 +19,9 @@ const (
 // SessionRecord is the index entry in sessions/index.jsonl.
 // Contains all queryable fields. One record per agent run.
 type SessionRecord struct {
+	// Schema version (0 for records written before versioning was added)
+	SchemaVersion int `json:"schema_version,omitempty"`
+
 	// Identity
 	SessionID string `json:"session_id"`
 	TaskID    string `json:"task_id"` // populated at Finalize, not CreateSession (agent claims task mid-session)
@@ -107,6 +114,27 @@ type DiffStats struct {
 	FilesChanged int `json:"files_changed"`
 	LinesAdded   int `json:"lines_added"`
 	LinesRemoved int `json:"lines_removed"`
+}
+
+// NormalizeAfterLoad performs post-deserialization schema migration on the
+// metadata, handling deprecated field migration, default backfill, and version
+// stamping. Safe to call multiple times (idempotent).
+func (m *SessionMetadata) NormalizeAfterLoad() {
+	normalizeRecord(&m.SessionRecord)
+}
+
+// normalizeRecord performs all record-level normalization: field migration,
+// default backfill, and version stamping. This is the single source of truth
+// for schema migration logic.
+func normalizeRecord(rec *SessionRecord) {
+	if rec.SchemaVersion >= CurrentSchemaVersion {
+		return // already current
+	}
+	// Future migrations go here as version-gated blocks:
+	// if rec.SchemaVersion < 2 { ... migrate v1->v2 ... }
+
+	// Stamp current version after all migrations.
+	rec.SchemaVersion = CurrentSchemaVersion
 }
 
 // Filter specifies query criteria for listing sessions.

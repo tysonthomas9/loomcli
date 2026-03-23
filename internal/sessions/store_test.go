@@ -357,3 +357,70 @@ func TestAppendTranscript_PathTraversal(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveMetadata_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore error: %v", err)
+	}
+
+	sess, err := store.CreateSession(CreateOptions{
+		AgentName:  "nova",
+		Backend:    "claude",
+		AttemptNum: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession error: %v", err)
+	}
+
+	sid := sess.SessionID()
+
+	// Load, modify, save, reload
+	meta, err := store.LoadMetadata(sid)
+	if err != nil {
+		t.Fatalf("LoadMetadata error: %v", err)
+	}
+
+	meta.InputTokens = 5000
+	meta.OutputTokens = 2000
+	meta.EstimatedCostUSD = 0.045
+
+	if err := store.SaveMetadata(sid, meta); err != nil {
+		t.Fatalf("SaveMetadata error: %v", err)
+	}
+
+	reloaded, err := store.LoadMetadata(sid)
+	if err != nil {
+		t.Fatalf("LoadMetadata (after save) error: %v", err)
+	}
+
+	if reloaded.InputTokens != 5000 {
+		t.Errorf("InputTokens: expected 5000, got %d", reloaded.InputTokens)
+	}
+	if reloaded.OutputTokens != 2000 {
+		t.Errorf("OutputTokens: expected 2000, got %d", reloaded.OutputTokens)
+	}
+	if reloaded.EstimatedCostUSD != 0.045 {
+		t.Errorf("EstimatedCostUSD: expected 0.045, got %f", reloaded.EstimatedCostUSD)
+	}
+}
+
+func TestSaveMetadata_InvalidSessionID(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore error: %v", err)
+	}
+
+	meta := &SessionMetadata{}
+	err = store.SaveMetadata("", meta)
+	if err == nil {
+		t.Fatal("expected error for empty session ID")
+	}
+
+	err = store.SaveMetadata("../traversal", meta)
+	if err == nil {
+		t.Fatal("expected error for traversal session ID")
+	}
+}

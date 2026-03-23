@@ -66,7 +66,10 @@ export function CreateWorkspaceModal({
     }
   }, [isOpen]);
 
-  useRegisterEscapeLayer(LAYER_MODAL, onClose, isOpen);
+  const guardedClose = useCallback(() => {
+    if (!isSubmitting) onClose();
+  }, [isSubmitting, onClose]);
+  useRegisterEscapeLayer(LAYER_MODAL, guardedClose, isOpen);
   useFocusTrap(dialogRef, isOpen, { initialFocus: nameRef });
   useFocusReturn(isOpen);
 
@@ -153,7 +156,11 @@ export function CreateWorkspaceModal({
 
       try {
         const data = await createWorkspace(req);
-        onSuccess(data, req.name);
+        try {
+          onSuccess(data, req.name);
+        } catch {
+          // onSuccess side effects (navigation) may fail — still close
+        }
         onClose();
       } catch (err: unknown) {
         const message =
@@ -193,7 +200,7 @@ export function CreateWorkspaceModal({
   return createPortal(
     <div
       className={styles.overlay}
-      onClick={onClose}
+      onClick={() => { if (!isSubmitting) onClose(); }}
       data-testid="create-workspace-overlay"
     >
       <div
@@ -386,6 +393,12 @@ export function CreateWorkspaceModal({
             </div>
           )}
 
+          {isSubmitting && (
+            <p className={styles.statusMessage} data-testid="create-workspace-status">
+              {type === "clone" ? "Cloning repository\u2026" : "Setting up workspace\u2026"}
+            </p>
+          )}
+
           {error && (
             <p className={styles.error} data-testid="create-workspace-error">
               {error}
@@ -408,7 +421,14 @@ export function CreateWorkspaceModal({
               disabled={!canSubmit}
               data-testid="create-workspace-submit"
             >
-              {isSubmitting ? "Creating..." : "Create Workspace"}
+              {isSubmitting ? (
+                <>
+                  <span className={styles.spinner} />
+                  Creating...
+                </>
+              ) : (
+                "Create Workspace"
+              )}
             </button>
           </div>
         </form>

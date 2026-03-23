@@ -7,6 +7,7 @@ import type { LoomAgentStatus, ParsedLoomStatus } from "@/types";
 import { parseLoomStatus } from "@/types";
 import { RepoBadge } from "@/components/RepoBadge";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+import { useIssueDiffStat } from "@/hooks/useIssueDiffStat";
 
 import styles from "./AgentCard.module.css";
 
@@ -21,6 +22,8 @@ export interface AgentCardProps {
   agent: LoomAgentStatus;
   /** Optional task title to display (when working/planning) */
   taskTitle?: string | undefined;
+  /** Optional issue ID — used to fetch line-level diff stats */
+  issueId?: string | undefined;
   /** Additional CSS class name */
   className?: string;
   /** Click handler */
@@ -83,6 +86,7 @@ export function getStatusLabel(parsed: ParsedLoomStatus): string {
 export function AgentCard({
   agent,
   taskTitle,
+  issueId,
   className,
   onClick,
 }: AgentCardProps): JSX.Element {
@@ -96,7 +100,12 @@ export function AgentCard({
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
     : "Agent";
-  const changeCount = agent.ahead + (agent.changes?.length ?? 0);
+
+  // Use line-level diff stats when issueId is available (replaces commit counts)
+  const { data: diffStat } = useIssueDiffStat({
+    issueId: issueId ?? null,
+    enabled: !!issueId,
+  });
 
   const rootClassName = [styles.card, className].filter(Boolean).join(" ");
 
@@ -154,32 +163,18 @@ export function AgentCard({
       </div>
 
       <div className={styles.meta}>
-        {(agent.ahead > 0 || agent.behind > 0) && (
+        {diffStat && (diffStat.added > 0 || diffStat.removed > 0) && (
           <div
-            className={styles.commitCounts}
-            title={
-              agent.ahead > 0 && agent.behind > 0
-                ? `${agent.ahead} commits ahead and ${agent.behind} commits behind`
-                : agent.ahead > 0
-                  ? `${agent.ahead} commits ahead`
-                  : `${agent.behind} commits behind`
-            }
+            className={styles.diffStats}
+            title={`${diffStat.added} lines added, ${diffStat.removed} lines removed`}
           >
-            {agent.ahead > 0 && (
-              <span className={styles.commitCount}>+{agent.ahead}</span>
+            {diffStat.added > 0 && (
+              <span className={styles.diffAdded}>+{diffStat.added}</span>
             )}
-            {agent.behind > 0 && (
-              <span className={styles.behindCount}>-{agent.behind}</span>
+            {diffStat.removed > 0 && (
+              <span className={styles.diffRemoved}>-{diffStat.removed}</span>
             )}
           </div>
-        )}
-        {changeCount > 0 && (
-          <span
-            className={styles.changeBadge}
-            title={`${changeCount} total pending changes`}
-          >
-            +{changeCount}
-          </span>
         )}
         <span
           className={styles.statusLine}

@@ -242,7 +242,20 @@ export async function createWorkspace(
     workspaceCache = data;
   }
   fetchPromise = null;
-  return workspaceCache ?? (await refreshWorkspace());
+  // If POST succeeded but data was null (backend created workspace but
+  // workspaceConfigFn errored), try refreshing. If the refresh fails too,
+  // suppress the error — the workspace was created on disk and will appear
+  // on the next poll cycle. Returning stale cache prevents the modal from
+  // staying open due to an exception in this fallback path.
+  if (workspaceCache) {
+    return workspaceCache;
+  }
+  try {
+    return await refreshWorkspace();
+  } catch {
+    // Suppress refresh failure — POST already succeeded.
+    return workspaceCache ?? ({} as WorkspaceData);
+  }
 }
 
 /**

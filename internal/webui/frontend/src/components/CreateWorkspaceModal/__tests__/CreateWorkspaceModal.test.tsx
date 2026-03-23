@@ -267,6 +267,150 @@ describe("CreateWorkspaceModal", () => {
       // Clean up
       resolvePromise(MOCK_WORKSPACE_DATA);
     });
+
+    it("shows spinner element in submit button during submission", async () => {
+      let resolvePromise!: (value: WorkspaceData) => void;
+      mockCreateWorkspace.mockImplementation(
+        () =>
+          new Promise<WorkspaceData>((resolve) => {
+            resolvePromise = resolve;
+          }),
+      );
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "my-workspace" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        const submit = screen.getByTestId("create-workspace-submit");
+        expect(submit.querySelector('[class*="spinner"]')).toBeInTheDocument();
+      });
+
+      resolvePromise(MOCK_WORKSPACE_DATA);
+    });
+
+    it("shows status message during clone submission", async () => {
+      let resolvePromise!: (value: WorkspaceData) => void;
+      mockCreateWorkspace.mockImplementation(
+        () =>
+          new Promise<WorkspaceData>((resolve) => {
+            resolvePromise = resolve;
+          }),
+      );
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "my-workspace" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("create-workspace-status"),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByTestId("create-workspace-status"),
+        ).toHaveTextContent("Cloning repository");
+      });
+
+      resolvePromise(MOCK_WORKSPACE_DATA);
+    });
+
+    it("shows status message during empty workspace submission", async () => {
+      let resolvePromise!: (value: WorkspaceData) => void;
+      mockCreateWorkspace.mockImplementation(
+        () =>
+          new Promise<WorkspaceData>((resolve) => {
+            resolvePromise = resolve;
+          }),
+      );
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.click(screen.getByLabelText("Local Repos"));
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "my-workspace" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
+        target: { value: "/path/to/repo" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("create-workspace-status"),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByTestId("create-workspace-status"),
+        ).toHaveTextContent("Setting up workspace");
+      });
+
+      resolvePromise(MOCK_WORKSPACE_DATA);
+    });
+
+    it("overlay click does not close modal during submission", async () => {
+      let resolvePromise!: (value: WorkspaceData) => void;
+      mockCreateWorkspace.mockImplementation(
+        () =>
+          new Promise<WorkspaceData>((resolve) => {
+            resolvePromise = resolve;
+          }),
+      );
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "my-workspace" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-clone-url"), {
+        target: { value: "https://github.com/example/repo" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("create-workspace-submit")).toBeDisabled();
+      });
+
+      // Try to close via overlay click — should be blocked
+      fireEvent.click(screen.getByTestId("create-workspace-overlay"));
+      expect(onClose).not.toHaveBeenCalled();
+
+      resolvePromise(MOCK_WORKSPACE_DATA);
+    });
   });
 
   describe("form submission", () => {
@@ -396,6 +540,35 @@ describe("CreateWorkspaceModal", () => {
       );
       expect(onSuccess).not.toHaveBeenCalled();
       expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("calls onClose even if onSuccess throws", async () => {
+      mockCreateWorkspace.mockResolvedValue(MOCK_WORKSPACE_DATA);
+      onSuccess.mockImplementation(() => {
+        throw new Error("navigation error");
+      });
+
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      // Switch to Local Repos so only name + repo is needed
+      fireEvent.click(screen.getByLabelText("Local Repos"));
+      fireEvent.change(screen.getByTestId("create-workspace-name"), {
+        target: { value: "test-ws" },
+      });
+      fireEvent.change(screen.getByTestId("create-workspace-repo-path"), {
+        target: { value: "/path/to/repo" },
+      });
+      fireEvent.click(screen.getByTestId("create-workspace-submit"));
+
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalledTimes(1);
+      });
     });
 
     it("displays server error from API body", async () => {

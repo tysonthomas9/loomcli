@@ -60,6 +60,7 @@ export function RepoGroupedList({
       key={agent.name}
       agent={agent}
       taskTitle={agentTasks[agent.name]?.title}
+      issueId={agentTasks[agent.name]?.id}
       {...(onAgentClick !== undefined && {
         onClick: () => onAgentClick(agent.name),
       })}

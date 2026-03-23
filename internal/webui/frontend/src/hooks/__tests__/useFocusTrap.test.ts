@@ -9,7 +9,10 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { useFocusTrap } from "../useFocusTrap";
+import {
+  useFocusTrap,
+  _resetFocusTrapRegistry,
+} from "../useFocusTrap";
 
 describe("useFocusTrap", () => {
   let container: HTMLDivElement;
@@ -17,12 +20,14 @@ describe("useFocusTrap", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    _resetFocusTrapRegistry();
     container = document.createElement("div");
     container.tabIndex = -1;
     document.body.appendChild(container);
   });
 
   afterEach(() => {
+    _resetFocusTrapRegistry();
     vi.restoreAllMocks();
     vi.useRealTimers();
     if (document.body.contains(container)) {
@@ -406,6 +411,155 @@ describe("useFocusTrap", () => {
       expect(() => {
         renderHook(() => useFocusTrap(containerRef, true));
       }).not.toThrow();
+    });
+  });
+
+  describe("concurrent traps", () => {
+    let container2: HTMLDivElement;
+
+    beforeEach(() => {
+      container2 = document.createElement("div");
+      container2.tabIndex = -1;
+      document.body.appendChild(container2);
+    });
+
+    afterEach(() => {
+      if (document.body.contains(container2)) {
+        document.body.removeChild(container2);
+      }
+    });
+
+    function setupContainer2(innerHTML: string) {
+      container2.innerHTML = innerHTML;
+      const allElements = container2.querySelectorAll("*");
+      allElements.forEach((el) => {
+        Object.defineProperty(el, "offsetParent", {
+          get: () => container2,
+          configurable: true,
+        });
+      });
+      return { current: container2 };
+    }
+
+    it("only the top-layer (later registered) trap handles Tab", () => {
+      const containerRef1 = setupContainer(
+        `<button>P1-First</button><button>P1-Last</button>`,
+      );
+      const containerRef2 = setupContainer2(
+        `<button>P2-First</button><button>P2-Last</button>`,
+      );
+
+      // Render both traps active (trap 2 registered later, wins at same priority)
+      renderHook(() => useFocusTrap(containerRef1, true));
+      renderHook(() => useFocusTrap(containerRef2, true));
+
+      const buttons2 = container2.querySelectorAll("button");
+      const lastButton2 = buttons2[buttons2.length - 1]!;
+      lastButton2.focus();
+      expect(document.activeElement).toBe(lastButton2);
+
+      // Tab should wrap within trap 2 only
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      expect(document.activeElement).toBe(buttons2[0]);
+    });
+
+    it("deactivating the top trap lets the remaining trap handle Tab", () => {
+      const containerRef1 = setupContainer(
+        `<button>P1-First</button><button>P1-Last</button>`,
+      );
+      const containerRef2 = setupContainer2(
+        `<button>P2-First</button><button>P2-Last</button>`,
+      );
+
+      // Render both traps active
+      renderHook(() => useFocusTrap(containerRef1, true));
+      const { rerender: rerender2 } = renderHook(
+        ({ active }) => useFocusTrap(containerRef2, active),
+        { initialProps: { active: true } },
+      );
+
+      // Deactivate trap 2
+      rerender2({ active: false });
+
+      // Now trap 1 should handle Tab
+      const buttons1 = container.querySelectorAll("button");
+      const lastButton1 = buttons1[buttons1.length - 1]!;
+      lastButton1.focus();
+      expect(document.activeElement).toBe(lastButton1);
+
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      expect(document.activeElement).toBe(buttons1[0]);
+    });
+
+    it("higher priority trap wins regardless of registration order", () => {
+      const containerRef1 = setupContainer(
+        `<button>Hi-First</button><button>Hi-Last</button>`,
+      );
+      const containerRef2 = setupContainer2(
+        `<button>Lo-First</button><button>Lo-Last</button>`,
+      );
+
+      // Render low-priority first, then high-priority
+      renderHook(() => useFocusTrap(containerRef2, true, { priority: 0 }));
+      renderHook(() => useFocusTrap(containerRef1, true, { priority: 10 }));
+
+      // Focus inside the high-priority trap
+      const buttons1 = container.querySelectorAll("button");
+      const lastButton1 = buttons1[buttons1.length - 1]!;
+      lastButton1.focus();
+      expect(document.activeElement).toBe(lastButton1);
+
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      // High-priority trap handles Tab
+      expect(document.activeElement).toBe(buttons1[0]);
+    });
+
+    it("focus inside lower trap's container is not intercepted by top trap", () => {
+      const containerRef1 = setupContainer(
+        `<button>Lo-First</button><button>Lo-Last</button>`,
+      );
+      const containerRef2 = setupContainer2(
+        `<button>Hi-First</button><button>Hi-Last</button>`,
+      );
+
+      // Render low-priority first, then high-priority
+      renderHook(() => useFocusTrap(containerRef1, true, { priority: 0 }));
+      renderHook(() => useFocusTrap(containerRef2, true, { priority: 10 }));
+
+      // Focus inside the LOW-priority trap (not the top one)
+      const buttons1 = container.querySelectorAll("button");
+      const middleButton = buttons1[0]!;
+      middleButton.focus();
+      expect(document.activeElement).toBe(middleButton);
+
+      const tabEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(tabEvent);
+
+      // Top trap should NOT steal focus — containment check prevents it
+      // Focus stays where it was (no wrapping since focus is not in the top trap)
+      expect(document.activeElement).toBe(middleButton);
     });
   });
 });

@@ -3,6 +3,8 @@
  * Shows last updated time, retry countdown, and manual retry button.
  */
 
+import { useState, useEffect } from "react";
+
 import styles from "./ConnectionBanner.module.css";
 
 /**
@@ -53,6 +55,14 @@ export function ConnectionBanner({
   onRetry,
   className,
 }: ConnectionBannerProps): JSX.Element {
+  // Tick state to force re-renders every second, keeping isStale and
+  // relativeTime fresh even when the parent component does not re-render.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const rootClassName = [styles.banner, className].filter(Boolean).join(" ");
 
   const relativeTime = lastUpdated

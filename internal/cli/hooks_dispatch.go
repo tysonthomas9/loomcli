@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // dispatchHookEvent maps a parsed HookEvent to a sessions.TranscriptEntry
@@ -46,7 +47,50 @@ func dispatchHookEvent(event *HookEvent, beadsDir, sessionID string) error { //n
 		return nil
 	}
 
+	// On SessionEnd, capture token usage from the backend's transcript file.
+	if event.Type == HookSessionEnd && event.SessionRef != "" {
+		captureTokenUsage(store, sessionID, event.SessionRef, event.Backend)
+	}
+
 	return nil
+}
+
+// captureTokenUsage reads the backend's transcript file, sums token usage,
+// computes estimated cost, and patches the session metadata. All errors are
+// logged to stderr; this function never returns an error (hooks must exit 0).
+func captureTokenUsage(store *sessions.Store, sessionID, transcriptPath, backend string) {
+	tokenUsage, err := sessions.SumTranscriptUsage(transcriptPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loom hook: failed to sum transcript usage: %v\n", err)
+		return
+	}
+
+	if tokenUsage.InputTokens == 0 && tokenUsage.OutputTokens == 0 {
+		return
+	}
+
+	meta, err := store.LoadMetadata(sessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loom hook: failed to load metadata for token usage: %v\n", err)
+		return
+	}
+
+	meta.InputTokens = tokenUsage.InputTokens
+	meta.OutputTokens = tokenUsage.OutputTokens
+	meta.CacheReadTokens = tokenUsage.CacheReadTokens
+	meta.CacheWriteTokens = tokenUsage.CacheWriteTokens
+
+	tier := usage.ResolvePricing(backend)
+	meta.EstimatedCostUSD = usage.EstimateCost(tier, usage.SessionUsage{
+		InputTokens:      tokenUsage.InputTokens,
+		OutputTokens:     tokenUsage.OutputTokens,
+		CacheReadTokens:  tokenUsage.CacheReadTokens,
+		CacheWriteTokens: tokenUsage.CacheWriteTokens,
+	})
+
+	if err := store.SaveMetadata(sessionID, meta); err != nil {
+		fmt.Fprintf(os.Stderr, "loom hook: failed to save metadata with token usage: %v\n", err)
+	}
 }
 
 // mapEventToEntry converts a backend-agnostic HookEvent into a TranscriptEntry.

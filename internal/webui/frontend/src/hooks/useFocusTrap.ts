@@ -6,18 +6,101 @@ export interface UseFocusTrapOptions {
   initialFocus?: React.RefObject<HTMLElement | null>;
   /** Delay before activating trap (ms). Default: 0 */
   activationDelay?: number;
+  /** Priority for concurrent trap resolution. Higher priority wins. Default: 0. */
+  priority?: number;
 }
+
+// ============= Focus Trap Registry =============
+// Module-level registry that mirrors the escape layer registry pattern.
+// Only the top-priority trap intercepts Tab events.
+
+interface FocusTrapEntry {
+  id: string;
+  seq: number; // registration sequence for tiebreaking equal priorities
+  priority: number;
+  containerRef: React.RefObject<HTMLElement | null>;
+  handler: (event: KeyboardEvent) => void;
+}
+
+let traps: FocusTrapEntry[] = [];
+let trapIdCounter = 0;
+let focusTrapListenerAttached = false;
+
+function handleFocusTrapKeyDown(event: KeyboardEvent): void {
+  if (event.key !== "Tab") return;
+  if (traps.length === 0) return;
+
+  // Top trap is first in the sorted array (highest priority, latest registered for ties)
+  const topTrap = traps[0];
+  if (!topTrap) return;
+
+  const container = topTrap.containerRef.current;
+  if (!container) return;
+
+  // Containment check: only intercept if focus is inside the top trap's container
+  if (
+    document.activeElement !== container &&
+    !container.contains(document.activeElement)
+  ) {
+    return;
+  }
+
+  topTrap.handler(event);
+}
+
+export function registerFocusTrap(
+  priority: number,
+  containerRef: React.RefObject<HTMLElement | null>,
+  handler: (event: KeyboardEvent) => void,
+): string {
+  const seq = ++trapIdCounter;
+  const id = `focus-trap-${seq}`;
+  traps.push({ id, seq, priority, containerRef, handler });
+  // Sort: highest priority first; for equal priority, latest registered first (last-in wins)
+  traps.sort((a, b) => {
+    if (b.priority !== a.priority) return b.priority - a.priority;
+    return b.seq - a.seq;
+  });
+
+  if (!focusTrapListenerAttached) {
+    document.addEventListener("keydown", handleFocusTrapKeyDown);
+    focusTrapListenerAttached = true;
+  }
+  return id;
+}
+
+export function unregisterFocusTrap(id: string): void {
+  traps = traps.filter((t) => t.id !== id);
+  if (traps.length === 0 && focusTrapListenerAttached) {
+    document.removeEventListener("keydown", handleFocusTrapKeyDown);
+    focusTrapListenerAttached = false;
+  }
+}
+
+// Exported for testing only
+export function _resetFocusTrapRegistry(): void {
+  if (focusTrapListenerAttached) {
+    document.removeEventListener("keydown", handleFocusTrapKeyDown);
+    focusTrapListenerAttached = false;
+  }
+  traps = [];
+  trapIdCounter = 0;
+}
+
+// ============= Hook =============
 
 /**
  * Traps Tab/Shift+Tab focus cycling within a container element.
  * Re-queries focusable elements on each Tab press to handle dynamic content.
+ * Uses a module-level registry so only the top-priority trap intercepts Tab
+ * when multiple traps are active concurrently.
  */
 export function useFocusTrap(
   containerRef: React.RefObject<HTMLElement | null>,
   isActive: boolean,
   options: UseFocusTrapOptions = {},
 ): void {
-  const { initialFocus, activationDelay = 0 } = options;
+  const { initialFocus, activationDelay = 0, priority = 0 } = options;
   const generationRef = useRef(0);
 
   // Handle initial focus when trap activates
@@ -52,7 +135,7 @@ export function useFocusTrap(
     }
   }, [isActive, containerRef, initialFocus, activationDelay]);
 
-  // Handle Tab/Shift+Tab key trapping
+  // Handle Tab/Shift+Tab key trapping via registry
   useEffect(() => {
     if (!isActive || !containerRef.current) return;
 
@@ -85,7 +168,7 @@ export function useFocusTrap(
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isActive, containerRef]);
+    const id = registerFocusTrap(priority, containerRef, handleKeyDown);
+    return () => unregisterFocusTrap(id);
+  }, [isActive, containerRef, priority]);
 }

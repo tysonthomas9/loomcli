@@ -214,6 +214,145 @@ func TestDispatchHookEvent_StoreError(t *testing.T) {
 	}
 }
 
+func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
+	beadsDir := t.TempDir()
+	sessionID := "test-session-token-usage"
+
+	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+
+	// Write metadata.json (required for LoadMetadata)
+	metaJSON := `{
+		"session_id": "test-session-token-usage",
+		"agent_name": "nova",
+		"backend": "claude",
+		"started_at": "2026-03-23T00:00:00Z",
+		"status": "running",
+		"exit_code": 0
+	}`
+	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), []byte(metaJSON), 0o644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+
+	// Write a fake Claude transcript file with usage data
+	transcriptDir := t.TempDir()
+	transcriptPath := filepath.Join(transcriptDir, "transcript.jsonl")
+	transcriptContent := `{"type":"message","role":"assistant","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200,"cache_creation_input_tokens":100}}
+{"type":"message","role":"assistant","usage":{"input_tokens":2000,"output_tokens":300,"cache_read_input_tokens":50,"cache_creation_input_tokens":25}}
+`
+	if err := os.WriteFile(transcriptPath, []byte(transcriptContent), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	event := &HookEvent{
+		Type:       HookSessionEnd,
+		SessionRef: transcriptPath,
+		Backend:    "claude",
+		Timestamp:  time.Now(),
+	}
+
+	err := dispatchHookEvent(event, beadsDir, sessionID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Read back metadata and verify token usage was captured
+	store, storeErr := sessions.NewStore(beadsDir)
+	if storeErr != nil {
+		t.Fatalf("create store: %v", storeErr)
+	}
+	meta, metaErr := store.LoadMetadata(sessionID)
+	if metaErr != nil {
+		t.Fatalf("load metadata: %v", metaErr)
+	}
+
+	if meta.InputTokens != 3000 {
+		t.Errorf("InputTokens: expected 3000, got %d", meta.InputTokens)
+	}
+	if meta.OutputTokens != 800 {
+		t.Errorf("OutputTokens: expected 800, got %d", meta.OutputTokens)
+	}
+	if meta.CacheReadTokens != 250 {
+		t.Errorf("CacheReadTokens: expected 250, got %d", meta.CacheReadTokens)
+	}
+	if meta.CacheWriteTokens != 125 {
+		t.Errorf("CacheWriteTokens: expected 125, got %d", meta.CacheWriteTokens)
+	}
+	if meta.EstimatedCostUSD <= 0 {
+		t.Errorf("EstimatedCostUSD should be positive, got %f", meta.EstimatedCostUSD)
+	}
+}
+
+func TestDispatchHookEvent_SessionEndMissingTranscript(t *testing.T) {
+	beadsDir := t.TempDir()
+	sessionID := "test-session-no-transcript"
+
+	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+
+	// Write metadata.json
+	metaJSON := `{
+		"session_id": "test-session-no-transcript",
+		"agent_name": "nova",
+		"backend": "claude",
+		"started_at": "2026-03-23T00:00:00Z",
+		"status": "running",
+		"exit_code": 0
+	}`
+	if err := os.WriteFile(filepath.Join(sessDir, "metadata.json"), []byte(metaJSON), 0o644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+
+	event := &HookEvent{
+		Type:       HookSessionEnd,
+		SessionRef: "/nonexistent/transcript.jsonl",
+		Backend:    "claude",
+		Timestamp:  time.Now(),
+	}
+
+	// Should not error — missing transcript is graceful
+	err := dispatchHookEvent(event, beadsDir, sessionID)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+
+	// Metadata tokens should remain 0
+	store, _ := sessions.NewStore(beadsDir)
+	meta, metaErr := store.LoadMetadata(sessionID)
+	if metaErr != nil {
+		t.Fatalf("load metadata: %v", metaErr)
+	}
+	if meta.InputTokens != 0 || meta.OutputTokens != 0 {
+		t.Errorf("expected zero tokens for missing transcript, got input=%d output=%d",
+			meta.InputTokens, meta.OutputTokens)
+	}
+}
+
+func TestDispatchHookEvent_SessionEndEmptyRef(t *testing.T) {
+	beadsDir := t.TempDir()
+	sessionID := "test-session-empty-ref"
+
+	sessDir := filepath.Join(beadsDir, "sessions", sessionID)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("create session dir: %v", err)
+	}
+
+	event := &HookEvent{
+		Type:       HookSessionEnd,
+		SessionRef: "", // empty — should skip capture
+		Timestamp:  time.Now(),
+	}
+
+	err := dispatchHookEvent(event, beadsDir, sessionID)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
 // readSingleTranscriptEntry reads the first (and expected only) entry from
 // transcript.jsonl in the given session directory.
 func readSingleTranscriptEntry(t *testing.T, sessDir string) sessions.TranscriptEntry {

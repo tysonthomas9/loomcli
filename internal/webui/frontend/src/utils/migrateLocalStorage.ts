@@ -28,8 +28,9 @@ export function getStorageVersion(): string | null {
 
 function migrateV5toV6(): void {
   for (const [v5Key, v6Key] of Object.entries(V5_TO_V6_KEY_MAP)) {
+    let oldValue: string | null = null;
     try {
-      const oldValue = localStorage.getItem(v5Key);
+      oldValue = localStorage.getItem(v5Key);
       if (oldValue === null) continue;
 
       // Validate JSON keys that store JSON (beads-recent-assignees)
@@ -55,7 +56,6 @@ function migrateV5toV6(): void {
       if (e instanceof DOMException && e.name === "QuotaExceededError") {
         // Free space by removing old key, then retry write
         try {
-          const oldValue = localStorage.getItem(v5Key);
           localStorage.removeItem(v5Key);
           if (oldValue !== null) {
             localStorage.setItem(v6Key, oldValue);
