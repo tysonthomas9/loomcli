@@ -149,16 +149,19 @@ export function useOptimisticStatusUpdate(
         newStatus,
       };
 
-      // Apply optimistic update using immer
-      const updatedIssue = produce(issue, (draft) => {
-        draft.status = newStatus;
-        draft.updated_at = new Date().toISOString();
+      // Apply optimistic update using functional form to avoid stale closure when
+      // multiple concurrent updates fire in the same render cycle
+      setIssues((current) => {
+        const currentIssue = current.get(issueId);
+        if (!currentIssue) return current;
+        const updatedIssue = produce(currentIssue, (draft) => {
+          draft.status = newStatus;
+          draft.updated_at = new Date().toISOString();
+        });
+        const newIssues = new Map(current);
+        newIssues.set(issueId, updatedIssue);
+        return newIssues;
       });
-
-      // Update state with new issue
-      const newIssues = new Map(issues);
-      newIssues.set(issueId, updatedIssue);
-      setIssues(newIssues);
 
       return snapshot;
     },

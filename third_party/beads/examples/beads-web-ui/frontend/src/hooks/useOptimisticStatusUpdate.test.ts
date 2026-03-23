@@ -106,7 +106,9 @@ describe('useOptimisticStatusUpdate', () => {
       });
 
       expect(mockSetIssues).toHaveBeenCalled();
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      // setIssues is now called with a functional updater
+      const updater = mockSetIssues.mock.calls[0][0] as (prev: Map<string, Issue>) => Map<string, Issue>;
+      const newIssuesMap = updater(mockIssues);
       expect(newIssuesMap.get('issue-1')?.status).toBe('in_progress');
     });
 
@@ -180,7 +182,9 @@ describe('useOptimisticStatusUpdate', () => {
         await result.current.updateIssueStatus('issue-1', 'in_progress', 'open');
       });
 
-      const newIssuesMap = mockSetIssues.mock.calls[0][0] as Map<string, Issue>;
+      // setIssues is now called with a functional updater
+      const updater = mockSetIssues.mock.calls[0][0] as (prev: Map<string, Issue>) => Map<string, Issue>;
+      const newIssuesMap = updater(mockIssues);
       const updatedIssue = newIssuesMap.get('issue-1');
       expect(updatedIssue?.updated_at).not.toBe('2025-01-01T00:00:00Z');
     });
@@ -675,6 +679,45 @@ describe('useOptimisticStatusUpdate', () => {
       // Neither should be pending
       expect(result.current.pendingUpdates.has('issue-1')).toBe(false);
       expect(result.current.pendingUpdates.has('issue-2')).toBe(false);
+    });
+
+    it('does not clobber first optimistic update when second fires in same render cycle', () => {
+      const issue1 = createTestIssue({ id: 'issue-1', status: 'open' });
+      const issue2 = createTestIssue({ id: 'issue-2', status: 'open' });
+      mockIssues.set('issue-1', issue1);
+      mockIssues.set('issue-2', issue2);
+
+      // Track actual state through setIssues calls
+      let currentState = new Map(mockIssues);
+      const trackingSetIssues = vi.fn().mockImplementation(
+        (arg: Map<string, Issue> | ((prev: Map<string, Issue>) => Map<string, Issue>)) => {
+          if (typeof arg === 'function') {
+            currentState = arg(currentState);
+          } else {
+            currentState = arg;
+          }
+        }
+      );
+
+      // API calls never resolve (only testing optimistic state)
+      vi.mocked(api.updateIssue).mockReturnValue(new Promise(() => {}));
+
+      const { result } = renderHook(() =>
+        useOptimisticStatusUpdate({
+          issues: currentState,
+          setIssues: trackingSetIssues,
+        })
+      );
+
+      // Fire both in same act() — same render cycle
+      act(() => {
+        result.current.updateIssueStatus('issue-1', 'in_progress', 'open');
+        result.current.updateIssueStatus('issue-2', 'closed', 'open');
+      });
+
+      // BOTH optimistic changes must be visible
+      expect(currentState.get('issue-1')?.status).toBe('in_progress');
+      expect(currentState.get('issue-2')?.status).toBe('closed');
     });
   });
 

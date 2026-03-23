@@ -323,15 +323,20 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
         throw new Error(`Issue ${issueId} not found`);
       }
 
-      // Optimistic update
-      const optimisticIssue: Issue = {
-        ...existingIssue,
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-      };
-      const newMap = new Map(issuesMap);
-      newMap.set(issueId, optimisticIssue);
-      setIssuesMap(newMap);
+      // Optimistic update using functional form to avoid stale closure when
+      // multiple concurrent updates fire in the same render cycle
+      setIssuesMap((current) => {
+        const currentIssue = current.get(issueId);
+        if (!currentIssue) return current;
+        const optimisticIssue: Issue = {
+          ...currentIssue,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        };
+        const newMap = new Map(current);
+        newMap.set(issueId, optimisticIssue);
+        return newMap;
+      });
 
       try {
         await apiUpdateIssue(issueId, { status: newStatus });

@@ -154,7 +154,7 @@ describe('useFallbackPolling', () => {
       expect(result.current.isActive).toBe(true);
     });
 
-    it('isActive becomes false when wsState becomes connected', () => {
+    it('isActive becomes false when wsState becomes connected after grace period', () => {
       const onPoll = vi.fn();
       const { result, rerender } = renderHook(
         ({ wsState }) =>
@@ -162,6 +162,7 @@ describe('useFallbackPolling', () => {
             wsState,
             onPoll,
             activationThreshold: 1000,
+            recoveryGracePeriod: 2000,
           }),
         { initialProps: { wsState: 'reconnecting' as ConnectionState } }
       );
@@ -175,6 +176,14 @@ describe('useFallbackPolling', () => {
 
       // WebSocket reconnects
       rerender({ wsState: 'connected' });
+
+      // Polling stays active during grace period
+      expect(result.current.isActive).toBe(true);
+
+      // Advance past grace period — now polling should stop
+      act(() => {
+        vi.advanceTimersByTime(2100);
+      });
 
       expect(result.current.isActive).toBe(false);
     });
@@ -845,7 +854,7 @@ describe('useFallbackPolling', () => {
       expect(result.current.timeUntilActive).toBe(5000);
     });
 
-    it('wsState flicker between states does not cause issues', () => {
+    it('wsState flicker between states resumes countdown from accumulated degraded time', () => {
       const onPoll = vi.fn();
       const { result, rerender } = renderHook(
         ({ wsState }) =>
@@ -853,35 +862,148 @@ describe('useFallbackPolling', () => {
             wsState,
             onPoll,
             activationThreshold: 5000,
+            recoveryGracePeriod: 2000,
           }),
         { initialProps: { wsState: 'reconnecting' as ConnectionState } }
       );
 
-      // Start countdown
+      // Accumulate 2000ms of degraded time
       act(() => {
         vi.advanceTimersByTime(2000);
       });
 
-      // Brief recovery
+      // Brief recovery (shorter than grace period)
       rerender({ wsState: 'connected' });
       expect(result.current.timeUntilActive).toBeNull();
 
-      // Immediately back to reconnecting
+      // Immediately back to reconnecting — should resume from accumulated time
       rerender({ wsState: 'reconnecting' });
-      expect(result.current.timeUntilActive).toBe(5000);
 
-      // Full countdown should be required
+      // Remaining should be ~3000ms (5000 - 2000 accumulated), not 5000ms
+      act(() => {
+        vi.advanceTimersByTime(3100);
+      });
+
+      expect(result.current.isActive).toBe(true);
+    });
+
+    it('polling activates despite rapid connected-reconnecting oscillation within threshold', () => {
+      const onPoll = vi.fn();
+      const { result, rerender } = renderHook(
+        ({ wsState }) =>
+          useFallbackPolling({
+            wsState,
+            onPoll,
+            activationThreshold: 5000,
+            recoveryGracePeriod: 2000,
+          }),
+        { initialProps: { wsState: 'reconnecting' as ConnectionState } }
+      );
+
+      // Accumulate 1500ms degraded
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+
+      // Brief connected blip (< grace period)
+      rerender({ wsState: 'connected' });
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+
+      // Back to reconnecting
+      rerender({ wsState: 'reconnecting' });
+
+      // Advance remaining ~3500ms
+      act(() => {
+        vi.advanceTimersByTime(3600);
+      });
+
+      expect(result.current.isActive).toBe(true);
+    });
+
+    it('sustained connected state beyond grace period fully resets degraded tracking', () => {
+      const onPoll = vi.fn();
+      const { result, rerender } = renderHook(
+        ({ wsState }) =>
+          useFallbackPolling({
+            wsState,
+            onPoll,
+            activationThreshold: 5000,
+            recoveryGracePeriod: 2000,
+          }),
+        { initialProps: { wsState: 'reconnecting' as ConnectionState } }
+      );
+
+      // Accumulate 3000ms degraded
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+
+      // Sustained recovery beyond grace period
+      rerender({ wsState: 'connected' });
+      act(() => {
+        vi.advanceTimersByTime(2500);
+      });
+
+      // Back to reconnecting — should start fresh countdown
+      rerender({ wsState: 'reconnecting' });
+
+      // After 4000ms (< 5000 threshold), should NOT be active
       act(() => {
         vi.advanceTimersByTime(4000);
       });
 
       expect(result.current.isActive).toBe(false);
 
+      // After 1100ms more (total 5100ms from fresh start), should be active
       act(() => {
         vi.advanceTimersByTime(1100);
       });
 
       expect(result.current.isActive).toBe(true);
+    });
+
+    it('polling continues uninterrupted through brief connected blips when already active', async () => {
+      const onPoll = vi.fn().mockResolvedValue(undefined);
+      const { result, rerender } = renderHook(
+        ({ wsState }) =>
+          useFallbackPolling({
+            wsState,
+            onPoll,
+            activationThreshold: 1000,
+            pollInterval: 2000,
+            recoveryGracePeriod: 3000,
+          }),
+        { initialProps: { wsState: 'reconnecting' as ConnectionState } }
+      );
+
+      // Activate polling
+      await act(async () => {
+        vi.advanceTimersByTime(1100);
+        await Promise.resolve();
+      });
+
+      expect(result.current.isActive).toBe(true);
+      expect(onPoll).toHaveBeenCalledTimes(1);
+
+      // Brief connected blip (shorter than grace period)
+      rerender({ wsState: 'connected' });
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+        await Promise.resolve();
+      });
+
+      // Back to reconnecting
+      rerender({ wsState: 'reconnecting' });
+
+      // Advance past poll interval — polling should still fire
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+        await Promise.resolve();
+      });
+
+      expect(onPoll).toHaveBeenCalledTimes(2);
     });
 
     it('uses default values when not provided', async () => {

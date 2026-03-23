@@ -22,6 +22,8 @@ export interface UseFallbackPollingOptions {
   pollInterval?: number;
   /** Whether polling is enabled at all (default: true) */
   enabled?: boolean;
+  /** How long 'connected' state must persist before fully resetting degraded tracking (default: 5000ms) */
+  recoveryGracePeriod?: number;
 }
 
 /**
@@ -69,6 +71,7 @@ export function useFallbackPolling(options: UseFallbackPollingOptions): UseFallb
     activationThreshold = 30000,
     pollInterval = 30000,
     enabled = true,
+    recoveryGracePeriod = 5000,
   } = options;
 
   const [isActive, setIsActive] = useState(false);
@@ -78,12 +81,17 @@ export function useFallbackPolling(options: UseFallbackPollingOptions): UseFallb
   const activationTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const pollTimerRef = useRef<ReturnType<typeof setInterval>>();
   const countdownTimerRef = useRef<ReturnType<typeof setInterval>>();
+  const recoveryTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const onPollRef = useRef(onPoll);
   const mountedRef = useRef(true);
   const pollingInFlightRef = useRef(false);
 
   // Track activation start time for countdown calculation
   const activationStartRef = useRef<number | null>(null);
+  // Track the first degraded-episode timestamp for accumulated degraded time
+  const firstDegradedRef = useRef<number | null>(null);
+  // Track whether polling was manually stopped (prevents re-activation while still reconnecting)
+  const manuallyStopped = useRef(false);
 
   // Update callback ref when it changes
   useEffect(() => {
@@ -103,6 +111,10 @@ export function useFallbackPolling(options: UseFallbackPollingOptions): UseFallb
     if (countdownTimerRef.current !== undefined) {
       clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = undefined;
+    }
+    if (recoveryTimerRef.current !== undefined) {
+      clearTimeout(recoveryTimerRef.current);
+      recoveryTimerRef.current = undefined;
     }
     activationStartRef.current = null;
   }, []);
@@ -128,47 +140,111 @@ export function useFallbackPolling(options: UseFallbackPollingOptions): UseFallb
   useEffect(() => {
     if (!enabled) {
       clearTimers();
+      firstDegradedRef.current = null;
       setIsActive(false);
       setTimeUntilActive(null);
       return;
     }
 
     if (wsState === 'connected') {
-      // SSE recovered - stop polling
-      clearTimers();
-      setIsActive(false);
+      // Reset manual stop flag — state change clears the stop
+      manuallyStopped.current = false;
+      // Cancel any pending activation/countdown timers but NOT the poll timer
+      // (polling continues during grace period if already active)
+      if (activationTimerRef.current !== undefined) {
+        clearTimeout(activationTimerRef.current);
+        activationTimerRef.current = undefined;
+      }
+      if (countdownTimerRef.current !== undefined) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = undefined;
+      }
+      activationStartRef.current = null;
       setTimeUntilActive(null);
-    } else if (wsState === 'reconnecting' && !isActive) {
-      // Start countdown to activation
-      activationStartRef.current = Date.now();
-      setTimeUntilActive(activationThreshold);
 
-      // Update countdown every second
-      countdownTimerRef.current = setInterval(() => {
-        if (!mountedRef.current || activationStartRef.current === null) return;
-        const elapsed = Date.now() - activationStartRef.current;
-        const remaining = Math.max(0, activationThreshold - elapsed);
-        setTimeUntilActive(remaining);
-      }, 1000);
-
-      // Set activation timer
-      activationTimerRef.current = setTimeout(() => {
+      // Start recovery grace timer — only fully reset after sustained connected state
+      if (recoveryTimerRef.current !== undefined) {
+        clearTimeout(recoveryTimerRef.current);
+      }
+      recoveryTimerRef.current = setTimeout(() => {
         if (!mountedRef.current) return;
-        // Clear countdown timer before activating
+        // Sustained recovery — fully reset degraded tracking
+        firstDegradedRef.current = null;
+        setIsActive(false);
+        if (pollTimerRef.current !== undefined) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = undefined;
+        }
+        recoveryTimerRef.current = undefined;
+      }, recoveryGracePeriod);
+    } else if (wsState === 'reconnecting') {
+      // Cancel any pending recovery timer — connection dropped again
+      if (recoveryTimerRef.current !== undefined) {
+        clearTimeout(recoveryTimerRef.current);
+        recoveryTimerRef.current = undefined;
+      }
+
+      // If already active or manually stopped, just keep current state (no-op)
+      if (isActive || manuallyStopped.current) return;
+
+      // Record the start of the degradation window if not already set
+      if (firstDegradedRef.current === null) {
+        firstDegradedRef.current = Date.now();
+      }
+
+      // Calculate remaining time based on total accumulated degraded time
+      const totalDegraded = Date.now() - firstDegradedRef.current;
+      const remaining = Math.max(0, activationThreshold - totalDegraded);
+
+      if (remaining <= 0) {
+        // Already past threshold — activate immediately
         if (countdownTimerRef.current !== undefined) {
           clearInterval(countdownTimerRef.current);
           countdownTimerRef.current = undefined;
         }
         setIsActive(true);
         setTimeUntilActive(null);
-      }, activationThreshold);
+      } else {
+        // Start countdown for remaining time
+        activationStartRef.current = Date.now();
+        setTimeUntilActive(remaining);
+
+        // Clear any existing timers before setting new ones
+        if (countdownTimerRef.current !== undefined) {
+          clearInterval(countdownTimerRef.current);
+        }
+        if (activationTimerRef.current !== undefined) {
+          clearTimeout(activationTimerRef.current);
+        }
+
+        // Update countdown every second
+        countdownTimerRef.current = setInterval(() => {
+          if (!mountedRef.current || firstDegradedRef.current === null) return;
+          const elapsed = Date.now() - firstDegradedRef.current;
+          const countdownRemaining = Math.max(0, activationThreshold - elapsed);
+          setTimeUntilActive(countdownRemaining);
+        }, 1000);
+
+        // Set activation timer for remaining time
+        activationTimerRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
+          if (countdownTimerRef.current !== undefined) {
+            clearInterval(countdownTimerRef.current);
+            countdownTimerRef.current = undefined;
+          }
+          setIsActive(true);
+          setTimeUntilActive(null);
+        }, remaining);
+      }
     } else if (wsState === 'disconnected') {
-      // Manual disconnect - stop polling
+      // Manual disconnect - stop everything
+      manuallyStopped.current = false;
       clearTimers();
+      firstDegradedRef.current = null;
       setIsActive(false);
       setTimeUntilActive(null);
     }
-  }, [wsState, enabled, activationThreshold, isActive, clearTimers]);
+  }, [wsState, enabled, activationThreshold, recoveryGracePeriod, isActive, clearTimers]);
 
   // Manage polling interval when active
   useEffect(() => {
@@ -207,6 +283,8 @@ export function useFallbackPolling(options: UseFallbackPollingOptions): UseFallb
 
   const stopPolling = useCallback(() => {
     clearTimers();
+    firstDegradedRef.current = null;
+    manuallyStopped.current = true;
     setIsActive(false);
     setTimeUntilActive(null);
   }, [clearTimers]);

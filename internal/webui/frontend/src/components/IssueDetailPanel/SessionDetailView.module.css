@@ -1,0 +1,97 @@
+.sessionDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sessionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border, #e0e0e0);
+}
+
+.sessionId {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.activeBadge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-success-bg, #d4edda);
+  color: var(--color-success, #28a745);
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.entry {
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--color-surface, #fafafa);
+}
+
+.entryHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #666);
+}
+
+.role {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.toolName {
+  font-family: monospace;
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: var(--color-code-bg, #f0f0f0);
+}
+
+.timestamp {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.toolInput pre,
+.toolOutput pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  font-family: monospace;
+}
+
+.toolInputToggle {
+  display: inline;
+  font-size: 12px;
+  color: var(--color-primary, #0366d6);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 4px;
+}
+
+.toolInputToggle:hover {
+  text-decoration: underline;
+}
