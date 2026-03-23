@@ -952,6 +952,102 @@ describe("IssueDetailPanel", () => {
     });
   });
 
+  describe("handleTitleSave error handling", () => {
+    it("shows error toast when title save fails", async () => {
+      const { updateIssue } = await import("@/api");
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+
+      const mockIssue = createTestIssueDetails({
+        title: "Original Title",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // Enter edit mode by clicking the editable title display
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      // Change title
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+
+      // Trigger save via blur
+      fireEvent.blur(input);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+    });
+
+    it("shows generic error message for non-Error exceptions", async () => {
+      const { updateIssue } = await import("@/api");
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      mockUpdateIssue.mockRejectedValueOnce("string error");
+
+      const mockIssue = createTestIssueDetails({
+        title: "Original Title",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.blur(input);
+
+      await waitFor(() => {
+        const toast = screen.getByTestId("title-error-toast");
+        expect(toast).toHaveTextContent("Failed to update title");
+      });
+    });
+
+    it("clears title error on next successful save attempt", async () => {
+      const { updateIssue } = await import("@/api");
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+
+      // First call fails
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Temporary error"));
+
+      const mockIssue = createTestIssueDetails({
+        title: "Original Title",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // First save attempt - fails
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.blur(input);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+
+      // Second save attempt - succeeds
+      mockUpdateIssue.mockResolvedValueOnce({ ...mockIssue, title: "New Title" });
+
+      // The EditableTitle component stays in edit mode on error
+      const inputAgain = screen.getByTestId("editable-title-input");
+      fireEvent.change(inputAgain, { target: { value: "New Title 2" } });
+      fireEvent.blur(inputAgain);
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("title-error-toast"),
+        ).not.toBeInTheDocument();
+      });
+    });
+  });
+
   describe("Details/Logs tabs", () => {
     it("always shows Details tab", () => {
       const mockIssue = createTestIssueDetails({
@@ -1048,6 +1144,61 @@ describe("IssueDetailPanel", () => {
         expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
         unmount();
       }
+    });
+
+    it("resets active tab to Details when issue changes", () => {
+      const issueA = createTestIssueDetails({
+        id: "issue-A",
+        assignee: "agent-1",
+      });
+      const issueB = createTestIssueDetails({
+        id: "issue-B",
+        assignee: "agent-2",
+      });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+
+      // Switch to Logs tab
+      const logsTab = screen.getByRole("tab", { name: "Logs" });
+      fireEvent.click(logsTab);
+      expect(logsTab).toHaveAttribute("aria-selected", "true");
+
+      // Change issue
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+
+      // Details tab should be active again
+      const detailsTab = screen.getByRole("tab", { name: "Details" });
+      expect(detailsTab).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("preserves tab availability across multiple issue changes", () => {
+      const issueA = createTestIssueDetails({
+        id: "issue-A",
+        assignee: "agent-1",
+      });
+      const issueB = createTestIssueDetails({
+        id: "issue-B",
+        assignee: "agent-2",
+      });
+      const issueC = createTestIssueDetails({
+        id: "issue-C",
+        assignee: "agent-3",
+      });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueC} onClose={() => {}} />,
+      );
+
+      expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
     });
 
     it("passes agentName from assignee to useAgentTerminalLogs", () => {

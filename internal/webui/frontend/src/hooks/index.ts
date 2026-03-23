@@ -7,6 +7,8 @@ export type { UseSSEOptions, UseSSEReturn } from "./useSSE";
 
 export { useDebounce } from "./useDebounce";
 
+export { useDebouncedCallback } from "./useDebouncedCallback";
+
 export { useSort } from "./useSort";
 export type {
   UseSortOptions,

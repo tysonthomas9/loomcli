@@ -58,7 +58,13 @@ export function getOpenStatus(issue: OpenStatusCheckable): OpenStatus {
  */
 export function isPRUrl(ref?: string | null): boolean {
   if (!ref) return false;
-  return ref.includes("/pull/") || ref.includes("/pulls/");
+  try {
+    const url = new URL(ref);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    return url.pathname.includes("/pull/") || url.pathname.includes("/pulls/");
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -253,6 +253,7 @@ function DefaultContent({
   const [isSavingType, setIsSavingType] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
@@ -324,9 +325,15 @@ function DefaultContent({
       if (!issue) return;
 
       setIsSavingTitle(true);
+      setTitleError(null);
       try {
         const updatedIssue = await updateIssue(issue.id, { title: newTitle });
         onIssueUpdate?.(updatedIssue);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to update title";
+        setTitleError(message);
+        throw err;
       } finally {
         setIsSavingTitle(false);
       }
@@ -843,6 +850,14 @@ function DefaultContent({
           message={statusError}
           onDismiss={() => setStatusError(null)}
           testId="status-error-toast"
+        />
+      )}
+      {/* Error toast for title save failures */}
+      {titleError && (
+        <ErrorToast
+          message={titleError}
+          onDismiss={() => setTitleError(null)}
+          testId="title-error-toast"
         />
       )}
     </>
