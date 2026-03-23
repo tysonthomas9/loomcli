@@ -7,6 +7,7 @@ import { produce } from "immer";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { MutationPayload } from "../api/sse";
+import type { Priority } from "../types/common";
 import type { Issue } from "../types/issue";
 import {
   MutationCreate,
@@ -122,7 +123,7 @@ function applyUpdateToIssue(issue: Issue, mutation: MutationPayload): Issue {
       draft.assignee = mutation.assignee;
     }
     if (mutation.priority != null) {
-      draft.priority = mutation.priority;
+      draft.priority = mutation.priority as Priority;
     }
     if (mutation.new_status != null) {
       draft.status = mutation.new_status;
