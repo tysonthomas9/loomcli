@@ -167,7 +167,7 @@ func TestStatusOrphanedTaskDetection(t *testing.T) {
 		},
 	}
 
-	issues := detectIssues(mon)
+	issues := detectIssues(getDefaultResolver(), mon)
 
 	found := false
 	for _, issue := range issues {
@@ -192,7 +192,7 @@ func TestStatusNoOrphanedTaskWhenAgentRunning(t *testing.T) {
 		},
 	}
 
-	issues := detectIssues(mon)
+	issues := detectIssues(getDefaultResolver(), mon)
 
 	for _, issue := range issues {
 		if issue.Message == "task task-1 is in_progress with no running agent" {
@@ -227,7 +227,7 @@ func TestBuildStatusDataWorktreeCounts(t *testing.T) {
 		},
 	}
 
-	data := buildStatusData(daemon, mon)
+	data := buildStatusData(getDefaultResolver(), daemon, mon)
 
 	if data.Worktrees.Active != 2 {
 		t.Errorf("active = %d, want 2", data.Worktrees.Active)
@@ -254,7 +254,7 @@ func TestBuildStatusDataWorktreeCounts(t *testing.T) {
 
 func TestBuildStatusDataNilMonitor(t *testing.T) {
 	daemon := DaemonInfo{Running: false}
-	data := buildStatusData(daemon, nil)
+	data := buildStatusData(getDefaultResolver(), daemon, nil)
 
 	if data.Worktrees.Active != 0 {
 		t.Errorf("active = %d, want 0", data.Worktrees.Active)
@@ -508,7 +508,7 @@ func TestBuildStatusDataExtractsTaskID(t *testing.T) {
 		},
 	}
 
-	data := buildStatusData(daemon, mon)
+	data := buildStatusData(getDefaultResolver(), daemon, mon)
 
 	if len(data.Worktrees.List) < 2 {
 		t.Fatalf("expected 2 worktrees, got %d", len(data.Worktrees.List))

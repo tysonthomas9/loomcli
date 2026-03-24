@@ -219,8 +219,8 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 // getWorkspaceInfo returns workspace metadata for API responses.
 func getWorkspaceInfo() WorkspaceInfo {
-	resolver, err := NewResolver()
-	if err != nil || resolver.Mode() != ModeWorkspace {
+	resolver := getDefaultResolver()
+	if resolver.Mode() != ModeWorkspace {
 		return WorkspaceInfo{Mode: "legacy"}
 	}
 	return WorkspaceInfo{
@@ -249,8 +249,8 @@ func handleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		Timestamp:  time.Now(),
 	}
 
-	resolver, err := NewResolver()
-	if err != nil || resolver.Mode() != ModeWorkspace {
+	resolver := getDefaultResolver()
+	if resolver.Mode() != ModeWorkspace {
 		response.Mode = "legacy"
 		writeJSON(w, response)
 		return

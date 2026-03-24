@@ -98,6 +98,7 @@ func init() {
 type checkFunc func() CheckResult
 
 func runDoctor(cmd *cobra.Command, args []string) error {
+	resolver := GetDeps(cmd).ResolverOrDefault()
 	checks := []checkFunc{
 		checkGit,
 		checkGitRepo,
@@ -109,8 +110,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		checkBeadsInit,
 		checkProjectConfig,
 		checkGlobalConfig,
-		checkWorktrees,
-		checkStaleLocks,
+		func() CheckResult { return checkWorktrees(resolver) },
+		func() CheckResult { return checkStaleLocks(resolver) },
 		checkLoomDaemon,
 		checkRedis,
 	}
@@ -157,9 +158,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 }
 
 func renderDoctorHuman(output DoctorOutput) {
-	fmt.Println("Loom Doctor")
-	fmt.Println("===========")
-	fmt.Println()
+	fmt.Println("Loom Doctor\n===========")
 
 	for _, r := range output.Checks {
 		var icon string
@@ -523,8 +522,8 @@ func checkGlobalConfig() CheckResult {
 	}
 }
 
-func checkWorktrees() CheckResult {
-	worktrees, err := DiscoverWorktrees()
+func checkWorktrees(resolver *Resolver) CheckResult {
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		return CheckResult{
 			Name:    "worktrees",
@@ -555,8 +554,8 @@ func checkWorktrees() CheckResult {
 	}
 }
 
-func checkStaleLocks() CheckResult {
-	worktrees, err := DiscoverWorktrees()
+func checkStaleLocks(resolver *Resolver) CheckResult {
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil || len(worktrees) == 0 {
 		return CheckResult{} // skip — worktrees check already reported
 	}

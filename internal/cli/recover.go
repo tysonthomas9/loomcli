@@ -62,10 +62,11 @@ func init() {
 }
 
 func runRecover(cmd *cobra.Command, args []string) {
+	resolver := GetDeps(cmd).ResolverOrDefault()
 	worktreeName := args[0]
 
 	// 1. Resolve worktree path
-	worktreePath, err := ResolveWorktreePath(worktreeName)
+	worktreePath, err := resolver.ResolveWorktreePath(worktreeName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -85,7 +86,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 
 	if lockInfo == nil {
 		fmt.Println("No lock file found - checking for orphaned tasks...")
-		resetOrphanedAgentTasks(worktreePath, worktreeName, "", !recoverNoAnalyze)
+		resetOrphanedAgentTasks(resolver, worktreePath, worktreeName, "", !recoverNoAnalyze)
 		fmt.Println("Agent is ready for new work.")
 		return
 	}
@@ -120,14 +121,14 @@ func runRecover(cmd *cobra.Command, args []string) {
 
 	// 4. Handle orphaned task if there was one
 	if lockInfo.TaskID != "" {
-		handleOrphanedTask(worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
+		handleOrphanedTask(resolver, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
 	}
 
 	// 5. Find and reset any additional orphaned tasks assigned to this agent
-	resetOrphanedAgentTasks(worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
+	resetOrphanedAgentTasks(resolver, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
 
 	// 6. Clean up untracked files left by the crashed agent
-	cleanUntrackedFiles(worktreePath, recoverForce)
+	cleanUntrackedFiles(resolver, worktreePath, recoverForce)
 
 	fmt.Println("")
 	fmt.Println("=========================================")
@@ -178,21 +179,22 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 	if lockInfo != nil {
 		lockTaskID = lockInfo.TaskID
 	}
-	resetOrphanedAgentTasks(worktreePath, agentName, lockTaskID, false)
+	daemonResolver := getDefaultResolver()
+	resetOrphanedAgentTasks(daemonResolver, worktreePath, agentName, lockTaskID, false)
 
 	// 6. Clean untracked files (force=true, no prompting)
-	cleanUntrackedFiles(worktreePath, true)
+	cleanUntrackedFiles(daemonResolver, worktreePath, true)
 
 	return nil
 }
 
 // handleOrphanedTask decides whether to close or reopen an orphaned task
-func handleOrphanedTask(worktreePath, taskID string, analyze bool) {
+func handleOrphanedTask(resolver *Resolver, worktreePath, taskID string, analyze bool) {
 	fmt.Printf("\nHandling orphaned task: %s\n", taskID)
 
 	if analyze {
 		fmt.Println("Analyzing task completion with Claude...")
-		completed, reason := analyzeTaskCompletion(worktreePath, taskID)
+		completed, reason := analyzeTaskCompletion(resolver, worktreePath, taskID)
 
 		if completed {
 			fmt.Printf("Task appears COMPLETE: %s\n", reason)
@@ -210,7 +212,7 @@ func handleOrphanedTask(worktreePath, taskID string, analyze bool) {
 // analyzeTaskCompletion uses Claude to determine if a task was completed.
 // In workspace mode, it searches git logs across ALL repos in the workspace
 // to give Claude the most complete picture of relevant commits.
-func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason string) {
+func analyzeTaskCompletion(resolver *Resolver, worktreePath, taskID string) (completed bool, reason string) {
 	// Get task details
 	taskResult := execCommand(GetBeadsDir(), "bd", "show", taskID)
 	if taskResult.Err != nil {
@@ -221,7 +223,6 @@ func analyzeTaskCompletion(worktreePath, taskID string) (completed bool, reason 
 	// In workspace mode, search across all repos for a complete picture.
 	var gitOutput string
 	searchedWorkspace := false
-	resolver := getDefaultResolver()
 	if resolver.Mode() == ModeWorkspace {
 		worktrees, err := resolver.DiscoverWorktrees()
 		if err == nil && len(worktrees) > 0 {
@@ -389,7 +390,7 @@ func confirmKill(pid int) bool {
 
 // cleanUntrackedFiles checks for and optionally removes untracked files.
 // In workspace mode, it iterates over all repos in the workspace.
-func cleanUntrackedFiles(worktreePath string, force bool) {
+func cleanUntrackedFiles(resolver *Resolver, worktreePath string, force bool) {
 	// Collect paths to clean. In workspace mode, clean all repos.
 	type cleanTarget struct {
 		name string
@@ -397,7 +398,6 @@ func cleanUntrackedFiles(worktreePath string, force bool) {
 	}
 	var targets []cleanTarget
 
-	resolver := getDefaultResolver()
 	if resolver.Mode() == ModeWorkspace {
 		worktrees, err := resolver.DiscoverWorktrees()
 		if err == nil && len(worktrees) > 0 {
@@ -464,7 +464,7 @@ func cleanUntrackedFiles(worktreePath string, force bool) {
 
 // resetOrphanedAgentTasks finds all in_progress tasks assigned to the given agent
 // and handles them (analyze or reset). Tasks matching alreadyHandledTaskID are skipped.
-func resetOrphanedAgentTasks(worktreePath, agentName, alreadyHandledTaskID string, analyze bool) {
+func resetOrphanedAgentTasks(resolver *Resolver, worktreePath, agentName, alreadyHandledTaskID string, analyze bool) {
 	if agentName == "" {
 		return
 	}
@@ -501,7 +501,7 @@ func resetOrphanedAgentTasks(worktreePath, agentName, alreadyHandledTaskID strin
 
 	fmt.Printf("\nFound %d additional orphaned task(s) for agent %s:\n", len(orphaned), agentName)
 	for _, t := range orphaned {
-		handleOrphanedTask(worktreePath, t.ID, analyze)
+		handleOrphanedTask(resolver, worktreePath, t.ID, analyze)
 	}
 }
 

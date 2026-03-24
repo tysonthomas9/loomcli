@@ -33,7 +33,8 @@ func init() {
 }
 
 func runList(cmd *cobra.Command, args []string) {
-	worktrees, err := DiscoverWorktrees()
+	resolver := GetDeps(cmd).ResolverOrDefault()
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

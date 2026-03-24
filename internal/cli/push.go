@@ -71,6 +71,8 @@ func init() {
 }
 
 func runPush(cmd *cobra.Command, args []string) {
+	resolver := GetDeps(cmd).ResolverOrDefault()
+
 	if IsWorkspaceMode() {
 		if pushAll && pushWorkspace != "" {
 			fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
@@ -84,17 +86,11 @@ func runPush(cmd *cobra.Command, args []string) {
 			if len(args) == 1 {
 				targetBranch = args[0]
 			}
-			pushAllWorkspaces(targetBranch)
+			pushAllWorkspaces(resolver, targetBranch)
 		} else {
 			sourceBranch = args[0]
 			if len(args) == 2 {
 				targetBranch = args[1]
-			}
-
-			resolver, err := NewResolver()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-				os.Exit(1)
 			}
 
 			wsName := pushWorkspace
@@ -113,19 +109,13 @@ func runPush(cmd *cobra.Command, args []string) {
 
 	// Legacy mode
 	if pushAll {
-		pushAllWorktrees(args[0])
+		pushAllWorktrees(resolver, args[0])
 	} else {
 		pushBranch(args[0], args[1])
 	}
 }
 
-func pushAllWorkspaces(targetBranch string) {
-	resolver, err := NewResolver()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
-	}
-
+func pushAllWorkspaces(resolver *Resolver, targetBranch string) {
 	wsNames := resolver.WorkspaceNames()
 	if len(wsNames) == 0 {
 		fmt.Println("No workspaces found.")
@@ -366,13 +356,13 @@ func targetBranchDisplay(target string) string {
 	return target
 }
 
-func pushAllWorktrees(targetBranch string) {
+func pushAllWorktrees(resolver *Resolver, targetBranch string) {
 	fmt.Println("=========================================")
 	fmt.Printf("Pushing all worktrees -> %s\n", targetBranch)
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	worktrees, err := DiscoverWorktrees()
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
 		os.Exit(1)

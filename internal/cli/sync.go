@@ -51,20 +51,17 @@ func runFullSync(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	resolver := GetDeps(cmd).ResolverOrDefault()
+
 	if IsWorkspaceMode() {
-		runWorkspaceSync()
+		runWorkspaceSync(resolver)
 		return
 	}
 
-	runLegacySync()
+	runLegacySync(resolver)
 }
 
-func runWorkspaceSync() {
-	resolver, err := NewResolver()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
-	}
+func runWorkspaceSync(resolver *Resolver) {
 
 	// If workspace flag specified, operate on just that workspace
 	if syncWorkspaceFlag != "" {
@@ -131,13 +128,13 @@ func syncSingleWorkspace(resolver *Resolver) {
 	}
 }
 
-func runLegacySync() {
+func runLegacySync(resolver *Resolver) {
 	fmt.Println("=========================================")
 	fmt.Println("Full Sync: All Worktrees")
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	worktrees, err := DiscoverWorktrees()
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
 		os.Exit(1)

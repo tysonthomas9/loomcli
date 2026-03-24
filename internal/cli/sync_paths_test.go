@@ -85,7 +85,7 @@ func TestRunLegacySync_WithWorktrees(t *testing.T) {
 	})
 	outputMock.Install()
 
-	runLegacySync()
+	runLegacySync(getDefaultResolver())
 }
 
 func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
@@ -163,7 +163,7 @@ func TestRunWorkspaceSync_MultipleWorkspaces(t *testing.T) {
 	})
 	outputMock.Install()
 
-	runWorkspaceSync()
+	runWorkspaceSync(getDefaultResolver())
 }
 
 func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
@@ -231,7 +231,7 @@ func TestRunWorkspaceSync_SpecificWorkspaceFlag(t *testing.T) {
 	})
 	outputMock.Install()
 
-	runWorkspaceSync()
+	runWorkspaceSync(getDefaultResolver())
 }
 
 func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
@@ -244,7 +244,7 @@ func TestRunWorkspaceSync_UnknownWorkspace(t *testing.T) {
 		defaultResolver = nil
 		syncWorkspaceFlag = "nonexistent"
 
-		runWorkspaceSync()
+		runWorkspaceSync(getDefaultResolver())
 		return
 	}
 

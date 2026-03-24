@@ -73,7 +73,8 @@ func init() {
 }
 
 func runReset(cmd *cobra.Command, args []string) {
-	defaultBranch := GetDefaultBranch()
+	resolver := GetDeps(cmd).ResolverOrDefault()
+	defaultBranch := resolver.GetDefaultBranch()
 
 	if resetAll {
 		// Reset all worktrees
@@ -82,7 +83,7 @@ func runReset(cmd *cobra.Command, args []string) {
 		if explicitBranch {
 			targetBranch = args[0]
 		}
-		if err := resetAllWorktrees(targetBranch, explicitBranch); err != nil {
+		if err := resetAllWorktrees(resolver, targetBranch, explicitBranch); err != nil {
 			os.Exit(1)
 		}
 	} else {
@@ -92,14 +93,14 @@ func runReset(cmd *cobra.Command, args []string) {
 		if len(args) > 1 {
 			targetBranch = args[1]
 		}
-		if !resetWorktree(worktreeName, targetBranch, !resetForce) {
+		if !resetWorktree(resolver, worktreeName, targetBranch, !resetForce) {
 			os.Exit(1)
 		}
 	}
 }
 
-func resetAllWorktrees(targetBranch string, explicitTarget bool) error {
-	worktrees, err := DiscoverWorktrees()
+func resetAllWorktrees(resolver *Resolver, targetBranch string, explicitTarget bool) error {
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
 		return fmt.Errorf("error discovering worktrees: %w", err)
@@ -159,7 +160,7 @@ func resetAllWorktrees(targetBranch string, explicitTarget bool) error {
 	// Reset each worktree
 	var failed []string
 	for _, t := range targets {
-		if !resetWorktree(t.wt.Name, t.branch, false) {
+		if !resetWorktree(resolver, t.wt.Name, t.branch, false) {
 			failed = append(failed, t.wt.Name)
 		}
 		fmt.Println("")
@@ -180,8 +181,8 @@ func resetAllWorktrees(targetBranch string, explicitTarget bool) error {
 	return nil
 }
 
-func resetWorktree(worktreeName, targetBranch string, askConfirm bool) bool {
-	worktreePath, err := ResolveWorktreePath(worktreeName)
+func resetWorktree(resolver *Resolver, worktreeName, targetBranch string, askConfirm bool) bool {
+	worktreePath, err := resolver.ResolveWorktreePath(worktreeName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return false

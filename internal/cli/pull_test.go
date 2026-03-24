@@ -311,7 +311,7 @@ func TestPullAllWorktrees(t *testing.T) {
 			}
 			t.Cleanup(func() { claudeInvoker = origClaude })
 
-			pullAllWorktrees(tc.sourceBranch)
+			pullAllWorktrees(getDefaultResolver(), tc.sourceBranch)
 		})
 	}
 }
@@ -332,7 +332,7 @@ func TestPullAllWorktrees_NoWorktrees(t *testing.T) {
 	outputMock := NewOutputCommandMock(t, []OutputCommandStub{})
 	outputMock.Install()
 
-	pullAllWorktrees("main")
+	pullAllWorktrees(getDefaultResolver(), "main")
 }
 
 func TestSourceBranchDisplay(t *testing.T) {

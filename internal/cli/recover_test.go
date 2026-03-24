@@ -158,7 +158,7 @@ func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-abc")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-abc")
 
 	if !completed {
 		t.Error("expected completed=true")
@@ -194,7 +194,7 @@ func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-def")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-def")
 
 	if completed {
 		t.Error("expected completed=false")
@@ -218,7 +218,7 @@ func TestAnalyzeTaskCompletion_BdShowFails(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-notfound")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-notfound")
 
 	if completed {
 		t.Error("expected completed=false when bd show fails")
@@ -255,7 +255,7 @@ func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-xyz")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-xyz")
 
 	if completed {
 		t.Error("expected completed=false when claude fails")
@@ -291,7 +291,7 @@ func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-multi")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-multi")
 
 	if !completed {
 		t.Error("expected completed=true for multiline response with COMPLETED")
@@ -327,7 +327,7 @@ func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-case")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-case")
 
 	if !completed {
 		t.Error("expected completed=true for lowercase 'Completed'")
@@ -363,7 +363,7 @@ func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-colon")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-colon")
 
 	if completed {
 		t.Error("expected completed=false")
@@ -400,7 +400,7 @@ func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-unparse")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-unparse")
 
 	if completed {
 		t.Error("expected completed=false when response is unparseable")
@@ -445,7 +445,7 @@ func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
 	})
 	mock.Install()
 
-	handleOrphanedTask("/test/worktree", "task-orphan1", true)
+	handleOrphanedTask(getDefaultResolver(), "/test/worktree", "task-orphan1", true)
 }
 
 func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
@@ -490,7 +490,7 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 	})
 	mock.Install()
 
-	handleOrphanedTask("/test/worktree", "task-orphan2", true)
+	handleOrphanedTask(getDefaultResolver(), "/test/worktree", "task-orphan2", true)
 }
 
 func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
@@ -514,7 +514,7 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 	})
 	mock.Install()
 
-	handleOrphanedTask("/test/worktree", "task-orphan3", false)
+	handleOrphanedTask(getDefaultResolver(), "/test/worktree", "task-orphan3", false)
 }
 
 func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
@@ -529,7 +529,7 @@ func TestCleanUntrackedFiles_NoFiles(t *testing.T) {
 	mock.Install()
 
 	// No output command mock needed — GitClean should not be called
-	cleanUntrackedFiles("/test/worktree", false)
+	cleanUntrackedFiles(getDefaultResolver(), "/test/worktree", false)
 }
 
 func TestCleanUntrackedFiles_WithForce(t *testing.T) {
@@ -550,7 +550,7 @@ func TestCleanUntrackedFiles_WithForce(t *testing.T) {
 	}})
 	outputMock.Install()
 
-	cleanUntrackedFiles("/test/worktree", true)
+	cleanUntrackedFiles(getDefaultResolver(), "/test/worktree", true)
 }
 
 func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
@@ -565,7 +565,7 @@ func TestCleanUntrackedFiles_DryRunFails(t *testing.T) {
 	}})
 	mock.Install()
 
-	cleanUntrackedFiles("/test/worktree", true)
+	cleanUntrackedFiles(getDefaultResolver(), "/test/worktree", true)
 }
 
 func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
@@ -586,7 +586,7 @@ func TestCleanUntrackedFiles_CleanFails(t *testing.T) {
 	}})
 	outputMock.Install()
 
-	cleanUntrackedFiles("/test/worktree", true)
+	cleanUntrackedFiles(getDefaultResolver(), "/test/worktree", true)
 }
 
 func TestKillProcess_Success(t *testing.T) {
@@ -738,7 +738,7 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 	})
 	mock.Install()
 
-	resetOrphanedAgentTasks("/test/worktree", "falcon", "", false)
+	resetOrphanedAgentTasks(getDefaultResolver(), "/test/worktree", "falcon", "", false)
 }
 
 func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
@@ -769,7 +769,7 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 	})
 	mock.Install()
 
-	resetOrphanedAgentTasks("/test/worktree", "ember", "task-1", false)
+	resetOrphanedAgentTasks(getDefaultResolver(), "/test/worktree", "ember", "task-1", false)
 }
 
 func TestResetOrphanedAgentTasks_NoOrphanedTasks(t *testing.T) {
@@ -784,7 +784,7 @@ func TestResetOrphanedAgentTasks_NoOrphanedTasks(t *testing.T) {
 	})
 	mock.Install()
 
-	resetOrphanedAgentTasks("/test/worktree", "falcon", "", false)
+	resetOrphanedAgentTasks(getDefaultResolver(), "/test/worktree", "falcon", "", false)
 }
 
 func TestResetOrphanedAgentTasks_BdListFails(t *testing.T) {
@@ -801,7 +801,7 @@ func TestResetOrphanedAgentTasks_BdListFails(t *testing.T) {
 	mock.Install()
 
 	// Should not panic
-	resetOrphanedAgentTasks("/test/worktree", "falcon", "", false)
+	resetOrphanedAgentTasks(getDefaultResolver(), "/test/worktree", "falcon", "", false)
 }
 
 func TestResetOrphanedAgentTasks_EmptyAgentName(t *testing.T) {
@@ -809,7 +809,7 @@ func TestResetOrphanedAgentTasks_EmptyAgentName(t *testing.T) {
 	mock.Install()
 
 	// Should return immediately with no commands
-	resetOrphanedAgentTasks("/test/worktree", "", "", false)
+	resetOrphanedAgentTasks(getDefaultResolver(), "/test/worktree", "", "", false)
 }
 
 func TestRecoverWorktree_NoLock(t *testing.T) {
@@ -1090,7 +1090,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-ws1")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-ws1")
 
 	if !completed {
 		t.Error("expected completed=true in workspace mode")
@@ -1158,7 +1158,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, _ := analyzeTaskCompletion("/test/worktree", "task-empty")
+	completed, _ := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-empty")
 
 	if completed {
 		t.Error("expected completed=false when no commits found in workspace")
@@ -1234,7 +1234,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	})
 	mock.Install()
 
-	completed, reason := analyzeTaskCompletion("/test/worktree", "task-partial")
+	completed, reason := analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-partial")
 
 	if completed {
 		t.Error("expected completed=false")
@@ -1290,7 +1290,7 @@ func TestCleanUntrackedFiles_WorkspaceMode(t *testing.T) {
 	})
 	outputMock.Install()
 
-	cleanUntrackedFiles("/some/path", true)
+	cleanUntrackedFiles(getDefaultResolver(), "/some/path", true)
 }
 
 func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
@@ -1332,7 +1332,7 @@ func TestCleanUntrackedFiles_WorkspaceMode_NoUntrackedInAnyRepo(t *testing.T) {
 	mock.Install()
 
 	// No OutputCommandMock needed -- GitClean should not be called
-	cleanUntrackedFiles("/some/path", true)
+	cleanUntrackedFiles(getDefaultResolver(), "/some/path", true)
 }
 
 func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
@@ -1382,7 +1382,7 @@ func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
 	})
 	outputMock.Install()
 
-	cleanUntrackedFiles("/some/path", true)
+	cleanUntrackedFiles(getDefaultResolver(), "/some/path", true)
 }
 
 func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
@@ -1497,7 +1497,7 @@ func TestAnalyzeTaskCompletion_TruncatesLongTaskDetails(t *testing.T) {
 	})
 	mock.Install()
 
-	analyzeTaskCompletion("/test/worktree", "task-trunc1")
+	analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-trunc1")
 
 	// Inspect the prompt passed to claude (3rd call, index 2)
 	calls := mock.Calls()
@@ -1559,7 +1559,7 @@ func TestAnalyzeTaskCompletion_TruncatesLongGitOutput(t *testing.T) {
 	})
 	mock.Install()
 
-	analyzeTaskCompletion("/test/worktree", "task-trunc2")
+	analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-trunc2")
 
 	// Inspect the prompt passed to claude
 	calls := mock.Calls()
@@ -1613,7 +1613,7 @@ func TestAnalyzeTaskCompletion_XMLDelimitersInPrompt(t *testing.T) {
 	})
 	mock.Install()
 
-	analyzeTaskCompletion("/test/worktree", "task-xml")
+	analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-xml")
 
 	// Inspect the prompt passed to claude
 	calls := mock.Calls()
@@ -1696,7 +1696,7 @@ func TestAnalyzeTaskCompletion_AntiInjectionInstruction(t *testing.T) {
 	})
 	mock.Install()
 
-	analyzeTaskCompletion("/test/worktree", "task-inject")
+	analyzeTaskCompletion(getDefaultResolver(), "/test/worktree", "task-inject")
 
 	// Inspect the prompt passed to claude
 	calls := mock.Calls()

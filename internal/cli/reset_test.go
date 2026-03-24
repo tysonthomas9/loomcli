@@ -106,7 +106,7 @@ func TestResetAllWorktrees_PerRepoBranch(t *testing.T) {
 	defer func() { resetForce = false }()
 
 	defaultBranch := GetDefaultBranch()
-	err := resetAllWorktrees(defaultBranch, false)
+	err := resetAllWorktrees(getDefaultResolver(), defaultBranch, false)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestResetAllWorktrees_ExplicitBranchOverridesPerRepo(t *testing.T) {
 	resetForce = true
 	defer func() { resetForce = false }()
 
-	err := resetAllWorktrees("release", true)
+	err := resetAllWorktrees(getDefaultResolver(), "release", true)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestResetAllWorktrees_MixedDefaultBranch(t *testing.T) {
 	resetForce = true
 	defer func() { resetForce = false }()
 
-	err := resetAllWorktrees(defaultBranch, false)
+	err := resetAllWorktrees(getDefaultResolver(), defaultBranch, false)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestResetAllWorktrees_LegacyMode_NoPerRepoBranch(t *testing.T) {
 	resetForce = true
 	defer func() { resetForce = false }()
 
-	err := resetAllWorktrees("main", false)
+	err := resetAllWorktrees(getDefaultResolver(), "main", false)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestResetWorktree_ReturnsTrue_OnSuccess(t *testing.T) {
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -470,7 +470,7 @@ func TestResetWorktree_ReturnsFalse_OnFetchError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -511,7 +511,7 @@ func TestResetWorktree_ReturnsFalse_OnResolveError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("nonexistent-worktree-xyz", "main", false)
+	result := resetWorktree(getDefaultResolver(), "nonexistent-worktree-xyz", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -554,7 +554,7 @@ func TestResetWorktree_ReturnsTrue_OnUserAbort(t *testing.T) {
 	os.Stdout = w
 
 	// askConfirm=true triggers the confirmation prompt
-	result := resetWorktree("test-wt", "main", true)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", true)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -631,7 +631,7 @@ func TestResetAllWorktrees_PartialFailure_ReturnsError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	err := resetAllWorktrees("main", false)
+	err := resetAllWorktrees(getDefaultResolver(), "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -716,7 +716,7 @@ func TestResetAllWorktrees_AllFail_ReturnsError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	err := resetAllWorktrees("main", false)
+	err := resetAllWorktrees(getDefaultResolver(), "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -887,7 +887,7 @@ func TestResetWorktree_Success(t *testing.T) {
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	resetWorktree("test-wt", "main", false)
+	resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -925,7 +925,7 @@ func TestResetWorktree_FetchError(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	resetWorktree("test-wt", "main", false)
+	resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	w.Close()
 	wOut.Close()
@@ -985,7 +985,7 @@ func TestResetWorktree_RefusesWithActiveLock(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	w.Close()
 	wOut.Close()
@@ -1044,7 +1044,7 @@ func TestResetWorktree_RefusesWithActiveLock_ShowsTaskID(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	resetWorktree("test-wt", "main", false)
+	resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	w.Close()
 	wOut.Close()
@@ -1108,7 +1108,7 @@ func TestResetWorktree_ForceOverridesLock(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	w.Close()
 	wOut.Close()
@@ -1176,7 +1176,7 @@ func TestResetWorktree_ProceedsWithStaleLock(t *testing.T) {
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -1222,7 +1222,7 @@ func TestResetWorktree_ProceedsWithNoLock(t *testing.T) {
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -1303,7 +1303,7 @@ func TestResetWorktree_ProtectedBranch_Blocked(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -1363,7 +1363,7 @@ func TestResetWorktree_ProtectedBranch_Master_Blocked(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -1425,7 +1425,7 @@ func TestResetWorktree_ProtectedBranch_ForceOverride(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()
@@ -1486,7 +1486,7 @@ func TestResetWorktree_NonProtectedBranch_Allowed(t *testing.T) {
 	_, wOut, _ := os.Pipe()
 	os.Stdout = wOut
 
-	result := resetWorktree("test-wt", "main", false)
+	result := resetWorktree(getDefaultResolver(), "test-wt", "main", false)
 
 	wErr.Close()
 	wOut.Close()

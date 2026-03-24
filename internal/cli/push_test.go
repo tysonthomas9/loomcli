@@ -399,7 +399,7 @@ func TestPushAllWorktrees(t *testing.T) {
 			}
 			t.Cleanup(func() { claudeInvoker = origClaude })
 
-			pushAllWorktrees(tc.targetBranch)
+			pushAllWorktrees(getDefaultResolver(), tc.targetBranch)
 		})
 	}
 }
@@ -1042,7 +1042,7 @@ func TestPushAllWorktrees_EmptyList(t *testing.T) {
 	outputMock.Install()
 
 	// Should not panic when no worktrees
-	pushAllWorktrees("main")
+	pushAllWorktrees(getDefaultResolver(), "main")
 }
 
 func TestPushWorkspaceWorktrees_EmptyList(t *testing.T) {

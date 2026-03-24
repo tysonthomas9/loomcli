@@ -307,7 +307,7 @@ func TestCheckStaleLocks(t *testing.T) {
 		t.Setenv("LOOM_WORKTREES_DIR", filepath.Join(dir, "worktrees"))
 		defer ResetBeadsDirCache()
 
-		result := checkStaleLocks()
+		result := checkStaleLocks(getDefaultResolver())
 		// Empty result (skipped)
 		if result.Name != "" {
 			t.Errorf("expected empty result for no worktrees, got: %s", result.Name)
@@ -348,7 +348,7 @@ func TestCheckStaleLocks(t *testing.T) {
 			return CommandResult{Stdout: ""}
 		}
 
-		result := checkStaleLocks()
+		result := checkStaleLocks(getDefaultResolver())
 		if result.Name == "" {
 			// checkStaleLocks may return empty if DiscoverWorktrees fails (legacy mode)
 			// without proper git setup; this is acceptable

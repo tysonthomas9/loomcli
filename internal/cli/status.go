@@ -112,6 +112,7 @@ type StatusIssue struct {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
+	resolver := GetDeps(cmd).ResolverOrDefault()
 	var (
 		daemonInfo DaemonInfo
 		monData    *MonitorData
@@ -134,7 +135,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	wg.Wait()
 
 	// Build status data from collected information.
-	data := buildStatusData(daemonInfo, monData)
+	data := buildStatusData(resolver, daemonInfo, monData)
 
 	if statusJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -182,7 +183,7 @@ func collectDaemonStatus() DaemonInfo {
 	return DaemonInfo{}
 }
 
-func buildStatusData(daemon DaemonInfo, mon *MonitorData) StatusData {
+func buildStatusData(resolver *Resolver, daemon DaemonInfo, mon *MonitorData) StatusData {
 	data := StatusData{
 		Daemon:  daemon,
 		Backend: collectBackendInfo(),
@@ -229,7 +230,7 @@ func buildStatusData(daemon DaemonInfo, mon *MonitorData) StatusData {
 		}
 
 		// Issues
-		data.Issues = detectIssues(mon)
+		data.Issues = detectIssues(resolver, mon)
 	}
 
 	return data
@@ -282,11 +283,11 @@ func collectRedisStatus() RedisInfo {
 	return info
 }
 
-func detectIssues(mon *MonitorData) []StatusIssue {
+func detectIssues(resolver *Resolver, mon *MonitorData) []StatusIssue {
 	var issues []StatusIssue
 
 	// Detect stale locks (lock file exists but process not running)
-	worktrees, err := DiscoverWorktrees()
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err == nil {
 		for _, wt := range worktrees {
 			info, running, checkErr := CheckLock(wt.Path)

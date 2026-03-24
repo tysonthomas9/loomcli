@@ -75,6 +75,8 @@ func runPR(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	resolver := GetDeps(cmd).ResolverOrDefault()
+
 	if IsWorkspaceMode() {
 		if prAll && prWorkspace != "" {
 			fmt.Fprintln(os.Stderr, "Error: --all and --workspace are mutually exclusive")
@@ -88,17 +90,11 @@ func runPR(cmd *cobra.Command, args []string) {
 			if len(args) == 1 {
 				targetBranch = args[0]
 			}
-			prAllWorkspaces(targetBranch)
+			prAllWorkspaces(resolver, targetBranch)
 		} else {
 			sourceBranch = args[0]
 			if len(args) == 2 {
 				targetBranch = args[1]
-			}
-
-			resolver, err := NewResolver()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-				os.Exit(1)
 			}
 
 			wsName := prWorkspace
@@ -123,7 +119,7 @@ func runPR(cmd *cobra.Command, args []string) {
 		if len(args) == 1 {
 			targetBranch = args[0]
 		}
-		prAllWorktrees(targetBranch)
+		prAllWorktrees(resolver, targetBranch)
 	} else {
 		sourceBranch = args[0]
 		if len(args) == 2 {
@@ -136,13 +132,7 @@ func runPR(cmd *cobra.Command, args []string) {
 	}
 }
 
-func prAllWorkspaces(targetBranch string) {
-	resolver, err := NewResolver()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
-	}
-
+func prAllWorkspaces(resolver *Resolver, targetBranch string) {
 	wsNames := resolver.WorkspaceNames()
 	if len(wsNames) == 0 {
 		fmt.Println("No workspaces found.")
@@ -372,13 +362,13 @@ func createPRLegacy(repoPath, sourceBranch, targetBranch string) (string, error)
 	return prURL, nil
 }
 
-func prAllWorktrees(targetBranch string) {
+func prAllWorktrees(resolver *Resolver, targetBranch string) {
 	fmt.Println("=========================================")
 	fmt.Printf("Creating PRs for all worktrees -> %s\n", targetBranchDisplay(targetBranch))
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	worktrees, err := DiscoverWorktrees()
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering worktrees: %v\n", err)
 		os.Exit(1)

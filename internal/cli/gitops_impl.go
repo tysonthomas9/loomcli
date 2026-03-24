@@ -8,18 +8,29 @@ import (
 )
 
 // GitOpsImpl implements webui.GitOps using the cli package git functions.
-type GitOpsImpl struct{}
+type GitOpsImpl struct {
+	resolver *Resolver
+}
 
 // NewGitOps creates a new GitOps implementation.
 func NewGitOps() *GitOpsImpl {
 	return &GitOpsImpl{}
 }
 
-func (g *GitOpsImpl) ResolveAgentWorktree(name string) (*webui.AgentWorktree, error) {
-	resolver, err := NewResolver()
-	if err != nil {
-		return nil, fmt.Errorf("creating resolver: %v", err)
+// NewGitOpsWithResolver creates a new GitOps implementation with the given resolver.
+func NewGitOpsWithResolver(r *Resolver) *GitOpsImpl {
+	return &GitOpsImpl{resolver: r}
+}
+
+func (g *GitOpsImpl) resolverOrDefault() *Resolver {
+	if g.resolver != nil {
+		return g.resolver
 	}
+	return getDefaultResolver()
+}
+
+func (g *GitOpsImpl) ResolveAgentWorktree(name string) (*webui.AgentWorktree, error) {
+	resolver := g.resolverOrDefault()
 
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
@@ -136,18 +147,12 @@ func (g *GitOpsImpl) CheckGhInstalled() error {
 }
 
 func (g *GitOpsImpl) SetRepoDefaultBranch(repoName, branch string) error {
-	resolver, err := NewResolver()
-	if err != nil {
-		return err
-	}
+	resolver := g.resolverOrDefault()
 	return resolver.SetRepoDefaultBranch(repoName, branch)
 }
 
 func (g *GitOpsImpl) ListAgentWorktrees() ([]webui.AgentWorktree, error) {
-	resolver, err := NewResolver()
-	if err != nil {
-		return nil, fmt.Errorf("creating resolver: %v", err)
-	}
+	resolver := g.resolverOrDefault()
 
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {

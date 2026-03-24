@@ -69,7 +69,7 @@ func TestRunLegacySync_NoWorktrees(t *testing.T) {
 	syncPullOnly = false
 
 	// Should not panic when no worktrees
-	runLegacySync()
+	runLegacySync(getDefaultResolver())
 }
 
 func TestSyncCmd_Flags(t *testing.T) {
