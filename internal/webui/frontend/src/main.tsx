@@ -1,4 +1,4 @@
-import { StrictMode, type ReactElement } from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import "@/styles/index.css";
@@ -14,6 +14,11 @@ import {
   useIssueSessionMap,
 } from "@/hooks";
 import { IssueSessionProvider } from "@/contexts/IssueSessionContext";
+import {
+  IssueDetailPanelFixture,
+  ErrorTriggerFixture,
+  ToastTestFixture,
+} from "@/TestFixtures";
 
 // Run localStorage migration before anything reads storage.
 // ES imports are hoisted, so this executes after all imports but before any React rendering.
@@ -36,37 +41,24 @@ function IssueSessionWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Resolve which component to render.
- * Test fixture routes are only available in DEV mode and are dynamically
- * imported so the test code is tree-shaken from production bundles.
- */
-async function resolveComponent(): Promise<ReactElement> {
+// Simple path-based routing for test fixtures (development only)
+function getComponent() {
   const path = window.location.pathname;
 
-  if (import.meta.env.DEV && path.startsWith("/test/")) {
-    const {
-      IssueDetailPanelFixture,
-      ErrorTriggerFixture,
-      ToastTestFixture,
-      SessionNamePromptFixture,
-      PasteConfirmDialogFixture,
-    } = await import("@/TestFixtures");
-
-    const fixtureMap: Record<string, ReactElement> = {
-      "/test/issue-detail-panel": <IssueDetailPanelFixture />,
-      "/test/error-boundary": <ErrorTriggerFixture />,
-      "/test/toast": <ToastTestFixture />,
-      "/test/session-name-prompt": <SessionNamePromptFixture />,
-      "/test/paste-confirm": <PasteConfirmDialogFixture />,
-    };
-
-    const fixture = fixtureMap[path];
-    if (fixture) {
-      return fixture;
-    }
+  // Test fixture routes - only available in development
+  if (import.meta.env.DEV && path === "/test/issue-detail-panel") {
+    return <IssueDetailPanelFixture />;
   }
 
+  if (import.meta.env.DEV && path === "/test/error-boundary") {
+    return <ErrorTriggerFixture />;
+  }
+
+  if (import.meta.env.DEV && path === "/test/toast") {
+    return <ToastTestFixture />;
+  }
+
+  // Default: render main app
   return <App />;
 }
 
@@ -87,25 +79,23 @@ initAuth()
     console.error("[Auth] Unexpected error during initialization:", error);
   })
   .finally(() => {
-    resolveComponent().then((component) => {
-      createRoot(rootElement).render(
-        <StrictMode>
-          <ErrorBoundary
-            onError={(error, errorInfo) => {
-              reportError("react-error", error, {
-                componentStack: errorInfo.componentStack ?? undefined,
-              });
-            }}
-          >
-            <ToastProvider>
-              <WorkspaceProvider>
-                <AgentProvider>
-                  <IssueSessionWrapper>{component}</IssueSessionWrapper>
-                </AgentProvider>
-              </WorkspaceProvider>
-            </ToastProvider>
-          </ErrorBoundary>
-        </StrictMode>,
-      );
-    });
+    createRoot(rootElement).render(
+      <StrictMode>
+        <ErrorBoundary
+          onError={(error, errorInfo) => {
+            reportError("react-error", error, {
+              componentStack: errorInfo.componentStack ?? undefined,
+            });
+          }}
+        >
+          <ToastProvider>
+            <WorkspaceProvider>
+              <AgentProvider>
+                <IssueSessionWrapper>{getComponent()}</IssueSessionWrapper>
+              </AgentProvider>
+            </WorkspaceProvider>
+          </ToastProvider>
+        </ErrorBoundary>
+      </StrictMode>,
+    );
   });
