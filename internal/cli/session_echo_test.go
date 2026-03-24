@@ -240,14 +240,14 @@ func TestSessionCapture_FailedSession(t *testing.T) {
 // sessionListResponse mirrors webui.SessionListResponse for test assertions
 // without importing the webui package directly (handleListTaskSessions is unexported).
 type sessionListResponse struct {
-	Success bool              `json:"success"`
-	Data    *sessionListData  `json:"data,omitempty"`
-	Error   string            `json:"error,omitempty"`
+	Success bool             `json:"success"`
+	Data    *sessionListData `json:"data,omitempty"`
+	Error   string           `json:"error,omitempty"`
 }
 
 type sessionListData struct {
-	TaskID   string             `json:"task_id"`
-	Sessions []sessionListItem  `json:"sessions"`
+	TaskID   string            `json:"task_id"`
+	Sessions []sessionListItem `json:"sessions"`
 }
 
 type sessionListItem struct {
