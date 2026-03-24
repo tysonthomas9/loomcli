@@ -114,6 +114,10 @@ func TestRunPlan_DaemonMode_AcquiresLock(t *testing.T) {
 	os.Chdir(tmpDir)
 	t.Cleanup(func() { os.Chdir(origDir) })
 
+	// Isolate from real ~/.loom/config.yaml so NewResolver() falls back to
+	// legacy mode and ResolveAgentTarget("") returns tmpDir.
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(tmpDir, "no-config"))
+
 	// Create .git directory
 	os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
 
