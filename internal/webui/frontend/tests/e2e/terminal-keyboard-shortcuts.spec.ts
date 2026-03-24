@@ -3,6 +3,7 @@ import { test, expect } from "@playwright/test";
 import {
   setupTerminalMocks,
   navigateToTerminal,
+  threeTabOpts,
 } from "../helpers/terminal-mocks";
 
 /**
@@ -11,41 +12,6 @@ import {
  * tab bar keyboard navigation (Arrow keys, Home, End),
  * and the session name prompt interaction via new-tab button.
  */
-
-const threeSessions = [
-  { name: "tab-1", label: "Session 1", created: 1 },
-  { name: "tab-2", label: "Session 2", created: 2 },
-  { name: "tab-3", label: "Session 3", created: 3 },
-];
-
-const threeTabMeta = [
-  {
-    session_name: "tab-1",
-    label: "Session 1",
-    notes: "",
-    sort_order: 0,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    session_name: "tab-2",
-    label: "Session 2",
-    notes: "",
-    sort_order: 1,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    session_name: "tab-3",
-    label: "Session 3",
-    notes: "",
-    sort_order: 2,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-];
-
-const threeTabOpts = { sessions: threeSessions, tabMetadata: threeTabMeta };
 
 test.describe("Terminal keyboard shortcuts", () => {
   test.describe("Search shortcuts", () => {
@@ -108,9 +74,9 @@ test.describe("Terminal keyboard shortcuts", () => {
       await setupTerminalMocks(page, threeTabOpts);
       await navigateToTerminal(page);
 
-      await page.getByTestId("terminal-tab-tab-1").focus();
+      await page.getByTestId("terminal-tab-session-1").focus();
       await page.keyboard.press("ArrowRight");
-      await expect(page.getByTestId("terminal-tab-tab-2")).toHaveAttribute(
+      await expect(page.getByTestId("terminal-tab-session-2")).toHaveAttribute(
         "aria-selected",
         "true",
       );
@@ -120,9 +86,9 @@ test.describe("Terminal keyboard shortcuts", () => {
       await setupTerminalMocks(page, threeTabOpts);
       await navigateToTerminal(page);
 
-      await page.getByTestId("terminal-tab-tab-1").focus();
+      await page.getByTestId("terminal-tab-session-1").focus();
       await page.keyboard.press("ArrowLeft");
-      await expect(page.getByTestId("terminal-tab-tab-3")).toHaveAttribute(
+      await expect(page.getByTestId("terminal-tab-session-3")).toHaveAttribute(
         "aria-selected",
         "true",
       );
@@ -132,10 +98,10 @@ test.describe("Terminal keyboard shortcuts", () => {
       await setupTerminalMocks(page, threeTabOpts);
       await navigateToTerminal(page);
 
-      await page.getByTestId("terminal-tab-tab-3").click();
-      await page.getByTestId("terminal-tab-tab-3").focus();
+      await page.getByTestId("terminal-tab-session-3").click();
+      await page.getByTestId("terminal-tab-session-3").focus();
       await page.keyboard.press("ArrowRight");
-      await expect(page.getByTestId("terminal-tab-tab-1")).toHaveAttribute(
+      await expect(page.getByTestId("terminal-tab-session-1")).toHaveAttribute(
         "aria-selected",
         "true",
       );
@@ -145,10 +111,10 @@ test.describe("Terminal keyboard shortcuts", () => {
       await setupTerminalMocks(page, threeTabOpts);
       await navigateToTerminal(page);
 
-      await page.getByTestId("terminal-tab-tab-3").click();
-      await page.getByTestId("terminal-tab-tab-3").focus();
+      await page.getByTestId("terminal-tab-session-3").click();
+      await page.getByTestId("terminal-tab-session-3").focus();
       await page.keyboard.press("Home");
-      await expect(page.getByTestId("terminal-tab-tab-1")).toHaveAttribute(
+      await expect(page.getByTestId("terminal-tab-session-1")).toHaveAttribute(
         "aria-selected",
         "true",
       );
@@ -158,9 +124,9 @@ test.describe("Terminal keyboard shortcuts", () => {
       await setupTerminalMocks(page, threeTabOpts);
       await navigateToTerminal(page);
 
-      await page.getByTestId("terminal-tab-tab-1").focus();
+      await page.getByTestId("terminal-tab-session-1").focus();
       await page.keyboard.press("End");
-      await expect(page.getByTestId("terminal-tab-tab-3")).toHaveAttribute(
+      await expect(page.getByTestId("terminal-tab-session-3")).toHaveAttribute(
         "aria-selected",
         "true",
       );
@@ -197,18 +163,20 @@ test.describe("Terminal keyboard shortcuts", () => {
       await setupTerminalMocks(page, threeTabOpts);
       await navigateToTerminal(page);
 
-      await page.getByTestId("terminal-tab-close-tab-2").click();
-      await expect(page.getByTestId("terminal-tab-tab-2")).not.toBeVisible();
-      await expect(page.getByTestId("terminal-tab-tab-1")).toBeVisible();
-      await expect(page.getByTestId("terminal-tab-tab-3")).toBeVisible();
+      await page.getByTestId("terminal-tab-close-session-2").click();
+      await expect(
+        page.getByTestId("terminal-tab-session-2"),
+      ).not.toBeVisible();
+      await expect(page.getByTestId("terminal-tab-session-1")).toBeVisible();
+      await expect(page.getByTestId("terminal-tab-session-3")).toBeVisible();
     });
 
     test("closing active tab switches to adjacent", async ({ page }) => {
       await setupTerminalMocks(page, threeTabOpts);
       await navigateToTerminal(page);
 
-      await page.getByTestId("terminal-tab-close-tab-1").click();
-      await expect(page.getByTestId("terminal-tab-tab-2")).toHaveAttribute(
+      await page.getByTestId("terminal-tab-close-session-1").click();
+      await expect(page.getByTestId("terminal-tab-session-2")).toHaveAttribute(
         "aria-selected",
         "true",
       );

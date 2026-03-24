@@ -111,8 +111,7 @@ async function injectWebSocketMock(
         }
       }
 
-      (window as unknown as Record<string, unknown>).WebSocket =
-        MockWebSocket;
+      (window as unknown as Record<string, unknown>).WebSocket = MockWebSocket;
     },
     { autoOpen },
   );
@@ -122,9 +121,8 @@ async function injectWebSocketMock(
 async function getMockWSCount(page: Page): Promise<number> {
   return page.evaluate(
     () =>
-      (
-        (window as unknown as Record<string, unknown[]>).__mockWSInstances ?? []
-      ).length,
+      ((window as unknown as Record<string, unknown[]>).__mockWSInstances ?? [])
+        .length,
   );
 }
 
@@ -239,7 +237,16 @@ test.describe("Terminal disconnect and reconnect", () => {
         )
         .toBe("connected");
 
-      await page.waitForTimeout(300);
+      // Ensure the connection is fully settled before triggering close
+      await expect
+        .poll(
+          async () =>
+            page
+              .getByTestId("terminal-tab-status-session-1")
+              .getAttribute("data-status"),
+          { timeout: 5000 },
+        )
+        .toBe("connected");
       await fireCloseOnOpen(page);
 
       // After close, state should no longer be connected
@@ -311,7 +318,16 @@ test.describe("Terminal disconnect and reconnect", () => {
         )
         .toBe("connected");
 
-      await page.waitForTimeout(300);
+      // Ensure the connection is fully settled before triggering close
+      await expect
+        .poll(
+          async () =>
+            page
+              .getByTestId("terminal-tab-status-session-1")
+              .getAttribute("data-status"),
+          { timeout: 5000 },
+        )
+        .toBe("connected");
       const countBefore = await getMockWSCount(page);
 
       await fireCloseOnOpen(page);

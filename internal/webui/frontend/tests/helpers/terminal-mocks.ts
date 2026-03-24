@@ -197,12 +197,13 @@ export async function setupTerminalMocks(
   });
 
   await page.route("**/api/terminal/spawn", async (route) => {
+    const body = route.request().postDataJSON() as { name?: string } | null;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         success: true,
-        data: { session_name: "new-session" },
+        data: { session_name: body?.name ?? "new-session" },
       }),
     });
   });
@@ -218,6 +219,47 @@ export async function setupTerminalMocks(
     });
   });
 }
+
+/**
+ * Three-session test data shared across terminal spec files.
+ */
+export const threeSessions: MockSession[] = [
+  { name: "session-1", label: "Session 1", created: 1 },
+  { name: "session-2", label: "Session 2", created: 2 },
+  { name: "session-3", label: "Session 3", created: 3 },
+];
+
+export const threeTabMeta: MockTabMetadata[] = [
+  {
+    session_name: "session-1",
+    label: "Session 1",
+    notes: "",
+    sort_order: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    session_name: "session-2",
+    label: "Session 2",
+    notes: "",
+    sort_order: 1,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    session_name: "session-3",
+    label: "Session 3",
+    notes: "",
+    sort_order: 2,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+];
+
+export const threeTabOpts: TerminalMockOptions = {
+  sessions: threeSessions,
+  tabMetadata: threeTabMeta,
+};
 
 /**
  * Navigate to the terminal view by clicking the NavRail terminal button.

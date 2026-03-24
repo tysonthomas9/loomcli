@@ -304,8 +304,7 @@ export function SessionNamePromptFixture(): JSX.Element {
   const [confirmedName, setConfirmedName] = useState("");
   const [confirmCount, setConfirmCount] = useState(0);
   const [cancelCount, setCancelCount] = useState(0);
-  const [existingNames, setExistingNames] =
-    useState<string[]>(initialExisting);
+  const [existingNames, setExistingNames] = useState<string[]>(initialExisting);
 
   const handleConfirm = (name: string) => {
     setConfirmedName(name);
@@ -339,8 +338,7 @@ export function SessionNamePromptFixture(): JSX.Element {
         <span data-testid="confirmed-name">{confirmedName}</span>
       </p>
       <p>
-        Confirm count:{" "}
-        <span data-testid="confirm-count">{confirmCount}</span>
+        Confirm count: <span data-testid="confirm-count">{confirmCount}</span>
       </p>
       <p>
         Cancel count: <span data-testid="cancel-count">{cancelCount}</span>
@@ -384,6 +382,13 @@ export function SessionNamePromptFixture(): JSX.Element {
  * Test fixture for PasteConfirmDialog e2e tests.
  * Renders a simulated paste confirmation dialog with interactive controls.
  *
+ * NOTE: This is a prototype/spec-ahead implementation. The real PasteConfirmDialog
+ * component has not been built yet, so this fixture hand-rolls the dialog UI to
+ * define the expected behavior and serve as a reference for the future component.
+ *
+ * TODO: Replace this reimplementation with the real PasteConfirmDialog component
+ * once it is created in src/components/.
+ *
  * URL: /test/paste-confirm
  */
 const MAX_PREVIEW_LINES = 10;
@@ -411,7 +416,9 @@ export function PasteConfirmDialogFixture(): JSX.Element {
 
   const lines = pasteText
     .split("\n")
-    .filter((_, i, arr) => !(i === arr.length - 1 && arr[arr.length - 1] === ""));
+    .filter(
+      (_, i, arr) => !(i === arr.length - 1 && arr[arr.length - 1] === ""),
+    );
   const lineCount = lines.length;
   const visibleLines = lines.slice(0, MAX_PREVIEW_LINES);
   const hiddenCount = lineCount - visibleLines.length;
@@ -428,8 +435,7 @@ export function PasteConfirmDialogFixture(): JSX.Element {
     >
       <h1>PasteConfirmDialog Test Fixture</h1>
       <p>
-        Confirm count:{" "}
-        <span data-testid="confirm-count">{confirmCount}</span>
+        Confirm count: <span data-testid="confirm-count">{confirmCount}</span>
       </p>
       <p>
         Cancel count: <span data-testid="cancel-count">{cancelCount}</span>
@@ -547,7 +553,8 @@ export function PasteConfirmDialogFixture(): JSX.Element {
                   marginTop: "0.5rem",
                 }}
               >
-                ... and {hiddenCount} more {hiddenCount === 1 ? "line" : "lines"}
+                ... and {hiddenCount} more{" "}
+                {hiddenCount === 1 ? "line" : "lines"}
               </p>
             )}
             <div

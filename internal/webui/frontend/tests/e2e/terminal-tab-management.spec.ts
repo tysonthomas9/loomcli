@@ -3,47 +3,13 @@ import { test, expect } from "@playwright/test";
 import {
   setupTerminalMocks,
   navigateToTerminal,
+  threeTabOpts,
 } from "../helpers/terminal-mocks";
 
 /**
  * E2E tests for terminal tab management.
  * Covers tab rendering, creation, closing, switching, renaming, and keyboard navigation.
  */
-
-const threeSessions = [
-  { name: "session-1", label: "Session 1", created: 1 },
-  { name: "session-2", label: "Session 2", created: 2 },
-  { name: "session-3", label: "Session 3", created: 3 },
-];
-
-const threeTabMeta = [
-  {
-    session_name: "session-1",
-    label: "Session 1",
-    notes: "",
-    sort_order: 0,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    session_name: "session-2",
-    label: "Session 2",
-    notes: "",
-    sort_order: 1,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    session_name: "session-3",
-    label: "Session 3",
-    notes: "",
-    sort_order: 2,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-];
-
-const threeTabOpts = { sessions: threeSessions, tabMetadata: threeTabMeta };
 
 test.describe("Terminal Tab Management", () => {
   test.describe("Tab rendering", () => {
@@ -61,15 +27,15 @@ test.describe("Terminal Tab Management", () => {
       await setupTerminalMocks(page, threeTabOpts);
       await navigateToTerminal(page);
 
-      await expect(
-        page.getByTestId("terminal-tab-label-session-1"),
-      ).toHaveText("Session 1");
-      await expect(
-        page.getByTestId("terminal-tab-label-session-2"),
-      ).toHaveText("Session 2");
-      await expect(
-        page.getByTestId("terminal-tab-label-session-3"),
-      ).toHaveText("Session 3");
+      await expect(page.getByTestId("terminal-tab-label-session-1")).toHaveText(
+        "Session 1",
+      );
+      await expect(page.getByTestId("terminal-tab-label-session-2")).toHaveText(
+        "Session 2",
+      );
+      await expect(page.getByTestId("terminal-tab-label-session-3")).toHaveText(
+        "Session 3",
+      );
     });
 
     test("marks active tab with aria-selected=true", async ({ page }) => {
@@ -119,9 +85,10 @@ test.describe("Terminal Tab Management", () => {
       await page.getByTestId("session-name-confirm-button").click();
 
       await expect(page.getByTestId("terminal-tab-my-new-tab")).toBeVisible();
-      await expect(
-        page.getByTestId("terminal-tab-my-new-tab"),
-      ).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByTestId("terminal-tab-my-new-tab")).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
     });
   });
 
@@ -152,9 +119,9 @@ test.describe("Terminal Tab Management", () => {
       });
       await navigateToTerminal(page);
 
-      await expect(
-        page.getByTestId("terminal-tab-close-only-tab"),
-      ).toHaveCount(0);
+      await expect(page.getByTestId("terminal-tab-close-only-tab")).toHaveCount(
+        0,
+      );
     });
 
     test("after closing active tab, adjacent tab becomes active", async ({
@@ -212,9 +179,9 @@ test.describe("Terminal Tab Management", () => {
       await navigateToTerminal(page);
 
       await page.getByTestId("terminal-tab-label-session-1").dblclick();
-      await expect(
-        page.getByTestId("terminal-tab-label-session-1"),
-      ).toHaveText("Session 1");
+      await expect(page.getByTestId("terminal-tab-label-session-1")).toHaveText(
+        "Session 1",
+      );
     });
   });
 
