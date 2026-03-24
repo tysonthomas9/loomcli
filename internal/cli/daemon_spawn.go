@@ -206,5 +206,5 @@ func (d *Daemon) waitForAgent(ap *AgentProcess) int {
 // exitCode is passed so recovery can make smarter decisions (e.g. skip task
 // reset on clean exit when the task status is already terminal).
 func (d *Daemon) recoverAgent(ap *AgentProcess, exitCode int) error {
-	return RecoverWorktree(ap.worktreePath, ap.entry.Worktree, exitCode)
+	return RecoverWorktree(d.resolver, ap.worktreePath, ap.entry.Worktree, exitCode)
 }

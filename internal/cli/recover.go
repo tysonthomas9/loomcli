@@ -139,7 +139,8 @@ func runRecover(cmd *cobra.Command, args []string) {
 // RecoverWorktree provides a non-interactive recovery path for daemon use:
 // force-release locks, kill processes, reset orphaned tasks, clean files.
 // On clean exit (code 0) trusts agent's task status; on non-zero resets tasks.
-func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
+// If resolver is nil, the package-level default resolver is used.
+func RecoverWorktree(resolver *Resolver, worktreePath, agentName string, exitCode int) error {
 	// 1. Check lock status
 	lockInfo, isRunning, err := CheckLock(worktreePath)
 	if err != nil {
@@ -179,11 +180,13 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 	if lockInfo != nil {
 		lockTaskID = lockInfo.TaskID
 	}
-	daemonResolver := getDefaultResolver()
-	resetOrphanedAgentTasks(daemonResolver, worktreePath, agentName, lockTaskID, false)
+	if resolver == nil {
+		resolver = getDefaultResolver()
+	}
+	resetOrphanedAgentTasks(resolver, worktreePath, agentName, lockTaskID, false)
 
 	// 6. Clean untracked files (force=true, no prompting)
-	cleanUntrackedFiles(daemonResolver, worktreePath, true)
+	cleanUntrackedFiles(resolver, worktreePath, true)
 
 	return nil
 }

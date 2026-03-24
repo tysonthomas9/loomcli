@@ -148,12 +148,17 @@ func buildPRBody(info *epicPRInfo) string {
 
 // createEpicPR creates a GitHub PR for an epic branch.
 // Returns the PR URL on success.
-func createEpicPR(dir, epicID, branch string, info *epicPRInfo) (string, error) {
+func createEpicPR(resolver *Resolver, dir, epicID, branch string, info *epicPRInfo) (string, error) {
 	title := fmt.Sprintf("%s (%s)", info.Title, epicID)
 	body := buildPRBody(info)
 
+	baseBranch := GetDefaultBranch()
+	if resolver != nil {
+		baseBranch = resolver.GetDefaultBranch()
+	}
+
 	result := execCommand(dir, "gh", "pr", "create",
-		"--base", GetDefaultBranch(),
+		"--base", baseBranch,
 		"--head", branch,
 		"--title", title,
 		"--body", body,
@@ -175,7 +180,7 @@ func storeExternalRef(epicID, prURL string) error {
 
 // EnsureEpicPR checks if a PR exists for the epic branch and creates one if needed.
 // This is non-fatal — errors are returned but should not block agent restarts.
-func EnsureEpicPR(worktreePath, epicID string, eventBus events.Emitter) error {
+func EnsureEpicPR(resolver *Resolver, worktreePath, epicID string, eventBus events.Emitter) error {
 	if eventBus == nil {
 		eventBus = events.NopBus{}
 	}
@@ -214,7 +219,7 @@ func EnsureEpicPR(worktreePath, epicID string, eventBus events.Emitter) error {
 	}
 
 	// 6. Create the PR
-	newURL, err := createEpicPR(worktreePath, epicID, branch, info)
+	newURL, err := createEpicPR(resolver, worktreePath, epicID, branch, info)
 	if err != nil {
 		return fmt.Errorf("failed to create PR: %w", err)
 	}

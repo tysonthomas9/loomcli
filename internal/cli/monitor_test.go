@@ -1369,7 +1369,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		agents, _ := collectAgentStatus(nil, "")
+		agents, _ := collectAgentStatus(nil, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1413,7 +1413,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		agents, _ := collectAgentStatus(nil, "")
+		agents, _ := collectAgentStatus(nil, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1460,7 +1460,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			"spark": {ID: "T-123", Status: "in_progress"},
 		}
 
-		agents, _ := collectAgentStatus(agentTasks, "")
+		agents, _ := collectAgentStatus(nil, agentTasks, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1504,7 +1504,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		agents, _ := collectAgentStatus(nil, "")
+		agents, _ := collectAgentStatus(nil, nil, "")
 
 		if len(agents) != 1 {
 			t.Fatalf("expected 1 agent, got %d", len(agents))
@@ -1566,7 +1566,7 @@ func TestCollectAgentStatus(t *testing.T) {
 			return CommandResult{}
 		}
 
-		_, taskIDToAgents := collectAgentStatus(nil, "")
+		_, taskIDToAgents := collectAgentStatus(nil, nil, "")
 
 		if len(taskIDToAgents["T-conflict"]) != 2 {
 			t.Errorf("expected 2 agents claiming same task, got %d", len(taskIDToAgents["T-conflict"]))
@@ -2519,7 +2519,7 @@ func TestCollectAgentStatusLockFallback(t *testing.T) {
 				"alpha": {ID: "T-999", Title: "Test Task", Priority: 2, Status: "in_progress"},
 			}
 
-			agents, _ := collectAgentStatus(agentTasks, "")
+			agents, _ := collectAgentStatus(nil, agentTasks, "")
 			if len(agents) != 1 {
 				t.Fatalf("expected 1 agent, got %d", len(agents))
 			}

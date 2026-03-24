@@ -56,7 +56,8 @@ type SupervisedAgentStatus struct {
 // Daemon coordinates multiple supervised agents.
 type Daemon struct {
 	config     *DaemonConfig
-	projectDir string // directory containing loom.yaml
+	projectDir string    // directory containing loom.yaml
+	resolver   *Resolver // worktree/repo resolver (injected or created from config)
 
 	// agents is populated during NewDaemon and is immutable afterward.
 	// Safe to read without holding mu after Start() is called.
@@ -101,9 +102,16 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 		eventBus = events.NopBus{}
 	}
 
+	// Create a resolver for this daemon instance
+	resolver, resolverErr := NewResolver()
+	if resolverErr != nil {
+		resolver = &Resolver{mode: ModeLegacy}
+	}
+
 	d := &Daemon{
 		config:       config,
 		projectDir:   projectDir,
+		resolver:     resolver,
 		agents:       make([]*AgentProcess, 0, len(config.Agents)),
 		epicAssigner: NewEpicAssigner(),
 		concurrency:  NewConcurrencyTracker(config.Roles),
@@ -112,7 +120,7 @@ func NewDaemon(config *DaemonConfig, projectDir string, eventBus events.Emitter)
 
 	for i, entry := range config.Agents {
 		// Resolve worktree path
-		target, err := ResolveAgentTarget(entry.Worktree)
+		target, err := resolveAgentTargetWithResolver(resolver, entry.Worktree)
 		if err != nil {
 			return nil, fmt.Errorf("agent[%d] worktree %q: %w", i, entry.Worktree, err)
 		}
@@ -298,7 +306,7 @@ func (d *Daemon) superviseAgent(ap *AgentProcess) {
 		currentEpicID := ap.assignedEpicID
 		ap.mu.Unlock()
 		if currentEpicID != "" {
-			if err := EnsureEpicPR(ap.worktreePath, currentEpicID, d.eventBus); err != nil {
+			if err := EnsureEpicPR(d.resolver, ap.worktreePath, currentEpicID, d.eventBus); err != nil {
 				log.Printf("[daemon] Agent %s: PR creation failed: %v", ap.entry.Worktree, err)
 				// Non-fatal — don't block restart
 			}

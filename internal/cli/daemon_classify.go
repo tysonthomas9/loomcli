@@ -75,7 +75,7 @@ func (d *Daemon) saveAgentCheckpoint(ap *AgentProcess, exitCode int) {
 		return
 	}
 
-	diff := captureGitDiff(ap.worktreePath, maxDiffBytes)
+	diff := captureGitDiff(d.resolver, ap.worktreePath, maxDiffBytes)
 	errClass := ""
 	ap.mu.Lock()
 	if ap.lastError != nil {

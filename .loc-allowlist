@@ -5,7 +5,7 @@
 908 internal/cli/monitor.go
 728 internal/webui/fleet_handlers.go
 703 internal/rpc/protocol.go
-713 internal/cli/worktree.go
+727 internal/cli/worktree.go
 656 internal/webui/log_streamer.go
 635 internal/cli/push.go
 631 internal/cli/automode_tmux.go
@@ -14,5 +14,5 @@
 574 internal/cli/daemon_cmd.go
 517 internal/types/issue.go
 667 internal/cli/doctor.go
-516 internal/cli/recover.go
+519 internal/cli/recover.go
 516 internal/webui/handlers_issues_write.go

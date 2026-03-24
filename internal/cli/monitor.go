@@ -164,7 +164,7 @@ func collectMonitorData(readyLimit int, branch string) *MonitorData {
 
 	// Collect agents, passing the task map for fallback lookup
 	var taskIDToAgents map[string][]string
-	data.Agents, taskIDToAgents = collectAgentStatus(data.AgentTasks, branch)
+	data.Agents, taskIDToAgents = collectAgentStatus(nil, data.AgentTasks, branch)
 
 	// Detect task conflicts (multiple agents claiming same task)
 	data.TaskConflicts = make(map[string][]string)
@@ -199,7 +199,7 @@ func collectMonitorData(readyLimit int, branch string) *MonitorData {
 // CollectAgentStatusOnly returns just agent status without task context.
 // Exported for use by the HTTP server.
 func CollectAgentStatusOnly(branch string) []AgentStatus {
-	agents, _ := collectAgentStatus(nil, branch)
+	agents, _ := collectAgentStatus(nil, nil, branch)
 	return agents
 }
 
@@ -300,8 +300,11 @@ func getWorktreeFileChanges(path string) []FileChange {
 	return changes
 }
 
-func collectAgentStatus(agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) {
-	worktrees, err := DiscoverWorktrees()
+func collectAgentStatus(resolver *Resolver, agentTasks map[string]TaskInfo, branch string) ([]AgentStatus, map[string][]string) { //nolint:unparam // resolver is nil from monitor callers but supports injection for daemon/test use
+	if resolver == nil {
+		resolver = getDefaultResolver()
+	}
+	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
 		return nil, nil
 	}

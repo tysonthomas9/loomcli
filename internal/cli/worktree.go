@@ -417,7 +417,13 @@ func NewResolverFromConfig(cfg *LoomConfig) *Resolver {
 	}
 }
 
-// Package-level default resolver (lazily initialized)
+// Package-level default resolver (lazily initialized).
+// Remaining production callers (Phase 4 audit):
+//   - deps.go: ResolverOrDefault() nil-guard fallback
+//   - gitops_impl.go: resolverOrDefault() nil-guard fallback
+//   - serve_handlers.go: getWorkspaceInfo(), handleWorkspaces() (no server struct)
+//   - Package-level wrappers: GetWorktreesDir(), GetDefaultBranch(), ResolveWorktreePath(), DiscoverWorktrees()
+//   - Nil-guard fallbacks in captureGitDiff, collectAgentStatus, RecoverWorktree
 var defaultResolver *Resolver
 
 func getDefaultResolver() *Resolver {
@@ -646,7 +652,15 @@ type ResolvedTarget struct {
 // Claude always runs from the workspace root so bd commands use the shared
 // .beads/ directory.
 func ResolveAgentTarget(name string) (ResolvedTarget, error) {
-	resolver, _ := NewResolver()
+	return resolveAgentTargetWithResolver(nil, name)
+}
+
+// resolveAgentTargetWithResolver is the internal implementation that accepts
+// an optional resolver. If resolver is nil, one is created via NewResolver().
+func resolveAgentTargetWithResolver(resolver *Resolver, name string) (ResolvedTarget, error) {
+	if resolver == nil {
+		resolver, _ = NewResolver()
+	}
 	if resolver.Mode() == ModeWorkspace {
 		// Absolute paths are used as-is even in workspace mode
 		if name != "" && filepath.IsAbs(name) {

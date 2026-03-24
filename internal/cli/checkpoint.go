@@ -84,8 +84,10 @@ func ClearCheckpoint(lockDir string) error {
 // captureGitDiff runs `git diff HEAD` in the worktree and returns the output
 // truncated to maxBytes. In workspace mode, iterates all repos and concatenates
 // diffs with repo name headers.
-func captureGitDiff(worktreePath string, maxBytes int) string {
-	resolver := getDefaultResolver()
+func captureGitDiff(resolver *Resolver, worktreePath string, maxBytes int) string {
+	if resolver == nil {
+		resolver = getDefaultResolver()
+	}
 	if resolver.Mode() == ModeWorkspace {
 		worktrees, err := resolver.DiscoverWorktrees()
 		if err == nil && len(worktrees) > 0 {
