@@ -344,3 +344,20 @@ func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockAgentInvokerReco
 func containsSubstring(slice []string, substr string) bool {
 	return testutil.ContainsSubstring(slice, substr)
 }
+
+// stubIsolatedConfig isolates a test from the real ~/.loom/config.yaml.
+// It points LOOM_CONFIG_DIR to a non-existent path, sets the package-level
+// defaultResolver to a legacy-mode resolver (via NewResolverFromConfig(nil)),
+// and resets the beads dir cache so GetBeadsDir() returns "." instead of a
+// real workspace path. All changes are restored via t.Cleanup.
+func stubIsolatedConfig(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(t.TempDir(), "no-config"))
+
+	oldResolver := defaultResolver
+	defaultResolver = NewResolverFromConfig(nil)
+	t.Cleanup(func() { defaultResolver = oldResolver })
+
+	ResetBeadsDirCache()
+}

@@ -1844,6 +1844,13 @@ func TestRunAutoModeLoop_ConsecutiveErrors(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
+	// Isolate from real ~/.loom/config.yaml so ResolveActiveWorkspace()
+	// returns nil and the prompt matches GeneratePlanningPrompt(name, nil, "").
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(t.TempDir(), "no-config"))
+	oldResolver := defaultResolver
+	defaultResolver = NewResolverFromConfig(nil)
+	t.Cleanup(func() { defaultResolver = oldResolver })
+
 	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
@@ -1902,6 +1909,13 @@ func TestRunAutoModeLoop_PlanAgentType(t *testing.T) {
 }
 
 func TestRunAutoModeLoop_TaskAgentType(t *testing.T) {
+	// Isolate from real ~/.loom/config.yaml so ResolveActiveWorkspace()
+	// returns nil and the prompt matches GenerateTaskPrompt(name, nil, ...).
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(t.TempDir(), "no-config"))
+	oldResolver := defaultResolver
+	defaultResolver = NewResolverFromConfig(nil)
+	t.Cleanup(func() { defaultResolver = oldResolver })
+
 	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
@@ -2647,6 +2661,14 @@ func TestRunAutoModeLoop_CustomFieldsFallback(t *testing.T) {
 func TestRunAutoModeLoop_CustomTaskCheckOnlyFallback(t *testing.T) {
 	// When only CustomTaskCheck is set (not CustomPromptGen), CustomTaskCheck is used
 	// for task availability, and the default AgentType-based prompt gen is used.
+
+	// Isolate from real ~/.loom/config.yaml so ResolveActiveWorkspace()
+	// returns nil and the prompt matches GenerateTaskPrompt(name, nil, ...).
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(t.TempDir(), "no-config"))
+	oldResolver := defaultResolver
+	defaultResolver = NewResolverFromConfig(nil)
+	t.Cleanup(func() { defaultResolver = oldResolver })
+
 	oldExec := execCommand
 	oldClaude := claudeNonInteractiveInvoker
 	t.Cleanup(func() {
@@ -3166,6 +3188,14 @@ func TestRunAutoModeLoop_CodexPlanAgentType(t *testing.T) {
 	// Mirrors TestRunAutoModeLoop_PlanAgentType but with codex backend.
 	// Verifies that when codex is the active backend, RunAutoModeLoop dispatches
 	// to codexNonInteractiveInvoker instead of claudeNonInteractiveInvoker.
+
+	// Isolate from real ~/.loom/config.yaml so ResolveActiveWorkspace()
+	// returns nil and the prompt matches GeneratePlanningPrompt(name, nil, "").
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(t.TempDir(), "no-config"))
+	oldResolver := defaultResolver
+	defaultResolver = NewResolverFromConfig(nil)
+	t.Cleanup(func() { defaultResolver = oldResolver })
+
 	resetBackendState(t)
 	RegisterBackend(&CodexBackend{})
 	if err := SetBackend("codex"); err != nil {

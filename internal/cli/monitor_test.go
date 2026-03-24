@@ -17,7 +17,7 @@ func stubLegacyResolver(t *testing.T, tmpDir string) {
 	t.Helper()
 
 	oldResolver := defaultResolver
-	defaultResolver = &Resolver{mode: ModeLegacy}
+	defaultResolver = NewResolverFromConfig(nil)
 	t.Cleanup(func() { defaultResolver = oldResolver })
 
 	oldFlag := worktreesFlag

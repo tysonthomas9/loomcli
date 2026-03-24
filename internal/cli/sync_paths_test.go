@@ -16,9 +16,10 @@ func TestRunLegacySync_WithWorktrees(t *testing.T) {
 		"LOOM_WORKTREES_DIR": worktreesDir,
 	})
 
-	// Reset defaultResolver so it re-reads env
+	// Reset defaultResolver to legacy mode so it uses LOOM_WORKTREES_DIR
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir+"/no-config")
 	origResolver := defaultResolver
-	defaultResolver = nil
+	defaultResolver = NewResolverFromConfig(nil)
 	t.Cleanup(func() { defaultResolver = origResolver })
 
 	origPushOnly := syncPushOnly

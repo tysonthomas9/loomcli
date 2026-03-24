@@ -394,6 +394,29 @@ var (
 	beadsDirOnce  sync.Once
 )
 
+// NewResolverFromConfig creates a Resolver from an already-loaded config.
+// If cfg is nil or has no workspaces, returns a legacy-mode resolver.
+// This enables tests to construct resolvers without reading disk.
+func NewResolverFromConfig(cfg *LoomConfig) *Resolver {
+	if cfg == nil || len(cfg.Workspaces) == 0 {
+		return &Resolver{mode: ModeLegacy}
+	}
+	ws := cfg.DefaultWorkspace
+	if ws == "" {
+		names := make([]string, 0, len(cfg.Workspaces))
+		for name := range cfg.Workspaces {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		ws = names[0]
+	}
+	return &Resolver{
+		mode:      ModeWorkspace,
+		config:    cfg,
+		workspace: ws,
+	}
+}
+
 // Package-level default resolver (lazily initialized)
 var defaultResolver *Resolver
 

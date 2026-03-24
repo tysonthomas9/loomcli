@@ -1461,6 +1461,8 @@ func TestHandleMetrics_NilData(t *testing.T) {
 }
 
 func TestCollectWorkerStatusCounts_NoDaemon(t *testing.T) {
+	stubIsolatedConfig(t)
+
 	// When no daemon is running, collectWorkerStatusCounts should return all zeros
 	counts := collectWorkerStatusCounts()
 

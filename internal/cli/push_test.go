@@ -8,6 +8,8 @@ import (
 )
 
 func TestPushCmd_ArgsValidation(t *testing.T) {
+	stubIsolatedConfig(t)
+
 	// Save and restore the global flag
 	origPushAll := pushAll
 	defer func() { pushAll = origPushAll }()

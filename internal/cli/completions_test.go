@@ -154,6 +154,13 @@ func TestBranchCompletion(t *testing.T) {
 }
 
 func TestWorktreeCompletion(t *testing.T) {
+	// Isolate from real ~/.loom/config.yaml so NewResolver() in
+	// worktreeCompletion falls back to legacy mode.
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(t.TempDir(), "no-config"))
+	oldResolver := defaultResolver
+	defaultResolver = NewResolverFromConfig(nil)
+	t.Cleanup(func() { defaultResolver = oldResolver })
+
 	t.Run("already_has_arg", func(t *testing.T) {
 		// No mocks needed - should return early
 		completions, directive := worktreeCompletion(nil, []string{"existing"}, "")
@@ -356,6 +363,13 @@ func TestWorktreeCompletion(t *testing.T) {
 }
 
 func TestWorktreeThenBranchCompletion(t *testing.T) {
+	// Isolate from real ~/.loom/config.yaml so NewResolver() in
+	// worktreeCompletion falls back to legacy mode.
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(t.TempDir(), "no-config"))
+	oldResolver := defaultResolver
+	defaultResolver = NewResolverFromConfig(nil)
+	t.Cleanup(func() { defaultResolver = oldResolver })
+
 	t.Run("no_args_returns_worktrees", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		wtDir := filepath.Join(tmpDir, "worktrees", "falcon")

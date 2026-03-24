@@ -39,12 +39,22 @@ type FileSystem interface {
 // Deps is the central dependency-injection container for CLI commands.
 // It holds all external dependencies so they can be swapped for testing.
 type Deps struct {
-	Git    GitRunner
-	Exec   ExecRunner
-	FS     FileSystem
-	Logger *slog.Logger
-	Clock  func() time.Time
-	BD     BDRunner
+	Git      GitRunner
+	Exec     ExecRunner
+	FS       FileSystem
+	Logger   *slog.Logger
+	Clock    func() time.Time
+	BD       BDRunner
+	Resolver *Resolver
+}
+
+// ResolverOrDefault returns d.Resolver if set, otherwise falls back to
+// the package-level getDefaultResolver() which reads ~/.loom/config.yaml.
+func (d *Deps) ResolverOrDefault() *Resolver {
+	if d != nil && d.Resolver != nil {
+		return d.Resolver
+	}
+	return getDefaultResolver()
 }
 
 // --- default implementations ---

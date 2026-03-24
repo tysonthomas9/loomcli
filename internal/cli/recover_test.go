@@ -53,7 +53,7 @@ func TestForceReleaseLock_NoLockFile(t *testing.T) {
 }
 
 func TestCloseTask_Success(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    ".",
 		Name:   "bd",
@@ -68,7 +68,7 @@ func TestCloseTask_Success(t *testing.T) {
 }
 
 func TestCloseTask_Failure(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{{
 		Dir:    ".",
 		Name:   "bd",
@@ -84,7 +84,7 @@ func TestCloseTask_Failure(t *testing.T) {
 }
 
 func TestResetTask_Success(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -107,7 +107,7 @@ func TestResetTask_Success(t *testing.T) {
 }
 
 func TestResetTask_Failure(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -132,7 +132,7 @@ func TestResetTask_Failure(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -169,7 +169,7 @@ func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -205,7 +205,7 @@ func TestAnalyzeTaskCompletion_Incomplete(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_BdShowFails(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -229,7 +229,7 @@ func TestAnalyzeTaskCompletion_BdShowFails(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -266,7 +266,7 @@ func TestAnalyzeTaskCompletion_ClaudeFails(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -302,7 +302,7 @@ func TestAnalyzeTaskCompletion_ParsesMultilineResponse(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -338,7 +338,7 @@ func TestAnalyzeTaskCompletion_CaseInsensitive(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -375,7 +375,7 @@ func TestAnalyzeTaskCompletion_ReasonWithColons(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -411,7 +411,7 @@ func TestAnalyzeTaskCompletion_UnparseableResponse(t *testing.T) {
 }
 
 func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		// analyzeTaskCompletion calls
 		{
@@ -449,7 +449,7 @@ func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
 }
 
 func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		// analyzeTaskCompletion calls
 		{
@@ -494,7 +494,7 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 }
 
 func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		// resetTask: show then update (no analyze)
 		{
@@ -696,7 +696,7 @@ func TestKillProcess_WithChildProcesses(t *testing.T) {
 }
 
 func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -742,7 +742,7 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 }
 
 func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	mock := NewCommandMock(t, []CommandStub{
 		{
 			Dir:    ".",
@@ -813,7 +813,7 @@ func TestResetOrphanedAgentTasks_EmptyAgentName(t *testing.T) {
 }
 
 func TestRecoverWorktree_NoLock(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	tmpDir := t.TempDir()
 
 	// No lock file in tmpDir, so CheckLock returns (nil, false, nil).
@@ -843,7 +843,7 @@ func TestRecoverWorktree_NoLock(t *testing.T) {
 }
 
 func TestRecoverWorktree_StaleLock(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	tmpDir := t.TempDir()
 
 	// Create a lock file with a non-existent PID so CheckLock returns (info, false, nil)
@@ -903,7 +903,7 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 }
 
 func TestRecoverWorktree_LockCheckError(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	tmpDir := t.TempDir()
 
 	// Create a directory named .agent.lock instead of a file, causing ReadFile to fail
@@ -923,7 +923,7 @@ func TestRecoverWorktree_LockCheckError(t *testing.T) {
 }
 
 func TestRecoverWorktree_EmptyAgentName(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 	tmpDir := t.TempDir()
 
 	// No lock file. Empty agent name means resetOrphanedAgentTasks returns immediately.
@@ -1024,7 +1024,7 @@ func TestForceReleaseLock_WorkspacePath_NoLock(t *testing.T) {
 func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 	// In workspace mode, analyzeTaskCompletion should search git logs across
 	// all repos discovered by the resolver, aggregating with repo name labels.
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1103,7 +1103,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode(t *testing.T) {
 func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 	// When workspace mode finds no commits across any repo, the fallback
 	// single-repo search also runs. Either way, claude receives empty git logs.
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1168,7 +1168,7 @@ func TestAnalyzeTaskCompletion_WorkspaceMode_NoCommitsInAnyRepo(t *testing.T) {
 func TestAnalyzeTaskCompletion_WorkspaceMode_PartialResults(t *testing.T) {
 	// Only some repos have matching commits; the aggregated output
 	// should include only those repos with results.
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
@@ -1388,7 +1388,7 @@ func TestCleanUntrackedFiles_WorkspaceMode_PartialUntracked(t *testing.T) {
 func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	// Full RecoverWorktree flow in workspace mode: lock at workspace root,
 	// clean across workspace repos.
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 
 	wsDir := t.TempDir()
 	wsDir, _ = filepath.EvalSymlinks(wsDir)
@@ -1468,7 +1468,7 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 // ============================================================================
 
 func TestAnalyzeTaskCompletion_TruncatesLongTaskDetails(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 
 	// Generate task details output exceeding 4000 chars
 	longTaskOutput := strings.Repeat("A", 5000)
@@ -1530,7 +1530,7 @@ func TestAnalyzeTaskCompletion_TruncatesLongTaskDetails(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_TruncatesLongGitOutput(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 
 	// Generate git log output exceeding 4000 chars
 	longGitOutput := strings.Repeat("B", 5000)
@@ -1587,7 +1587,7 @@ func TestAnalyzeTaskCompletion_TruncatesLongGitOutput(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_XMLDelimitersInPrompt(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{
@@ -1670,7 +1670,7 @@ func TestAnalyzeTaskCompletion_XMLDelimitersInPrompt(t *testing.T) {
 }
 
 func TestAnalyzeTaskCompletion_AntiInjectionInstruction(t *testing.T) {
-	ResetBeadsDirCache()
+	stubIsolatedConfig(t)
 
 	mock := NewCommandMock(t, []CommandStub{
 		{

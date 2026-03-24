@@ -186,6 +186,8 @@ func TestInitBeads_AlreadyInitialized(t *testing.T) {
 }
 
 func TestInitBeads_Initialize(t *testing.T) {
+	stubIsolatedConfig(t)
+
 	// Save and restore working directory
 	origDir, _ := os.Getwd()
 	defer os.Chdir(origDir)
@@ -757,6 +759,8 @@ func TestShowSummary_EmptyNames(t *testing.T) {
 // --- Additional coverage tests ---
 
 func TestInitBeads_Failure(t *testing.T) {
+	stubIsolatedConfig(t)
+
 	origDir, _ := os.Getwd()
 	defer os.Chdir(origDir)
 
