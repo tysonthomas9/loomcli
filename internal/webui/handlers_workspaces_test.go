@@ -89,7 +89,8 @@ func TestHandleGetWorkspace_Found(t *testing.T) {
 		}, nil
 	}
 
-	handler := handleGetWorkspace(mp, configFn)
+	wsExistsFn := func(id string) bool { return mp.PoolForWorkspace(id) != nil }
+	handler := handleGetWorkspace(mp, configFn, wsExistsFn)
 
 	// Use a mux to exercise PathValue
 	mux := http.NewServeMux()
@@ -129,7 +130,8 @@ func TestHandleGetWorkspace_Found(t *testing.T) {
 func TestHandleGetWorkspace_NotFound(t *testing.T) {
 	mp := daemon.NewMultiPool(WorkspaceFromContext, 10)
 
-	handler := handleGetWorkspace(mp, nil)
+	wsExistsFn := func(id string) bool { return mp.PoolForWorkspace(id) != nil }
+	handler := handleGetWorkspace(mp, nil, wsExistsFn)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}", handler)
@@ -146,7 +148,8 @@ func TestHandleGetWorkspace_NotFound(t *testing.T) {
 
 func TestHandleGetWorkspace_MissingPathParam(t *testing.T) {
 	mp := daemon.NewMultiPool(WorkspaceFromContext, 10)
-	handler := handleGetWorkspace(mp, nil)
+	wsExistsFn := func(id string) bool { return mp.PoolForWorkspace(id) != nil }
+	handler := handleGetWorkspace(mp, nil, wsExistsFn)
 
 	// Call directly without mux so PathValue("ws") returns ""
 	req := httptest.NewRequest("GET", "/api/workspaces/", nil)

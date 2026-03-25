@@ -2,6 +2,7 @@ package webui
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
@@ -64,28 +65,32 @@ func handleListWorkspaces(mp *daemon.MultiPool, configFn func() (*WorkspaceData,
 
 // handleGetWorkspace returns GET /api/workspaces/{ws} — details for a single
 // workspace including its pool stats and config metadata.
-func handleGetWorkspace(mp *daemon.MultiPool, configFn func() (*WorkspaceData, error)) http.HandlerFunc {
+func handleGetWorkspace(mp *daemon.MultiPool, configFn func() (*WorkspaceData, error), wsExistsFn func(string) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		wsID := r.PathValue("ws")
+		wsID := strings.TrimSpace(r.PathValue("ws"))
 		if wsID == "" {
 			respondError(w, http.StatusBadRequest, "workspace ID is required")
 			return
 		}
 
-		// Check if the workspace is registered.
-		p := mp.PoolForWorkspace(wsID)
-		if p == nil {
-			respondError(w, http.StatusNotFound, "workspace not found")
+		// Validate workspace existence via the injected function.
+		if !wsExistsFn(wsID) {
+			respondError(w, http.StatusNotFound, "workspace not found: "+wsID)
 			return
 		}
+
+		// Get pool for stats (may still be nil if pool was deregistered between check and here).
+		p := mp.PoolForWorkspace(wsID)
 
 		item := workspaceListItem{
 			ID:   wsID,
 			Name: wsID,
 		}
 
-		stats := p.Stats()
-		item.Pool = &stats
+		if p != nil {
+			stats := p.Stats()
+			item.Pool = &stats
+		}
 
 		// Enrich with config metadata if available.
 		if configFn != nil {
