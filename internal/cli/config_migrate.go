@@ -2,15 +2,17 @@ package cli
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
 
 // CurrentConfigVersion is the latest config schema version.
 // Bump this when adding new migrations.
-const CurrentConfigVersion = 1
+const CurrentConfigVersion = 2
 
 // MigrationFunc transforms config data from one version to the next.
 type MigrationFunc func(data map[string]interface{}) (map[string]interface{}, error)
@@ -18,6 +20,7 @@ type MigrationFunc func(data map[string]interface{}) (map[string]interface{}, er
 // migrations maps source version to the function that migrates it to source+1.
 var migrations = map[int]MigrationFunc{
 	0: migrateV0ToV1,
+	1: migrateV1ToV2,
 }
 
 // getConfigVersion reads the version field from raw config data.
@@ -120,5 +123,23 @@ func MigrateConfigFile(path string) (oldVersion int, backupPath string, err erro
 // migrateV0ToV1 adds the version field to a legacy config.
 func migrateV0ToV1(data map[string]interface{}) (map[string]interface{}, error) {
 	data["version"] = 1
+	return data, nil
+}
+
+// migrateV1ToV2 adds a stable UUID (id field) to each workspace entry.
+func migrateV1ToV2(data map[string]interface{}) (map[string]interface{}, error) {
+	workspaces, _ := data["workspaces"].(map[string]interface{})
+	for name, entry := range workspaces {
+		ws, ok := entry.(map[string]interface{})
+		if !ok {
+			slog.Warn("skipping non-map workspace entry during v1→v2 migration", "workspace", name)
+			continue
+		}
+		if _, hasID := ws["id"]; !hasID {
+			ws["id"] = uuid.New().String()
+		}
+		workspaces[name] = ws
+	}
+	data["version"] = 2
 	return data, nil
 }

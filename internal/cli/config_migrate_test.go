@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestGetConfigVersion(t *testing.T) {
@@ -140,7 +142,7 @@ func TestMigrateConfigFile(t *testing.T) {
 func TestMigrateConfigFile_AlreadyCurrent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\nbackend: claude\n"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("version: 2\nbackend: claude\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,6 +176,151 @@ func TestMigrateV0ToV1(t *testing.T) {
 	}
 	if result["backend"] != "claude" {
 		t.Error("existing fields should be preserved")
+	}
+}
+
+func TestMigrateV1ToV2_AddsUUIDs(t *testing.T) {
+	data := map[string]interface{}{
+		"version": 1,
+		"workspaces": map[string]interface{}{
+			"alpha": map[string]interface{}{
+				"path": "/tmp/alpha",
+			},
+			"beta": map[string]interface{}{
+				"path": "/tmp/beta",
+			},
+		},
+	}
+	result, err := migrateV1ToV2(data)
+	if err != nil {
+		t.Fatalf("migrateV1ToV2() error = %v", err)
+	}
+	if v := getConfigVersion(result); v != 2 {
+		t.Errorf("version = %d, want 2", v)
+	}
+	workspaces := result["workspaces"].(map[string]interface{})
+	for _, name := range []string{"alpha", "beta"} {
+		ws := workspaces[name].(map[string]interface{})
+		idVal, ok := ws["id"]
+		if !ok {
+			t.Fatalf("workspace %q missing id field", name)
+		}
+		idStr, ok := idVal.(string)
+		if !ok {
+			t.Fatalf("workspace %q id is not a string: %T", name, idVal)
+		}
+		if _, err := uuid.Parse(idStr); err != nil {
+			t.Errorf("workspace %q id %q is not a valid UUID: %v", name, idStr, err)
+		}
+	}
+	// Ensure the two UUIDs are different
+	alphaID := workspaces["alpha"].(map[string]interface{})["id"].(string)
+	betaID := workspaces["beta"].(map[string]interface{})["id"].(string)
+	if alphaID == betaID {
+		t.Errorf("alpha and beta got the same UUID: %s", alphaID)
+	}
+}
+
+func TestMigrateV1ToV2_PreservesExistingID(t *testing.T) {
+	existingID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	data := map[string]interface{}{
+		"version": 1,
+		"workspaces": map[string]interface{}{
+			"hasid": map[string]interface{}{
+				"path": "/tmp/hasid",
+				"id":   existingID,
+			},
+			"noid": map[string]interface{}{
+				"path": "/tmp/noid",
+			},
+		},
+	}
+	result, err := migrateV1ToV2(data)
+	if err != nil {
+		t.Fatalf("migrateV1ToV2() error = %v", err)
+	}
+	workspaces := result["workspaces"].(map[string]interface{})
+
+	// Existing ID should be preserved
+	hasidWs := workspaces["hasid"].(map[string]interface{})
+	if hasidWs["id"] != existingID {
+		t.Errorf("existing id changed: got %q, want %q", hasidWs["id"], existingID)
+	}
+
+	// Missing ID should get a new valid UUID
+	noidWs := workspaces["noid"].(map[string]interface{})
+	newID, ok := noidWs["id"].(string)
+	if !ok {
+		t.Fatal("workspace 'noid' missing id after migration")
+	}
+	if _, err := uuid.Parse(newID); err != nil {
+		t.Errorf("workspace 'noid' id %q is not a valid UUID: %v", newID, err)
+	}
+	if newID == existingID {
+		t.Error("new UUID should differ from the preserved one")
+	}
+}
+
+func TestMigrateV1ToV2_NoWorkspaces(t *testing.T) {
+	data := map[string]interface{}{
+		"version": 1,
+		"backend": "claude",
+	}
+	result, err := migrateV1ToV2(data)
+	if err != nil {
+		t.Fatalf("migrateV1ToV2() error = %v", err)
+	}
+	if v := getConfigVersion(result); v != 2 {
+		t.Errorf("version = %d, want 2", v)
+	}
+	if result["backend"] != "claude" {
+		t.Error("existing fields should be preserved")
+	}
+}
+
+func TestMigrateV1ToV2_EmptyWorkspaces(t *testing.T) {
+	data := map[string]interface{}{
+		"version":    1,
+		"workspaces": map[string]interface{}{},
+	}
+	result, err := migrateV1ToV2(data)
+	if err != nil {
+		t.Fatalf("migrateV1ToV2() error = %v", err)
+	}
+	if v := getConfigVersion(result); v != 2 {
+		t.Errorf("version = %d, want 2", v)
+	}
+}
+
+func TestMigrationChain_V0ToV2(t *testing.T) {
+	data := map[string]interface{}{
+		"backend": "claude",
+		"workspaces": map[string]interface{}{
+			"ws1": map[string]interface{}{
+				"path": "/tmp/ws1",
+			},
+			"ws2": map[string]interface{}{
+				"path": "/tmp/ws2",
+			},
+		},
+	}
+	result, err := MigrateConfigData(data)
+	if err != nil {
+		t.Fatalf("MigrateConfigData() error = %v", err)
+	}
+	if v := getConfigVersion(result); v != 2 {
+		t.Errorf("version = %d, want 2", v)
+	}
+	workspaces := result["workspaces"].(map[string]interface{})
+	for _, name := range []string{"ws1", "ws2"} {
+		ws := workspaces[name].(map[string]interface{})
+		idStr, ok := ws["id"].(string)
+		if !ok {
+			t.Fatalf("workspace %q missing id after full migration chain", name)
+		}
+		if _, err := uuid.Parse(idStr); err != nil {
+			t.Errorf("workspace %q id %q is not a valid UUID: %v", name, idStr, err)
+		}
 	}
 }
 

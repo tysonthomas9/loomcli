@@ -33,7 +33,7 @@ func listenForAttachKey(attachChan chan struct{}, shutdown chan struct{}) {
 				continue
 			}
 			select {
-			case keyChan <- buf[0]:
+			case keyChan <- buf[0]: //nolint:gosec // buf[0] is safe: n > 0 is checked above
 			default:
 			}
 		}

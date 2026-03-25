@@ -287,7 +287,7 @@ func createEmptyWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir, b
 		slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 	}
 
-	cfg.Workspaces[wsName] = WorkspaceConfig{Path: wsDir, Repos: repos}
+	cfg.Workspaces[wsName] = WorkspaceConfig{ID: NewWorkspaceID(), Path: wsDir, Repos: repos}
 	if len(cfg.Workspaces) == 1 {
 		cfg.DefaultWorkspace = wsName
 	}
@@ -384,7 +384,7 @@ func createCloneWorkspace(ctx context.Context, cfg *LoomConfig, wsName, wsDir st
 		slog.Warn("failed to start daemon for workspace", "workspace", wsName, "err", err)
 	}
 
-	cfg.Workspaces[wsName] = WorkspaceConfig{Path: wsDir, Repos: repos}
+	cfg.Workspaces[wsName] = WorkspaceConfig{ID: NewWorkspaceID(), Path: wsDir, Repos: repos}
 	if len(cfg.Workspaces) == 1 {
 		cfg.DefaultWorkspace = wsName
 	}

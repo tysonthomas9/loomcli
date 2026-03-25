@@ -17,6 +17,7 @@ import (
 
 // WorkspaceData represents the full workspace topology returned by the API.
 type WorkspaceData struct {
+	ID               string               `json:"id"`
 	Name             string               `json:"name"`
 	Path             string               `json:"path"`
 	Repos            []WorkspaceRepo      `json:"repos"`
@@ -29,6 +30,7 @@ type WorkspaceData struct {
 
 // WorkspaceSummary provides a lightweight summary of a configured workspace.
 type WorkspaceSummary struct {
+	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Path      string `json:"path"`
 	Active    bool   `json:"active"`
