@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	logRouterAgent      string
-	logRouterBaseDir    string
-	logRouterLockPath   string
-	logRouterMaxLogSize int
+	logRouterAgent       string
+	logRouterBaseDir     string
+	logRouterLockPath    string
+	logRouterMaxLogSize  int
+	logRouterWorkspaceID string
 )
 
 var logRouterCmd = &cobra.Command{
@@ -36,6 +37,7 @@ func init() {
 	logRouterCmd.Flags().StringVar(&logRouterBaseDir, "base-dir", "", "Base directory for log files (default: ~/.loom/logs)")
 	logRouterCmd.Flags().StringVar(&logRouterLockPath, "lock-path", "", "Path to the .agent.lock file to watch for TaskID changes (required)")
 	logRouterCmd.Flags().IntVar(&logRouterMaxLogSize, "max-log-size", 50, "Maximum log file size in MB before rotation (0 to disable)")
+	logRouterCmd.Flags().StringVar(&logRouterWorkspaceID, "workspace-id", "", "Workspace ID for log directory namespacing")
 	_ = logRouterCmd.MarkFlagRequired("agent")
 	_ = logRouterCmd.MarkFlagRequired("lock-path")
 	rootCmd.AddCommand(logRouterCmd)
@@ -49,6 +51,11 @@ func runLogRouter(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("getting home directory: %w", err)
 		}
 		baseDir = filepath.Join(homeDir, ".loom", "logs")
+	}
+
+	// Namespace by workspace ID if provided
+	if logRouterWorkspaceID != "" {
+		baseDir = filepath.Join(baseDir, logRouterWorkspaceID)
 	}
 
 	agentLogDir := filepath.Join(baseDir, "agents")

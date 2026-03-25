@@ -188,11 +188,6 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.HandleFunc("POST /api/sessions/notify", handleNotifySessionChange(hub))
 	}
 
-	// Log streaming endpoints
-	mux.HandleFunc("GET /api/agents/{name}/logs", handleGetAgentLog())
-	mux.HandleFunc("GET /api/tasks/{id}/logs", handleListTaskPhases())
-	mux.HandleFunc("GET /api/tasks/{id}/logs/{phase}", handleGetTaskLog())
-
 	// Workspace management and workspace-scoped API routes
 	if multiPool != nil {
 		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn)
@@ -244,6 +239,11 @@ func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, wo
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", handleDaemonStatus(multiPool))
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/config/backend", handleGetBackendConfig(multiPool))
 	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/config/backend", handlePatchBackendConfig(multiPool))
+
+	// Log streaming endpoints (workspace-scoped)
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/logs", handleGetAgentLog())
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs", handleListTaskPhases())
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}", handleGetTaskLog())
 
 	// Apply WorkspaceMiddleware to all workspace-scoped routes
 	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(wsExistsFn, wsMux))

@@ -146,12 +146,12 @@ func TestListTaskPhases_RejectsSymlinkDir(t *testing.T) {
 		t.Skip("symlink tests not supported on Windows")
 	}
 
-	// Get the log dir structure to set up the symlink in the expected location
-	logDir, err := getLogDir()
+	// Get the workspace-scoped log dir structure to set up the symlink in the expected location
+	wsLogDir, err := getWorkspaceLogDir("")
 	if err != nil {
-		t.Fatalf("getLogDir() error = %v", err)
+		t.Fatalf("getWorkspaceLogDir() error = %v", err)
 	}
-	tasksDir := filepath.Join(logDir, "tasks")
+	tasksDir := filepath.Join(wsLogDir, "tasks")
 	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
 		t.Fatalf("failed to create tasks dir: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestListTaskPhases_RejectsSymlinkDir(t *testing.T) {
 		t.Fatalf("failed to create symlink dir: %v", err)
 	}
 
-	_, err = listTaskPhases(taskID)
+	_, err = listTaskPhases("", taskID)
 	if err == nil {
 		t.Fatal("listTaskPhases() should reject symlink directory")
 	}

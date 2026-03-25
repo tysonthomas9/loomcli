@@ -28,11 +28,14 @@ var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 var validPhase = regexp.MustCompile(`^(planning|implementation)$`)
 
 // handleGetAgentLog returns the current log file content for an agent.
-// GET /api/agents/{name}/logs
+// GET /api/workspaces/{ws}/agents/{name}/logs
 // Query params: ?lines=N (default 200, max 10000)
 // Response: {success: true, data: {lines: [...], lineCount: N}}
 func handleGetAgentLog() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Get workspace ID from context (injected by WorkspaceMiddleware)
+		wsID := WorkspaceFromContext(r.Context())
+
 		// Get agent name from path
 		agentName := r.PathValue("name")
 		if agentName == "" {
@@ -63,8 +66,8 @@ func handleGetAgentLog() http.HandlerFunc {
 			}
 		}
 
-		// Get log file path
-		logPath, err := getAgentLogPath(agentName)
+		// Get log file path (workspace-scoped)
+		logPath, err := getAgentLogPath(wsID, agentName)
 		if err != nil {
 			log.Printf("Agent log path error for %s: %v", agentName, err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{
@@ -109,10 +112,13 @@ func handleGetAgentLog() http.HandlerFunc {
 }
 
 // handleListTaskPhases returns the available log phases for a task.
-// GET /api/tasks/{id}/logs
+// GET /api/workspaces/{ws}/tasks/{id}/logs
 // Response: {success: true, data: {phases: ["planning", "implementation"]}}
 func handleListTaskPhases() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Get workspace ID from context (injected by WorkspaceMiddleware)
+		wsID := WorkspaceFromContext(r.Context())
+
 		// Get task ID from path
 		taskID := r.PathValue("id")
 		if taskID == "" {
@@ -132,8 +138,8 @@ func handleListTaskPhases() http.HandlerFunc {
 			return
 		}
 
-		// List available phases
-		phases, err := listTaskPhases(taskID)
+		// List available phases (workspace-scoped)
+		phases, err := listTaskPhases(wsID, taskID)
 		if err != nil {
 			log.Printf("Failed to list task phases for %s: %v", taskID, err)
 			respondJSON(w, http.StatusInternalServerError, TaskPhasesResponse{
@@ -153,11 +159,14 @@ func handleListTaskPhases() http.HandlerFunc {
 }
 
 // handleGetTaskLog returns the current log file content for a task phase.
-// GET /api/tasks/{id}/logs/{phase}
+// GET /api/workspaces/{ws}/tasks/{id}/logs/{phase}
 // Query params: ?lines=N (default 200, max 10000)
 // Response: {success: true, data: {lines: [...], lineCount: N}}
 func handleGetTaskLog() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Get workspace ID from context (injected by WorkspaceMiddleware)
+		wsID := WorkspaceFromContext(r.Context())
+
 		// Get task ID from path
 		taskID := r.PathValue("id")
 		if taskID == "" {
@@ -207,8 +216,8 @@ func handleGetTaskLog() http.HandlerFunc {
 			}
 		}
 
-		// Get log file path
-		logPath, err := getTaskLogPath(taskID, phase)
+		// Get log file path (workspace-scoped)
+		logPath, err := getTaskLogPath(wsID, taskID, phase)
 		if err != nil {
 			log.Printf("Task log path error for %s/%s: %v", taskID, phase, err)
 			respondJSON(w, http.StatusInternalServerError, LogContentResponse{

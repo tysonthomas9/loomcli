@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+// defaultWorkspaceDir is the sentinel directory name used when no workspace ID
+// is available. This prevents log files from colliding with workspace-scoped
+// directories directly under ~/.loom/logs/.
+const defaultWorkspaceDir = "_default"
+
 // getLogDir returns the base log directory (~/.loom/logs).
 func getLogDir() (string, error) {
 	home, err := os.UserHomeDir()
@@ -16,15 +21,33 @@ func getLogDir() (string, error) {
 	return filepath.Join(home, ".loom", "logs"), nil
 }
 
-// getAgentLogPath returns the path to an agent's log file.
+// getWorkspaceLogDir returns the workspace-scoped log directory (~/.loom/logs/{wsID}).
+// If workspaceID is empty, falls back to ~/.loom/logs/_default.
+func getWorkspaceLogDir(workspaceID string) (string, error) {
+	logDir, err := getLogDir()
+	if err != nil {
+		return "", err
+	}
+	if workspaceID == "" {
+		workspaceID = defaultWorkspaceDir
+	}
+	return filepath.Join(logDir, workspaceID), nil
+}
+
+// getAgentLogPath returns the path to an agent's log file, scoped by workspace.
 // It validates the resolved path to prevent symlink attacks.
-func getAgentLogPath(agentName string) (string, error) {
+func getAgentLogPath(workspaceID, agentName string) (string, error) {
 	logDir, err := getLogDir()
 	if err != nil {
 		return "", err
 	}
 
-	logPath := filepath.Join(logDir, "agents", agentName+".log")
+	wsLogDir, err := getWorkspaceLogDir(workspaceID)
+	if err != nil {
+		return "", err
+	}
+
+	logPath := filepath.Join(wsLogDir, "agents", agentName+".log")
 
 	// Prevent symlink attacks - ensure resolved path stays within logDir
 	if err := validatePathWithinDir(logPath, logDir); err != nil {
@@ -34,15 +57,20 @@ func getAgentLogPath(agentName string) (string, error) {
 	return logPath, nil
 }
 
-// getTaskLogPath returns the path to a task's phase log file.
+// getTaskLogPath returns the path to a task's phase log file, scoped by workspace.
 // It validates the resolved path to prevent symlink attacks.
-func getTaskLogPath(taskID, phase string) (string, error) {
+func getTaskLogPath(workspaceID, taskID, phase string) (string, error) {
 	logDir, err := getLogDir()
 	if err != nil {
 		return "", err
 	}
 
-	logPath := filepath.Join(logDir, "tasks", taskID, phase+".log")
+	wsLogDir, err := getWorkspaceLogDir(workspaceID)
+	if err != nil {
+		return "", err
+	}
+
+	logPath := filepath.Join(wsLogDir, "tasks", taskID, phase+".log")
 
 	// Prevent symlink attacks - ensure resolved path stays within logDir
 	if err := validatePathWithinDir(logPath, logDir); err != nil {
@@ -52,15 +80,20 @@ func getTaskLogPath(taskID, phase string) (string, error) {
 	return logPath, nil
 }
 
-// getTaskLogDir returns the directory containing a task's log files.
+// getTaskLogDir returns the directory containing a task's log files, scoped by workspace.
 // It validates the resolved path to prevent symlink attacks.
-func getTaskLogDir(taskID string) (string, error) {
+func getTaskLogDir(workspaceID, taskID string) (string, error) {
 	logDir, err := getLogDir()
 	if err != nil {
 		return "", err
 	}
 
-	taskDir := filepath.Join(logDir, "tasks", taskID)
+	wsLogDir, err := getWorkspaceLogDir(workspaceID)
+	if err != nil {
+		return "", err
+	}
+
+	taskDir := filepath.Join(wsLogDir, "tasks", taskID)
 
 	// Prevent symlink attacks - ensure resolved path stays within logDir
 	if err := validatePathWithinDir(taskDir, logDir); err != nil {
@@ -104,9 +137,9 @@ func validatePathWithinDir(path, allowedDir string) error {
 	return nil
 }
 
-// listTaskPhases returns the available log phases for a task.
-func listTaskPhases(taskID string) ([]string, error) {
-	taskDir, err := getTaskLogDir(taskID)
+// listTaskPhases returns the available log phases for a task, scoped by workspace.
+func listTaskPhases(workspaceID, taskID string) ([]string, error) {
+	taskDir, err := getTaskLogDir(workspaceID, taskID)
 	if err != nil {
 		return nil, err
 	}

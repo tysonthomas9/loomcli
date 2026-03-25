@@ -36,7 +36,13 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		fmt.Printf("[auto] Warning: could not get home directory: %v\n", err)
 		homeDir = os.TempDir()
 	}
-	logDir := filepath.Join(homeDir, ".loom", "logs")
+	// Namespace log directory by workspace ID to prevent collisions between
+	// same-named agents in different workspaces.
+	workspaceID := os.Getenv("LOOM_WORKSPACE_ID")
+	if workspaceID == "" {
+		workspaceID = "_default"
+	}
+	logDir := filepath.Join(homeDir, ".loom", "logs", workspaceID)
 	agentLogDir := filepath.Join(logDir, "agents")
 	if err := os.MkdirAll(agentLogDir, 0700); err != nil {
 		fmt.Printf("[auto] Warning: could not create log directory: %v\n", err)
