@@ -70,9 +70,6 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 		mux.HandleFunc("GET /api/backends", handleGetBackendsHealth(backendOps))
 	}
 
-	// Issue + dependency endpoints with optional workspace middleware
-	registerIssueRoutes(mux, pool, multiPool, workspaceConfigFn)
-
 	// Fleet endpoints for worker registration, task acquisition, and completion
 	// Only registered when fleet coordination (Redis) is configured.
 	if fleetEnabled {
@@ -91,8 +88,6 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 			mux.HandleFunc("POST /api/fleet/heartbeat", handleFleetHeartbeat(fleetStore))
 		}
 	}
-
-	// Ready, blocked, and graph endpoints are registered in registerIssueRoutes
 
 	// Server-Sent Events endpoint for real-time push notifications
 	if hub != nil {
@@ -211,50 +206,6 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	}
 
 	return clientErrLimiter, cspLimiter
-}
-
-// registerIssueRoutes sets up issue and dependency endpoints with optional workspace middleware.
-func registerIssueRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error)) {
-	var issuePool daemon.Pool = pool
-	if multiPool != nil {
-		issuePool = multiPool
-	}
-	defaultWSFn := func() string {
-		if workspaceConfigFn != nil {
-			if wsData, err := workspaceConfigFn(); err == nil && wsData != nil {
-				if wsData.DefaultWorkspace != "" {
-					return wsData.DefaultWorkspace
-				}
-				return wsData.Name
-			}
-		}
-		if multiPool != nil {
-			if wsIDs := multiPool.WorkspaceIDs(); len(wsIDs) > 0 {
-				return wsIDs[0]
-			}
-		}
-		return ""
-	}
-	wrapWS := func(h http.HandlerFunc) http.Handler {
-		if multiPool != nil {
-			return OptionalWorkspaceMiddleware(defaultWSFn, h)
-		}
-		return h
-	}
-	mux.Handle("GET /api/issues/{id}", wrapWS(handleGetIssue(issuePool)))
-	mux.Handle("GET /api/issues", wrapWS(handleListIssues(issuePool)))
-	mux.Handle("POST /api/issues", wrapWS(handleCreateIssue(issuePool)))
-	mux.Handle("PATCH /api/issues/{id}", wrapWS(handlePatchIssue(issuePool)))
-	mux.Handle("POST /api/issues/{id}/close", wrapWS(handleCloseIssue(issuePool)))
-	mux.Handle("POST /api/issues/{id}/move", wrapWS(handleMoveIssue(issuePool, workspaceConfigFn)))
-	mux.Handle("DELETE /api/issues/{id}", wrapWS(handleDeleteIssue(issuePool)))
-	mux.Handle("POST /api/issues/{id}/comments", wrapWS(handleAddComment(issuePool)))
-	mux.Handle("GET /api/issues/{id}/events", wrapWS(handleGetIssueEvents(issuePool)))
-	mux.Handle("POST /api/issues/{id}/dependencies", wrapWS(handleAddDependency(issuePool)))
-	mux.Handle("DELETE /api/issues/{id}/dependencies/{depId}", wrapWS(handleRemoveDependency(issuePool)))
-	mux.Handle("GET /api/ready", wrapWS(handleReady(issuePool)))
-	mux.Handle("GET /api/blocked", wrapWS(handleBlocked(issuePool)))
-	mux.Handle("GET /api/issues/graph", wrapWS(handleGraph(issuePool)))
 }
 
 // registerWorkspaceRoutes sets up workspace listing and workspace-scoped API routes.

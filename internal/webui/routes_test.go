@@ -1620,12 +1620,12 @@ func TestSetupRoutes_IssueEndpoints_MethodRestrictions(t *testing.T) {
 		path        string
 		expectRoute bool // true if route is registered for this method
 	}{
-		{"GET /api/issues", http.MethodGet, "/api/issues", true},
-		{"POST /api/issues", http.MethodPost, "/api/issues", true},
+		{"GET /api/issues", http.MethodGet, "/api/issues", false},
+		{"POST /api/issues", http.MethodPost, "/api/issues", false},
 		{"DELETE /api/issues", http.MethodDelete, "/api/issues", false},
-		{"DELETE /api/issues/test-id", http.MethodDelete, "/api/issues/test-id", true},
-		{"GET /api/issues/test-id", http.MethodGet, "/api/issues/test-id", true},
-		{"PATCH /api/issues/test-id", http.MethodPatch, "/api/issues/test-id", true},
+		{"DELETE /api/issues/test-id", http.MethodDelete, "/api/issues/test-id", false},
+		{"GET /api/issues/test-id", http.MethodGet, "/api/issues/test-id", false},
+		{"PATCH /api/issues/test-id", http.MethodPatch, "/api/issues/test-id", false},
 		{"PUT /api/issues/test-id", http.MethodPut, "/api/issues/test-id", false},
 	}
 
@@ -1681,8 +1681,8 @@ func TestSetupRoutes_DependencyEndpoints_MethodRestrictions(t *testing.T) {
 		path        string
 		expectRoute bool
 	}{
-		{"POST /api/issues/id/dependencies", http.MethodPost, "/api/issues/test-id/dependencies", true},
-		{"DELETE /api/issues/id/dependencies/depId", http.MethodDelete, "/api/issues/test-id/dependencies/dep-1", true},
+		{"POST /api/issues/id/dependencies", http.MethodPost, "/api/issues/test-id/dependencies", false},
+		{"DELETE /api/issues/id/dependencies/depId", http.MethodDelete, "/api/issues/test-id/dependencies/dep-1", false},
 		{"GET /api/issues/id/dependencies", http.MethodGet, "/api/issues/test-id/dependencies", false},
 	}
 

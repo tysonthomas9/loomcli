@@ -43,23 +43,3 @@ func WorkspaceMiddleware(wsExists func(id string) bool, next http.Handler) http.
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
-
-// OptionalWorkspaceMiddleware reads the Workspace header and injects it into
-// the context. If the header is missing, it calls defaultWSFn to resolve the
-// current default workspace dynamically. This ensures that changes to the
-// default workspace (via PUT /api/workspace/default) take effect immediately
-// without requiring a server restart.
-func OptionalWorkspaceMiddleware(defaultWSFn func() string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wsID := strings.TrimSpace(r.Header.Get("Workspace"))
-		if wsID == "" {
-			wsID = defaultWSFn()
-		}
-		if wsID != "" {
-			ctx := WithWorkspace(r.Context(), wsID)
-			next.ServeHTTP(w, r.WithContext(ctx))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
