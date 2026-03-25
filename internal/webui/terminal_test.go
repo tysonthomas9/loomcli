@@ -1024,3 +1024,200 @@ func TestTerminalDetachDuringShutdown(t *testing.T) {
 		t.Errorf("expected SessionCount()==0 after concurrent Detach+Shutdown, got %d", got)
 	}
 }
+
+// --- shortWorkspaceID tests ---
+
+func TestShortWorkspaceID(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{
+			name: "empty string returns default",
+			id:   "",
+			want: "default",
+		},
+		{
+			name: "full UUID returns first 8 chars",
+			id:   "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+			want: "a1b2c3d4",
+		},
+		{
+			name: "string shorter than 8 returns as-is",
+			id:   "abc",
+			want: "abc",
+		},
+		{
+			name: "exactly 8 chars returns as-is",
+			id:   "abcdefgh",
+			want: "abcdefgh",
+		},
+		{
+			name: "9 chars returns first 8",
+			id:   "abcdefghi",
+			want: "abcdefgh",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shortWorkspaceID(tt.id)
+			if got != tt.want {
+				t.Errorf("shortWorkspaceID(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
+// --- FindLatestAgentSession tests ---
+
+// TestFindLatestAgentSession_WithWorkspaceID verifies that when a workspace ID
+// is provided, only sessions for that workspace are matched.
+func TestFindLatestAgentSession_WithWorkspaceID(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+	defer mgr.Shutdown()
+
+	wsID := "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
+	wsPrefix := shortWorkspaceID(wsID) // "aaaabbbb"
+	agentName := "ember"
+
+	// Create a session matching the workspace naming convention.
+	sessionName := fmt.Sprintf("loom-%s-task-%s-99999", wsPrefix, agentName)
+	if err := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "300").Run(); err != nil { //nolint:norawexec
+		t.Fatalf("failed to create tmux session %q: %v", sessionName, err)
+	}
+	t.Cleanup(func() { killTmuxSession(t, sessionName) })
+
+	// Create a session for a different workspace to verify isolation.
+	otherSession := fmt.Sprintf("loom-bbbbcccc-task-%s-88888", agentName)
+	if err := exec.Command("tmux", "new-session", "-d", "-s", otherSession, "sleep", "300").Run(); err != nil { //nolint:norawexec
+		t.Fatalf("failed to create tmux session %q: %v", otherSession, err)
+	}
+	t.Cleanup(func() { killTmuxSession(t, otherSession) })
+
+	// With workspace ID: should only find the matching workspace's session.
+	name, found, err := mgr.FindLatestAgentSession(wsID, agentName)
+	if err != nil {
+		t.Fatalf("FindLatestAgentSession() error: %v", err)
+	}
+	if !found {
+		t.Fatal("FindLatestAgentSession() found = false, want true")
+	}
+	if name != sessionName {
+		t.Errorf("FindLatestAgentSession() = %q, want %q", name, sessionName)
+	}
+}
+
+// TestFindLatestAgentSession_EmptyWorkspaceID verifies that when no workspace
+// ID is provided, sessions for any workspace are matched (backwards-compatible).
+func TestFindLatestAgentSession_EmptyWorkspaceID(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+	defer mgr.Shutdown()
+
+	agentName := "spark"
+
+	// Create sessions from two different workspaces.
+	session1 := fmt.Sprintf("loom-aaaabbbb-task-%s-11111", agentName)
+	session2 := fmt.Sprintf("loom-ccccdddd-task-%s-22222", agentName)
+	for _, s := range []string{session1, session2} {
+		if err := exec.Command("tmux", "new-session", "-d", "-s", s, "sleep", "300").Run(); err != nil { //nolint:norawexec
+			t.Fatalf("failed to create tmux session %q: %v", s, err)
+		}
+		t.Cleanup(func() { killTmuxSession(t, s) })
+	}
+
+	// With empty workspace ID: should find at least one session.
+	name, found, err := mgr.FindLatestAgentSession("", agentName)
+	if err != nil {
+		t.Fatalf("FindLatestAgentSession() error: %v", err)
+	}
+	if !found {
+		t.Fatal("FindLatestAgentSession() found = false, want true")
+	}
+	// The returned session should be one of the two we created.
+	if name != session1 && name != session2 {
+		t.Errorf("FindLatestAgentSession() = %q, want one of %q or %q", name, session1, session2)
+	}
+}
+
+// TestFindLatestAgentSession_WorkspaceIsolation verifies that sessions from
+// different workspaces with the same agent name are properly isolated.
+func TestFindLatestAgentSession_WorkspaceIsolation(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+	defer mgr.Shutdown()
+
+	agentName := "bolt"
+	wsA := "11112222-3333-4444-5555-666677778888"
+	wsB := "99998888-7777-6666-5555-444433332222"
+	wsPrefixA := shortWorkspaceID(wsA) // "11112222"
+	wsPrefixB := shortWorkspaceID(wsB) // "99998888"
+
+	sessionA := fmt.Sprintf("loom-%s-task-%s-55555", wsPrefixA, agentName)
+	sessionB := fmt.Sprintf("loom-%s-task-%s-66666", wsPrefixB, agentName)
+	for _, s := range []string{sessionA, sessionB} {
+		if err := exec.Command("tmux", "new-session", "-d", "-s", s, "sleep", "300").Run(); err != nil { //nolint:norawexec
+			t.Fatalf("failed to create tmux session %q: %v", s, err)
+		}
+		t.Cleanup(func() { killTmuxSession(t, s) })
+	}
+
+	// Query workspace A: should only find sessionA.
+	name, found, err := mgr.FindLatestAgentSession(wsA, agentName)
+	if err != nil {
+		t.Fatalf("FindLatestAgentSession(wsA) error: %v", err)
+	}
+	if !found {
+		t.Fatal("FindLatestAgentSession(wsA) found = false, want true")
+	}
+	if name != sessionA {
+		t.Errorf("FindLatestAgentSession(wsA) = %q, want %q", name, sessionA)
+	}
+
+	// Query workspace B: should only find sessionB.
+	name, found, err = mgr.FindLatestAgentSession(wsB, agentName)
+	if err != nil {
+		t.Fatalf("FindLatestAgentSession(wsB) error: %v", err)
+	}
+	if !found {
+		t.Fatal("FindLatestAgentSession(wsB) found = false, want true")
+	}
+	if name != sessionB {
+		t.Errorf("FindLatestAgentSession(wsB) = %q, want %q", name, sessionB)
+	}
+}
+
+// TestFindLatestAgentSession_NoMatch verifies that when no sessions match the
+// given agent name, the function returns found=false without error.
+func TestFindLatestAgentSession_NoMatch(t *testing.T) {
+	skipIfNoTmux(t)
+
+	mgr, err := NewTerminalManager("", "", 0)
+	if err != nil {
+		t.Fatalf("NewTerminalManager() error: %v", err)
+	}
+	defer mgr.Shutdown()
+
+	_, found, err := mgr.FindLatestAgentSession("", "nonexistent-agent-xyz")
+	if err != nil {
+		t.Fatalf("FindLatestAgentSession() error: %v", err)
+	}
+	if found {
+		t.Error("FindLatestAgentSession() found = true, want false for nonexistent agent")
+	}
+}

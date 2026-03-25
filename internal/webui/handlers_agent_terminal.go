@@ -67,8 +67,14 @@ func handleGetAgentTerminalInfo(manager *TerminalManager) http.HandlerFunc {
 			return
 		}
 
+		// Get workspace ID from context (set by WorkspaceMiddleware) or query param fallback.
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			wsID = r.URL.Query().Get("workspace")
+		}
+
 		mode := agentTerminalModeArchive
-		if _, found, err := manager.FindLatestAgentSession(agentName); err != nil {
+		if _, found, err := manager.FindLatestAgentSession(wsID, agentName); err != nil {
 			log.Printf("Failed to resolve agent tmux session for %q: %v", agentName, err)
 			respondJSON(w, http.StatusInternalServerError, agentTerminalInfoResponse{
 				Success: false,
@@ -180,7 +186,13 @@ func handleAgentTerminalWS(manager *TerminalManager, auth *terminalAuth, allowed
 			return
 		}
 
-		sessionName, found, err := manager.FindLatestAgentSession(agentName)
+		// Get workspace ID from context (set by WorkspaceMiddleware) or query param fallback.
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			wsID = r.URL.Query().Get("workspace")
+		}
+
+		sessionName, found, err := manager.FindLatestAgentSession(wsID, agentName)
 		if err != nil {
 			respondJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"success": false,

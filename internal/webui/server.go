@@ -187,7 +187,7 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// Initialize terminal manager for WebSocket terminal sessions.
 	// Include the workspace ID in the session prefix to prevent same-name agents
 	// across workspaces from sharing tmux sessions.
-	termSessionPrefix := fmt.Sprintf("%d-%s", actualPort, initialWorkspaceID)
+	termSessionPrefix := fmt.Sprintf("%d-%s", actualPort, shortWorkspaceID(initialWorkspaceID))
 	var termMgr *TerminalManager
 	if termMgr, err = NewTerminalManager(config.TerminalCmd, termSessionPrefix, config.MaxTerminalSessions); err != nil {
 		if errors.Is(err, ErrTmuxNotFound) {

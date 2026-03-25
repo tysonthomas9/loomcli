@@ -344,9 +344,23 @@ func (m *TerminalManager) listTmuxSessions() ([]tmuxSessionMeta, error) {
 	return sessions, nil
 }
 
+// shortWorkspaceID returns the first 8 characters of a workspace UUID for use
+// in tmux session name matching. Returns "default" if the ID is empty.
+func shortWorkspaceID(id string) string {
+	if id == "" {
+		return "default"
+	}
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
 // FindLatestAgentSession returns the newest tmux session matching the auto-mode
-// naming convention for an agent: loom-<role>-<agent>-<pid>.
-func (m *TerminalManager) FindLatestAgentSession(agentName string) (string, bool, error) {
+// naming convention for an agent: loom-<wsPrefix>-<role>-<agent>-<pid>.
+// When workspaceID is non-empty, only sessions for that workspace are matched.
+// When workspaceID is empty, sessions for any workspace are matched (backwards-compatible).
+func (m *TerminalManager) FindLatestAgentSession(workspaceID, agentName string) (string, bool, error) {
 	if !validSessionName.MatchString(agentName) {
 		return "", false, fmt.Errorf("invalid agent name %q", agentName)
 	}
@@ -355,7 +369,16 @@ func (m *TerminalManager) FindLatestAgentSession(agentName string) (string, bool
 	if err != nil {
 		return "", false, err
 	}
-	pattern := regexp.MustCompile(fmt.Sprintf(`^loom-[a-zA-Z0-9_-]+-%s-[0-9]+$`, regexp.QuoteMeta(agentName)))
+
+	// Build pattern: when workspace ID is provided, match only that workspace's
+	// prefix; otherwise match any prefix (backwards-compatible for pre-T1 sessions).
+	var pattern *regexp.Regexp
+	if workspaceID != "" {
+		wsPrefix := shortWorkspaceID(workspaceID)
+		pattern = regexp.MustCompile(fmt.Sprintf(`^loom-%s-[a-zA-Z0-9_-]+-%s-[0-9]+$`, regexp.QuoteMeta(wsPrefix), regexp.QuoteMeta(agentName)))
+	} else {
+		pattern = regexp.MustCompile(fmt.Sprintf(`^loom-[a-zA-Z0-9_-]+-%s-[0-9]+$`, regexp.QuoteMeta(agentName)))
+	}
 
 	var bestName string
 	var bestCreated int64

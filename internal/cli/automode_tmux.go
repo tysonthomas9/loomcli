@@ -27,8 +27,12 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 		}
 	}
 
-	// Include PID to prevent session name collisions
-	sessionName := fmt.Sprintf("loom-%s-%s-%d", opts.AgentType, opts.AgentName, os.Getpid())
+	// Resolve workspace ID for session naming and log isolation.
+	wsID := ResolveWorkspaceID(opts.WorkspaceID)
+	wsPrefix := ShortWorkspaceID(wsID)
+
+	// Include workspace prefix and PID to prevent session name collisions
+	sessionName := fmt.Sprintf("loom-%s-%s-%s-%d", wsPrefix, opts.AgentType, opts.AgentName, os.Getpid())
 
 	// Setup log file — store outside worktree to avoid polluting git status
 	homeDir, err := os.UserHomeDir()
@@ -38,7 +42,7 @@ func RunAutoModeTmux(opts AutoModeOptions, shutdown chan struct{}) {
 	}
 	// Namespace log directory by workspace ID to prevent collisions between
 	// same-named agents in different workspaces.
-	workspaceID := os.Getenv("LOOM_WORKSPACE_ID")
+	workspaceID := wsID
 	if workspaceID == "" {
 		workspaceID = "_default"
 	}

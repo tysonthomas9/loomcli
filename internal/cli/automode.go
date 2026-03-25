@@ -25,14 +25,14 @@ type AutoModeOptions struct {
 	AgentType       string // "plan" or "task"
 	AgentName       string
 	WorktreePath    string
+	WorkspaceID     string                                // Stable workspace UUID (falls back to LOOM_WORKSPACE_ID env)
 	ParentID        string                                // Epic ID to scope task discovery to (empty = all tasks)
 	CustomPromptGen func(string, *WorkspaceConfig) string // Custom prompt generator (overrides AgentType selection)
 	CustomTaskCheck func() (bool, error)                  // Custom task availability check (overrides AgentType selection)
 	BackoffBase     time.Duration                         // Base backoff duration for no-progress retries (default 30s)
 	EventBus        events.Emitter                        // Event emission for observability (nil = no events)
 
-	// Interface abstractions for remote agent support.
-	// When nil, local filesystem implementations are used (existing behavior).
+	// Interface abstractions for remote agent support (nil = local filesystem).
 	LockBridge   LockBridge
 	EventEmitter EventEmitter
 }
