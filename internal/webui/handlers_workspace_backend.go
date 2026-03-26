@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// WorkspaceBackendPatchRequest is the JSON body for PATCH /api/workspace/{name}/config/backend.
+// WorkspaceBackendPatchRequest is the JSON body for PATCH /api/workspaces/{ws}/config/backend.
 type WorkspaceBackendPatchRequest struct {
 	Backend string `json:"backend"`
 }
@@ -85,14 +85,24 @@ func saveLoomConfigForBackend(cfg *loomConfigForBackend) error {
 	return nil
 }
 
+// resolveWorkspaceNameByIDForBackend looks up a workspace name from the config by matching the UUID.
+func resolveWorkspaceNameByIDForBackend(cfg *loomConfigForBackend, wsID string) (string, loomWorkspaceForBackend, bool) {
+	for name, ws := range cfg.Workspaces {
+		if ws.ID == wsID {
+			return name, ws, true
+		}
+	}
+	return "", loomWorkspaceForBackend{}, false
+}
+
 // handleWorkspaceBackendPatch returns a handler that updates a workspace's backend
-// in the global config. After updating, it calls workspaceConfigFn to return
-// refreshed workspace data.
+// in the global config. The workspace is identified by UUID from WorkspaceMiddleware context.
+// After updating, it calls workspaceConfigFn to return refreshed workspace data.
 func handleWorkspaceBackendPatch(workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
-		if name == "" {
-			respondJSON(w, http.StatusBadRequest, workspaceResponse{Success: false, Error: "workspace name required"})
+		wsID := WorkspaceFromContext(r.Context())
+		if wsID == "" {
+			respondJSON(w, http.StatusBadRequest, workspaceResponse{Success: false, Error: "workspace ID is required"})
 			return
 		}
 
@@ -132,9 +142,9 @@ func handleWorkspaceBackendPatch(workspaceConfigFn func() (*WorkspaceData, error
 			return
 		}
 
-		ws, ok := cfg.Workspaces[name]
-		if !ok {
-			respondJSON(w, http.StatusNotFound, workspaceResponse{Success: false, Error: fmt.Sprintf("workspace %q not found", name)})
+		name, ws, found := resolveWorkspaceNameByIDForBackend(cfg, wsID)
+		if !found {
+			respondJSON(w, http.StatusNotFound, workspaceResponse{Success: false, Error: fmt.Sprintf("workspace with ID %q not found", wsID)})
 			return
 		}
 

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// WorkspaceCreateRequest is the JSON body for POST /api/workspace/create.
+// WorkspaceCreateRequest is the JSON body for POST /api/workspaces.
 type WorkspaceCreateRequest struct {
 	Name      string   `json:"name"`
 	Type      string   `json:"type"`       // "empty", "clone", "template"

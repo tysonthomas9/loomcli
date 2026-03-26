@@ -29,7 +29,7 @@ func TestHandleWorkspaceCreate_EmptyType_Success(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn)
 
 	body := strings.NewReader(`{"name":"my-ws","type":"empty","repos":["/home/user/repo"]}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -77,7 +77,7 @@ func TestHandleWorkspaceCreate_CloneType_Success(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn)
 
 	body := strings.NewReader(`{"name":"cloned-ws","type":"clone","clone_url":"https://github.com/user/repo.git","branch":"main"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -108,7 +108,7 @@ func TestHandleWorkspaceCreate_CloneType_GitAtURL(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, nil)
 
 	body := strings.NewReader(`{"name":"ssh-ws","type":"clone","clone_url":"git@github.com:user/repo.git"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -126,7 +126,7 @@ func TestHandleWorkspaceCreate_TemplateType_NotImplemented(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, nil)
 
 	body := strings.NewReader(`{"name":"tpl-ws","type":"template"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -210,7 +210,7 @@ func TestHandleWorkspaceCreate_NameValidation(t *testing.T) {
 				h = handler
 			}
 
-			req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", strings.NewReader(tt.body))
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
 
@@ -254,7 +254,7 @@ func TestHandleWorkspaceCreate_URLValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"name":"ws","type":"clone","clone_url":%q}`, tt.cloneURL)
-			req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", strings.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", strings.NewReader(body))
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 
@@ -311,7 +311,7 @@ func TestHandleWorkspaceCreate_MissingRequiredFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", strings.NewReader(tt.body))
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 
@@ -339,7 +339,7 @@ func TestHandleWorkspaceCreate_CreateFnError(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -363,7 +363,7 @@ func TestHandleWorkspaceCreate_NilCreateFn(t *testing.T) {
 	handler := handleWorkspaceCreate(nil, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -393,7 +393,7 @@ func TestHandleWorkspaceCreate_RequestBodyTooLarge(t *testing.T) {
 
 	// Create a JSON body larger than 1MB (maxRequestBody)
 	largeBody := `{"name":"` + strings.Repeat("a", 1<<20+1) + `"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", strings.NewReader(largeBody))
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", strings.NewReader(largeBody))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -420,7 +420,7 @@ func TestHandleWorkspaceCreate_InvalidJSON(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, nil)
 
 	body := strings.NewReader(`{invalid json}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -447,7 +447,7 @@ func TestHandleWorkspaceCreate_MissingType(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, nil)
 
 	body := strings.NewReader(`{"name":"ws"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -474,7 +474,7 @@ func TestHandleWorkspaceCreate_InvalidType(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"foobar"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -500,7 +500,7 @@ func TestHandleWorkspaceCreate_SuccessWithWorkspaceConfigFn(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, mockWorkspaceConfigFn)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -531,7 +531,7 @@ func TestHandleWorkspaceCreate_SuccessNilWorkspaceConfigFn(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -563,7 +563,7 @@ func TestHandleWorkspaceCreate_ContextTimeout(t *testing.T) {
 	handler := handleWorkspaceCreate(createFn, nil)
 
 	body := strings.NewReader(`{"name":"ws","type":"empty","repos":["/a"]}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/workspace/create", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", body)
 
 	// Cancel the parent context to trigger the timeout path immediately.
 	// The handler creates a child context with workspaceCreateTimeout from r.Context().

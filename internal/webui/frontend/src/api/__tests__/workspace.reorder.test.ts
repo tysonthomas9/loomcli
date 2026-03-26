@@ -66,14 +66,14 @@ describe("reorderWorkspaces", () => {
     reorderWorkspaces = workspaceMod.reorderWorkspaces;
   });
 
-  it("calls PUT /api/workspace/order with correct payload", async () => {
+  it("calls PUT /api/workspaces/order with correct payload", async () => {
     const wsData = createMockWorkspaceData();
     mockPut.mockResolvedValueOnce({ success: true, data: wsData });
 
     await reorderWorkspaces(["beta", "alpha"]);
 
     expect(mockPut).toHaveBeenCalledTimes(1);
-    expect(mockPut).toHaveBeenCalledWith("/api/workspace/order", {
+    expect(mockPut).toHaveBeenCalledWith("/api/workspaces/order", {
       order: ["beta", "alpha"],
     });
   });
@@ -114,7 +114,9 @@ describe("reorderWorkspaces", () => {
 
     const result = await reorderWorkspaces([]);
 
-    expect(mockPut).toHaveBeenCalledWith("/api/workspace/order", { order: [] });
+    expect(mockPut).toHaveBeenCalledWith("/api/workspaces/order", {
+      order: [],
+    });
     expect(result).toEqual(wsData);
   });
 });

@@ -295,6 +295,13 @@ export function WorkspaceTree({
   }, []);
 
   // Context menu handlers
+  // Workspace summaries for resolving name→ID
+  const wsSummaries = workspace?.workspaces;
+  const wsIdByName = useCallback(
+    (name: string) => wsSummaries?.find((w) => w.name === name)?.id ?? "",
+    [wsSummaries],
+  );
+
   const handleOverflowClick = useCallback(
     (e: React.MouseEvent, wsName: string) => {
       e.stopPropagation();
@@ -352,7 +359,7 @@ export function WorkspaceTree({
     setRenameError(null);
 
     try {
-      await renameWorkspace(editingWorkspace, trimmed);
+      await renameWorkspace(wsIdByName(editingWorkspace), trimmed);
       setEditingWorkspace(null);
       refetch();
     } catch (err) {
@@ -363,7 +370,7 @@ export function WorkspaceTree({
     } finally {
       setIsSaving(false);
     }
-  }, [editingWorkspace, draftName, refetch]);
+  }, [editingWorkspace, draftName, refetch, wsIdByName]);
 
   const handleRenameKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -393,6 +400,7 @@ export function WorkspaceTree({
   const handleConfirmDelete = useCallback(() => {
     if (!pendingDeleteName) return;
     const nameToDelete = pendingDeleteName;
+    const idToDelete = wsIdByName(pendingDeleteName);
     setConfirmDeleteOpen(false);
     setPendingDeleteName(null);
 
@@ -403,7 +411,7 @@ export function WorkspaceTree({
     deleteTimerRef.current = setTimeout(async () => {
       deletionPendingRef.current = true;
       try {
-        await deleteWorkspace(nameToDelete);
+        await deleteWorkspace(idToDelete);
         refetch();
       } catch (err) {
         const message =
@@ -430,7 +438,7 @@ export function WorkspaceTree({
         refetch();
       },
     });
-  }, [pendingDeleteName, refetch, showToast]);
+  }, [pendingDeleteName, refetch, showToast, wsIdByName]);
 
   // Cleanup delete timer on unmount
   useEffect(() => {

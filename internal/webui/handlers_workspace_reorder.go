@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-// workspaceOrderRequest is the JSON body for PUT /api/workspace/order.
+// workspaceOrderRequest is the JSON body for PUT /api/workspaces/order.
 type workspaceOrderRequest struct {
 	Order []string `json:"order"`
 }

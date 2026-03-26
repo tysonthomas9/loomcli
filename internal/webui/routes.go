@@ -59,15 +59,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	mux.HandleFunc("GET /api/config/backend", handleGetBackendConfig(pool))
 	mux.HandleFunc("PATCH /api/config/backend", handlePatchBackendConfig(pool))
 
-	// Workspace topology endpoint
-	mux.HandleFunc("GET /api/workspace", handleWorkspace(workspaceConfigFn))
-	mux.HandleFunc("PATCH /api/workspace/rename", handleWorkspaceRename(workspaceConfigFn))
-	mux.HandleFunc("DELETE /api/workspace/{name}", handleWorkspaceDelete(workspaceDeleteFn, workspaceConfigFn))
-	mux.HandleFunc("PUT /api/workspace/order", handleWorkspaceReorder(workspaceConfigFn))
-	mux.HandleFunc("PUT /api/workspace/default", handleSetDefaultWorkspace(setDefaultWsFn, workspaceConfigFn))
-	mux.HandleFunc("DELETE /api/workspace/default", handleClearDefaultWorkspace(clearDefaultWsFn, workspaceConfigFn))
-	mux.HandleFunc("PATCH /api/workspace/{name}/config/backend", handleWorkspaceBackendPatch(workspaceConfigFn))
-	mux.HandleFunc("POST /api/workspace/create", handleWorkspaceCreate(workspaceCreateFn, workspaceConfigFn))
+	// Workspace CRUD endpoints are registered in registerWorkspaceRoutes below.
 
 	// Backend health endpoint
 	if backendOps != nil {
@@ -186,7 +178,7 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 
 	// Workspace management and workspace-scoped API routes
 	if multiPool != nil {
-		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, tabMetaStore, termManager, hub, getMutationsSince, fleetRegistry, tokenCfg, fleetRegCfg, claimMetrics, gitOps, fileOps)
+		registerWorkspaceRoutes(mux, multiPool, workspaceConfigFn, wsExistsFn, tabMetaStore, termManager, hub, getMutationsSince, fleetRegistry, tokenCfg, fleetRegCfg, claimMetrics, gitOps, fileOps, workspaceDeleteFn, setDefaultWsFn, clearDefaultWsFn, workspaceCreateFn)
 	}
 
 	// Static file serving with SPA routing (must be last - catches all paths)
@@ -199,16 +191,33 @@ func setupRoutes(mux *http.ServeMux, pool daemon.Pool, multiPool *daemon.MultiPo
 	return clientErrLimiter, cspLimiter
 }
 
-// registerWorkspaceRoutes sets up workspace listing and workspace-scoped API routes.
-func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, tabMetaStore *tabmeta.Store, termManager *TerminalManager, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, gitOps GitOps, fileOps FileOps) {
+// registerWorkspaceRoutes sets up workspace listing, CRUD, and workspace-scoped API routes.
+func registerWorkspaceRoutes(mux *http.ServeMux, multiPool *daemon.MultiPool, workspaceConfigFn func() (*WorkspaceData, error), wsExistsFn func(string) bool, tabMetaStore *tabmeta.Store, termManager *TerminalManager, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent, fleetRegistry *fleet.StoreRegistry, tokenCfg *TokenConfig, fleetRegCfg *FleetRegisterConfig, claimMetrics *fleet.ClaimMetrics, gitOps GitOps, fileOps FileOps, workspaceDeleteFn func(string) error, setDefaultWsFn func(string) error, clearDefaultWsFn func() error, workspaceCreateFn WorkspaceCreateFn) { //nolint:funlen // route registration function
+	// Active workspace endpoint — returns full topology for the default workspace
+	mux.HandleFunc("GET /api/workspaces/active", handleActiveWorkspace(workspaceConfigFn))
+
 	// Workspace listing (not workspace-scoped themselves)
 	mux.HandleFunc("GET /api/workspaces", handleListWorkspaces(multiPool, workspaceConfigFn))
 	mux.HandleFunc("GET /api/workspaces/{ws}", handleGetWorkspace(multiPool, workspaceConfigFn, wsExistsFn))
+
+	// Global workspace CRUD operations (no WorkspaceMiddleware)
+	mux.HandleFunc("POST /api/workspaces", handleWorkspaceCreate(workspaceCreateFn, workspaceConfigFn))
+	mux.HandleFunc("PUT /api/workspaces/order", handleWorkspaceReorder(workspaceConfigFn))
+	mux.HandleFunc("PUT /api/workspaces/default", handleSetDefaultWorkspace(setDefaultWsFn, workspaceConfigFn))
+	mux.HandleFunc("DELETE /api/workspaces/default", handleClearDefaultWorkspace(clearDefaultWsFn, workspaceConfigFn))
+
+	// Per-workspace DELETE — registered on main mux with manual middleware wrapping
+	// because DELETE /api/workspaces/{ws} (no trailing slash) won't match the
+	// wsMux prefix handler at /api/workspaces/{ws}/.
+	mux.Handle("DELETE /api/workspaces/{ws}", WorkspaceMiddleware(wsExistsFn, handleWorkspaceDelete(workspaceDeleteFn, workspaceConfigFn)))
 
 	// Workspace-scoped API routes via a sub-mux with WorkspaceMiddleware.
 	// The middleware injects the workspace ID into the context so that
 	// multiPool.Get(ctx) routes to the correct per-workspace pool.
 	wsMux := http.NewServeMux()
+
+	// Per-workspace CRUD (through WorkspaceMiddleware via wsMux)
+	wsMux.HandleFunc("PATCH /api/workspaces/{ws}/name", handleWorkspaceRename(workspaceConfigFn))
 
 	// Issue endpoints
 	wsMux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}", handleGetIssue(multiPool))

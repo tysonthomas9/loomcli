@@ -25,7 +25,7 @@ func TestWorkspaceReorder_ValidNames(t *testing.T) {
 	handler := handleWorkspaceReorder(mockWorkspaceConfigFn)
 
 	body := strings.NewReader(`{"order":["gamma","alpha","beta"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -76,7 +76,7 @@ func TestWorkspaceReorder_FiltersUnknownNames(t *testing.T) {
 
 	// Include unknown names that should be filtered out
 	body := strings.NewReader(`{"order":["beta","nonexistent","alpha","also-unknown"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -106,7 +106,7 @@ func TestWorkspaceReorder_FiltersUnknownNames(t *testing.T) {
 func TestWorkspaceReorder_EmptyBody(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", strings.NewReader(""))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", strings.NewReader(""))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -140,7 +140,7 @@ func TestWorkspaceReorder_EmptyOrderArray(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
 	body := strings.NewReader(`{"order":[]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -169,7 +169,7 @@ func TestWorkspaceReorder_NoConfigFound(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
 	body := strings.NewReader(`{"order":["alpha"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -210,7 +210,7 @@ func TestWorkspaceReorder_ConfigSaveFails(t *testing.T) {
 	})
 
 	body := strings.NewReader(`{"order":["alpha"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -233,7 +233,7 @@ func TestWorkspaceReorder_RequestBodyTooLarge(t *testing.T) {
 
 	// Create a JSON body larger than 1MB (maxRequestBody)
 	largeBody := `{"order":["` + strings.Repeat("a", 1<<20+1) + `"]}`
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", strings.NewReader(largeBody))
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", strings.NewReader(largeBody))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -266,7 +266,7 @@ func TestWorkspaceReorder_NilWorkspaceConfigFn(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
 	body := strings.NewReader(`{"order":["beta","alpha"]}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -294,7 +294,7 @@ func TestWorkspaceReorder_InvalidJSON(t *testing.T) {
 	handler := handleWorkspaceReorder(nil)
 
 	body := strings.NewReader(`{invalid json}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/workspace/order", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/workspaces/order", body)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

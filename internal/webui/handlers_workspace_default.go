@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-// handleSetDefaultWorkspace handles PUT /api/workspace/default.
+// handleSetDefaultWorkspace handles PUT /api/workspaces/default.
 // Sets the default workspace in the config file.
 func handleSetDefaultWorkspace(setFn func(string) error, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +51,7 @@ func handleSetDefaultWorkspace(setFn func(string) error, workspaceConfigFn func(
 	}
 }
 
-// handleClearDefaultWorkspace handles DELETE /api/workspace/default.
+// handleClearDefaultWorkspace handles DELETE /api/workspaces/default.
 // Clears the default workspace, reverting to first-workspace behavior.
 func handleClearDefaultWorkspace(clearFn func() error, workspaceConfigFn func() (*WorkspaceData, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

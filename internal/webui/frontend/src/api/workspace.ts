@@ -1,6 +1,6 @@
 /**
- * API client for workspace endpoint with module-level caching.
- * Interfaces with GET /api/workspace endpoint.
+ * API client for workspace endpoints with module-level caching.
+ * Interfaces with GET /api/workspaces/active and /api/workspaces/ CRUD endpoints.
  */
 
 import { get, post, patch, put, del, ApiError } from "./client";
@@ -94,7 +94,7 @@ export async function fetchWorkspace(
   const gen = cacheGeneration;
   const path = workspaceId
     ? `/api/workspaces/${encodeURIComponent(workspaceId)}`
-    : "/api/workspace";
+    : "/api/workspaces/active";
   fetchPromise = get<ApiResult<WorkspaceData>>(path).then(
     (response) => {
       // Discard stale response if a refresh happened while we were in-flight
@@ -137,15 +137,15 @@ export async function refreshWorkspace(): Promise<WorkspaceData> {
 }
 
 /**
- * Rename a workspace. On success, invalidates the cache and returns refreshed data.
+ * Rename a workspace by ID. On success, invalidates the cache and returns refreshed data.
  */
 export async function renameWorkspace(
-  oldName: string,
+  workspaceId: string,
   newName: string,
 ): Promise<WorkspaceData> {
   const response = await patch<ApiResult<WorkspaceData>>(
-    "/api/workspace/rename",
-    { old_name: oldName, new_name: newName },
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/name`,
+    { new_name: newName },
   );
   const data = unwrap(response);
   if (data == null) {
@@ -160,13 +160,13 @@ export async function renameWorkspace(
 }
 
 /**
- * Delete a workspace by name. On success, invalidates the cache and returns refreshed data.
+ * Delete a workspace by ID. On success, invalidates the cache and returns refreshed data.
  */
 export async function deleteWorkspace(
-  name: string,
+  workspaceId: string,
 ): Promise<WorkspaceData | null> {
   const response = await del<ApiResult<WorkspaceData>>(
-    `/api/workspace/${encodeURIComponent(name)}`,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}`,
   );
   if (!response.success) {
     throw new ApiError(0, response.error);
@@ -184,9 +184,12 @@ export async function deleteWorkspace(
 export async function reorderWorkspaces(
   order: string[],
 ): Promise<WorkspaceData> {
-  const response = await put<ApiResult<WorkspaceData>>("/api/workspace/order", {
-    order,
-  });
+  const response = await put<ApiResult<WorkspaceData>>(
+    "/api/workspaces/order",
+    {
+      order,
+    },
+  );
   const data = unwrap(response);
   // Refresh cache with the returned data
   cacheGeneration++;
@@ -202,7 +205,7 @@ export async function setDefaultWorkspace(
   name: string,
 ): Promise<WorkspaceData> {
   const response = await put<ApiResult<WorkspaceData>>(
-    "/api/workspace/default",
+    "/api/workspaces/default",
     { name },
   );
   const data = unwrap(response);
@@ -219,7 +222,7 @@ export async function setDefaultWorkspace(
  */
 export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
   const response = await del<ApiResult<WorkspaceData>>(
-    "/api/workspace/default",
+    "/api/workspaces/default",
   );
   if (!response.success) {
     throw new ApiError(0, response.error);
@@ -250,10 +253,7 @@ export interface CreateWorkspaceRequest {
 export async function createWorkspace(
   req: CreateWorkspaceRequest,
 ): Promise<WorkspaceData> {
-  const response = await post<ApiResult<WorkspaceData>>(
-    "/api/workspace/create",
-    req,
-  );
+  const response = await post<ApiResult<WorkspaceData>>("/api/workspaces", req);
   const data = unwrap(response);
   cacheGeneration++;
   if (data) {

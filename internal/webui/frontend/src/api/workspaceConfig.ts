@@ -1,6 +1,6 @@
 /**
  * API client for per-workspace configuration endpoints.
- * Interfaces with PATCH /api/workspace/{name}/config/backend.
+ * Interfaces with PATCH /api/workspaces/{ws}/config/backend.
  */
 
 import { patch, ApiError, wsUrl } from "./client";
