@@ -30,12 +30,13 @@ type WorkspaceIDResolverFn func(name string) (string, error)
 // The id parameter is always the workspace UUID. Callers resolve UUID before
 // calling. The registry never switches keys.
 type WorkspaceRegistry struct {
-	mu        sync.RWMutex
-	multiPool *daemon.MultiPool
-	multiSub  *MultiWorkspaceSubscriber
-	poolSize  int
-	logger    *slog.Logger
-	closed    bool
+	mu          sync.RWMutex
+	multiPool   *daemon.MultiPool
+	multiSub    *MultiWorkspaceSubscriber
+	poolSize    int
+	logger      *slog.Logger
+	closed      bool
+	poolFactory func(socketPath string, poolSize int) (*daemon.ConnectionPool, error)
 }
 
 // NewWorkspaceRegistry creates a new WorkspaceRegistry.
@@ -49,10 +50,11 @@ func NewWorkspaceRegistry(
 		logger = slog.Default()
 	}
 	return &WorkspaceRegistry{
-		multiPool: multiPool,
-		multiSub:  multiSub,
-		poolSize:  poolSize,
-		logger:    logger,
+		multiPool:   multiPool,
+		multiSub:    multiSub,
+		poolSize:    poolSize,
+		logger:      logger,
+		poolFactory: daemon.NewConnectionPool,
 	}
 }
 
@@ -80,34 +82,33 @@ func (r *WorkspaceRegistry) Register(id, path string) error {
 	}
 
 	socketPath := rpc.ShortSocketPath(path)
-	rawPool, err := daemon.NewConnectionPool(socketPath, r.poolSize)
+	rawPool, err := r.poolFactory(socketPath, r.poolSize)
 	if err != nil {
 		r.logger.Warn("failed to create connection pool for workspace",
 			"workspace", id, "socket", socketPath, "err", err)
-		// Non-fatal: continue to attempt subscriber registration
-		return nil
+	} else {
+		breaker := circuitbreaker.NewBreaker("ws-"+shortBreakerName(id), circuitbreaker.Config{
+			FailureThreshold:  5,
+			OpenTimeout:       30 * time.Second,
+			HalfOpenMaxProbes: 1,
+			ShouldTrip:        daemon.DaemonShouldTrip,
+			OnStateChange: func(from, to circuitbreaker.State) {
+				r.logger.Info("circuit breaker state change",
+					"component", "circuit_breaker", "workspace", id, "from", from, "to", to)
+			},
+		})
+		pool := daemon.NewProtectedPool(rawPool, breaker)
+
+		if err := r.multiPool.Register(id, pool); err != nil {
+			r.logger.Warn("failed to register pool for workspace",
+				"workspace", id, "err", err)
+		} else {
+			r.logger.Info("registered connection pool for workspace",
+				"workspace", id, "socket", socketPath)
+		}
 	}
 
-	breaker := circuitbreaker.NewBreaker("ws-"+shortBreakerName(id), circuitbreaker.Config{
-		FailureThreshold:  5,
-		OpenTimeout:       30 * time.Second,
-		HalfOpenMaxProbes: 1,
-		ShouldTrip:        daemon.DaemonShouldTrip,
-		OnStateChange: func(from, to circuitbreaker.State) {
-			r.logger.Info("circuit breaker state change",
-				"component", "circuit_breaker", "workspace", id, "from", from, "to", to)
-		},
-	})
-	pool := daemon.NewProtectedPool(rawPool, breaker)
-
-	if err := r.multiPool.Register(id, pool); err != nil {
-		r.logger.Warn("failed to register pool for workspace",
-			"workspace", id, "err", err)
-		return nil
-	}
-	r.logger.Info("registered connection pool for workspace",
-		"workspace", id, "socket", socketPath)
-
+	// Always attempt subscriber registration, even if pool creation failed.
 	if err := r.multiSub.AddWorkspace(id); err != nil {
 		r.logger.Warn("failed to start subscriber for workspace",
 			"workspace", id, "err", err)

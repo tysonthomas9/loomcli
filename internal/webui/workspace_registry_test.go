@@ -301,6 +301,52 @@ func TestRegistry_ConcurrentOperations(t *testing.T) {
 	}
 }
 
+func TestRegistry_Register_PoolFailure_StillAttemptsSubscriber(t *testing.T) {
+	registry, multiPool, multiSub := newTestRegistry(t)
+
+	wsID := "pool-failure-test-uuid"
+	wsPath := t.TempDir()
+
+	// Override poolFactory to simulate daemon-down scenario.
+	registry.poolFactory = func(socketPath string, poolSize int) (*daemon.ConnectionPool, error) {
+		return nil, fmt.Errorf("simulated pool creation failure")
+	}
+
+	// Register should return nil (non-fatal) even when pool creation fails.
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	// Pool was never created, so MultiPool should be empty.
+	poolIDs := multiPool.WorkspaceIDs()
+	if len(poolIDs) != 0 {
+		t.Errorf("expected 0 workspace IDs in MultiPool after pool failure, got %d: %v", len(poolIDs), poolIDs)
+	}
+
+	// Subscriber was attempted but failed (no pool registered).
+	// The key assertion: the code reached the subscriber block (no early return).
+	subIDs := multiSub.WorkspaceIDs()
+	if len(subIDs) != 0 {
+		t.Errorf("expected 0 subscriber IDs (subscriber fails without pool), got %d: %v", len(subIDs), subIDs)
+	}
+
+	// Registry is still usable after pool failure — restore factory and register again.
+	registry.poolFactory = daemon.NewConnectionPool
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("second Register returned error: %v", err)
+	}
+
+	poolIDs = multiPool.WorkspaceIDs()
+	if len(poolIDs) != 1 || poolIDs[0] != wsID {
+		t.Errorf("expected pool registered after factory restore, got %v", poolIDs)
+	}
+
+	subIDs = multiSub.WorkspaceIDs()
+	if len(subIDs) != 1 || subIDs[0] != wsID {
+		t.Errorf("expected subscriber registered after factory restore, got %v", subIDs)
+	}
+}
+
 func TestRegistry_WorkspaceIDs_ReturnsRegisteredUUIDs(t *testing.T) {
 	registry, _, _ := newTestRegistry(t)
 
