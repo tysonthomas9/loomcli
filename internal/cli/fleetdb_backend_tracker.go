@@ -33,7 +33,7 @@ func (b *fleetDBBackend) Ready(_ context.Context, opts ReadyOpts) ([]BdIssue, er
 }
 
 func (b *fleetDBBackend) List(_ context.Context, opts ListOpts) ([]BdIssue, error) {
-	rpcArgs := &rpc.ListArgs{Status: opts.Status, Assignee: opts.Assignee, IssueType: opts.Type, Limit: opts.Limit}
+	rpcArgs := &rpc.ListArgs{Status: opts.Status, Assignee: opts.Assignee, IssueType: opts.Type, ParentID: opts.ParentID, Limit: opts.Limit}
 	resp, err := b.client.List(rpcArgs)
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
