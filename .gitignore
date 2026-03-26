@@ -27,5 +27,9 @@ loom.yaml
 .make-dev.log
 .make-dev.pid
 
+# Auth service
+services/auth/node_modules/
+services/auth/dist/
+
 # Local worktrees
 worktrees/
