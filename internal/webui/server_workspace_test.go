@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
@@ -8,6 +9,166 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
+
+func TestWrapWorkspaceCreateFn_NilInner(t *testing.T) {
+	registry, _, _ := newTestRegistry(t)
+
+	wrapped := wrapWorkspaceCreateFn(nil, registry, nil, nil)
+	if wrapped != nil {
+		t.Fatal("expected nil wrapper when innerCreate is nil")
+	}
+}
+
+func TestWrapWorkspaceCreateFn_ResolveIDNil_AbortsRegistration(t *testing.T) {
+	registry, multiPool, _ := newTestRegistry(t)
+
+	var innerCalled bool
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
+		innerCalled = true
+		return nil
+	}
+
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, nil, nil)
+	if wrapped == nil {
+		t.Fatal("expected non-nil wrapper")
+	}
+
+	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if !innerCalled {
+		t.Error("expected innerCreate to be called")
+	}
+
+	// No registration should have happened.
+	if ids := multiPool.WorkspaceIDs(); len(ids) != 0 {
+		t.Errorf("expected 0 workspace IDs in MultiPool, got %d: %v", len(ids), ids)
+	}
+}
+
+func TestWrapWorkspaceCreateFn_ResolveIDFails_AbortsRegistration(t *testing.T) {
+	registry, multiPool, _ := newTestRegistry(t)
+
+	var innerCalled bool
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
+		innerCalled = true
+		return nil
+	}
+
+	resolveID := func(name string) (string, error) {
+		return "", fmt.Errorf("config not readable")
+	}
+
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, resolveID, nil)
+	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if !innerCalled {
+		t.Error("expected innerCreate to be called")
+	}
+
+	// No registration should have happened.
+	if ids := multiPool.WorkspaceIDs(); len(ids) != 0 {
+		t.Errorf("expected 0 workspace IDs in MultiPool, got %d: %v", len(ids), ids)
+	}
+}
+
+func TestWrapWorkspaceCreateFn_ResolveIDEmpty_AbortsRegistration(t *testing.T) {
+	registry, multiPool, _ := newTestRegistry(t)
+
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
+		return nil
+	}
+
+	resolveID := func(name string) (string, error) {
+		return "", nil // empty string, no error
+	}
+
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, resolveID, nil)
+	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	// No registration should have happened.
+	if ids := multiPool.WorkspaceIDs(); len(ids) != 0 {
+		t.Errorf("expected 0 workspace IDs in MultiPool, got %d: %v", len(ids), ids)
+	}
+}
+
+func TestWrapWorkspaceCreateFn_ResolveIDSucceeds_RegistersByUUID(t *testing.T) {
+	registry, multiPool, multiSub := newTestRegistry(t)
+
+	wsUUID := "eeeeeeee-1111-2222-3333-444444444444"
+	wsName := "new-workspace"
+	wsPath := t.TempDir()
+
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
+		return nil
+	}
+
+	resolveID := func(name string) (string, error) {
+		if name == wsName {
+			return wsUUID, nil
+		}
+		return "", fmt.Errorf("unknown workspace %q", name)
+	}
+
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, resolveID, nil)
+	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: wsName, Path: wsPath})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	// Verify registered under UUID.
+	poolIDs := multiPool.WorkspaceIDs()
+	if len(poolIDs) != 1 {
+		t.Fatalf("expected 1 workspace ID in MultiPool, got %d: %v", len(poolIDs), poolIDs)
+	}
+	if poolIDs[0] != wsUUID {
+		t.Errorf("expected pool keyed by UUID %q, got %q", wsUUID, poolIDs[0])
+	}
+
+	// Verify NOT registered under name.
+	if multiPool.PoolForWorkspace(wsName) != nil {
+		t.Error("workspace should NOT be registered under name key")
+	}
+
+	// Verify subscriber registered.
+	subIDs := multiSub.WorkspaceIDs()
+	if len(subIDs) != 1 {
+		t.Fatalf("expected 1 subscriber, got %d: %v", len(subIDs), subIDs)
+	}
+	if subIDs[0] != wsUUID {
+		t.Errorf("expected subscriber keyed by UUID %q, got %q", wsUUID, subIDs[0])
+	}
+}
+
+func TestWrapWorkspaceCreateFn_InnerCreateFails_NoRegistration(t *testing.T) {
+	registry, multiPool, _ := newTestRegistry(t)
+
+	createErr := fmt.Errorf("disk full")
+	innerCreate := func(ctx context.Context, req WorkspaceCreateRequest) error {
+		return createErr
+	}
+
+	resolveID := func(name string) (string, error) {
+		t.Error("resolveID should not be called when innerCreate fails")
+		return "some-uuid", nil
+	}
+
+	wrapped := wrapWorkspaceCreateFn(innerCreate, registry, resolveID, nil)
+	err := wrapped(context.Background(), WorkspaceCreateRequest{Name: "my-ws"})
+	if err != createErr {
+		t.Fatalf("expected createErr, got %v", err)
+	}
+
+	if ids := multiPool.WorkspaceIDs(); len(ids) != 0 {
+		t.Errorf("expected 0 workspace IDs after inner failure, got %d: %v", len(ids), ids)
+	}
+}
 
 func TestWrapWorkspaceDeleteFn_NilInner(t *testing.T) {
 	registry, _, _ := newTestRegistry(t)

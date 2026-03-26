@@ -105,14 +105,23 @@ func wrapWorkspaceCreateFn(
 		}
 
 		// Resolve UUID — config was just saved by innerCreate, so resolution should succeed.
-		wsID := req.Name // fallback to name if resolver unavailable
-		if resolveID != nil {
-			if id, err := resolveID(req.Name); err != nil {
-				slog.Warn("failed to resolve workspace UUID after creation",
-					"workspace", req.Name, "err", err)
-			} else {
-				wsID = id
-			}
+		// If resolution fails, abort registration rather than registering under a name key
+		// in a UUID-keyed registry. Startup reconciliation will register it on next restart.
+		if resolveID == nil {
+			slog.Warn("no workspace ID resolver available, skipping runtime registration",
+				"workspace", req.Name)
+			return nil
+		}
+		wsID, err := resolveID(req.Name)
+		if err != nil {
+			slog.Error("failed to resolve workspace UUID after creation — skipping runtime registration",
+				"workspace", req.Name, "err", err)
+			return nil
+		}
+		if wsID == "" {
+			slog.Error("resolved workspace ID is empty — skipping runtime registration",
+				"workspace", req.Name)
+			return nil
 		}
 
 		// Determine the workspace directory (mirrors GetWorkspaceDir logic in cli/config.go)
