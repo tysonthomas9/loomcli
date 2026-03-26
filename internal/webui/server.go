@@ -171,14 +171,14 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 	// daemons to SSE clients. Each workspace gets its own DaemonSubscriber
 	// goroutine that tags mutations with the workspace ID.
 	multiSub := NewMultiWorkspaceSubscriber(hub, multiPool, config.Logger)
-	var getMutationsSince func(since int64) []rpc.MutationEvent
+	var getMutationsSince func(wsID string, since int64) []rpc.MutationEvent
 	if pool != nil {
 		if err := multiSub.AddWorkspace(initialWorkspaceID); err != nil {
 			slog.Warn("failed to add initial workspace subscriber", "workspace", initialWorkspaceID, "err", err)
 		} else {
 			slog.Info("workspace subscriber started", "workspace", initialWorkspaceID)
 		}
-		getMutationsSince = multiSub.GetMutationsSince
+		getMutationsSince = multiSub.GetMutationsSinceForWorkspace
 	}
 
 	reconcileConfigWorkspaces(config.WorkspaceListFn, initialWorkspaceID, pool != nil, multiPool, multiSub, config.PoolSize)

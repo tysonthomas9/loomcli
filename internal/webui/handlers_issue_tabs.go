@@ -135,13 +135,20 @@ func handleSaveIssueTabs(store *issuetabs.Store, hub *SSEHub) http.HandlerFunc {
 			return
 		}
 
-		// Broadcast SSE event for real-time sync
+		// Broadcast SSE event for real-time sync — issue tabs are not yet workspace-scoped
+		// (T22 will move them), so derive workspace from query param if available.
 		if hub != nil {
-			hub.Broadcast(&MutationPayload{
-				Type:      "issue_tabs",
-				IssueID:   issueID,
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			})
+			wsID := r.URL.Query().Get("workspace_id")
+			if wsID != "" {
+				hub.Broadcast(&MutationPayload{
+					Type:        "issue_tabs",
+					IssueID:     issueID,
+					Timestamp:   time.Now().UTC().Format(time.RFC3339),
+					WorkspaceID: wsID,
+				})
+			} else {
+				log.Printf("issue_tabs broadcast missing workspace_id for issue %s, mutation will be dropped", issueID)
+			}
 		}
 
 		respondJSON(w, http.StatusOK, issueTabResponse{

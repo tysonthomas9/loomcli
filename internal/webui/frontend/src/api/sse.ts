@@ -309,7 +309,11 @@ export class BeadsSSEClient {
  * @param since Optional timestamp (ms) for catch-up events
  */
 export function getSSEUrl(since?: number, sourceRepos?: string[]): string {
-  const base = `${window.location.origin}/api/events`;
+  const workspace = getActiveWorkspace();
+  // SSE endpoint is workspace-scoped; without a workspace the server will reject
+  const base = workspace
+    ? `${window.location.origin}/api/workspaces/${encodeURIComponent(workspace)}/events`
+    : `${window.location.origin}/api/events`;
   const params = new URLSearchParams();
   if (since !== undefined) {
     params.set("since", String(since));
@@ -320,11 +324,6 @@ export function getSSEUrl(since?: number, sourceRepos?: string[]): string {
   const token = getAuthToken();
   if (token) {
     params.set("token", token);
-  }
-  // EventSource doesn't support custom headers, so pass workspace as query param
-  const workspace = getActiveWorkspace();
-  if (workspace) {
-    params.set("workspace", workspace);
   }
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;

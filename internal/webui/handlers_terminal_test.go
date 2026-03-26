@@ -1755,10 +1755,12 @@ func TestHandleTerminalWS_SSEBroadcastOnIssueSession(t *testing.T) {
 	}
 
 	// Register an SSE client on the hub to capture broadcast events.
+	// WorkspaceID must match the workspace in the tab metadata ("default").
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "default",
 	}
 	hub.RegisterClient(client)
 	defer hub.UnregisterClient(client)

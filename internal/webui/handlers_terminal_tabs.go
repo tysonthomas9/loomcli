@@ -198,16 +198,18 @@ func handlePatchTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc 
 		// Broadcast SSE event for real-time sync
 		if hub != nil {
 			hub.Broadcast(&MutationPayload{
-				Type:      "terminal_metadata",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Type:        "terminal_metadata",
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				WorkspaceID: workspace,
 			})
 		}
 
 		// Broadcast additional terminal_session_change event when issue linkage changes
 		if issueIDChanged && hub != nil {
 			hub.Broadcast(&MutationPayload{
-				Type:      "terminal_session_change",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Type:        "terminal_session_change",
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				WorkspaceID: workspace,
 			})
 		}
 
@@ -290,8 +292,9 @@ func handlePutTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc {
 		// Broadcast SSE event for real-time sync
 		if hub != nil {
 			hub.Broadcast(&MutationPayload{
-				Type:      "terminal_metadata",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Type:        "terminal_metadata",
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				WorkspaceID: workspace,
 			})
 		}
 
@@ -336,8 +339,9 @@ func handleDeleteTerminalTab(store *tabmeta.Store, hub *SSEHub) http.HandlerFunc
 		// Broadcast SSE event for real-time sync
 		if hub != nil {
 			hub.Broadcast(&MutationPayload{
-				Type:      "terminal_metadata",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Type:        "terminal_metadata",
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				WorkspaceID: workspace,
 			})
 		}
 

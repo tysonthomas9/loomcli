@@ -1403,9 +1403,9 @@ func TestHandleAPIHealth_SuccessWithMockServer(t *testing.T) {
 
 // --- SSE route conditional registration tests ---
 
-// TestSetupRoutes_SSEEndpointNotRegisteredWhenHubNil verifies that GET /api/events
-// falls through to the frontend handler when hub is nil.
-func TestSetupRoutes_SSEEndpointNotRegisteredWhenHubNil(t *testing.T) {
+// TestSetupRoutes_LegacySSEEndpointReturns404 verifies that GET /api/events
+// (legacy endpoint) returns 404 now that SSE is workspace-scoped.
+func TestSetupRoutes_LegacySSEEndpointReturns404(t *testing.T) {
 	mux := http.NewServeMux()
 	setupRoutes(mux, nil, nil, nil, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
@@ -1413,7 +1413,7 @@ func TestSetupRoutes_SSEEndpointNotRegisteredWhenHubNil(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	// With nil hub, the SSE route is not registered; SPA catch-all rejects /api/* with 404 JSON
+	// Legacy SSE endpoint removed; SPA catch-all rejects /api/* with 404 JSON
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("expected /api/events to return 404, got %d", rr.Code)
 	}
@@ -1424,26 +1424,32 @@ func TestSetupRoutes_SSEEndpointNotRegisteredWhenHubNil(t *testing.T) {
 	}
 }
 
-// TestSetupRoutes_SSEEndpointRegisteredWhenHubNonNil verifies that GET /api/events
-// is handled by the SSE handler when hub is non-nil.
-func TestSetupRoutes_SSEEndpointRegisteredWhenHubNonNil(t *testing.T) {
+// TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope verifies that
+// GET /api/workspaces/{ws}/events is handled by the SSE handler when
+// hub and multiPool are non-nil.
+func TestSetupRoutes_SSEEndpointRegisteredOnWorkspaceScope(t *testing.T) {
 	hub := NewSSEHub()
 	go hub.Run()
 	defer hub.Stop()
 
+	multiPool := daemon.NewMultiPool(WorkspaceFromContext, 1)
+	// Register a fake workspace so WorkspaceMiddleware passes
+	_ = multiPool.Register("test-ws", &stubPool{})
+
 	mux := http.NewServeMux()
-	setupRoutes(mux, nil, nil, hub, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
+	setupRoutes(mux, nil, multiPool, hub, nil, nil, nil, nil, nil, "", false, nil, nil, nil, nil, false, false, "", "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, wsExistsFn)
 
 	// Use a context with short timeout because the SSE handler streams forever
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/test-ws/events", nil).WithContext(ctx)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
-	// With non-nil hub, the route IS registered.
-	// The SSE handler sets Content-Type to text/event-stream, not HTML.
+	// With non-nil hub and multiPool, the workspace-scoped SSE route IS registered.
+	// The SSE handler sets Content-Type to text/event-stream.
 	ct := rr.Header().Get("Content-Type")
 	if ct == "text/html; charset=utf-8" {
 		t.Error("expected SSE route to be registered, but request fell through to frontend handler")

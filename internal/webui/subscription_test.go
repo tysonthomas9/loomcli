@@ -301,18 +301,20 @@ func TestDaemonSubscriber_BroadcastsToHub(t *testing.T) {
 
 	// Register a client to receive broadcasts
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
 	}
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
 	// Manually broadcast through the hub (simulating what processMutationResponse does)
 	mutation := &MutationPayload{
-		Type:      "create",
-		IssueID:   "bd-test",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Type:        "create",
+		IssueID:     "bd-test",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: "test-ws",
 	}
 	hub.Broadcast(mutation)
 
@@ -572,14 +574,16 @@ func TestDaemonSubscriber_PollDBChanges_CountChanged(t *testing.T) {
 
 	// Register a client to capture broadcasts
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
 	}
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond) // Wait for registration
 
 	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
 	// Simulate that initialization already happened with count=3
 	subscriber.countInitialized = true
 	subscriber.lastKnownCount = 3
@@ -637,14 +641,16 @@ func TestDaemonSubscriber_PollDBChanges_UpdateDetected(t *testing.T) {
 	defer hub.Stop()
 
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
 	}
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
 	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
 	subscriber.countInitialized = true
 	subscriber.lastKnownCount = 10 // Same as server will return
 	subscriber.lastPollTime = time.Now().Add(-5 * time.Second)
@@ -1019,14 +1025,16 @@ func TestDaemonSubscriber_WaitForMutations_Success(t *testing.T) {
 	defer hub.Stop()
 
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
 	}
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
 	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
 	subscriber.waitForMutations()
 
 	// Should have broadcast the mutation
@@ -1079,14 +1087,16 @@ func TestDaemonSubscriber_PollMutations_Success(t *testing.T) {
 	defer hub.Stop()
 
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
 	}
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
 	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
 	subscriber.useFallback = true // Enable fallback mode
 
 	done := make(chan struct{})
@@ -1225,14 +1235,16 @@ func TestDaemonSubscriber_ExternalChangeLoop_IntegrationDetectsChange(t *testing
 
 	// Register an SSE client to capture broadcasts
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
 	}
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
 	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
 	subscriber.Start()
 
 	// Wait for a refresh broadcast to arrive (3x externalPollInterval to account for
@@ -1339,14 +1351,16 @@ func TestDaemonSubscriber_SubscriptionLoop_FallbackTransition(t *testing.T) {
 	defer hub.Stop()
 
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 64),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 64),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
 	}
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
 	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
 	subscriber.Start()
 
 	// Wait for a mutation broadcast to arrive (proving fallback transition worked)
@@ -1430,14 +1444,16 @@ func TestDaemonSubscriber_ConcurrentLoops_NoRace(t *testing.T) {
 
 	// Register a client to consume broadcasts (prevent channel backpressure)
 	client := &SSEClient{
-		id:   1,
-		send: make(chan *MutationPayload, 512),
-		done: make(chan struct{}),
+		id:          1,
+		send:        make(chan *MutationPayload, 512),
+		done:        make(chan struct{}),
+		workspaceID: "test-ws",
 	}
 	hub.RegisterClient(client)
 	time.Sleep(50 * time.Millisecond)
 
 	subscriber := NewDaemonSubscriber(pool, hub)
+	subscriber.workspaceID = "test-ws"
 	subscriber.Start()
 
 	// Let both loops run concurrently for 500ms (enough for -race to catch issues)

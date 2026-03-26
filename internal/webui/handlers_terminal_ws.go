@@ -296,9 +296,10 @@ func broadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *SSEHub, sessio
 	for _, meta := range allMeta {
 		if meta.SessionName == session && meta.IssueID != "" {
 			hub.Broadcast(&MutationPayload{
-				Type:      "terminal_session_change",
-				IssueID:   meta.IssueID,
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Type:        "terminal_session_change",
+				IssueID:     meta.IssueID,
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				WorkspaceID: meta.Workspace,
 			})
 			return
 		}

@@ -14,6 +14,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
+// testWorkspaceID is the default workspace ID used in SSE live tests.
+const testWorkspaceID = "test-ws"
+
 // sseEvent represents a parsed SSE event from the wire.
 type sseEvent struct {
 	ID    string
@@ -28,12 +31,12 @@ type sseTestClient struct {
 	scanner *bufio.Scanner
 }
 
-// connectSSE opens a GET request to the given SSE endpoint URL and returns
+// connectSSE opens a GET request to the workspace-scoped SSE endpoint and returns
 // a client that can read parsed SSE events.
 func connectSSE(t *testing.T, serverURL string, headers map[string]string) *sseTestClient {
 	t.Helper()
 
-	req, err := http.NewRequest(http.MethodGet, serverURL+"/api/events", nil)
+	req, err := http.NewRequest(http.MethodGet, serverURL+"/api/workspaces/"+testWorkspaceID+"/events", nil)
 	if err != nil {
 		t.Fatalf("failed to create request: %v", err)
 	}
@@ -57,11 +60,39 @@ func connectSSE(t *testing.T, serverURL string, headers map[string]string) *sseT
 	}
 }
 
+// connectSSEForWorkspace connects to the SSE endpoint for a specific workspace.
+func connectSSEForWorkspace(t *testing.T, serverURL, wsID string, headers map[string]string) *sseTestClient {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, serverURL+"/api/workspaces/"+wsID+"/events", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	client := &http.Client{Timeout: 0}
+	resp, err := client.Do(req) //nolint:gosec // G704 — test hits local httptest server
+	if err != nil {
+		t.Fatalf("failed to connect to SSE endpoint: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("unexpected status: %d", resp.StatusCode)
+	}
+
+	return &sseTestClient{
+		resp:    resp,
+		scanner: bufio.NewScanner(resp.Body),
+	}
+}
+
 // connectSSEWithQuery connects with a query string (e.g. "?since=12345").
 func connectSSEWithQuery(t *testing.T, serverURL, query string, headers map[string]string) *sseTestClient {
 	t.Helper()
 
-	url := serverURL + "/api/events"
+	url := serverURL + "/api/workspaces/" + testWorkspaceID + "/events"
 	if query != "" {
 		url += "?" + query
 	}
@@ -158,12 +189,15 @@ func parseMutationPayload(data string) (*MutationPayload, error) {
 // newLiveSSEServer creates an httptest.NewServer wired to handleSSE with the
 // given hub and getMutationsSince callback. The caller must call server.Close()
 // and hub.Stop() when done (use t.Cleanup).
-func newLiveSSEServer(t *testing.T, hub *SSEHub, getMutationsSince func(since int64) []rpc.MutationEvent) *httptest.Server {
+func newLiveSSEServer(t *testing.T, hub *SSEHub, getMutationsSince func(wsID string, since int64) []rpc.MutationEvent) *httptest.Server {
 	t.Helper()
 
 	handler := handleSSE(hub, getMutationsSince)
+	wsMux := http.NewServeMux()
+	wsMux.HandleFunc("GET /api/workspaces/{ws}/events", handler)
+	// Wrap with a simple workspace existence check that always passes in tests
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/events", handler)
+	mux.Handle("/api/workspaces/{ws}/", WorkspaceMiddleware(func(string) bool { return true }, wsMux))
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(func() {
@@ -245,10 +279,11 @@ func TestSSELive_MutationDelivery(t *testing.T) {
 
 	// Broadcast a mutation
 	hub.Broadcast(&MutationPayload{
-		Type:      "create",
-		IssueID:   "bd-live-1",
-		Title:     "Live Test Issue",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Type:        "create",
+		IssueID:     "bd-live-1",
+		Title:       "Live Test Issue",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: testWorkspaceID,
 	})
 
 	// Read mutation event
@@ -314,10 +349,11 @@ func TestSSELive_MultipleClients(t *testing.T) {
 
 	// Broadcast
 	hub.Broadcast(&MutationPayload{
-		Type:      "create",
-		IssueID:   "bd-multi-1",
-		Title:     "Multi-client Test",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Type:        "create",
+		IssueID:     "bd-multi-1",
+		Title:       "Multi-client Test",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		WorkspaceID: testWorkspaceID,
 	})
 
 	// Verify all clients receive it
@@ -365,10 +401,10 @@ func TestSSELive_MultipleMutationTypes(t *testing.T) {
 	}
 
 	mutations := []MutationPayload{
-		{Type: "create", IssueID: "bd-types-1", Title: "Created", Timestamp: time.Now().UTC().Format(time.RFC3339)},
-		{Type: "update", IssueID: "bd-types-1", Title: "Updated", Timestamp: time.Now().UTC().Format(time.RFC3339)},
-		{Type: "status", IssueID: "bd-types-1", OldStatus: "open", NewStatus: "in_progress", Timestamp: time.Now().UTC().Format(time.RFC3339)},
-		{Type: "delete", IssueID: "bd-types-1", Timestamp: time.Now().UTC().Format(time.RFC3339)},
+		{Type: "create", IssueID: "bd-types-1", Title: "Created", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
+		{Type: "update", IssueID: "bd-types-1", Title: "Updated", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
+		{Type: "status", IssueID: "bd-types-1", OldStatus: "open", NewStatus: "in_progress", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
+		{Type: "delete", IssueID: "bd-types-1", Timestamp: time.Now().UTC().Format(time.RFC3339), WorkspaceID: testWorkspaceID},
 	}
 
 	for i := range mutations {
@@ -420,7 +456,7 @@ func TestSSELive_CatchUpOnReconnect(t *testing.T) {
 		},
 	}
 
-	getMutationsSince := func(since int64) []rpc.MutationEvent {
+	getMutationsSince := func(wsID string, since int64) []rpc.MutationEvent {
 		return catchUpEvents
 	}
 
@@ -474,7 +510,7 @@ func TestSSELive_LastEventIDHeader(t *testing.T) {
 	t.Cleanup(hub.Stop)
 
 	var capturedSince int64
-	getMutationsSince := func(since int64) []rpc.MutationEvent {
+	getMutationsSince := func(wsID string, since int64) []rpc.MutationEvent {
 		capturedSince = since
 		return nil
 	}
@@ -524,9 +560,10 @@ func TestSSELive_MonotonicEventIDs(t *testing.T) {
 	const numMutations = 5
 	for i := 0; i < numMutations; i++ {
 		hub.Broadcast(&MutationPayload{
-			Type:      "create",
-			IssueID:   fmt.Sprintf("bd-mono-%d", i),
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Type:        "create",
+			IssueID:     fmt.Sprintf("bd-mono-%d", i),
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+			WorkspaceID: testWorkspaceID,
 		})
 	}
 
@@ -598,7 +635,7 @@ func TestSSELive_RetryFieldInStream(t *testing.T) {
 
 	// Open a raw HTTP connection instead of using connectSSE, so we can
 	// read the raw stream without the readEvent helper filtering retry:.
-	resp, err := http.Get(server.URL + "/api/events") //nolint:gosec // G107 — test hits local httptest server
+	resp, err := http.Get(server.URL + "/api/workspaces/" + testWorkspaceID + "/events") //nolint:gosec // G107 — test hits local httptest server
 	if err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
