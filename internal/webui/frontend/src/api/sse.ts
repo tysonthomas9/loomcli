@@ -3,7 +3,7 @@
  * Provides a simpler push model compared to WebSocket with built-in browser reconnection.
  */
 
-import { getAuthToken, getAuthState, wsUrl, initAuth } from "./client";
+import { getAuthToken, wsUrl } from "./client";
 
 // Connection states for real-time event streaming
 export type ConnectionState =
@@ -87,7 +87,6 @@ export class BeadsSSEClient {
 
   /**
    * Connect to the SSE endpoint.
-   * If auth state is 'failed', attempts token re-acquisition before connecting.
    * @param since Optional timestamp (ms) to receive events since that time
    * @param sourceRepos Optional repo filter for server-side event filtering
    */
@@ -104,13 +103,6 @@ export class BeadsSSEClient {
 
     this.manualDisconnect = false;
     this.setState("connecting");
-
-    // If auth previously failed, try re-acquiring token before connecting
-    if (getAuthToken() === null && getAuthState() === "failed") {
-      await initAuth({ maxRetries: 0 }).catch(() => {
-        // Best-effort; proceed even if re-auth fails (auth may be disabled)
-      });
-    }
 
     // Use provided since value or fall back to last received event ID
     const sinceParam = since ?? this.lastEventId;
