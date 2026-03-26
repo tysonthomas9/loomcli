@@ -24,7 +24,7 @@ func setupIssueTabsTest(t *testing.T) (*issuetabs.Store, *SSEHub) {
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 
-	return issuetabs.NewStore(rdb, nil), hub
+	return issuetabs.NewStore(rdb, "test-ws-uuid", nil), hub
 }
 
 // ── GET handler tests ─────────────────────────────────────────────────────────
@@ -381,7 +381,7 @@ func TestHandleGetIssueTabs_PoolError(t *testing.T) {
 	// Create a miniredis, get the store, then close the server to simulate pool error
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	store := issuetabs.NewStore(rdb, nil)
+	store := issuetabs.NewStore(rdb, "test-ws-uuid", nil)
 
 	// Close Redis to simulate connection failure
 	mr.Close()
@@ -454,7 +454,7 @@ func TestHandleDeleteIssueTabs_PoolTimeout(t *testing.T) {
 	// Create a miniredis, get the store, then close the server to simulate timeout/pool error
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	store := issuetabs.NewStore(rdb, nil)
+	store := issuetabs.NewStore(rdb, "test-ws-uuid", nil)
 
 	// Close Redis to simulate connection failure (pool timeout)
 	mr.Close()

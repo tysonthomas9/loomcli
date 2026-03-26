@@ -14,7 +14,7 @@ func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return NewStore(rdb, nil), mr
+	return NewStore(rdb, "test-ws-uuid", nil), mr
 }
 
 func TestAddAndList_RoundTrip(t *testing.T) {
@@ -286,4 +286,197 @@ func TestValidateIssueID(t *testing.T) {
 			t.Errorf("ValidateIssueID(%q) error = %v, wantErr = %v", tt.id, err, tt.wantErr)
 		}
 	}
+}
+
+func TestIsolation_DifferentWorkspaces(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	storeA := NewStore(rdb, "ws-A", nil)
+	storeB := NewStore(rdb, "ws-B", nil)
+	ctx := context.Background()
+
+	recA := SessionRecord{
+		ID:          "sess-a:100",
+		SessionName: "issue-proj-1",
+		IssueID:     "proj.1",
+		Backend:     "claude",
+		Status:      "active",
+		Launcher:    "user",
+		StartedAt:   time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
+	}
+	recB := SessionRecord{
+		ID:          "sess-b:200",
+		SessionName: "issue-proj-1",
+		IssueID:     "proj.1",
+		Backend:     "shell",
+		Status:      "completed",
+		Launcher:    "start-work",
+		StartedAt:   time.Date(2025, 2, 20, 14, 0, 0, 0, time.UTC),
+	}
+
+	if err := storeA.Add(ctx, recA); err != nil {
+		t.Fatalf("Add ws-A: %v", err)
+	}
+	if err := storeB.Add(ctx, recB); err != nil {
+		t.Fatalf("Add ws-B: %v", err)
+	}
+
+	gotA, err := storeA.List(ctx, "proj.1")
+	if err != nil {
+		t.Fatalf("List ws-A: %v", err)
+	}
+	gotB, err := storeB.List(ctx, "proj.1")
+	if err != nil {
+		t.Fatalf("List ws-B: %v", err)
+	}
+
+	if len(gotA) != 1 {
+		t.Fatalf("ws-A: len(records) = %d, want 1", len(gotA))
+	}
+	if gotA[0].ID != "sess-a:100" {
+		t.Errorf("ws-A: records[0].ID = %q, want %q", gotA[0].ID, "sess-a:100")
+	}
+	if gotA[0].Backend != "claude" {
+		t.Errorf("ws-A: records[0].Backend = %q, want %q", gotA[0].Backend, "claude")
+	}
+
+	if len(gotB) != 1 {
+		t.Fatalf("ws-B: len(records) = %d, want 1", len(gotB))
+	}
+	if gotB[0].ID != "sess-b:200" {
+		t.Errorf("ws-B: records[0].ID = %q, want %q", gotB[0].ID, "sess-b:200")
+	}
+	if gotB[0].Backend != "shell" {
+		t.Errorf("ws-B: records[0].Backend = %q, want %q", gotB[0].Backend, "shell")
+	}
+}
+
+func TestMigrateLegacyKeys(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	// Insert 3 keys in old "issue:sessions:{id}" format directly into miniredis.
+	mr.Set("issue:sessions:proj.1", `{"issue_id":"proj.1","sessions":[{"id":"s1","session_name":"sess1","issue_id":"proj.1","backend":"claude","status":"active","launcher":"user","started_at":"2025-01-15T10:00:00Z"}]}`)
+	mr.Set("issue:sessions:proj.2", `{"issue_id":"proj.2","sessions":[{"id":"s2","session_name":"sess2","issue_id":"proj.2","backend":"shell","status":"completed","launcher":"start-work","started_at":"2025-01-16T10:00:00Z"}]}`)
+	mr.Set("issue:sessions:proj.3", `{"issue_id":"proj.3","sessions":[{"id":"s3","session_name":"sess3","issue_id":"proj.3","backend":"claude","status":"active","launcher":"user","started_at":"2025-01-17T10:00:00Z"}]}`)
+
+	store := NewStore(rdb, "my-ws", nil)
+	ctx := context.Background()
+
+	count, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("migrated count = %d, want 3", count)
+	}
+
+	// Verify all 3 now exist under the new namespaced key format.
+	for _, issueID := range []string{"proj.1", "proj.2", "proj.3"} {
+		records, err := store.List(ctx, issueID)
+		if err != nil {
+			t.Fatalf("List(%s): %v", issueID, err)
+		}
+		if len(records) != 1 {
+			t.Errorf("List(%s): len(records) = %d, want 1", issueID, len(records))
+		}
+	}
+
+	// Verify old keys are gone.
+	for _, oldKey := range []string{"issue:sessions:proj.1", "issue:sessions:proj.2", "issue:sessions:proj.3"} {
+		if mr.Exists(oldKey) {
+			t.Errorf("old key %q should no longer exist", oldKey)
+		}
+	}
+}
+
+func TestMigrateLegacyKeys_Idempotent(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	mr.Set("issue:sessions:proj.1", `{"issue_id":"proj.1","sessions":[{"id":"s1","session_name":"sess1","issue_id":"proj.1","backend":"claude","status":"active","launcher":"user","started_at":"2025-01-15T10:00:00Z"}]}`)
+
+	store := NewStore(rdb, "my-ws", nil)
+	ctx := context.Background()
+
+	count1, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys (first run): %v", err)
+	}
+	if count1 != 1 {
+		t.Errorf("first run: migrated count = %d, want 1", count1)
+	}
+
+	count2, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys (second run): %v", err)
+	}
+	if count2 != 0 {
+		t.Errorf("second run: migrated count = %d, want 0", count2)
+	}
+}
+
+func TestMigrateLegacyKeys_SkipsNamespacedKeys(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	// Insert keys already in ws:... format directly into miniredis.
+	mr.Set("ws:other-ws:issue:sessions:proj.1", `{"issue_id":"proj.1","sessions":[]}`)
+	mr.Set("ws:other-ws:issue:sessions:proj.2", `{"issue_id":"proj.2","sessions":[]}`)
+
+	store := NewStore(rdb, "my-ws", nil)
+	ctx := context.Background()
+
+	count, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("migrated count = %d, want 0 (namespaced keys should be skipped)", count)
+	}
+
+	// Verify original keys are untouched.
+	if !mr.Exists("ws:other-ws:issue:sessions:proj.1") {
+		t.Error("ws:other-ws:issue:sessions:proj.1 should still exist")
+	}
+	if !mr.Exists("ws:other-ws:issue:sessions:proj.2") {
+		t.Error("ws:other-ws:issue:sessions:proj.2 should still exist")
+	}
+}
+
+func TestMigrateLegacyKeys_EmptyDB(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	store := NewStore(rdb, "my-ws", nil)
+	ctx := context.Background()
+
+	count, err := store.MigrateLegacyKeys(ctx)
+	if err != nil {
+		t.Fatalf("MigrateLegacyKeys: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("migrated count = %d, want 0", count)
+	}
+}
+
+func TestNewStore_PanicsOnEmptyWorkspaceID(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for empty workspaceID, but did not panic")
+		}
+	}()
+
+	NewStore(rdb, "", nil)
 }

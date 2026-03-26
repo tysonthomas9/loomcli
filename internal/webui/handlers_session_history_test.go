@@ -19,7 +19,7 @@ func setupSessionHistoryStore(t *testing.T) *sessionhistory.Store {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return sessionhistory.NewStore(rdb, nil)
+	return sessionhistory.NewStore(rdb, "test-ws-uuid", nil)
 }
 
 func TestHandleListSessionHistory_ReturnsRecords(t *testing.T) {

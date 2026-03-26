@@ -1,8 +1,8 @@
 // Package issuetabs provides Redis-backed persistence for issue-scoped tab state.
 //
-// Each issue gets a Redis key at "issue:tabs:{issueId}" storing a JSON-encoded
-// IssueTabState blob. The entire tab array is always read/written atomically.
-// Keys expire after 24 hours (refreshed on every write).
+// Each issue gets a Redis key at "ws:{workspaceID}:issue:tabs:{issueId}" storing
+// a JSON-encoded IssueTabState blob. The entire tab array is always read/written
+// atomically. Keys expire after 24 hours (refreshed on every write).
 package issuetabs
 
 import (
@@ -43,16 +43,21 @@ type IssueTabState struct {
 
 // Store provides Redis-backed persistence for issue tab state.
 type Store struct {
-	client *redis.Client
-	logger *slog.Logger
+	client      *redis.Client
+	workspaceID string
+	logger      *slog.Logger
 }
 
-// NewStore creates a new issue tab state store.
-func NewStore(client *redis.Client, logger *slog.Logger) *Store {
+// NewStore creates a new issue tab state store scoped to a workspace.
+// workspaceID must be non-empty (programming error if empty).
+func NewStore(client *redis.Client, workspaceID string, logger *slog.Logger) *Store {
+	if workspaceID == "" {
+		panic("issuetabs.NewStore: workspaceID must not be empty")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Store{client: client, logger: logger}
+	return &Store{client: client, workspaceID: workspaceID, logger: logger}
 }
 
 // Close closes the underlying Redis client.
@@ -60,8 +65,8 @@ func (s *Store) Close() error {
 	return s.client.Close()
 }
 
-func issueKey(issueID string) string {
-	return keyPrefix + issueID
+func (s *Store) issueKey(issueID string) string {
+	return "ws:" + s.workspaceID + ":" + keyPrefix + issueID
 }
 
 // ValidateIssueID returns an error if the issue ID is invalid.
@@ -81,7 +86,7 @@ func (s *Store) Get(ctx context.Context, issueID string) (*IssueTabState, error)
 		return nil, err
 	}
 
-	data, err := s.client.Get(ctx, issueKey(issueID)).Bytes()
+	data, err := s.client.Get(ctx, s.issueKey(issueID)).Bytes()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, nil
@@ -110,7 +115,7 @@ func (s *Store) Save(ctx context.Context, state *IssueTabState) error {
 		return fmt.Errorf("marshal %s: %w", state.IssueID, err)
 	}
 
-	if err := s.client.Set(ctx, issueKey(state.IssueID), data, ttl).Err(); err != nil {
+	if err := s.client.Set(ctx, s.issueKey(state.IssueID), data, ttl).Err(); err != nil {
 		return fmt.Errorf("set %s: %w", state.IssueID, err)
 	}
 
@@ -123,7 +128,7 @@ func (s *Store) Delete(ctx context.Context, issueID string) error {
 		return err
 	}
 
-	if err := s.client.Del(ctx, issueKey(issueID)).Err(); err != nil {
+	if err := s.client.Del(ctx, s.issueKey(issueID)).Err(); err != nil {
 		return fmt.Errorf("del %s: %w", issueID, err)
 	}
 

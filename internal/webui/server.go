@@ -331,23 +331,24 @@ func StartServer(ctx context.Context, config ServerConfig) error {
 		}
 	}
 
-	// Initialize issue tab state store for tab persistence across navigation
 	var issueTabStore *issuetabs.Store
 	if config.FleetRedis != nil {
 		itClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
-		issueTabStore = issuetabs.NewStore(itClient, nil)
+		issueTabStore = issuetabs.NewStore(itClient, initialWorkspaceID, nil)
 		defer func() { _ = issueTabStore.Close() }()
 		slog.Info("issue tab store initialized", "redis_address", config.FleetRedis.Address)
 	}
 
-	// Initialize session history store for terminal session audit trail
 	var sessionHistoryStore *sessionhistory.Store
 	if config.FleetRedis != nil {
 		shClient := fleet.NewRedisClient(config.FleetRedis.Address, config.FleetRedis.Password, 0)
-		sessionHistoryStore = sessionhistory.NewStore(shClient, nil)
+		sessionHistoryStore = sessionhistory.NewStore(shClient, initialWorkspaceID, nil)
 		defer func() { _ = sessionHistoryStore.Close() }()
 		sessionHistoryStoreRef = sessionHistoryStore
 		slog.Info("session history store initialized", "redis_address", config.FleetRedis.Address)
+		if n, err := sessionHistoryStore.MigrateLegacyKeys(ctx); err == nil && n > 0 {
+			slog.Info("session history legacy keys migrated", "count", n)
+		}
 	}
 
 	// Load or generate API key for authentication

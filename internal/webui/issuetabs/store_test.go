@@ -14,7 +14,7 @@ func setupTest(t *testing.T) (*Store, *miniredis.Miniredis) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rdb.Close() })
-	return NewStore(rdb, nil), mr
+	return NewStore(rdb, "test-ws-uuid", nil), mr
 }
 
 func TestSaveAndGet_RoundTrip(t *testing.T) {
@@ -112,7 +112,7 @@ func TestSave_SetsTTL(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	redisTTL := mr.TTL(issueKey("TTL-TEST"))
+	redisTTL := mr.TTL(store.issueKey("TTL-TEST"))
 	// TTL should be approximately 24 hours (allow some margin)
 	expected := 24 * time.Hour
 	if redisTTL < expected-time.Minute || redisTTL > expected+time.Minute {
@@ -280,4 +280,77 @@ func TestValidateAndFilter_RemovesTerminalWithEmptySessionName(t *testing.T) {
 	if len(result.Tabs) != 1 {
 		t.Fatalf("len(Tabs) = %d, want 1 (terminal with empty session_name removed)", len(result.Tabs))
 	}
+}
+
+func TestIsolation_DifferentWorkspaces(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	storeA := NewStore(rdb, "ws-A", nil)
+	storeB := NewStore(rdb, "ws-B", nil)
+	ctx := context.Background()
+
+	stateA := &IssueTabState{
+		IssueID:     "PROJ-1",
+		Tabs:        []IssueTab{{ID: "details", Type: "details", Label: "Details A", SortOrder: 0}},
+		ActiveTabID: "details",
+	}
+	stateB := &IssueTabState{
+		IssueID:     "PROJ-1",
+		Tabs:        []IssueTab{{ID: "logs", Type: "logs", Label: "Logs B", SortOrder: 0}},
+		ActiveTabID: "logs",
+	}
+
+	if err := storeA.Save(ctx, stateA); err != nil {
+		t.Fatalf("Save ws-A: %v", err)
+	}
+	if err := storeB.Save(ctx, stateB); err != nil {
+		t.Fatalf("Save ws-B: %v", err)
+	}
+
+	gotA, err := storeA.Get(ctx, "PROJ-1")
+	if err != nil {
+		t.Fatalf("Get ws-A: %v", err)
+	}
+	gotB, err := storeB.Get(ctx, "PROJ-1")
+	if err != nil {
+		t.Fatalf("Get ws-B: %v", err)
+	}
+
+	if gotA == nil {
+		t.Fatal("expected state from ws-A, got nil")
+	}
+	if gotB == nil {
+		t.Fatal("expected state from ws-B, got nil")
+	}
+
+	if len(gotA.Tabs) != 1 || gotA.Tabs[0].Label != "Details A" {
+		t.Errorf("ws-A: Tabs[0].Label = %q, want %q", gotA.Tabs[0].Label, "Details A")
+	}
+	if gotA.ActiveTabID != "details" {
+		t.Errorf("ws-A: ActiveTabID = %q, want %q", gotA.ActiveTabID, "details")
+	}
+
+	if len(gotB.Tabs) != 1 || gotB.Tabs[0].Label != "Logs B" {
+		t.Errorf("ws-B: Tabs[0].Label = %q, want %q", gotB.Tabs[0].Label, "Logs B")
+	}
+	if gotB.ActiveTabID != "logs" {
+		t.Errorf("ws-B: ActiveTabID = %q, want %q", gotB.ActiveTabID, "logs")
+	}
+}
+
+func TestNewStore_PanicsOnEmptyWorkspaceID(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { rdb.Close() })
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for empty workspaceID, but did not panic")
+		}
+	}()
+
+	NewStore(rdb, "", nil)
 }
