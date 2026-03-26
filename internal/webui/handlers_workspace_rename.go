@@ -44,6 +44,7 @@ type loomConfigForRename struct {
 
 // loomWorkspaceForRename preserves all workspace fields via yaml.Node round-trip.
 type loomWorkspaceForRename struct {
+	ID    string    `yaml:"id,omitempty"`
 	Path  string    `yaml:"path"`
 	Repos yaml.Node `yaml:"repos,omitempty"`
 }

@@ -31,6 +31,7 @@ type loomConfigForBackend struct {
 // loomWorkspaceForBackend preserves all workspace fields via yaml.Node round-trip,
 // while exposing the Backend field for modification.
 type loomWorkspaceForBackend struct {
+	ID      string    `yaml:"id,omitempty"`
 	Path    string    `yaml:"path"`
 	Backend string    `yaml:"backend,omitempty"`
 	Repos   yaml.Node `yaml:"repos,omitempty"`

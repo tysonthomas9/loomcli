@@ -134,7 +134,7 @@ func ensureCurrentProjectRegistered() {
 	}
 
 	repos := []RepoConfig{{Name: wsName, Path: cwd}}
-	cfg.Workspaces[wsName] = WorkspaceConfig{Path: cwd, Repos: repos}
+	cfg.Workspaces[wsName] = WorkspaceConfig{ID: NewWorkspaceID(), Path: cwd, Repos: repos}
 	if cfg.DefaultWorkspace == "" {
 		cfg.DefaultWorkspace = wsName
 	}

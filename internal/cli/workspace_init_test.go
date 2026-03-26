@@ -3,9 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestEnsureDaemonForWorkspace_ContextCancelled(t *testing.T) {
@@ -94,5 +98,99 @@ func TestEnsureDaemonForWorkspace_TimeoutFallback(t *testing.T) {
 func TestDefaultDaemonStartupTimeout(t *testing.T) {
 	if defaultDaemonStartupTimeout != 30*time.Second {
 		t.Errorf("defaultDaemonStartupTimeout = %v, want 30s", defaultDaemonStartupTimeout)
+	}
+}
+
+func TestEnsureCurrentProjectRegistered_GeneratesUUID(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	// Create a temp directory to serve as cwd so the workspace name is predictable.
+	wsDir := filepath.Join(t.TempDir(), "myproject")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	// Change to the workspace directory so ensureCurrentProjectRegistered uses it.
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(wsDir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	ensureCurrentProjectRegistered()
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("LoadConfig() returned nil after ensureCurrentProjectRegistered")
+	}
+
+	ws, ok := cfg.Workspaces["myproject"]
+	if !ok {
+		t.Fatal("workspace 'myproject' not found in config")
+	}
+	if ws.ID == "" {
+		t.Fatal("workspace ID is empty; auto-init should generate a UUID")
+	}
+	if _, err := uuid.Parse(ws.ID); err != nil {
+		t.Errorf("workspace ID %q is not a valid UUID: %v", ws.ID, err)
+	}
+}
+
+func TestEnsureCurrentProjectRegistered_SkipsExistingByPath(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
+
+	wsDir := filepath.Join(t.TempDir(), "existing")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	// Resolve symlinks (macOS /var -> /private/var) so the path matches os.Getwd().
+	wsDir, err := filepath.EvalSymlinks(wsDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks() error = %v", err)
+	}
+
+	// Pre-create a config with this path already registered under a different name.
+	existingID := "pre-existing-uuid-789"
+	cfg := &LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"other-name": {ID: existingID, Path: wsDir, Repos: []RepoConfig{}},
+		},
+	}
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(wsDir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	ensureCurrentProjectRegistered()
+
+	loaded, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	// Should not have added a duplicate entry.
+	if len(loaded.Workspaces) != 1 {
+		t.Errorf("len(Workspaces) = %d, want 1 (should not duplicate)", len(loaded.Workspaces))
+	}
+	ws := loaded.Workspaces["other-name"]
+	if ws.ID != existingID {
+		t.Errorf("ID = %q, want %q (should preserve existing)", ws.ID, existingID)
 	}
 }

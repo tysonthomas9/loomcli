@@ -534,6 +534,120 @@ func TestWorkspaceRename_MaxLengthExactly64(t *testing.T) {
 	}
 }
 
+func TestLoomWorkspaceForRename_RoundTrip(t *testing.T) {
+	ws := loomWorkspaceForRename{
+		ID:   "test-uuid-abc-123",
+		Path: "/home/user/projects/myws",
+	}
+
+	data, err := yaml.Marshal(ws)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() error = %v", err)
+	}
+
+	var got loomWorkspaceForRename
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if got.ID != ws.ID {
+		t.Errorf("ID = %q, want %q", got.ID, ws.ID)
+	}
+	if got.Path != ws.Path {
+		t.Errorf("Path = %q, want %q", got.Path, ws.Path)
+	}
+}
+
+func TestLoomWorkspaceForRename_EmptyID(t *testing.T) {
+	ws := loomWorkspaceForRename{
+		ID:   "",
+		Path: "/home/user/projects/myws",
+	}
+
+	data, err := yaml.Marshal(ws)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() error = %v", err)
+	}
+
+	var got loomWorkspaceForRename
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if got.ID != "" {
+		t.Errorf("ID = %q, want empty", got.ID)
+	}
+	if got.Path != ws.Path {
+		t.Errorf("Path = %q, want %q", got.Path, ws.Path)
+	}
+}
+
+func TestApplyWorkspaceRename_PreservesUUID(t *testing.T) {
+	cfg := &loomConfigForRename{
+		Version:          1,
+		DefaultWorkspace: "foo",
+		WorkspaceOrder:   []string{"foo"},
+		Workspaces: map[string]loomWorkspaceForRename{
+			"foo": {ID: "test-uuid-123", Path: "/home/user/projects/foo"},
+		},
+	}
+
+	ws := cfg.Workspaces["foo"]
+	applyWorkspaceRename(cfg, "foo", "bar", ws)
+
+	if _, ok := cfg.Workspaces["foo"]; ok {
+		t.Error("old key 'foo' should have been removed")
+	}
+	renamed, ok := cfg.Workspaces["bar"]
+	if !ok {
+		t.Fatal("new key 'bar' should be present")
+	}
+	if renamed.ID != "test-uuid-123" {
+		t.Errorf("ID = %q, want %q", renamed.ID, "test-uuid-123")
+	}
+	if renamed.Path != "/home/user/projects/foo" {
+		t.Errorf("Path = %q, want %q", renamed.Path, "/home/user/projects/foo")
+	}
+	if cfg.DefaultWorkspace != "bar" {
+		t.Errorf("DefaultWorkspace = %q, want %q", cfg.DefaultWorkspace, "bar")
+	}
+	if len(cfg.WorkspaceOrder) != 1 || cfg.WorkspaceOrder[0] != "bar" {
+		t.Errorf("WorkspaceOrder = %v, want [bar]", cfg.WorkspaceOrder)
+	}
+}
+
+func TestWorkspaceRename_PreservesUUID_EndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	setLoomConfigDir(t, dir)
+
+	writeTestLoomConfig(t, dir, &loomConfigForRename{
+		Version: 1,
+		Workspaces: map[string]loomWorkspaceForRename{
+			"myws": {ID: "stable-uuid-456", Path: "/home/user/projects/myws"},
+		},
+	})
+
+	handler := handleWorkspaceRename(nil)
+
+	body := strings.NewReader(`{"old_name":"myws","new_name":"renamed"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/workspace/rename", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	cfg := readTestLoomConfig(t, dir)
+	ws, ok := cfg.Workspaces["renamed"]
+	if !ok {
+		t.Fatal("workspace 'renamed' should exist in config")
+	}
+	if ws.ID != "stable-uuid-456" {
+		t.Errorf("ID = %q, want %q; UUID was not preserved through rename", ws.ID, "stable-uuid-456")
+	}
+}
+
 func TestValidWorkspaceName(t *testing.T) {
 	tests := []struct {
 		name  string
