@@ -24,10 +24,12 @@ function createWorkspace(
   overrides?: Partial<WorkspaceSummary>,
 ): WorkspaceSummary {
   return {
+    id: "ws-test",
     name: "test-workspace",
     path: "/home/user/workspace",
     active: false,
     repo_count: 1,
+    is_default: false,
     ...overrides,
   };
 }
@@ -38,16 +40,19 @@ function createWorkspace(
 function createWorkspaces(): WorkspaceSummary[] {
   return [
     createWorkspace({
+      id: "ws-alpha",
       name: "alpha",
       path: "/home/user/alpha",
       repo_count: 3,
     }),
     createWorkspace({
+      id: "ws-beta",
       name: "beta",
       path: "/home/user/beta",
       repo_count: 1,
     }),
     createWorkspace({
+      id: "ws-gamma",
       name: "gamma",
       path: "/home/user/gamma-project",
       repo_count: 5,
@@ -62,7 +67,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={false}
           workspaces={createWorkspaces()}
-          activeWorkspaceName="alpha"
+          activeWorkspaceId="ws-alpha"
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -81,7 +86,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName="alpha"
+          activeWorkspaceId="ws-alpha"
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -104,7 +109,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName="alpha"
+          activeWorkspaceId="ws-alpha"
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -120,7 +125,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName="alpha"
+          activeWorkspaceId="ws-alpha"
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -136,7 +141,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName="beta"
+          activeWorkspaceId="ws-beta"
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -157,7 +162,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName="beta"
+          activeWorkspaceId="ws-beta"
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -186,7 +191,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={workspaces}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -211,12 +216,12 @@ describe("WorkspaceSwitcher", () => {
       expect(tenthButton.querySelector("[class*=shortcutHint]")).toBeNull();
     });
 
-    it("shows no active indicator when activeWorkspaceName is null", () => {
+    it("shows no active indicator when activeWorkspaceId is null", () => {
       render(
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -238,7 +243,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -257,7 +262,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -276,7 +281,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -294,7 +299,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -311,7 +316,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -333,7 +338,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={workspaces}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -357,7 +362,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={onSelect}
           onClose={onClose}
         />,
@@ -368,7 +373,7 @@ describe("WorkspaceSwitcher", () => {
       fireEvent.click(betaButton!);
 
       expect(onSelect).toHaveBeenCalledTimes(1);
-      expect(onSelect).toHaveBeenCalledWith("beta");
+      expect(onSelect).toHaveBeenCalledWith("ws-beta");
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
@@ -379,7 +384,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={onClose}
         />,
@@ -397,7 +402,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={onClose}
         />,
@@ -416,7 +421,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -432,7 +437,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={false}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -443,7 +448,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -462,7 +467,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -490,7 +495,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -511,7 +516,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -535,7 +540,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -558,7 +563,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={onSelect}
           onClose={onClose}
         />,
@@ -571,7 +576,7 @@ describe("WorkspaceSwitcher", () => {
       fireEvent.keyDown(overlay, { key: "Enter" });
 
       expect(onSelect).toHaveBeenCalledTimes(1);
-      expect(onSelect).toHaveBeenCalledWith("beta");
+      expect(onSelect).toHaveBeenCalledWith("ws-beta");
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
@@ -582,7 +587,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={onSelect}
           onClose={vi.fn()}
         />,
@@ -603,7 +608,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -625,7 +630,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={[]}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,
@@ -647,7 +652,7 @@ describe("WorkspaceSwitcher", () => {
         <WorkspaceSwitcher
           isOpen={true}
           workspaces={createWorkspaces()}
-          activeWorkspaceName={null}
+          activeWorkspaceId={null}
           onSelect={vi.fn()}
           onClose={vi.fn()}
         />,

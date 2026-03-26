@@ -5,6 +5,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import type { BackendInfo } from "./backendDefaults";
 
@@ -36,6 +37,7 @@ export function BackendSelectorDropdown({
   className,
   placeholder = "Select backend",
 }: BackendSelectorDropdownProps): JSX.Element {
+  const [, setSearchParams] = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [optimisticBackend, setOptimisticBackend] = useState(selectedBackend);
@@ -299,8 +301,10 @@ export function BackendSelectorDropdown({
                       className={styles.configureLink}
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.history.replaceState({}, "", "?view=settings");
-                        window.dispatchEvent(new PopStateEvent("popstate"));
+                        setSearchParams(
+                          { view: "settings" },
+                          { replace: true },
+                        );
                       }}
                       data-testid={`backend-configure-${backend.name}`}
                     >

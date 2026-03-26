@@ -169,7 +169,7 @@ export function SortableWorkspaceEntry({
       ) : (
         <a
           className={styles.workspaceEntryName}
-          href={`/?_ws=${encodeURIComponent(ws.name)}`}
+          href={`/ws/${ws.id}/`}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();

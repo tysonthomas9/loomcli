@@ -1,9 +1,10 @@
 /**
  * useRepoFilterParam - React hook for syncing the `repoFilter` URL parameter.
- * Follows useRepoFilter pattern: URL-synced state via replaceState + popstate.
+ * Uses React Router's useSearchParams instead of manual pushState/replaceState.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 
 const REPO_FILTER_PARAM = "repoFilter";
 
@@ -24,49 +25,14 @@ export type UseRepoFilterParamReturn = [
 ];
 
 /**
- * Check if running in browser environment.
- */
-function isBrowser(): boolean {
-  return (
-    typeof window !== "undefined" && typeof window.location !== "undefined"
-  );
-}
-
-/**
- * Parse repo filter from URL search parameters.
- * Returns null for missing or empty param (meaning "all repos").
+ * Parse repo filter from URL search parameters (legacy compat).
  */
 export function parseRepoFilterFromUrl(): string | null {
-  if (!isBrowser()) return null;
-
+  if (typeof window === "undefined" || !window.location) return null;
   const params = new URLSearchParams(window.location.search);
   const raw = params.get(REPO_FILTER_PARAM);
-
   if (!raw || raw.trim() === "") return null;
   return raw;
-}
-
-/**
- * Update URL with repo filter param without triggering navigation.
- * Removes the param when repoFilter is null (all repos) for clean URLs.
- */
-function updateRepoFilterUrl(repoFilter: string | null): void {
-  if (!isBrowser()) return;
-
-  const params = new URLSearchParams(window.location.search);
-
-  if (repoFilter === null) {
-    params.delete(REPO_FILTER_PARAM);
-  } else {
-    params.set(REPO_FILTER_PARAM, repoFilter);
-  }
-
-  const queryString = params.toString();
-  const newUrl = queryString
-    ? `${window.location.pathname}?${queryString}`
-    : window.location.pathname;
-
-  window.history.replaceState(null, "", newUrl);
 }
 
 /**
@@ -74,40 +40,33 @@ function updateRepoFilterUrl(repoFilter: string | null): void {
  * null means "all repos" (no filtering).
  */
 export function useRepoFilterParam(
-  options: UseRepoFilterParamOptions = {},
+  _options: UseRepoFilterParamOptions = {},
 ): UseRepoFilterParamReturn {
-  const { syncUrl = true } = options;
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [repoFilter, setRepoFilterState] = useState<string | null>(() => {
-    if (syncUrl) {
-      return parseRepoFilterFromUrl();
-    }
-    return null;
-  });
+  const repoFilter = useMemo(() => {
+    const raw = searchParams.get(REPO_FILTER_PARAM);
+    if (!raw || raw.trim() === "") return null;
+    return raw;
+  }, [searchParams]);
 
-  // Sync URL when state changes
-  useEffect(() => {
-    if (syncUrl && isBrowser()) {
-      updateRepoFilterUrl(repoFilter);
-    }
-  }, [repoFilter, syncUrl]);
-
-  // Handle browser back/forward navigation
-  useEffect(() => {
-    if (!syncUrl || !isBrowser()) return;
-
-    const handlePopState = () => {
-      setRepoFilterState(parseRepoFilterFromUrl());
-    };
-
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [syncUrl]);
-
-  // Memoized setter
-  const setRepoFilter = useCallback((name: string | null) => {
-    setRepoFilterState(name);
-  }, []);
+  const setRepoFilter = useCallback(
+    (name: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (name === null) {
+            next.delete(REPO_FILTER_PARAM);
+          } else {
+            next.set(REPO_FILTER_PARAM, name);
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   return [repoFilter, setRepoFilter];
 }

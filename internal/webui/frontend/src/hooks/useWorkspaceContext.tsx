@@ -3,6 +3,9 @@
  * Centralizes workspace state with workspace-level selection, repo-level filtering,
  * and localStorage persistence. This is THE canonical workspace hook.
  * Follows useAgentContext pattern.
+ *
+ * T12 changes: accepts workspaceId prop from route params instead of reading
+ * from localStorage/URL. Removed _ws URL param hack and full-page reload switching.
  */
 
 import {
@@ -14,6 +17,7 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
+import { useNavigate } from "react-router-dom";
 
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 import {
@@ -21,16 +25,8 @@ import {
   clearDefaultWorkspace as clearDefaultWorkspaceApi,
   refreshWorkspace,
 } from "@/api/workspace";
-import {
-  setActiveWorkspace as setActiveWorkspaceClient,
-  getActiveWorkspace,
-} from "@/api/client";
-import {
-  wsGet,
-  wsSet,
-  getLastWorkspaceId,
-  setLastWorkspaceId,
-} from "@/utils/scopedStorage";
+import { setActiveWorkspace as setActiveWorkspaceClient } from "@/api/client";
+import { wsGet, wsSet, setLastWorkspaceId } from "@/utils/scopedStorage";
 
 import { useWorkspace as useWorkspaceData } from "./useWorkspace";
 import type { UseWorkspaceReturn } from "./useWorkspace";
@@ -75,12 +71,12 @@ export interface WorkspaceContextValue extends UseWorkspaceReturn {
   /** Get agent info by name. Returns undefined if not found. */
   getAgentByName: (name: string) => WorkspaceAgentInfo | undefined;
 
-  /** Stable workspace UUID, used for scoping localStorage keys. */
-  workspaceId: string | null;
+  /** Stable workspace UUID from route params. */
+  workspaceId: string;
 
   /** Name of the active workspace */
   activeWorkspaceName: string | null;
-  /** Switch workspace (future multi-workspace) */
+  /** Navigate to a different workspace (SPA navigation, no page reload) */
   setActiveWorkspace: (name: string) => void;
 
   /** Name of the default workspace, null if none set */
@@ -118,17 +114,15 @@ const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(
  * Props for WorkspaceProvider.
  */
 export interface WorkspaceProviderProps {
+  /** Workspace UUID from route param */
+  workspaceId: string;
   children: ReactNode;
 }
 
 /**
  * Read initial selected repos from scoped localStorage.
- * Uses workspace ID from loom:last-workspace-id for synchronous initialization.
- * Returns empty Set (meaning "all") if not found or invalid.
  */
-function readStoredRepoSelection(): Set<string> {
-  const wsId = getLastWorkspaceId();
-  if (!wsId) return new Set<string>();
+function readStoredRepoSelection(wsId: string): Set<string> {
   const raw = wsGet(wsId, SK_SELECTED_REPOS);
   if (raw === null) return new Set<string>();
   try {
@@ -145,41 +139,34 @@ function readStoredRepoSelection(): Set<string> {
 }
 
 /**
- * WorkspaceProvider wraps the app and provides workspace data to all children.
- * Manages workspace-level selection, repo-level filtering, and localStorage persistence.
+ * WorkspaceProvider wraps workspace-scoped content and provides workspace data.
+ * Receives workspaceId from route params (via WorkspaceLayout).
  */
 export function WorkspaceProvider({
+  workspaceId,
   children,
 }: WorkspaceProviderProps): JSX.Element {
-  // Set the API client workspace header synchronously during initialization,
-  // BEFORE useWorkspaceData fires its initial fetch. This ensures the first
-  // /api/workspace request uses the correct Workspace header.
-  // Priority: URL ?_ws param > localStorage > default workspace
-  const [activeWorkspaceName, setActiveWorkspaceNameRaw] = useState<
-    string | null
-  >(() => {
-    // Check for workspace switch via URL param (set by setActiveWorkspace)
-    const urlWS = new URLSearchParams(window.location.search).get("_ws");
-    if (urlWS) {
-      // Persist to localStorage and clean up the URL param
-      lsSet(LS_ACTIVE_WORKSPACE, urlWS);
-      const cleanUrl = new URL(window.location.href);
-      cleanUrl.searchParams.delete("_ws");
-      window.history.replaceState(null, "", cleanUrl.toString());
-      setActiveWorkspaceClient(urlWS);
-      return urlWS;
-    }
-    const stored = lsGet(LS_ACTIVE_WORKSPACE) ?? lsGet(LS_DEFAULT_WORKSPACE);
-    if (stored) setActiveWorkspaceClient(stored);
-    return stored;
+  const navigate = useNavigate();
+
+  // Set the API client workspace header so all fetchApi calls use the correct
+  // workspace routing. This will be removed by T13 (path-based API routing).
+  useEffect(() => {
+    setActiveWorkspaceClient(workspaceId);
+    setLastWorkspaceId(workspaceId);
+  }, [workspaceId]);
+
+  // Initialize API client header synchronously on first render
+  useState(() => {
+    setActiveWorkspaceClient(workspaceId);
+    setLastWorkspaceId(workspaceId);
   });
 
   const workspaceResult = useWorkspaceData({ pollInterval: 60000 });
 
-  // Stable workspace UUID — initialized from localStorage, synced from API
-  const [workspaceId, setWorkspaceId] = useState<string | null>(() =>
-    getLastWorkspaceId(),
-  );
+  // Track workspace name for display and localStorage
+  const [activeWorkspaceName, setActiveWorkspaceNameRaw] = useState<
+    string | null
+  >(null);
 
   // Default workspace state (fast-path from localStorage, synced from server)
   const [defaultWorkspaceName, setDefaultWorkspaceNameRaw] = useState<
@@ -188,14 +175,13 @@ export function WorkspaceProvider({
 
   // Repo-level selection
   const [selectedRepoNames, setSelectedRepoNames] = useState<Set<string>>(() =>
-    readStoredRepoSelection(),
+    readStoredRepoSelection(workspaceId),
   );
 
-  // Sync activeWorkspaceName and workspaceId when workspace data loads
+  // Sync activeWorkspaceName when workspace data loads
   useEffect(() => {
     if (workspaceResult.workspace) {
       const wsName = workspaceResult.workspace.name;
-      const wsId = workspaceResult.workspace.id;
       setActiveWorkspaceNameRaw((prev) => {
         if (prev !== wsName) {
           lsSet(LS_ACTIVE_WORKSPACE, wsName);
@@ -203,24 +189,8 @@ export function WorkspaceProvider({
         }
         return prev;
       });
-      // Sync workspace UUID to localStorage and state
-      if (wsId) {
-        setWorkspaceId((prev) => {
-          if (prev !== wsId) {
-            setLastWorkspaceId(wsId);
-            return wsId;
-          }
-          return prev;
-        });
-      }
     }
   }, [workspaceResult.workspace]);
-
-  // Sync active workspace ID to the API client module so all fetchApi calls
-  // include the Workspace header for multi-workspace routing.
-  useEffect(() => {
-    setActiveWorkspaceClient(activeWorkspaceName);
-  }, [activeWorkspaceName]);
 
   // Stable key for repo list — avoids re-running cleanup on every poll tick
   const repoNamesKey = useMemo(
@@ -245,14 +215,11 @@ export function WorkspaceProvider({
         }
       }
       if (!changed) return prev;
-      // If all selected repos were stale, fall back to "all"
       if (cleaned.size === 0) {
-        if (workspaceId)
-          wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([]));
+        wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([]));
         return new Set<string>();
       }
-      if (workspaceId)
-        wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([...cleaned]));
+      wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([...cleaned]));
       return cleaned;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -267,30 +234,23 @@ export function WorkspaceProvider({
     }
   }, [workspaceResult.workspace]);
 
-  // Workspace selection action — updates localStorage, sets the API client
-  // header, and forces a full page reload to ensure all subsystems (issues,
-  // agents, SSE connections) use the new workspace context.
-  const setActiveWorkspace = useCallback((name: string) => {
-    // Skip no-op switches
-    if (name === getActiveWorkspace()) return;
-    lsSet(LS_ACTIVE_WORKSPACE, name);
-    // Synchronously update the API client header
-    setActiveWorkspaceClient(name);
-    // Force full page reload with workspace param in URL.
-    // Using setTimeout(0) to escape React's synthetic event handling
-    // which may prevent synchronous navigation.
-    setTimeout(() => {
-      const url = new URL(window.location.origin + window.location.pathname);
-      url.searchParams.set("_ws", name);
-      window.location.replace(url.toString());
-    }, 0);
-  }, []);
+  // Workspace switch — SPA navigation via React Router (no page reload)
+  const setActiveWorkspace = useCallback(
+    (name: string) => {
+      // Find the workspace ID for the given name from the workspace list
+      const workspaces = workspaceResult.workspace?.workspaces ?? [];
+      const target = workspaces.find((ws) => ws.name === name);
+      if (target) {
+        navigate(`/ws/${target.id}/`);
+      }
+    },
+    [workspaceResult.workspace, navigate],
+  );
 
   // Set or clear the default workspace with optimistic update
   const setDefaultWorkspace = useCallback(
     async (name: string | null) => {
       const previous = defaultWorkspaceName;
-      // Optimistic update
       setDefaultWorkspaceNameRaw(name);
       lsSet(LS_DEFAULT_WORKSPACE, name ?? "");
       try {
@@ -301,10 +261,8 @@ export function WorkspaceProvider({
         }
         await refreshWorkspace();
       } catch (err) {
-        // Roll back on failure
         setDefaultWorkspaceNameRaw(previous);
         lsSet(LS_DEFAULT_WORKSPACE, previous ?? "");
-        // Re-throw so callers can show error UI
         throw err;
       }
     },
@@ -316,15 +274,14 @@ export function WorkspaceProvider({
     (names: string[]) => {
       const next = new Set(names);
       setSelectedRepoNames(next);
-      if (workspaceId)
-        wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify(names));
+      wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify(names));
     },
     [workspaceId],
   );
 
   const selectAll = useCallback(() => {
     setSelectedRepoNames(new Set<string>());
-    if (workspaceId) wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([]));
+    wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([]));
   }, [workspaceId]);
 
   const toggleRepo = useCallback(
@@ -336,8 +293,7 @@ export function WorkspaceProvider({
         } else {
           next.add(name);
         }
-        if (workspaceId)
-          wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([...next]));
+        wsSet(workspaceId, SK_SELECTED_REPOS, JSON.stringify([...next]));
         return next;
       });
     },
@@ -456,7 +412,7 @@ const NO_WORKSPACE_CONTEXT: WorkspaceContextValue = {
   getRepoByName: () => undefined,
   getReposByGroup: () => [],
   getAgentByName: () => undefined,
-  workspaceId: null,
+  workspaceId: "",
   activeWorkspaceName: null,
   setActiveWorkspace: () => {},
   defaultWorkspaceName: null,

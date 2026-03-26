@@ -23,6 +23,14 @@ import type { Issue, Status } from "@/types";
 
 import App from "../App";
 
+// Mock react-router-dom
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", () => ({
+  useParams: vi.fn(() => ({ workspaceId: "test-ws-id" })),
+  useNavigate: vi.fn(() => mockNavigate),
+  useSearchParams: vi.fn(() => [new URLSearchParams(), vi.fn()]),
+}));
+
 // Create hoisted mocks for @/api functions used by handleApprove/handleReject
 const { mockCloseIssue, mockUpdateIssue, mockAddComment } = vi.hoisted(() => ({
   mockCloseIssue: vi.fn(),
@@ -207,22 +215,20 @@ const { mockUseViewState, mockSetActiveView, mockNavigateToView } = vi.hoisted(
 
 /**
  * Helper to create a useViewState return value (object shape).
+ * After T12 migration: no urlIssueId (removed from hook).
  */
 function createViewStateReturn(
   view: string,
   setter = mockSetActiveView,
-  issueId: string | null = null,
 ): {
   view: string;
   setView: typeof mockSetActiveView;
   navigateToView: typeof mockNavigateToView;
-  urlIssueId: string | null;
 } {
   return {
     view,
     setView: setter,
     navigateToView: mockNavigateToView,
-    urlIssueId: issueId,
   };
 }
 
@@ -352,10 +358,7 @@ vi.mock("@/hooks", () => ({
     sourceReposFilter: undefined,
     isMultiRepo: false,
   })),
-  useWorkspaceState: vi.fn(() => ({
-    currentWorkspaceId: null,
-    switchWorkspace: vi.fn(),
-  })),
+  useWorkspaceState: vi.fn(),
   useFocusReturn: vi.fn(),
   useFocusTrap: vi.fn(),
   useRepoFilterParam: vi.fn(() => [null, vi.fn()]),
@@ -1512,7 +1515,7 @@ describe("App", () => {
       expect(fetchIssue).toHaveBeenCalledWith("issue-123");
     });
 
-    it("back button from issue-detail view restores previous view", () => {
+    it("back button from issue-detail view navigates via React Router", () => {
       const clearIssue = vi.fn();
       const mockReturn = createMockUseIssuesReturn({});
       vi.mocked(useIssues).mockReturnValue(mockReturn);
@@ -1537,19 +1540,12 @@ describe("App", () => {
 
       render(<App />);
 
-      // Mock history.back
-      const historyBackSpy = vi
-        .spyOn(window.history, "back")
-        .mockImplementation(() => {});
-
       // Click the back button in IssueDetailView
       const backButton = screen.getByTestId("detail-back-button");
       fireEvent.click(backButton);
 
-      // Should call history.back() for proper browser navigation
-      expect(historyBackSpy).toHaveBeenCalled();
-
-      historyBackSpy.mockRestore();
+      // Should call navigate() via React Router (instead of window.history.back)
+      expect(mockNavigate).toHaveBeenCalled();
     });
 
     it("does not re-fetch when clicking the same issue that is already selected in detail view", () => {
@@ -2374,7 +2370,7 @@ describe("App", () => {
       ];
       // Set view to issue-detail with a different issue
       mockUseViewState.mockReturnValue(
-        createViewStateReturn("issue-detail", mockSetActiveView, "other-issue"),
+        createViewStateReturn("issue-detail", mockSetActiveView),
       );
       const mockReturn = createMockUseIssuesReturn({ issues });
       vi.mocked(useIssues).mockReturnValue(mockReturn);

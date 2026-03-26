@@ -32,6 +32,7 @@ function makeWorkspace(
   overrides: Partial<WorkspaceSummary> = {},
 ): WorkspaceSummary {
   return {
+    id: "ws-dev",
     name: "dev",
     path: "/home/user/dev",
     active: true,
@@ -83,18 +84,20 @@ describe("SortableWorkspaceEntry", () => {
       render(<SortableWorkspaceEntry {...defaultProps()} />);
 
       const link = screen.getByLabelText("Switch to workspace dev");
-      expect(link).toHaveAttribute("href", "/?_ws=dev");
+      expect(link).toHaveAttribute("href", "/ws/ws-dev/");
     });
 
-    it("encodes special characters in workspace name for href", () => {
+    it("uses workspace ID in href", () => {
       render(
         <SortableWorkspaceEntry
-          {...defaultProps({ ws: makeWorkspace({ name: "my workspace" }) })}
+          {...defaultProps({
+            ws: makeWorkspace({ id: "ws-custom", name: "my workspace" }),
+          })}
         />,
       );
 
       const link = screen.getByLabelText("Switch to workspace my workspace");
-      expect(link).toHaveAttribute("href", "/?_ws=my%20workspace");
+      expect(link).toHaveAttribute("href", "/ws/ws-custom/");
     });
 
     it("displays repo count", () => {

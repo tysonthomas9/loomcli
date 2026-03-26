@@ -194,7 +194,6 @@ export { useWorkspaceState } from "./useWorkspaceState";
 export type {
   WorkspaceSnapshot,
   UseWorkspaceStateParams,
-  UseWorkspaceStateReturn,
 } from "./useWorkspaceState";
 
 export {

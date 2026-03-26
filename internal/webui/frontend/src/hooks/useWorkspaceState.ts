@@ -2,10 +2,14 @@
  * useWorkspaceState - Saves and restores per-workspace UI state on switch.
  * State is stored in-memory only (resets on page reload).
  * Captures: active view, filters, search, selected issue, scroll position.
- * On switch: closes panels, restores saved state (or defaults), updates URL.
+ * On workspace ID change: closes panels, restores saved state (or defaults).
+ *
+ * T12 changes: removed URL management (now handled by React Router),
+ * accepts workspaceId as prop, removed switchWorkspace/currentWorkspaceId exports.
+ * T24 will rewrite the snapshot logic.
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import type { ViewMode } from "@/components/ViewSwitcher";
 import type { FilterState, FilterActions } from "./useFilterState";
@@ -25,6 +29,8 @@ export interface WorkspaceSnapshot {
  * Parameters for useWorkspaceState hook.
  */
 export interface UseWorkspaceStateParams {
+  /** The current workspace ID from the route */
+  workspaceId: string;
   /** Ref tracking latest state values (avoids stale closures) */
   stateRef: React.RefObject<{
     view: ViewMode;
@@ -40,61 +46,19 @@ export interface UseWorkspaceStateParams {
   closeAllPanels: () => void;
 }
 
-/**
- * Return type for useWorkspaceState hook.
- */
-export interface UseWorkspaceStateReturn {
-  currentWorkspaceId: string | null;
-  switchWorkspace: (newId: string | null) => void;
-}
-
-const WORKSPACE_PARAM = "workspace";
-
-/**
- * Read workspace param from current URL.
- */
-function parseWorkspaceFromUrl(): string | null {
-  if (typeof window === "undefined") return null;
-  const params = new URLSearchParams(window.location.search);
-  return params.get(WORKSPACE_PARAM);
-}
-
-/**
- * Update workspace param in URL via replaceState.
- */
-function updateWorkspaceUrl(workspaceId: string | null): void {
-  if (typeof window === "undefined") return;
-  const params = new URLSearchParams(window.location.search);
-  if (workspaceId) {
-    params.set(WORKSPACE_PARAM, workspaceId);
-  } else {
-    params.delete(WORKSPACE_PARAM);
-  }
-  const queryString = params.toString();
-  const newUrl = queryString
-    ? `${window.location.pathname}?${queryString}`
-    : window.location.pathname;
-  window.history.replaceState(null, "", newUrl);
-}
-
-export function useWorkspaceState(
-  params: UseWorkspaceStateParams,
-): UseWorkspaceStateReturn {
-  const { stateRef, setView, filterActions, setSearchValue, closeAllPanels } =
-    params;
-
-  const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string | null>(
-    () => parseWorkspaceFromUrl(),
-  );
-
-  // Ref mirrors currentWorkspaceId to keep switchWorkspace stable across renders
-  const currentWorkspaceIdRef = useRef(currentWorkspaceId);
-  useEffect(() => {
-    currentWorkspaceIdRef.current = currentWorkspaceId;
-  });
+export function useWorkspaceState(params: UseWorkspaceStateParams): void {
+  const {
+    workspaceId,
+    stateRef,
+    setView,
+    filterActions,
+    setSearchValue,
+    closeAllPanels,
+  } = params;
 
   const snapshotsRef = useRef<Map<string, WorkspaceSnapshot>>(new Map());
   const rafIdRef = useRef<number | null>(null);
+  const prevWorkspaceIdRef = useRef<string>(workspaceId);
 
   // Capture snapshot from current state
   const captureSnapshot = useCallback((): WorkspaceSnapshot => {
@@ -113,7 +77,6 @@ export function useWorkspaceState(
   const restoreSnapshot = useCallback(
     (snapshot: WorkspaceSnapshot | undefined) => {
       if (snapshot) {
-        // setView clears issue ID when view !== "issue-detail"
         setView(snapshot.view);
         filterActions.clearAll();
         if (snapshot.filters.priority !== undefined)
@@ -149,62 +112,30 @@ export function useWorkspaceState(
     [setView, filterActions, setSearchValue],
   );
 
-  // switchWorkspace uses ref for currentWorkspaceId so the callback is stable
-  // and the popstate effect doesn't re-register on every workspace change.
-  // Accepts skipUrlUpdate to avoid redundant replaceState during popstate.
-  const switchWorkspaceInternal = useCallback(
-    (newId: string | null, skipUrlUpdate: boolean) => {
-      const prevId = currentWorkspaceIdRef.current;
-
-      // Capture current workspace state before switching
-      if (prevId !== null) {
-        const snapshot = captureSnapshot();
-        snapshotsRef.current.set(prevId, snapshot);
-      }
-
-      // Cancel any pending scroll restore from prior switch
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-
-      // Close all panels synchronously
-      closeAllPanels();
-
-      // Look up and restore snapshot for new workspace
-      const savedSnapshot =
-        newId !== null ? snapshotsRef.current.get(newId) : undefined;
-      restoreSnapshot(savedSnapshot);
-
-      // Update URL workspace param (skip during popstate — URL already correct)
-      if (!skipUrlUpdate) {
-        updateWorkspaceUrl(newId);
-      }
-
-      // Update current workspace
-      currentWorkspaceIdRef.current = newId;
-      setCurrentWorkspaceId(newId);
-    },
-    [captureSnapshot, closeAllPanels, restoreSnapshot],
-  );
-
-  const switchWorkspace = useCallback(
-    (newId: string | null) => switchWorkspaceInternal(newId, false),
-    [switchWorkspaceInternal],
-  );
-
-  // Handle popstate for browser back/forward
+  // React to workspaceId changes (SPA navigation via React Router)
   useEffect(() => {
-    const handlePopState = () => {
-      const urlWorkspace = parseWorkspaceFromUrl();
-      if (urlWorkspace !== currentWorkspaceIdRef.current) {
-        switchWorkspaceInternal(urlWorkspace, true);
-      }
-    };
+    const prevId = prevWorkspaceIdRef.current;
+    if (prevId === workspaceId) return;
 
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [switchWorkspaceInternal]);
+    // Capture snapshot for previous workspace
+    const snapshot = captureSnapshot();
+    snapshotsRef.current.set(prevId, snapshot);
+
+    // Cancel pending scroll restore
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+
+    // Close all panels
+    closeAllPanels();
+
+    // Restore snapshot for new workspace
+    const savedSnapshot = snapshotsRef.current.get(workspaceId);
+    restoreSnapshot(savedSnapshot);
+
+    prevWorkspaceIdRef.current = workspaceId;
+  }, [workspaceId, captureSnapshot, closeAllPanels, restoreSnapshot]);
 
   // Cleanup pending rAF on unmount
   useEffect(() => {
@@ -214,6 +145,4 @@ export function useWorkspaceState(
       }
     };
   }, []);
-
-  return { currentWorkspaceId, switchWorkspace };
 }
