@@ -190,7 +190,10 @@ export type {
 export { useTheme } from "./useTheme";
 export type { Theme, UseThemeReturn } from "./useTheme";
 
-export { useWorkspaceState } from "./useWorkspaceState";
+export {
+  useWorkspaceState,
+  clearWorkspaceSnapshots,
+} from "./useWorkspaceState";
 export type {
   WorkspaceSnapshot,
   UseWorkspaceStateParams,

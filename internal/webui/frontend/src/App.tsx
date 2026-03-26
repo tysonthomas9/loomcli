@@ -344,10 +344,13 @@ function App() {
         ? pendingPanel.name
         : null;
 
-  // Workspace snapshot ref — updated synchronously during render (not in an effect)
-  const wsState = { view: activeView, filters, searchValue, selectedIssueId };
-  const latestStateRef = useRef(wsState);
-  latestStateRef.current = wsState;
+  // Ref to main scrollable container for workspace state snapshot.
+  // NOTE: Must be declared BEFORE useWorkspaceState below — React runs effects
+  // top-to-bottom, and the hook's mount effect needs this ref populated first.
+  const mainContentRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    mainContentRef.current = document.getElementById("main-content");
+  }, []);
 
   // Bulk selection state for Table view
   const {
@@ -712,13 +715,12 @@ function App() {
     clearIssue();
   }, [closePanel, clearIssue]);
 
-  // Workspace state preservation: save/restore per-workspace UI state on switch
+  // Workspace state preservation: save/restore ephemeral per-workspace UI state on switch
   useWorkspaceState({
     workspaceId,
-    stateRef: latestStateRef,
-    setView: setActiveView,
-    filterActions,
-    setSearchValue,
+    scrollContainerRef: mainContentRef,
+    activePanel,
+    restorePanel: openPanel,
     closeAllPanels,
   });
 

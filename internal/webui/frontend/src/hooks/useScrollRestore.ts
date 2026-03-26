@@ -16,6 +16,8 @@ export interface UseScrollRestoreOptions {
   scrollContainerRef: RefObject<HTMLElement | null>;
   /** Whether scroll restore is enabled (default: true) */
   enabled?: boolean;
+  /** Optional namespace prefix for workspace-scoped keys (e.g., workspace ID) */
+  namespace?: string;
 }
 
 /**
@@ -25,16 +27,18 @@ export function useScrollRestore({
   viewKey,
   scrollContainerRef,
   enabled = true,
+  namespace,
 }: UseScrollRestoreOptions): void {
   const rafIdRef = useRef<number | null>(null);
-  const viewKeyRef = useRef(viewKey);
-  viewKeyRef.current = viewKey;
+  const storageKey = namespace ? `${namespace}:${viewKey}` : viewKey;
+  const storageKeyRef = useRef(storageKey);
+  storageKeyRef.current = storageKey;
 
   // Restore scroll position on mount
   useEffect(() => {
     if (!enabled) return;
 
-    const savedPosition = scrollPositions.get(viewKey);
+    const savedPosition = scrollPositions.get(storageKey);
     if (savedPosition === undefined) return;
 
     rafIdRef.current = requestAnimationFrame(() => {
@@ -51,7 +55,7 @@ export function useScrollRestore({
         rafIdRef.current = null;
       }
     };
-  }, [viewKey, scrollContainerRef, enabled]);
+  }, [storageKey, scrollContainerRef, enabled]);
 
   // Save scroll position on unmount.
   // Copy ref to local variable per react-hooks/exhaustive-deps rule.
@@ -63,7 +67,7 @@ export function useScrollRestore({
     const container = scrollContainerRefCurrent;
     return () => {
       if (container) {
-        scrollPositions.set(viewKeyRef.current, container.scrollTop);
+        scrollPositions.set(storageKeyRef.current, container.scrollTop);
       }
     };
   }, [scrollContainerRefCurrent, enabled]);

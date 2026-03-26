@@ -3,22 +3,22 @@
  */
 
 /**
- * Unit tests for useWorkspaceState hook.
- * Verifies per-workspace snapshot capture/restore, scroll management,
- * panel close on switch.
+ * Unit tests for useWorkspaceState hook (T24 rewrite).
+ * Verifies ephemeral per-workspace snapshot capture/restore:
+ * - Scroll position (via scrollContainerRef)
+ * - Active panel state (via restorePanel callback)
  *
- * After T12 migration: hook accepts workspaceId as a prop, returns void,
- * and reacts to workspaceId changes via useEffect.
+ * URL-owned state (view, filters, search) is NOT snapshotted.
  */
 
 import { renderHook } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import type { ViewMode } from "@/components/ViewSwitcher";
-import type { FilterState, FilterActions } from "../useFilterState";
+import type { PanelState } from "../usePanelManager";
 
 import {
   useWorkspaceState,
+  clearWorkspaceSnapshots,
   type UseWorkspaceStateParams,
 } from "../useWorkspaceState";
 
@@ -27,61 +27,38 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a mock scroll container element attached to the DOM via
- * document.getElementById('main-content').
+ * Create a mock scroll container element with configurable scrollTop.
  */
-function mockScrollContainer(scrollTop = 0): HTMLDivElement {
-  const el = document.createElement("div");
-  el.id = "main-content";
-  Object.defineProperty(el, "scrollTop", {
+function createScrollContainer(scrollTop = 0): {
+  ref: React.RefObject<HTMLElement | null>;
+  element: HTMLDivElement;
+} {
+  const element = document.createElement("div");
+  Object.defineProperty(element, "scrollTop", {
     value: scrollTop,
     writable: true,
     configurable: true,
   });
-  document.body.appendChild(el);
-  return el;
+  const ref = { current: element } as React.RefObject<HTMLElement | null>;
+  return { ref, element };
 }
 
 /**
  * Build default params for useWorkspaceState with vi.fn mocks.
  */
 function createParams(overrides?: Partial<UseWorkspaceStateParams>) {
-  const defaultState: {
-    view: ViewMode;
-    filters: FilterState;
-    searchValue: string;
-    selectedIssueId: string | null;
-  } = {
-    view: "kanban",
-    filters: {},
-    searchValue: "",
-    selectedIssueId: null,
-  };
-
-  const stateRef = { current: defaultState };
-
-  const filterActions: FilterActions = {
-    setPriority: vi.fn(),
-    setType: vi.fn(),
-    setLabels: vi.fn(),
-    setSearch: vi.fn(),
-    setShowBlocked: vi.fn(),
-    setGroupBy: vi.fn(),
-    clearFilter: vi.fn(),
-    clearAll: vi.fn(),
-  };
+  const { ref } = createScrollContainer(0);
 
   const params: UseWorkspaceStateParams = {
-    workspaceId: "initial-ws",
-    stateRef: stateRef as React.RefObject<typeof defaultState>,
-    setView: vi.fn(),
-    filterActions,
-    setSearchValue: vi.fn(),
+    workspaceId: "ws-1",
+    scrollContainerRef: ref,
+    activePanel: null,
+    restorePanel: vi.fn(),
     closeAllPanels: vi.fn(),
     ...overrides,
   };
 
-  return { params, stateRef };
+  return { params };
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +70,8 @@ describe("useWorkspaceState", () => {
   let nextRafId: number;
 
   beforeEach(() => {
+    clearWorkspaceSnapshots();
+
     // Mock requestAnimationFrame / cancelAnimationFrame
     rafCallbacks = new Map();
     nextRafId = 1;
@@ -115,10 +94,6 @@ describe("useWorkspaceState", () => {
   });
 
   afterEach(() => {
-    // Clean up any elements added to the DOM
-    const el = document.getElementById("main-content");
-    if (el) el.remove();
-
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -134,240 +109,226 @@ describe("useWorkspaceState", () => {
   }
 
   // -----------------------------------------------------------------------
-  // 1. The hook returns void
+  // 1. Return value
   // -----------------------------------------------------------------------
 
   describe("return value", () => {
-    it("returns void (no currentWorkspaceId or switchWorkspace)", () => {
+    it("returns void", () => {
       const { params } = createParams();
-
       const { result } = renderHook(() => useWorkspaceState(params));
-
       expect(result.current).toBeUndefined();
     });
   });
 
   // -----------------------------------------------------------------------
-  // 2. Snapshot capture on workspace change
+  // 2. First visit (no snapshot)
   // -----------------------------------------------------------------------
 
-  describe("snapshot capture", () => {
-    it("captures current state when switching workspaces via rerender", () => {
-      const { params, stateRef } = createParams({ workspaceId: "A" });
-      mockScrollContainer(150);
-
-      const { rerender } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
-      );
-
-      // Simulate user changing state while on workspace A
-      stateRef.current.view = "table";
-      stateRef.current.filters = { search: "auth", showBlocked: true };
-      stateRef.current.searchValue = "auth";
-      stateRef.current.selectedIssueId = "issue-42";
-
-      // Now switch to workspace B
-      rerender({ wsId: "B" });
-
-      // B gets defaults on first visit
-      expect(params.setView).toHaveBeenCalledWith("kanban");
-      expect(params.filterActions.clearAll).toHaveBeenCalled();
-      expect(params.setSearchValue).toHaveBeenCalledWith("");
-
-      // Clear mocks
-      vi.mocked(params.setView).mockClear();
-      vi.mocked(params.filterActions.clearAll).mockClear();
-      vi.mocked(params.setSearchValue).mockClear();
-      vi.mocked(params.filterActions.setSearch).mockClear();
-      vi.mocked(params.filterActions.setShowBlocked).mockClear();
-
-      // Switch back to A - should restore A's captured state
-      rerender({ wsId: "A" });
-
-      expect(params.setView).toHaveBeenCalledWith("table");
-      expect(params.filterActions.setSearch).toHaveBeenCalledWith("auth");
-      expect(params.filterActions.setShowBlocked).toHaveBeenCalledWith(true);
-      expect(params.setSearchValue).toHaveBeenCalledWith("auth");
-    });
-
-    it("captures scrollTop from scroll container element", () => {
-      const { params, stateRef } = createParams({ workspaceId: "A" });
-      const scrollEl = mockScrollContainer(0);
-
-      const { rerender } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
-      );
-
-      // Set scroll position and state
-      scrollEl.scrollTop = 500;
-      stateRef.current.view = "kanban";
-
-      // Switch to B - captures A's scroll at 500
-      rerender({ wsId: "B" });
-
-      // Switch back to A
-      rerender({ wsId: "A" });
-
-      // Flush rAF to restore scroll
+  describe("first visit", () => {
+    it("does not call restorePanel on first visit (no snapshot exists)", () => {
+      const { params } = createParams();
+      renderHook(() => useWorkspaceState(params));
       flushRaf();
+      expect(params.restorePanel).not.toHaveBeenCalled();
+    });
 
-      expect(scrollEl.scrollTop).toBe(500);
+    it("does not modify scrollTop on first visit", () => {
+      const { ref, element } = createScrollContainer(0);
+      const { params } = createParams({ scrollContainerRef: ref });
+      renderHook(() => useWorkspaceState(params));
+      flushRaf();
+      expect(element.scrollTop).toBe(0);
     });
   });
 
   // -----------------------------------------------------------------------
-  // 3. Snapshot restore
+  // 3. Snapshot capture on unmount
   // -----------------------------------------------------------------------
 
-  describe("snapshot restore", () => {
-    it("restores all saved state values when switching back", () => {
-      const { params, stateRef } = createParams({ workspaceId: "A" });
-      mockScrollContainer(0);
+  describe("snapshot capture on unmount", () => {
+    it("captures scrollTop and activePanel on unmount, restores on remount", () => {
+      const { ref, element } = createScrollContainer(0);
+      const restorePanel = vi.fn();
+      const panel: PanelState = { type: "issue", id: "abc-123" };
+      const { params } = createParams({
+        workspaceId: "ws-1",
+        scrollContainerRef: ref,
+        activePanel: panel,
+        restorePanel,
+      });
 
-      const { rerender } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
+      const { unmount } = renderHook(() => useWorkspaceState(params));
+
+      // Simulate scroll
+      element.scrollTop = 350;
+
+      // Unmount captures snapshot
+      unmount();
+
+      // Remount with same workspaceId
+      restorePanel.mockClear();
+      renderHook(() => useWorkspaceState({ ...params, restorePanel }));
+
+      // Panel should be restored
+      expect(restorePanel).toHaveBeenCalledWith(panel);
+
+      // Scroll should be restored via rAF
+      flushRaf();
+      expect(element.scrollTop).toBe(350);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 4. Scroll restore on revisit
+  // -----------------------------------------------------------------------
+
+  describe("scroll restore on revisit", () => {
+    it("restores scroll position via requestAnimationFrame", () => {
+      const { ref, element } = createScrollContainer(0);
+      const { params } = createParams({
+        workspaceId: "ws-1",
+        scrollContainerRef: ref,
+      });
+
+      // First mount: scroll to 500, then unmount
+      const { unmount } = renderHook(() => useWorkspaceState(params));
+      element.scrollTop = 500;
+      unmount();
+
+      // Second mount: scroll should restore
+      element.scrollTop = 0;
+      renderHook(() => useWorkspaceState(params));
+
+      // Before rAF flush, scroll hasn't changed yet
+      expect(element.scrollTop).toBe(0);
+
+      flushRaf();
+      expect(element.scrollTop).toBe(500);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 5. Panel restore on revisit
+  // -----------------------------------------------------------------------
+
+  describe("panel restore on revisit", () => {
+    it("restores issue panel state on revisit", () => {
+      const { ref } = createScrollContainer(0);
+      const panel: PanelState = { type: "issue", id: "issue-42" };
+      const restorePanel = vi.fn();
+      const { params } = createParams({
+        workspaceId: "ws-1",
+        scrollContainerRef: ref,
+        activePanel: panel,
+        restorePanel,
+      });
+
+      const { unmount } = renderHook(() => useWorkspaceState(params));
+      unmount();
+
+      restorePanel.mockClear();
+      renderHook(() =>
+        useWorkspaceState({ ...params, activePanel: null, restorePanel }),
       );
 
-      // Set state for workspace A
-      stateRef.current = {
-        view: "graph",
-        filters: {
-          search: "network",
-          showBlocked: false,
-          groupBy: "epic",
-          labels: ["frontend"],
-        },
-        searchValue: "network",
-        selectedIssueId: "issue-99",
-      };
+      expect(restorePanel).toHaveBeenCalledWith(panel);
+    });
 
-      // Switch to B
-      rerender({ wsId: "B" });
+    it("restores agent panel state on revisit", () => {
+      const { ref } = createScrollContainer(0);
+      const panel: PanelState = { type: "agent", name: "falcon" };
+      const restorePanel = vi.fn();
+      const { params } = createParams({
+        workspaceId: "ws-1",
+        scrollContainerRef: ref,
+        activePanel: panel,
+        restorePanel,
+      });
 
-      // Change state for workspace B
-      stateRef.current = {
-        view: "monitor",
-        filters: {},
-        searchValue: "other",
-        selectedIssueId: null,
-      };
+      const { unmount } = renderHook(() => useWorkspaceState(params));
+      unmount();
 
-      // Clear the mock call history so we can verify the restore calls
-      vi.mocked(params.setView).mockClear();
-      vi.mocked(params.filterActions.clearAll).mockClear();
-      vi.mocked(params.filterActions.setSearch).mockClear();
-      vi.mocked(params.filterActions.setShowBlocked).mockClear();
-      vi.mocked(params.filterActions.setGroupBy).mockClear();
-      vi.mocked(params.filterActions.setLabels).mockClear();
-      vi.mocked(params.setSearchValue).mockClear();
+      restorePanel.mockClear();
+      renderHook(() =>
+        useWorkspaceState({ ...params, activePanel: null, restorePanel }),
+      );
+
+      expect(restorePanel).toHaveBeenCalledWith(panel);
+    });
+
+    it("does not call restorePanel when snapshot has null panel", () => {
+      const { ref } = createScrollContainer(0);
+      const restorePanel = vi.fn();
+      const { params } = createParams({
+        workspaceId: "ws-1",
+        scrollContainerRef: ref,
+        activePanel: null,
+        restorePanel,
+      });
+
+      const { unmount } = renderHook(() => useWorkspaceState(params));
+      unmount();
+
+      restorePanel.mockClear();
+      renderHook(() => useWorkspaceState({ ...params, restorePanel }));
+
+      expect(restorePanel).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 6. Workspace switch via workspaceId change (defense-in-depth)
+  // -----------------------------------------------------------------------
+
+  describe("workspace switch via rerender", () => {
+    it("captures old snapshot and restores new on workspaceId change", () => {
+      const { ref, element } = createScrollContainer(0);
+      const restorePanel = vi.fn();
+      const panelA: PanelState = { type: "issue", id: "a-1" };
+
+      const { params } = createParams({
+        workspaceId: "A",
+        scrollContainerRef: ref,
+        activePanel: panelA,
+        restorePanel,
+      });
+
+      const { rerender } = renderHook(
+        (props: { wsId: string; panel: PanelState }) =>
+          useWorkspaceState({
+            ...params,
+            workspaceId: props.wsId,
+            activePanel: props.panel,
+            restorePanel,
+          }),
+        { initialProps: { wsId: "A", panel: panelA } },
+      );
+
+      // Scroll on workspace A
+      element.scrollTop = 200;
+
+      // Switch to workspace B (first visit)
+      restorePanel.mockClear();
+      rerender({ wsId: "B", panel: null });
+
+      // closeAllPanels called on switch
+      expect(params.closeAllPanels).toHaveBeenCalledTimes(1);
+      // No snapshot for B → no restorePanel call
+      expect(restorePanel).not.toHaveBeenCalled();
 
       // Switch back to A
-      rerender({ wsId: "A" });
+      restorePanel.mockClear();
+      rerender({ wsId: "A", panel: null });
 
-      expect(params.setView).toHaveBeenCalledWith("graph");
-      expect(params.filterActions.clearAll).toHaveBeenCalled();
-      expect(params.filterActions.setSearch).toHaveBeenCalledWith("network");
-      expect(params.filterActions.setShowBlocked).toHaveBeenCalledWith(false);
-      expect(params.filterActions.setGroupBy).toHaveBeenCalledWith("epic");
-      expect(params.filterActions.setLabels).toHaveBeenCalledWith(["frontend"]);
-      expect(params.setSearchValue).toHaveBeenCalledWith("network");
+      // A's panel should be restored
+      expect(restorePanel).toHaveBeenCalledWith(panelA);
+
+      // A's scroll should be restored
+      flushRaf();
+      expect(element.scrollTop).toBe(200);
     });
-  });
 
-  // -----------------------------------------------------------------------
-  // 4. No snapshot (first visit)
-  // -----------------------------------------------------------------------
-
-  describe("no snapshot (first visit)", () => {
-    it("applies defaults when visiting a workspace with no prior snapshot", () => {
-      const { params } = createParams({ workspaceId: "A" });
-
-      const { rerender } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
-      );
-
-      // Clear mock history
-      vi.mocked(params.setView).mockClear();
-      vi.mocked(params.filterActions.clearAll).mockClear();
-      vi.mocked(params.setSearchValue).mockClear();
-
-      // Switch to B (never visited before)
-      rerender({ wsId: "B" });
-
-      // Defaults: kanban view, clearAll filters, empty search
-      expect(params.setView).toHaveBeenCalledWith("kanban");
-      expect(params.filterActions.clearAll).toHaveBeenCalled();
-      expect(params.setSearchValue).toHaveBeenCalledWith("");
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 5. Multiple workspaces
-  // -----------------------------------------------------------------------
-
-  describe("multiple workspaces", () => {
-    it("preserves each workspace state independently (A -> B -> C -> A)", () => {
-      const { params, stateRef } = createParams({ workspaceId: "A" });
-      mockScrollContainer(0);
-
-      const { rerender } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
-      );
-
-      stateRef.current = {
-        view: "table",
-        filters: {},
-        searchValue: "alpha",
-        selectedIssueId: "a1",
-      };
-
-      // Switch to B
-      rerender({ wsId: "B" });
-      stateRef.current = {
-        view: "graph",
-        filters: {},
-        searchValue: "beta",
-        selectedIssueId: "b1",
-      };
-
-      // Switch to C
-      rerender({ wsId: "C" });
-      stateRef.current = {
-        view: "monitor",
-        filters: {},
-        searchValue: "gamma",
-        selectedIssueId: "c1",
-      };
-
-      // Clear mocks before switching back to A
-      vi.mocked(params.setView).mockClear();
-      vi.mocked(params.setSearchValue).mockClear();
-
-      // Switch back to A
-      rerender({ wsId: "A" });
-
-      // A's state should be restored
-      expect(params.setView).toHaveBeenCalledWith("table");
-      expect(params.setSearchValue).toHaveBeenCalledWith("alpha");
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 6. Panel close
-  // -----------------------------------------------------------------------
-
-  describe("panel close", () => {
-    it("calls closeAllPanels on every switch", () => {
+    it("calls closeAllPanels on every workspace switch", () => {
       const { params } = createParams({ workspaceId: "A" });
 
       const { rerender } = renderHook(
@@ -381,63 +342,54 @@ describe("useWorkspaceState", () => {
 
       rerender({ wsId: "C" });
       expect(params.closeAllPanels).toHaveBeenCalledTimes(2);
-
-      rerender({ wsId: "D" });
-      expect(params.closeAllPanels).toHaveBeenCalledTimes(3);
     });
   });
 
   // -----------------------------------------------------------------------
-  // 7. Scroll position
+  // 7. Multiple workspaces (A → B → C → A)
   // -----------------------------------------------------------------------
 
-  describe("scroll position", () => {
-    it("captures scrollTop from scroll container and restores via rAF", () => {
-      const { params, stateRef } = createParams({ workspaceId: "A" });
-      const scrollEl = mockScrollContainer(0);
+  describe("multiple workspaces", () => {
+    it("preserves each workspace snapshot independently", () => {
+      const { ref, element } = createScrollContainer(0);
+      const restorePanel = vi.fn();
+      const panelA: PanelState = { type: "issue", id: "a-1" };
+      const panelB: PanelState = { type: "agent", name: "hawk" };
+
+      const { params } = createParams({
+        workspaceId: "A",
+        scrollContainerRef: ref,
+        activePanel: panelA,
+        restorePanel,
+      });
 
       const { rerender } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
+        (props: { wsId: string; panel: PanelState }) =>
+          useWorkspaceState({
+            ...params,
+            workspaceId: props.wsId,
+            activePanel: props.panel,
+            restorePanel,
+          }),
+        { initialProps: { wsId: "A", panel: panelA } },
       );
 
-      // Simulate scrolling
-      scrollEl.scrollTop = 250;
-      stateRef.current.view = "kanban";
+      element.scrollTop = 100;
 
-      // Switch to B (captures A at 250)
-      rerender({ wsId: "B" });
-      flushRaf();
+      // Switch to B
+      rerender({ wsId: "B", panel: panelB });
+      element.scrollTop = 300;
 
-      // B's default scroll is 0
-      expect(scrollEl.scrollTop).toBe(0);
+      // Switch to C (first visit)
+      rerender({ wsId: "C", panel: null });
 
       // Switch back to A
-      rerender({ wsId: "A" });
+      restorePanel.mockClear();
+      rerender({ wsId: "A", panel: null });
+
+      expect(restorePanel).toHaveBeenCalledWith(panelA);
       flushRaf();
-
-      // A's scroll should be restored to 250
-      expect(scrollEl.scrollTop).toBe(250);
-    });
-
-    it("defaults scrollTop to 0 when no main-content element exists", () => {
-      const { params, stateRef } = createParams({ workspaceId: "A" });
-      // No scroll container in DOM
-
-      const { rerender } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
-      );
-
-      stateRef.current.view = "kanban";
-
-      // Switch to B - should not throw even without main-content
-      rerender({ wsId: "B" });
-
-      // Should not throw when flushing rAF without element
-      flushRaf();
+      expect(element.scrollTop).toBe(100);
     });
   });
 
@@ -446,62 +398,159 @@ describe("useWorkspaceState", () => {
   // -----------------------------------------------------------------------
 
   describe("rapid switch cancels rAF", () => {
-    it("cancels pending rAF when switching rapidly, only final scroll restore executes", () => {
-      const { params, stateRef } = createParams({ workspaceId: "A" });
-      const scrollEl = mockScrollContainer(0);
+    it("cancels pending rAF when switching rapidly", () => {
+      const { ref, element } = createScrollContainer(0);
+      const { params } = createParams({
+        workspaceId: "A",
+        scrollContainerRef: ref,
+      });
 
+      // First: create a snapshot for B by mounting/unmounting with B
+      const { unmount: setup } = renderHook(() =>
+        useWorkspaceState({ ...params, workspaceId: "B" }),
+      );
+      element.scrollTop = 200;
+      setup();
+
+      // Now mount with A
+      element.scrollTop = 0;
       const { rerender } = renderHook(
         (props: { wsId: string }) =>
           useWorkspaceState({ ...params, workspaceId: props.wsId }),
         { initialProps: { wsId: "A" } },
       );
 
-      scrollEl.scrollTop = 100;
-      stateRef.current.view = "kanban";
+      element.scrollTop = 100;
 
-      // Switch to B
+      // Switch to B — B has a snapshot, so restoreFromSnapshot schedules rAF
       rerender({ wsId: "B" });
-      scrollEl.scrollTop = 200;
-      stateRef.current.view = "table";
+      expect(rafCallbacks.size).toBeGreaterThan(0);
 
-      // Switch to C rapidly without flushing rAF
+      // Switch to C rapidly without flushing rAF — should cancel
       rerender({ wsId: "C" });
 
-      // cancelAnimationFrame should have been called
       expect(cancelAnimationFrame).toHaveBeenCalled();
-
-      // Only the latest rAF callback should remain
-      expect(rafCallbacks.size).toBe(1);
-
-      // Flush - should restore C's scroll (default 0 since first visit)
-      flushRaf();
-      expect(scrollEl.scrollTop).toBe(0);
     });
   });
 
   // -----------------------------------------------------------------------
-  // 9. Cleanup
+  // 9. Cleanup on unmount
   // -----------------------------------------------------------------------
 
   describe("cleanup", () => {
     it("cancels pending rAF on unmount", () => {
-      const { params } = createParams({ workspaceId: "A" });
+      const { ref, element } = createScrollContainer(0);
+      const { params } = createParams({
+        workspaceId: "ws-1",
+        scrollContainerRef: ref,
+      });
 
-      const { rerender, unmount } = renderHook(
-        (props: { wsId: string }) =>
-          useWorkspaceState({ ...params, workspaceId: props.wsId }),
-        { initialProps: { wsId: "A" } },
-      );
+      // First mount/unmount to create a snapshot
+      const { unmount: unmount1 } = renderHook(() => useWorkspaceState(params));
+      element.scrollTop = 100;
+      unmount1();
 
-      // Trigger a switch to create a pending rAF
-      rerender({ wsId: "B" });
+      // Second mount — triggers rAF for scroll restore
+      const { unmount: unmount2 } = renderHook(() => useWorkspaceState(params));
 
-      // Should have a pending rAF
-      expect(rafCallbacks.size).toBe(1);
+      expect(rafCallbacks.size).toBeGreaterThan(0);
 
-      unmount();
+      unmount2();
 
       expect(cancelAnimationFrame).toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 10. clearWorkspaceSnapshots utility
+  // -----------------------------------------------------------------------
+
+  describe("clearWorkspaceSnapshots", () => {
+    it("clears all stored snapshots so subsequent mount gets no restore", () => {
+      const { ref, element } = createScrollContainer(0);
+      const restorePanel = vi.fn();
+      const panel: PanelState = { type: "issue", id: "xyz" };
+      const { params } = createParams({
+        workspaceId: "ws-1",
+        scrollContainerRef: ref,
+        activePanel: panel,
+        restorePanel,
+      });
+
+      // Mount, scroll, unmount
+      const { unmount } = renderHook(() => useWorkspaceState(params));
+      element.scrollTop = 999;
+      unmount();
+
+      // Clear all snapshots
+      clearWorkspaceSnapshots();
+
+      // Reset element scroll to verify it's NOT restored to 999
+      element.scrollTop = 0;
+
+      // Remount — no restore should happen
+      restorePanel.mockClear();
+      renderHook(() =>
+        useWorkspaceState({ ...params, activePanel: null, restorePanel }),
+      );
+      flushRaf();
+
+      expect(restorePanel).not.toHaveBeenCalled();
+      expect(element.scrollTop).toBe(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 11. scrollContainerRef.current is null
+  // -----------------------------------------------------------------------
+
+  describe("null scrollContainerRef", () => {
+    it("defaults scrollTop to 0 when ref is null during capture", () => {
+      const restorePanel = vi.fn();
+      const nullRef = {
+        current: null,
+      } as React.RefObject<HTMLElement | null>;
+
+      const { params } = createParams({
+        workspaceId: "ws-1",
+        scrollContainerRef: nullRef,
+        activePanel: null,
+        restorePanel,
+      });
+
+      // Mount and unmount — should not throw
+      const { unmount } = renderHook(() => useWorkspaceState(params));
+      unmount();
+
+      // Remount — should not throw or set scroll
+      renderHook(() => useWorkspaceState(params));
+      flushRaf();
+
+      // No restorePanel called (panel was null)
+      expect(restorePanel).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 12. Does NOT manage URL-owned state
+  // -----------------------------------------------------------------------
+
+  describe("URL-owned state exclusion", () => {
+    it("does not accept view/filter/search params (structural guarantee)", () => {
+      // This is a compile-time check. The UseWorkspaceStateParams type
+      // does not include stateRef, setView, filterActions, or setSearchValue.
+      // If someone tries to add them, TypeScript will error.
+      const { params } = createParams();
+
+      // Verify the params shape only has the expected keys
+      const keys = Object.keys(params).sort();
+      expect(keys).toEqual([
+        "activePanel",
+        "closeAllPanels",
+        "restorePanel",
+        "scrollContainerRef",
+        "workspaceId",
+      ]);
     });
   });
 });

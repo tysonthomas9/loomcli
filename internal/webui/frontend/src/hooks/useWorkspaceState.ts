@@ -1,47 +1,50 @@
 /**
- * useWorkspaceState - Saves and restores per-workspace UI state on switch.
- * State is stored in-memory only (resets on page reload).
- * Captures: active view, filters, search, selected issue, scroll position.
- * On workspace ID change: closes panels, restores saved state (or defaults).
+ * useWorkspaceState - Saves and restores per-workspace ephemeral UI state on switch.
+ * State is stored in a module-level Map (survives remounts, resets on page reload).
+ * Captures: scroll position and active panel state.
  *
- * T12 changes: removed URL management (now handled by React Router),
- * accepts workspaceId as prop, removed switchWorkspace/currentWorkspaceId exports.
- * T24 will rewrite the snapshot logic.
+ * URL-owned state (view mode, filters, search, selected issue) is NOT stored —
+ * the URL is the single source of truth for those (per T12's URL/State Contract).
+ *
+ * T24: Rewritten for path-based routing. Module-level Map survives WorkspaceLayout
+ * remounts. Accepts workspaceId as prop, returns void.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
-import type { ViewMode } from "@/components/ViewSwitcher";
-import type { FilterState, FilterActions } from "./useFilterState";
+import type { PanelState } from "./usePanelManager";
+
+// Module-level storage survives component remounts within the same session.
+const workspaceSnapshots = new Map<string, WorkspaceSnapshot>();
 
 /**
- * Per-workspace snapshot of UI state.
+ * Clear all stored workspace snapshots (useful for testing).
+ */
+export function clearWorkspaceSnapshots(): void {
+  workspaceSnapshots.clear();
+}
+
+/**
+ * Per-workspace snapshot of ephemeral UI state.
+ * Only stores state that is NOT URL-owned.
  */
 export interface WorkspaceSnapshot {
-  view: ViewMode;
-  filters: FilterState;
-  searchValue: string;
-  selectedIssueId: string | null;
   scrollTop: number;
+  activePanel: PanelState;
 }
 
 /**
  * Parameters for useWorkspaceState hook.
  */
 export interface UseWorkspaceStateParams {
-  /** The current workspace ID from the route */
+  /** The current workspace ID from the route (useParams) */
   workspaceId: string;
-  /** Ref tracking latest state values (avoids stale closures) */
-  stateRef: React.RefObject<{
-    view: ViewMode;
-    filters: FilterState;
-    searchValue: string;
-    selectedIssueId: string | null;
-  }>;
-  /** Set the active view (clears issue ID when not issue-detail) */
-  setView: (view: ViewMode) => void;
-  filterActions: FilterActions;
-  setSearchValue: (value: string) => void;
+  /** Ref to the main scrollable container element */
+  scrollContainerRef: RefObject<HTMLElement | null>;
+  /** Current active panel state from usePanelManager */
+  activePanel: PanelState;
+  /** Callback to restore a panel state (openPanel from usePanelManager) */
+  restorePanel: (panel: NonNullable<PanelState>) => void;
   /** Synchronously close all panels without animation */
   closeAllPanels: () => void;
 }
@@ -49,77 +52,62 @@ export interface UseWorkspaceStateParams {
 export function useWorkspaceState(params: UseWorkspaceStateParams): void {
   const {
     workspaceId,
-    stateRef,
-    setView,
-    filterActions,
-    setSearchValue,
+    scrollContainerRef,
+    activePanel,
+    restorePanel,
     closeAllPanels,
   } = params;
 
-  const snapshotsRef = useRef<Map<string, WorkspaceSnapshot>>(new Map());
   const rafIdRef = useRef<number | null>(null);
   const prevWorkspaceIdRef = useRef<string>(workspaceId);
 
-  // Capture snapshot from current state
-  const captureSnapshot = useCallback((): WorkspaceSnapshot => {
-    const current = stateRef.current!;
-    const mainEl = document.getElementById("main-content");
-    return {
-      view: current.view,
-      filters: { ...current.filters },
-      searchValue: current.searchValue,
-      selectedIssueId: current.selectedIssueId,
-      scrollTop: mainEl?.scrollTop ?? 0,
+  // Panel ref: updated in an effect (not during render) so that the
+  // workspaceId-change effect — which runs first — still sees the
+  // PREVIOUS render's panel value when capturing the old workspace.
+  const activePanelRef = useRef<PanelState>(activePanel);
+
+  const restorePanelRef = useRef(restorePanel);
+  restorePanelRef.current = restorePanel;
+
+  const closeAllPanelsRef = useRef(closeAllPanels);
+  closeAllPanelsRef.current = closeAllPanels;
+
+  // Capture snapshot for a workspace
+  const captureSnapshot = (wsId: string): void => {
+    const snapshot: WorkspaceSnapshot = {
+      scrollTop: scrollContainerRef.current?.scrollTop ?? 0,
+      activePanel: activePanelRef.current,
     };
-  }, [stateRef]);
+    workspaceSnapshots.set(wsId, snapshot);
+  };
 
-  // Restore snapshot or apply defaults
-  const restoreSnapshot = useCallback(
-    (snapshot: WorkspaceSnapshot | undefined) => {
-      if (snapshot) {
-        setView(snapshot.view);
-        filterActions.clearAll();
-        if (snapshot.filters.priority !== undefined)
-          filterActions.setPriority(snapshot.filters.priority);
-        if (snapshot.filters.type !== undefined)
-          filterActions.setType(snapshot.filters.type);
-        if (snapshot.filters.labels !== undefined)
-          filterActions.setLabels(snapshot.filters.labels);
-        if (snapshot.filters.search !== undefined)
-          filterActions.setSearch(snapshot.filters.search);
-        if (snapshot.filters.showBlocked !== undefined)
-          filterActions.setShowBlocked(snapshot.filters.showBlocked);
-        if (snapshot.filters.groupBy !== undefined)
-          filterActions.setGroupBy(snapshot.filters.groupBy);
-        setSearchValue(snapshot.searchValue);
-      } else {
-        // First visit defaults
-        setView("kanban");
-        filterActions.clearAll();
-        setSearchValue("");
+  // Restore snapshot for a workspace (scroll via rAF, panel immediately)
+  const restoreFromSnapshot = (wsId: string): void => {
+    const snapshot = workspaceSnapshots.get(wsId);
+    if (!snapshot) return;
+
+    // Restore panel state
+    if (snapshot.activePanel !== null) {
+      restorePanelRef.current(snapshot.activePanel);
+    }
+
+    // Restore scroll position via rAF to let DOM settle
+    rafIdRef.current = requestAnimationFrame(() => {
+      const container = scrollContainerRef.current;
+      if (container) {
+        container.scrollTop = snapshot.scrollTop;
       }
+      rafIdRef.current = null;
+    });
+  };
 
-      // Schedule scroll restore via rAF
-      const scrollTarget = snapshot?.scrollTop ?? 0;
-      rafIdRef.current = requestAnimationFrame(() => {
-        const mainEl = document.getElementById("main-content");
-        if (mainEl) {
-          mainEl.scrollTop = scrollTarget;
-        }
-        rafIdRef.current = null;
-      });
-    },
-    [setView, filterActions, setSearchValue],
-  );
-
-  // React to workspaceId changes (SPA navigation via React Router)
+  // React to workspaceId changes (defense-in-depth for non-remount transitions)
   useEffect(() => {
     const prevId = prevWorkspaceIdRef.current;
     if (prevId === workspaceId) return;
 
     // Capture snapshot for previous workspace
-    const snapshot = captureSnapshot();
-    snapshotsRef.current.set(prevId, snapshot);
+    captureSnapshot(prevId);
 
     // Cancel pending scroll restore
     if (rafIdRef.current !== null) {
@@ -127,22 +115,34 @@ export function useWorkspaceState(params: UseWorkspaceStateParams): void {
       rafIdRef.current = null;
     }
 
-    // Close all panels
-    closeAllPanels();
+    // Close all panels before restoring new workspace state
+    closeAllPanelsRef.current();
 
     // Restore snapshot for new workspace
-    const savedSnapshot = snapshotsRef.current.get(workspaceId);
-    restoreSnapshot(savedSnapshot);
+    restoreFromSnapshot(workspaceId);
 
     prevWorkspaceIdRef.current = workspaceId;
-  }, [workspaceId, captureSnapshot, closeAllPanels, restoreSnapshot]);
+  }, [workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cleanup pending rAF on unmount
+  // On mount: restore snapshot if available
   useEffect(() => {
+    restoreFromSnapshot(workspaceId);
+
+    // On unmount: capture snapshot for current workspace
     return () => {
+      captureSnapshot(prevWorkspaceIdRef.current);
+
+      // Cancel pending rAF
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
       }
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync activePanelRef LAST — after the workspaceId effect has had a
+  // chance to capture the old panel value for the previous workspace.
+  useEffect(() => {
+    activePanelRef.current = activePanel;
+  });
 }
