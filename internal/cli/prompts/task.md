@@ -79,6 +79,8 @@ Before implementing, read the actual source files you'll be modifying — not ju
 - Follow existing code patterns in the codebase
 - Do not refactor unrelated code
 - Do not add features beyond the task scope
+- **No TODO comments for deferred work.** If the design specifies a change you cannot make (e.g., a backend route doesn't exist yet, a dependency isn't ready), create a follow-up bug ticket with `bd create --title="..." --type=bug --priority=2 --parent=<epic-id>` instead of leaving a TODO in code. TODOs are invisible to the task system and never get resolved. Tickets get tracked and assigned.
+- **Flag discovered gaps.** If you discover edge cases or failure paths not covered by the design's acceptance criteria, do not silently handle them. Create a bug ticket with `bd create` for each one, documenting the scenario, the risk, and your recommended fix. This surfaces gaps the planner missed rather than burying them in implementation choices.
 
 ### Step 4: Manual Testing
 Manual testing means **real end-to-end verification** — not unit tests. You must prove the code actually works by exercising it the way a user or the system would.

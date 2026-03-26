@@ -119,8 +119,15 @@ Write a comprehensive plan that includes:
 - List edge cases to handle
 - Error scenarios and how to handle them
 - Validation requirements
+- For every decision point where the implementation could go two ways, state the expected behavior explicitly. If the design is silent on a failure path, the implementation agent will decide on its own — and may decide wrong. Say "abort and return error", "log warning and skip", or "fall back to X" — never leave it open.
 
-#### 3i. Testing Strategy
+#### 3i. Acceptance Criteria
+- List concrete, testable assertions that must be true when this task is done
+- These are behavioral — verifiable from the outside, not by reading code
+- Include negative cases: "X must NOT happen when Y"
+- The implementation agent and the reviewer will both use these to verify correctness
+
+#### 3j. Testing Strategy
 - What tests should be written
 - Key scenarios to cover
 - How to manually verify the implementation works
