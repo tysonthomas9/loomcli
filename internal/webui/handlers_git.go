@@ -16,10 +16,11 @@ var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
 // AgentResolver is satisfied by any interface that can resolve agent worktrees.
 // Both GitOps and FileOps implement this, allowing resolveAgent to be shared.
 type AgentResolver interface {
-	ResolveAgentWorktree(name string) (*AgentWorktree, error)
+	ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error)
 }
 
 // resolveAgent validates the agent name from the path and resolves it via the given resolver.
+// It extracts the workspace ID from the request context (set by WorkspaceMiddleware).
 func resolveAgent(w http.ResponseWriter, r *http.Request, ops AgentResolver) (*AgentWorktree, bool) {
 	agentName := r.PathValue("name")
 	if agentName == "" {
@@ -31,7 +32,8 @@ func resolveAgent(w http.ResponseWriter, r *http.Request, ops AgentResolver) (*A
 		return nil, false
 	}
 
-	wt, err := ops.ResolveAgentWorktree(agentName)
+	wsID := WorkspaceFromContext(r.Context())
+	wt, err := ops.ResolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		respondError(w, http.StatusNotFound, fmt.Sprintf("agent worktree %q not found", agentName))
 		return nil, false
@@ -103,7 +105,8 @@ type pushAllResponse struct {
 // Pushes all agent worktree branches to their target branches.
 func handleGitPushAll(ops GitOps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		worktrees, err := ops.ListAgentWorktrees()
+		wsID := WorkspaceFromContext(r.Context())
+		worktrees, err := ops.ListAgentWorktrees(wsID)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("listing worktrees: %v", err))
 			return
@@ -443,7 +446,8 @@ func handleGitTargetUpdate(ops GitOps) http.HandlerFunc {
 			return
 		}
 
-		if err := ops.SetRepoDefaultBranch(wt.RepoName, req.Branch); err != nil {
+		wsID := WorkspaceFromContext(r.Context())
+		if err := ops.SetRepoDefaultBranch(wsID, wt.RepoName, req.Branch); err != nil {
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("updating target branch: %v", err))
 			return
 		}

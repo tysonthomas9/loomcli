@@ -28,7 +28,7 @@ type mockGitOps struct {
 	diffFilePatchFunc      func(worktreePath, from, to, path string) (*DiffFilePatchResult, error)
 }
 
-func (m *mockGitOps) ResolveAgentWorktree(name string) (*AgentWorktree, error) {
+func (m *mockGitOps) ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error) {
 	if m.resolveFunc != nil {
 		return m.resolveFunc(name)
 	}
@@ -84,14 +84,14 @@ func (m *mockGitOps) CheckGhInstalled() error {
 	return nil
 }
 
-func (m *mockGitOps) SetRepoDefaultBranch(repoName, branch string) error {
+func (m *mockGitOps) SetRepoDefaultBranch(workspaceID, repoName, branch string) error {
 	if m.setRepoDefaultFunc != nil {
 		return m.setRepoDefaultFunc(repoName, branch)
 	}
 	return nil
 }
 
-func (m *mockGitOps) ListAgentWorktrees() ([]AgentWorktree, error) {
+func (m *mockGitOps) ListAgentWorktrees(workspaceID string) ([]AgentWorktree, error) {
 	if m.listAgentWorktreesFunc != nil {
 		return m.listAgentWorktreesFunc()
 	}
@@ -1315,6 +1315,174 @@ func TestGitPushAll_ListError(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
+}
+
+// --- Workspace-scoped tests ---
+
+func TestResolveAgent_WorkspaceScoped(t *testing.T) {
+	var capturedWorkspaceID string
+	ops := &mockGitOps{
+		resolveFunc: func(name string) (*AgentWorktree, error) {
+			return testWorktree(), nil
+		},
+	}
+	// Override ResolveAgentWorktree to capture workspace ID.
+	// We use a wrapper approach: set up the mock so the method captures wsID.
+	captureOps := &wsCaptureMockGitOps{
+		mockGitOps: ops,
+		captureResolveWS: func(wsID string) {
+			capturedWorkspaceID = wsID
+		},
+	}
+
+	handler := handleGitPush(captureOps)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(WithWorkspace(req.Context(), "ws1"))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if capturedWorkspaceID != "ws1" {
+		t.Errorf("capturedWorkspaceID = %q, want %q", capturedWorkspaceID, "ws1")
+	}
+}
+
+func TestResolveAgent_NoWorkspace_FallsBackToDefault(t *testing.T) {
+	var capturedWorkspaceID string
+	ops := &mockGitOps{
+		resolveFunc: func(name string) (*AgentWorktree, error) {
+			return testWorktree(), nil
+		},
+	}
+	captureOps := &wsCaptureMockGitOps{
+		mockGitOps: ops,
+		captureResolveWS: func(wsID string) {
+			capturedWorkspaceID = wsID
+		},
+	}
+
+	handler := handleGitPush(captureOps)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/test-agent/git/push", nil)
+	req.SetPathValue("name", "test-agent")
+	// No workspace in context — should fall back to empty string.
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if capturedWorkspaceID != "" {
+		t.Errorf("capturedWorkspaceID = %q, want empty", capturedWorkspaceID)
+	}
+}
+
+func TestHandleGitPushAll_WorkspaceScoped(t *testing.T) {
+	var capturedWorkspaceID string
+	ops := &mockGitOps{
+		pushFunc: func(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error) {
+			return &GitPushResult{Success: true, Message: "merged"}, nil
+		},
+	}
+	captureOps := &wsCaptureMockGitOps{
+		mockGitOps: ops,
+		captureListWS: func(wsID string) {
+			capturedWorkspaceID = wsID
+		},
+	}
+	// Set up list to return worktrees.
+	ops.listAgentWorktreesFunc = func() ([]AgentWorktree, error) {
+		return []AgentWorktree{
+			{Name: "falcon", Path: "/tmp/wt/falcon", Branch: "falcon", DefaultBranch: "main", Remote: "origin"},
+		}, nil
+	}
+
+	handler := handleGitPushAll(captureOps)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/git/push-all", nil)
+	req = req.WithContext(WithWorkspace(req.Context(), "ws-prod"))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if capturedWorkspaceID != "ws-prod" {
+		t.Errorf("capturedWorkspaceID = %q, want %q", capturedWorkspaceID, "ws-prod")
+	}
+}
+
+func TestHandleGitTargetUpdate_WorkspaceScoped(t *testing.T) {
+	var capturedWorkspaceID string
+	ops := &mockGitOps{
+		resolveFunc: func(name string) (*AgentWorktree, error) {
+			return testWorktree(), nil
+		},
+	}
+	captureOps := &wsCaptureMockGitOps{
+		mockGitOps: ops,
+		captureSetRepoWS: func(wsID string) {
+			capturedWorkspaceID = wsID
+		},
+	}
+	ops.setRepoDefaultFunc = func(repoName, branch string) error {
+		return nil
+	}
+
+	handler := handleGitTargetUpdate(captureOps)
+
+	body := `{"branch": "develop"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/agents/test-agent/git/target", strings.NewReader(body))
+	req.SetPathValue("name", "test-agent")
+	req = req.WithContext(WithWorkspace(req.Context(), "ws-staging"))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if capturedWorkspaceID != "ws-staging" {
+		t.Errorf("capturedWorkspaceID = %q, want %q", capturedWorkspaceID, "ws-staging")
+	}
+}
+
+// wsCaptureMockGitOps wraps mockGitOps to capture workspace IDs passed to
+// workspace-scoped methods. This allows tests to verify that the correct
+// workspace ID flows from the HTTP context through to the interface methods.
+type wsCaptureMockGitOps struct {
+	*mockGitOps
+	captureResolveWS func(wsID string)
+	captureListWS    func(wsID string)
+	captureSetRepoWS func(wsID string)
+}
+
+func (m *wsCaptureMockGitOps) ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error) {
+	if m.captureResolveWS != nil {
+		m.captureResolveWS(workspaceID)
+	}
+	return m.mockGitOps.ResolveAgentWorktree(workspaceID, name)
+}
+
+func (m *wsCaptureMockGitOps) ListAgentWorktrees(workspaceID string) ([]AgentWorktree, error) {
+	if m.captureListWS != nil {
+		m.captureListWS(workspaceID)
+	}
+	return m.mockGitOps.ListAgentWorktrees(workspaceID)
+}
+
+func (m *wsCaptureMockGitOps) SetRepoDefaultBranch(workspaceID, repoName, branch string) error {
+	if m.captureSetRepoWS != nil {
+		m.captureSetRepoWS(workspaceID)
+	}
+	return m.mockGitOps.SetRepoDefaultBranch(workspaceID, repoName, branch)
 }
 
 func TestGitPushAll_DefaultRemote(t *testing.T) {

@@ -63,8 +63,9 @@ func handleGetIssueDiffStat(pool daemon.Pool, gitOps GitOps) http.HandlerFunc {
 			return
 		}
 
-		// Resolve assignee to worktree.
-		wt, err := gitOps.ResolveAgentWorktree(issue.Assignee)
+		// Resolve assignee to worktree (workspace-scoped).
+		wsID := WorkspaceFromContext(r.Context())
+		wt, err := gitOps.ResolveAgentWorktree(wsID, issue.Assignee)
 		if err != nil {
 			respondError(w, http.StatusNotFound, fmt.Sprintf("agent worktree not found for %s", issue.Assignee))
 			return

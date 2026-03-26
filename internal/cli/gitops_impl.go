@@ -15,10 +15,47 @@ func NewGitOps() *GitOpsImpl {
 	return &GitOpsImpl{}
 }
 
-func (g *GitOpsImpl) ResolveAgentWorktree(name string) (*webui.AgentWorktree, error) {
+// resolveWorkspaceConfigName translates a workspace ID (which may be a UUID or a
+// config name) into the workspace config name that Resolver.SetWorkspace expects.
+// Returns empty string if the ID is empty or not found.
+func resolveWorkspaceConfigName(cfg *LoomConfig, wsID string) string {
+	if cfg == nil || wsID == "" {
+		return ""
+	}
+	// Direct name match (pre-T2 compatibility: MultiPool keyed by name)
+	if _, ok := cfg.Workspaces[wsID]; ok {
+		return wsID
+	}
+	// UUID match (post-T2: MultiPool keyed by UUID)
+	name, _, found := WorkspaceByID(cfg, wsID)
+	if found {
+		return name
+	}
+	return ""
+}
+
+// scopeResolverToWorkspace sets the resolver's active workspace based on a
+// workspace ID from the HTTP context. If workspaceID is empty or the resolver
+// is not in workspace mode, this is a no-op (preserving default workspace behavior).
+func scopeResolverToWorkspace(resolver *Resolver, workspaceID string) error {
+	if workspaceID == "" || resolver.Mode() != ModeWorkspace {
+		return nil
+	}
+	wsName := resolveWorkspaceConfigName(resolver.config, workspaceID)
+	if wsName == "" {
+		return fmt.Errorf("workspace %q not found in config", workspaceID)
+	}
+	return resolver.SetWorkspace(wsName)
+}
+
+func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*webui.AgentWorktree, error) {
 	resolver, err := NewResolver()
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
+	}
+
+	if err := scopeResolverToWorkspace(resolver, workspaceID); err != nil {
+		return nil, err
 	}
 
 	worktrees, err := resolver.DiscoverWorktrees()
@@ -136,18 +173,25 @@ func (g *GitOpsImpl) CheckGhInstalled() error {
 	return checkGhInstalled()
 }
 
-func (g *GitOpsImpl) SetRepoDefaultBranch(repoName, branch string) error {
+func (g *GitOpsImpl) SetRepoDefaultBranch(workspaceID, repoName, branch string) error {
 	resolver, err := NewResolver()
 	if err != nil {
+		return err
+	}
+	if err := scopeResolverToWorkspace(resolver, workspaceID); err != nil {
 		return err
 	}
 	return resolver.SetRepoDefaultBranch(repoName, branch)
 }
 
-func (g *GitOpsImpl) ListAgentWorktrees() ([]webui.AgentWorktree, error) {
+func (g *GitOpsImpl) ListAgentWorktrees(workspaceID string) ([]webui.AgentWorktree, error) {
 	resolver, err := NewResolver()
 	if err != nil {
 		return nil, fmt.Errorf("creating resolver: %v", err)
+	}
+
+	if err := scopeResolverToWorkspace(resolver, workspaceID); err != nil {
+		return nil, err
 	}
 
 	worktrees, err := resolver.DiscoverWorktrees()
