@@ -444,6 +444,34 @@ describe("BeadsSSEClient", () => {
       expect(client.getReconnectAttempts()).toBe(0);
     });
 
+    it("errors are processed again after disconnect then reconnect", () => {
+      const onError = vi.fn();
+      const onReconnect = vi.fn();
+      const client = new BeadsSSEClient("test-ws-id", { onError, onReconnect });
+
+      // First connection
+      client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      // Disconnect (sets manualDisconnect = true)
+      client.disconnect();
+
+      // Reconnect (should reset manualDisconnect = false)
+      client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      onError.mockClear();
+      onReconnect.mockClear();
+
+      // Error on the new connection should be processed, not suppressed
+      MockEventSource.lastInstance?.simulateError(MockEventSource.CLOSED);
+
+      expect(client.getState()).toBe("reconnecting");
+      expect(client.getReconnectAttempts()).toBe(1);
+      expect(onError).toHaveBeenCalledWith("Connection closed");
+      expect(onReconnect).toHaveBeenCalledWith(1);
+    });
+
     it("logs warning after 5 connection failures", () => {
       const consoleWarnSpy = vi
         .spyOn(console, "warn")

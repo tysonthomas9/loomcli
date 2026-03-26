@@ -456,7 +456,7 @@ describe("NETWORK_PATTERNS", () => {
 
   it("sseEndpoint is a valid path string", () => {
     expect(typeof NETWORK_PATTERNS.sseEndpoint).toBe("string");
-    expect(NETWORK_PATTERNS.sseEndpoint).toBe("/api/events");
+    expect(NETWORK_PATTERNS.sseEndpoint).toBe("/api/workspaces/");
   });
 
   it("readyEndpoint is a valid path string", () => {

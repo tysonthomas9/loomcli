@@ -141,8 +141,8 @@ export const TIMING_EXPECTATIONS = {
  * and remain open (streaming) rather than completing immediately like regular requests.
  */
 export const NETWORK_PATTERNS = {
-  /** SSE endpoint for real-time events (shows as "eventsource" type in DevTools) */
-  sseEndpoint: "/api/events",
+  /** SSE endpoint prefix for real-time events (shows as "eventsource" type in DevTools) */
+  sseEndpoint: "/api/workspaces/",
   /** Initial data fetch (regular fetch request) */
   readyEndpoint: "/api/ready",
   /** Issue detail endpoint pattern */
